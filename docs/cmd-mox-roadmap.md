@@ -1,0 +1,199 @@
+## CmdMox Implementation Roadmap
+
+### **I. Project Foundation & Infrastructure**
+
+- [ ]**Establish Core Repository Structure**
+
+  - [ ]Create project skeleton (`src/cmdmox/`, `tests/`, `conftest.py`, etc.)
+
+  - [ ]Set up packaging, CI, linting, type-checking (e.g., `pyproject.toml`, `pytest`, `ruff`, `mypy`)
+
+- [ ]**Initial Documentation**
+
+  - [ ]Draft README with basic usage and conceptual overview
+
+  - [ ]Add this design spec as `DESIGN.md`
+
+### **II. Core Components: Environment & IPC**
+
+- [ ]**Environment Manager**
+
+  - [ ]Context manager to save/restore environment (`PATH`, etc.)
+
+  - [ ]Temporary shim directory creation/cleanup
+
+  - [ ]Environment variable for IPC socket path
+
+- [ ]**Shim Generation Engine**
+
+  - [ ]Single Python `shim.py` script (template)
+
+  - [ ]Logic to create per-command symlinks in temp directory
+
+  - [ ]Symlink invokes correct behaviour based on `argv[0]`
+
+  - [ ]Make shims executable on all supported Unix platforms
+
+- [ ]**IPC Bus (Unix Domain Sockets)**
+
+  - [ ]Lightweight IPC server in main test process
+
+  - [ ]Start/stop server in sync with test lifecycle
+
+  - [ ]Structured (JSON) communication: invocation/request, response/result
+
+  - [ ]Timeout/error handling and robust socket cleanup
+
+### **III. Mox Controller & Public API**
+
+- [ ]`Mox` **Controller Class**
+
+  - [ ]Holds expectations, stubs, spies, and the invocation journal
+
+  - [ ]Manages lifecycle: record → replay → verify
+
+- [ ]**Factory Methods**
+
+  - [ ]`mox.mock(cmd)`, `mox.stub(cmd)`, `mox.spy(cmd)`
+
+- [ ]**Pytest Plugin**
+
+  - [ ]Register `mox` fixture
+
+  - [ ]xdist/parallelisation awareness (worker IDs, temp dirs)
+
+- [ ]**Context Manager Interface**
+
+  - [ ]Support for explicit `with cmdmox.Mox() as mox: ...` usage
+
+### **IV. Command Double Implementations**
+
+- [ ]**StubCommand**
+
+  - [ ]`.returns()` and `.runs()` (static/dynamic behaviour)
+
+  - [ ]No verification/required calls
+
+- [ ]**MockCommand**
+
+  - [ ]`.with_args()`, `.with_matching_args()`, `.with_stdin()`
+
+  - [ ]`.returns()`, `.runs()`
+
+  - [ ]`.times()`, `.in_order()`, `.any_order()`
+
+  - [ ]`.with_env()` for environment matching/injection
+
+  - [ ]Strict record-replay-verify logic
+
+- [ ]**SpyCommand**
+
+  - [ ]`.returns()` for canned response
+
+  - [ ]`.passthrough()` for record/replay mode
+
+  - [ ]Maintain call history (`invocations`, `call_count` API)
+
+### **V. Matching & Verification Engine**
+
+- [ ]**Comparator Classes**
+
+  - [ ]Implement: `Any`, `IsA`, `Regex`, `Contains`, `StartsWith`, `Predicate`
+
+  - [ ]Flexible matcher plumbing in mock argument matching
+
+- [ ]**Invocation Journal**
+
+  - [ ]Capture: command, args, stdin, env per invocation
+
+  - [ ]Store as list or deque, preserve order for verify
+
+- [ ]**Verification Algorithm**
+
+  - [ ]Unexpected calls (fail early)
+
+  - [ ]Unfulfilled expectations
+
+  - [ ]Call counts, strict ordering checks
+
+  - [ ]Clear diff-style error reporting (`VerificationError` etc.)
+
+### **VI. Shim Behaviour**
+
+- [ ]**Shim Startup Logic**
+
+  - [ ]Determine which command to simulate via `argv[0]`
+
+  - [ ]Connect to IPC socket
+
+  - [ ]Capture stdin, argv, env
+
+  - [ ]Send invocation to IPC server, wait for response
+
+  - [ ]Apply returned behaviour: print `stdout`, `stderr`, exit with code
+
+- [ ]**Passthrough Spies**
+
+  - [ ]IPC protocol for server to direct shim to run "real" command
+
+  - [ ]Shim locates real command in original `PATH`, executes, sends result
+
+### **VII. Advanced Features & Edge Cases**
+
+- [ ]**Environment Variable Injection**
+
+  - [ ]`.with_env()` applies mock-specific env prior to executing handler or canned response
+
+- [ ]**Concurrency Support**
+
+  - [ ]Safe parallel use: unique per-test temp dirs, socket names, no shared files
+
+- [ ]**Robust Cleanup**
+
+  - [ ]Always restore env and remove temp dirs/sockets, even on error/interrupt
+
+### **VIII. Documentation, Examples & Usability**
+
+- [ ]**API Reference & Tutorials**
+
+  - [ ]Document all public APIs and matchers
+
+  - [ ]Example tests for stubs, mocks, spies, pipelines, passthrough mode
+
+  - [ ]Comparison/migration guide for `shellmock` users
+
+### **IX. Quality Assurance**
+
+- [ ]**Unit & Integration Testing**
+
+  - [ ]Full test coverage for all core components (especially IPC and env manipulation)
+
+  - [ ]Tests for pytest-xdist compatibility
+
+  - [ ]Regression suite for edge cases (pipelines, missing commands, complex args)
+
+### **X. Release & Post-MVP**
+
+- [ ]**First Public Release (1.0.0)**
+
+  - [ ]Polish docs, clean up, push to PyPI
+
+  - [ ]Announce project, collect early user feedback
+
+### **XI. Future/Epic: Windows and Record Mode**
+
+- [ ]**Windows Support**
+
+  - [ ]Prototype `.bat`/`.exe` shims, named pipes IPC, Windows PATH handling
+
+- [ ]**Test Generation Utility**
+
+  - [ ]Prototype tool for automatic pytest test file generation from passthrough spy recordings
+
+  - [ ]Export/serialise real command interactions to reusable mocks
+
+**Legend:**
+
+- Each `[ ]` is an implementable, trackable unit (suitable for tickets/epics in e.g. GitHub Projects, Jira, etc.)
+
+- [ ]All MVP checkboxes above this point should be completed before first public release.
