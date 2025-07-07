@@ -1,8 +1,10 @@
-## flake8-return Style Guide (Python 3.13)
+# flake8-return Style Guide (Python 3.13)
 
-The `flake8-return` rules ensure consistent and explicit return behaviour, Ensuring your functions are clear in intent and free from unnecessary control flow. Follow these rules:
+The `flake8-return` rules ensure consistent and explicit return behaviour,
+Ensuring your functions are clear in intent and free from unnecessary control
+flow. Follow these rules:
 
-### R501 — Avoid Explicit `return None` if It's the Only Return
+## R501 — Avoid Explicit `return None` if It's the Only Return
 
 ```python
 # BAD:
@@ -14,11 +16,12 @@ def func():
     return
 ```
 
-Use `return` alone instead of `return None` when the function's only result is `None`.
+Use `return` alone instead of `return None` when the function's only result is
+`None`.
 
----
+______________________________________________________________________
 
-### R502 — Avoid Implicit `None` in Functions That May Return a Value
+## R502 — Avoid Implicit `None` in Functions That May Return a Value
 
 ```python
 # BAD:
@@ -36,9 +39,9 @@ def func(x):
 
 Ensure all branches explicitly return a value if any branch does.
 
----
+______________________________________________________________________
 
-### R503 — Add an Explicit Return at the End
+## R503 — Add an Explicit Return at the End
 
 ```python
 # BAD:
@@ -56,9 +59,9 @@ def func(x):
 
 Don't rely on implicit `None`—always return something at the end.
 
----
+______________________________________________________________________
 
-### R504 — Avoid Redundant Variable Assignment Before `return`
+## R504 — Avoid Redundant Variable Assignment Before `return`
 
 ```python
 # BAD:
@@ -71,13 +74,15 @@ def func():
     return compute()
 ```
 
-Inline return expressions unless the variable is reused meaningfully before returning.
+Inline return expressions unless the variable is reused meaningfully before
+returning.
 
----
+______________________________________________________________________
 
-### R505–R508 — Eliminate Unnecessary `else` After Terminal Statements
+## R505–R508 — Eliminate Unnecessary `else` After Terminal Statements
 
-Avoid `else` after `return`, `raise`, `break`, or `continue`. These statements already exit control flow.
+Avoid `else` after `return`, `raise`, `break`, or `continue`. These statements
+already exit control flow.
 
 ```python
 # BAD:
@@ -111,6 +116,7 @@ for x in xs:
 
 These rules apply to regular and `async def` functions alike.
 
----
+______________________________________________________________________
 
-Use the `flake8-return` rules to enforce predictable and clean return logic, enhancing readability and correctness.
+Use the `flake8-return` rules to enforce predictable and clean return logic,
+enhancing readability and correctness.
