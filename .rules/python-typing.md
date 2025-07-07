@@ -104,8 +104,9 @@ Allow generic classes/functions to fall back to default types when no specific t
 T = typing.TypeVar("T", default=int)
 
 class Box[T]:
-    def __init__(self, value: T = T()):
-        self.value = value
+    def __init__(self, value: T | None = None):
+        # Fallback to the TypeVar default (int in this example)
+        self.value: T = value if value is not None else int()  # type: ignore[arg-type]
 ```
 
 This makes APIs more ergonomic while retaining type safety.
