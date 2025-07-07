@@ -143,7 +143,7 @@
 
 - [ ] **Environment Variable Injection**
 
-  - [ ] `.with_env()` applies mock-specific env prior to executing handler or
+  - [ ] `.with_env()` applies mock-specific env before executing the handler or
     canned response
 
 - [ ] **Concurrency Support**

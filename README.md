@@ -1,5 +1,8 @@
-<!-- markdownlint-disable-next-line MD013 -->
+<!-- markdownlint-disable MD013 -->
+
 # 🕵️‍♀️ CmdMox – Python-native command mocking so you never have to write another shell test again
+
+<!-- markdownlint-enable MD013 -->
 
 Replace your flaky bats tests, your brittle log-parsing hacks, and that one Bash
 script that only works on Tuesdays. CmdMox intercepts external commands with
@@ -18,8 +21,8 @@ If you've ever mocked `curl` with `cat`, this library is your penance.
 ## 🧪 Example: Testing a command-line script with CmdMox
 
 Let’s say your script under test calls `git clone` and `curl`. You want to test
-it *without actually cloning anything*, because you value your bandwidth and
-your sanity.
+it *without actually cloning anything* because you value your bandwidth and your
+sanity.
 
 ```python
 # test_my_script.py

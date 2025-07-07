@@ -52,8 +52,11 @@ command is called. The resulting tests are highly self-documenting; the record
 phase serves as a clear specification of the application's external
 interactions.
 
-<!-- markdownlint-disable-next-line MD013 -->
+<!-- markdownlint-disable MD013 -->
+
 ### 1.2 The Core Architectural Principle: Command Interception via Dynamic `PATH` Manipulation
+
+<!-- markdownlint-enable MD013 -->
 
 The fundamental mechanism for intercepting command invocations will be the
 dynamic manipulation of the `PATH` environment variable. This is a
@@ -254,11 +257,15 @@ inspiration from PyMox's method-chaining style.
   for the data that is piped to the command's standard input. This can be a
   literal string or bytes, or a comparator for flexible matching.
 
-- <!-- markdownlint-disable-next-line MD013 -->
+<!-- markdownlint-disable MD013 -->
+
 - `.returns(stdout: Union[str, bytes] = b'', stderr: Union[str, bytes] = b'', exit_code: int = 0)`**:**
-  Specifies the static result of the command invocation. The mock will write the
-  given `stdout` and `stderr` to the corresponding streams and exit with the
-  provided `exit_code`.
+
+<!-- markdownlint-enable MD013 -->
+
+Specifies the static result of the command invocation. The mock will write the
+given `stdout` and `stderr` to the corresponding streams and exit with the
+provided `exit_code`.
 
 - `.runs(handler: Callable)`**:** Provides a powerful mechanism for dynamic
   behavior. The `handler` is a Python callable that will be executed by the
@@ -283,17 +290,17 @@ API equivalents, demonstrating complete functional parity.
 
 **Table 1:** `shellmock` **to** `CmdMox` **Feature Mapping**
 
-| shellmock Feature (from)                    | Proposed CmdMox API Equivalent                    |
-| ------------------------------------------- | -------------------------------------------------- |
-| Mock an executable cmd                      | mock_cmd = mox.mock('cmd')                        |
-| Define behavior for specific args (--match) | mock_cmd.with_args('arg1', 'arg2')                |
-| Define exit code (--status \<exit_code\>)   | mock_cmd.returns(exit_code=\<exit_code\>)         |
-| Define stdout (--output \<string\>)         | mock_cmd.returns(stdout=\<string\>)               |
-| Partial argument matching (--type partial)  | mock_cmd.with_matching_args(Contains('arg'))      |
-| Regex argument matching (--type regex)      | mock_cmd.with_matching_args(Regex(r'--file=\S+')) |
-| Match on stdin (--match-stdin)              | mock_cmd.with_stdin('some input')                 |
-| Custom behavior (--exec \<command\>)        | mock_cmd.runs(lambda inv: ('output', b'', 0))     |
-| Verify calls (shellmock_verify)             | mox.verify()                                      |
+| shellmock Feature (from)                           | Proposed CmdMox API Equivalent                     |
+| -------------------------------------------------- | -------------------------------------------------- |
+| Mock an executable cmd                             | mock_cmd = mox.mock('cmd')                         |
+| Define behavior for specific args (--match)        | mock_cmd.with_args('arg1', 'arg2')                 |
+| Define exit code (--status \<exit_code>)           | mock_cmd.returns(exit_code=\<exit_code>)           |
+| Define stdout (--output \<string>)                 | mock_cmd.returns(stdout=\<string>)                 |
+| Partial argument matching (--type partial)         | mock_cmd.with_matching_args(Contains('arg'))       |
+| Regex argument matching (--type regex)             | mock_cmd.with_matching_args(Regex(r'--file=\\S+')) |
+| Match on stdin (--match-stdin)                     | mock_cmd.with_stdin('some input')                  |
+| Custom behavior (--exec \<command>)                | mock_cmd.runs(lambda inv: ('output', b'', 0))      |
+| Verify calls (shellmock_verify)                    | mox.verify()                                       |
 
 ### 2.5 The Lifecycle in Practice: `replay()` and `verify()`
 
@@ -784,22 +791,24 @@ eliminating the possibility of cross-test interference and ensuring correctness
 and reliability in parallel test runs.
 
 <!-- markdownlint-disable MD013 -->
+
 #### Table 2: Fluent API Method Reference
 
 This table provides a quick, scannable reference for the core Domain-Specific
 Language (DSL) used to build expectations.
 
-| Method                              | Purpose                                               | Example                                            |
-| ----------------------------------- | ----------------------------------------------------- | -------------------------------------------------- |
-| .with_args(*args)                   | Specifies the exact arguments the command must be called with.    | .with_args('ls', '-l', '/tmp')                     |
-| .with_matching_args(*matchers)      | Specifies flexible argument matchers (e.g., comparators).         | .with_matching_args(IsA(str), Regex(r'--foo=\\d+')) |
-| .with_stdin(data)                   | Specifies expected stdin content. Can use strings or comparators. | .with_stdin(Contains('payload'))                   |
-| .with_env(vars)                     | Specifies environment variables for the command's context.        | .with_env({'API_KEY': 'secret'})                   |
-| .returns(stdout, stderr, exit_code) | Defines the static output and exit code of the mocked command.    | .returns(stdout=b'OK', exit_code=0)                |
-| .runs(handler)                      | Provides a callable for dynamic, stateful behavior.               | .runs(my_handler_func)                             |
-| .times(count)                       | Sets the expected number of times the command will be called.     | .times(2)                                          |
-| .in_order()                         | Marks this expectation as part of an ordered sequence.            | .in_order()                                        |
-| .passthrough()                      | (Spy only) Executes the real command and records the interaction. | mox.spy('ssh').passthrough()                       |
+| Method                              | Purpose                                                           | Example                                             |
+| ----------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------- |
+| .with_args(\*args)                  | Specifies the exact arguments the command must be called with.    | .with_args('ls', '-l', '/tmp')                      |
+| .with_matching_args(\*matchers)     | Specifies flexible argument matchers (e.g., comparators).         | .with_matching_args(IsA(str), Regex(r'--foo=\\d+')) |
+| .with_stdin(data)                   | Specifies expected stdin content. Can use strings or comparators. | .with_stdin(Contains('payload'))                    |
+| .with_env(vars)                     | Specifies environment variables for the command's context.        | .with_env({'API_KEY': 'secret'})                    |
+| .returns(stdout, stderr, exit_code) | Defines the static output and exit code of the mocked command.    | .returns(stdout=b'OK', exit_code=0)                 |
+| .runs(handler)                      | Provides a callable for dynamic, stateful behavior.               | .runs(my_handler_func)                              |
+| .times(count)                       | Sets the expected number of times the command will be called.     | .times(2)                                           |
+| .in_order()                         | Marks this expectation as part of an ordered sequence.            | .in_order()                                         |
+| .passthrough()                      | (Spy only) Executes the real command and records the interaction. | mox.spy('ssh').passthrough()                        |
+
 <!-- markdownlint-enable MD013 -->
 
 ## VIII. Conclusion and Future Roadmap

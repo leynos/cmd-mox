@@ -22,8 +22,8 @@
   document why `Any` is acceptable if used.
 - **Be explicit with returns.** Use `-> None`, `-> str`, etc., for all public
   functions and class methods.
-- **Favour immutability.** Prefer tuples over lists, and `frozendict` or
-  `types.MappingProxyType` where appropriate.
+  - **Favour immutability.** Prefer tuples to lists, and `frozendict` or
+    `types.MappingProxyType` where appropriate.
 
 ## Tooling and Runtime Practices
 
@@ -75,17 +75,17 @@ def scale(values: list[float], factor: float) -> list[float]:
 
 ## Testing with pytest
 
-- **Colocate unit tests with code** using a unittests subdirectory and a `test_`
-  prefix. This keeps logic and its tests together:
+- **Colocate unit tests with code** using an `unittests` subdirectory and a
+  `test_` prefix. This keeps logic and its tests together:
 
-  ```text
-  user_auth/
-    models.py
-    login_flow.py
-    unittests/
-      test_models.py
-      test_login_flow.py
-  ```
+```text
+user_auth/
+  models.py
+  login_flow.py
+  unittests/
+    test_models.py
+    test_login_flow.py
+```
 
 - **Structure integration tests separately.** When tests span multiple
   components, use `tests/integration/`:
