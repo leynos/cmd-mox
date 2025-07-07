@@ -2,10 +2,10 @@ MDLINT ?= $(shell which markdownlint)
 NIXIE ?= $(shell which nixie)
 MDFORMAT_ALL ?= $(shell which mdformat-all)
 TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) $(NIXIE) uv
-VENV_TOOLS = pytest
+VENV_TOOLS =
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
-	markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
+        markdownlint nixie test typecheck $(TOOLS)
 
 .DEFAULT_GOAL := all
 
@@ -41,8 +41,12 @@ endef
 $(TOOLS): ## Verify required CLI tools
 	$(call ensure_tool,$@)
 
+
+ifneq ($(strip $(VENV_TOOLS)),)
+.PHONY: $(VENV_TOOLS)
 $(VENV_TOOLS): ## Verify required CLI tools in venv
-	$(call ensure_tool_venv,$@)
+        $(call ensure_tool_venv,$@)
+endif
 
 fmt: ruff $(MDFORMAT_ALL) ## Format sources
 	ruff format
@@ -67,7 +71,7 @@ nixie: $(NIXIE) ## Validate Mermaid diagrams
 	find . -type f -name '*.md' \
 	  -not -path './.venv/*' -print0 | xargs -0 $(NIXIE)
 
-test: build uv pytest ## Run tests
+test: build uv ## Run tests
 	uv run pytest -v
 
 help: ## Show available targets
