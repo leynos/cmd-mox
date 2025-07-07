@@ -5,7 +5,7 @@ TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) $(NIXIE) uv
 VENV_TOOLS =
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
-	markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
+        markdownlint nixie test typecheck $(TOOLS)
 
 .DEFAULT_GOAL := all
 
@@ -41,8 +41,12 @@ endef
 $(TOOLS): ## Verify required CLI tools
 	$(call ensure_tool,$@)
 
+
+ifneq ($(strip $(VENV_TOOLS)),)
+.PHONY: $(VENV_TOOLS)
 $(VENV_TOOLS): ## Verify required CLI tools in venv
-	$(call ensure_tool_venv,$@)
+        $(call ensure_tool_venv,$@)
+endif
 
 fmt: ruff $(MDFORMAT_ALL) ## Format sources
 	ruff format
