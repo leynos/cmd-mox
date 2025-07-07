@@ -2,17 +2,17 @@
 
 ### **I. Project Foundation & Infrastructure**
 
-- [ ] **Establish Core Repository Structure**
+- [x] **Establish Core Repository Structure**
 
-  - [ ] Create project skeleton (`src/cmdmox/`, `tests/`, `conftest.py`, etc.)
+  - [x] Create project skeleton (`cmd_mox/`, `tests/`, `conftest.py`, etc.)
 
-  - [ ] Set up packaging, CI, linting, type-checking (e.g., `pyproject.toml`, `pytest`, `ruff`, `mypy`)
+  - [x] Set up packaging, CI, linting, type-checking (e.g., `pyproject.toml`, `pytest`, `ruff`, `mypy`)
 
-- [ ] **Initial Documentation**
+- [x] **Initial Documentation**
 
-  - [ ] Draft README with basic usage and conceptual overview
+  - [X] Draft README with basic usage and conceptual overview
 
-  - [ ] Add this design spec as `DESIGN.md`
+  - [x] Add this design spec as `docs/python-native-command-mocking-design.md`
 
 ### **II. Core Components: Environment & IPC**
 
