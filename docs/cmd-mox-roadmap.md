@@ -1,12 +1,13 @@
-## CmdMox Implementation Roadmap
+# CmdMox Implementation Roadmap
 
-### **I. Project Foundation & Infrastructure**
+## **I. Project Foundation & Infrastructure**
 
 - [x] **Establish Core Repository Structure**
 
   - [x] Create project skeleton (`cmd_mox/`, `tests/`, `conftest.py`, etc.)
 
-  - [x] Set up packaging, CI, linting, type-checking (e.g., `pyproject.toml`, `pytest`, `ruff`, `mypy`)
+  - [x] Set up packaging, CI, linting, type-checking (e.g., `pyproject.toml`,
+    `pytest`, `ruff`, `mypy`)
 
 - [x] **Initial Documentation**
 
@@ -14,7 +15,7 @@
 
   - [x] Add this design spec as `docs/python-native-command-mocking-design.md`
 
-### **II. Core Components: Environment & IPC**
+## **II. Core Components: Environment & IPC**
 
 - [x] **Environment Manager**
 
@@ -30,7 +31,7 @@
 
   - [ ] Logic to create per-command symlinks in temp directory
 
-  - [ ] Symlink invokes correct behaviour based on `argv[0] `
+  - [ ] Symlink invokes correct behaviour based on `argv[0]`
 
   - [ ] Make shims executable on all supported Unix platforms
 
@@ -44,7 +45,7 @@
 
   - [ ] Timeout/error handling and robust socket cleanup
 
-### **III. Mox Controller & Public API**
+## **III. Mox Controller & Public API**
 
 - [ ] `Mox` **Controller Class**
 
@@ -66,7 +67,7 @@
 
   - [ ] Support for explicit `with cmdmox.Mox() as mox: ...` usage
 
-### **IV. Command Double Implementations**
+## **IV. Command Double Implementations**
 
 - [ ] **StubCommand**
 
@@ -94,7 +95,7 @@
 
   - [ ] Maintain call history (`invocations`, `call_count` API)
 
-### **V. Matching & Verification Engine**
+## **V. Matching & Verification Engine**
 
 - [ ] **Comparator Classes**
 
@@ -118,11 +119,11 @@
 
   - [ ] Clear diff-style error reporting (`VerificationError` etc.)
 
-### **VI. Shim Behaviour**
+## **VI. Shim Behaviour**
 
 - [ ] **Shim Startup Logic**
 
-  - [ ] Determine which command to simulate via `argv[0] `
+  - [ ] Determine which command to simulate via `argv[0]`
 
   - [ ] Connect to IPC socket
 
@@ -138,21 +139,23 @@
 
   - [ ] Shim locates real command in original `PATH`, executes, sends result
 
-### **VII. Advanced Features & Edge Cases**
+## **VII. Advanced Features & Edge Cases**
 
 - [ ] **Environment Variable Injection**
 
-  - [ ] `.with_env()` applies mock-specific env prior to executing handler or canned response
+  - [ ] `.with_env()` applies mock-specific env before executing the handler or
+    canned response
 
 - [ ] **Concurrency Support**
 
-  - [ ] Safe parallel use: unique per-test temp dirs, socket names, no shared files
+  - [ ] Safe parallel use: unique per-test temp dirs, socket names, no shared
+    files
 
 - [ ] **Robust Cleanup**
 
   - [ ] Always restore env and remove temp dirs/sockets, even on error/interrupt
 
-### **VIII. Documentation, Examples & Usability**
+## **VIII. Documentation, Examples & Usability**
 
 - [ ] **API Reference & Tutorials**
 
@@ -162,17 +165,19 @@
 
   - [ ] Comparison/migration guide for `shellmock` users
 
-### **IX. Quality Assurance**
+## **IX. Quality Assurance**
 
 - [ ] **Unit & Integration Testing**
 
-  - [ ] Full test coverage for all core components (especially IPC and env manipulation)
+  - [ ] Full test coverage for all core components (especially IPC and env
+    manipulation)
 
   - [ ] Tests for pytest-xdist compatibility
 
-  - [ ] Regression suite for edge cases (pipelines, missing commands, complex args)
+  - [ ] Regression suite for edge cases (pipelines, missing commands, complex
+    args)
 
-### **X. Release & Post-MVP**
+## **X. Release & Post-MVP**
 
 - [ ] **First Public Release (1.0.0)**
 
@@ -180,7 +185,7 @@
 
   - [ ] Announce project, collect early user feedback
 
-### **XI. Future/Epic: Windows and Record Mode**
+## **XI. Future/Epic: Windows and Record Mode**
 
 - [ ] **Windows Support**
 
@@ -188,12 +193,15 @@
 
 - [ ] **Test Generation Utility**
 
-  - [ ] Prototype tool for automatic pytest test file generation from passthrough spy recordings
+  - [ ] Prototype tool for automatic pytest test file generation from
+    passthrough spy recordings
 
   - [ ] Export/serialise real command interactions to reusable mocks
 
 **Legend:**
 
-- Each `[ ] ` is an implementable, trackable unit (suitable for tickets/epics in e.g. GitHub Projects, Jira, etc.)
+- Each `[ ]` is an implementable, trackable unit (suitable for tickets/epics in
+  e.g. GitHub Projects, Jira, etc.)
 
-- [ ] All MVP checkboxes above this point should be completed before first public release.
+- [ ] All MVP checkboxes above this point should be completed before first
+  public release.
