@@ -55,6 +55,17 @@ def test_environment_manager_restores_on_exception() -> None:
     assert not holder["path"].exists()
 
 
+def test_environment_manager_nested_raises() -> None:
+    """Nesting EnvironmentManager should raise RuntimeError."""
+    original_env = os.environ.copy()
+    outer = EnvironmentManager()
+    with outer as env:
+        with pytest.raises(RuntimeError):
+            EnvironmentManager().__enter__()
+        assert os.environ["PATH"].split(os.pathsep)[0] == str(env.shim_dir)
+    assert os.environ == original_env
+
+
 def test_environment_restores_deleted_vars() -> None:
     """Deletion of variables inside context is undone on exit."""
     os.environ["DEL_VAR"] = "before"

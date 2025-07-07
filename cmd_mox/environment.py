@@ -8,6 +8,8 @@ import tempfile
 import typing as t
 from pathlib import Path
 
+_active_manager: EnvironmentManager | None = None
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types
 
@@ -29,9 +31,11 @@ class EnvironmentManager:
 
     def __enter__(self) -> EnvironmentManager:
         """Set up the temporary environment."""
-        if self._orig_env is not None:
+        global _active_manager
+        if self._orig_env is not None or _active_manager is not None:
             msg = "EnvironmentManager cannot be nested"
             raise RuntimeError(msg)
+        _active_manager = self
         self._orig_env = os.environ.copy()
         self.shim_dir = Path(tempfile.mkdtemp(prefix="cmdmox-"))
         os.environ["PATH"] = os.pathsep.join(
@@ -60,6 +64,8 @@ class EnvironmentManager:
                     if key not in os.environ:
                         os.environ[key] = value
                 self._orig_env = None
+                global _active_manager
+                _active_manager = None
         finally:
             if self.shim_dir and self.shim_dir.exists():
                 shutil.rmtree(self.shim_dir, ignore_errors=True)
