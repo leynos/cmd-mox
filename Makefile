@@ -2,7 +2,7 @@ MDLINT ?= $(shell which markdownlint)
 NIXIE ?= $(shell which nixie)
 MDFORMAT_ALL ?= $(shell which mdformat-all)
 TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) $(NIXIE) uv
-VENV_TOOLS = pytest
+VENV_TOOLS =
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
 	markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
@@ -13,7 +13,7 @@ all: build check-fmt test typecheck
 
 build: uv ## Build virtual-env and install deps
 	uv venv
-	uv sync --group dev --group examples
+	uv sync --group dev
 
 build-release: ## Build artefacts (sdist & wheel)
 	python -m build --sdist --wheel
@@ -67,7 +67,7 @@ nixie: $(NIXIE) ## Validate Mermaid diagrams
 	find . -type f -name '*.md' \
 	  -not -path './.venv/*' -print0 | xargs -0 $(NIXIE)
 
-test: build uv pytest ## Run tests
+test: build uv ## Run tests
 	uv run pytest -v
 
 help: ## Show available targets

@@ -47,11 +47,11 @@ jobs:
         run: |
           uv pip install slipcover pytest-forked
           uv run python -m slipcover \
-            --source=./falcon_pachinko \
+            --source=./cmd_mox \
             --omit="*/unittests/*,*/.venv/*" \
             --branch \
             --out coverage.xml \
-            -m pytest --forked -v falcon_pachinko/unittests
+            -m pytest --forked -v cmd_mox/unittests
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
