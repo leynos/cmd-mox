@@ -2,198 +2,198 @@
 
 ### **I. Project Foundation & Infrastructure**
 
-- [ ]**Establish Core Repository Structure**
+- [ ] **Establish Core Repository Structure**
 
-  - [ ]Create project skeleton (`src/cmdmox/`, `tests/`, `conftest.py`, etc.)
+  - [ ] Create project skeleton (`src/cmdmox/`, `tests/`, `conftest.py`, etc.)
 
-  - [ ]Set up packaging, CI, linting, type-checking (e.g., `pyproject.toml`, `pytest`, `ruff`, `mypy`)
+  - [ ] Set up packaging, CI, linting, type-checking (e.g., `pyproject.toml`, `pytest`, `ruff`, `mypy`)
 
-- [ ]**Initial Documentation**
+- [ ] **Initial Documentation**
 
-  - [ ]Draft README with basic usage and conceptual overview
+  - [ ] Draft README with basic usage and conceptual overview
 
-  - [ ]Add this design spec as `DESIGN.md`
+  - [ ] Add this design spec as `DESIGN.md`
 
 ### **II. Core Components: Environment & IPC**
 
-- [ ]**Environment Manager**
+- [ ] **Environment Manager**
 
-  - [ ]Context manager to save/restore environment (`PATH`, etc.)
+  - [ ] Context manager to save/restore environment (`PATH`, etc.)
 
-  - [ ]Temporary shim directory creation/cleanup
+  - [ ] Temporary shim directory creation/cleanup
 
-  - [ ]Environment variable for IPC socket path
+  - [ ] Environment variable for IPC socket path
 
-- [ ]**Shim Generation Engine**
+- [ ] **Shim Generation Engine**
 
-  - [ ]Single Python `shim.py` script (template)
+  - [ ] Single Python `shim.py` script (template)
 
-  - [ ]Logic to create per-command symlinks in temp directory
+  - [ ] Logic to create per-command symlinks in temp directory
 
-  - [ ]Symlink invokes correct behaviour based on `argv[0]`
+  - [ ] Symlink invokes correct behaviour based on `argv[0] `
 
-  - [ ]Make shims executable on all supported Unix platforms
+  - [ ] Make shims executable on all supported Unix platforms
 
-- [ ]**IPC Bus (Unix Domain Sockets)**
+- [ ] **IPC Bus (Unix Domain Sockets)**
 
-  - [ ]Lightweight IPC server in main test process
+  - [ ] Lightweight IPC server in main test process
 
-  - [ ]Start/stop server in sync with test lifecycle
+  - [ ] Start/stop server in sync with test lifecycle
 
-  - [ ]Structured (JSON) communication: invocation/request, response/result
+  - [ ] Structured (JSON) communication: invocation/request, response/result
 
-  - [ ]Timeout/error handling and robust socket cleanup
+  - [ ] Timeout/error handling and robust socket cleanup
 
 ### **III. Mox Controller & Public API**
 
-- [ ]`Mox` **Controller Class**
+- [ ] `Mox` **Controller Class**
 
-  - [ ]Holds expectations, stubs, spies, and the invocation journal
+  - [ ] Holds expectations, stubs, spies, and the invocation journal
 
-  - [ ]Manages lifecycle: record → replay → verify
+  - [ ] Manages lifecycle: record → replay → verify
 
-- [ ]**Factory Methods**
+- [ ] **Factory Methods**
 
-  - [ ]`mox.mock(cmd)`, `mox.stub(cmd)`, `mox.spy(cmd)`
+  - [ ] `mox.mock(cmd)`, `mox.stub(cmd)`, `mox.spy(cmd)`
 
-- [ ]**Pytest Plugin**
+- [ ] **Pytest Plugin**
 
-  - [ ]Register `mox` fixture
+  - [ ] Register `mox` fixture
 
-  - [ ]xdist/parallelisation awareness (worker IDs, temp dirs)
+  - [ ] xdist/parallelisation awareness (worker IDs, temp dirs)
 
-- [ ]**Context Manager Interface**
+- [ ] **Context Manager Interface**
 
-  - [ ]Support for explicit `with cmdmox.Mox() as mox: ...` usage
+  - [ ] Support for explicit `with cmdmox.Mox() as mox: ...` usage
 
 ### **IV. Command Double Implementations**
 
-- [ ]**StubCommand**
+- [ ] **StubCommand**
 
-  - [ ]`.returns()` and `.runs()` (static/dynamic behaviour)
+  - [ ] `.returns()` and `.runs()` (static/dynamic behaviour)
 
-  - [ ]No verification/required calls
+  - [ ] No verification/required calls
 
-- [ ]**MockCommand**
+- [ ] **MockCommand**
 
-  - [ ]`.with_args()`, `.with_matching_args()`, `.with_stdin()`
+  - [ ] `.with_args()`, `.with_matching_args()`, `.with_stdin()`
 
-  - [ ]`.returns()`, `.runs()`
+  - [ ] `.returns()`, `.runs()`
 
-  - [ ]`.times()`, `.in_order()`, `.any_order()`
+  - [ ] `.times()`, `.in_order()`, `.any_order()`
 
-  - [ ]`.with_env()` for environment matching/injection
+  - [ ] `.with_env()` for environment matching/injection
 
-  - [ ]Strict record-replay-verify logic
+  - [ ] Strict record-replay-verify logic
 
-- [ ]**SpyCommand**
+- [ ] **SpyCommand**
 
-  - [ ]`.returns()` for canned response
+  - [ ] `.returns()` for canned response
 
-  - [ ]`.passthrough()` for record/replay mode
+  - [ ] `.passthrough()` for record/replay mode
 
-  - [ ]Maintain call history (`invocations`, `call_count` API)
+  - [ ] Maintain call history (`invocations`, `call_count` API)
 
 ### **V. Matching & Verification Engine**
 
-- [ ]**Comparator Classes**
+- [ ] **Comparator Classes**
 
-  - [ ]Implement: `Any`, `IsA`, `Regex`, `Contains`, `StartsWith`, `Predicate`
+  - [ ] Implement: `Any`, `IsA`, `Regex`, `Contains`, `StartsWith`, `Predicate`
 
-  - [ ]Flexible matcher plumbing in mock argument matching
+  - [ ] Flexible matcher plumbing in mock argument matching
 
-- [ ]**Invocation Journal**
+- [ ] **Invocation Journal**
 
-  - [ ]Capture: command, args, stdin, env per invocation
+  - [ ] Capture: command, args, stdin, env per invocation
 
-  - [ ]Store as list or deque, preserve order for verify
+  - [ ] Store as list or deque, preserve order for verify
 
-- [ ]**Verification Algorithm**
+- [ ] **Verification Algorithm**
 
-  - [ ]Unexpected calls (fail early)
+  - [ ] Unexpected calls (fail early)
 
-  - [ ]Unfulfilled expectations
+  - [ ] Unfulfilled expectations
 
-  - [ ]Call counts, strict ordering checks
+  - [ ] Call counts, strict ordering checks
 
-  - [ ]Clear diff-style error reporting (`VerificationError` etc.)
+  - [ ] Clear diff-style error reporting (`VerificationError` etc.)
 
 ### **VI. Shim Behaviour**
 
-- [ ]**Shim Startup Logic**
+- [ ] **Shim Startup Logic**
 
-  - [ ]Determine which command to simulate via `argv[0]`
+  - [ ] Determine which command to simulate via `argv[0] `
 
-  - [ ]Connect to IPC socket
+  - [ ] Connect to IPC socket
 
-  - [ ]Capture stdin, argv, env
+  - [ ] Capture stdin, argv, env
 
-  - [ ]Send invocation to IPC server, wait for response
+  - [ ] Send invocation to IPC server, wait for response
 
-  - [ ]Apply returned behaviour: print `stdout`, `stderr`, exit with code
+  - [ ] Apply returned behaviour: print `stdout`, `stderr`, exit with code
 
-- [ ]**Passthrough Spies**
+- [ ] **Passthrough Spies**
 
-  - [ ]IPC protocol for server to direct shim to run "real" command
+  - [ ] IPC protocol for server to direct shim to run "real" command
 
-  - [ ]Shim locates real command in original `PATH`, executes, sends result
+  - [ ] Shim locates real command in original `PATH`, executes, sends result
 
 ### **VII. Advanced Features & Edge Cases**
 
-- [ ]**Environment Variable Injection**
+- [ ] **Environment Variable Injection**
 
-  - [ ]`.with_env()` applies mock-specific env prior to executing handler or canned response
+  - [ ] `.with_env()` applies mock-specific env prior to executing handler or canned response
 
-- [ ]**Concurrency Support**
+- [ ] **Concurrency Support**
 
-  - [ ]Safe parallel use: unique per-test temp dirs, socket names, no shared files
+  - [ ] Safe parallel use: unique per-test temp dirs, socket names, no shared files
 
-- [ ]**Robust Cleanup**
+- [ ] **Robust Cleanup**
 
-  - [ ]Always restore env and remove temp dirs/sockets, even on error/interrupt
+  - [ ] Always restore env and remove temp dirs/sockets, even on error/interrupt
 
 ### **VIII. Documentation, Examples & Usability**
 
-- [ ]**API Reference & Tutorials**
+- [ ] **API Reference & Tutorials**
 
-  - [ ]Document all public APIs and matchers
+  - [ ] Document all public APIs and matchers
 
-  - [ ]Example tests for stubs, mocks, spies, pipelines, passthrough mode
+  - [ ] Example tests for stubs, mocks, spies, pipelines, passthrough mode
 
-  - [ ]Comparison/migration guide for `shellmock` users
+  - [ ] Comparison/migration guide for `shellmock` users
 
 ### **IX. Quality Assurance**
 
-- [ ]**Unit & Integration Testing**
+- [ ] **Unit & Integration Testing**
 
-  - [ ]Full test coverage for all core components (especially IPC and env manipulation)
+  - [ ] Full test coverage for all core components (especially IPC and env manipulation)
 
-  - [ ]Tests for pytest-xdist compatibility
+  - [ ] Tests for pytest-xdist compatibility
 
-  - [ ]Regression suite for edge cases (pipelines, missing commands, complex args)
+  - [ ] Regression suite for edge cases (pipelines, missing commands, complex args)
 
 ### **X. Release & Post-MVP**
 
-- [ ]**First Public Release (1.0.0)**
+- [ ] **First Public Release (1.0.0)**
 
-  - [ ]Polish docs, clean up, push to PyPI
+  - [ ] Polish docs, clean up, push to PyPI
 
-  - [ ]Announce project, collect early user feedback
+  - [ ] Announce project, collect early user feedback
 
 ### **XI. Future/Epic: Windows and Record Mode**
 
-- [ ]**Windows Support**
+- [ ] **Windows Support**
 
-  - [ ]Prototype `.bat`/`.exe` shims, named pipes IPC, Windows PATH handling
+  - [ ] Prototype `.bat`/`.exe` shims, named pipes IPC, Windows PATH handling
 
-- [ ]**Test Generation Utility**
+- [ ] **Test Generation Utility**
 
-  - [ ]Prototype tool for automatic pytest test file generation from passthrough spy recordings
+  - [ ] Prototype tool for automatic pytest test file generation from passthrough spy recordings
 
-  - [ ]Export/serialise real command interactions to reusable mocks
+  - [ ] Export/serialise real command interactions to reusable mocks
 
 **Legend:**
 
-- Each `[ ]` is an implementable, trackable unit (suitable for tickets/epics in e.g. GitHub Projects, Jira, etc.)
+- Each `[ ] ` is an implementable, trackable unit (suitable for tickets/epics in e.g. GitHub Projects, Jira, etc.)
 
-- [ ]All MVP checkboxes above this point should be completed before first public release.
+- [ ] All MVP checkboxes above this point should be completed before first public release.
