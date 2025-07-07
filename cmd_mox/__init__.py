@@ -2,4 +2,6 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .environment import EnvironmentManager
+
+__all__ = ["EnvironmentManager"]

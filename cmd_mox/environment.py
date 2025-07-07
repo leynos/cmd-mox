@@ -15,7 +15,12 @@ CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
 
 
 class EnvironmentManager:
-    """Manage temporary environment modifications for CmdMox."""
+    """Manage temporary environment modifications for CmdMox.
+
+    The manager is not re-entrant; nested usage is unsupported and will raise
+    ``RuntimeError``. This keeps the restore logic simple and prevents
+    inadvertent environment leakage.
+    """
 
     def __init__(self) -> None:
         self._orig_env: dict[str, str] | None = None
@@ -24,6 +29,9 @@ class EnvironmentManager:
 
     def __enter__(self) -> EnvironmentManager:
         """Set up the temporary environment."""
+        if self._orig_env is not None:
+            msg = "EnvironmentManager cannot be nested"
+            raise RuntimeError(msg)
         self._orig_env = os.environ.copy()
         self.shim_dir = Path(tempfile.mkdtemp(prefix="cmdmox-"))
         os.environ["PATH"] = os.pathsep.join(
@@ -42,8 +50,16 @@ class EnvironmentManager:
         """Restore the original environment and clean up."""
         try:
             if self._orig_env is not None:
-                os.environ.clear()
-                os.environ.update(self._orig_env)
+                orig_env = self._orig_env
+                for key in list(os.environ):
+                    if key not in orig_env:
+                        os.environ.pop(key, None)
+                    elif os.environ[key] != orig_env[key]:
+                        os.environ[key] = orig_env[key]
+                for key, value in orig_env.items():
+                    if key not in os.environ:
+                        os.environ[key] = value
+                self._orig_env = None
         finally:
             if self.shim_dir and self.shim_dir.exists():
                 shutil.rmtree(self.shim_dir, ignore_errors=True)

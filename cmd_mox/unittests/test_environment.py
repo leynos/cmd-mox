@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 import typing as t
 
+import pytest
+
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import pytest
+    from pathlib import Path
 
 
 def test_environment_manager_modifies_and_restores(
@@ -33,3 +35,34 @@ def test_environment_restores_modified_vars(monkeypatch: pytest.MonkeyPatch) -> 
     with EnvironmentManager():
         os.environ["TEST_VAR"] = "inside"
     assert os.environ["TEST_VAR"] == "before"
+    del os.environ["TEST_VAR"]
+
+
+def test_environment_manager_restores_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Environment is restored even if the context body raises."""
+    original_env = os.environ.copy()
+    holder: dict[str, Path | None] = {"path": None}
+
+    def trigger_error() -> None:
+        with EnvironmentManager() as env:
+            holder["path"] = env.shim_dir
+            assert env.shim_dir is not None
+            assert env.shim_dir.exists()
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        trigger_error()
+    assert os.environ == original_env
+    assert holder["path"] is not None
+    assert not holder["path"].exists()
+
+
+def test_environment_restores_deleted_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deletion of variables inside context is undone on exit."""
+    os.environ["DEL_VAR"] = "before"
+    with EnvironmentManager():
+        del os.environ["DEL_VAR"]
+    assert os.environ["DEL_VAR"] == "before"
+    del os.environ["DEL_VAR"]
