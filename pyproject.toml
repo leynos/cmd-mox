@@ -17,7 +17,7 @@ dev = [
 
 [tool.pyright]
 pythonVersion = "3.13"
-strict = true
+typeCheckingMode = "strict"
 include = ["cmd_mox"]
 
 [tool.ruff]
