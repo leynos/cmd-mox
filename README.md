@@ -2,9 +2,9 @@
 
 Replace your flaky bats tests, your brittle log-parsing hacks, and that one Bash script that only works on Tuesdays. CmdMox intercepts external commands with Python shims, speaks fluent IPC over Unix domain sockets, and enforces your expectations like a disappointed parent.
 
-Mocks? Verified.
-Stubs? Quietly compliant.
-Spies? Judging everything you do.
+- Mocks? Verified.
+- Stubs? Quietly compliant.
+- Spies? Judging everything you do.
 
 Designed for pytest, built for people who’ve seen things—like `ksh93` unit test harnesses and AIX cronjobs running `sccs`.
 
