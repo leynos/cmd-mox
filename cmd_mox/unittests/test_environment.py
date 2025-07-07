@@ -13,9 +13,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from pathlib import Path
 
 
-def test_environment_manager_modifies_and_restores(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_environment_manager_modifies_and_restores() -> None:
     """Path and env variables should be modified and later restored."""
     original_env = os.environ.copy()
     with EnvironmentManager() as env:
@@ -29,7 +27,7 @@ def test_environment_manager_modifies_and_restores(
     assert not env.shim_dir.exists()
 
 
-def test_environment_restores_modified_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_environment_restores_modified_vars() -> None:
     """User-modified variables inside context should revert on exit."""
     os.environ["TEST_VAR"] = "before"
     with EnvironmentManager():
@@ -38,9 +36,7 @@ def test_environment_restores_modified_vars(monkeypatch: pytest.MonkeyPatch) -> 
     del os.environ["TEST_VAR"]
 
 
-def test_environment_manager_restores_on_exception(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_environment_manager_restores_on_exception() -> None:
     """Environment is restored even if the context body raises."""
     original_env = os.environ.copy()
     holder: dict[str, Path | None] = {"path": None}
@@ -59,7 +55,7 @@ def test_environment_manager_restores_on_exception(
     assert not holder["path"].exists()
 
 
-def test_environment_restores_deleted_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_environment_restores_deleted_vars() -> None:
     """Deletion of variables inside context is undone on exit."""
     os.environ["DEL_VAR"] = "before"
     with EnvironmentManager():
