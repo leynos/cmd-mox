@@ -42,21 +42,30 @@ When implementing changes, adhere to the following testing procedures:
 ## Change Quality & Committing
 
 * **Atomicity:** Aim for small, focused, atomic changes. Each change (and subsequent commit) should represent a single logical unit of work.
-* **Quality Gates:** Before considering a change complete or proposing a commit, ensure it meets the following criteria:
-  * For Python files:
-    * **Testing:** Passes all relevant unit and behavioral tests according to the guidelines above.
-    * **Linting:** Passes lint checks (`ruff check` or integrated editor linting).
-    * **Formatting:** Adheres to formatting standards (`ruff format` or integrated editor formatting).
-    * **Typechecking:** Passes type checking (`pyright` or integrated editor type checking).
-  * For TypeScript files:
-    * **Testing:** Passes all relevant unit and behavioral tests according to the guidelines above.
-    * **Linting:** Passes lint checks (`biome check .` or integrated editor linting).
-    * **Formatting:** Adheres to formatting standards (`biome check --apply .` or integrated editor formatting).
-    * **TypeScript Compilation:** Compiles successfully without TypeScript errors (`tsc --noEmit`).
-  
-  * For Markdown files (`.md` only):
-    * **Linting:** Passes lint checks (`markdownlint filename.md` or integrated editor linting).
-    * **Mermaid diagrams:** Passes validation using nixie (`nixie filename.md`)
+ **Quality Gates:** Before considering a change complete or proposing a commit,
+  ensure it meets the following criteria:
+
+  - For Python files:
+
+    - **Testing:** Passes all relevant unit and behavioral tests according to
+      the guidelines above.
+    - **Linting:** Passes lint checks (`make lint`).
+    - **Formatting:** Adheres to formatting standards (`make fmt`).
+    - **Typechecking:** Passes type checking (`make typecheck`).
+
+  - For TypeScript files:
+
+    - **Testing:** Passes all relevant unit and behavioral tests according to
+      the guidelines above.
+    - **Linting:** Passes lint checks (`biome check .`).
+    - **Formatting:** Adheres to formatting standards (`biome check --apply .`).
+    - **TypeScript Compilation:** Compiles successfully without TypeScript
+      errors (`tsc --noEmit`).
+
+  - For Markdown files (`.md` only):
+
+    - **Linting:** Passes lint checks (`make markdownlint`).
+    - **Mermaid diagrams:** Passes validation using nixie (`make nixie`)
 * **Committing:**
   * Only changes that meet all the quality gates above should be committed.
   * Write clear, descriptive commit messages summarizing the change, following these formatting guidelines:
