@@ -222,6 +222,13 @@ This component will be implemented as a robust, exception-safe context manager t
 
   3. It will perform a recursive deletion of the temporary shim directory and all its contents (symlinks and the IPC socket).
 
+The manager is not reentrant. Nested usage would overwrite the saved environment
+snapshot, so attempts to use it recursively will raise ``RuntimeError``.
+Instead of clearing ``os.environ`` on exit, the manager restores only those
+variables that changed and removes any that were added. This approach avoids
+disrupting other threads that might rely on the environment remaining mostly
+stable.
+
 This rigorous management ensures that each test runs in a perfectly isolated environment and leaves no artifacts behind, a critical requirement for a reliable testing framework.
 
 ### 3.4 The Invocation Journal
