@@ -16,13 +16,13 @@
 
 ### **II. Core Components: Environment & IPC**
 
-- [ ] **Environment Manager**
+- [x] **Environment Manager**
 
-  - [ ] Context manager to save/restore environment (`PATH`, etc.)
+  - [x] Context manager to save/restore environment (`PATH`, etc.)
 
-  - [ ] Temporary shim directory creation/cleanup
+  - [x] Temporary shim directory creation/cleanup
 
-  - [ ] Environment variable for IPC socket path
+  - [x] Environment variable for IPC socket path
 
 - [ ] **Shim Generation Engine**
 
