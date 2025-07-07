@@ -13,7 +13,7 @@ all: build check-fmt test typecheck
 
 build: uv ## Build virtual-env and install deps
 	uv venv
-	uv sync --group dev --group examples
+	uv sync --group dev
 
 build-release: ## Build artefacts (sdist & wheel)
 	python -m build --sdist --wheel
