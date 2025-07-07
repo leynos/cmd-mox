@@ -49,8 +49,17 @@ select = [
     "FURB",
     "B",
     "RUF",
+    "LOG",
+    "Q",
+    "PT",
+    "RSE",
+    "PERF",
+    "TRY",
+    "D",
+    "ANN",
 ]
 per-file-ignores = {"**/test_*.py" = ["S101"]}
+ignore = ["D205"]
 
 [tool.ruff.lint.flake8-import-conventions]
 # Declare the banned `from` imports.
@@ -60,20 +69,18 @@ banned-from = [
     "collections.abc",
     "dataclasses",
     "enum",
-    "unittest.mock",
+    "msgspec",
 ]
 
 [tool.ruff.lint.flake8-import-conventions.aliases]
-# Declare the default aliases.
-altair = "alt"
-"matplotlib.pyplot" = "plt"
-numpy = "np"
-pandas = "pd"
-seaborn = "sns"
-scipy = "sp"
-"collections.abc" = "cabc"
 datetime = "dt"
-unittest.mock = "mock"
+dataclasses = "dc"
+"collections.abc" = "cabc"
+"msgspec.json" = "msgspec_json"
+
+[tool.ruff.lint.pydocstyle]
+# Enforce NumPy docstring style
+convention = "numpy"
 
 [tool.pytest.ini_options]
 # Ensure asyncio fixtures create a new event loop for each test
