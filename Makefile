@@ -2,7 +2,7 @@ MDLINT ?= $(shell which markdownlint)
 NIXIE ?= $(shell which nixie)
 MDFORMAT_ALL ?= $(shell which mdformat-all)
 TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) $(NIXIE) uv
-VENV_TOOLS =
+VENV_TOOLS = pytest
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
         markdownlint nixie test typecheck $(TOOLS)
@@ -32,14 +32,16 @@ define ensure_tool
 endef
 
 define ensure_tool_venv
-	@uv run --which $(1) >/dev/null 2>&1 || { \
+	@uv run which $(1) >/dev/null 2>&1 || { \
 	  printf "Error: '%s' is required in the virtualenv, but is not installed\n" "$(1)" >&2; \
 	  exit 1; \
 	}
 endef
 
+ifneq ($(strip $(TOOLS)),)
 $(TOOLS): ## Verify required CLI tools
 	$(call ensure_tool,$@)
+endif
 
 
 ifneq ($(strip $(VENV_TOOLS)),)
@@ -71,7 +73,7 @@ nixie: $(NIXIE) ## Validate Mermaid diagrams
 	find . -type f -name '*.md' \
 	  -not -path './.venv/*' -print0 | xargs -0 $(NIXIE)
 
-test: build uv ## Run tests
+test: build uv pytest ## Run tests
 	uv run pytest -v
 
 help: ## Show available targets
