@@ -66,5 +66,6 @@ def test_create_shim_symlinks_missing_or_non_executable_shim(
         shim_path.write_text("#!/bin/sh\necho fake")
         shim_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         monkeypatch.setattr("cmd_mox.shimgen.SHIM_PATH", shim_path)
-        with pytest.raises(PermissionError):
-            create_shim_symlinks(tempdir, ["ls"])  # type: ignore[list-item]
+        mapping = create_shim_symlinks(tempdir, ["ls"])  # type: ignore[list-item]
+        assert mapping["ls"].is_symlink()
+        assert os.access(shim_path, os.X_OK)

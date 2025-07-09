@@ -28,8 +28,12 @@ def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str
         raise FileNotFoundError(msg)
 
     if not os.access(SHIM_PATH, os.X_OK):
-        msg = f"Shim template not executable: {SHIM_PATH}"
-        raise PermissionError(msg)
+        try:
+            mode = SHIM_PATH.stat().st_mode | 0o111
+            SHIM_PATH.chmod(mode)
+        except OSError as exc:  # pragma: no cover - OS specific
+            msg = f"Cannot make shim executable: {SHIM_PATH}"
+            raise PermissionError(msg) from exc
     mapping: dict[str, Path] = {}
     for name in commands:
         link = directory / name
