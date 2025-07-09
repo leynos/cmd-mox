@@ -1,7 +1,12 @@
 """Tests for shim generation utilities."""
 
 import os
+import pathlib
+import stat
 import subprocess
+import tempfile
+
+import pytest
 
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.shimgen import SHIM_PATH, create_shim_symlinks
@@ -26,3 +31,40 @@ def test_create_shim_symlinks_and_execution() -> None:
                 text=True,
             )
             assert result.stdout.strip() == cmd
+
+
+def test_create_shim_symlinks_missing_target_dir() -> None:
+    """Error raised when directory does not exist."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        missing = pathlib.Path(tmpdir) / "absent"
+        with pytest.raises(FileNotFoundError):
+            create_shim_symlinks(missing, ["ls"])  # type: ignore[list-item]
+
+
+def test_create_shim_symlinks_existing_non_symlink_file() -> None:
+    """Error raised when a non-symlink file already exists."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = pathlib.Path(tmpdir)
+        file_path = path / "ls"
+        file_path.write_text("not a symlink")
+        with pytest.raises(FileExistsError):
+            create_shim_symlinks(path, ["ls"])  # type: ignore[list-item]
+
+
+def test_create_shim_symlinks_missing_or_non_executable_shim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Handle missing or non-executable shim templates."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tempdir = pathlib.Path(tmpdir)
+        missing_shim = tempdir / "missing"
+        monkeypatch.setattr("cmd_mox.shimgen.SHIM_PATH", missing_shim)
+        with pytest.raises(FileNotFoundError):
+            create_shim_symlinks(tempdir, ["ls"])  # type: ignore[list-item]
+
+        shim_path = tempdir / "fake_shim"
+        shim_path.write_text("#!/bin/sh\necho fake")
+        shim_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        monkeypatch.setattr("cmd_mox.shimgen.SHIM_PATH", shim_path)
+        with pytest.raises(PermissionError):
+            create_shim_symlinks(tempdir, ["ls"])  # type: ignore[list-item]

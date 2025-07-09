@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import typing as t
 from pathlib import Path
 
@@ -18,15 +19,24 @@ def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str
     commands:
         Command names (e.g. "git", "curl") for which to create shims.
     """
-    if not directory.exists():
-        msg = f"Directory {directory} does not exist"
+    if not directory.is_dir():
+        msg = f"{directory} is not a directory"
         raise FileNotFoundError(msg)
 
-    SHIM_PATH.chmod(0o755)
+    if not SHIM_PATH.exists():
+        msg = f"Shim template not found: {SHIM_PATH}"
+        raise FileNotFoundError(msg)
+
+    if not os.access(SHIM_PATH, os.X_OK):
+        msg = f"Shim template not executable: {SHIM_PATH}"
+        raise PermissionError(msg)
     mapping: dict[str, Path] = {}
     for name in commands:
         link = directory / name
-        if link.exists():
+        if os.path.lexists(link):
+            if not link.is_symlink():
+                msg = f"{link} already exists and is not a symlink"
+                raise FileExistsError(msg)
             link.unlink()
         link.symlink_to(SHIM_PATH)
         mapping[name] = link
