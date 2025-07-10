@@ -38,7 +38,7 @@ def test_create_shim_symlinks_missing_target_dir() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         missing = pathlib.Path(tmpdir) / "absent"
         with pytest.raises(FileNotFoundError):
-            create_shim_symlinks(missing, ["ls"])  # type: ignore[list-item]
+            create_shim_symlinks(missing, ["ls"])
 
 
 def test_create_shim_symlinks_existing_non_symlink_file() -> None:
@@ -48,7 +48,7 @@ def test_create_shim_symlinks_existing_non_symlink_file() -> None:
         file_path = path / "ls"
         file_path.write_text("not a symlink")
         with pytest.raises(FileExistsError):
-            create_shim_symlinks(path, ["ls"])  # type: ignore[list-item]
+            create_shim_symlinks(path, ["ls"])
 
 
 def test_create_shim_symlinks_missing_or_non_executable_shim(
@@ -60,12 +60,12 @@ def test_create_shim_symlinks_missing_or_non_executable_shim(
         missing_shim = tempdir / "missing"
         monkeypatch.setattr("cmd_mox.shimgen.SHIM_PATH", missing_shim)
         with pytest.raises(FileNotFoundError):
-            create_shim_symlinks(tempdir, ["ls"])  # type: ignore[list-item]
+            create_shim_symlinks(tempdir, ["ls"])
 
         shim_path = tempdir / "fake_shim"
         shim_path.write_text("#!/bin/sh\necho fake")
         shim_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         monkeypatch.setattr("cmd_mox.shimgen.SHIM_PATH", shim_path)
-        mapping = create_shim_symlinks(tempdir, ["ls"])  # type: ignore[list-item]
+        mapping = create_shim_symlinks(tempdir, ["ls"])
         assert mapping["ls"].is_symlink()
         assert os.access(shim_path, os.X_OK)
