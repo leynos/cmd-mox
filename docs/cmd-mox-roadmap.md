@@ -25,15 +25,15 @@
 
   - [x] Environment variable for IPC socket path
 
-- [ ] **Shim Generation Engine**
+- [x] **Shim Generation Engine**
 
-  - [ ] Single Python `shim.py` script (template)
+  - [x] Single Python `shim.py` script (template)
 
-  - [ ] Logic to create per-command symlinks in temp directory
+  - [x] Logic to create per-command symlinks in temp directory
 
-  - [ ] Symlink invokes correct behaviour based on `argv[0]`
+  - [x] Symlink invokes correct behaviour based on `argv[0]`
 
-  - [ ] Make shims executable on all supported Unix platforms
+  - [x] Make shims executable on all supported Unix platforms
 
 - [ ] **IPC Bus (Unix Domain Sockets)**
 

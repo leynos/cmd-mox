@@ -360,6 +360,25 @@ This symlink-based approach is highly efficient and ensures that any updates or
 bug fixes to the shim logic only need to be applied to one central template
 file.
 
+```mermaid
+sequenceDiagram
+    actor User
+    participant App as Application
+    participant FS as FileSystem
+    User->>App: Call create_shim_symlinks(directory, commands)
+    App->>FS: Check if directory exists
+    alt Directory does not exist
+        App->>User: Raise FileNotFoundError
+    else Directory exists
+        App->>FS: Set SHIM_PATH executable
+        loop For each command
+            App->>FS: Remove existing symlink (if any)
+            App->>FS: Create symlink to SHIM_PATH
+        end
+        App->>User: Return mapping of command to symlink path
+    end
+```
+
 ### 3.2 State Management and Inter-Process Communication (IPC)
 
 The communication between the main test process (hosting the `Mox` controller)
