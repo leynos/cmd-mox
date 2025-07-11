@@ -9,6 +9,19 @@ from pathlib import Path
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 
 
+def _validate_command_name(name: str) -> None:
+    """Validate *name* is a safe command filename."""
+    invalid = (
+        not name
+        or name in {".", ".."}
+        or any(sep in name for sep in ("/", "\\"))
+        or "\x00" in name
+    )
+    if invalid:
+        msg = f"Invalid command name: {name!r}"
+        raise ValueError(msg)
+
+
 def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
     """Create symlinks for the given commands in *directory*.
 
@@ -36,6 +49,7 @@ def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str
             raise PermissionError(msg) from exc
     mapping: dict[str, Path] = {}
     for name in commands:
+        _validate_command_name(name)
         link = directory / name
         if os.path.lexists(link):
             if not link.is_symlink():

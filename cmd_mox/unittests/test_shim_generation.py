@@ -69,3 +69,14 @@ def test_create_shim_symlinks_missing_or_non_executable_shim(
         mapping = create_shim_symlinks(tempdir, ["ls"])
         assert mapping["ls"].is_symlink()
         assert os.access(shim_path, os.X_OK)
+
+
+@pytest.mark.parametrize(
+    "name", ["../evil", "bad/name", "bad\\name", "..", "", "bad\x00name"]
+)
+def test_create_shim_symlinks_invalid_command_name(name: str) -> None:
+    """Invalid command names should raise ValueError."""
+    with EnvironmentManager() as env:
+        assert env.shim_dir is not None
+        with pytest.raises(ValueError, match="Invalid command name"):
+            create_shim_symlinks(env.shim_dir, [name])
