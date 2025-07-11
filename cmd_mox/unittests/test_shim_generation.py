@@ -71,7 +71,9 @@ def test_create_shim_symlinks_missing_or_non_executable_shim(
         assert os.access(shim_path, os.X_OK)
 
 
-@pytest.mark.parametrize("name", ["../evil", "bad/name", "bad\\name", "..", ""])
+@pytest.mark.parametrize(
+    "name", ["../evil", "bad/name", "bad\\name", "..", "", "bad\x00name"]
+)
 def test_create_shim_symlinks_invalid_command_name(name: str) -> None:
     """Invalid command names should raise ValueError."""
     with EnvironmentManager() as env:

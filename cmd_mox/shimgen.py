@@ -11,13 +11,13 @@ SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 
 def _validate_command_name(name: str) -> None:
     """Validate *name* is a safe command filename."""
-    if not name or name in {".", ".."}:
-        msg = f"Invalid command name: {name!r}"
-        raise ValueError(msg)
-    if any(sep in name for sep in ("/", "\\")):
-        msg = f"Invalid command name: {name!r}"
-        raise ValueError(msg)
-    if "\x00" in name:
+    invalid = (
+        not name
+        or name in {".", ".."}
+        or any(sep in name for sep in ("/", "\\"))
+        or "\x00" in name
+    )
+    if invalid:
         msg = f"Invalid command name: {name!r}"
         raise ValueError(msg)
 
