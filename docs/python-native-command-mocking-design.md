@@ -432,6 +432,14 @@ This socket-based IPC architecture is the key technical differentiator for
 exchange of rich, complex data structures, providing a foundation for advanced
 features that are infeasible with file-based logging.
 
+The initial implementation ships with a lightweight `IPCServer` class. It
+listens on a Unix domain socket path provided by the `EnvironmentManager` and
+handles JSON messages representing an `Invocation`. Each connection is served in
+a background thread with reasonable timeouts to avoid hung tests. Responses are
+JSON encoded `stdout`, `stderr`, and `exit_code` data. The server cleans up the
+socket on shutdown to prevent stale sockets from interfering with subsequent
+tests.
+
 ### 3.3 The Environment Manager
 
 This component will be implemented as a robust, exception-safe context manager

@@ -8,7 +8,8 @@ import tempfile
 
 import pytest
 
-from cmd_mox.environment import EnvironmentManager
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
+from cmd_mox.ipc import IPCServer
 from cmd_mox.shimgen import SHIM_PATH, create_shim_symlinks
 
 
@@ -17,8 +18,12 @@ def test_create_shim_symlinks_and_execution() -> None:
     commands = ["git", "curl"]
     with EnvironmentManager() as env:
         assert env.shim_dir is not None
+        assert env.socket_path is not None
+        server = IPCServer(env.socket_path)
+        server.start()
         mapping = create_shim_symlinks(env.shim_dir, commands)
         assert set(mapping) == set(commands)
+        os.environ[CMOX_IPC_SOCKET_ENV] = str(env.socket_path)
         for cmd in commands:
             link = mapping[cmd]
             assert link.is_symlink()
@@ -31,6 +36,7 @@ def test_create_shim_symlinks_and_execution() -> None:
                 text=True,
             )
             assert result.stdout.strip() == cmd
+        server.stop()
 
 
 def test_create_shim_symlinks_missing_target_dir() -> None:

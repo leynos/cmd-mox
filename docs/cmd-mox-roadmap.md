@@ -35,15 +35,15 @@
 
   - [x] Make shims executable on all supported Unix platforms
 
-- [ ] **IPC Bus (Unix Domain Sockets)**
+- [x] **IPC Bus (Unix Domain Sockets)**
 
-  - [ ] Lightweight IPC server in main test process
+  - [x] Lightweight IPC server in main test process
 
-  - [ ] Start/stop server in sync with test lifecycle
+  - [x] Start/stop server in sync with test lifecycle
 
-  - [ ] Structured (JSON) communication: invocation/request, response/result
+  - [x] Structured (JSON) communication: invocation/request, response/result
 
-  - [ ] Timeout/error handling and robust socket cleanup
+  - [x] Timeout/error handling and robust socket cleanup
 
 ## **III. Mox Controller & Public API**
 
