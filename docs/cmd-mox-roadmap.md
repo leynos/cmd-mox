@@ -85,6 +85,9 @@
 
   - [ ] `.with_env()` for environment matching/injection
 
+  - [ ] Fluent expectation DSL as described in
+    `docs/python-native-command-mocking-design.md`
+
   - [ ] Strict record-replay-verify logic
 
 - [ ] **SpyCommand**
@@ -94,6 +97,9 @@
   - [ ] `.passthrough()` for record/replay mode
 
   - [ ] Maintain call history (`invocations`, `call_count` API)
+
+  - [ ] Assertion helpers for inspecting spy history (e.g. `assert_called`,
+    `assert_called_with`)
 
 ## **V. Matching & Verification Engine**
 
@@ -176,6 +182,8 @@
 
   - [ ] Regression suite for edge cases (pipelines, missing commands, complex
     args)
+
+  - [ ] Behavioural acceptance tests covering the full fluent API
 
 ## **X. Release & Post-MVP**
 
