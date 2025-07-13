@@ -14,6 +14,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types
 
 CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
+CMOX_IPC_TIMEOUT_ENV = "CMOX_IPC_TIMEOUT"  # server/shim communication timeout
 
 
 class EnvironmentManager:

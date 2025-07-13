@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.ipc import Invocation, invoke_server
 
 
@@ -20,15 +20,17 @@ def main() -> None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)
 
+    stdin_data = sys.stdin.read() if not sys.stdin.isatty() else ""
     invocation = Invocation(
         command=cmd_name,
         args=sys.argv[1:],
-        stdin=sys.stdin.read(),
+        stdin=stdin_data,
         env=dict(os.environ),
     )
 
     try:
-        response = invoke_server(invocation, timeout=5.0)
+        timeout = float(os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0"))
+        response = invoke_server(invocation, timeout=timeout)
     except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover - network issues
         print(f"IPC error: {exc}", file=sys.stderr)
         sys.exit(1)

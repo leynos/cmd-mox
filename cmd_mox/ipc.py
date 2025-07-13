@@ -1,22 +1,30 @@
-"""Simple IPC server and client helpers for CmdMox."""
+"""JSON IPC server and client helpers for CmdMox."""
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses as dc
 import json
+import logging
 import os
 import socket
+import socketserver
 import threading
+import time
 import typing as t
 from pathlib import Path
+
+from .environment import CMOX_IPC_SOCKET_ENV
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types
 
+logger = logging.getLogger(__name__)
 
-@dc.dataclass
+
+@dc.dataclass(slots=True)
 class Invocation:
-    """Information sent from a shim to the IPC server."""
+    """Information reported by a shim to the IPC server."""
 
     command: str
     args: list[str]
@@ -24,25 +32,64 @@ class Invocation:
     env: dict[str, str]
 
 
-@dc.dataclass
+@dc.dataclass(slots=True)
 class Response:
-    """Response from the IPC server to a shim."""
+    """Response from the IPC server back to a shim."""
 
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
 
 
+class _IPCHandler(socketserver.StreamRequestHandler):
+    """Handle a single shim connection."""
+
+    def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
+        raw = self.rfile.read()
+        try:
+            payload = json.loads(raw.decode())
+        except json.JSONDecodeError:
+            logger.exception("IPC received malformed JSON")
+            return
+        if not isinstance(payload, dict):
+            logger.error("IPC payload not a dict: %r", payload)
+            return
+        try:
+            payload_dict = t.cast("dict[str, t.Any]", payload)
+            invocation = Invocation(**payload_dict)  # type: ignore[arg-type] - payload validated
+        except TypeError:
+            logger.exception("IPC payload missing required fields: %r", payload)
+            return
+        response = self.server.outer.handle_invocation(  # type: ignore[attr-defined]
+            invocation
+        )
+        self.wfile.write(json.dumps(dc.asdict(response)).encode())
+
+
+class _InnerServer(socketserver.ThreadingUnixStreamServer):
+    """Threaded Unix stream server passing requests to :class:`IPCServer`."""
+
+    timeout = 1.0
+
+    def __init__(self, socket_path: Path, outer: IPCServer) -> None:
+        self.outer = outer
+        super().__init__(str(socket_path), _IPCHandler)
+        self.daemon_threads = True
+
+
 class IPCServer:
-    """Lightweight JSON IPC server using a Unix domain socket."""
+    """Run a Unix domain socket server for shims."""
 
     def __init__(self, socket_path: Path, timeout: float = 5.0) -> None:
         self.socket_path = Path(socket_path)
         self.timeout = timeout
-        self._sock: socket.socket | None = None
+        self._server: _InnerServer | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
+    # ------------------------------------------------------------------
+    # Context manager protocol
+    # ------------------------------------------------------------------
     def __enter__(self) -> IPCServer:
         """Start the server when entering a context."""
         self.start()
@@ -57,69 +104,64 @@ class IPCServer:
         """Stop the server when leaving a context."""
         self.stop()
 
+    # ------------------------------------------------------------------
+    # Lifecycle management
+    # ------------------------------------------------------------------
     def start(self) -> None:
-        """Start the server in a background thread."""
+        """Start the background server thread."""
         if self._thread:
             msg = "IPC server already started"
             raise RuntimeError(msg)
+
+        self._stop.clear()
         if self.socket_path.exists():
-            self.socket_path.unlink()
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._sock.bind(str(self.socket_path))
-        self._sock.listen()
-        self._thread = threading.Thread(target=self._serve, daemon=True)
+            try:
+                self.socket_path.unlink()
+            except OSError as exc:  # pragma: no cover - unlikely race
+                logger.warning(
+                    "Could not unlink stale socket %s: %s", self.socket_path, exc
+                )
+
+        self._server = _InnerServer(self.socket_path, self)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+
+        # Wait briefly for the socket file to appear to avoid connection races
+        for _ in range(50):
+            if self.socket_path.exists():
+                break
+            time.sleep(0.01)
 
     def stop(self) -> None:
         """Stop the server and clean up the socket."""
         self._stop.set()
-        if self._sock:
-            try:
-                self._sock.close()
-            finally:
-                self._sock = None
+        if self._server:
+            self._server.shutdown()
+            self._server.server_close()
         if self._thread:
-            self._thread.join(timeout=self.timeout)
+            self._thread.join(self.timeout)
             self._thread = None
+        self._server = None
         if self.socket_path.exists():
-            self.socket_path.unlink()
+            with contextlib.suppress(OSError):
+                self.socket_path.unlink()
 
-    def _serve(self) -> None:
-        sock = self._sock
-        if sock is None:
-            return
-        while not self._stop.is_set():
-            try:
-                sock.settimeout(0.1)
-                conn, _ = sock.accept()
-            except TimeoutError:
-                continue
-            except OSError:
-                break
-            with conn:
-                conn.settimeout(self.timeout)
-                try:
-                    data = conn.recv(1024)
-                    buffer = data
-                    while data:
-                        data = conn.recv(1024)
-                        buffer += data
-                    payload = t.cast("dict[str, t.Any]", json.loads(buffer.decode()))
-                    invocation = Invocation(**payload)  # type: ignore[arg-type]
-                    response = self.handle_invocation(invocation)
-                    conn.sendall(json.dumps(dc.asdict(response)).encode())
-                except (OSError, json.JSONDecodeError):
-                    # Ignore malformed requests or connection errors
-                    continue
-
+    # ------------------------------------------------------------------
+    # Request processing
+    # ------------------------------------------------------------------
     def handle_invocation(self, invocation: Invocation) -> Response:
-        """Echo the command name in ``stdout``."""
+        """Echo the command name by default."""
         return Response(stdout=invocation.command)
 
 
 def invoke_server(invocation: Invocation, timeout: float) -> Response:
     """Send *invocation* to the IPC server and return its response."""
-    sock_path = Path(os.environ["CMOX_IPC_SOCKET"])  # raised KeyError if unset
+    sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
+    if sock is None:
+        msg = f"{CMOX_IPC_SOCKET_ENV} is not set"
+        raise RuntimeError(msg)
+
+    sock_path = Path(sock)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(timeout)
         client.connect(str(sock_path))
@@ -131,5 +173,5 @@ def invoke_server(invocation: Invocation, timeout: float) -> Response:
             if not chunk:
                 break
             buffer += chunk
-    payload = json.loads(buffer.decode())
-    return Response(**payload)
+    payload_dict = t.cast("dict[str, t.Any]", json.loads(buffer.decode()))
+    return Response(**payload_dict)

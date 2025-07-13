@@ -19,24 +19,24 @@ def test_create_shim_symlinks_and_execution() -> None:
     with EnvironmentManager() as env:
         assert env.shim_dir is not None
         assert env.socket_path is not None
-        server = IPCServer(env.socket_path)
-        server.start()
-        mapping = create_shim_symlinks(env.shim_dir, commands)
-        assert set(mapping) == set(commands)
-        os.environ[CMOX_IPC_SOCKET_ENV] = str(env.socket_path)
-        for cmd in commands:
-            link = mapping[cmd]
-            assert link.is_symlink()
-            assert link.resolve() == SHIM_PATH
-            assert os.access(link, os.X_OK)
-            result = subprocess.run(  # noqa: S603
-                [str(link)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            assert result.stdout.strip() == cmd
-        server.stop()
+        with IPCServer(env.socket_path):
+            mapping = create_shim_symlinks(env.shim_dir, commands)
+            assert set(mapping) == set(commands)
+            os.environ[CMOX_IPC_SOCKET_ENV] = str(env.socket_path)
+            for cmd in commands:
+                link = mapping[cmd]
+                assert link.is_symlink()
+                assert link.resolve() == SHIM_PATH
+                assert os.access(link, os.X_OK)
+                result = subprocess.run(  # noqa: S603
+                    [str(link)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                assert result.stdout.strip() == cmd
+                assert result.stderr == ""
+                assert result.returncode == 0
 
 
 def test_create_shim_symlinks_missing_target_dir() -> None:

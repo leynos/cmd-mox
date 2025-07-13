@@ -14,16 +14,16 @@ def test_shim_invokes_via_ipc() -> None:
         assert env.shim_dir is not None
         socket_path = env.socket_path
         assert socket_path is not None
-        server = IPCServer(socket_path)
-        server.start()
-        create_shim_symlinks(env.shim_dir, commands)
+        with IPCServer(socket_path):
+            create_shim_symlinks(env.shim_dir, commands)
 
-        os.environ[CMOX_IPC_SOCKET_ENV] = str(socket_path)
-        result = subprocess.run(  # noqa: S603
-            [str(env.shim_dir / "foo")],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert result.stdout.strip() == "foo"
-        server.stop()
+            os.environ[CMOX_IPC_SOCKET_ENV] = str(socket_path)
+            result = subprocess.run(  # noqa: S603
+                [str(env.shim_dir / "foo")],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert result.stdout.strip() == "foo"
+            assert result.stderr == ""
+            assert result.returncode == 0
