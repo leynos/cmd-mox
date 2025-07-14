@@ -449,6 +449,63 @@ retries connection attempts a few times and validates that the server's reply is
 valid JSON, raising a `RuntimeError` if decoding fails. These safeguards make the
 IPC bus robust on slower or heavily loaded systems.
 
+```mermaid
+classDiagram
+    class IPCServer {
+        - Path socket_path
+        - float timeout
+        - _InnerServer _server
+        - Thread _thread
+        - Event _stop
+        + __enter__() IPCServer
+        + __exit__(exc_type, exc, tb) None
+        + start() None
+        + stop() None
+        + handle_invocation(invocation: Invocation) Response
+    }
+    class _InnerServer {
+        - IPCServer outer
+        + __init__(socket_path: Path, outer: IPCServer)
+    }
+    class _IPCHandler {
+        + handle() None
+    }
+    class Invocation {
+        + str command
+        + list[str] args
+        + str stdin
+        + dict[str, str] env
+    }
+    class Response {
+        + str stdout
+        + str stderr
+        + int exit_code
+    }
+    IPCServer --> _InnerServer : manages
+    _InnerServer --> _IPCHandler : uses
+    _IPCHandler --> Invocation : parses
+    _IPCHandler --> Response : returns
+    IPCServer --> Invocation : handles
+    IPCServer --> Response : returns
+```
+
+```mermaid
+sequenceDiagram
+    actor Shim
+    participant IPCServer
+    participant Handler as _IPCHandler
+    participant App as Application Logic
+
+    Shim->>IPCServer: Connect via Unix socket
+    Shim->>IPCServer: Send JSON Invocation
+    IPCServer->>Handler: Pass connection
+    Handler->>Handler: Parse Invocation
+    Handler->>App: handle_invocation(Invocation)
+    App-->>Handler: Response
+    Handler->>Shim: Send JSON Response
+    Shim->>Shim: Write stdout, stderr, exit code
+```
+
 ### 3.3 The Environment Manager
 
 This component will be implemented as a robust, exception-safe context manager

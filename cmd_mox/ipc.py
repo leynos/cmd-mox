@@ -78,8 +78,6 @@ class _IPCHandler(socketserver.StreamRequestHandler):
 class _InnerServer(socketserver.ThreadingUnixStreamServer):
     """Threaded Unix stream server passing requests to :class:`IPCServer`."""
 
-    timeout = 1.0
-
     def __init__(self, socket_path: Path, outer: IPCServer) -> None:
         self.outer = outer
         super().__init__(str(socket_path), _IPCHandler)
@@ -89,9 +87,22 @@ class _InnerServer(socketserver.ThreadingUnixStreamServer):
 class IPCServer:
     """Run a Unix domain socket server for shims."""
 
-    def __init__(self, socket_path: Path, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        socket_path: Path,
+        timeout: float = 5.0,
+        accept_timeout: float | None = None,
+    ) -> None:
+        """Create a server listening at *socket_path*.
+
+        ``timeout`` controls startup and shutdown waits. ``accept_timeout``
+        determines how often the server checks for shutdown requests while
+        waiting for incoming connections. If not provided, it defaults to one
+        tenth of ``timeout`` capped at 0.1 seconds.
+        """
         self.socket_path = Path(socket_path)
         self.timeout = timeout
+        self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
         self._server: _InnerServer | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -143,6 +154,7 @@ class IPCServer:
                 )
 
         self._server = _InnerServer(self.socket_path, self)
+        self._server.timeout = self.accept_timeout
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
