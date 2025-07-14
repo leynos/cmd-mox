@@ -20,7 +20,7 @@ def main() -> None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)
 
-    stdin_data = sys.stdin.read() if not sys.stdin.isatty() else ""
+    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
     invocation = Invocation(
         command=cmd_name,
         args=sys.argv[1:],

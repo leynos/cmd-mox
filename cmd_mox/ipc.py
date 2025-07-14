@@ -167,11 +167,8 @@ def invoke_server(invocation: Invocation, timeout: float) -> Response:
         client.connect(str(sock_path))
         client.sendall(json.dumps(dc.asdict(invocation)).encode())
         client.shutdown(socket.SHUT_WR)
-        buffer = b""
-        while True:
-            chunk = client.recv(1024)
-            if not chunk:
-                break
-            buffer += chunk
-    payload_dict = t.cast("dict[str, t.Any]", json.loads(buffer.decode()))
+        chunks = []
+        while chunk := client.recv(1024):
+            chunks.append(chunk)
+    payload_dict = t.cast("dict[str, t.Any]", json.loads(b"".join(chunks).decode()))
     return Response(**payload_dict)
