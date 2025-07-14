@@ -27,3 +27,20 @@ def test_shim_invokes_via_ipc() -> None:
             assert result.stdout.strip() == "foo"
             assert result.stderr == ""
             assert result.returncode == 0
+
+
+def test_shim_errors_when_socket_unset() -> None:
+    """Shim prints an error if IPC socket env var is missing."""
+    commands = ["bar"]
+    with EnvironmentManager() as env:
+        assert env.shim_dir is not None
+        create_shim_symlinks(env.shim_dir, commands)
+        os.environ.pop(CMOX_IPC_SOCKET_ENV, None)
+        result = subprocess.run(  # noqa: S603
+            [str(env.shim_dir / "bar")],
+            capture_output=True,
+            text=True,
+        )
+        assert result.stdout == ""
+        assert result.stderr.strip() == "IPC socket not specified"
+        assert result.returncode == 1

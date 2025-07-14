@@ -41,6 +41,14 @@ class Response:
     exit_code: int = 0
 
 
+def _read_all(sock: socket.socket) -> bytes:
+    """Read all data from *sock* until EOF."""
+    chunks = []
+    while chunk := sock.recv(1024):
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
@@ -64,6 +72,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             invocation
         )
         self.wfile.write(json.dumps(dc.asdict(response)).encode())
+        self.wfile.flush()
 
 
 class _InnerServer(socketserver.ThreadingUnixStreamServer):
@@ -167,8 +176,6 @@ def invoke_server(invocation: Invocation, timeout: float) -> Response:
         client.connect(str(sock_path))
         client.sendall(json.dumps(dc.asdict(invocation)).encode())
         client.shutdown(socket.SHUT_WR)
-        chunks = []
-        while chunk := client.recv(1024):
-            chunks.append(chunk)
-    payload_dict = t.cast("dict[str, t.Any]", json.loads(b"".join(chunks).decode()))
+        raw = _read_all(client)
+    payload_dict = t.cast("dict[str, t.Any]", json.loads(raw.decode()))
     return Response(**payload_dict)
