@@ -8,7 +8,8 @@ import tempfile
 
 import pytest
 
-from cmd_mox.environment import EnvironmentManager
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
+from cmd_mox.ipc import IPCServer
 from cmd_mox.shimgen import SHIM_PATH, create_shim_symlinks
 
 
@@ -17,20 +18,25 @@ def test_create_shim_symlinks_and_execution() -> None:
     commands = ["git", "curl"]
     with EnvironmentManager() as env:
         assert env.shim_dir is not None
-        mapping = create_shim_symlinks(env.shim_dir, commands)
-        assert set(mapping) == set(commands)
-        for cmd in commands:
-            link = mapping[cmd]
-            assert link.is_symlink()
-            assert link.resolve() == SHIM_PATH
-            assert os.access(link, os.X_OK)
-            result = subprocess.run(  # noqa: S603
-                [str(link)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            assert result.stdout.strip() == cmd
+        assert env.socket_path is not None
+        with IPCServer(env.socket_path):
+            mapping = create_shim_symlinks(env.shim_dir, commands)
+            assert set(mapping) == set(commands)
+            os.environ[CMOX_IPC_SOCKET_ENV] = str(env.socket_path)
+            for cmd in commands:
+                link = mapping[cmd]
+                assert link.is_symlink()
+                assert link.resolve() == SHIM_PATH
+                assert os.access(link, os.X_OK)
+                result = subprocess.run(  # noqa: S603
+                    [str(link)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                assert result.stdout.strip() == cmd
+                assert result.stderr == ""
+                assert result.returncode == 0
 
 
 def test_create_shim_symlinks_missing_target_dir() -> None:
