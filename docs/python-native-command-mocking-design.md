@@ -441,6 +441,14 @@ reasonable timeouts. Responses are JSON encoded `stdout`, `stderr`, and
 sockets from interfering with subsequent tests. The communication timeout is
 configurable via the `CMOX_IPC_TIMEOUT` environment variable.
 
+To avoid races and corrupted state, `IPCServer.start()` first checks if an
+existing socket is in use before unlinking it. After launching the background
+thread, the server polls for the socket path using an exponential backoff to
+ensure it appears before clients connect. On the client side, `invoke_server()`
+retries connection attempts a few times and validates that the server's reply is
+valid JSON, raising a `RuntimeError` if decoding fails. These safeguards make the
+IPC bus robust on slower or heavily loaded systems.
+
 ### 3.3 The Environment Manager
 
 This component will be implemented as a robust, exception-safe context manager

@@ -125,6 +125,17 @@ class IPCServer:
         self._stop.clear()
         if self.socket_path.exists():
             try:
+                # Verify the socket isn't in use before removing it to avoid
+                # clobbering another process's server.
+                probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                try:
+                    probe.connect(str(self.socket_path))
+                    probe.close()
+                    msg = f"Socket {self.socket_path} is still in use"
+                    raise RuntimeError(msg)
+                except (ConnectionRefusedError, OSError):
+                    # No listener found; safe to remove the stale file.
+                    pass
                 self.socket_path.unlink()
             except OSError as exc:  # pragma: no cover - unlikely race
                 logger.warning(
@@ -135,11 +146,19 @@ class IPCServer:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
-        # Wait briefly for the socket file to appear to avoid connection races
-        for _ in range(50):
+        # Poll for the socket path using exponential backoff to avoid races on
+        # slower systems while failing quickly when something goes wrong.
+        timeout_end = time.time() + self.timeout
+        wait_time = 0.001
+        while time.time() < timeout_end:
             if self.socket_path.exists():
                 break
-            time.sleep(0.01)
+            time.sleep(wait_time)
+            wait_time = min(wait_time * 1.5, 0.1)
+
+        if not self.socket_path.exists():
+            msg = f"Socket file {self.socket_path} not created within timeout"
+            raise RuntimeError(msg)
 
     def stop(self) -> None:
         """Stop the server and clean up the socket."""
@@ -171,11 +190,27 @@ def invoke_server(invocation: Invocation, timeout: float) -> Response:
         raise RuntimeError(msg)
 
     sock_path = Path(sock)
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(timeout)
-        client.connect(str(sock_path))
-        client.sendall(json.dumps(dc.asdict(invocation)).encode())
-        client.shutdown(socket.SHUT_WR)
-        raw = _read_all(client)
-    payload_dict = t.cast("dict[str, t.Any]", json.loads(raw.decode()))
+    attempt = 0
+    while True:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(timeout)
+                client.connect(str(sock_path))
+                client.sendall(json.dumps(dc.asdict(invocation)).encode())
+                client.shutdown(socket.SHUT_WR)
+                raw = _read_all(client)
+            break
+        except OSError:
+            if attempt >= 2:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+            attempt += 1
+
+    try:
+        payload = json.loads(raw.decode())
+    except json.JSONDecodeError as exc:
+        msg = "Invalid JSON from IPC server"
+        raise RuntimeError(msg) from exc
+
+    payload_dict = t.cast("dict[str, t.Any]", payload)
     return Response(**payload_dict)
