@@ -45,9 +45,9 @@
 
   - [x] Timeout/error handling and robust socket cleanup
 
-## **III. Mox Controller & Public API**
+## **III. CmdMox Controller & Public API**
 
-- [ ] `Mox` **Controller Class**
+- [ ] `CmdMox` **Controller Class**
 
   - [ ] Holds expectations, stubs, spies, and the invocation journal
 
@@ -65,7 +65,7 @@
 
 - [ ] **Context Manager Interface**
 
-  - [ ] Support for explicit `with cmdmox.Mox() as mox: ...` usage
+  - [ ] Support for explicit `with cmdmox.CmdMox() as mox: ...` usage
 
 ## **IV. Command Double Implementations**
 
