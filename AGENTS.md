@@ -76,15 +76,6 @@ When implementing changes, adhere to the following testing procedures:
     - **Formatting:** Adheres to formatting standards (`make fmt`).
     - **Typechecking:** Passes type checking (`make typecheck`).
 
-  - For TypeScript files:
-
-    - **Testing:** Passes all relevant unit and behavioral tests according to
-      the guidelines above.
-    - **Linting:** Passes lint checks (`biome check .`).
-    - **Formatting:** Adheres to formatting standards (`biome check --apply .`).
-    - **TypeScript Compilation:** Compiles successfully without TypeScript
-      errors (`tsc --noEmit`).
-
   - For Markdown files (`.md` only):
 
     - **Linting:** Passes lint checks (`make markdownlint`).
