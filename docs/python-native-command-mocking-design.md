@@ -966,10 +966,12 @@ The first implementation of the :class:`CmdMox` controller focuses on
 lifecycle management and a minimal stub facility. The controller wraps
 ``EnvironmentManager`` and ``IPCServer`` to orchestrate environment setup and
 inter-process communication. Invocations from shims are appended to an internal
-journal. When a stub is registered for a command, the controller returns
-the configured :class:`Response`; otherwise it echoes the command name. This
-simplified approach establishes the record → replay → verify workflow and lays
-the groundwork for upcoming expectation and spy features.
+journal. When a stub is registered for a command, the controller returns the
+configured :class:`Response`; otherwise it echoes the command name. During
+``verify()`` the controller asserts that every invocation corresponds to a
+registered stub and that each stub was called at least once. This simplified
+verification establishes the record → replay → verify workflow and lays the
+groundwork for upcoming expectation and spy features.
 
 ```mermaid
 sequenceDiagram

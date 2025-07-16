@@ -78,6 +78,8 @@ class CmdMox:
 
     def stub(self, command_name: str) -> StubCommand:
         """Create or retrieve a :class:`StubCommand` for *command_name*."""
+        if command_name in self.stubs:
+            return self.stubs[command_name]
         stub = StubCommand(command_name, self)
         self.stubs[command_name] = stub
         self.register_command(command_name)
@@ -91,6 +93,8 @@ class CmdMox:
             self.__enter__()
         if self.environment.shim_dir is None or self.environment.socket_path is None:
             raise RuntimeError("Environment not initialised")  # noqa: TRY003
+        self.journal.clear()
+        self._commands = set(self.stubs) | self._commands
         create_shim_symlinks(self.environment.shim_dir, self._commands)
         self._server = IPCServer(self.environment.socket_path)
         self._server.handle_invocation = self._handle_invocation  # type: ignore[method-assign]
@@ -101,13 +105,29 @@ class CmdMox:
         """Stop the server and finalise the verification phase."""
         if self._phase != "replay":
             raise RuntimeError("verify() called out of order")  # noqa: TRY003
-        if self._server is not None:
-            self._server.stop()
-            self._server = None
-        if self._entered:
-            self.environment.__exit__(None, None, None)
-            self._entered = False
-        self._phase = "verify"
+        try:
+            unexpected = [
+                inv.command for inv in self.journal if inv.command not in self.stubs
+            ]
+            if unexpected:
+                msg = f"Unexpected commands invoked: {unexpected}"
+                raise AssertionError(msg)
+            missing = [
+                name
+                for name in self.stubs
+                if all(inv.command != name for inv in self.journal)
+            ]
+            if missing:
+                msg = f"Expected commands not called: {missing}"
+                raise AssertionError(msg)
+        finally:
+            if self._server is not None:
+                self._server.stop()
+                self._server = None
+            if self._entered:
+                self.environment.__exit__(None, None, None)
+                self._entered = False
+            self._phase = "verify"
 
     # ------------------------------------------------------------------
     # Internal helpers
