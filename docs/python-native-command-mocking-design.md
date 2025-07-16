@@ -153,7 +153,7 @@ developer will interact with the library.
 ### 2.1 The `CmdMox` Controller: The Central Orchestrator
 
 The central class and primary user entry point for the library will be
-`cmdmox.CmdMox`. An instance of this class encapsulates the entire state for a
+`cmd_mox.CmdMox`. An instance of this class encapsulates the entire state for a
 single test case, including all recorded expectations, the invocation journal,
 lifecycle and environment management context. It is analogous to the
 `mox.Mox` class in PyMox and is responsible for orchestrating the
@@ -169,32 +169,32 @@ seamless integration with modern Python testing workflows.
 
 The recommended and primary method for using `CmdMox` will be through a `pytest`
 fixture. This aligns with the "New Elegant Way" promoted by PyMox and the
-broader Python testing ecosystem. Users will enable the plugin, and a `mox`
+broader Python testing ecosystem. Users will enable the plugin, and a `cmd_mox`
 fixture will be automatically available to their test functions. This fixture
-provides a fresh, properly configured `CmdMox` instance for each test, with setup
-and teardown handled automatically.
+provides a fresh, properly configured `cmd_mox.CmdMox` instance for each test,
+with setup and teardown handled automatically.
 
 *Example Usage:*
 
 ```python
 # In conftest.py
-pytest_plugins = ("cmdmox.pytest_plugin",)
+pytest_plugins = ("cmd_mox.pytest_plugin",)
 
 # In test_my_cli_tool.py
-def test_git_clone_functionality(mox):
-    # The 'mox' fixture is a ready-to-use CmdMox.CmdMox instance.
+def test_git_clone_functionality(cmd_mox):
+    # The 'cmd_mox' fixture is a ready-to-use cmd_mox.CmdMox instance.
     # Record phase:
-    mox.mock('git').with_args('clone', 'https://a.b/c.git').returns(exit_code=0)
+    cmd_mox.mock('git').with_args('clone', 'https://a.b/c.git').returns(exit_code=0)
 
     # Replay phase:
-    mox.replay()
+    cmd_mox.replay()
     result = my_cli_tool.clone_repo('https://a.b/c.git')
 
     # Assertions on the code under test:
     assert result is True
 
     # Verify phase:
-mox.verify()
+    cmd_mox.verify()
 ```
 
 #### Alternative Interface: Context Manager
@@ -207,10 +207,10 @@ torn down and restored on exit, even in the case of an exception.
 *Example Usage:*
 
 ```python
-import cmdmox
+import cmd_mox
 import subprocess
 
-with cmdmox.CmdMox() as mox:
+with cmd_mox.CmdMox() as mox:
     mox.stub('ls').with_args('-l').returns(stdout='total 0')
     mox.replay()
 
@@ -395,7 +395,7 @@ same host. The workflow is as follows:
 1. **Server Initialization:** When the `CmdMox` controller enters the replay phase,
    it starts a lightweight server thread. This thread creates a `socket.socket`
    listening on a unique path within the temporary shim directory (e.g.,
-   `/tmp/cmdmox.../ipc.sock`).
+   `/tmp/cmd_mox.../ipc.sock`).
 
 2. **Environment Setup:** The controller exports the path to this socket in an
    environment variable (e.g., `CMOX_IPC_SOCKET`). This variable is inherited by
@@ -640,21 +640,21 @@ rather than just literal values.
 
 The library will provide a suite of built-in comparators:
 
-- `cmdmox.Any()`: Matches any single argument at a given position.
+- `cmd_mox.Any()`: Matches any single argument at a given position.
 
-- `cmdmox.IsA(type)`: Matches any argument that is an instance of the given
+- `cmd_mox.IsA(type)`: Matches any argument that is an instance of the given
   Python type (after basic parsing).
 
-- `cmdmox.Regex(pattern: str)`: Matches any argument that conforms to the given
+- `cmd_mox.Regex(pattern: str)`: Matches any argument that conforms to the given
   regular expression.
 
-- `cmdmox.Contains(substring: str)`: Matches any argument that contains the
+- `cmd_mox.Contains(substring: str)`: Matches any argument that contains the
   given substring.
 
-- `cmdmox.StartsWith(prefix: str)`: Matches any argument that starts with the
+- `cmd_mox.StartsWith(prefix: str)`: Matches any argument that starts with the
   given prefix.
 
-- `cmdmox.Predicate(callable)`: The most flexible comparator. It accepts a
+- `cmd_mox.Predicate(callable)`: The most flexible comparator. It accepts a
   callable that takes the argument as input and returns `True` for a match and
   `False` otherwise.
 

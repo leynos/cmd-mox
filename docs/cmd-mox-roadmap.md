@@ -59,13 +59,13 @@
 
 - [ ] **Pytest Plugin**
 
-  - [ ] Register `mox` fixture
+  - [ ] Register `cmd_mox` fixture
 
   - [ ] xdist/parallelisation awareness (worker IDs, temp dirs)
 
 - [ ] **Context Manager Interface**
 
-  - [ ] Support for explicit `with cmdmox.CmdMox() as mox: ...` usage
+  - [ ] Support for explicit `with cmd_mox.CmdMox() as mox:` usage
 
 ## **IV. Command Double Implementations**
 
