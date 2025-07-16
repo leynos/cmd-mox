@@ -289,7 +289,8 @@ To ensure `CmdMox` is a compelling replacement for `shellmock`, the following
 table maps the core features of `shellmock` to their more expressive `CmdMox`
 API equivalents, demonstrating complete functional parity.
 
-**Table 1:** `shellmock` **to** `CmdMox` **Feature Mapping**
+**Table 1:** `shellmock` **to** `CmdMox` **Feature Mapping** <!-- markdownlint-
+disable MD013 -->
 
 | shellmock Feature (from)                    | Proposed CmdMox API Equivalent                     |
 | ------------------------------------------- | -------------------------------------------------- |
@@ -302,6 +303,7 @@ API equivalents, demonstrating complete functional parity.
 | Match on stdin (--match-stdin)              | mock_cmd.with_stdin('some input')                  |
 | Custom behavior (--exec \<command>)         | mock_cmd.runs(lambda inv: ('output', b'', 0))      |
 | Verify calls (shellmock_verify)             | mox.verify()                                       |
+<!-- markdownlint-enable MD013 -->
 
 ### 2.5 The Lifecycle in Practice: `replay()` and `verify()`
 
@@ -968,3 +970,28 @@ journal. When a stub is registered for a command, the controller returns
 the configured :class:`Response`; otherwise it echoes the command name. This
 simplified approach establishes the record → replay → verify workflow and lays
 the groundwork for upcoming expectation and spy features.
+
+```mermaid
+sequenceDiagram
+    actor Tester
+    participant CmdMox
+    participant EnvironmentManager
+    participant IPCServer
+    participant Shim
+
+    Tester->>CmdMox: Create instance
+    Tester->>CmdMox: stub('hi').returns(stdout='hello')
+    Tester->>CmdMox: replay()
+    CmdMox->>EnvironmentManager: __enter__()
+    CmdMox->>Shim: create_shim_symlinks()
+    CmdMox->>IPCServer: start()
+    Tester->>Shim: run 'hi' (as subprocess)
+    Shim->>IPCServer: connect and send invocation
+    IPCServer->>CmdMox: handle_invocation(invocation)
+    CmdMox->>IPCServer: return Response(stdout='hello')
+    IPCServer->>Shim: send response
+    Shim->>Tester: output 'hello'
+    Tester->>CmdMox: verify()
+    CmdMox->>IPCServer: stop()
+    CmdMox->>EnvironmentManager: __exit__()
+```
