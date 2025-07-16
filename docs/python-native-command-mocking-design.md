@@ -150,13 +150,14 @@ modern PyMox fork, particularly its "New Elegant Way" of integration with
 testing frameworks. This section serves as the definitive contract for how a
 developer will interact with the library.
 
-### 2.1 The `Mox` Controller: The Central Orchestrator
+### 2.1 The `CmdMox` Controller: The Central Orchestrator
 
 The central class and primary user entry point for the library will be
-`cmdmox.Mox`. An instance of this class encapsulates the entire state for a
+`cmd_mox.CmdMox`. An instance of this class encapsulates the entire state for a
 single test case, including all recorded expectations, the invocation journal,
-and the environment management context. It is analogous to the `mox.Mox` class
-in PyMox and is responsible for orchestrating the record-replay-verify
+lifecycle and environment management context. It is analogous to the
+`mox.Mox` class in PyMox and is responsible for orchestrating the
+record-replay-verify
 lifecycle.
 
 ### 2.2 Ergonomic Integrations: `pytest` Fixtures and Context Managers
@@ -168,32 +169,32 @@ seamless integration with modern Python testing workflows.
 
 The recommended and primary method for using `CmdMox` will be through a `pytest`
 fixture. This aligns with the "New Elegant Way" promoted by PyMox and the
-broader Python testing ecosystem. Users will enable the plugin, and a `mox`
+broader Python testing ecosystem. Users will enable the plugin, and a `cmd_mox`
 fixture will be automatically available to their test functions. This fixture
-provides a fresh, properly configured `Mox` instance for each test, with setup
-and teardown handled automatically.
+provides a fresh, properly configured `cmd_mox.CmdMox` instance for each test,
+with setup and teardown handled automatically.
 
 *Example Usage:*
 
 ```python
 # In conftest.py
-pytest_plugins = ("cmdmox.pytest_plugin",)
+pytest_plugins = ("cmd_mox.pytest_plugin",)
 
 # In test_my_cli_tool.py
-def test_git_clone_functionality(mox):
-    # The 'mox' fixture is a ready-to-use CmdMox.Mox instance.
+def test_git_clone_functionality(cmd_mox):
+    # The 'cmd_mox' fixture is a ready-to-use cmd_mox.CmdMox instance.
     # Record phase:
-    mox.mock('git').with_args('clone', 'https://a.b/c.git').returns(exit_code=0)
+    cmd_mox.mock('git').with_args('clone', 'https://a.b/c.git').returns(exit_code=0)
 
     # Replay phase:
-    mox.replay()
+    cmd_mox.replay()
     result = my_cli_tool.clone_repo('https://a.b/c.git')
 
     # Assertions on the code under test:
     assert result is True
 
     # Verify phase:
-mox.verify()
+    cmd_mox.verify()
 ```
 
 #### Alternative Interface: Context Manager
@@ -206,10 +207,10 @@ torn down and restored on exit, even in the case of an exception.
 *Example Usage:*
 
 ```python
-import cmdmox
+import cmd_mox
 import subprocess
 
-with cmdmox.Mox() as mox:
+with cmd_mox.CmdMox() as mox:
     mox.stub('ls').with_args('-l').returns(stdout='total 0')
     mox.replay()
 
@@ -223,7 +224,7 @@ mox.verify()
 
 ### 2.3 Creating Test Doubles: `mox.mock()`, `mox.stub()`, and `mox.spy()`
 
-The `Mox` controller instance provides three distinct factory methods for
+The `CmdMox` controller instance provides three distinct factory methods for
 creating the different types of test doubles, each returning a chainable object
 for further configuration.
 
@@ -304,7 +305,7 @@ API equivalents, demonstrating complete functional parity.
 
 ### 2.5 The Lifecycle in Practice: `replay()` and `verify()`
 
-The `Mox` controller provides two methods that demarcate the phases of the
+The `CmdMox` controller provides two methods that demarcate the phases of the
 testing lifecycle.
 
 - `mox.replay()`: This method must be called after all expectations have been
@@ -339,7 +340,7 @@ Python shims that intercept command calls. To maximize efficiency and minimize
 disk I/O, the engine will not write a unique script for every mocked command.
 
 Instead, the `CmdMox` library will contain a single, generic `shim.py` template
-script. When `mox.replay()` is invoked, the `Mox` controller will execute the
+script. When `mox.replay()` is invoked, the `CmdMox` controller will execute the
 following steps:
 
 1. Create a temporary directory with a unique, process-safe name (e.g.,
@@ -381,7 +382,7 @@ sequenceDiagram
 
 ### 3.2 State Management and Inter-Process Communication (IPC)
 
-The communication between the main test process (hosting the `Mox` controller)
+The communication between the main test process (hosting the `CmdMox` controller)
 and the numerous, short-lived shim processes is the most critical architectural
 element of `CmdMox`. The design moves away from the fragile, file-based
 communication methods used by shell-based tools in favor of a modern, robust IPC
@@ -391,10 +392,10 @@ This IPC bus will be implemented using a Unix domain socket, which provides a
 fast and reliable stream-based communication channel between processes on the
 same host. The workflow is as follows:
 
-1. **Server Initialization:** When the `Mox` controller enters the replay phase,
+1. **Server Initialization:** When the `CmdMox` controller enters the replay phase,
    it starts a lightweight server thread. This thread creates a `socket.socket`
    listening on a unique path within the temporary shim directory (e.g.,
-   `/tmp/cmdmox.../ipc.sock`).
+   `/tmp/cmd_mox.../ipc.sock`).
 
 2. **Environment Setup:** The controller exports the path to this socket in an
    environment variable (e.g., `CMOX_IPC_SOCKET`). This variable is inherited by
@@ -547,7 +548,7 @@ reliable testing framework.
 ### 3.4 The Invocation Journal
 
 The Invocation Journal is a simple but crucial in-memory data structure within
-each `Mox` controller instance. It will likely be implemented as a
+each `CmdMox` controller instance. It will likely be implemented as a
 `collections.deque` or a standard `list`. Its sole purpose is to store a
 chronological record of all command calls that occurred during the replay phase.
 
@@ -571,7 +572,7 @@ API call like `mox.stub('grep').returns(stdout='match', exit_code=0)` initiates
 the following process:
 
 1. **Configuration:** The call creates a `Stub` configuration object within the
-   `Mox` controller. This object stores the command name (`grep`) and the
+   `CmdMox` controller. This object stores the command name (`grep`) and the
    associated response data (stdout, stderr, exit code).
 
 2. **Replay Phase:** During `mox.replay()`, this configuration is made available
@@ -639,21 +640,21 @@ rather than just literal values.
 
 The library will provide a suite of built-in comparators:
 
-- `cmdmox.Any()`: Matches any single argument at a given position.
+- `cmd_mox.Any()`: Matches any single argument at a given position.
 
-- `cmdmox.IsA(type)`: Matches any argument that is an instance of the given
+- `cmd_mox.IsA(type)`: Matches any argument that is an instance of the given
   Python type (after basic parsing).
 
-- `cmdmox.Regex(pattern: str)`: Matches any argument that conforms to the given
+- `cmd_mox.Regex(pattern: str)`: Matches any argument that conforms to the given
   regular expression.
 
-- `cmdmox.Contains(substring: str)`: Matches any argument that contains the
+- `cmd_mox.Contains(substring: str)`: Matches any argument that contains the
   given substring.
 
-- `cmdmox.StartsWith(prefix: str)`: Matches any argument that starts with the
+- `cmd_mox.StartsWith(prefix: str)`: Matches any argument that starts with the
   given prefix.
 
-- `cmdmox.Predicate(callable)`: The most flexible comparator. It accepts a
+- `cmd_mox.Predicate(callable)`: The most flexible comparator. It accepts a
   callable that takes the argument as input and returns `True` for a match and
   `False` otherwise.
 
@@ -878,7 +879,7 @@ incorporated into the names of the temporary directory and the IPC socket:
 
 - Worker 1 Socket: `/tmp/cmdmox-gw1-pid54321/ipc.sock`
 
-Because each worker process gets its own `Mox` instance, its own unique shim
+Because each worker process gets its own `CmdMox` instance, its own unique shim
 directory, and its own private IPC socket, there is no shared state between
 workers. Each test runs in a completely isolated `CmdMox` environment,
 eliminating the possibility of cross-test interference and ensuring correctness

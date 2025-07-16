@@ -45,9 +45,9 @@
 
   - [x] Timeout/error handling and robust socket cleanup
 
-## **III. Mox Controller & Public API**
+## **III. CmdMox Controller & Public API**
 
-- [ ] `Mox` **Controller Class**
+- [ ] `CmdMox` **Controller Class**
 
   - [ ] Holds expectations, stubs, spies, and the invocation journal
 
@@ -59,13 +59,13 @@
 
 - [ ] **Pytest Plugin**
 
-  - [ ] Register `mox` fixture
+  - [ ] Register `cmd_mox` fixture
 
   - [ ] xdist/parallelisation awareness (worker IDs, temp dirs)
 
 - [ ] **Context Manager Interface**
 
-  - [ ] Support for explicit `with cmdmox.Mox() as mox: ...` usage
+  - [ ] Support for explicit `with cmd_mox.CmdMox() as mox:` usage
 
 ## **IV. Command Double Implementations**
 
