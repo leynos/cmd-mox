@@ -55,7 +55,7 @@
 
 - [ ] **Factory Methods**
 
-  - [ ] `mox.mock(cmd)`, `mox.stub(cmd)`, `mox.spy(cmd)`
+  - [ ] `cmd_mox.mock(cmd)`, `cmd_mox.stub(cmd)`, `cmd_mox.spy(cmd)`
 
 - [ ] **Pytest Plugin**
 
