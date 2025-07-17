@@ -16,6 +16,7 @@ def test_cmdmox_stub_records_invocation() -> None:
     original_path = os.environ["PATH"]
     mox = CmdMox()
     mox.stub("hello").returns(stdout="hi")
+    mox.__enter__()
     mox.replay()
 
     cmd_path = Path(mox.environment.shim_dir) / "hello"
@@ -36,6 +37,7 @@ def test_cmdmox_replay_verify_out_of_order() -> None:
     with pytest.raises(RuntimeError):
         mox.verify()
     mox.stub("foo").returns(stdout="bar")
+    mox.__enter__()
     mox.replay()
     with pytest.raises(RuntimeError):
         mox.replay()
@@ -50,6 +52,7 @@ def test_cmdmox_nonstubbed_command_behavior() -> None:
     """Invoking a non-stubbed command returns name but fails verification."""
     mox = CmdMox()
     mox.register_command("not_stubbed")
+    mox.__enter__()
     mox.replay()
 
     cmd_path = Path(mox.environment.shim_dir) / "not_stubbed"
@@ -68,6 +71,7 @@ def test_cmdmox_environment_cleanup_on_exception() -> None:
     original_path = os.environ["PATH"]
     mox = CmdMox()
     mox.stub("fail").returns(stdout="fail")
+    mox.__enter__()
     mox.replay()
 
     # Ensure environment was modified during replay
@@ -83,8 +87,9 @@ def test_cmdmox_environment_cleanup_on_exception() -> None:
     finally:
         with pytest.raises(AssertionError):
             mox.verify()
+        mox.__exit__(None, None, None)
 
-    # Environment is restored after verification
+    # Verify environment is restored
     assert os.environ["PATH"] == original_path
 
 
@@ -92,12 +97,13 @@ def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
     """Behavior when environment is not initialized."""
     mox = CmdMox()
     mox.stub("foo").returns(stdout="bar")
+    mox.__enter__()
     mox.replay()
     monkeypatch.setattr(mox.environment, "shim_dir", None)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="NoneType"):
         Path(mox.environment.shim_dir) / "foo"  # type: ignore[arg-type]
     monkeypatch.setattr(mox.environment, "socket_path", None)
     assert mox.environment.socket_path is None
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="Expected commands not called"):
         mox.verify()
     mox.__exit__(None, None, None)

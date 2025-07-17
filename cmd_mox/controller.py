@@ -86,13 +86,16 @@ class CmdMox:
         return stub
 
     def replay(self) -> None:
-        """Transition to replay mode and start the IPC server."""
+        """Transition to replay mode and start the IPC server.
+
+        The context must be entered before calling this method.
+        """
         if self._phase != "record":
-            raise RuntimeError("replay() called out of order")  # noqa: TRY003
+            raise RuntimeError
         if not self._entered:
-            self.__enter__()
+            raise RuntimeError
         if self.environment.shim_dir is None or self.environment.socket_path is None:
-            raise RuntimeError("Environment not initialised")  # noqa: TRY003
+            raise RuntimeError
         self.journal.clear()
         self._commands = set(self.stubs) | self._commands
         create_shim_symlinks(self.environment.shim_dir, self._commands)

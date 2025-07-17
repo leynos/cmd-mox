@@ -33,6 +33,7 @@ def step_stub_command(context: BehaveContext, cmd: str, text: str) -> None:
 @when("I replay the controller")
 def step_replay(context: BehaveContext) -> None:
     """Invoke :meth:`CmdMox.replay`."""
+    context.mox.__enter__()
     context.mox.replay()
 
 
