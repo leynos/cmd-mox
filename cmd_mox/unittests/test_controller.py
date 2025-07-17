@@ -46,22 +46,21 @@ def test_cmdmox_replay_verify_out_of_order() -> None:
         mox.verify()
 
 
-def test_cmdmox_nonstubbed_command_returns_name() -> None:
-    """Invoking a non-stubbed command returns command name as stdout."""
+def test_cmdmox_nonstubbed_command_behavior() -> None:
+    """Invoking a non-stubbed command returns name but fails verification."""
     mox = CmdMox()
     mox.register_command("not_stubbed")
     mox.replay()
+
     cmd_path = Path(mox.environment.shim_dir) / "not_stubbed"
     result = subprocess.run(  # noqa: S603
-        [str(cmd_path)],
-        capture_output=True,
-        text=True,
-        check=True,
+        [str(cmd_path)], capture_output=True, text=True, check=True
     )
+
+    assert result.stdout.strip() == "not_stubbed"
+
     with pytest.raises(AssertionError):
         mox.verify()
-    mox.__exit__(None, None, None)
-    assert result.stdout.strip() == "not_stubbed"
 
 
 def test_cmdmox_environment_cleanup_on_exception() -> None:
@@ -70,6 +69,9 @@ def test_cmdmox_environment_cleanup_on_exception() -> None:
     mox = CmdMox()
     mox.stub("fail").returns(stdout="fail")
     mox.replay()
+
+    # Ensure environment was modified during replay
+    assert os.environ["PATH"] != original_path
 
     def _boom() -> None:
         raise RuntimeError
@@ -81,7 +83,8 @@ def test_cmdmox_environment_cleanup_on_exception() -> None:
     finally:
         with pytest.raises(AssertionError):
             mox.verify()
-        mox.__exit__(None, None, None)
+
+    # Environment is restored after verification
     assert os.environ["PATH"] == original_path
 
 
