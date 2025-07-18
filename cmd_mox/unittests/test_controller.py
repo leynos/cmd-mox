@@ -73,15 +73,16 @@ def test_cmdmox_nonstubbed_command_behavior() -> None:
         mox.verify()
 
 
-def test_cmdmox_environment_cleanup_on_exception() -> None:
-    """Environment is cleaned up if an exception occurs during test."""
+def _test_environment_cleanup_helper(*, call_replay_before_exception: bool) -> None:
+    """Shared logic verifying env cleanup when exceptions occur."""
     original_path = os.environ["PATH"]
     mox = CmdMox()
     mox.stub("fail").returns(stdout="fail")
     mox.__enter__()
-    mox.replay()
+    if call_replay_before_exception:
+        mox.replay()
 
-    # Ensure environment was modified during replay
+    # Environment should differ while the manager is active
     assert os.environ["PATH"] != original_path
 
     def _boom() -> None:
@@ -92,36 +93,23 @@ def test_cmdmox_environment_cleanup_on_exception() -> None:
     except RuntimeError:
         pass
     finally:
-        with pytest.raises(UnfulfilledExpectationError):
-            mox.verify()
+        if call_replay_before_exception:
+            with pytest.raises(UnfulfilledExpectationError):
+                mox.verify()
         mox.__exit__(None, None, None)
 
-    # Verify environment is restored
+    # Ensure PATH is fully restored
     assert os.environ["PATH"] == original_path
+
+
+def test_cmdmox_environment_cleanup_on_exception() -> None:
+    """Environment is cleaned when an exception occurs after replay."""
+    _test_environment_cleanup_helper(call_replay_before_exception=True)
 
 
 def test_cmdmox_environment_cleanup_on_exception_before_replay() -> None:
     """Environment is cleaned up if an error occurs before replay."""
-    original_path = os.environ["PATH"]
-    mox = CmdMox()
-    mox.stub("fail").returns(stdout="fail")
-    mox.__enter__()
-
-    # Ensure environment was modified after __enter__
-    assert os.environ["PATH"] != original_path
-
-    def _boom() -> None:
-        raise RuntimeError
-
-    try:
-        _boom()
-    except RuntimeError:
-        pass
-    finally:
-        mox.__exit__(None, None, None)
-
-    # Verify environment is restored
-    assert os.environ["PATH"] == original_path
+    _test_environment_cleanup_helper(call_replay_before_exception=False)
 
 
 def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
