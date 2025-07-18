@@ -247,6 +247,10 @@ engine described later in this document. `MockCommand` also records each
 invocation in an internal list so future verification logic can assert on call
 counts and arguments.
 
+All three command-double types derive from an internal `_CommandDouble` base
+class, which centralises the common ``name``, ``controller`` and ``response``
+attributes along with the ``returns()`` helper for specifying canned results.
+
 When a command name is registered in multiple categories, `CmdMox` resolves the
 collision deterministically. Stubs take precedence over mocks, which in turn
 take precedence over spies. Tests should avoid mixing categories for the same

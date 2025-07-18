@@ -38,8 +38,8 @@ class _CallbackIPCServer(IPCServer):
         return self._handler(invocation)
 
 
-class StubCommand:
-    """Simple stub configuration object."""
+class _CommandDouble:
+    """Base class shared by stub, mock, and spy command doubles."""
 
     def __init__(self, name: str, controller: CmdMox) -> None:  # type: ignore[NAME_DEFINED_LATER]
         self.name = name
@@ -48,10 +48,20 @@ class StubCommand:
 
     def returns(
         self, stdout: str = "", stderr: str = "", exit_code: int = 0
-    ) -> StubCommand:
-        """Set the static response for this stub."""
+    ) -> _CommandDouble:
+        """Set the static response for this double."""
         self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
         return self
+
+
+class StubCommand(_CommandDouble):
+    """Simple stub configuration object."""
+
+    def returns(
+        self, stdout: str = "", stderr: str = "", exit_code: int = 0
+    ) -> StubCommand:
+        """Set the static response and return ``self``."""
+        return t.cast("StubCommand", super().returns(stdout, stderr, exit_code))
 
 
 class MockCommand(StubCommand):
@@ -62,21 +72,18 @@ class MockCommand(StubCommand):
         self.invocations: list[Invocation] = []
 
 
-class SpyCommand:
+class SpyCommand(_CommandDouble):
     """Simple spy configuration object that records invocations."""
 
     def __init__(self, name: str, controller: CmdMox) -> None:  # type: ignore[NAME_DEFINED_LATER]
-        self.name = name
-        self.controller = controller
-        self.response = Response()
+        super().__init__(name, controller)
         self.invocations: list[Invocation] = []
 
     def returns(
         self, stdout: str = "", stderr: str = "", exit_code: int = 0
     ) -> SpyCommand:
-        """Set the static response for this spy."""
-        self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
-        return self
+        """Set the static response and return ``self``."""
+        return t.cast("SpyCommand", super().returns(stdout, stderr, exit_code))
 
 
 class Phase(enum.Enum):
