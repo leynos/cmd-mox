@@ -55,7 +55,11 @@ class StubCommand:
 
 
 class MockCommand(StubCommand):
-    """Placeholder strict mock command."""
+    """Strict mock command that records invocations."""
+
+    def __init__(self, name: str, controller: CmdMox) -> None:  # type: ignore[NAME_DEFINED_LATER]
+        super().__init__(name, controller)
+        self.invocations: list[Invocation] = []
 
 
 class SpyCommand:
@@ -97,6 +101,27 @@ class CmdMox:
         self.spies: dict[str, SpyCommand] = {}
         self.journal: deque[Invocation] = deque()
         self._commands: set[str] = set()
+
+    # ------------------------------------------------------------------
+    # Internal helper accessors
+    # ------------------------------------------------------------------
+    def _registered_commands(self) -> set[str]:
+        """Return all commands registered via stubs, mocks, or spies."""
+        return set(self.stubs) | set(self.mocks) | set(self.spies)
+
+    def _expected_commands(self) -> set[str]:
+        """Return commands that must be called during replay."""
+        return set(self.stubs) | set(self.mocks)
+
+    def _find_double(self, name: str) -> StubCommand | MockCommand | SpyCommand | None:
+        """Return the configured command double for *name*, if any."""
+        if name in self.stubs:
+            return self.stubs[name]
+        if name in self.mocks:
+            return self.mocks[name]
+        if name in self.spies:
+            return self.spies[name]
+        return None
 
     # ------------------------------------------------------------------
     # Context manager protocol
@@ -182,9 +207,7 @@ class CmdMox:
             raise MissingEnvironmentError(msg)
         try:
             self.journal.clear()
-            self._commands = (
-                set(self.stubs) | set(self.mocks) | set(self.spies) | self._commands
-            )
+            self._commands = self._registered_commands() | self._commands
             create_shim_symlinks(self.environment.shim_dir, self._commands)
             self._server = _CallbackIPCServer(
                 self.environment.socket_path, self._handle_invocation
@@ -210,14 +233,14 @@ class CmdMox:
             )
             raise LifecycleError(msg)
         try:
-            all_registered = set(self.stubs) | set(self.mocks) | set(self.spies)
+            all_registered = self._registered_commands()
             unexpected = [
                 inv.command for inv in self.journal if inv.command not in all_registered
             ]
             if unexpected:
                 msg = f"Unexpected commands invoked: {unexpected}"
                 raise UnexpectedCommandError(msg)
-            required = set(self.stubs) | set(self.mocks)
+            required = self._expected_commands()
             missing = [
                 name
                 for name in required
@@ -241,14 +264,14 @@ class CmdMox:
     # Internal helpers
     # ------------------------------------------------------------------
     def _handle_invocation(self, invocation: Invocation) -> Response:
-        """Record *invocation* and return the appropriate response."""
+        """Record *invocation* and return the appropriate response.
+
+        Stubs take precedence over mocks, which take precedence over spies.
+        """
         self.journal.append(invocation)
-        if invocation.command in self.stubs:
-            return self.stubs[invocation.command].response
-        if invocation.command in self.mocks:
-            return self.mocks[invocation.command].response
-        if invocation.command in self.spies:
-            spy = self.spies[invocation.command]
-            spy.invocations.append(invocation)
-            return spy.response
-        return Response(stdout=invocation.command)
+        double = self._find_double(invocation.command)
+        if double is None:
+            return Response(stdout=invocation.command)
+        if isinstance(double, MockCommand | SpyCommand):
+            double.invocations.append(invocation)
+        return double.response

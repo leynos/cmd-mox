@@ -151,6 +151,22 @@ def test_factory_methods_create_distinct_objects() -> None:
     assert isinstance(mox.spy("c"), SpyCommand)
 
 
+def test_mock_idempotency() -> None:
+    """Repeated calls to mock() with the same name return the same object."""
+    mox = CmdMox()
+    m1 = mox.mock("foo")
+    m2 = mox.mock("foo")
+    assert m1 is m2
+
+
+def test_spy_idempotency() -> None:
+    """Repeated calls to spy() with the same name return the same object."""
+    mox = CmdMox()
+    s1 = mox.spy("bar")
+    s2 = mox.spy("bar")
+    assert s1 is s2
+
+
 def test_mock_and_spy_invocations(tmp_path: Path) -> None:
     """Mock and spy commands record calls and verify correctly."""
     mox = CmdMox()
