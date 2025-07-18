@@ -29,6 +29,7 @@ class EnvironmentManager:
         self._orig_env: dict[str, str] | None = None
         self.shim_dir: Path | None = None
         self.socket_path: Path | None = None
+        self._created_dir: Path | None = None
 
     def __enter__(self) -> EnvironmentManager:
         """Set up the temporary environment."""
@@ -39,6 +40,7 @@ class EnvironmentManager:
         _active_manager = self
         self._orig_env = os.environ.copy()
         self.shim_dir = Path(tempfile.mkdtemp(prefix="cmdmox-"))
+        self._created_dir = self.shim_dir
         os.environ["PATH"] = os.pathsep.join(
             [str(self.shim_dir), self._orig_env.get("PATH", "")]
         )
@@ -68,5 +70,11 @@ class EnvironmentManager:
         finally:
             global _active_manager
             _active_manager = None
-            if self.shim_dir and self.shim_dir.exists():
+            if (
+                self._created_dir
+                and self.shim_dir
+                and self.shim_dir == self._created_dir
+                and self.shim_dir.exists()
+            ):
                 shutil.rmtree(self.shim_dir, ignore_errors=True)
+            self._created_dir = None
