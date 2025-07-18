@@ -13,11 +13,11 @@ design.
 
 ### 1.1 The "Record-Replay-Verify" Paradigm for External Processes
 
-The foundational testing paradigm adopted by `CmdMox` is "Record-Replay-Verify,"
-a disciplined workflow popularized by the EasyMock framework for Java and its
-Python counterpart, PyMox. This paradigm structures tests into three distinct,
-sequential phases, enforcing clarity and explicitness about a system's
-interactions with its dependencies.
+The foundational testing paradigm adopted by `CmdMox` is
+"Record-Replay-Verify," a disciplined workflow popularized by the EasyMock
+framework for Java and its Python counterpart, PyMox. This paradigm structures
+tests into three distinct, sequential phases, enforcing clarity and
+explicitness about a system's interactions with its dependencies.
 
 1. **Record Phase:** In this initial phase, the developer uses the `CmdMox` API
    to declaratively define a set of expectations. An expectation is a precise
@@ -30,10 +30,10 @@ interactions with its dependencies.
    the framework into the replay phase. During this phase, the system or
    component under test is executed. Any attempt to invoke an external command
    is intercepted by `CmdMox`. The framework consults the recorded expectations
-   to find one that matches the actual invocation. If a match is found, `CmdMox`
-   provides the specified behavior. If no match is found, it is treated as an
-   unexpected interaction, which will cause the test to fail during the final
-   phase.
+   to find one that matches the actual invocation. If a match is found,
+   `CmdMox` provides the specified behavior. If no match is found, it is
+   treated as an unexpected interaction, which will cause the test to fail
+   during the final phase.
 
 3. **Verify Phase:** After the code under test has completed its execution, the
    test enters the final verification phase. In this phase, `CmdMox` checks
@@ -59,8 +59,8 @@ interactions.
 <!-- markdownlint-enable MD013 -->
 
 The fundamental mechanism for intercepting command invocations will be the
-dynamic manipulation of the `PATH` environment variable. This is a
-well-established and reliable technique employed by a wide array of shell-based
+dynamic manipulation of the `PATH` environment variable. This is a well-
+established and reliable technique employed by a wide array of shell-based
 mocking tools to redirect command calls.
 
 The process works as follows:
@@ -76,10 +76,10 @@ The process works as follows:
   environment variable of the test process.
 
 - When the code under test attempts to execute a command like `git`, the
-  operating system's standard library functions for finding executables (such as
-  `execvp`) search the directories listed in `PATH` in order. The OS will find
-  the `CmdMox`-generated shim in the temporary directory before it finds the
-  real system command in a standard location like `/usr/bin/git`.
+  operating system's standard library functions for finding executables (such
+  as `execvp`) search the directories listed in `PATH` in order. The OS will
+  find the `CmdMox`-generated shim in the temporary directory before it finds
+  the real system command in a standard location like `/usr/bin/git`.
 
 - This shim then becomes the entry point for the mocked behavior.
 
@@ -92,8 +92,8 @@ architectural improvement over existing tools. Frameworks like `shellmock` and
 `bats-mock` generate *shell scripts* to act as shims. These shell shims are
 inherently limited. To communicate invocation details back to the main test
 runner process, they must resort to writing to temporary log files (e.g.,
-`shellmock.out`, `*.playback.capture.tmp`). The test runner then has the brittle
-and inefficient task of parsing these flat text files to verify the
+`shellmock.out`, `*.playback.capture.tmp`). The test runner then has the
+brittle and inefficient task of parsing these flat text files to verify the
 interactions. This approach struggles with structured data, concurrency, and
 complex quoting or argument-passing scenarios.
 
@@ -111,24 +111,25 @@ performance, and greater reliability, as detailed in Section III.
 
 ### 1.3 Defining the Terminology: Stubs, Mocks, and Spies
 
-To ensure clarity, `CmdMox` will adopt precise definitions for its test doubles,
-based on established software testing theory and adapted for the context of
-external commands.
+To ensure clarity, `CmdMox` will adopt precise definitions for its test
+doubles, based on established software testing theory and adapted for the
+context of external commands.
 
 - **Stub:** A stub is a simple, "fire-and-forget" replacement for a command. Its
   purpose is to provide a fixed, canned response to a command invocation to
-  allow the code under test to proceed. For example, a test might stub the `git`
-  command to always return a successful exit code. A stub does not perform any
-  verification; if the stubbed command is never called, the test still passes.
-  Stubs are used to satisfy a dependency, not to test an interaction.
+  allow the code under test to proceed. For example, a test might stub the
+  `git` command to always return a successful exit code. A stub does not
+  perform any verification; if the stubbed command is never called, the test
+  still passes. Stubs are used to satisfy a dependency, not to test an
+  interaction.
 
 - **Mock:** A mock is a "verifiable" replacement for a command. Like a stub, it
   provides a defined behavior. However, a mock also carries a set of strict
   expectations about how it must be invoked. These expectations can include the
   exact arguments, the number of times it should be called, and the order of
-  invocation relative to other mocks. The `verify()` phase of the test will fail
-  if these expectations are not met precisely. Mocks are used to test that the
-  system under test interacts with its dependencies *in a specific, correct
+  invocation relative to other mocks. The `verify()` phase of the test will
+  fail if these expectations are not met precisely. Mocks are used to test that
+  the system under test interacts with its dependencies *in a specific, correct
   way*. This aligns with the strict philosophy of PyMox.
 
 - **Spy:** A spy is an "observational" test double. A spy wraps a command to
@@ -137,9 +138,9 @@ external commands.
   or it can "passthrough" and execute the real underlying command. After the
   test run, the developer can inspect the spy's recorded history to make
   assertions about how the command was used. This provides a more flexible,
-  `assert`-based verification style, similar to the functionality found in tools
-  like `bash_placebo`, and is useful when the exact sequence or number of calls
-  is not known beforehand or is not the primary subject of the test.
+  `assert`-based verification style, similar to the functionality found in
+  tools like `bash_placebo`, and is useful when the exact sequence or number of
+  calls is not known beforehand or is not the primary subject of the test.
 
 ## II. The Public API: A `CmdMox` User's Guide
 
@@ -155,9 +156,8 @@ developer will interact with the library.
 The central class and primary user entry point for the library will be
 `cmd_mox.CmdMox`. An instance of this class encapsulates the entire state for a
 single test case, including all recorded expectations, the invocation journal,
-lifecycle and environment management context. It is analogous to the
-`mox.Mox` class in PyMox and is responsible for orchestrating the
-record-replay-verify
+lifecycle and environment management context. It is analogous to the `mox.Mox`
+class in PyMox and is responsible for orchestrating the record-replay-verify
 lifecycle.
 
 ### 2.2 Ergonomic Integrations: `pytest` Fixtures and Context Managers
@@ -167,12 +167,12 @@ seamless integration with modern Python testing workflows.
 
 **Primary Interface:** `pytest` **Fixture**
 
-The recommended and primary method for using `CmdMox` will be through a `pytest`
-fixture. This aligns with the "New Elegant Way" promoted by PyMox and the
-broader Python testing ecosystem. Users will enable the plugin, and a `cmd_mox`
-fixture will be automatically available to their test functions. This fixture
-provides a fresh, properly configured `cmd_mox.CmdMox` instance for each test,
-with setup and teardown handled automatically.
+The recommended and primary method for using `CmdMox` will be through a
+`pytest` fixture. This aligns with the "New Elegant Way" promoted by PyMox and
+the broader Python testing ecosystem. Users will enable the plugin, and a
+`cmd_mox` fixture will be automatically available to their test functions. This
+fixture provides a fresh, properly configured `cmd_mox.CmdMox` instance for
+each test, with setup and teardown handled automatically.
 
 *Example Usage:*
 
@@ -242,8 +242,8 @@ for further configuration.
 
 ### 2.4 The Fluent API for Defining Expectations
 
-The core of the library's ergonomic design lies in its fluent, chainable API for
-defining the behavior and expectations of test doubles. This DSL allows
+The core of the library's ergonomic design lies in its fluent, chainable API
+for defining the behavior and expectations of test doubles. This DSL allows
 developers to write clear, readable, and expressive test setups, drawing direct
 inspiration from PyMox's method-chaining style.
 
@@ -251,8 +251,8 @@ inspiration from PyMox's method-chaining style.
   command-line arguments that are expected. The match must be precise.
 
 - `.with_matching_args(*comparators)`**:** For more flexible matching, this
-  method accepts a sequence of `CmdMox` comparator objects (see Section V). This
-  allows for matching based on type, regular expressions, or custom logic.
+  method accepts a sequence of `CmdMox` comparator objects (see Section V).
+  This allows for matching based on type, regular expressions, or custom logic.
 
 - `.with_stdin(data: Union[str, bytes, Comparator])`**:** Defines an expectation
   for the data that is piped to the command's standard input. This can be a
@@ -260,7 +260,8 @@ inspiration from PyMox's method-chaining style.
 
 <!-- markdownlint-disable MD013 -->
 
-- `.returns(stdout: Union[str, bytes] = b'', stderr: Union[str, bytes] = b'', exit_code: int = 0)`**:**
+- `.returns(stdout: Union[str, bytes] = b'', stderr: Union[str, bytes] = b'',
+  exit_code: int = 0)`**:**
 
 <!-- markdownlint-enable MD013 -->
 
@@ -289,19 +290,21 @@ To ensure `CmdMox` is a compelling replacement for `shellmock`, the following
 table maps the core features of `shellmock` to their more expressive `CmdMox`
 API equivalents, demonstrating complete functional parity.
 
-**Table 1:** `shellmock` **to** `CmdMox` **Feature Mapping**
+**Table 1:** `shellmock` **to** `CmdMox` **Feature Mapping** <!-- markdownlint-
+disable MD013 -->
 
-| shellmock Feature (from)                           | Proposed CmdMox API Equivalent                     |
-| -------------------------------------------------- | -------------------------------------------------- |
-| Mock an executable cmd                             | mock_cmd = mox.mock('cmd')                         |
-| Define behavior for specific args (--match)        | mock_cmd.with_args('arg1', 'arg2')                 |
-| Define exit code (--status \<exit_code>)           | mock_cmd.returns(exit_code=\<exit_code>)           |
-| Define stdout (--output \<string>)                 | mock_cmd.returns(stdout=\<string>)                 |
-| Partial argument matching (--type partial)         | mock_cmd.with_matching_args(Contains('arg'))       |
-| Regex argument matching (--type regex)             | mock_cmd.with_matching_args(Regex(r'--file=\\S+')) |
-| Match on stdin (--match-stdin)                     | mock_cmd.with_stdin('some input')                  |
-| Custom behavior (--exec \<command>)                | mock_cmd.runs(lambda inv: ('output', b'', 0))      |
-| Verify calls (shellmock_verify)                    | mox.verify()                                       |
+| shellmock Feature (from)                    | Proposed CmdMox API Equivalent                     |
+| ------------------------------------------- | -------------------------------------------------- |
+| Mock an executable cmd                      | mock_cmd = mox.mock('cmd')                         |
+| Define behavior for specific args (--match) | mock_cmd.with_args('arg1', 'arg2')                 |
+| Define exit code (--status \<exit_code>)    | mock_cmd.returns(exit_code=\<exit_code>)           |
+| Define stdout (--output \<string>)          | mock_cmd.returns(stdout=\<string>)                 |
+| Partial argument matching (--type partial)  | mock_cmd.with_matching_args(Contains('arg'))       |
+| Regex argument matching (--type regex)      | mock_cmd.with_matching_args(Regex(r'--file=\\S+')) |
+| Match on stdin (--match-stdin)              | mock_cmd.with_stdin('some input')                  |
+| Custom behavior (--exec \<command>)         | mock_cmd.runs(lambda inv: ('output', b'', 0))      |
+| Verify calls (shellmock_verify)             | mox.verify()                                       |
+<!-- markdownlint-enable MD013 -->
 
 ### 2.5 The Lifecycle in Practice: `replay()` and `verify()`
 
@@ -320,8 +323,8 @@ testing lifecycle.
   verification logic, comparing the journal of actual invocations against the
   list of recorded expectations. If any discrepancy is found—such as an
   unexpected call, an unfulfilled expectation, or an incorrect argument—it
-  raises a detailed `VerificationError`. The error messages will be designed for
-  maximum debuggability, providing a clear "diff" between the expected and
+  raises a detailed `VerificationError`. The error messages will be designed
+  for maximum debuggability, providing a clear "diff" between the expected and
   actual interactions, similar to the highly-regarded error reporting of PyMox.
   Finally, it orchestrates the cleanup of all test artifacts, including
   restoring the `PATH`.
@@ -340,16 +343,16 @@ Python shims that intercept command calls. To maximize efficiency and minimize
 disk I/O, the engine will not write a unique script for every mocked command.
 
 Instead, the `CmdMox` library will contain a single, generic `shim.py` template
-script. When `mox.replay()` is invoked, the `CmdMox` controller will execute the
-following steps:
+script. When `mox.replay()` is invoked, the `CmdMox` controller will execute
+the following steps:
 
 1. Create a temporary directory with a unique, process-safe name (e.g.,
    `/tmp/cmdmox-pytest-worker-1-pid-12345`).
 
 2. For each unique command name being mocked (e.g., `git`, `curl`), it will
    create a symbolic link inside the temporary directory (e.g., `git` ->
-   `.../cmdmox/internal/shim.py`). This avoids duplicating the script's content
-   on disk.
+   `.../ cmdmox/internal/shim.py`). This avoids duplicating the script's
+   content on disk.
 
 3. The master `shim.py` script itself will be made executable (`chmod +x`). The
    operating system will follow the symlink and execute the target script.
@@ -382,24 +385,24 @@ sequenceDiagram
 
 ### 3.2 State Management and Inter-Process Communication (IPC)
 
-The communication between the main test process (hosting the `CmdMox` controller)
-and the numerous, short-lived shim processes is the most critical architectural
-element of `CmdMox`. The design moves away from the fragile, file-based
-communication methods used by shell-based tools in favor of a modern, robust IPC
-bus.
+The communication between the main test process (hosting the `CmdMox`
+controller) and the numerous, short-lived shim processes is the most critical
+architectural element of `CmdMox`. The design moves away from the fragile,
+file- based communication methods used by shell-based tools in favor of a
+modern, robust IPC bus.
 
 This IPC bus will be implemented using a Unix domain socket, which provides a
 fast and reliable stream-based communication channel between processes on the
 same host. The workflow is as follows:
 
-1. **Server Initialization:** When the `CmdMox` controller enters the replay phase,
-   it starts a lightweight server thread. This thread creates a `socket.socket`
-   listening on a unique path within the temporary shim directory (e.g.,
-   `/tmp/cmd_mox.../ipc.sock`).
+1. **Server Initialization:** When the `CmdMox` controller enters the replay
+   phase, it starts a lightweight server thread. This thread creates a
+   `socket.socket` listening on a unique path within the temporary shim
+   directory (e.g., `/tmp/ cmd_mox.../ipc.sock`).
 
 2. **Environment Setup:** The controller exports the path to this socket in an
-   environment variable (e.g., `CMOX_IPC_SOCKET`). This variable is inherited by
-   any child processes, including the code under test and, consequently, the
+   environment variable (e.g., `CMOX_IPC_SOCKET`). This variable is inherited
+   by any child processes, including the code under test and, consequently, the
    shims it invokes.
 
 3. **Shim Connection:** When a shim is executed by the OS, its first action is
@@ -407,10 +410,10 @@ same host. The workflow is as follows:
    listening server thread in the main test process.
 
 4. **Invocation Reporting:** The shim gathers all relevant invocation data: the
-   command name, the list of arguments (`sys.argv[1:]`), the complete content of
-   its standard input, and a snapshot of its current environment variables. It
-   serializes this data into a structured format like JSON and sends it over the
-   socket to the server.
+   command name, the list of arguments (`sys.argv[1:]`), the complete content
+   of its standard input, and a snapshot of its current environment variables.
+   It serializes this data into a structured format like JSON and sends it over
+   the socket to the server.
 
 5. **Server-Side Processing:** The server thread in the main process receives
    the JSON payload. It deserializes it into an `Invocation` object and records
@@ -446,9 +449,9 @@ To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
 thread, the server polls for the socket path using an exponential backoff to
 ensure it appears before clients connect. On the client side, `invoke_server()`
-retries connection attempts a few times and validates that the server's reply is
-valid JSON, raising a `RuntimeError` if decoding fails. These safeguards make the
-IPC bus robust on slower or heavily loaded systems.
+retries connection attempts a few times and validates that the server's reply
+is valid JSON, raising a `RuntimeError` if decoding fails. These safeguards
+make the IPC bus robust on slower or heavily loaded systems.
 
 ```mermaid
 classDiagram
@@ -516,11 +519,11 @@ that handles all modifications to the process environment.
 
   1. It will save a copy of the original `os.environ`.
 
-  2. It will create the temporary shim directory.
+  1. It will create the temporary shim directory.
 
-  3. It will prepend the shim directory's path to `os.environ`.
+  1. It will prepend the shim directory's path to `os.environ`.
 
-  4. It will set any other necessary environment variables for the IPC
+  1. It will set any other necessary environment variables for the IPC
      mechanism, such as `CMOX_IPC_SOCKET`. Clients may additionally honour
      `CMOX_IPC_TIMEOUT` to override the default connection timeout.
 
@@ -529,17 +532,18 @@ that handles all modifications to the process environment.
   1. It will execute in a `finally` block to guarantee cleanup, even if the test
      fails with an exception.
 
-  2. It will restore the original `PATH` and unset any `CmdMox`-specific
+  1. It will restore the original `PATH` and unset any `CmdMox`-specific
      environment variables.
 
-  3. It will perform a recursive deletion of the temporary shim directory and
+  1. It will perform a recursive deletion of the temporary shim directory and
      all its contents (symlinks and the IPC socket).
 
-The manager is not reentrant. Nested usage would overwrite the saved environment
-snapshot, so attempts to use it recursively will raise `RuntimeError`. Instead
-of clearing `os.environ` on exit, the manager restores only those variables that
-changed and removes any that were added. This approach avoids disrupting other
-threads that might rely on the environment remaining mostly stable.
+The manager is not reentrant. Nested usage would overwrite the saved
+environment snapshot, so attempts to use it recursively will raise
+`RuntimeError`. Instead of clearing `os.environ` on exit, the manager restores
+only those variables that changed and removes any that were added. This
+approach avoids disrupting other threads that might rely on the environment
+remaining mostly stable.
 
 This rigorous management ensures that each test runs in a perfectly isolated
 environment and leaves no artifacts behind, a critical requirement for a
@@ -554,16 +558,17 @@ chronological record of all command calls that occurred during the replay phase.
 
 Each time the IPC server thread receives an invocation report from a shim, it
 constructs a structured `Invocation` object (e.g., a dataclass or `NamedTuple`)
-containing the command name, arguments, `stdin`, and environment. This object is
-then appended to the journal. The `verify()` method uses this journal as the
-definitive record of what actually happened, comparing it against the predefined
-expectations to detect any discrepancies.
+containing the command name, arguments, `stdin`, and environment. This object
+is then appended to the journal. The `verify()` method uses this journal as the
+definitive record of what actually happened, comparing it against the
+predefined expectations to detect any discrepancies.
 
 ## IV. Feature Deep Dive: Stubbing
 
-This section details the implementation of the simplest form of test double: the
-stub. Stubs are essential for satisfying dependencies of the system under test
-without coupling the test to the implementation details of those dependencies.
+This section details the implementation of the simplest form of test double:
+the stub. Stubs are essential for satisfying dependencies of the system under
+test without coupling the test to the implementation details of those
+dependencies.
 
 ### 4.1 Simple, "Fire-and-Forget" Replacements
 
@@ -590,8 +595,8 @@ the following process:
    `stdout`, and exits with status 0.
 
 6. **Verification:** During `mox.verify()`, stubs are not checked. If the `grep`
-   command is never called, the test still passes. This "fire-and-forget" nature
-   is the defining characteristic of a stub.
+   command is never called, the test still passes. This "fire-and-forget"
+   nature is the defining characteristic of a stub.
 
 ### 4.2 Advanced Stubs: Callable Handlers
 
@@ -669,26 +674,26 @@ engine is the key to writing flexible yet precise tests.
 ### 5.2 Verification Logic: The Heart of `mox.verify()`
 
 The `mox.verify()` method encapsulates the most complex logic in the library.
-Its purpose is to algorithmically reconcile the list of predefined `Expectation`
-objects with the chronological `InvocationJournal` collected during the replay
-phase. A mismatch of any kind constitutes a test failure.
+Its purpose is to algorithmically reconcile the list of predefined
+`Expectation` objects with the chronological `InvocationJournal` collected
+during the replay phase. A mismatch of any kind constitutes a test failure.
 
 The verification algorithm will perform several critical checks:
 
 1. **Unexpected Invocations:** It iterates through the `InvocationJournal`. For
    each actual invocation, it checks if it matches any of the recorded
    expectations. If an invocation occurs that does not match *any* unfulfilled
-   expectation, it signifies an unexpected command call. This immediately raises
-   an `UnexpectedCommandError`, analogous to PyMox's
+   expectation, it signifies an unexpected command call. This immediately
+   raises an `UnexpectedCommandError`, analogous to PyMox's
    `UnexpectedMethodCallError`. The error message will clearly state the
    unexpected command that was called.
 
 2. **Unfulfilled Expectations:** After checking all actual invocations, the
    algorithm checks if any `Expectation` objects remain unfulfilled. If an
-   expectation was recorded but never matched by an actual invocation, it raises
-   an `UnfulfilledExpectationError`. This is equivalent to PyMox's "Expected
-   methods never called" error and is critical for ensuring that the code under
-   test is actually exercising its dependencies as intended.
+   expectation was recorded but never matched by an actual invocation, it
+   raises an `UnfulfilledExpectationError`. This is equivalent to PyMox's
+   "Expected methods never called" error and is critical for ensuring that the
+   code under test is actually exercising its dependencies as intended.
 
 3. **Incorrect Call Counts:** For expectations defined with `.times(N)`, the
    verifier ensures that the expectation was met exactly `N` times. If it was
@@ -697,21 +702,21 @@ The verification algorithm will perform several critical checks:
 4. **Order Violations:** For expectations marked with `.in_order()`, the
    verifier ensures that they were met in the same sequence in which they were
    recorded. It maintains a pointer to the "current" expected ordered call and
-   advances it only when a match is found. An out-of-order call is treated as an
-   unexpected invocation.
+   advances it only when a match is found. An out-of-order call is treated as
+   an unexpected invocation.
 
 The error messages generated by `verify()` are a key part of the user
 experience. They will be meticulously crafted to provide maximum diagnostic
-information, showing the expected call (including arguments and comparators) and
-contrasting it with the actual call that was received, or noting its absence
-entirely.
+information, showing the expected call (including arguments and comparators)
+and contrasting it with the actual call that was received, or noting its
+absence entirely.
 
 ## VI. Feature Deep Dive: Spying
 
-Spying provides a more flexible, observational approach to testing interactions,
-complementing the strictness of mocks. Spies are useful for when the exact
-details of an interaction are not critical to the test's success, but the
-developer still wants to assert that a call was made.
+Spying provides a more flexible, observational approach to testing
+interactions, complementing the strictness of mocks. Spies are useful for when
+the exact details of an interaction are not critical to the test's success, but
+the developer still wants to assert that a call was made.
 
 ### 6.1 The Spy API and Invocation History
 
@@ -750,14 +755,14 @@ def test_downloader_uses_correct_user_agent(mox):
 ```
 
 This style of verification is less rigid than mocking and is preferred when the
-goal is simply to check that "a call happened with these properties" rather than
-enforcing a strict sequence of interactions.
+goal is simply to check that "a call happened with these properties" rather
+than enforcing a strict sequence of interactions.
 
 ### 6.2 Passthrough Spies: The "Record Mode"
 
 A powerful extension of the spy concept is the "passthrough" spy. This feature
-enables a "record and replay" workflow for test generation, an incredibly useful
-tool for bootstrapping tests for legacy systems or complex command-line
+enables a "record and replay" workflow for test generation, an incredibly
+useful tool for bootstrapping tests for legacy systems or complex command-line
 interactions, similar in spirit to the record mode of `bash_placebo`.
 
 A passthrough spy is created with `spy = mox.spy('aws').passthrough()`. The
@@ -788,11 +793,11 @@ The immediate benefit is that a test can run against a real system while
 `CmdMox` transparently records every interaction. The long-term implication is
 the potential for a powerful test generation utility. A developer could run a
 complex script under a `CmdMox` recorder, which would use passthrough spies to
-capture all external command interactions. The recorder could then automatically
-generate a complete, self-contained `pytest` file, with all the real
-interactions converted into `mox.mock(...).returns(...)` definitions. This would
-dramatically lower the barrier to entry for placing legacy command-line tools
-under test.
+capture all external command interactions. The recorder could then
+automatically generate a complete, self-contained `pytest` file, with all the
+real interactions converted into `mox.mock(...).returns(...)` definitions. This
+would dramatically lower the barrier to entry for placing legacy command-line
+tools under test.
 
 ## VII. Advanced Topics and Implementation Considerations
 
@@ -808,8 +813,8 @@ commands. It does not, and cannot, intercept or interpret the functionality of
 the shell itself, such as pipelines (`|`), I/O redirection (`>`, `<`), or
 process substitution (`<()`).
 
-Therefore, the design explicitly states that `CmdMox` mocks the *tools*, not the
-*shell* that glues them together. When a user needs to test a script that
+Therefore, the design explicitly states that `CmdMox` mocks the *tools*, not
+the *shell* that glues them together. When a user needs to test a script that
 contains a command like `grep foo file.txt | sort -r`, the test is not on the
 pipeline itself, but on the behavior of `grep` and `sort`.
 
@@ -848,19 +853,19 @@ will include a `.with_env(vars: dict)` method on `MockCommand`, `StubCommand`,
 and `SpyCommand` objects.
 
 When this method is used, the provided dictionary of environment variables is
-stored with the expectation. This data is then passed to the shim as part of the
-response payload from the IPC server. Before executing its primary action (e.g.,
-printing `stdout` or running a handler), the shim script will update its own
-environment using `os.environ.update(vars)`. This ensures that any further
-processes spawned by a `.runs()` handler, for example, will inherit the correct,
-mock-specific environment.
+stored with the expectation. This data is then passed to the shim as part of
+the response payload from the IPC server. Before executing its primary action
+(e.g., printing `stdout` or running a handler), the shim script will update its
+own environment using `os.environ.update(vars)`. This ensures that any further
+processes spawned by a `.runs()` handler, for example, will inherit the
+correct, mock-specific environment.
 
 ### 7.3 Concurrency and Parallelization (`pytest-xdist`)
 
 Modern test suites are frequently run in parallel using tools like
-`pytest-xdist` to reduce execution time. `CmdMox` must be designed from the
-ground up to be fully compatible with parallel execution, where each test worker
-runs in a separate process.
+`pytest- xdist` to reduce execution time. `CmdMox` must be designed from the
+ground up to be fully compatible with parallel execution, where each test
+worker runs in a separate process.
 
 The proposed IPC-based architecture is inherently conducive to safe
 parallelization. The file-based communication used by shell-based mockers would
@@ -911,44 +916,45 @@ Language (DSL) used to build expectations.
 ### 8.1 Summary of the `CmdMox` Design
 
 This document outlines a comprehensive design for `CmdMox`, a Python library
-poised to significantly improve the testing landscape for command-line tools and
-scripts. By synthesizing the ergonomic, "Record-Replay-Verify" paradigm of PyMox
-with a robust `PATH`-hijacking mechanism, `CmdMox` offers a powerful and
+poised to significantly improve the testing landscape for command-line tools
+and scripts. By synthesizing the ergonomic, "Record-Replay-Verify" paradigm of
+PyMox with a robust `PATH`-hijacking mechanism, `CmdMox` offers a powerful and
 developer-friendly solution.
 
-The key architectural innovations—the use of Python shims over shell scripts and
-the implementation of a sophisticated, socket-based IPC bus—liberate the
-framework from the brittleness of file-based communication. This design provides
-a solid foundation for reliable, process-safe, and highly-featured test doubles.
-The fluent, chainable API ensures that tests are not only effective but also
-readable and maintainable. The inclusion of stubs, strict mocks, and
-observational spies (including a passthrough mode) provides a complete toolkit
-for tackling a wide range of testing scenarios.
+The key architectural innovations—the use of Python shims over shell scripts
+and the implementation of a sophisticated, socket-based IPC bus—liberate the
+framework from the brittleness of file-based communication. This design
+provides a solid foundation for reliable, process-safe, and highly-featured
+test doubles. The fluent, chainable API ensures that tests are not only
+effective but also readable and maintainable. The inclusion of stubs, strict
+mocks, and observational spies (including a passthrough mode) provides a
+complete toolkit for tackling a wide range of testing scenarios.
 
 ### 8.2 Future Roadmap
 
-While the design for version 1.0 is comprehensive for Linux, FreeBSD, and Darwin
-environments, several avenues for future expansion exist.
+While the design for version 1.0 is comprehensive for Linux, FreeBSD, and
+Darwin environments, several avenues for future expansion exist.
 
 - **Windows Support:** This is the most significant potential extension. It
-  would constitute a major architectural undertaking, as the `PATH` interception
-  mechanism is fundamentally different on Windows. It would require generating
-  `.bat` or `.exe` shims, handling a different `PATH` separator, and likely
-  using a different IPC mechanism (e.g., named pipes) instead of Unix domain
-  sockets. This would be a target for a version 2.0 release.
+  would constitute a major architectural undertaking, as the `PATH`
+  interception mechanism is fundamentally different on Windows. It would
+  require generating `.bat` or `.exe` shims, handling a different `PATH`
+  separator, and likely using a different IPC mechanism (e.g., named pipes)
+  instead of Unix domain sockets. This would be a target for a version 2.0
+  release.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.
-  Future research could explore techniques to achieve this, such as
-  pre-processing the script under test to replace target function definitions
-  with calls to a `cmdmox-shim` command before sourcing it. This remains a
-  complex area with many edge cases.
+  Future research could explore techniques to achieve this, such as pre-
+  processing the script under test to replace target function definitions with
+  calls to a `cmdmox-shim` command before sourcing it. This remains a complex
+  area with many edge cases.
 
 - **Performance Optimizations:** For test suites with extremely high-frequency
   command calls, the performance of the JSON serialization and socket
   communication could become a factor. Future versions could investigate
-  higher-performance IPC strategies, such as using a binary serialization format
-  like MessagePack or exploring shared memory for certain use cases.
+  higher- performance IPC strategies, such as using a binary serialization
+  format like MessagePack or exploring shared memory for certain use cases.
 
 - **Test Generation Utility:** The "passthrough spy" feature is a stepping stone
   to a powerful developer tool. A high-priority post-1.0 feature would be to
@@ -957,3 +963,113 @@ environments, several avenues for future expansion exist.
   automatically generate a complete `pytest` test file with all the necessary
   `CmdMox` mock definitions, dramatically accelerating the adoption of testing
   for existing, legacy codebases.
+
+### 8.3 Design Decisions for the Initial Controller
+
+The first implementation of the :class:`CmdMox` controller focuses on lifecycle
+management and a minimal stub facility. The controller wraps
+``EnvironmentManager`` and ``IPCServer`` to orchestrate environment setup and
+inter-process communication. Invocations from shims are appended to an internal
+journal. When a stub is registered for a command, the controller returns the
+configured :class:`Response`; otherwise it echoes the command name. During
+``verify()`` the controller asserts that every invocation corresponds to a
+registered stub and that each stub was called at least once. This simplified
+verification establishes the record → replay → verify workflow and lays the
+groundwork for upcoming expectation and spy features.
+
+```mermaid
+sequenceDiagram
+    actor Tester
+    participant CmdMox
+    participant EnvironmentManager
+    participant IPCServer
+    participant Shim
+
+    Tester->>CmdMox: Create instance
+    Tester->>CmdMox: stub('hi').returns(stdout='hello')
+    Tester->>CmdMox: replay()
+    CmdMox->>EnvironmentManager: __enter__()
+    CmdMox->>Shim: create_shim_symlinks()
+    CmdMox->>IPCServer: start()
+    Tester->>Shim: run 'hi' (as subprocess)
+    Shim->>IPCServer: connect and send invocation
+    IPCServer->>CmdMox: handle_invocation(invocation)
+    CmdMox->>IPCServer: return Response(stdout='hello')
+    IPCServer->>Shim: send response
+    Shim->>Tester: output 'hello'
+    Tester->>CmdMox: verify()
+    CmdMox->>IPCServer: stop()
+    CmdMox->>EnvironmentManager: __exit__()
+```
+
+Custom exception classes clarify failure modes: `LifecycleError` signals
+improper use of `replay()` or `verify()`, `UnexpectedCommandError` indicates an
+invocation without a matching stub, and `UnfulfilledExpectationError` reports
+stubs that were never called. To aid debugging, these errors include the
+controller's active phase in their messages.
+
+```mermaid
+classDiagram
+    class CmdMox {
+        - EnvironmentManager environment
+        - IPCServer _server
+        - bool _entered
+        - str _phase
+        - list expectations
+        - dict stubs
+        - list spies
+        - deque journal
+        - set _commands
+        + __enter__()
+        + __exit__()
+        + register_command(name)
+        + stub(command_name)
+        + replay()
+        + verify()
+        - _handle_invocation(invocation)
+    }
+    class StubCommand {
+        - str name
+        - CmdMox controller
+        - Response response
+        + returns(stdout, stderr, exit_code)
+    }
+    class EnvironmentManager {
+    }
+    class IPCServer {
+        + start()
+        + stop()
+        + handle_invocation(invocation)
+    }
+    class Invocation {
+    }
+    class Response {
+    }
+    CmdMox "1" -- "1" EnvironmentManager : uses
+    CmdMox "1" -- "1" IPCServer : manages
+    CmdMox "1" -- "*" StubCommand : has
+    CmdMox "1" -- "*" Invocation : records
+    StubCommand "1" -- "1" Response : configures
+    IPCServer "1" -- "*" Invocation : handles
+```
+
+```mermaid
+classDiagram
+    class CmdMoxError {
+    }
+    class LifecycleError {
+    }
+    class MissingEnvironmentError {
+    }
+    class VerificationError {
+    }
+    class UnexpectedCommandError {
+    }
+    class UnfulfilledExpectationError {
+    }
+    CmdMoxError <|-- LifecycleError
+    CmdMoxError <|-- MissingEnvironmentError
+    CmdMoxError <|-- VerificationError
+    VerificationError <|-- UnexpectedCommandError
+    VerificationError <|-- UnfulfilledExpectationError
+```

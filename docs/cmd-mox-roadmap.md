@@ -47,11 +47,11 @@
 
 ## **III. CmdMox Controller & Public API**
 
-- [ ] `CmdMox` **Controller Class**
+- [x] `CmdMox` **Controller Class**
 
-  - [ ] Holds expectations, stubs, spies, and the invocation journal
+  - [x] Holds expectations, stubs, spies, and the invocation journal
 
-  - [ ] Manages lifecycle: record → replay → verify
+  - [x] Manages lifecycle: record → replay → verify
 
 - [ ] **Factory Methods**
 
