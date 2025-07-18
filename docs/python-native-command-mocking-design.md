@@ -1006,3 +1006,69 @@ Custom exception classes clarify failure modes: `LifecycleError` signals
 improper use of `replay()` or `verify()`, `UnexpectedCommandError` indicates an
 invocation without a matching stub, and `UnfulfilledExpectationError` reports
 stubs that were never called.
+
+```mermaid
+classDiagram
+    class CmdMox {
+        - EnvironmentManager environment
+        - IPCServer _server
+        - bool _entered
+        - str _phase
+        - list expectations
+        - dict stubs
+        - list spies
+        - deque journal
+        - set _commands
+        + __enter__()
+        + __exit__()
+        + register_command(name)
+        + stub(command_name)
+        + replay()
+        + verify()
+        - _handle_invocation(invocation)
+    }
+    class StubCommand {
+        - str name
+        - CmdMox controller
+        - Response response
+        + returns(stdout, stderr, exit_code)
+    }
+    class EnvironmentManager {
+    }
+    class IPCServer {
+        + start()
+        + stop()
+        + handle_invocation(invocation)
+    }
+    class Invocation {
+    }
+    class Response {
+    }
+    CmdMox "1" -- "1" EnvironmentManager : uses
+    CmdMox "1" -- "1" IPCServer : manages
+    CmdMox "1" -- "*" StubCommand : has
+    CmdMox "1" -- "*" Invocation : records
+    StubCommand "1" -- "1" Response : configures
+    IPCServer "1" -- "*" Invocation : handles
+```
+
+```mermaid
+classDiagram
+    class CmdMoxError {
+    }
+    class LifecycleError {
+    }
+    class MissingEnvironmentError {
+    }
+    class VerificationError {
+    }
+    class UnexpectedCommandError {
+    }
+    class UnfulfilledExpectationError {
+    }
+    CmdMoxError <|-- LifecycleError
+    CmdMoxError <|-- MissingEnvironmentError
+    CmdMoxError <|-- VerificationError
+    VerificationError <|-- UnexpectedCommandError
+    VerificationError <|-- UnfulfilledExpectationError
+```
