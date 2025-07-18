@@ -1005,7 +1005,8 @@ sequenceDiagram
 Custom exception classes clarify failure modes: `LifecycleError` signals
 improper use of `replay()` or `verify()`, `UnexpectedCommandError` indicates an
 invocation without a matching stub, and `UnfulfilledExpectationError` reports
-stubs that were never called.
+stubs that were never called. To aid debugging, these errors include the
+controller's active phase in their messages.
 
 ```mermaid
 classDiagram
