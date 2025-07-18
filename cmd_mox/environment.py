@@ -65,8 +65,8 @@ class EnvironmentManager:
                     if key not in os.environ:
                         os.environ[key] = value
                 self._orig_env = None
-                global _active_manager
-                _active_manager = None
         finally:
+            global _active_manager
+            _active_manager = None
             if self.shim_dir and self.shim_dir.exists():
                 shutil.rmtree(self.shim_dir, ignore_errors=True)
