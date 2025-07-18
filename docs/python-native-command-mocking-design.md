@@ -240,6 +240,11 @@ for further configuration.
   This is used to record invocations for later inspection without the strict
   upfront expectations of a mock.
 
+The initial implementation of `MockCommand` and `SpyCommand` mirrors the
+behaviour of `StubCommand`. They provide static responses and record
+invocations, laying the groundwork for the richer matching and verification
+engine described later in this document.
+
 ### 2.4 The Fluent API for Defining Expectations
 
 The core of the library's ergonomic design lies in its fluent, chainable API

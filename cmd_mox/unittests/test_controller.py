@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from cmd_mox.controller import CmdMox
+from cmd_mox.controller import CmdMox, MockCommand, SpyCommand, StubCommand
 from cmd_mox.errors import (
     LifecycleError,
     MissingEnvironmentError,
@@ -141,3 +141,32 @@ def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
         mox.replay()
 
     mox.__exit__(None, None, None)
+
+
+def test_factory_methods_create_distinct_objects() -> None:
+    """CmdMox exposes mock() and spy() alongside stub()."""
+    mox = CmdMox()
+    assert isinstance(mox.stub("a"), StubCommand)
+    assert isinstance(mox.mock("b"), MockCommand)
+    assert isinstance(mox.spy("c"), SpyCommand)
+
+
+def test_mock_and_spy_invocations(tmp_path: Path) -> None:
+    """Mock and spy commands record calls and verify correctly."""
+    mox = CmdMox()
+    mox.mock("hello").returns(stdout="hi")
+    mox.spy("world").returns(stdout="earth")
+    mox.__enter__()
+    mox.replay()
+
+    cmd_hello = Path(mox.environment.shim_dir) / "hello"
+    cmd_world = Path(mox.environment.shim_dir) / "world"
+    res1 = subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
+    res2 = subprocess.run([str(cmd_world)], capture_output=True, text=True, check=True)  # noqa: S603
+
+    mox.verify()
+
+    assert res1.stdout.strip() == "hi"
+    assert res2.stdout.strip() == "earth"
+    assert len(mox.journal) == 2
+    assert mox.spies["world"].invocations[0].command == "world"
