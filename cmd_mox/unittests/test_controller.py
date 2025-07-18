@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from cmd_mox.controller import CmdMox
 from cmd_mox.errors import (
     LifecycleError,
+    MissingEnvironmentError,
     UnexpectedCommandError,
     UnfulfilledExpectationError,
 )
@@ -123,18 +125,19 @@ def test_cmdmox_environment_cleanup_on_exception_before_replay() -> None:
 
 
 def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Behavior when environment is not initialized."""
+    """Replay fails when environment attributes are missing."""
     mox = CmdMox()
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
-    mox.replay()
+
     monkeypatch.setattr(mox.environment, "shim_dir", None)
-    with pytest.raises(TypeError, match="NoneType"):
-        Path(mox.environment.shim_dir) / "foo"  # type: ignore[arg-type]
+    with pytest.raises(MissingEnvironmentError, match="shim_dir"):
+        mox.replay()
+
+    # Restore shim_dir and remove socket_path
+    monkeypatch.setattr(mox.environment, "shim_dir", Path(tempfile.gettempdir()))
     monkeypatch.setattr(mox.environment, "socket_path", None)
-    assert mox.environment.socket_path is None
-    with pytest.raises(
-        UnfulfilledExpectationError, match="Expected commands not called"
-    ):
-        mox.verify()
+    with pytest.raises(MissingEnvironmentError, match="socket_path"):
+        mox.replay()
+
     mox.__exit__(None, None, None)
