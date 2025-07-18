@@ -155,7 +155,7 @@ def test_spy_idempotency() -> None:
     assert s1 is s2
 
 
-def test_mock_and_spy_invocations(tmp_path: Path) -> None:
+def test_mock_and_spy_invocations() -> None:
     """Mock and spy commands record calls and verify correctly."""
     mox = CmdMox()
     mox.mock("hello").returns(stdout="hi")
@@ -173,4 +173,5 @@ def test_mock_and_spy_invocations(tmp_path: Path) -> None:
     assert res1.stdout.strip() == "hi"
     assert res2.stdout.strip() == "earth"
     assert len(mox.journal) == 2
+    assert mox.mocks["hello"].invocations[0].command == "hello"
     assert mox.spies["world"].invocations[0].command == "world"
