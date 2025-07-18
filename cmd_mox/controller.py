@@ -11,6 +11,12 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     TracebackType = types.TracebackType
 
 from .environment import EnvironmentManager
+from .errors import (
+    LifecycleError,
+    MissingEnvironmentError,
+    UnexpectedCommandError,
+    UnfulfilledExpectationError,
+)
 from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
 
@@ -91,30 +97,42 @@ class CmdMox:
         The context must be entered before calling this method.
         """
         if self._phase != "record":
-            raise RuntimeError
+            raise LifecycleError("Cannot call replay(): not in 'record' phase")  # noqa: TRY003
         if not self._entered:
-            raise RuntimeError
-        if self.environment.shim_dir is None or self.environment.socket_path is None:
-            raise RuntimeError
-        self.journal.clear()
-        self._commands = set(self.stubs) | self._commands
-        create_shim_symlinks(self.environment.shim_dir, self._commands)
-        self._server = IPCServer(self.environment.socket_path)
-        self._server.handle_invocation = self._handle_invocation  # type: ignore[method-assign]
-        self._server.start()
-        self._phase = "replay"
+            raise LifecycleError("replay() called without entering context")  # noqa: TRY003
+        if self.environment.shim_dir is None:
+            msg = "Environment attribute 'shim_dir' is missing (None)"
+            raise MissingEnvironmentError(msg)
+        if self.environment.socket_path is None:
+            msg = "Environment attribute 'socket_path' is missing (None)"
+            raise MissingEnvironmentError(msg)
+        try:
+            self.journal.clear()
+            self._commands = set(self.stubs) | self._commands
+            create_shim_symlinks(self.environment.shim_dir, self._commands)
+            self._server = IPCServer(self.environment.socket_path)
+            self._server.handle_invocation = self._handle_invocation  # type: ignore[method-assign]
+            self._server.start()
+            self._phase = "replay"
+        except Exception:
+            if self._server is not None:
+                self._server.stop()
+                self._server = None
+            self.environment.__exit__(None, None, None)
+            self._entered = False
+            raise
 
     def verify(self) -> None:
         """Stop the server and finalise the verification phase."""
         if self._phase != "replay":
-            raise RuntimeError("verify() called out of order")  # noqa: TRY003
+            raise LifecycleError("verify() called out of order")  # noqa: TRY003
         try:
             unexpected = [
                 inv.command for inv in self.journal if inv.command not in self.stubs
             ]
             if unexpected:
                 msg = f"Unexpected commands invoked: {unexpected}"
-                raise AssertionError(msg)
+                raise UnexpectedCommandError(msg)
             missing = [
                 name
                 for name in self.stubs
@@ -122,7 +140,7 @@ class CmdMox:
             ]
             if missing:
                 msg = f"Expected commands not called: {missing}"
-                raise AssertionError(msg)
+                raise UnfulfilledExpectationError(msg)
         finally:
             if self._server is not None:
                 self._server.stop()

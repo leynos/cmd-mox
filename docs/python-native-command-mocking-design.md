@@ -1001,3 +1001,8 @@ sequenceDiagram
     CmdMox->>IPCServer: stop()
     CmdMox->>EnvironmentManager: __exit__()
 ```
+
+Custom exception classes clarify failure modes: `LifecycleError` signals
+improper use of `replay()` or `verify()`, `UnexpectedCommandError` indicates an
+invocation without a matching stub, and `UnfulfilledExpectationError` reports
+stubs that were never called.
