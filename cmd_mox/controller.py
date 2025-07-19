@@ -43,18 +43,20 @@ class CommandDouble:
 
     __slots__ = ("controller", "invocations", "kind", "name", "response")
 
-    def __init__(
-        self, name: str, controller: CmdMox, kind: t.Literal["stub", "mock", "spy"]
-    ) -> None:  # type: ignore[NAME_DEFINED_LATER]
+    T_Kind = t.Literal["stub", "mock", "spy"]
+
+    def __init__(self, name: str, controller: CmdMox, kind: T_Kind) -> None:
         self.name = name
         self.kind = kind
         self.controller = controller
         self.response = Response()
         self.invocations: list[Invocation] = []
 
+    T_Self = t.TypeVar("T_Self", bound="CommandDouble")
+
     def returns(
-        self, stdout: str = "", stderr: str = "", exit_code: int = 0
-    ) -> CommandDouble:
+        self: T_Self, stdout: str = "", stderr: str = "", exit_code: int = 0
+    ) -> T_Self:
         """Set the static response and return ``self``."""
         self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
         return self
@@ -63,6 +65,16 @@ class CommandDouble:
     def is_expected(self) -> bool:
         """Return ``True`` for stubs and mocks."""
         return self.kind in ("stub", "mock")
+
+    def __repr__(self) -> str:
+        """Return debugging representation with name, kind, and response."""
+        return (
+            f"CommandDouble(name={self.name!r}, "
+            f"kind={self.kind!r}, "
+            f"response={self.response!r})"
+        )
+
+    __str__ = __repr__
 
 
 # Backwards compatibility aliases
@@ -154,13 +166,19 @@ class CmdMox:
         self._commands.add(name)
 
     def _get_double(
-        self, command_name: str, kind: t.Literal["stub", "mock", "spy"]
+        self, command_name: str, kind: CommandDouble.T_Kind
     ) -> CommandDouble:
         dbl = self._doubles.get(command_name)
         if dbl is None:
             dbl = CommandDouble(command_name, self, kind)
             self._doubles[command_name] = dbl
             self.register_command(command_name)
+        elif dbl.kind != kind:
+            msg = (
+                f"{command_name!r} already registered as {dbl.kind}; "
+                f"cannot register as {kind}"
+            )
+            raise ValueError(msg)
         return dbl
 
     def stub(self, command_name: str) -> CommandDouble:

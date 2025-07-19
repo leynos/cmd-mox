@@ -163,6 +163,14 @@ def test_spy_idempotency() -> None:
     assert s1 is s2
 
 
+def test_double_kind_mismatch() -> None:
+    """Requesting a different kind for an existing double raises ``ValueError``."""
+    mox = CmdMox()
+    mox.stub("foo")
+    with pytest.raises(ValueError, match="registered as stub"):
+        mox.mock("foo")
+
+
 def test_mock_and_spy_invocations() -> None:
     """Mock and spy commands record calls and verify correctly."""
     mox = CmdMox()
