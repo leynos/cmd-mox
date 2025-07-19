@@ -45,7 +45,7 @@ class CommandDouble:
 
     T_Kind = t.Literal["stub", "mock", "spy"]
 
-    def __init__(self, name: str, controller: CmdMox, kind: T_Kind) -> None:
+    def __init__(self, name: str, controller: "CmdMox", kind: T_Kind) -> None:  # noqa: UP037
         self.name = name
         self.kind = kind
         self.controller = controller
