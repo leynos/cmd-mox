@@ -121,7 +121,10 @@ class CmdMox:
         return set(self.stubs) | set(self.mocks)
 
     def _find_double(self, name: str) -> StubCommand | MockCommand | SpyCommand | None:
-        """Return the configured command double for *name*, if any."""
+        """Return the configured command double for *name*, if any.
+
+        Stubs are consulted first, then mocks, then spies.
+        """
         if name in self.stubs:
             return self.stubs[name]
         if name in self.mocks:
@@ -279,6 +282,6 @@ class CmdMox:
         double = self._find_double(invocation.command)
         if double is None:
             return Response(stdout=invocation.command)
-        if isinstance(double, MockCommand | SpyCommand):
+        if isinstance(double, (MockCommand, SpyCommand)):  # noqa: UP038
             double.invocations.append(invocation)
         return double.response

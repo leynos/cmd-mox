@@ -175,3 +175,24 @@ def test_mock_and_spy_invocations() -> None:
     assert len(mox.journal) == 2
     assert mox.mocks["hello"].invocations[0].command == "hello"
     assert mox.spies["world"].invocations[0].command == "world"
+
+
+def test_invocation_order_multiple_calls() -> None:
+    """Multiple calls are recorded in order."""
+    mox = CmdMox()
+    mox.mock("hello").returns(stdout="hi")
+    mox.spy("world").returns(stdout="earth")
+    mox.__enter__()
+    mox.replay()
+
+    cmd_hello = Path(mox.environment.shim_dir) / "hello"
+    cmd_world = Path(mox.environment.shim_dir) / "world"
+    subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
+    subprocess.run([str(cmd_world)], capture_output=True, text=True, check=True)  # noqa: S603
+    subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
+
+    mox.verify()
+
+    assert [inv.command for inv in mox.journal] == ["hello", "world", "hello"]
+    assert len(mox.mocks["hello"].invocations) == 2
+    assert len(mox.spies["world"].invocations) == 1
