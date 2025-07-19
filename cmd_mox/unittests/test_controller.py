@@ -147,12 +147,28 @@ def test_mock_idempotency() -> None:
     assert m1 is m2
 
 
+def test_stub_idempotency() -> None:
+    """Repeated calls to stub() with the same name return the same object."""
+    mox = CmdMox()
+    s1 = mox.stub("bar")
+    s2 = mox.stub("bar")
+    assert s1 is s2
+
+
 def test_spy_idempotency() -> None:
     """Repeated calls to spy() with the same name return the same object."""
     mox = CmdMox()
     s1 = mox.spy("bar")
     s2 = mox.spy("bar")
     assert s1 is s2
+
+
+def test_double_kind_mismatch() -> None:
+    """Requesting a different kind for an existing double raises ``ValueError``."""
+    mox = CmdMox()
+    mox.stub("foo")
+    with pytest.raises(ValueError, match="registered as stub"):
+        mox.mock("foo")
 
 
 def test_mock_and_spy_invocations() -> None:
@@ -196,3 +212,15 @@ def test_invocation_order_multiple_calls() -> None:
     assert [inv.command for inv in mox.journal] == ["hello", "world", "hello"]
     assert len(mox.mocks["hello"].invocations) == 2
     assert len(mox.spies["world"].invocations) == 1
+
+
+def test_is_recording_property() -> None:
+    """is_recording is True for mocks and spies, False for stubs."""
+    mox = CmdMox()
+    stub = mox.stub("a")
+    mock = mox.mock("b")
+    spy = mox.spy("c")
+
+    assert not stub.is_recording
+    assert mock.is_recording
+    assert spy.is_recording

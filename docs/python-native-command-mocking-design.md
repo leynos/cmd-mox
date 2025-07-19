@@ -240,21 +240,18 @@ for further configuration.
   This is used to record invocations for later inspection without the strict
   upfront expectations of a mock.
 
-The initial implementation of `MockCommand` and `SpyCommand` mirrors the
-behaviour of `StubCommand`. They provide static responses and record
-invocations, laying the groundwork for the richer matching and verification
-engine described later in this document. `MockCommand` also records each
-invocation in an internal list so future verification logic can assert on call
-counts and arguments.
+Early iterations of the library exposed distinct ``StubCommand``,
+``MockCommand`` and ``SpyCommand`` classes. These have since been unified into
+a single ``CommandDouble`` implementation tagged with a ``kind`` attribute. The
+factories ``mox.stub()``, ``mox.mock()`` and ``mox.spy()`` still exist for
+ergonomics but internally return ``CommandDouble`` instances. Each double
+tracks invocations so verification can assert on call counts and order. Mocks
+and spies record calls (``double.is_recording`` is ``True``), while stubs do
+not.
 
-All three command-double types derive from an internal `_CommandDouble` base
-class, which centralises the common ``name``, ``controller`` and ``response``
-attributes along with the ``returns()`` helper for specifying canned results.
-
-When a command name is registered in multiple categories, `CmdMox` resolves the
-collision deterministically. Stubs take precedence over mocks, which in turn
-take precedence over spies. Tests should avoid mixing categories for the same
-command, but this ordering ensures predictable behaviour if it occurs.
+The ``kind`` flag determines whether a double is considered an expectation
+(stubs and mocks) or merely observational (spies). It also governs how
+``CmdMox.verify()`` checks the journal for unexpected or missing commands.
 
 ### 2.4 The Fluent API for Defining Expectations
 

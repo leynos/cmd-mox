@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .controller import CmdMox, MockCommand, SpyCommand
+from .controller import CmdMox, CommandDouble, MockCommand, SpyCommand
 from .environment import EnvironmentManager
 from .errors import (
     CmdMoxError,
@@ -19,6 +19,7 @@ __all__ = [
     "SHIM_PATH",
     "CmdMox",
     "CmdMoxError",
+    "CommandDouble",
     "EnvironmentManager",
     "IPCServer",
     "Invocation",
