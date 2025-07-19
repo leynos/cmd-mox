@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from cmd_mox.controller import CmdMox
+from cmd_mox.controller import CmdMox, MockCommand, SpyCommand, StubCommand
 from cmd_mox.errors import (
     LifecycleError,
     MissingEnvironmentError,
@@ -73,15 +73,16 @@ def test_cmdmox_nonstubbed_command_behavior() -> None:
         mox.verify()
 
 
-def test_cmdmox_environment_cleanup_on_exception() -> None:
-    """Environment is cleaned up if an exception occurs during test."""
+def _test_environment_cleanup_helper(*, call_replay_before_exception: bool) -> None:
+    """Shared logic verifying env cleanup when exceptions occur."""
     original_path = os.environ["PATH"]
     mox = CmdMox()
     mox.stub("fail").returns(stdout="fail")
     mox.__enter__()
-    mox.replay()
+    if call_replay_before_exception:
+        mox.replay()
 
-    # Ensure environment was modified during replay
+    # Environment should differ while the manager is active
     assert os.environ["PATH"] != original_path
 
     def _boom() -> None:
@@ -92,36 +93,23 @@ def test_cmdmox_environment_cleanup_on_exception() -> None:
     except RuntimeError:
         pass
     finally:
-        with pytest.raises(UnfulfilledExpectationError):
-            mox.verify()
+        if call_replay_before_exception:
+            with pytest.raises(UnfulfilledExpectationError):
+                mox.verify()
         mox.__exit__(None, None, None)
 
-    # Verify environment is restored
+    # Ensure PATH is fully restored
     assert os.environ["PATH"] == original_path
+
+
+def test_cmdmox_environment_cleanup_on_exception() -> None:
+    """Environment is cleaned when an exception occurs after replay."""
+    _test_environment_cleanup_helper(call_replay_before_exception=True)
 
 
 def test_cmdmox_environment_cleanup_on_exception_before_replay() -> None:
     """Environment is cleaned up if an error occurs before replay."""
-    original_path = os.environ["PATH"]
-    mox = CmdMox()
-    mox.stub("fail").returns(stdout="fail")
-    mox.__enter__()
-
-    # Ensure environment was modified after __enter__
-    assert os.environ["PATH"] != original_path
-
-    def _boom() -> None:
-        raise RuntimeError
-
-    try:
-        _boom()
-    except RuntimeError:
-        pass
-    finally:
-        mox.__exit__(None, None, None)
-
-    # Verify environment is restored
-    assert os.environ["PATH"] == original_path
+    _test_environment_cleanup_helper(call_replay_before_exception=False)
 
 
 def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,3 +129,70 @@ def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
         mox.replay()
 
     mox.__exit__(None, None, None)
+
+
+def test_factory_methods_create_distinct_objects() -> None:
+    """CmdMox exposes mock() and spy() alongside stub()."""
+    mox = CmdMox()
+    assert isinstance(mox.stub("a"), StubCommand)
+    assert isinstance(mox.mock("b"), MockCommand)
+    assert isinstance(mox.spy("c"), SpyCommand)
+
+
+def test_mock_idempotency() -> None:
+    """Repeated calls to mock() with the same name return the same object."""
+    mox = CmdMox()
+    m1 = mox.mock("foo")
+    m2 = mox.mock("foo")
+    assert m1 is m2
+
+
+def test_spy_idempotency() -> None:
+    """Repeated calls to spy() with the same name return the same object."""
+    mox = CmdMox()
+    s1 = mox.spy("bar")
+    s2 = mox.spy("bar")
+    assert s1 is s2
+
+
+def test_mock_and_spy_invocations() -> None:
+    """Mock and spy commands record calls and verify correctly."""
+    mox = CmdMox()
+    mox.mock("hello").returns(stdout="hi")
+    mox.spy("world").returns(stdout="earth")
+    mox.__enter__()
+    mox.replay()
+
+    cmd_hello = Path(mox.environment.shim_dir) / "hello"
+    cmd_world = Path(mox.environment.shim_dir) / "world"
+    res1 = subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
+    res2 = subprocess.run([str(cmd_world)], capture_output=True, text=True, check=True)  # noqa: S603
+
+    mox.verify()
+
+    assert res1.stdout.strip() == "hi"
+    assert res2.stdout.strip() == "earth"
+    assert len(mox.journal) == 2
+    assert mox.mocks["hello"].invocations[0].command == "hello"
+    assert mox.spies["world"].invocations[0].command == "world"
+
+
+def test_invocation_order_multiple_calls() -> None:
+    """Multiple calls are recorded in order."""
+    mox = CmdMox()
+    mox.mock("hello").returns(stdout="hi")
+    mox.spy("world").returns(stdout="earth")
+    mox.__enter__()
+    mox.replay()
+
+    cmd_hello = Path(mox.environment.shim_dir) / "hello"
+    cmd_world = Path(mox.environment.shim_dir) / "world"
+    subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
+    subprocess.run([str(cmd_world)], capture_output=True, text=True, check=True)  # noqa: S603
+    subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
+
+    mox.verify()
+
+    assert [inv.command for inv in mox.journal] == ["hello", "world", "hello"]
+    assert len(mox.mocks["hello"].invocations) == 2
+    assert len(mox.spies["world"].invocations) == 1

@@ -53,9 +53,9 @@
 
   - [x] Manages lifecycle: record → replay → verify
 
-- [ ] **Factory Methods**
+- [x] **Factory Methods**
 
-  - [ ] `cmd_mox.mock(cmd)`, `cmd_mox.stub(cmd)`, `cmd_mox.spy(cmd)`
+  - [x] `cmd_mox.mock(cmd)`, `cmd_mox.stub(cmd)`, `cmd_mox.spy(cmd)`
 
 - [ ] **Pytest Plugin**
 

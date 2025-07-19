@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .controller import CmdMox
+from .controller import CmdMox, MockCommand, SpyCommand
 from .environment import EnvironmentManager
 from .errors import (
     CmdMoxError,
@@ -24,7 +24,9 @@ __all__ = [
     "Invocation",
     "LifecycleError",
     "MissingEnvironmentError",
+    "MockCommand",
     "Response",
+    "SpyCommand",
     "UnexpectedCommandError",
     "UnfulfilledExpectationError",
     "VerificationError",
