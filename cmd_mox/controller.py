@@ -66,6 +66,11 @@ class CommandDouble:
         """Return ``True`` for stubs and mocks."""
         return self.kind in ("stub", "mock")
 
+    @property
+    def is_recording(self) -> bool:
+        """Return ``True`` for mocks and spies."""
+        return self.kind in ("mock", "spy")
+
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response."""
         return (
@@ -280,6 +285,6 @@ class CmdMox:
         dbl = self._doubles.get(invocation.command)
         if not dbl:
             return Response(stdout=invocation.command)
-        if dbl.kind in ("mock", "spy"):
+        if dbl.is_recording:
             dbl.invocations.append(invocation)
         return dbl.response

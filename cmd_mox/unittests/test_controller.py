@@ -212,3 +212,15 @@ def test_invocation_order_multiple_calls() -> None:
     assert [inv.command for inv in mox.journal] == ["hello", "world", "hello"]
     assert len(mox.mocks["hello"].invocations) == 2
     assert len(mox.spies["world"].invocations) == 1
+
+
+def test_is_recording_property() -> None:
+    """is_recording is True for mocks and spies, False for stubs."""
+    mox = CmdMox()
+    stub = mox.stub("a")
+    mock = mox.mock("b")
+    spy = mox.spy("c")
+
+    assert not stub.is_recording
+    assert mock.is_recording
+    assert spy.is_recording

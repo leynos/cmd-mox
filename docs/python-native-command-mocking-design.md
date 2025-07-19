@@ -245,7 +245,9 @@ Early iterations of the library exposed distinct ``StubCommand``,
 a single ``CommandDouble`` implementation tagged with a ``kind`` attribute. The
 factories ``mox.stub()``, ``mox.mock()`` and ``mox.spy()`` still exist for
 ergonomics but internally return ``CommandDouble`` instances. Each double
-tracks invocations so verification can assert on call counts and order.
+tracks invocations so verification can assert on call counts and order. Mocks
+and spies record calls (``double.is_recording`` is ``True``), while stubs do
+not.
 
 The ``kind`` flag determines whether a double is considered an expectation
 (stubs and mocks) or merely observational (spies). It also governs how
