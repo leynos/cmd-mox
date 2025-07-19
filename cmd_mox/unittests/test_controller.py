@@ -147,6 +147,14 @@ def test_mock_idempotency() -> None:
     assert m1 is m2
 
 
+def test_stub_idempotency() -> None:
+    """Repeated calls to stub() with the same name return the same object."""
+    mox = CmdMox()
+    s1 = mox.stub("bar")
+    s2 = mox.stub("bar")
+    assert s1 is s2
+
+
 def test_spy_idempotency() -> None:
     """Repeated calls to spy() with the same name return the same object."""
     mox = CmdMox()

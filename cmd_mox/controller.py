@@ -38,52 +38,37 @@ class _CallbackIPCServer(IPCServer):
         return self._handler(invocation)
 
 
-class _CommandDouble:
-    """Base class shared by stub, mock, and spy command doubles."""
+class CommandDouble:
+    """Configuration for a stub, mock, or spy command."""
 
-    def __init__(self, name: str, controller: CmdMox) -> None:  # type: ignore[NAME_DEFINED_LATER]
+    __slots__ = ("controller", "invocations", "kind", "name", "response")
+
+    def __init__(
+        self, name: str, controller: CmdMox, kind: t.Literal["stub", "mock", "spy"]
+    ) -> None:  # type: ignore[NAME_DEFINED_LATER]
         self.name = name
+        self.kind = kind
         self.controller = controller
         self.response = Response()
+        self.invocations: list[Invocation] = []
 
     def returns(
         self, stdout: str = "", stderr: str = "", exit_code: int = 0
-    ) -> _CommandDouble:
-        """Set the static response for this double."""
+    ) -> CommandDouble:
+        """Set the static response and return ``self``."""
         self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
         return self
 
-
-class StubCommand(_CommandDouble):
-    """Simple stub configuration object."""
-
-    def returns(
-        self, stdout: str = "", stderr: str = "", exit_code: int = 0
-    ) -> StubCommand:
-        """Set the static response and return ``self``."""
-        return t.cast("StubCommand", super().returns(stdout, stderr, exit_code))
+    @property
+    def is_expected(self) -> bool:
+        """Return ``True`` for stubs and mocks."""
+        return self.kind in ("stub", "mock")
 
 
-class MockCommand(StubCommand):
-    """Strict mock command that records invocations."""
-
-    def __init__(self, name: str, controller: CmdMox) -> None:  # type: ignore[NAME_DEFINED_LATER]
-        super().__init__(name, controller)
-        self.invocations: list[Invocation] = []
-
-
-class SpyCommand(_CommandDouble):
-    """Simple spy configuration object that records invocations."""
-
-    def __init__(self, name: str, controller: CmdMox) -> None:  # type: ignore[NAME_DEFINED_LATER]
-        super().__init__(name, controller)
-        self.invocations: list[Invocation] = []
-
-    def returns(
-        self, stdout: str = "", stderr: str = "", exit_code: int = 0
-    ) -> SpyCommand:
-        """Set the static response and return ``self``."""
-        return t.cast("SpyCommand", super().returns(stdout, stderr, exit_code))
+# Backwards compatibility aliases
+StubCommand = CommandDouble
+MockCommand = CommandDouble
+SpyCommand = CommandDouble
 
 
 class Phase(enum.Enum):
@@ -103,35 +88,38 @@ class CmdMox:
         self._entered = False
         self._phase = Phase.RECORD
 
-        self.stubs: dict[str, StubCommand] = {}
-        self.mocks: dict[str, MockCommand] = {}
-        self.spies: dict[str, SpyCommand] = {}
+        self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque()
         self._commands: set[str] = set()
+
+    # ------------------------------------------------------------------
+    # Double accessors
+    # ------------------------------------------------------------------
+    @property
+    def stubs(self) -> dict[str, CommandDouble]:
+        """Return all stub doubles."""
+        return {n: d for n, d in self._doubles.items() if d.kind == "stub"}
+
+    @property
+    def mocks(self) -> dict[str, CommandDouble]:
+        """Return all mock doubles."""
+        return {n: d for n, d in self._doubles.items() if d.kind == "mock"}
+
+    @property
+    def spies(self) -> dict[str, CommandDouble]:
+        """Return all spy doubles."""
+        return {n: d for n, d in self._doubles.items() if d.kind == "spy"}
 
     # ------------------------------------------------------------------
     # Internal helper accessors
     # ------------------------------------------------------------------
     def _registered_commands(self) -> set[str]:
-        """Return all commands registered via stubs, mocks, or spies."""
-        return set(self.stubs) | set(self.mocks) | set(self.spies)
+        """Return all commands registered via doubles."""
+        return set(self._doubles)
 
     def _expected_commands(self) -> set[str]:
         """Return commands that must be called during replay."""
-        return set(self.stubs) | set(self.mocks)
-
-    def _find_double(self, name: str) -> StubCommand | MockCommand | SpyCommand | None:
-        """Return the configured command double for *name*, if any.
-
-        Stubs are consulted first, then mocks, then spies.
-        """
-        if name in self.stubs:
-            return self.stubs[name]
-        if name in self.mocks:
-            return self.mocks[name]
-        if name in self.spies:
-            return self.spies[name]
-        return None
+        return {name for name, dbl in self._doubles.items() if dbl.is_expected}
 
     # ------------------------------------------------------------------
     # Context manager protocol
@@ -165,32 +153,27 @@ class CmdMox:
         """Register *name* for shim creation during :meth:`replay`."""
         self._commands.add(name)
 
-    def stub(self, command_name: str) -> StubCommand:
-        """Create or retrieve a :class:`StubCommand` for *command_name*."""
-        if command_name in self.stubs:
-            return self.stubs[command_name]
-        stub = StubCommand(command_name, self)
-        self.stubs[command_name] = stub
-        self.register_command(command_name)
-        return stub
+    def _get_double(
+        self, command_name: str, kind: t.Literal["stub", "mock", "spy"]
+    ) -> CommandDouble:
+        dbl = self._doubles.get(command_name)
+        if dbl is None:
+            dbl = CommandDouble(command_name, self, kind)
+            self._doubles[command_name] = dbl
+            self.register_command(command_name)
+        return dbl
 
-    def mock(self, command_name: str) -> MockCommand:
-        """Create or retrieve a :class:`MockCommand` for *command_name*."""
-        if command_name in self.mocks:
-            return self.mocks[command_name]
-        mock = MockCommand(command_name, self)
-        self.mocks[command_name] = mock
-        self.register_command(command_name)
-        return mock
+    def stub(self, command_name: str) -> CommandDouble:
+        """Create or retrieve a stub for *command_name*."""
+        return self._get_double(command_name, "stub")
 
-    def spy(self, command_name: str) -> SpyCommand:
-        """Create or retrieve a :class:`SpyCommand` for *command_name*."""
-        if command_name in self.spies:
-            return self.spies[command_name]
-        spy = SpyCommand(command_name, self)
-        self.spies[command_name] = spy
-        self.register_command(command_name)
-        return spy
+    def mock(self, command_name: str) -> CommandDouble:
+        """Create or retrieve a mock for *command_name*."""
+        return self._get_double(command_name, "mock")
+
+    def spy(self, command_name: str) -> CommandDouble:
+        """Create or retrieve a spy for *command_name*."""
+        return self._get_double(command_name, "spy")
 
     def replay(self) -> None:
         """Transition to replay mode and start the IPC server.
@@ -274,14 +257,11 @@ class CmdMox:
     # Internal helpers
     # ------------------------------------------------------------------
     def _handle_invocation(self, invocation: Invocation) -> Response:
-        """Record *invocation* and return the appropriate response.
-
-        Stubs take precedence over mocks, which take precedence over spies.
-        """
+        """Record *invocation* and return the configured response."""
         self.journal.append(invocation)
-        double = self._find_double(invocation.command)
-        if double is None:
+        dbl = self._doubles.get(invocation.command)
+        if not dbl:
             return Response(stdout=invocation.command)
-        if isinstance(double, (MockCommand, SpyCommand)):  # noqa: UP038
-            double.invocations.append(invocation)
-        return double.response
+        if dbl.kind in ("mock", "spy"):
+            dbl.invocations.append(invocation)
+        return dbl.response
