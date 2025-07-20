@@ -71,12 +71,14 @@ def check_output(result: subprocess.CompletedProcess[str], text: str) -> None:
 def check_journal(mox: CmdMox, count: int, cmd: str) -> None:
     """Verify the journal contains the expected command invocation."""
     assert len(mox.journal) == count
-    assert mox.journal[0].command == cmd
+    if count > 0:
+        assert mox.journal[0].command == cmd
 
 
 @then(parsers.cfparse('the spy "{cmd}" should record {count:d} invocation'))
 def check_spy(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the spy recorded the invocation."""
+    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
     spy = mox.spies[cmd]
     assert len(spy.invocations) == count
 
@@ -84,6 +86,7 @@ def check_spy(mox: CmdMox, cmd: str, count: int) -> None:
 @then(parsers.cfparse('the mock "{cmd}" should record {count:d} invocation'))
 def check_mock(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the mock recorded the invocation."""
+    assert cmd in mox.mocks, f"Mock for command '{cmd}' not found"
     mock = mox.mocks[cmd]
     assert len(mock.invocations) == count
 
