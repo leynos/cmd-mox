@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 from pathlib import Path
 
@@ -36,11 +37,13 @@ def spy_command(mox: CmdMox, cmd: str, text: str) -> None:
     mox.spy(cmd).returns(stdout=text)
 
 
-@when("I replay the controller")
-def replay_controller(mox: CmdMox) -> None:
-    """Enter replay mode."""
-    mox.__enter__()
+@when("I replay the controller", target_fixture="mox_stack")
+def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
+    """Enter replay mode within a context manager."""
+    stack = contextlib.ExitStack()
+    stack.enter_context(mox)
     mox.replay()
+    return stack
 
 
 @when(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
@@ -52,10 +55,10 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
 
 
 @when("I verify the controller")
-def verify_controller(mox: CmdMox) -> None:
-    """Invoke verification."""
+def verify_controller(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
+    """Invoke verification and close context."""
     mox.verify()
-    mox.__exit__(None, None, None)
+    mox_stack.close()
 
 
 @then(parsers.cfparse('the output should be "{text}"'))

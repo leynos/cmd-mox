@@ -14,6 +14,7 @@ dev = [
     "pyright",
     "pytest-timeout",
     "pytest-bdd",
+    "parse_type",
 ]
 
 [tool.pyright]
