@@ -185,7 +185,7 @@
     args)
 
   - [ ] Behavioural acceptance tests covering the full fluent API using
-        `behave` and `cfparse`
+        `pytest-bdd` and `cfparse`
 
 ## **X. Release & Post-MVP**
 

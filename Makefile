@@ -2,7 +2,7 @@ MDLINT ?= $(shell which markdownlint)
 NIXIE ?= $(shell which nixie)
 MDFORMAT_ALL ?= $(shell which mdformat-all)
 TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) $(NIXIE) uv
-VENV_TOOLS = pytest behave
+VENV_TOOLS = pytest
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
         markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
@@ -75,7 +75,6 @@ nixie: $(NIXIE) ## Validate Mermaid diagrams
 
 test: build uv $(VENV_TOOLS) ## Run tests
 	uv run pytest -v
-	uv run behave -v
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
