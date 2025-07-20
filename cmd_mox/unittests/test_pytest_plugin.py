@@ -54,3 +54,32 @@ def test_worker_prefix(
     )
     result = pytester.runpytest("-s")
     result.assert_outcomes(passed=1)
+
+
+def test_default_prefix(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fall back to 'main' when no worker ID is present."""
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    pytester.makepyfile(
+        """
+        import os
+        import subprocess
+        import pytest
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def test_default(cmd_mox):
+            cmd_mox.stub('foo').returns(stdout='bar')
+            cmd_mox.replay()
+            path = cmd_mox.environment.shim_dir / 'foo'
+            res = subprocess.run(  # noqa: S603
+                [str(path)], capture_output=True, text=True, check=True
+            )
+            assert res.stdout.strip() == 'bar'
+            assert 'main' in os.path.basename(cmd_mox.environment.shim_dir)
+            cmd_mox.verify()
+        """
+    )
+    result = pytester.runpytest("-s")
+    result.assert_outcomes(passed=1)

@@ -1096,4 +1096,5 @@ before yielding and always exits it afterwards to guarantee environment cleanup.
 To support ``pytest-xdist`` each fixture instance incorporates the worker ID
 into the temporary directory prefix.  The prefix takes the form
 ``cmdmox-{worker}-{pid}-`` ensuring that socket paths and shim directories are
-unique across parallel workers.
+unique across parallel workers. When ``PYTEST_XDIST_WORKER`` is absent the
+fixture falls back to ``main`` so the prefix becomes ``cmdmox-main-{pid}-``.
