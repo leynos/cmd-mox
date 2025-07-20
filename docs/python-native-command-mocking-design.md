@@ -1083,6 +1083,17 @@ classDiagram
     CmdMoxError <|-- LifecycleError
     CmdMoxError <|-- MissingEnvironmentError
     CmdMoxError <|-- VerificationError
-    VerificationError <|-- UnexpectedCommandError
-    VerificationError <|-- UnfulfilledExpectationError
+VerificationError <|-- UnexpectedCommandError
+VerificationError <|-- UnfulfilledExpectationError
 ```
+
+### 8.4 Design Decisions for the Pytest Plugin
+
+The plugin exposes a ``cmd_mox`` fixture that yields a ready-to-use
+:class:`CmdMox` instance.  The fixture enters the :class:`EnvironmentManager`
+before yielding and always exits it afterwards to guarantee environment cleanup.
+
+To support ``pytest-xdist`` each fixture instance incorporates the worker ID
+into the temporary directory prefix.  The prefix takes the form
+``cmdmox-{worker}-{pid}-`` ensuring that socket paths and shim directories are
+unique across parallel workers.

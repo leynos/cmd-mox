@@ -13,6 +13,7 @@ from .errors import (
     VerificationError,
 )
 from .ipc import Invocation, IPCServer, Response
+from .pytest_plugin import cmd_mox as cmd_mox_fixture
 from .shimgen import SHIM_PATH, create_shim_symlinks
 
 __all__ = [
@@ -31,5 +32,6 @@ __all__ = [
     "UnexpectedCommandError",
     "UnfulfilledExpectationError",
     "VerificationError",
+    "cmd_mox_fixture",
     "create_shim_symlinks",
 ]

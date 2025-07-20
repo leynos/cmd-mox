@@ -1,0 +1,56 @@
+"""Unit tests for the pytest plugin."""
+
+from __future__ import annotations
+
+import subprocess
+import typing as t
+from pathlib import Path
+
+import pytest
+
+if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    from cmd_mox.controller import CmdMox
+
+pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
+
+
+@pytest.mark.usefixtures("cmd_mox")
+def test_fixture_basic(cmd_mox: CmdMox) -> None:
+    """Fixture yields a CmdMox instance and cleans up."""
+    cmd_mox.stub("hello").returns(stdout="hi")
+    cmd_mox.replay()
+    cmd_path = Path(cmd_mox.environment.shim_dir) / "hello"
+    result = subprocess.run(  # noqa: S603
+        [str(cmd_path)], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "hi"
+    cmd_mox.verify()
+
+
+def test_worker_prefix(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Worker ID is included in the environment prefix."""
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw99")
+    pytester.makepyfile(
+        """
+        import os
+        import subprocess
+        import pytest
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def test_worker(cmd_mox):
+            cmd_mox.stub('foo').returns(stdout='bar')
+            cmd_mox.replay()
+            path = cmd_mox.environment.shim_dir / 'foo'
+            res = subprocess.run(  # noqa: S603
+                [str(path)], capture_output=True, text=True, check=True
+            )
+            assert res.stdout.strip() == 'bar'
+            assert 'gw99' in os.path.basename(cmd_mox.environment.shim_dir)
+            cmd_mox.verify()
+        """
+    )
+    result = pytester.runpytest("-s")
+    result.assert_outcomes(passed=1)

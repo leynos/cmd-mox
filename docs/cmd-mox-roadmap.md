@@ -57,11 +57,11 @@
 
   - [x] `cmd_mox.mock(cmd)`, `cmd_mox.stub(cmd)`, `cmd_mox.spy(cmd)`
 
-- [ ] **Pytest Plugin**
+- [x] **Pytest Plugin**
 
-  - [ ] Register `cmd_mox` fixture
+  - [x] Register `cmd_mox` fixture
 
-  - [ ] xdist/parallelisation awareness (worker IDs, temp dirs)
+  - [x] xdist/parallelisation awareness (worker IDs, temp dirs)
 
 - [ ] **Context Manager Interface**
 

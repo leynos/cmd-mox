@@ -25,11 +25,12 @@ class EnvironmentManager:
     inadvertent environment leakage.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, prefix: str = "cmdmox-") -> None:
         self._orig_env: dict[str, str] | None = None
         self.shim_dir: Path | None = None
         self.socket_path: Path | None = None
         self._created_dir: Path | None = None
+        self._prefix = prefix
 
     def __enter__(self) -> EnvironmentManager:
         """Set up the temporary environment."""
@@ -39,7 +40,7 @@ class EnvironmentManager:
             raise RuntimeError(msg)
         _active_manager = self
         self._orig_env = os.environ.copy()
-        self.shim_dir = Path(tempfile.mkdtemp(prefix="cmdmox-"))
+        self.shim_dir = Path(tempfile.mkdtemp(prefix=self._prefix))
         self._created_dir = self.shim_dir
         os.environ["PATH"] = os.pathsep.join(
             [str(self.shim_dir), self._orig_env.get("PATH", "")]
