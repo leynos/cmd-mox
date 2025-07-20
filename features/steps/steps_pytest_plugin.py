@@ -16,8 +16,10 @@ class BehaveContext(t.Protocol):
     """Behave step context for plugin tests."""
 
     test_file: Path
-    tmpdir: Path
     result: subprocess.CompletedProcess[str]
+
+    def add_cleanup(self, func: t.Callable[..., object], *args: object) -> None:
+        """Register a clean-up callback."""
 
 
 @given("a temporary test file using the cmd_mox fixture")
@@ -41,8 +43,8 @@ def test_example(cmd_mox):
 """
     tmpdir = Path(tempfile.mkdtemp())
     context.test_file = tmpdir / "test_example.py"
-    context.tmpdir = tmpdir
     context.test_file.write_text(test_code)
+    context.add_cleanup(shutil.rmtree, tmpdir)
 
 
 @when("I run pytest on the file")
@@ -54,7 +56,6 @@ def step_run_pytest(context: BehaveContext) -> None:
         text=True,
     )
     context.result = result
-    shutil.rmtree(context.tmpdir)
 
 
 @then("the run should pass")
