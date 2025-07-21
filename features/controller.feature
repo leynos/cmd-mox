@@ -38,3 +38,10 @@ Feature: CmdMox basic functionality
     Then the journal order should be foo,bar,foo
     And the mock "foo" should record 2 invocation
     And the spy "bar" should record 1 invocation
+
+  Scenario: context manager usage
+    Given a CmdMox controller
+    And the command "hi" is stubbed to return "hello"
+    When I run the command "hi" using a with block
+    Then the output should be "hello"
+    Then the journal should contain 1 invocation of "hi"

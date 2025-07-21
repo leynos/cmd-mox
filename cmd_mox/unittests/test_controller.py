@@ -214,6 +214,21 @@ def test_invocation_order_multiple_calls() -> None:
     assert len(mox.spies["world"].invocations) == 1
 
 
+def test_context_manager_usage() -> None:
+    """Using ``CmdMox`` as a context manager restores the environment."""
+    original_path = os.environ["PATH"]
+    with CmdMox() as mox:
+        mox.stub("hi").returns(stdout="hello")
+        mox.replay()
+        cmd_path = Path(mox.environment.shim_dir) / "hi"
+        result = subprocess.run(  # noqa: S603
+            [str(cmd_path)], capture_output=True, text=True, check=True
+        )
+    mox.verify()
+    assert result.stdout.strip() == "hello"
+    assert os.environ["PATH"] == original_path
+
+
 def test_is_recording_property() -> None:
     """is_recording is True for mocks and spies, False for stubs."""
     mox = CmdMox()

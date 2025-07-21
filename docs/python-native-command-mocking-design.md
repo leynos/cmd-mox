@@ -175,7 +175,6 @@ fixture provides a fresh, properly configured `cmd_mox.CmdMox` instance for
 each test, with setup and teardown handled automatically.
 
 *Example Usage:*
-
 ```python
 # In conftest.py
 pytest_plugins = ("cmd_mox.pytest_plugin",)
@@ -205,7 +204,6 @@ that the environment is correctly set up on entry and, critically, that it is
 torn down and restored on exit, even in the case of an exception.
 
 *Example Usage:*
-
 ```python
 import cmd_mox
 import subprocess
@@ -221,6 +219,12 @@ with cmd_mox.CmdMox() as mox:
 mox.verify()
 # The PATH is automatically restored here.
 ```
+
+`__enter__` delegates to :class:`EnvironmentManager`, ensuring the PATH and IPC
+variables are set up. `__exit__` stops any running server and restores the
+original environment. Verification may occur inside the ``with`` block or after
+it has exited; if called later, ``CmdMox`` detects that cleanup already
+happened and merely performs journal checks.
 
 ### 2.3 Creating Test Doubles: `mox.mock()`, `mox.stub()`, and `mox.spy()`
 
@@ -375,9 +379,7 @@ the following steps:
 
 This symlink-based approach is highly efficient and ensures that any updates or
 bug fixes to the shim logic only need to be applied to one central template
-file.
-
-```mermaid
+```file.
 sequenceDiagram
     actor User
     participant App as Application
@@ -465,7 +467,6 @@ ensure it appears before clients connect. On the client side, `invoke_server()`
 retries connection attempts a few times and validates that the server's reply
 is valid JSON, raising a `RuntimeError` if decoding fails. These safeguards
 make the IPC bus robust on slower or heavily loaded systems.
-
 ```mermaid
 classDiagram
     class IPCServer {
@@ -505,7 +506,6 @@ classDiagram
     IPCServer --> Invocation : handles
     IPCServer --> Response : returns
 ```
-
 ```mermaid
 sequenceDiagram
     actor Shim
@@ -750,7 +750,6 @@ for this purpose:
   structured access to a single call's details.
 
 *Example Assertion-Style Verification:*
-
 ```python
 def test_downloader_uses_correct_user_agent(mox):
     spy = mox.spy('curl')
@@ -836,7 +835,6 @@ The user would test this by executing the full command line (e.g., via
 command in the pipeline:
 
 *Example Pipeline Test:*
-
 ```python
 def test_pipeline_logic(mox):
     # Mock the first command in the pipe
@@ -989,7 +987,6 @@ configured :class:`Response`; otherwise it echoes the command name. During
 registered stub and that each stub was called at least once. This simplified
 verification establishes the record → replay → verify workflow and lays the
 groundwork for upcoming expectation and spy features.
-
 ```mermaid
 sequenceDiagram
     actor Tester
@@ -1020,7 +1017,6 @@ improper use of `replay()` or `verify()`, `UnexpectedCommandError` indicates an
 invocation without a matching stub, and `UnfulfilledExpectationError` reports
 stubs that were never called. To aid debugging, these errors include the
 controller's active phase in their messages.
-
 ```mermaid
 classDiagram
     class CmdMox {
@@ -1065,7 +1061,6 @@ classDiagram
     StubCommand "1" -- "1" Response : configures
     IPCServer "1" -- "*" Invocation : handles
 ```
-
 ```mermaid
 classDiagram
     class CmdMoxError {

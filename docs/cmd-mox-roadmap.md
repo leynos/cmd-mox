@@ -63,9 +63,9 @@
 
   - [x] xdist/parallelisation awareness (worker IDs, temp dirs)
 
-- [ ] **Context Manager Interface**
+- [x] **Context Manager Interface**
 
-  - [ ] Support for explicit `with cmd_mox.CmdMox() as mox:` usage
+  - [x] Support for explicit `with cmd_mox.CmdMox() as mox:` usage
 
 ## **IV. Command Double Implementations**
 

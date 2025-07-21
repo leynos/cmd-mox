@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -59,6 +60,21 @@ def verify_controller(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
     """Invoke verification and close context."""
     mox.verify()
     mox_stack.close()
+
+
+@when(
+    parsers.cfparse('I run the command "{cmd}" using a with block'),
+    target_fixture="result",
+)
+def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* inside a ``with mox`` block and verify afterwards."""
+    original_path = os.environ["PATH"]
+    with mox:
+        mox.replay()
+        result = subprocess.run([cmd], capture_output=True, text=True, check=True)  # noqa: S603
+    mox.verify()
+    assert os.environ["PATH"] == original_path
+    return result
 
 
 @then(parsers.cfparse('the output should be "{text}"'))
@@ -122,4 +138,10 @@ def test_spy_records_invocation() -> None:
 )
 def test_journal_preserves_order() -> None:
     """Journal records commands in order."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "context manager usage")
+def test_context_manager_usage() -> None:
+    """CmdMox works within a ``with`` block."""
     pass
