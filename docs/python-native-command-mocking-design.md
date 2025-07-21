@@ -379,7 +379,7 @@ the following steps:
 
 This symlink-based approach is highly efficient and ensures that any updates or
 bug fixes to the shim logic only need to be applied to one central template
-```file.
+```mermaid
 sequenceDiagram
     actor User
     participant App as Application

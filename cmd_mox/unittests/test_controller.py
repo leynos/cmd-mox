@@ -214,18 +214,28 @@ def test_invocation_order_multiple_calls() -> None:
     assert len(mox.spies["world"].invocations) == 1
 
 
-def test_context_manager_usage() -> None:
-    """Using ``CmdMox`` as a context manager restores the environment."""
+def test_context_manager_restores_env_on_exception() -> None:
+    """Context manager restores environment even if an exception occurs."""
+
+    class CustomError(Exception):
+        """Exception used to trigger cleanup."""
+
+    def run_with_error() -> None:
+        with mox:
+            mox.stub("boom").returns(stdout="oops")
+            mox.replay()
+            cmd_path = Path(mox.environment.shim_dir) / "boom"
+            subprocess.run(  # noqa: S603
+                [str(cmd_path)], capture_output=True, text=True, check=True
+            )
+            raise CustomError
+
     original_path = os.environ["PATH"]
-    with CmdMox() as mox:
-        mox.stub("hi").returns(stdout="hello")
-        mox.replay()
-        cmd_path = Path(mox.environment.shim_dir) / "hi"
-        result = subprocess.run(  # noqa: S603
-            [str(cmd_path)], capture_output=True, text=True, check=True
-        )
+    mox = CmdMox()
+    with pytest.raises(CustomError):
+        run_with_error()
+
     mox.verify()
-    assert result.stdout.strip() == "hello"
     assert os.environ["PATH"] == original_path
 
 
