@@ -99,11 +99,22 @@ class Phase(enum.Enum):
 class CmdMox:
     """Central orchestrator implementing the record-replay-verify lifecycle."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, verify_on_exit: bool = True) -> None:
+        """Create a new controller.
+
+        Parameters
+        ----------
+        verify_on_exit:
+            When ``True`` (the default), :meth:`__exit__` will automatically
+            call :meth:`verify`. This catches missed verifications and ensures
+            the environment is restored. Disable for explicit control.
+        """
         self.environment = EnvironmentManager()
         self._server: _CallbackIPCServer | None = None
         self._entered = False
         self._phase = Phase.RECORD
+
+        self._verify_on_exit = verify_on_exit
 
         self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque()
@@ -153,7 +164,10 @@ class CmdMox:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:  # pragma: no cover - thin wrapper
-        """Exit context and clean up the environment."""
+        """Exit context, optionally verifying and cleaning up."""
+        if self._handle_auto_verify(exc_type):
+            return
+
         if self._server is not None:
             try:
                 self._server.stop()
@@ -162,6 +176,21 @@ class CmdMox:
         if self._entered:
             self.environment.__exit__(exc_type, exc, tb)
             self._entered = False
+
+    def _handle_auto_verify(self, exc_type: type[BaseException] | None) -> bool:
+        """Invoke :meth:`verify` when exiting a replay block."""
+        if not self._verify_on_exit or self._phase is not Phase.REPLAY:
+            return False
+        verify_error: Exception | None = None
+        try:
+            self.verify()
+        except Exception as err:  # noqa: BLE001
+            # pragma: no cover - verification failed
+            verify_error = err
+        if exc_type is None and verify_error is not None:
+            raise verify_error
+        # Early return is safe: verify() handles server shutdown and environment cleanup
+        return True
 
     # ------------------------------------------------------------------
     # Public API

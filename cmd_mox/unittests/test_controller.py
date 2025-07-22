@@ -214,6 +214,43 @@ def test_invocation_order_multiple_calls() -> None:
     assert len(mox.spies["world"].invocations) == 1
 
 
+def test_context_manager_restores_env_on_exception() -> None:
+    """Context manager restores environment even if an exception occurs."""
+
+    class CustomError(Exception):
+        """Exception used to trigger cleanup."""
+
+    def run_with_error() -> None:
+        with mox:
+            mox.stub("boom").returns(stdout="oops")
+            mox.replay()
+            cmd_path = Path(mox.environment.shim_dir) / "boom"
+            subprocess.run(  # noqa: S603
+                [str(cmd_path)], capture_output=True, text=True, check=True
+            )
+            raise CustomError
+
+    original_env = os.environ.copy()
+    mox = CmdMox()
+    with pytest.raises(CustomError):
+        run_with_error()
+
+    assert os.environ == original_env
+
+
+def test_context_manager_auto_verify() -> None:
+    """Exiting the context automatically calls verify."""
+    mox = CmdMox()
+    mox.stub("hi").returns(stdout="hello")
+    with mox:
+        mox.replay()
+        cmd_path = Path(mox.environment.shim_dir) / "hi"
+        subprocess.run([str(cmd_path)], capture_output=True, text=True, check=True)  # noqa: S603
+
+    with pytest.raises(LifecycleError):
+        mox.verify()
+
+
 def test_is_recording_property() -> None:
     """is_recording is True for mocks and spies, False for stubs."""
     mox = CmdMox()
