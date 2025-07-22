@@ -16,6 +16,7 @@ from cmd_mox.errors import (
     MissingEnvironmentError,
     UnexpectedCommandError,
 )
+from cmd_mox.ipc import Response
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.ipc import Invocation
@@ -283,3 +284,23 @@ def test_stub_runs_handler() -> None:
     mox.verify()
 
     assert result.stdout.strip() == "handled"
+
+
+def test_stub_handler_returns_response() -> None:
+    """Dynamic handlers may return a ``Response`` instance."""
+
+    def handler(invocation: Invocation) -> Response:
+        assert invocation.args == []
+        return Response(stdout="r", stderr="", exit_code=0)
+
+    mox = CmdMox()
+    mox.stub("obj").runs(handler)
+    mox.__enter__()
+    mox.replay()
+
+    cmd_path = Path(mox.environment.shim_dir) / "obj"
+    result = subprocess.run([str(cmd_path)], capture_output=True, text=True, check=True)  # noqa: S603
+
+    mox.verify()
+
+    assert result.stdout.strip() == "r"

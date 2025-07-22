@@ -605,12 +605,14 @@ the following process:
 5. **Execution:** The shim receives this payload, prints "match" to its
    `stdout`, and exits with status 0.
 
-6. **Verification:** During `mox.verify()`, stubs are not checked. If the `grep`
-   command is never called, the test still passes. This "fire-and-forget"
-   nature is the defining characteristic of a stub.
+6. **Verification:** During `mox.verify()`, stubs are not checked. If the
+   `grep` command is never called, the test still passes. This
+   "fire-and-forget" nature is the defining characteristic of a stub.
 
-Implementation-wise, the controller marks only mocks as "expected". Unused
-stubs therefore never raise `UnfulfilledExpectationError` during verification.
+   Implementation-wise, the controller marks only mocks as "expected". Unused
+   stubs therefore never raise `UnfulfilledExpectationError` during
+   verification. Stub invocations still appear in the global journal for later
+   inspection.
 
 ### 4.2 Advanced Stubs: Callable Handlers
 
@@ -983,11 +985,13 @@ management and a minimal stub facility. The controller wraps
 ``EnvironmentManager`` and ``IPCServer`` to orchestrate environment setup and
 inter-process communication. Invocations from shims are appended to an internal
 journal. When a stub is registered for a command, the controller returns the
-configured :class:`Response`; otherwise it echoes the command name. During
-``verify()`` the controller asserts that every invocation corresponds to a
-registered stub and that each stub was called at least once. This simplified
-verification establishes the record → replay → verify workflow and lays the
-groundwork for upcoming expectation and spy features.
+configured :class:`Response`; otherwise it echoes the command name.
+
+During ``verify()`` the controller fails if unexpected commands were executed
+or if any registered mock command was never called. Stubs are ignored during
+this phase. This simplified verification establishes the record → replay →
+verify workflow and lays the groundwork for upcoming expectation and spy
+features.
 ```mermaid
 sequenceDiagram
     actor Tester
