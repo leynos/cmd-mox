@@ -609,6 +609,9 @@ the following process:
    command is never called, the test still passes. This "fire-and-forget"
    nature is the defining characteristic of a stub.
 
+Implementation-wise, the controller marks only mocks as "expected". Unused
+stubs therefore never raise `UnfulfilledExpectationError` during verification.
+
 ### 4.2 Advanced Stubs: Callable Handlers
 
 To support dynamic or stateful behavior, `CmdMox` allows stubs to be configured

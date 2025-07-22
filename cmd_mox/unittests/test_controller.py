@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import typing as t
 from pathlib import Path
 
 import pytest
@@ -14,8 +15,10 @@ from cmd_mox.errors import (
     LifecycleError,
     MissingEnvironmentError,
     UnexpectedCommandError,
-    UnfulfilledExpectationError,
 )
+
+if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    from cmd_mox.ipc import Invocation
 
 
 def test_cmdmox_stub_records_invocation() -> None:
@@ -94,8 +97,7 @@ def _test_environment_cleanup_helper(*, call_replay_before_exception: bool) -> N
         pass
     finally:
         if call_replay_before_exception:
-            with pytest.raises(UnfulfilledExpectationError):
-                mox.verify()
+            mox.verify()
         mox.__exit__(None, None, None)
 
     # Ensure PATH is fully restored
@@ -261,3 +263,23 @@ def test_is_recording_property() -> None:
     assert not stub.is_recording
     assert mock.is_recording
     assert spy.is_recording
+
+
+def test_stub_runs_handler() -> None:
+    """Stub runs a dynamic handler when invoked."""
+
+    def handler(invocation: Invocation) -> tuple[str, str, int]:
+        assert invocation.args == []
+        return ("handled", "", 0)
+
+    mox = CmdMox()
+    mox.stub("dyn").runs(handler)
+    mox.__enter__()
+    mox.replay()
+
+    cmd_path = Path(mox.environment.shim_dir) / "dyn"
+    result = subprocess.run([str(cmd_path)], capture_output=True, text=True, check=True)  # noqa: S603
+
+    mox.verify()
+
+    assert result.stdout.strip() == "handled"

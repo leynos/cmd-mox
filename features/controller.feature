@@ -45,3 +45,12 @@ Feature: CmdMox basic functionality
     When I run the command "hi" using a with block
     Then the output should be "hello"
     Then the journal should contain 1 invocation of "hi"
+
+  Scenario: stub runs dynamic handler
+    Given a CmdMox controller
+    And the command "dyn" is stubbed to run a handler
+    When I replay the controller
+    And I run the command "dyn"
+    Then the output should be "handled"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "dyn"

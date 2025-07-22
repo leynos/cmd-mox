@@ -41,7 +41,14 @@ class _CallbackIPCServer(IPCServer):
 class CommandDouble:
     """Configuration for a stub, mock, or spy command."""
 
-    __slots__ = ("controller", "invocations", "kind", "name", "response")
+    __slots__ = (
+        "controller",
+        "handler",
+        "invocations",
+        "kind",
+        "name",
+        "response",
+    )
 
     T_Kind = t.Literal["stub", "mock", "spy"]
 
@@ -50,6 +57,7 @@ class CommandDouble:
         self.kind = kind
         self.controller = controller
         self.response = Response()
+        self.handler: t.Callable[[Invocation], Response] | None = None
         self.invocations: list[Invocation] = []
 
     T_Self = t.TypeVar("T_Self", bound="CommandDouble")
@@ -59,12 +67,29 @@ class CommandDouble:
     ) -> T_Self:
         """Set the static response and return ``self``."""
         self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
+        self.handler = None
+        return self
+
+    def runs(
+        self: T_Self,
+        handler: t.Callable[[Invocation], tuple[str, str, int] | Response],
+    ) -> T_Self:
+        """Use *handler* to generate responses dynamically."""
+
+        def _wrap(invocation: Invocation) -> Response:
+            result = handler(invocation)
+            if isinstance(result, Response):
+                return result
+            stdout, stderr, exit_code = result
+            return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+        self.handler = _wrap
         return self
 
     @property
     def is_expected(self) -> bool:
-        """Return ``True`` for stubs and mocks."""
-        return self.kind in ("stub", "mock")
+        """Return ``True`` only for mocks."""
+        return self.kind == "mock"
 
     @property
     def is_recording(self) -> bool:
@@ -316,4 +341,6 @@ class CmdMox:
             return Response(stdout=invocation.command)
         if dbl.is_recording:
             dbl.invocations.append(invocation)
+        if dbl.handler is not None:
+            return dbl.handler(invocation)
         return dbl.response

@@ -5,11 +5,15 @@ from __future__ import annotations
 import contextlib
 import os
 import subprocess
+import typing as t
 from pathlib import Path
 
 from pytest_bdd import given, parsers, scenario, then, when
 
 from cmd_mox.controller import CmdMox
+
+if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    from cmd_mox.ipc import Invocation
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
@@ -36,6 +40,17 @@ def mock_command(mox: CmdMox, cmd: str, text: str) -> None:
 def spy_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a spied command."""
     mox.spy(cmd).returns(stdout=text)
+
+
+@given(parsers.cfparse('the command "{cmd}" is stubbed to run a handler'))
+def stub_runs(mox: CmdMox, cmd: str) -> None:
+    """Configure a stub with a dynamic handler."""
+
+    def handler(invocation: Invocation) -> tuple[str, str, int]:
+        assert invocation.command == cmd
+        return ("handled", "", 0)
+
+    mox.stub(cmd).runs(handler)
 
 
 @when("I replay the controller", target_fixture="mox_stack")
@@ -143,4 +158,10 @@ def test_journal_preserves_order() -> None:
 @scenario(str(FEATURES_DIR / "controller.feature"), "context manager usage")
 def test_context_manager_usage() -> None:
     """CmdMox works within a ``with`` block."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "stub runs dynamic handler")
+def test_stub_runs_dynamic_handler() -> None:
+    """Stub executes a custom handler."""
     pass
