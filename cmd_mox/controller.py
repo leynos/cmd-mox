@@ -165,15 +165,7 @@ class CmdMox:
         tb: TracebackType | None,
     ) -> None:  # pragma: no cover - thin wrapper
         """Exit context, optionally verifying and cleaning up."""
-        if self._verify_on_exit and self._phase is Phase.REPLAY:
-            verify_error: Exception | None = None
-            try:
-                self.verify()
-            except Exception as err:  # noqa: BLE001
-                # pragma: no cover - verification failed
-                verify_error = err
-            if exc_type is None and verify_error is not None:
-                raise verify_error
+        if self._handle_auto_verify(exc_type):
             return
 
         if self._server is not None:
@@ -184,6 +176,21 @@ class CmdMox:
         if self._entered:
             self.environment.__exit__(exc_type, exc, tb)
             self._entered = False
+
+    def _handle_auto_verify(self, exc_type: type[BaseException] | None) -> bool:
+        """Invoke :meth:`verify` when exiting a replay block."""
+        if not self._verify_on_exit or self._phase is not Phase.REPLAY:
+            return False
+        verify_error: Exception | None = None
+        try:
+            self.verify()
+        except Exception as err:  # noqa: BLE001
+            # pragma: no cover - verification failed
+            verify_error = err
+        if exc_type is None and verify_error is not None:
+            raise verify_error
+        # Early return is safe: verify() handles server shutdown and environment cleanup
+        return True
 
     # ------------------------------------------------------------------
     # Public API
