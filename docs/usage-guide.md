@@ -16,7 +16,7 @@ In your `conftest.py`:
 pytest_plugins = ("cmd_mox.pytest_plugin",)
 ```
 
-Each test receives a `cmd_mox` fixture giving access to the controller object.
+Each test receives a `cmd_mox` fixture that provides access to the controller object.
 
 ## Basic workflow
 
@@ -29,6 +29,16 @@ The three phases are defined in the design document:
 3. **Verify** – ensure every expectation was met and nothing unexpected happened.
 
 These phases form a strict sequence for reliable command-line tests.
+
+A typical test brings the three phases together:
+
+```python
+cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
+
+cmd_mox.replay()
+my_tool.clone_repo("repo")
+cmd_mox.verify()
+```
 
 ## Stubs, mocks and spies
 
@@ -127,10 +137,13 @@ The DSL methods closely mirror those described in the design specification. A fe
 - `with_matching_args(*matchers)` – match arguments using comparators.
 - `with_stdin(data)` – expect specific standard input.
 - `with_env(mapping)` – set additional environment variables for the invocation.
-- `returns(stdout=b"", stderr=b"", exit_code=0)` – static response.
+- `returns(stdout="", stderr="", exit_code=0)` – static response.
+
+*Note: All examples use string values for `stdout` and `stderr`. If you need to return bytes, pass a bytes object such as `stdout=b"output"`. Mixing types is not recommended unless explicitly required and documented.*
+
 - `runs(handler)` – call a function to produce dynamic output.
 - `times(count)` – expect the command exactly `count` times.
 - `in_order()` – enforce strict ordering with other expectations.
 - `passthrough()` – for spies, run the real command while recording it.
 
-Refer to `python-native-command-mocking-design.md` for the full table of methods and examples.
+Refer to the [design document](./python-native-command-mocking-design.md) for the full table of methods and examples.
