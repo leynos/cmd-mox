@@ -68,12 +68,11 @@ def verify_controller(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
 )
 def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     """Run *cmd* inside a ``with mox`` block and verify afterwards."""
-    original_path = os.environ["PATH"]
+    original_env = os.environ.copy()
     with mox:
         mox.replay()
         result = subprocess.run([cmd], capture_output=True, text=True, check=True)  # noqa: S603
-    mox.verify()
-    assert os.environ["PATH"] == original_path
+    assert os.environ == original_env
     return result
 
 

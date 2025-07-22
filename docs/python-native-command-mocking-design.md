@@ -215,16 +215,14 @@ with cmd_mox.CmdMox() as mox:
     # The PATH is now modified within this block.
     output = subprocess.check_output(['ls', '-l'], text=True)
     assert output == 'total 0'
-
-mox.verify()
-# The PATH is automatically restored here.
+# Exiting the block automatically calls ``mox.verify()`` and restores PATH
 ```
 
 `__enter__` delegates to :class:`EnvironmentManager`, ensuring the PATH and IPC
-variables are set up. `__exit__` stops any running server and restores the
-original environment. Verification may occur inside the ``with`` block or after
-it has exited; if called later, ``CmdMox`` detects that cleanup already
-happened and merely performs journal checks.
+variables are set up. By default `__exit__` invokes :meth:`verify`, stopping
+any running server and restoring the original environment. This behaviour can
+be disabled via ``CmdMox(verify_on_exit=False)`` when manual control is
+required.
 
 ### 2.3 Creating Test Doubles: `mox.mock()`, `mox.stub()`, and `mox.spy()`
 

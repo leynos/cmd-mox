@@ -230,13 +230,25 @@ def test_context_manager_restores_env_on_exception() -> None:
             )
             raise CustomError
 
-    original_path = os.environ["PATH"]
+    original_env = os.environ.copy()
     mox = CmdMox()
     with pytest.raises(CustomError):
         run_with_error()
 
-    mox.verify()
-    assert os.environ["PATH"] == original_path
+    assert os.environ == original_env
+
+
+def test_context_manager_auto_verify() -> None:
+    """Exiting the context automatically calls verify."""
+    mox = CmdMox()
+    mox.stub("hi").returns(stdout="hello")
+    with mox:
+        mox.replay()
+        cmd_path = Path(mox.environment.shim_dir) / "hi"
+        subprocess.run([str(cmd_path)], capture_output=True, text=True, check=True)  # noqa: S603
+
+    with pytest.raises(LifecycleError):
+        mox.verify()
 
 
 def test_is_recording_property() -> None:
