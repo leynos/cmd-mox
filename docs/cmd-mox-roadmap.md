@@ -69,11 +69,11 @@
 
 ## **IV. Command Double Implementations**
 
-- [ ] **StubCommand**
+- [x] **StubCommand**
 
-  - [ ] `.returns()` and `.runs()` (static/dynamic behaviour)
+  - [x] `.returns()` and `.runs()` (static/dynamic behaviour)
 
-  - [ ] No verification/required calls
+  - [x] No verification/required calls
 
 - [ ] **MockCommand**
 
