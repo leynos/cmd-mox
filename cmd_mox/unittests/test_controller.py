@@ -266,41 +266,39 @@ def test_is_recording_property() -> None:
     assert spy.is_recording
 
 
-def test_stub_runs_handler() -> None:
+def _tuple_handler(invocation: Invocation) -> tuple[str, str, int]:
+    assert invocation.args == []
+    return ("handled", "", 0)
+
+
+def _response_handler(invocation: Invocation) -> Response:
+    assert invocation.args == []
+    return Response(stdout="r", stderr="", exit_code=0)
+
+
+@pytest.mark.parametrize(
+    ("cmd", "handler", "expected"),
+    [
+        ("dyn", _tuple_handler, "handled"),
+        ("obj", _response_handler, "r"),
+    ],
+)
+def test_stub_runs_handler(
+    cmd: str,
+    handler: t.Callable[[Invocation], Response | tuple[str, str, int]],
+    expected: str,
+) -> None:
     """Stub runs a dynamic handler when invoked."""
-
-    def handler(invocation: Invocation) -> tuple[str, str, int]:
-        assert invocation.args == []
-        return ("handled", "", 0)
-
     mox = CmdMox()
-    mox.stub("dyn").runs(handler)
+    mox.stub(cmd).runs(handler)
     mox.__enter__()
     mox.replay()
 
-    cmd_path = Path(mox.environment.shim_dir) / "dyn"
-    result = subprocess.run([str(cmd_path)], capture_output=True, text=True, check=True)  # noqa: S603
+    cmd_path = Path(mox.environment.shim_dir) / cmd
+    result = subprocess.run(  # noqa: S603
+        [str(cmd_path)], capture_output=True, text=True, check=True
+    )
 
     mox.verify()
 
-    assert result.stdout.strip() == "handled"
-
-
-def test_stub_handler_returns_response() -> None:
-    """Dynamic handlers may return a ``Response`` instance."""
-
-    def handler(invocation: Invocation) -> Response:
-        assert invocation.args == []
-        return Response(stdout="r", stderr="", exit_code=0)
-
-    mox = CmdMox()
-    mox.stub("obj").runs(handler)
-    mox.__enter__()
-    mox.replay()
-
-    cmd_path = Path(mox.environment.shim_dir) / "obj"
-    result = subprocess.run([str(cmd_path)], capture_output=True, text=True, check=True)  # noqa: S603
-
-    mox.verify()
-
-    assert result.stdout.strip() == "r"
+    assert result.stdout.strip() == expected
