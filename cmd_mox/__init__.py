@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from .controller import CmdMox, CommandDouble, MockCommand, SpyCommand
 from .environment import EnvironmentManager
 from .errors import (
@@ -18,17 +19,23 @@ from .shimgen import SHIM_PATH, create_shim_symlinks
 
 __all__ = [
     "SHIM_PATH",
+    "Any",
     "CmdMox",
     "CmdMoxError",
     "CommandDouble",
+    "Contains",
     "EnvironmentManager",
     "IPCServer",
     "Invocation",
+    "IsA",
     "LifecycleError",
     "MissingEnvironmentError",
     "MockCommand",
+    "Predicate",
+    "Regex",
     "Response",
     "SpyCommand",
+    "StartsWith",
     "UnexpectedCommandError",
     "UnfulfilledExpectationError",
     "VerificationError",

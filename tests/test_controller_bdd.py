@@ -36,6 +36,14 @@ def mock_command(mox: CmdMox, cmd: str, text: str) -> None:
     mox.mock(cmd).returns(stdout=text)
 
 
+@given(
+    parsers.cfparse('the command "{cmd}" is mocked to return "{text}" times {count:d}')
+)
+def mock_command_times(mox: CmdMox, cmd: str, text: str, count: int) -> None:
+    """Configure a mocked command with an expected call count."""
+    mox.mock(cmd).returns(stdout=text).times(count)
+
+
 @given(parsers.cfparse('the command "{cmd}" is spied to return "{text}"'))
 def spy_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a spied command."""
@@ -53,6 +61,26 @@ def stub_runs(mox: CmdMox, cmd: str) -> None:
     mox.stub(cmd).runs(handler)
 
 
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked with args "{args}" returning "{text}" in order'
+    )
+)
+def mock_with_args_in_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
+    """Configure an ordered mock with arguments."""
+    mox.mock(cmd).with_args(*args.split()).returns(stdout=text).in_order()
+
+
+@given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))
+def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
+    """Stub command that outputs an injected env variable."""
+
+    def handler(invocation: Invocation) -> tuple[str, str, int]:
+        return (os.environ.get(var, ""), "", 0)
+
+    mox.stub(cmd).with_env({var: val}).runs(handler)
+
+
 @when("I replay the controller", target_fixture="mox_stack")
 def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
     """Enter replay mode within a context manager."""
@@ -68,6 +96,18 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
         [cmd], capture_output=True, text=True, check=True
     )
+
+
+@when(
+    parsers.cfparse('I run the command "{cmd}" with arguments "{args}"'),
+    target_fixture="result",
+)
+def run_command_args(
+    mox: CmdMox, cmd: str, args: str
+) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* with additional arguments."""
+    argv = [cmd, *args.split()]
+    return subprocess.run(argv, capture_output=True, text=True, check=True)  # noqa: S603
 
 
 @when("I verify the controller")
@@ -164,4 +204,18 @@ def test_context_manager_usage() -> None:
 @scenario(str(FEATURES_DIR / "controller.feature"), "stub runs dynamic handler")
 def test_stub_runs_dynamic_handler() -> None:
     """Stub executes a custom handler."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "ordered mocks match arguments")
+def test_ordered_mocks_match_arguments() -> None:
+    """Mocks enforce argument matching and ordering."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "environment variables can be injected"
+)
+def test_environment_injection() -> None:
+    """Stub applies environment variables to the shim."""
     pass

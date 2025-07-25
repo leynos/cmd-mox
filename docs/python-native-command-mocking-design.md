@@ -1098,3 +1098,22 @@ into the temporary directory prefix.  The prefix takes the form
 ``cmdmox-{worker}-{pid}-`` ensuring that socket paths and shim directories are
 unique across parallel workers. When ``PYTEST_XDIST_WORKER`` is absent the
 fixture falls back to ``main`` so the prefix becomes ``cmdmox-main-{pid}-``.
+
+### 8.5 Design Decisions for ``MockCommand`` Expectations
+
+The initial mock implementation now stores expectation details directly on the
+``CommandDouble`` object. Argument lists, stdin content and environment
+variables are captured via ``with_args()``, ``with_matching_args()``,
+``with_stdin()`` and ``with_env()`` methods. Each mock also tracks the required
+call count through ``times()`` and whether ordering should be enforced via
+``in_order()`` or ``any_order()``.
+
+Verification builds an ordered sequence from mocks marked with ``in_order()``.
+The journal of actual invocations is compared against this sequence while also
+validating argument and stdin matchers. Any deviation produces an
+``UnexpectedCommandError``. After replay, each mock's invocation count is
+checked against its ``times()`` setting, raising
+``UnfulfilledExpectationError`` for missing calls or ``UnexpectedCommandError``
+for excess calls. Environment variables specified with ``with_env()`` are
+injected into the shim via the ``Response`` object before executing the mock's
+handler or returning canned output.

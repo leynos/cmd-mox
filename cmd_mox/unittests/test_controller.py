@@ -199,7 +199,7 @@ def test_mock_and_spy_invocations() -> None:
 def test_invocation_order_multiple_calls() -> None:
     """Multiple calls are recorded in order."""
     mox = CmdMox()
-    mox.mock("hello").returns(stdout="hi")
+    mox.mock("hello").returns(stdout="hi").times(2)
     mox.spy("world").returns(stdout="earth")
     mox.__enter__()
     mox.replay()

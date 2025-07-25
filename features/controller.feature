@@ -28,7 +28,7 @@ Feature: CmdMox basic functionality
 
   Scenario: journal preserves invocation order
     Given a CmdMox controller
-    And the command "foo" is mocked to return "one"
+    And the command "foo" is mocked to return "one" times 2
     And the command "bar" is spied to return "two"
     When I replay the controller
     And I run the command "foo"
@@ -54,3 +54,22 @@ Feature: CmdMox basic functionality
     Then the output should be "handled"
     When I verify the controller
     Then the journal should contain 1 invocation of "dyn"
+
+  Scenario: ordered mocks match arguments
+    Given a CmdMox controller
+    And the command "first" is mocked with args "a" returning "one" in order
+    And the command "second" is mocked with args "b" returning "two" in order
+    When I replay the controller
+    And I run the command "first" with arguments "a"
+    And I run the command "second" with arguments "b"
+    When I verify the controller
+    Then the journal order should be first,second
+
+  Scenario: environment variables can be injected
+    Given a CmdMox controller
+    And the command "envcmd" is stubbed with env var "HELLO"="WORLD"
+    When I replay the controller
+    And I run the command "envcmd"
+    Then the output should be "WORLD"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "envcmd"
