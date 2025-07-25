@@ -22,8 +22,12 @@ def test_mock_with_args_and_order() -> None:
 
     path_first = Path(mox.environment.shim_dir) / "first"
     path_second = Path(mox.environment.shim_dir) / "second"
-    subprocess.run([str(path_first), "a"], capture_output=True, text=True, check=True)  # noqa: S603
-    subprocess.run([str(path_second), "b"], capture_output=True, text=True, check=True)  # noqa: S603
+    subprocess.run(  # noqa: S603
+        [str(path_first), "a"], capture_output=True, text=True, check=True, shell=False
+    )
+    subprocess.run(  # noqa: S603
+        [str(path_second), "b"], capture_output=True, text=True, check=True, shell=False
+    )
 
     mox.verify()
 
@@ -39,7 +43,9 @@ def test_mock_argument_mismatch() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "foo"
-    subprocess.run([str(path), "baz"], capture_output=True, text=True, check=True)  # noqa: S603
+    subprocess.run(  # noqa: S603
+        [str(path), "baz"], capture_output=True, text=True, check=True, shell=False
+    )
 
     with pytest.raises(UnexpectedCommandError):
         mox.verify()
@@ -54,7 +60,12 @@ def test_with_matching_args_and_stdin() -> None:
 
     path = Path(mox.environment.shim_dir) / "grep"
     subprocess.run(  # noqa: S603
-        [str(path), "foo=123"], input="data", text=True, capture_output=True, check=True
+        [str(path), "foo=123"],
+        input="data",
+        text=True,
+        capture_output=True,
+        check=True,
+        shell=False,
     )
 
     mox.verify()
@@ -72,7 +83,9 @@ def test_with_env_injection() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "env"
-    result = subprocess.run([str(path)], capture_output=True, text=True, check=True)  # noqa: S603
+    result = subprocess.run(  # noqa: S603
+        [str(path)], capture_output=True, text=True, check=True, shell=False
+    )
     mox.verify()
 
     assert result.stdout.strip() == "WORLD"

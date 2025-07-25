@@ -94,7 +94,7 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
 def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     """Invoke the stubbed command."""
     return subprocess.run(  # noqa: S603
-        [cmd], capture_output=True, text=True, check=True
+        [cmd], capture_output=True, text=True, check=True, shell=False
     )
 
 
@@ -107,7 +107,7 @@ def run_command_args(
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with additional arguments."""
     argv = [cmd, *args.split()]
-    return subprocess.run(argv, capture_output=True, text=True, check=True)  # noqa: S603
+    return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603
 
 
 @when("I verify the controller")
@@ -126,7 +126,9 @@ def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess
     original_env = os.environ.copy()
     with mox:
         mox.replay()
-        result = subprocess.run([cmd], capture_output=True, text=True, check=True)  # noqa: S603
+        result = subprocess.run(  # noqa: S603
+            [cmd], capture_output=True, text=True, check=True, shell=False
+        )
     assert os.environ == original_env
     return result
 

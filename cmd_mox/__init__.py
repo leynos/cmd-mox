@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from .controller import CmdMox, CommandDouble, MockCommand, SpyCommand
-from .environment import EnvironmentManager
+from .environment import EnvironmentManager, temporary_env
 from .errors import (
     CmdMoxError,
     LifecycleError,
@@ -13,6 +13,7 @@ from .errors import (
     UnfulfilledExpectationError,
     VerificationError,
 )
+from .expectations import Expectation
 from .ipc import Invocation, IPCServer, Response
 from .pytest_plugin import cmd_mox as cmd_mox_fixture
 from .shimgen import SHIM_PATH, create_shim_symlinks
@@ -25,6 +26,7 @@ __all__ = [
     "CommandDouble",
     "Contains",
     "EnvironmentManager",
+    "Expectation",
     "IPCServer",
     "Invocation",
     "IsA",
@@ -41,4 +43,5 @@ __all__ = [
     "VerificationError",
     "cmd_mox_fixture",
     "create_shim_symlinks",
+    "temporary_env",
 ]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import enum
-import os
 import typing as t
 from collections import deque
 
@@ -13,15 +12,12 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
     TracebackType = types.TracebackType
 
-from .environment import EnvironmentManager
-from .errors import (
-    LifecycleError,
-    MissingEnvironmentError,
-    UnexpectedCommandError,
-    UnfulfilledExpectationError,
-)
+from .environment import EnvironmentManager, temporary_env
+from .errors import LifecycleError, MissingEnvironmentError
+from .expectations import Expectation
 from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
+from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
 
 class _CallbackIPCServer(IPCServer):
@@ -44,16 +40,11 @@ class CommandDouble:
 
     __slots__ = (
         "controller",
-        "expected_args",
-        "expected_env",
-        "expected_stdin",
-        "expected_times",
+        "expectation",
         "handler",
         "invocations",
         "kind",
-        "matching_args",
         "name",
-        "ordered",
         "response",
     )
 
@@ -66,12 +57,7 @@ class CommandDouble:
         self.response = Response()
         self.handler: t.Callable[[Invocation], Response] | None = None
         self.invocations: list[Invocation] = []
-        self.expected_args: list[str] | None = None
-        self.matching_args: list[t.Callable[[str], bool]] | None = None
-        self.expected_stdin: str | t.Callable[[str], bool] | None = None
-        self.expected_env: dict[str, str] = {}
-        self.expected_times: int = 1
-        self.ordered = False
+        self.expectation = Expectation(name)
 
     T_Self = t.TypeVar("T_Self", bound="CommandDouble")
 
@@ -93,7 +79,7 @@ class CommandDouble:
             result = handler(invocation)
             if isinstance(result, Response):
                 return result
-            stdout, stderr, exit_code = result
+            stdout, stderr, exit_code = t.cast("tuple[str, str, int]", result)
             return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
         self.handler = _wrap
@@ -104,41 +90,41 @@ class CommandDouble:
     # ------------------------------------------------------------------
     def with_args(self: T_Self, *args: str) -> T_Self:
         """Match invocations with exactly ``args``."""
-        self.expected_args = list(args)
+        self.expectation.with_args(*args)
         return self
 
     def with_matching_args(self: T_Self, *matchers: t.Callable[[str], bool]) -> T_Self:
         """Match invocations using comparator callables."""
-        self.matching_args = list(matchers)
+        self.expectation.with_matching_args(*matchers)
         return self
 
     def with_stdin(self: T_Self, data: str | t.Callable[[str], bool]) -> T_Self:
         """Expect standard input to match ``data``."""
-        self.expected_stdin = data
+        self.expectation.with_stdin(data)
         return self
 
     def times(self: T_Self, count: int) -> T_Self:
         """Expect exactly ``count`` invocations."""
-        self.expected_times = count
+        self.expectation.times_called(count)
         return self
 
     def in_order(self: T_Self) -> T_Self:
         """Require this mock to be called in registration order."""
-        if self not in self.controller._ordered:
-            self.controller._ordered.append(self)
-        self.ordered = True
+        if self.expectation not in self.controller._ordered:
+            self.controller._ordered.append(self.expectation)
+        self.expectation.in_order()
         return self
 
     def any_order(self: T_Self) -> T_Self:
         """Allow this mock to be called in any order."""
-        if self in self.controller._ordered:
-            self.controller._ordered.remove(self)
-        self.ordered = False
+        if self.expectation in self.controller._ordered:
+            self.controller._ordered.remove(self.expectation)
+        self.expectation.any_order()
         return self
 
     def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self:
         """Inject additional environment variables when invoked."""
-        self.expected_env = mapping.copy()
+        self.expectation.with_env(mapping)
         return self
 
     # ------------------------------------------------------------------
@@ -146,26 +132,7 @@ class CommandDouble:
     # ------------------------------------------------------------------
     def matches(self, invocation: Invocation) -> bool:
         """Return ``True`` if *invocation* satisfies the expectation."""
-        if invocation.command != self.name:
-            return False
-        if self.expected_args is not None and invocation.args != self.expected_args:
-            return False
-        if self.matching_args is not None:
-            if len(invocation.args) != len(self.matching_args):
-                return False
-            for arg, matcher in zip(invocation.args, self.matching_args, strict=True):
-                if not matcher(arg):
-                    return False
-        if self.expected_stdin is not None:
-            if callable(self.expected_stdin):
-                if not self.expected_stdin(invocation.stdin):
-                    return False
-            elif invocation.stdin != self.expected_stdin:
-                return False
-        for key, value in self.expected_env.items():
-            if invocation.env.get(key) != value:
-                return False
-        return True
+        return self.expectation.matches(invocation)
 
     @property
     def is_expected(self) -> bool:
@@ -225,7 +192,7 @@ class CmdMox:
         self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque()
         self._commands: set[str] = set()
-        self._ordered: list[CommandDouble] = []
+        self._ordered: list[Expectation] = []
 
     # ------------------------------------------------------------------
     # Double accessors
@@ -385,53 +352,12 @@ class CmdMox:
             )
             raise LifecycleError(msg)
         try:
-            all_registered = self._registered_commands()
-            for inv in self.journal:
-                if inv.command not in all_registered:
-                    msg = f"Unexpected commands invoked: {inv.command}"
-                    raise UnexpectedCommandError(msg)
+            expectations = {n: d.expectation for n, d in self.mocks.items()}
+            inv_map = {n: d.invocations for n, d in self.mocks.items()}
 
-            ordered_seq: list[CommandDouble] = []
-            for dbl in self._ordered:
-                ordered_seq.extend([dbl] * dbl.expected_times)
-            order_index = 0
-
-            for inv in self.journal:
-                dbl = self._doubles.get(inv.command)
-                if dbl is None or dbl.kind == "stub":
-                    continue
-                if not dbl.matches(inv):
-                    msg = (
-                        "Unexpected invocation for "
-                        f"{inv.command}: args or stdin mismatch"
-                    )
-                    raise UnexpectedCommandError(msg)
-                if dbl.ordered:
-                    if (
-                        order_index >= len(ordered_seq)
-                        or ordered_seq[order_index] is not dbl
-                    ):
-                        msg = f"Unexpected call order for {inv.command}"
-                        raise UnexpectedCommandError(msg)
-                    order_index += 1
-
-            if order_index != len(ordered_seq):
-                remaining = [d.name for d in ordered_seq[order_index:]]
-                msg = f"Expected commands not called in order: {remaining}"
-                raise UnfulfilledExpectationError(msg)
-
-            for name, dbl in self.mocks.items():
-                expected = dbl.expected_times
-                actual = len(dbl.invocations)
-                if actual < expected:
-                    msg = (
-                        f"Expected {name} to be called {expected} times "
-                        f"but got {actual}"
-                    )
-                    raise UnfulfilledExpectationError(msg)
-                if actual > expected:
-                    msg = f"{name} called more than expected ({actual} > {expected})"
-                    raise UnexpectedCommandError(msg)
+            UnexpectedCommandVerifier().verify(self.journal, self._doubles)
+            OrderVerifier(self._ordered).verify(self.journal)
+            CountVerifier().verify(expectations, inv_map)
         finally:
             if self._server is not None:
                 try:
@@ -454,9 +380,12 @@ class CmdMox:
             return Response(stdout=invocation.command)
         if dbl.is_recording:
             dbl.invocations.append(invocation)
-        if dbl.expected_env:
-            os.environ.update(dbl.expected_env)
-        resp = dbl.handler(invocation) if dbl.handler is not None else dbl.response
-        if dbl.expected_env:
-            resp.env.update(dbl.expected_env)
+        env = dbl.expectation.env
+        if env and dbl.handler is not None:
+            with temporary_env(env):
+                resp = dbl.handler(invocation)
+        else:
+            resp = dbl.handler(invocation) if dbl.handler is not None else dbl.response
+        if env:
+            resp.env.update(env)
         return resp

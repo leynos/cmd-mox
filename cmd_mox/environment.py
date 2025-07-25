@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import tempfile
@@ -79,3 +80,18 @@ class EnvironmentManager:
             ):
                 shutil.rmtree(self.shim_dir, ignore_errors=True)
             self._created_dir = None
+
+
+@contextlib.contextmanager
+def temporary_env(mapping: dict[str, str]) -> t.Iterator[None]:
+    """Temporarily apply environment variables from *mapping*."""
+    saved: dict[str, str | None] = {k: os.environ.get(k) for k in mapping}
+    os.environ.update(mapping)
+    try:
+        yield
+    finally:
+        for key, val in saved.items():
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val

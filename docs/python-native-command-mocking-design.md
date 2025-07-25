@@ -1101,19 +1101,18 @@ fixture falls back to ``main`` so the prefix becomes ``cmdmox-main-{pid}-``.
 
 ### 8.5 Design Decisions for ``MockCommand`` Expectations
 
-The initial mock implementation now stores expectation details directly on the
-``CommandDouble`` object. Argument lists, stdin content and environment
-variables are captured via ``with_args()``, ``with_matching_args()``,
-``with_stdin()`` and ``with_env()`` methods. Each mock also tracks the required
-call count through ``times()`` and whether ordering should be enforced via
-``in_order()`` or ``any_order()``.
+Expectation configuration now lives in a dedicated :class:`Expectation` object
+held by each ``CommandDouble``. Builder methods such as ``with_args()`` and
+``with_stdin()`` delegate to this object. During replay the IPC handler
+temporarily applies any ``with_env()`` variables using ``temporary_env`` so the
+mock's handler executes with the expected environment yet leaves the process
+state untouched.
 
-Verification builds an ordered sequence from mocks marked with ``in_order()``.
-The journal of actual invocations is compared against this sequence while also
-validating argument and stdin matchers. Any deviation produces an
-``UnexpectedCommandError``. After replay, each mock's invocation count is
-checked against its ``times()`` setting, raising
-``UnfulfilledExpectationError`` for missing calls or ``UnexpectedCommandError``
-for excess calls. Environment variables specified with ``with_env()`` are
-injected into the shim via the ``Response`` object before executing the mock's
-handler or returning canned output.
+Verification is split into focused components. ``UnexpectedCommandVerifier``
+checks that every journal entry matches a registered expectation.
+``OrderVerifier`` ensures expectations marked ``in_order()`` appear in the same
+relative order in the journal, ignoring interleaved unordered mocks.
+``CountVerifier`` verifies that each expectation was met exactly the declared
+number of times. This modular approach simplifies the logic within
+:meth:`CmdMox.verify` and clarifies how mixed ordered and unordered calls are
+handled.
