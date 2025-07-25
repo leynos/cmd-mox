@@ -74,11 +74,16 @@ class Expectation:
         if self.args is not None and invocation.args != self.args:
             return False
         if self.match_args is not None:
-            if len(invocation.args) != len(self.match_args):
+            return self._validate_matchers(invocation.args)
+        return True
+
+    def _validate_matchers(self, args: list[str]) -> bool:
+        """Return ``True`` if ``args`` satisfy ``match_args`` validators."""
+        if len(args) != len(self.match_args):
+            return False
+        for arg, matcher in zip(args, self.match_args, strict=True):
+            if not matcher(arg):
                 return False
-            for arg, matcher in zip(invocation.args, self.match_args, strict=True):
-                if not matcher(arg):
-                    return False
         return True
 
     def _matches_stdin(self, invocation: Invocation) -> bool:
