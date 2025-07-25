@@ -1116,3 +1116,8 @@ relative order in the journal, ignoring interleaved unordered mocks.
 number of times. This modular approach simplifies the logic within
 :meth:`CmdMox.verify` and clarifies how mixed ordered and unordered calls are
 handled.
+
+To keep the expectation matcher readable, ``Expectation.matches`` now delegates
+individual checks to small helper methods. These helpers verify the command
+name, arguments, standard input, and environment separately, reducing
+cyclomatic complexity without altering behaviour.

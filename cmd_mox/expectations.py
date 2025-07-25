@@ -58,8 +58,19 @@ class Expectation:
 
     def matches(self, invocation: Invocation) -> bool:
         """Return ``True`` if *invocation* satisfies this expectation."""
-        if invocation.command != self.name:
-            return False
+        return (
+            self._matches_command(invocation)
+            and self._matches_args(invocation)
+            and self._matches_stdin(invocation)
+            and self._matches_env(invocation)
+        )
+
+    def _matches_command(self, invocation: Invocation) -> bool:
+        """Return ``True`` if the command name matches."""
+        return invocation.command == self.name
+
+    def _matches_args(self, invocation: Invocation) -> bool:
+        """Validate positional arguments."""
         if self.args is not None and invocation.args != self.args:
             return False
         if self.match_args is not None:
@@ -68,10 +79,16 @@ class Expectation:
             for arg, matcher in zip(invocation.args, self.match_args, strict=True):
                 if not matcher(arg):
                     return False
-        if self.stdin is not None:
-            if callable(self.stdin):
-                if not self.stdin(invocation.stdin):
-                    return False
-            elif invocation.stdin != self.stdin:
-                return False
+        return True
+
+    def _matches_stdin(self, invocation: Invocation) -> bool:
+        """Check stdin data or predicate."""
+        if self.stdin is None:
+            return True
+        if callable(self.stdin):
+            return bool(self.stdin(invocation.stdin))
+        return invocation.stdin == self.stdin
+
+    def _matches_env(self, invocation: Invocation) -> bool:
+        """Verify required environment variables."""
         return all(invocation.env.get(key) == value for key, value in self.env.items())

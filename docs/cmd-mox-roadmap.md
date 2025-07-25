@@ -75,7 +75,7 @@
 
   - [x] No verification/required calls
 
-- [x] **MockCommand**
+- [x] **MockCommand** *(done)*
 
   - [x] `.with_args()`, `.with_matching_args()`, `.with_stdin()`
 
