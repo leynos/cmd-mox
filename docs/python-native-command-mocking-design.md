@@ -652,6 +652,39 @@ verifiable mocking. Mocks are the foundation of the "Record-Replay-Verify"
 paradigm and are used to assert that the system under test interacts with its
 external dependencies in a precisely defined manner.
 
+```mermaid
+sequenceDiagram
+    participant Test as Test Code
+    participant CmdMox as CmdMox
+    participant Double as CommandDouble
+    participant Shim as Shim
+    participant IPC as IPC Server
+
+    Test->>CmdMox: Setup mock with expectations (args, stdin, env, order, times)
+    Test->>Shim: Run command (with args, stdin)
+    Shim->>IPC: Send invocation (args, stdin)
+    IPC->>CmdMox: Forward invocation
+    CmdMox->>Double: Match invocation (args, stdin, env)
+    alt Match success
+        Double->>CmdMox: Return response (stdout, stderr, env)
+        CmdMox->>IPC: Send response
+        IPC->>Shim: Return response
+        Shim->>Shim: Inject env if present
+        Shim->>Test: Return output
+    else Match failure
+        CmdMox->>IPC: Return error
+        IPC->>Shim: Return error
+        Shim->>Test: Raise error
+    end
+    Test->>CmdMox: verify()
+    CmdMox->>Double: Check call count, order, expectations
+    alt All expectations met
+        CmdMox->>Test: Success
+    else Expectation failed
+        CmdMox->>Test: Raise verification error
+    end
+```
+
 ### 5.1 The Argument Matching Engine and Comparators
 
 To provide flexibility beyond exact argument matching, `CmdMox` will include a

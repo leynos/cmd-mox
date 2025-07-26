@@ -6,6 +6,10 @@ import os
 import subprocess
 from pathlib import Path
 
+# These tests invoke shim binaries with `shell=False` so the command
+# strings are not interpreted by the shell. The paths come from the
+# environment manager and are not user controlled, which avoids
+# subprocess command injection issues.
 import pytest
 
 from cmd_mox import CmdMox, Regex, UnexpectedCommandError
