@@ -39,6 +39,7 @@ class Response:
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
+    env: dict[str, str] = dc.field(default_factory=dict)
 
 
 def _read_all(sock: socket.socket) -> bytes:

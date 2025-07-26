@@ -12,15 +12,12 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
     TracebackType = types.TracebackType
 
-from .environment import EnvironmentManager
-from .errors import (
-    LifecycleError,
-    MissingEnvironmentError,
-    UnexpectedCommandError,
-    UnfulfilledExpectationError,
-)
+from .environment import EnvironmentManager, temporary_env
+from .errors import LifecycleError, MissingEnvironmentError
+from .expectations import Expectation
 from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
+from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
 
 class _CallbackIPCServer(IPCServer):
@@ -43,6 +40,7 @@ class CommandDouble:
 
     __slots__ = (
         "controller",
+        "expectation",
         "handler",
         "invocations",
         "kind",
@@ -59,6 +57,7 @@ class CommandDouble:
         self.response = Response()
         self.handler: t.Callable[[Invocation], Response] | None = None
         self.invocations: list[Invocation] = []
+        self.expectation = Expectation(name)
 
     T_Self = t.TypeVar("T_Self", bound="CommandDouble")
 
@@ -80,11 +79,60 @@ class CommandDouble:
             result = handler(invocation)
             if isinstance(result, Response):
                 return result
-            stdout, stderr, exit_code = result
+            stdout, stderr, exit_code = t.cast("tuple[str, str, int]", result)
             return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
         self.handler = _wrap
         return self
+
+    # ------------------------------------------------------------------
+    # Expectation configuration
+    # ------------------------------------------------------------------
+    def with_args(self: T_Self, *args: str) -> T_Self:
+        """Match invocations with exactly ``args``."""
+        self.expectation.with_args(*args)
+        return self
+
+    def with_matching_args(self: T_Self, *matchers: t.Callable[[str], bool]) -> T_Self:
+        """Match invocations using comparator callables."""
+        self.expectation.with_matching_args(*matchers)
+        return self
+
+    def with_stdin(self: T_Self, data: str | t.Callable[[str], bool]) -> T_Self:
+        """Expect standard input to match ``data``."""
+        self.expectation.with_stdin(data)
+        return self
+
+    def times(self: T_Self, count: int) -> T_Self:
+        """Expect exactly ``count`` invocations."""
+        self.expectation.times_called(count)
+        return self
+
+    def in_order(self: T_Self) -> T_Self:
+        """Require this mock to be called in registration order."""
+        if self.expectation not in self.controller._ordered:
+            self.controller._ordered.append(self.expectation)
+        self.expectation.in_order()
+        return self
+
+    def any_order(self: T_Self) -> T_Self:
+        """Allow this mock to be called in any order."""
+        if self.expectation in self.controller._ordered:
+            self.controller._ordered.remove(self.expectation)
+        self.expectation.any_order()
+        return self
+
+    def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self:
+        """Inject additional environment variables when invoked."""
+        self.expectation.with_env(mapping)
+        return self
+
+    # ------------------------------------------------------------------
+    # Matching helpers
+    # ------------------------------------------------------------------
+    def matches(self, invocation: Invocation) -> bool:
+        """Return ``True`` if *invocation* satisfies the expectation."""
+        return self.expectation.matches(invocation)
 
     @property
     def is_expected(self) -> bool:
@@ -144,6 +192,7 @@ class CmdMox:
         self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque()
         self._commands: set[str] = set()
+        self._ordered: list[Expectation] = []
 
     # ------------------------------------------------------------------
     # Double accessors
@@ -253,10 +302,46 @@ class CmdMox:
         return self._get_double(command_name, "spy")
 
     def replay(self) -> None:
-        """Transition to replay mode and start the IPC server.
+        """Transition to replay mode and start the IPC server."""
+        self._check_replay_preconditions()
+        try:
+            self._start_ipc_server()
+            self._phase = Phase.REPLAY
+        except Exception:  # pragma: no cover - cleanup only
+            self._cleanup_after_replay_error()
+            raise
 
-        The context must be entered before calling this method.
-        """
+    def verify(self) -> None:
+        """Stop the server and finalise the verification phase."""
+        self._check_verify_preconditions()
+        try:
+            self._run_verifiers()
+        finally:
+            self._finalize_verification()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _handle_invocation(self, invocation: Invocation) -> Response:
+        """Record *invocation* and return the configured response."""
+        self.journal.append(invocation)
+        dbl = self._doubles.get(invocation.command)
+        if not dbl:
+            return Response(stdout=invocation.command)
+        if dbl.is_recording:
+            dbl.invocations.append(invocation)
+        env = dbl.expectation.env
+        if env and dbl.handler is not None:
+            with temporary_env(env):
+                resp = dbl.handler(invocation)
+        else:
+            resp = dbl.handler(invocation) if dbl.handler is not None else dbl.response
+        if env:
+            resp.env.update(env)
+        return resp
+
+    def _check_replay_preconditions(self) -> None:
+        """Validate state and environment before starting replay."""
         if self._phase is not Phase.RECORD:
             msg = (
                 "Cannot call replay(): not in 'record' phase "
@@ -275,72 +360,53 @@ class CmdMox:
         if self.environment.socket_path is None:
             msg = "Environment attribute 'socket_path' is missing (None)"
             raise MissingEnvironmentError(msg)
-        try:
-            self.journal.clear()
-            self._commands = self._registered_commands() | self._commands
-            create_shim_symlinks(self.environment.shim_dir, self._commands)
-            self._server = _CallbackIPCServer(
-                self.environment.socket_path, self._handle_invocation
-            )
-            self._server.start()
-            self._phase = Phase.REPLAY
-        except Exception:
-            if self._server is not None:
-                try:
-                    self._server.stop()
-                finally:
-                    self._server = None
-            self.environment.__exit__(None, None, None)
-            self._entered = False
-            raise
 
-    def verify(self) -> None:
-        """Stop the server and finalise the verification phase."""
+    def _start_ipc_server(self) -> None:
+        """Prepare shims and launch the IPC server."""
+        self.journal.clear()
+        self._commands = self._registered_commands() | self._commands
+        create_shim_symlinks(self.environment.shim_dir, self._commands)
+        self._server = _CallbackIPCServer(
+            self.environment.socket_path, self._handle_invocation
+        )
+        self._server.start()
+
+    def _cleanup_after_replay_error(self) -> None:
+        """Stop the server and restore the environment after failure."""
+        if self._server is not None:
+            try:
+                self._server.stop()
+            finally:
+                self._server = None
+        self.environment.__exit__(None, None, None)
+        self._entered = False
+
+    def _check_verify_preconditions(self) -> None:
+        """Ensure verify() is called in the correct phase."""
         if self._phase is not Phase.REPLAY:
             msg = (
                 "verify() called out of order "
                 f"(current phase: {self._phase.name.lower()})"
             )
             raise LifecycleError(msg)
-        try:
-            all_registered = self._registered_commands()
-            unexpected = [
-                inv.command for inv in self.journal if inv.command not in all_registered
-            ]
-            if unexpected:
-                msg = f"Unexpected commands invoked: {unexpected}"
-                raise UnexpectedCommandError(msg)
-            required = self._expected_commands()
-            missing = [
-                name
-                for name in required
-                if all(inv.command != name for inv in self.journal)
-            ]
-            if missing:
-                msg = f"Expected commands not called: {missing}"
-                raise UnfulfilledExpectationError(msg)
-        finally:
-            if self._server is not None:
-                try:
-                    self._server.stop()
-                finally:
-                    self._server = None
-            if self._entered:
-                self.environment.__exit__(None, None, None)
-                self._entered = False
-            self._phase = Phase.VERIFY
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-    def _handle_invocation(self, invocation: Invocation) -> Response:
-        """Record *invocation* and return the configured response."""
-        self.journal.append(invocation)
-        dbl = self._doubles.get(invocation.command)
-        if not dbl:
-            return Response(stdout=invocation.command)
-        if dbl.is_recording:
-            dbl.invocations.append(invocation)
-        if dbl.handler is not None:
-            return dbl.handler(invocation)
-        return dbl.response
+    def _run_verifiers(self) -> None:
+        """Execute the ordered verification checks."""
+        expectations = {n: d.expectation for n, d in self.mocks.items()}
+        inv_map = {n: d.invocations for n, d in self.mocks.items()}
+
+        UnexpectedCommandVerifier().verify(self.journal, self._doubles)
+        OrderVerifier(self._ordered).verify(self.journal)
+        CountVerifier().verify(expectations, inv_map)
+
+    def _finalize_verification(self) -> None:
+        """Stop the server, clean up the environment, and update phase."""
+        if self._server is not None:
+            try:
+                self._server.stop()
+            finally:
+                self._server = None
+        if self._entered:
+            self.environment.__exit__(None, None, None)
+            self._entered = False
+        self._phase = Phase.VERIFY

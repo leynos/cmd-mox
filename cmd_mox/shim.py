@@ -35,6 +35,9 @@ def main() -> None:
         print(f"IPC error: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    if response.env:
+        os.environ |= response.env
+
     sys.stdout.write(response.stdout)
     sys.stderr.write(response.stderr)
     sys.exit(response.exit_code)

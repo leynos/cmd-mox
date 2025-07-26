@@ -75,17 +75,17 @@
 
   - [x] No verification/required calls
 
-- [ ] **MockCommand**
+- [x] **MockCommand** *(done)*
 
-  - [ ] `.with_args()`, `.with_matching_args()`, `.with_stdin()`
+  - [x] `.with_args()`, `.with_matching_args()`, `.with_stdin()`
 
-  - [ ] `.returns()`, `.runs()`
+  - [x] `.returns()`, `.runs()`
 
-  - [ ] `.times()`, `.in_order()`, `.any_order()`
+  - [x] `.times()`, `.in_order()`, `.any_order()`
 
-  - [ ] `.with_env()` for environment matching/injection
+  - [x] `.with_env()` for environment matching/injection
 
-  - [ ] Strict record-replay-verify logic
+  - [x] Strict record-replay-verify logic
 
 - [ ] **SpyCommand**
 

@@ -652,6 +652,39 @@ verifiable mocking. Mocks are the foundation of the "Record-Replay-Verify"
 paradigm and are used to assert that the system under test interacts with its
 external dependencies in a precisely defined manner.
 
+```mermaid
+sequenceDiagram
+    participant Test as Test Code
+    participant CmdMox as CmdMox
+    participant Double as CommandDouble
+    participant Shim as Shim
+    participant IPC as IPC Server
+
+    Test->>CmdMox: Setup mock with expectations (args, stdin, env, order, times)
+    Test->>Shim: Run command (with args, stdin)
+    Shim->>IPC: Send invocation (args, stdin)
+    IPC->>CmdMox: Forward invocation
+    CmdMox->>Double: Match invocation (args, stdin, env)
+    alt Match success
+        Double->>CmdMox: Return response (stdout, stderr, env)
+        CmdMox->>IPC: Send response
+        IPC->>Shim: Return response
+        Shim->>Shim: Inject env if present
+        Shim->>Test: Return output
+    else Match failure
+        CmdMox->>IPC: Return error
+        IPC->>Shim: Return error
+        Shim->>Test: Raise error
+    end
+    Test->>CmdMox: verify()
+    CmdMox->>Double: Check call count, order, expectations
+    alt All expectations met
+        CmdMox->>Test: Success
+    else Expectation failed
+        CmdMox->>Test: Raise verification error
+    end
+```
+
 ### 5.1 The Argument Matching Engine and Comparators
 
 To provide flexibility beyond exact argument matching, `CmdMox` will include a
@@ -870,7 +903,7 @@ When this method is used, the provided dictionary of environment variables is
 stored with the expectation. This data is then passed to the shim as part of
 the response payload from the IPC server. Before executing its primary action
 (e.g., printing `stdout` or running a handler), the shim script will update its
-own environment using `os.environ.update(vars)`. This ensures that any further
+own environment using `os.environ |= vars`. This ensures that any further
 processes spawned by a `.runs()` handler, for example, will inherit the
 correct, mock-specific environment.
 
@@ -1098,3 +1131,31 @@ into the temporary directory prefix.  The prefix takes the form
 ``cmdmox-{worker}-{pid}-`` ensuring that socket paths and shim directories are
 unique across parallel workers. When ``PYTEST_XDIST_WORKER`` is absent the
 fixture falls back to ``main`` so the prefix becomes ``cmdmox-main-{pid}-``.
+
+### 8.5 Design Decisions for ``MockCommand`` Expectations
+
+Expectation configuration now lives in a dedicated :class:`Expectation` object
+held by each ``CommandDouble``. Builder methods such as ``with_args()`` and
+``with_stdin()`` delegate to this object. During replay the IPC handler
+temporarily applies any ``with_env()`` variables using ``temporary_env`` so the
+mock's handler executes with the expected environment yet leaves the process
+state untouched.
+
+Verification is split into focused components. ``UnexpectedCommandVerifier``
+checks that every journal entry matches a registered expectation.
+``OrderVerifier`` ensures expectations marked ``in_order()`` appear in the same
+relative order in the journal, ignoring interleaved unordered mocks.
+``CountVerifier`` verifies that each expectation was met exactly the declared
+number of times. This modular approach simplifies the logic within
+:meth:`CmdMox.verify` and clarifies how mixed ordered and unordered calls are
+handled.
+
+To keep the expectation matcher readable, ``Expectation.matches`` now delegates
+individual checks to small helper methods. These helpers verify the command
+name, arguments, standard input, and environment separately, reducing
+cyclomatic complexity without altering behaviour.
+
+The controller's `replay()` and `verify()` methods were likewise broken down
+into dedicated helper functions such as ``_check_replay_preconditions`` and
+``_finalize_verification``. This keeps the high-level workflow clear while
+localising error handling and environment cleanup details.
