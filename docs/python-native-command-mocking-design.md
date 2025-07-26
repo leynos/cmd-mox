@@ -903,7 +903,7 @@ When this method is used, the provided dictionary of environment variables is
 stored with the expectation. This data is then passed to the shim as part of
 the response payload from the IPC server. Before executing its primary action
 (e.g., printing `stdout` or running a handler), the shim script will update its
-own environment using `os.environ.update(vars)`. This ensures that any further
+own environment using `os.environ |= vars`. This ensures that any further
 processes spawned by a `.runs()` handler, for example, will inherit the
 correct, mock-specific environment.
 
@@ -1154,3 +1154,8 @@ To keep the expectation matcher readable, ``Expectation.matches`` now delegates
 individual checks to small helper methods. These helpers verify the command
 name, arguments, standard input, and environment separately, reducing
 cyclomatic complexity without altering behaviour.
+
+The controller's `replay()` and `verify()` methods were likewise broken down
+into dedicated helper functions such as ``_check_replay_preconditions`` and
+``_finalize_verification``. This keeps the high-level workflow clear while
+localising error handling and environment cleanup details.

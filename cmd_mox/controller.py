@@ -302,72 +302,22 @@ class CmdMox:
         return self._get_double(command_name, "spy")
 
     def replay(self) -> None:
-        """Transition to replay mode and start the IPC server.
-
-        The context must be entered before calling this method.
-        """
-        if self._phase is not Phase.RECORD:
-            msg = (
-                "Cannot call replay(): not in 'record' phase "
-                f"(current phase: {self._phase.name.lower()})"
-            )
-            raise LifecycleError(msg)
-        if not self._entered:
-            msg = (
-                "replay() called without entering context "
-                f"(current phase: {self._phase.name.lower()})"
-            )
-            raise LifecycleError(msg)
-        if self.environment.shim_dir is None:
-            msg = "Environment attribute 'shim_dir' is missing (None)"
-            raise MissingEnvironmentError(msg)
-        if self.environment.socket_path is None:
-            msg = "Environment attribute 'socket_path' is missing (None)"
-            raise MissingEnvironmentError(msg)
+        """Transition to replay mode and start the IPC server."""
+        self._check_replay_preconditions()
         try:
-            self.journal.clear()
-            self._commands = self._registered_commands() | self._commands
-            create_shim_symlinks(self.environment.shim_dir, self._commands)
-            self._server = _CallbackIPCServer(
-                self.environment.socket_path, self._handle_invocation
-            )
-            self._server.start()
+            self._start_ipc_server()
             self._phase = Phase.REPLAY
-        except Exception:
-            if self._server is not None:
-                try:
-                    self._server.stop()
-                finally:
-                    self._server = None
-            self.environment.__exit__(None, None, None)
-            self._entered = False
+        except Exception:  # pragma: no cover - cleanup only
+            self._cleanup_after_replay_error()
             raise
 
     def verify(self) -> None:
         """Stop the server and finalise the verification phase."""
-        if self._phase is not Phase.REPLAY:
-            msg = (
-                "verify() called out of order "
-                f"(current phase: {self._phase.name.lower()})"
-            )
-            raise LifecycleError(msg)
+        self._check_verify_preconditions()
         try:
-            expectations = {n: d.expectation for n, d in self.mocks.items()}
-            inv_map = {n: d.invocations for n, d in self.mocks.items()}
-
-            UnexpectedCommandVerifier().verify(self.journal, self._doubles)
-            OrderVerifier(self._ordered).verify(self.journal)
-            CountVerifier().verify(expectations, inv_map)
+            self._run_verifiers()
         finally:
-            if self._server is not None:
-                try:
-                    self._server.stop()
-                finally:
-                    self._server = None
-            if self._entered:
-                self.environment.__exit__(None, None, None)
-                self._entered = False
-            self._phase = Phase.VERIFY
+            self._finalize_verification()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -389,3 +339,74 @@ class CmdMox:
         if env:
             resp.env.update(env)
         return resp
+
+    def _check_replay_preconditions(self) -> None:
+        """Validate state and environment before starting replay."""
+        if self._phase is not Phase.RECORD:
+            msg = (
+                "Cannot call replay(): not in 'record' phase "
+                f"(current phase: {self._phase.name.lower()})"
+            )
+            raise LifecycleError(msg)
+        if not self._entered:
+            msg = (
+                "replay() called without entering context "
+                f"(current phase: {self._phase.name.lower()})"
+            )
+            raise LifecycleError(msg)
+        if self.environment.shim_dir is None:
+            msg = "Environment attribute 'shim_dir' is missing (None)"
+            raise MissingEnvironmentError(msg)
+        if self.environment.socket_path is None:
+            msg = "Environment attribute 'socket_path' is missing (None)"
+            raise MissingEnvironmentError(msg)
+
+    def _start_ipc_server(self) -> None:
+        """Prepare shims and launch the IPC server."""
+        self.journal.clear()
+        self._commands = self._registered_commands() | self._commands
+        create_shim_symlinks(self.environment.shim_dir, self._commands)
+        self._server = _CallbackIPCServer(
+            self.environment.socket_path, self._handle_invocation
+        )
+        self._server.start()
+
+    def _cleanup_after_replay_error(self) -> None:
+        """Stop the server and restore the environment after failure."""
+        if self._server is not None:
+            try:
+                self._server.stop()
+            finally:
+                self._server = None
+        self.environment.__exit__(None, None, None)
+        self._entered = False
+
+    def _check_verify_preconditions(self) -> None:
+        """Ensure verify() is called in the correct phase."""
+        if self._phase is not Phase.REPLAY:
+            msg = (
+                "verify() called out of order "
+                f"(current phase: {self._phase.name.lower()})"
+            )
+            raise LifecycleError(msg)
+
+    def _run_verifiers(self) -> None:
+        """Execute the ordered verification checks."""
+        expectations = {n: d.expectation for n, d in self.mocks.items()}
+        inv_map = {n: d.invocations for n, d in self.mocks.items()}
+
+        UnexpectedCommandVerifier().verify(self.journal, self._doubles)
+        OrderVerifier(self._ordered).verify(self.journal)
+        CountVerifier().verify(expectations, inv_map)
+
+    def _finalize_verification(self) -> None:
+        """Stop the server, clean up the environment, and update phase."""
+        if self._server is not None:
+            try:
+                self._server.stop()
+            finally:
+                self._server = None
+        if self._entered:
+            self.environment.__exit__(None, None, None)
+            self._entered = False
+        self._phase = Phase.VERIFY

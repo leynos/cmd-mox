@@ -36,7 +36,7 @@ def main() -> None:
         sys.exit(1)
 
     if response.env:
-        os.environ.update(response.env)
+        os.environ |= response.env
 
     sys.stdout.write(response.stdout)
     sys.stderr.write(response.stderr)
