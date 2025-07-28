@@ -161,6 +161,14 @@ def check_spy(mox: CmdMox, cmd: str, count: int) -> None:
     assert len(spy.invocations) == count
 
 
+@then(parsers.cfparse('the spy "{cmd}" call count should be {count:d}'))
+def check_spy_call_count(mox: CmdMox, cmd: str, count: int) -> None:
+    """Assert ``SpyCommand.call_count`` equals *count*."""
+    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
+    spy = mox.spies[cmd]
+    assert spy.call_count == count
+
+
 @then(parsers.cfparse('the mock "{cmd}" should record {count:d} invocation'))
 def check_mock(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the mock recorded the invocation."""

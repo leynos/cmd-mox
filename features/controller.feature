@@ -82,3 +82,4 @@ Feature: CmdMox basic functionality
     Then the output should be "hello"
     When I verify the controller
     Then the spy "echo" should record 1 invocation
+    And the spy "echo" call count should be 1

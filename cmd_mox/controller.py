@@ -12,6 +12,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
     TracebackType = types.TracebackType
 
+from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
 from .expectations import Expectation
@@ -199,6 +200,7 @@ class CmdMox:
         """
         self.environment = EnvironmentManager()
         self._server: _CallbackIPCServer | None = None
+        self._runner = CommandRunner(self.environment)
         self._entered = False
         self._phase = Phase.RECORD
 
@@ -347,7 +349,7 @@ class CmdMox:
             dbl.invocations.append(invocation)
         env = dbl.expectation.env
         if dbl.kind == "spy" and dbl.passthrough_mode:
-            resp = self._run_passthrough(invocation, dbl)
+            resp = self._runner.run(invocation, env)
         elif env and dbl.handler is not None:
             with temporary_env(env):
                 resp = dbl.handler(invocation)
@@ -356,33 +358,6 @@ class CmdMox:
         if env:
             resp.env.update(env)
         return resp
-
-    def _run_passthrough(self, invocation: Invocation, dbl: CommandDouble) -> Response:
-        """Execute the real command and capture its output."""
-        import os
-        import shutil
-        import subprocess
-
-        orig_env = self.environment._orig_env or {}
-        orig_path = orig_env.get("PATH", os.environ.get("PATH", ""))
-        real_path = shutil.which(invocation.command, path=orig_path)
-        if real_path is None:
-            return Response(stderr=f"{invocation.command}: not found", exit_code=127)
-
-        env = invocation.env.copy()
-        env["PATH"] = orig_path
-        env.update(dbl.expectation.env)
-        result = subprocess.run(  # noqa: S603
-            [real_path, *invocation.args],
-            input=invocation.stdin,
-            capture_output=True,
-            text=True,
-            env=env,
-            shell=False,
-        )
-        return Response(
-            stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode
-        )
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""

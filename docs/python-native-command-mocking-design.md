@@ -1165,10 +1165,11 @@ localising error handling and environment cleanup details.
 Spies now support a ``passthrough()`` mode that executes the real command
 instead of a canned response. When a passthrough spy is invoked, the controller
 locates the real executable using the original ``PATH`` preserved by the
-``EnvironmentManager``. It runs the command with the recorded environment
-(minus the shim directory) and captures its output and exit status. The results
-are stored alongside the invocation and returned to the shim so the calling
-process sees the real behaviour.
+``EnvironmentManager``. A small ``CommandRunner`` helper encapsulates this
+lookup and ``subprocess.run`` call. It runs the command with the recorded
+environment (minus the shim directory) and captures its output and exit status.
+The results are stored alongside the invocation and returned to the shim so the
+calling process sees the real behaviour.
 
 Both mocks and spies maintain an ``invocations`` list. A convenience property
 ``call_count`` exposes ``len(invocations)`` for assertion-style tests.
