@@ -28,6 +28,7 @@ class CommandRunner:
             return Response(stderr=f"{invocation.command}: not found", exit_code=127)
 
         env = {**invocation.env, "PATH": path, **extra_env}
+        # Explicit argument list and ``shell=False`` mitigate injection risk.
         result = subprocess.run(  # noqa: S603 - invocation args are controlled
             [real, *invocation.args],
             input=invocation.stdin,
