@@ -348,7 +348,7 @@ def test_passthrough_handles_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     mox.replay()
 
     def fake_run(argv: list[str], **_kwargs: object) -> t.NoReturn:
-        raise subprocess.TimeoutExpired(cmd=argv, timeout=10)
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=30)
 
     orig_run = subprocess.run
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
@@ -359,4 +359,4 @@ def test_passthrough_handles_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     mox.__exit__(None, None, None)
 
     assert result.returncode == 124
-    assert "timed out" in result.stderr
+    assert "timeout after 30 seconds" in result.stderr

@@ -46,19 +46,22 @@ class CommandRunner:
                 text=True,
                 env=env,
                 shell=False,
-                timeout=10,
+                timeout=30,
+            )
+            return Response(
+                stdout=result.stdout,
+                stderr=result.stderr,
+                exit_code=result.returncode,
             )
         except subprocess.TimeoutExpired:
-            return Response(stderr=f"{invocation.command}: timed out", exit_code=124)
-        except FileNotFoundError:
-            return Response(stderr=f"{invocation.command}: not found", exit_code=127)
-        except PermissionError:
             return Response(
-                stderr=f"{invocation.command}: permission denied", exit_code=126
+                stderr=f"{invocation.command}: timeout after 30 seconds",
+                exit_code=124,
             )
-
-        return Response(
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.returncode,
-        )
+        except (FileNotFoundError, PermissionError) as e:
+            return Response(stderr=f"{invocation.command}: {e}", exit_code=126)
+        except OSError as e:
+            return Response(
+                stderr=f"{invocation.command}: execution failed: {e}",
+                exit_code=126,
+            )
