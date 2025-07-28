@@ -50,6 +50,12 @@ def spy_command(mox: CmdMox, cmd: str, text: str) -> None:
     mox.spy(cmd).returns(stdout=text)
 
 
+@given(parsers.cfparse('the command "{cmd}" is spied to passthrough'))
+def spy_passthrough(mox: CmdMox, cmd: str) -> None:
+    """Configure a passthrough spy."""
+    mox.spy(cmd).passthrough()
+
+
 @given(parsers.cfparse('the command "{cmd}" is stubbed to run a handler'))
 def stub_runs(mox: CmdMox, cmd: str) -> None:
     """Configure a stub with a dynamic handler."""
@@ -220,4 +226,12 @@ def test_ordered_mocks_match_arguments() -> None:
 )
 def test_environment_injection() -> None:
     """Stub applies environment variables to the shim."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "passthrough spy executes real command"
+)
+def test_passthrough_spy() -> None:
+    """Spy runs the real command while recording."""
     pass

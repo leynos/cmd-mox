@@ -45,6 +45,7 @@ class CommandDouble:
         "invocations",
         "kind",
         "name",
+        "passthrough_mode",
         "response",
     )
 
@@ -57,6 +58,7 @@ class CommandDouble:
         self.response = Response()
         self.handler: t.Callable[[Invocation], Response] | None = None
         self.invocations: list[Invocation] = []
+        self.passthrough_mode = False
         self.expectation = Expectation(name)
 
     T_Self = t.TypeVar("T_Self", bound="CommandDouble")
@@ -127,6 +129,14 @@ class CommandDouble:
         self.expectation.with_env(mapping)
         return self
 
+    def passthrough(self: T_Self) -> T_Self:
+        """Execute the real command while recording invocations."""
+        if self.kind != "spy":
+            msg = "passthrough() is only valid for spies"
+            raise ValueError(msg)
+        self.passthrough_mode = True
+        return self
+
     # ------------------------------------------------------------------
     # Matching helpers
     # ------------------------------------------------------------------
@@ -143,6 +153,11 @@ class CommandDouble:
     def is_recording(self) -> bool:
         """Return ``True`` for mocks and spies."""
         return self.kind in ("mock", "spy")
+
+    @property
+    def call_count(self) -> int:
+        """Return the number of recorded invocations."""
+        return len(self.invocations)
 
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response."""
@@ -331,7 +346,9 @@ class CmdMox:
         if dbl.is_recording:
             dbl.invocations.append(invocation)
         env = dbl.expectation.env
-        if env and dbl.handler is not None:
+        if dbl.kind == "spy" and dbl.passthrough_mode:
+            resp = self._run_passthrough(invocation, dbl)
+        elif env and dbl.handler is not None:
             with temporary_env(env):
                 resp = dbl.handler(invocation)
         else:
@@ -339,6 +356,33 @@ class CmdMox:
         if env:
             resp.env.update(env)
         return resp
+
+    def _run_passthrough(self, invocation: Invocation, dbl: CommandDouble) -> Response:
+        """Execute the real command and capture its output."""
+        import os
+        import shutil
+        import subprocess
+
+        orig_env = self.environment._orig_env or {}
+        orig_path = orig_env.get("PATH", os.environ.get("PATH", ""))
+        real_path = shutil.which(invocation.command, path=orig_path)
+        if real_path is None:
+            return Response(stderr=f"{invocation.command}: not found", exit_code=127)
+
+        env = invocation.env.copy()
+        env["PATH"] = orig_path
+        env.update(dbl.expectation.env)
+        result = subprocess.run(  # noqa: S603
+            [real_path, *invocation.args],
+            input=invocation.stdin,
+            capture_output=True,
+            text=True,
+            env=env,
+            shell=False,
+        )
+        return Response(
+            stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode
+        )
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""

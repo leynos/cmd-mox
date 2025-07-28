@@ -73,3 +73,12 @@ Feature: CmdMox basic functionality
     Then the output should be "WORLD"
     When I verify the controller
     Then the journal should contain 1 invocation of "envcmd"
+
+  Scenario: passthrough spy executes real command
+    Given a CmdMox controller
+    And the command "echo" is spied to passthrough
+    When I replay the controller
+    And I run the command "echo" with arguments "hello"
+    Then the output should be "hello"
+    When I verify the controller
+    Then the spy "echo" should record 1 invocation

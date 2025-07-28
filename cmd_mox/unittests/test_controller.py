@@ -302,3 +302,21 @@ def test_stub_runs_handler(
     mox.verify()
 
     assert result.stdout.strip() == expected
+
+
+def test_spy_passthrough_records_real_output() -> None:
+    """Passthrough spy runs the real command and records calls."""
+    mox = CmdMox()
+    spy = mox.spy("echo").passthrough()
+    mox.__enter__()
+    mox.replay()
+
+    cmd_path = Path(mox.environment.shim_dir) / "echo"
+    result = subprocess.run(  # noqa: S603
+        [str(cmd_path), "hi"], capture_output=True, text=True, check=True
+    )
+
+    mox.verify()
+
+    assert result.stdout.strip() == "hi"
+    assert spy.call_count == 1
