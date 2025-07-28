@@ -345,19 +345,43 @@ class CmdMox:
         dbl = self._doubles.get(invocation.command)
         if not dbl:
             return Response(stdout=invocation.command)
+
         if dbl.is_recording:
             dbl.invocations.append(invocation)
-        env = dbl.expectation.env
-        if dbl.kind == "spy" and dbl.passthrough_mode:
-            resp = self._runner.run(invocation, env)
-        elif env and dbl.handler is not None:
-            with temporary_env(env):
-                resp = dbl.handler(invocation)
-        else:
-            resp = dbl.handler(invocation) if dbl.handler is not None else dbl.response
-        if env:
-            resp.env.update(env)
+
+        resp = self._execute_double_strategy(invocation, dbl)
+
+        # Apply environment variables if configured
+        if dbl.expectation.env:
+            resp.env.update(dbl.expectation.env)
+
         return resp
+
+    def _execute_double_strategy(
+        self, invocation: Invocation, dbl: CommandDouble
+    ) -> Response:
+        """Execute the appropriate strategy for the command double."""
+        if dbl.kind == "spy" and dbl.passthrough_mode:
+            return self._runner.run(invocation, dbl.expectation.env)
+
+        if dbl.expectation.env and dbl.handler is not None:
+            return self._execute_handler_with_env(invocation, dbl)
+
+        return self._execute_default_handler(invocation, dbl)
+
+    def _execute_handler_with_env(
+        self, invocation: Invocation, dbl: CommandDouble
+    ) -> Response:
+        """Execute handler with temporary environment variables."""
+        handler = t.cast("t.Callable[[Invocation], Response]", dbl.handler)
+        with temporary_env(dbl.expectation.env):
+            return handler(invocation)
+
+    def _execute_default_handler(
+        self, invocation: Invocation, dbl: CommandDouble
+    ) -> Response:
+        """Execute default handler or return static response."""
+        return dbl.handler(invocation) if dbl.handler is not None else dbl.response
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""
