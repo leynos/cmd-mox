@@ -17,20 +17,12 @@ if t.TYPE_CHECKING:  # pragma: no cover - used for type hints
 class CommandRunner:
     """Run commands using the original system environment."""
 
-    def __init__(self, env_mgr: EnvironmentManager) -> None:
+    def __init__(self, env_mgr: EnvironmentManager, *, timeout: float = 30.0) -> None:
         self._env_mgr = env_mgr
+        self._timeout = timeout
 
-    def run(
-        self, invocation: Invocation, extra_env: dict[str, str], *, timeout: int = 30
-    ) -> Response:
-        """Execute *invocation* in the original environment.
-
-        Parameters
-        ----------
-        timeout:
-            Maximum time in seconds to allow the command to run before it is
-            terminated.
-        """
+    def run(self, invocation: Invocation, extra_env: dict[str, str]) -> Response:
+        """Execute *invocation* in the original environment."""
         orig_env = self._env_mgr.original_environment
         path = orig_env.get("PATH", "")
         real = shutil.which(invocation.command, path=path)
@@ -49,19 +41,18 @@ class CommandRunner:
                 stderr=f"{invocation.command}: not executable", exit_code=126
             )
 
-        env = {"PATH": path}
-        env.update(extra_env)
-        env.update(invocation.env)
+        env = {"PATH": path} | extra_env
+        env |= invocation.env
 
         try:
-            result = subprocess.run(  # noqa: S603 - invocation args are controlled
+            result = subprocess.run(  # noqa: S603 - shell=False with list args prevents injection
                 [str(resolved), *invocation.args],
                 input=invocation.stdin,
                 capture_output=True,
                 text=True,
                 env=env,
                 shell=False,
-                timeout=timeout,
+                timeout=self._timeout,
             )
             return Response(
                 stdout=result.stdout,
@@ -69,8 +60,9 @@ class CommandRunner:
                 exit_code=result.returncode,
             )
         except subprocess.TimeoutExpired:
+            duration = int(self._timeout)
             return Response(
-                stderr=f"{invocation.command}: timeout after {timeout} seconds",
+                stderr=f"{invocation.command}: timeout after {duration} seconds",
                 exit_code=124,
             )
         except (FileNotFoundError, PermissionError) as e:
