@@ -81,6 +81,11 @@ class EnvironmentManager:
                 shutil.rmtree(self.shim_dir, ignore_errors=True)
             self._created_dir = None
 
+    @property
+    def original_environment(self) -> dict[str, str]:
+        """Return the unmodified environment prior to ``__enter__``."""
+        return self._orig_env or {}
+
 
 @contextlib.contextmanager
 def temporary_env(mapping: dict[str, str]) -> t.Iterator[None]:
