@@ -349,39 +349,35 @@ class CmdMox:
         if dbl.is_recording:
             dbl.invocations.append(invocation)
 
-        resp = self._execute_double_strategy(invocation, dbl)
-
-        # Apply environment variables if configured
-        if dbl.expectation.env:
-            resp.env.update(dbl.expectation.env)
-
-        return resp
+        return self._execute_double_strategy(invocation, dbl)
 
     def _execute_double_strategy(
         self, invocation: Invocation, dbl: CommandDouble
     ) -> Response:
         """Execute the appropriate strategy for the command double."""
+        env_vars = dbl.expectation.env
+        handler = dbl.handler
+
+        # passthrough spies execute the real command
         if dbl.kind == "spy" and dbl.passthrough_mode:
-            return self._runner.run(invocation, dbl.expectation.env)
+            return self._runner.run(invocation, env_vars)
 
-        if dbl.expectation.env and dbl.handler is not None:
-            return self._execute_handler_with_env(invocation, dbl)
+        # no handler -> static response
+        if handler is None:
+            resp = dbl.response
 
-        return self._execute_default_handler(invocation, dbl)
+        # handler with optional env vars
+        elif env_vars:
+            with temporary_env(env_vars):
+                resp = handler(invocation)
+        else:
+            resp = handler(invocation)
 
-    def _execute_handler_with_env(
-        self, invocation: Invocation, dbl: CommandDouble
-    ) -> Response:
-        """Execute handler with temporary environment variables."""
-        handler = t.cast("t.Callable[[Invocation], Response]", dbl.handler)
-        with temporary_env(dbl.expectation.env):
-            return handler(invocation)
+        # merge in env vars for the shim
+        if env_vars:
+            resp.env.update(env_vars)
 
-    def _execute_default_handler(
-        self, invocation: Invocation, dbl: CommandDouble
-    ) -> Response:
-        """Execute default handler or return static response."""
-        return dbl.handler(invocation) if dbl.handler is not None else dbl.response
+        return resp
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""

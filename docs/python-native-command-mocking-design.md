@@ -1172,5 +1172,10 @@ the recorded environment (minus the shim directory) and captures its output and
 exit status. The results are stored alongside the invocation and returned to
 the shim so the calling process sees the real behaviour.
 
+The runner validates that the resolved command path is absolute and executable.
+It enforces a configurable timeout (30 seconds by default) to prevent hanging
+processes. Any unexpected exceptions are converted into error responses instead
+of bubbling up.
+
 Both mocks and spies maintain an ``invocations`` list. A convenience property
 ``call_count`` exposes ``len(invocations)`` for assertion-style tests.

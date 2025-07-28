@@ -360,3 +360,31 @@ def test_passthrough_handles_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.returncode == 124
     assert "timeout after 30 seconds" in result.stderr
+
+
+def test_passthrough_handles_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runner reports permission errors for non-executable files."""
+    dummy = tmp_path / "dummy"
+    dummy.write_text("echo hi")
+    dummy.chmod(0o644)
+
+    mox = CmdMox()
+    mox.spy("dummycmd").passthrough()
+    mox.__enter__()
+    mox.replay()
+
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which",
+        lambda cmd, path=None: str(dummy) if cmd == "dummycmd" else None,
+    )
+
+    cmd_path = Path(mox.environment.shim_dir) / "dummycmd"
+    result = subprocess.run([str(cmd_path)], capture_output=True, text=True)  # noqa: S603
+
+    mox.verify()
+    mox.__exit__(None, None, None)
+
+    assert result.returncode == 126
+    assert "not executable" in result.stderr

@@ -83,3 +83,13 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the spy "echo" should record 1 invocation
     And the spy "echo" call count should be 1
+
+  Scenario: passthrough spy handles missing command
+    Given a CmdMox controller
+    And the command "bogus" is spied to passthrough
+    When I replay the controller
+    And I run the command "bogus" expecting failure
+    Then the exit code should be 127
+    And the stderr should contain "not found"
+    When I verify the controller
+    Then the spy "bogus" should record 1 invocation

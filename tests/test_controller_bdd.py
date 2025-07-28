@@ -105,6 +105,17 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
 
 
 @when(
+    parsers.cfparse('I run the command "{cmd}" expecting failure'),
+    target_fixture="result",
+)
+def run_command_failure(cmd: str) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* expecting a non-zero exit status."""
+    return subprocess.run(  # noqa: S603
+        [cmd], capture_output=True, text=True, check=False, shell=False
+    )
+
+
+@when(
     parsers.cfparse('I run the command "{cmd}" with arguments "{args}"'),
     target_fixture="result",
 )
@@ -143,6 +154,18 @@ def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess
 def check_output(result: subprocess.CompletedProcess[str], text: str) -> None:
     """Ensure the command output matches."""
     assert result.stdout.strip() == text
+
+
+@then(parsers.cfparse("the exit code should be {code:d}"))
+def check_exit_code(result: subprocess.CompletedProcess[str], code: int) -> None:
+    """Assert the process exit code equals *code*."""
+    assert result.returncode == code
+
+
+@then(parsers.cfparse('the stderr should contain "{text}"'))
+def check_stderr(result: subprocess.CompletedProcess[str], text: str) -> None:
+    """Ensure standard error output contains *text*."""
+    assert text in result.stderr
 
 
 @then(parsers.cfparse('the journal should contain {count:d} invocation of "{cmd}"'))
@@ -242,4 +265,12 @@ def test_environment_injection() -> None:
 )
 def test_passthrough_spy() -> None:
     """Spy runs the real command while recording."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "passthrough spy handles missing command"
+)
+def test_passthrough_spy_missing_command() -> None:
+    """Spy reports an error when the real command is absent."""
     pass
