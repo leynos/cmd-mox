@@ -35,7 +35,9 @@ class CommandRunner:
     # ------------------------------------------------------------------
     def _resolve_and_validate_command(self, command: str) -> Path | Response:
         """Locate *command* in PATH and ensure it is safe to execute."""
-        path = self._env_mgr.original_environment.get("PATH", "")
+        path = self._env_mgr.original_environment.get(
+            "PATH", os.environ.get("PATH", "")
+        )
         real = shutil.which(command, path=path)
         if real is None:
             return Response(stderr=f"{command}: not found", exit_code=127)
@@ -84,7 +86,9 @@ class CommandRunner:
                 stderr=f"{invocation.command}: timeout after {duration} seconds",
                 exit_code=124,
             )
-        except (FileNotFoundError, PermissionError) as e:
+        except FileNotFoundError as e:
+            return Response(stderr=f"{invocation.command}: {e}", exit_code=127)
+        except PermissionError as e:
             return Response(stderr=f"{invocation.command}: {e}", exit_code=126)
         except OSError as e:
             return Response(

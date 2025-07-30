@@ -356,28 +356,26 @@ class CmdMox:
     ) -> Response:
         """Execute the appropriate strategy for the command double."""
         env_vars = dbl.expectation.env
-        handler = dbl.handler
 
-        # passthrough spies execute the real command
         if dbl.kind == "spy" and dbl.passthrough_mode:
             return self._runner.run(invocation, env_vars)
 
-        # no handler -> static response
-        if handler is None:
-            resp = dbl.response
+        resp = dbl.response
+        handler = dbl.handler
+        if handler is not None:
+            resp = self._call_with_env(lambda: handler(invocation), env_vars)
 
-        # handler with optional env vars
-        elif env_vars:
-            with temporary_env(env_vars):
-                resp = handler(invocation)
-        else:
-            resp = handler(invocation)
-
-        # merge in env vars for the shim
-        if env_vars:
-            resp.env.update(env_vars)
-
+        resp.env.update(env_vars)
         return resp
+
+    def _call_with_env(
+        self, fn: t.Callable[[], Response], env: dict[str, str]
+    ) -> Response:
+        """Run ``fn`` with *env* temporarily applied if provided."""
+        if not env:
+            return fn()
+        with temporary_env(env):
+            return fn()
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""
