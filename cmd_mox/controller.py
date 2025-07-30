@@ -365,7 +365,8 @@ class CmdMox:
         if handler is not None:
             resp = self._call_with_env(lambda: handler(invocation), env_vars)
 
-        resp.env.update(env_vars)
+        for key, val in env_vars.items():
+            resp.env.setdefault(key, val)
         return resp
 
     def _call_with_env(

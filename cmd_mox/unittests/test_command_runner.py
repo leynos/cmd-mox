@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import typing as t
 
 import pytest
@@ -12,6 +13,7 @@ from cmd_mox.ipc import Invocation
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
+    from pathlib import Path
 
 
 class DummyResult:
@@ -52,3 +54,38 @@ def test_invocation_env_overrides_expectation_env(
     invocation = Invocation(command="echo", args=[], stdin="", env={"VAR": "inv"})
     runner.run(invocation, {"VAR": "expect"})
     assert captured["VAR"] == "inv"
+
+
+def test_fallback_to_system_path(
+    runner: CommandRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fallback to ``os.environ['PATH']`` when original PATH is missing."""
+    dummy = tmp_path / "dummy"
+    dummy.write_text("echo hi")
+    dummy.chmod(0o755)
+
+    monkeypatch.setenv("PATH", str(tmp_path))
+    old_path = runner._env_mgr.original_environment.pop("PATH", None)
+
+    captured_path: str | None = None
+
+    def fake_which(cmd: str, path: str | None = None) -> str | None:
+        nonlocal captured_path
+        captured_path = path
+        return str(dummy) if cmd == "dummy" else None
+
+    def fake_run(
+        argv: list[str], *, env: dict[str, str], **_kwargs: object
+    ) -> DummyResult:
+        return DummyResult(env)
+
+    monkeypatch.setattr("cmd_mox.command_runner.shutil.which", fake_which)
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    invocation = Invocation(command="dummy", args=[], stdin="", env={})
+    runner.run(invocation, {})
+
+    if old_path is not None:
+        runner._env_mgr.original_environment["PATH"] = old_path
+
+    assert captured_path == os.environ["PATH"]
