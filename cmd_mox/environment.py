@@ -18,6 +18,18 @@ CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
 CMOX_IPC_TIMEOUT_ENV = "CMOX_IPC_TIMEOUT"  # server/shim communication timeout
 
 
+def _restore_env(orig_env: dict[str, str]) -> None:
+    """Reset ``os.environ`` to the snapshot stored in ``orig_env``."""
+    for key in list(os.environ):
+        if key not in orig_env:
+            os.environ.pop(key, None)
+        elif os.environ[key] != orig_env[key]:
+            os.environ[key] = orig_env[key]
+    for key, value in orig_env.items():
+        if key not in os.environ:
+            os.environ[key] = value
+
+
 class EnvironmentManager:
     """Manage temporary environment modifications for CmdMox.
 
@@ -59,15 +71,7 @@ class EnvironmentManager:
         """Restore the original environment and clean up."""
         try:
             if self._orig_env is not None:
-                orig_env = self._orig_env
-                for key in list(os.environ):
-                    if key not in orig_env:
-                        os.environ.pop(key, None)
-                    elif os.environ[key] != orig_env[key]:
-                        os.environ[key] = orig_env[key]
-                for key, value in orig_env.items():
-                    if key not in os.environ:
-                        os.environ[key] = value
+                _restore_env(self._orig_env)
                 self._orig_env = None
         finally:
             global _active_manager
@@ -85,13 +89,9 @@ class EnvironmentManager:
 @contextlib.contextmanager
 def temporary_env(mapping: dict[str, str]) -> t.Iterator[None]:
     """Temporarily apply environment variables from *mapping*."""
-    saved: dict[str, str | None] = {k: os.environ.get(k) for k in mapping}
+    orig_env = os.environ.copy()
     os.environ.update(mapping)
     try:
         yield
     finally:
-        for key, val in saved.items():
-            if val is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = val
+        _restore_env(orig_env)

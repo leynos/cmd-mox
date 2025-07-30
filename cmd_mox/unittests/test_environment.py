@@ -7,7 +7,11 @@ import typing as t
 
 import pytest
 
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
+from cmd_mox.environment import (
+    CMOX_IPC_SOCKET_ENV,
+    EnvironmentManager,
+    temporary_env,
+)
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from pathlib import Path
@@ -73,3 +77,22 @@ def test_environment_restores_deleted_vars() -> None:
         del os.environ["DEL_VAR"]
     assert os.environ["DEL_VAR"] == "before"
     del os.environ["DEL_VAR"]
+
+
+def test_temporary_env_restores_environment() -> None:
+    """temporary_env should fully restore the process environment."""
+    original_env = os.environ.copy()
+    with temporary_env({"TMP": "1"}):
+        os.environ["EXTRA"] = "foo"
+        assert os.environ["TMP"] == "1"
+        assert os.environ["EXTRA"] == "foo"
+    assert os.environ == original_env
+
+
+def test_temporary_env_restores_deleted_vars() -> None:
+    """Variables deleted inside temporary_env are re-added."""
+    os.environ["KEEP"] = "val"
+    with temporary_env({"TMP": "x"}):
+        del os.environ["KEEP"]
+    assert os.environ["KEEP"] == "val"
+    del os.environ["KEEP"]
