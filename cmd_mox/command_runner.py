@@ -55,9 +55,7 @@ class CommandRunner:
     ) -> dict[str, str]:
         """Merge the original PATH with any supplied environment variables."""
         path = self._env_mgr.original_environment.get("PATH", "")
-        env = {"PATH": path} | extra_env
-        env |= invocation_env
-        return env
+        return {"PATH": path} | extra_env | invocation_env
 
     def _execute_command(
         self, resolved_path: Path, invocation: Invocation, env: dict[str, str]
