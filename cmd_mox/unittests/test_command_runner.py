@@ -31,8 +31,7 @@ def runner() -> cabc.Iterator[CommandRunner]:
     """Return a :class:`CommandRunner` with a managed environment."""
     env_mgr = EnvironmentManager()
     env_mgr.__enter__()
-    runner = CommandRunner(env_mgr)
-    yield runner
+    yield CommandRunner(env_mgr)
     env_mgr.__exit__(None, None, None)
 
 
