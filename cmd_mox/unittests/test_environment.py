@@ -96,3 +96,29 @@ def test_temporary_env_restores_deleted_vars() -> None:
         del os.environ["KEEP"]
     assert os.environ["KEEP"] == "val"
     del os.environ["KEEP"]
+
+
+def test_temporary_env_restores_on_exception() -> None:
+    """temporary_env should restore the env even if an error occurs."""
+    original_env = os.environ.copy()
+
+    def trigger() -> None:
+        with temporary_env({"ERR": "1"}):
+            os.environ["EXTRA"] = "bar"
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        trigger()
+    assert os.environ == original_env
+
+
+def test_nested_temporary_env() -> None:
+    """Nested temporary_env contexts restore environment correctly."""
+    original_env = os.environ.copy()
+    with temporary_env({"A": "1"}):
+        with temporary_env({"B": "2"}):
+            os.environ["C"] = "3"
+        assert "B" not in os.environ
+        assert os.environ["A"] == "1"
+        assert "C" not in os.environ
+    assert os.environ == original_env

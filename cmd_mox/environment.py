@@ -20,14 +20,8 @@ CMOX_IPC_TIMEOUT_ENV = "CMOX_IPC_TIMEOUT"  # server/shim communication timeout
 
 def _restore_env(orig_env: dict[str, str]) -> None:
     """Reset ``os.environ`` to the snapshot stored in ``orig_env``."""
-    for key in list(os.environ):
-        if key not in orig_env:
-            os.environ.pop(key, None)
-        elif os.environ[key] != orig_env[key]:
-            os.environ[key] = orig_env[key]
-    for key, value in orig_env.items():
-        if key not in os.environ:
-            os.environ[key] = value
+    os.environ.clear()
+    os.environ.update(orig_env)
 
 
 class EnvironmentManager:
