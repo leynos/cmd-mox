@@ -87,13 +87,13 @@
 
   - [x] Strict record-replay-verify logic
 
-- [ ] **SpyCommand**
+- [x] **SpyCommand**
 
-  - [ ] `.returns()` for canned response
+  - [x] `.returns()` for canned response
 
-  - [ ] `.passthrough()` for record/replay mode
+  - [x] `.passthrough()` for record/replay mode
 
-  - [ ] Maintain call history (`invocations`, `call_count` API)
+  - [x] Maintain call history (`invocations`, `call_count` API)
 
 ### Fluent API Enhancements
 

@@ -50,6 +50,12 @@ def spy_command(mox: CmdMox, cmd: str, text: str) -> None:
     mox.spy(cmd).returns(stdout=text)
 
 
+@given(parsers.cfparse('the command "{cmd}" is spied to passthrough'))
+def spy_passthrough(mox: CmdMox, cmd: str) -> None:
+    """Configure a passthrough spy."""
+    mox.spy(cmd).passthrough()
+
+
 @given(parsers.cfparse('the command "{cmd}" is stubbed to run a handler'))
 def stub_runs(mox: CmdMox, cmd: str) -> None:
     """Configure a stub with a dynamic handler."""
@@ -99,6 +105,17 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
 
 
 @when(
+    parsers.cfparse('I run the command "{cmd}" expecting failure'),
+    target_fixture="result",
+)
+def run_command_failure(cmd: str) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* expecting a non-zero exit status."""
+    return subprocess.run(  # noqa: S603
+        [cmd], capture_output=True, text=True, check=False, shell=False
+    )
+
+
+@when(
     parsers.cfparse('I run the command "{cmd}" with arguments "{args}"'),
     target_fixture="result",
 )
@@ -139,6 +156,18 @@ def check_output(result: subprocess.CompletedProcess[str], text: str) -> None:
     assert result.stdout.strip() == text
 
 
+@then(parsers.cfparse("the exit code should be {code:d}"))
+def check_exit_code(result: subprocess.CompletedProcess[str], code: int) -> None:
+    """Assert the process exit code equals *code*."""
+    assert result.returncode == code
+
+
+@then(parsers.cfparse('the stderr should contain "{text}"'))
+def check_stderr(result: subprocess.CompletedProcess[str], text: str) -> None:
+    """Ensure standard error output contains *text*."""
+    assert text in result.stderr
+
+
 @then(parsers.cfparse('the journal should contain {count:d} invocation of "{cmd}"'))
 def check_journal(mox: CmdMox, count: int, cmd: str) -> None:
     """Verify the journal contains the expected command invocation."""
@@ -153,6 +182,14 @@ def check_spy(mox: CmdMox, cmd: str, count: int) -> None:
     assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
     spy = mox.spies[cmd]
     assert len(spy.invocations) == count
+
+
+@then(parsers.cfparse('the spy "{cmd}" call count should be {count:d}'))
+def check_spy_call_count(mox: CmdMox, cmd: str, count: int) -> None:
+    """Assert ``SpyCommand.call_count`` equals *count*."""
+    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
+    spy = mox.spies[cmd]
+    assert spy.call_count == count
 
 
 @then(parsers.cfparse('the mock "{cmd}" should record {count:d} invocation'))
@@ -220,4 +257,20 @@ def test_ordered_mocks_match_arguments() -> None:
 )
 def test_environment_injection() -> None:
     """Stub applies environment variables to the shim."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "passthrough spy executes real command"
+)
+def test_passthrough_spy() -> None:
+    """Spy runs the real command while recording."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "passthrough spy handles missing command"
+)
+def test_passthrough_spy_missing_command() -> None:
+    """Spy reports an error when the real command is absent."""
     pass
