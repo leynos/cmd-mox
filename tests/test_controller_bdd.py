@@ -13,6 +13,8 @@ from pytest_bdd import given, parsers, scenario, then, when
 from cmd_mox.controller import CmdMox
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import pytest
+
     from cmd_mox.ipc import Invocation
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
@@ -85,6 +87,35 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
         return (os.environ.get(var, ""), "", 0)
 
     mox.stub(cmd).with_env({var: val}).runs(handler)
+
+
+@given(parsers.cfparse('the command "{cmd}" resolves to a non-executable file'))
+def non_executable_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cmd: str
+) -> None:
+    """Patch ``shutil.which`` so *cmd* resolves to a non-executable file."""
+    dummy = tmp_path / cmd
+    dummy.write_text("echo hi")
+    dummy.chmod(0o644)
+
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which",
+        lambda name, path=None: str(dummy) if name == cmd else None,
+    )
+
+
+@given(parsers.cfparse('the command "{cmd}" will timeout'))
+def command_will_timeout(monkeypatch: pytest.MonkeyPatch, cmd: str) -> None:
+    """Make ``subprocess.run`` raise ``TimeoutExpired`` for *cmd*."""
+    orig_run = subprocess.run
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if os.path.sep in argv[0] and "cmdmox-" not in Path(argv[0]).parent.name:
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=30)
+        result = orig_run(argv, **kwargs)
+        return t.cast("subprocess.CompletedProcess[str]", result)
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
 
 
 @when("I replay the controller", target_fixture="mox_stack")
@@ -273,4 +304,18 @@ def test_passthrough_spy() -> None:
 )
 def test_passthrough_spy_missing_command() -> None:
     """Spy reports an error when the real command is absent."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "passthrough spy handles permission error"
+)
+def test_passthrough_spy_permission_error() -> None:
+    """Spy records permission errors from the real command."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "passthrough spy handles timeout")
+def test_passthrough_spy_timeout() -> None:
+    """Spy records timeouts from the real command."""
     pass

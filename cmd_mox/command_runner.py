@@ -35,7 +35,9 @@ class CommandRunner:
     # ------------------------------------------------------------------
     def _resolve_and_validate_command(self, command: str) -> Path | Response:
         """Locate *command* in PATH and ensure it is safe to execute."""
-        path = self._env_mgr.original_environment.get("PATH", "")
+        path = self._env_mgr.original_environment.get(
+            "PATH", os.environ.get("PATH", "")
+        )
         real = shutil.which(command, path=path)
         if real is None:
             return Response(stderr=f"{command}: not found", exit_code=127)
@@ -78,18 +80,16 @@ class CommandRunner:
             )
         except subprocess.TimeoutExpired:
             duration = int(self._timeout)
-            return Response(
-                stderr=f"{invocation.command}: timeout after {duration} seconds",
-                exit_code=124,
-            )
-        except (FileNotFoundError, PermissionError) as e:
-            return Response(stderr=f"{invocation.command}: {e}", exit_code=126)
+            return self._error(invocation, f"timeout after {duration} seconds", 124)
+        except FileNotFoundError:
+            return self._error(invocation, "not found", 127)
+        except PermissionError as e:
+            return self._error(invocation, str(e), 126)
         except OSError as e:
-            return Response(
-                stderr=f"{invocation.command}: execution failed: {e}", exit_code=126
-            )
+            return self._error(invocation, f"execution failed: {e}", 126)
         except Exception as e:  # noqa: BLE001 - broad catch for safety
-            return Response(
-                stderr=f"{invocation.command}: unexpected error: {e}",
-                exit_code=126,
-            )
+            return self._error(invocation, f"unexpected error: {e}", 126)
+
+    def _error(self, invocation: Invocation, msg: str, code: int) -> Response:
+        """Return a ``Response`` containing *msg* for *invocation*."""
+        return Response(stderr=f"{invocation.command}: {msg}", exit_code=code)

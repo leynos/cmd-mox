@@ -388,3 +388,11 @@ def test_passthrough_handles_permission_error(
 
     assert result.returncode == 126
     assert "not executable" in result.stderr
+
+
+def test_passthrough_only_valid_for_spies() -> None:
+    """Calling passthrough() on a non-spy should raise ValueError."""
+    mox = CmdMox()
+    stub = mox.stub("foo")
+    with pytest.raises(ValueError, match="only valid for spies"):
+        stub.passthrough()

@@ -1165,7 +1165,7 @@ localising error handling and environment cleanup details.
 Spies now support a ``passthrough()`` mode that executes the real command
 instead of a canned response. When a passthrough spy is invoked, the controller
 locates the real executable using the original ``PATH`` preserved by the
-``EnvironmentManager``. The manager now exposes this data via a new
+``EnvironmentManager``. The manager exposes this via a new
 ``original_environment`` property. A small ``CommandRunner`` helper
 encapsulates the lookup and ``subprocess.run`` call. It runs the command with
 the recorded environment (minus the shim directory) and captures its output and
