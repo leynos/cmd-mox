@@ -16,10 +16,7 @@ from cmd_mox.errors import (
     MissingEnvironmentError,
     UnexpectedCommandError,
 )
-from cmd_mox.ipc import Response
-
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    from cmd_mox.ipc import Invocation
+from cmd_mox.ipc import Invocation, Response
 
 
 def test_cmdmox_stub_records_invocation() -> None:
@@ -396,3 +393,21 @@ def test_passthrough_only_valid_for_spies() -> None:
     stub = mox.stub("foo")
     with pytest.raises(ValueError, match="only valid for spies"):
         stub.passthrough()
+
+
+def test_invoke_handler_applies_env() -> None:
+    """_invoke_handler uses temporary_env and propagates env in Response."""
+    key = "SOME_VAR"
+    mox = CmdMox()
+
+    def handler(invocation: Invocation) -> Response:
+        return Response(stdout=os.environ.get(key, ""))
+
+    dbl = mox.stub("demo").with_env({key: "VAL"}).runs(handler)
+    inv = Invocation(command="demo", args=[], stdin="", env={})
+
+    assert key not in os.environ
+    resp = mox._invoke_handler(dbl, inv)
+    assert resp.stdout == "VAL"
+    assert key not in os.environ
+    assert resp.env == {key: "VAL"}

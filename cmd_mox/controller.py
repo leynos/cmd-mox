@@ -339,6 +339,20 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _invoke_handler(self, dbl: CommandDouble, inv: Invocation) -> Response:
+        """Invoke ``dbl``'s handler applying expectation environment."""
+        env = dbl.expectation.env
+        if dbl.handler is None:
+            resp = dbl.response
+        elif env:
+            with temporary_env(env):
+                resp = dbl.handler(inv)
+        else:
+            resp = dbl.handler(inv)
+        if env:
+            resp.env.update(env)
+        return resp
+
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
         self.journal.append(invocation)
@@ -348,26 +362,7 @@ class CmdMox:
 
         if dbl.is_recording:
             dbl.invocations.append(invocation)
-
-        return self._execute_double_strategy(invocation, dbl)
-
-    def _execute_double_strategy(
-        self, invocation: Invocation, dbl: CommandDouble
-    ) -> Response:
-        """Execute the appropriate strategy for the command double."""
-        env_vars = dbl.expectation.env
-
-        if dbl.kind == "spy" and dbl.passthrough_mode:
-            return self._runner.run(invocation, env_vars)
-
-        resp = dbl.response
-        handler = dbl.handler
-        if handler is not None:
-            resp = self._call_with_env(lambda: handler(invocation), env_vars)
-
-        for key, val in env_vars.items():
-            resp.env.setdefault(key, val)
-        return resp
+        return self._invoke_handler(dbl, invocation)
 
     def _call_with_env(
         self, fn: t.Callable[[], Response], env: dict[str, str]
