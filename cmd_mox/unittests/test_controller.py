@@ -77,8 +77,12 @@ def test_cmdmox_nonstubbed_command_behavior() -> None:
         mox.verify()
 
 
-def _test_environment_cleanup_helper(*, call_replay_before_exception: bool) -> None:
-    """Shared logic verifying env cleanup when exceptions occur."""
+@pytest.mark.parametrize("call_replay_before_exception", [True, False])
+def test_cmdmox_environment_cleanup_on_exception(
+    *,
+    call_replay_before_exception: bool,
+) -> None:
+    """Environment is cleaned even if an error occurs before replay."""
     original_path = os.environ["PATH"]
     mox = CmdMox()
     mox.stub("fail").returns(stdout="fail")
@@ -103,16 +107,6 @@ def _test_environment_cleanup_helper(*, call_replay_before_exception: bool) -> N
 
     # Ensure PATH is fully restored
     assert os.environ["PATH"] == original_path
-
-
-def test_cmdmox_environment_cleanup_on_exception() -> None:
-    """Environment is cleaned when an exception occurs after replay."""
-    _test_environment_cleanup_helper(call_replay_before_exception=True)
-
-
-def test_cmdmox_environment_cleanup_on_exception_before_replay() -> None:
-    """Environment is cleaned up if an error occurs before replay."""
-    _test_environment_cleanup_helper(call_replay_before_exception=False)
 
 
 def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
