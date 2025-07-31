@@ -11,13 +11,23 @@ SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 
 def _validate_command_name(name: str) -> None:
     """Validate *name* is a safe command filename."""
-    invalid = (
-        not name
-        or name in {".", ".."}
-        or any(sep in name for sep in ("/", "\\"))
-        or "\x00" in name
-    )
-    if invalid:
+    # Disallow empty names so we never create ``directory/`` itself.
+    if not name:
+        msg = f"Invalid command name: {name!r}"
+        raise ValueError(msg)
+
+    # ``.`` or ``..`` would resolve to the current or parent directory.
+    if name in {".", ".."}:
+        msg = f"Invalid command name: {name!r}"
+        raise ValueError(msg)
+
+    # Ensure the name does not include path separators for portability.
+    if any(sep in name for sep in ("/", "\\")):
+        msg = f"Invalid command name: {name!r}"
+        raise ValueError(msg)
+
+    # A NUL byte would truncate the filename on some systems.
+    if "\x00" in name:
         msg = f"Invalid command name: {name!r}"
         raise ValueError(msg)
 
