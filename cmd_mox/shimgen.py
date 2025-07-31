@@ -9,27 +9,40 @@ from pathlib import Path
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 
 
-def _validate_command_name(name: str) -> None:
-    """Validate *name* is a safe command filename."""
-    # Disallow empty names so we never create ``directory/`` itself.
+def _check_not_empty(name: str) -> None:
+    """Disallow empty names so we never create ``directory/`` itself."""
     if not name:
         msg = f"Invalid command name: {name!r}"
         raise ValueError(msg)
 
-    # ``.`` or ``..`` would resolve to the current or parent directory.
+
+def _check_not_special_dirs(name: str) -> None:
+    """Reject ``.`` or ``..`` which would resolve to the current or parent directory."""
     if name in {".", ".."}:
         msg = f"Invalid command name: {name!r}"
         raise ValueError(msg)
 
-    # Ensure the name does not include path separators for portability.
+
+def _check_no_path_separators(name: str) -> None:
+    """Ensure the name does not include path separators for portability."""
     if any(sep in name for sep in ("/", "\\")):
         msg = f"Invalid command name: {name!r}"
         raise ValueError(msg)
 
-    # A NUL byte would truncate the filename on some systems.
+
+def _check_no_nul_byte(name: str) -> None:
+    """Reject names containing NUL bytes to avoid filename truncation."""
     if "\x00" in name:
         msg = f"Invalid command name: {name!r}"
         raise ValueError(msg)
+
+
+def _validate_command_name(name: str) -> None:
+    """Validate *name* is a safe command filename."""
+    _check_not_empty(name)
+    _check_not_special_dirs(name)
+    _check_no_path_separators(name)
+    _check_no_nul_byte(name)
 
 
 def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
