@@ -311,3 +311,21 @@ def test_stub_runs_handler(
     mox.verify()
 
     assert result.stdout.strip() == expected
+
+
+def test_invoke_handler_applies_env() -> None:
+    """_invoke_handler uses temporary_env and propagates env in Response."""
+    key = "SOME_VAR"
+    mox = CmdMox()
+
+    def handler(invocation: Invocation) -> Response:
+        return Response(stdout=os.environ.get(key, ""))
+
+    dbl = mox.stub("demo").with_env({key: "VAL"}).runs(handler)
+    inv = Invocation(command="demo", args=[], stdin="", env={})
+
+    assert key not in os.environ
+    resp = mox._invoke_handler(dbl, inv)
+    assert resp.stdout == "VAL"
+    assert key not in os.environ
+    assert resp.env == {key: "VAL"}

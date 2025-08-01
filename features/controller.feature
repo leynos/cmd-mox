@@ -73,3 +73,45 @@ Feature: CmdMox basic functionality
     Then the output should be "WORLD"
     When I verify the controller
     Then the journal should contain 1 invocation of "envcmd"
+
+  Scenario: passthrough spy executes real command
+    Given a CmdMox controller
+    And the command "echo" is spied to passthrough
+    When I replay the controller
+    And I run the command "echo" with arguments "hello"
+    Then the output should be "hello"
+    When I verify the controller
+    Then the spy "echo" should record 1 invocation
+    And the spy "echo" call count should be 1
+
+  Scenario: passthrough spy handles missing command
+    Given a CmdMox controller
+    And the command "bogus" is spied to passthrough
+    When I replay the controller
+    And I run the command "bogus" expecting failure
+    Then the exit code should be 127
+    And the stderr should contain "not found"
+    When I verify the controller
+    Then the spy "bogus" should record 1 invocation
+
+  Scenario: passthrough spy handles permission error
+    Given a CmdMox controller
+    And the command "dummycmd" is spied to passthrough
+    And the command "dummycmd" resolves to a non-executable file
+    When I replay the controller
+    And I run the command "dummycmd" expecting failure
+    Then the exit code should be 126
+    And the stderr should contain "not executable"
+    When I verify the controller
+    Then the spy "dummycmd" should record 1 invocation
+
+  Scenario: passthrough spy handles timeout
+    Given a CmdMox controller
+    And the command "echo" is spied to passthrough
+    And the command "echo" will timeout
+    When I replay the controller
+    And I run the command "echo" expecting failure
+    Then the exit code should be 124
+    And the stderr should contain "timeout after 30 seconds"
+    When I verify the controller
+    Then the spy "echo" should record 1 invocation
