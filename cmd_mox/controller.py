@@ -242,11 +242,7 @@ class CmdMox:
         if self._handle_auto_verify(exc_type):
             return
 
-        if self._server is not None:
-            try:
-                self._server.stop()
-            finally:
-                self._server = None
+        self._stop_server()
         if self._entered:
             self.environment.__exit__(exc_type, exc, tb)
             self._entered = False
@@ -371,13 +367,17 @@ class CmdMox:
         )
         self._server.start()
 
-    def _cleanup_after_replay_error(self) -> None:
-        """Stop the server and restore the environment after failure."""
+    def _stop_server(self) -> None:
+        """Stop the IPC server and clear the reference."""
         if self._server is not None:
             try:
                 self._server.stop()
             finally:
                 self._server = None
+
+    def _cleanup_after_replay_error(self) -> None:
+        """Stop the server and restore the environment after failure."""
+        self._stop_server()
         self.environment.__exit__(None, None, None)
         self._entered = False
 
@@ -401,11 +401,7 @@ class CmdMox:
 
     def _finalize_verification(self) -> None:
         """Stop the server, clean up the environment, and update phase."""
-        if self._server is not None:
-            try:
-                self._server.stop()
-            finally:
-                self._server = None
+        self._stop_server()
         if self._entered:
             self.environment.__exit__(None, None, None)
             self._entered = False
