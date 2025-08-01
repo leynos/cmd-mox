@@ -19,10 +19,14 @@ from cmd_mox.errors import (
 from cmd_mox.ipc import Response
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import subprocess
+
     from cmd_mox.ipc import Invocation
 
 
-def test_cmdmox_stub_records_invocation() -> None:
+def test_cmdmox_stub_records_invocation(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Stubbed command returns configured output and journal records call."""
     original_path = os.environ["PATH"]
     mox = CmdMox()
@@ -31,9 +35,7 @@ def test_cmdmox_stub_records_invocation() -> None:
     mox.replay()
 
     cmd_path = Path(mox.environment.shim_dir) / "hello"
-    result = subprocess.run(  # noqa: S603
-        [str(cmd_path)], capture_output=True, text=True, check=True
-    )
+    result = run([str(cmd_path)])
     mox.verify()
 
     assert result.stdout.strip() == "hi"
@@ -42,7 +44,9 @@ def test_cmdmox_stub_records_invocation() -> None:
     assert os.environ["PATH"] == original_path
 
 
-def test_cmdmox_replay_verify_out_of_order() -> None:
+def test_cmdmox_replay_verify_out_of_order(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Calling replay() or verify() out of order should raise RuntimeError."""
     mox = CmdMox()
     with pytest.raises(LifecycleError):
@@ -53,13 +57,15 @@ def test_cmdmox_replay_verify_out_of_order() -> None:
     with pytest.raises(LifecycleError):
         mox.replay()
     cmd_path = Path(mox.environment.shim_dir) / "foo"
-    subprocess.run([str(cmd_path)], capture_output=True, text=True, check=True)  # noqa: S603
+    run([str(cmd_path)])
     mox.verify()
     with pytest.raises(LifecycleError):
         mox.verify()
 
 
-def test_cmdmox_nonstubbed_command_behavior() -> None:
+def test_cmdmox_nonstubbed_command_behavior(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Invoking a non-stubbed command returns name but fails verification."""
     mox = CmdMox()
     mox.register_command("not_stubbed")
@@ -67,9 +73,7 @@ def test_cmdmox_nonstubbed_command_behavior() -> None:
     mox.replay()
 
     cmd_path = Path(mox.environment.shim_dir) / "not_stubbed"
-    result = subprocess.run(  # noqa: S603
-        [str(cmd_path)], capture_output=True, text=True, check=True
-    )
+    result = run([str(cmd_path)])
 
     assert result.stdout.strip() == "not_stubbed"
 
@@ -174,7 +178,9 @@ def test_double_kind_mismatch() -> None:
         mox.mock("foo")
 
 
-def test_mock_and_spy_invocations() -> None:
+def test_mock_and_spy_invocations(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Mock and spy commands record calls and verify correctly."""
     mox = CmdMox()
     mox.mock("hello").returns(stdout="hi")
@@ -184,8 +190,8 @@ def test_mock_and_spy_invocations() -> None:
 
     cmd_hello = Path(mox.environment.shim_dir) / "hello"
     cmd_world = Path(mox.environment.shim_dir) / "world"
-    res1 = subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
-    res2 = subprocess.run([str(cmd_world)], capture_output=True, text=True, check=True)  # noqa: S603
+    res1 = run([str(cmd_hello)])
+    res2 = run([str(cmd_world)])
 
     mox.verify()
 
@@ -196,7 +202,9 @@ def test_mock_and_spy_invocations() -> None:
     assert mox.spies["world"].invocations[0].command == "world"
 
 
-def test_invocation_order_multiple_calls() -> None:
+def test_invocation_order_multiple_calls(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Multiple calls are recorded in order."""
     mox = CmdMox()
     mox.mock("hello").returns(stdout="hi").times(2)
@@ -206,9 +214,9 @@ def test_invocation_order_multiple_calls() -> None:
 
     cmd_hello = Path(mox.environment.shim_dir) / "hello"
     cmd_world = Path(mox.environment.shim_dir) / "world"
-    subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
-    subprocess.run([str(cmd_world)], capture_output=True, text=True, check=True)  # noqa: S603
-    subprocess.run([str(cmd_hello)], capture_output=True, text=True, check=True)  # noqa: S603
+    run([str(cmd_hello)])
+    run([str(cmd_world)])
+    run([str(cmd_hello)])
 
     mox.verify()
 
@@ -217,7 +225,9 @@ def test_invocation_order_multiple_calls() -> None:
     assert len(mox.spies["world"].invocations) == 1
 
 
-def test_context_manager_restores_env_on_exception() -> None:
+def test_context_manager_restores_env_on_exception(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Context manager restores environment even if an exception occurs."""
 
     class CustomError(Exception):
@@ -228,9 +238,7 @@ def test_context_manager_restores_env_on_exception() -> None:
             mox.stub("boom").returns(stdout="oops")
             mox.replay()
             cmd_path = Path(mox.environment.shim_dir) / "boom"
-            subprocess.run(  # noqa: S603
-                [str(cmd_path)], capture_output=True, text=True, check=True
-            )
+            run([str(cmd_path)])
             raise CustomError
 
     original_env = os.environ.copy()
@@ -241,14 +249,16 @@ def test_context_manager_restores_env_on_exception() -> None:
     assert os.environ == original_env
 
 
-def test_context_manager_auto_verify() -> None:
+def test_context_manager_auto_verify(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Exiting the context automatically calls verify."""
     mox = CmdMox()
     mox.stub("hi").returns(stdout="hello")
     with mox:
         mox.replay()
         cmd_path = Path(mox.environment.shim_dir) / "hi"
-        subprocess.run([str(cmd_path)], capture_output=True, text=True, check=True)  # noqa: S603
+        run([str(cmd_path)])
 
     with pytest.raises(LifecycleError):
         mox.verify()
@@ -287,6 +297,7 @@ def test_stub_runs_handler(
     cmd: str,
     handler: t.Callable[[Invocation], Response | tuple[str, str, int]],
     expected: str,
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Stub runs a dynamic handler when invoked."""
     mox = CmdMox()
@@ -295,9 +306,7 @@ def test_stub_runs_handler(
     mox.replay()
 
     cmd_path = Path(mox.environment.shim_dir) / cmd
-    result = subprocess.run(  # noqa: S603
-        [str(cmd_path)], capture_output=True, text=True, check=True
-    )
+    result = run([str(cmd_path)])
 
     mox.verify()
 
