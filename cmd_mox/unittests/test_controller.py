@@ -82,7 +82,7 @@ def test_cmdmox_environment_cleanup_on_exception(
     *,
     call_replay_before_exception: bool,
 ) -> None:
-    """Environment is cleaned even if an error occurs before replay."""
+    """Environment is cleaned even if an error occurs before or after replay."""
     original_path = os.environ["PATH"]
     mox = CmdMox()
     mox.stub("fail").returns(stdout="fail")
