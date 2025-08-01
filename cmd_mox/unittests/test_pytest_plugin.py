@@ -21,7 +21,7 @@ def test_fixture_basic(cmd_mox: CmdMox) -> None:
     cmd_mox.stub("hello").returns(stdout="hi")
     cmd_mox.replay()
     cmd_path = Path(cmd_mox.environment.shim_dir) / "hello"
-    result = run_cmd([str(cmd_path)])
+    result = run_cmd([cmd_path])
     assert result.stdout.strip() == "hi"
     cmd_mox.verify()
 

@@ -12,13 +12,18 @@ if t.TYPE_CHECKING:  # pragma: no cover - types only
 
 
 def run_cmd(
-    argv: cabc.Iterable[str | Path], **kwargs: object
+    argv: cabc.Iterable[str | Path], *, check: bool = True, **kwargs: object
 ) -> subprocess.CompletedProcess[str]:
-    """Run *argv* capturing output and raising on failure."""
+    """Run *argv* capturing output.
+
+    Parameters are forwarded to :func:`subprocess.run`. ``check`` defaults to
+    ``True`` so tests fail fast on non-zero exit codes, but it can be disabled
+    when callers want to inspect the result.
+    """
     return subprocess.run(  # noqa: S603
         [str(a) for a in argv],
         capture_output=True,
         text=True,
-        check=True,
+        check=check,
         **kwargs,
     )

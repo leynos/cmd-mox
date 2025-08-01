@@ -26,8 +26,8 @@ def test_mock_with_args_and_order() -> None:
 
     path_first = Path(mox.environment.shim_dir) / "first"
     path_second = Path(mox.environment.shim_dir) / "second"
-    run_cmd([str(path_first), "a"])
-    run_cmd([str(path_second), "b"])
+    run_cmd([path_first, "a"])
+    run_cmd([path_second, "b"])
 
     mox.verify()
 
@@ -43,7 +43,7 @@ def test_mock_argument_mismatch() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "foo"
-    run_cmd([str(path), "baz"])
+    run_cmd([path, "baz"])
 
     with pytest.raises(UnexpectedCommandError):
         mox.verify()
@@ -57,7 +57,7 @@ def test_with_matching_args_and_stdin() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "grep"
-    run_cmd([str(path), "foo=123"], input="data")
+    run_cmd([path, "foo=123"], input="data")
 
     mox.verify()
 
@@ -74,7 +74,7 @@ def test_with_env_injection() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "env"
-    result = run_cmd([str(path)])
+    result = run_cmd([path])
     mox.verify()
 
     assert result.stdout.strip() == "WORLD"

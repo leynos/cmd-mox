@@ -28,7 +28,7 @@ def test_create_shim_symlinks_and_execution() -> None:
                 assert link.is_symlink()
                 assert link.resolve() == SHIM_PATH
                 assert os.access(link, os.X_OK)
-                result = run_cmd([str(link)])
+                result = run_cmd([link])
                 assert result.stdout.strip() == cmd
                 assert result.stderr == ""
                 assert result.returncode == 0

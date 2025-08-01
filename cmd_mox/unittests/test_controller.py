@@ -28,7 +28,7 @@ def test_cmdmox_stub_records_invocation() -> None:
     mox.replay()
 
     cmd_path = Path(mox.environment.shim_dir) / "hello"
-    result = run_cmd([str(cmd_path)])
+    result = run_cmd([cmd_path])
     mox.verify()
 
     assert result.stdout.strip() == "hi"
@@ -48,7 +48,7 @@ def test_cmdmox_replay_verify_out_of_order() -> None:
     with pytest.raises(LifecycleError):
         mox.replay()
     cmd_path = Path(mox.environment.shim_dir) / "foo"
-    run_cmd([str(cmd_path)])
+    run_cmd([cmd_path])
     mox.verify()
     with pytest.raises(LifecycleError):
         mox.verify()
@@ -62,7 +62,7 @@ def test_cmdmox_nonstubbed_command_behavior() -> None:
     mox.replay()
 
     cmd_path = Path(mox.environment.shim_dir) / "not_stubbed"
-    result = run_cmd([str(cmd_path)])
+    result = run_cmd([cmd_path])
 
     assert result.stdout.strip() == "not_stubbed"
 
@@ -177,8 +177,8 @@ def test_mock_and_spy_invocations() -> None:
 
     cmd_hello = Path(mox.environment.shim_dir) / "hello"
     cmd_world = Path(mox.environment.shim_dir) / "world"
-    res1 = run_cmd([str(cmd_hello)])
-    res2 = run_cmd([str(cmd_world)])
+    res1 = run_cmd([cmd_hello])
+    res2 = run_cmd([cmd_world])
 
     mox.verify()
 
@@ -199,9 +199,9 @@ def test_invocation_order_multiple_calls() -> None:
 
     cmd_hello = Path(mox.environment.shim_dir) / "hello"
     cmd_world = Path(mox.environment.shim_dir) / "world"
-    run_cmd([str(cmd_hello)])
-    run_cmd([str(cmd_world)])
-    run_cmd([str(cmd_hello)])
+    run_cmd([cmd_hello])
+    run_cmd([cmd_world])
+    run_cmd([cmd_hello])
 
     mox.verify()
 
@@ -221,7 +221,7 @@ def test_context_manager_restores_env_on_exception() -> None:
             mox.stub("boom").returns(stdout="oops")
             mox.replay()
             cmd_path = Path(mox.environment.shim_dir) / "boom"
-            run_cmd([str(cmd_path)])
+            run_cmd([cmd_path])
             raise CustomError
 
     original_env = os.environ.copy()
@@ -239,7 +239,7 @@ def test_context_manager_auto_verify() -> None:
     with mox:
         mox.replay()
         cmd_path = Path(mox.environment.shim_dir) / "hi"
-        run_cmd([str(cmd_path)])
+        run_cmd([cmd_path])
 
     with pytest.raises(LifecycleError):
         mox.verify()
@@ -286,7 +286,7 @@ def test_stub_runs_handler(
     mox.replay()
 
     cmd_path = Path(mox.environment.shim_dir) / cmd
-    result = run_cmd([str(cmd_path)])
+    result = run_cmd([cmd_path])
 
     mox.verify()
 
