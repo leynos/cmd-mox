@@ -9,7 +9,7 @@ import pytest
 
 
 def run_subprocess(
-    args: t.Sequence[str] | str,
+    args: t.Sequence[str],
     **kwargs: t.Any,  # noqa: ANN401
 ) -> subprocess.CompletedProcess[str]:
     """Run ``subprocess.run`` with common defaults for tests."""
