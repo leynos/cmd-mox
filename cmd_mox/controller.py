@@ -258,11 +258,7 @@ class CmdMox:
         """Exit context, optionally verifying and cleaning up."""
         if self._handle_auto_verify(exc_type):
             return
-
-        self._stop_server()
-        if self._entered:
-            self.environment.__exit__(exc_type, exc, tb)
-            self._entered = False
+        self._stop_server_and_exit_env(exc_type, exc, tb)
 
     def _handle_auto_verify(self, exc_type: type[BaseException] | None) -> bool:
         """Invoke :meth:`verify` when exiting a replay block."""
@@ -335,44 +331,33 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _invoke_handler(
+        self, double: CommandDouble, invocation: Invocation
+    ) -> Response:
+        """Run ``double``'s handler within its expectation environment."""
+        env = double.expectation.env
+        if double.passthrough_mode:
+            resp = self._runner.run(invocation, env)
+        elif double.handler is None:
+            resp = double.response
+        elif env:
+            with temporary_env(env):
+                resp = double.handler(invocation)
+        else:
+            resp = double.handler(invocation)
+        if env:
+            resp.env.update(env)
+        return resp
+
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
         self.journal.append(invocation)
-        dbl = self._doubles.get(invocation.command)
-        if not dbl:
+        double = self._doubles.get(invocation.command)
+        if not double:
             return Response(stdout=invocation.command)
-
-        if dbl.is_recording:
-            dbl.invocations.append(invocation)
-
-        return self._execute_double_strategy(invocation, dbl)
-
-    def _execute_double_strategy(
-        self, invocation: Invocation, dbl: CommandDouble
-    ) -> Response:
-        """Execute the appropriate strategy for the command double."""
-        env_vars = dbl.expectation.env
-
-        if dbl.kind == "spy" and dbl.passthrough_mode:
-            return self._runner.run(invocation, env_vars)
-
-        resp = dbl.response
-        handler = dbl.handler
-        if handler is not None:
-            resp = self._call_with_env(lambda: handler(invocation), env_vars)
-
-        for key, val in env_vars.items():
-            resp.env.setdefault(key, val)
-        return resp
-
-    def _call_with_env(
-        self, fn: t.Callable[[], Response], env: dict[str, str]
-    ) -> Response:
-        """Run ``fn`` with *env* temporarily applied if provided."""
-        if not env:
-            return fn()
-        with temporary_env(env):
-            return fn()
+        if double.is_recording:
+            double.invocations.append(invocation)
+        return self._invoke_handler(double, invocation)
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""
@@ -405,17 +390,41 @@ class CmdMox:
         )
         self._server.start()
 
-    def _stop_server(self) -> None:
-        """Stop the IPC server and clear the reference."""
+    def _stop_server_and_exit_env(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc: BaseException | None = None,
+        tb: TracebackType | None = None,
+    ) -> None:
+        """Stop the IPC server and exit the environment manager.
+
+        This helper underpins :py:meth:`__exit__`,
+        :py:meth:`_cleanup_after_replay_error`, and
+        :py:meth:`_finalize_verification`.
+
+        Parameters
+        ----------
+        exc_type, exc, tb:
+            Exception information forwarded to
+            :meth:`EnvironmentManager.__exit__`. Pass ``None`` for all three
+            when no exception is being handled.
+
+        This method is idempotent so it is safe to call multiple times from
+        different cleanup paths.
+        """
         if self._server is not None:
             try:
                 self._server.stop()
             finally:
                 self._server = None
 
+        if self._entered:
+            self.environment.__exit__(exc_type, exc, tb)
+            self._entered = False
+
     def _cleanup_after_replay_error(self) -> None:
         """Stop the server and restore the environment after failure."""
-        self.__exit__(None, None, None)
+        self._stop_server_and_exit_env()
 
     def _check_verify_preconditions(self) -> None:
         """Ensure verify() is called in the correct phase."""
@@ -437,8 +446,5 @@ class CmdMox:
 
     def _finalize_verification(self) -> None:
         """Stop the server, clean up the environment, and update phase."""
-        self._stop_server()
-        if self._entered:
-            self.environment.__exit__(None, None, None)
-            self._entered = False
+        self._stop_server_and_exit_env()
         self._phase = Phase.VERIFY

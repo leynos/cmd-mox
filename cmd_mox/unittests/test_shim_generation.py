@@ -5,6 +5,7 @@ import pathlib
 import stat
 import subprocess
 import tempfile
+import typing as t
 
 import pytest
 
@@ -13,7 +14,9 @@ from cmd_mox.ipc import IPCServer
 from cmd_mox.shimgen import SHIM_PATH, create_shim_symlinks
 
 
-def test_create_shim_symlinks_and_execution() -> None:
+def test_create_shim_symlinks_and_execution(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Symlinks execute the shim and expose the invoked name."""
     commands = ["git", "curl"]
     with EnvironmentManager() as env:
@@ -28,12 +31,7 @@ def test_create_shim_symlinks_and_execution() -> None:
                 assert link.is_symlink()
                 assert link.resolve() == SHIM_PATH
                 assert os.access(link, os.X_OK)
-                result = subprocess.run(  # noqa: S603
-                    [str(link)],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
+                result = run([str(link)])
                 assert result.stdout.strip() == cmd
                 assert result.stderr == ""
                 assert result.returncode == 0
