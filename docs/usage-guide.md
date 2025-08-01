@@ -147,3 +147,15 @@ The DSL methods closely mirror those described in the design specification. A fe
 - `passthrough()` – for spies, run the real command while recording it.
 
 Refer to the [design document](./python-native-command-mocking-design.md) for the full table of methods and examples.
+
+## Environment variables
+
+CmdMox exposes two environment variables to coordinate shims with the IPC server.
+
+- `CMOX_IPC_SOCKET` – path to the Unix domain socket used by shims. The
+  `CmdMox` fixture sets this automatically when the server starts. Shims exit
+  with an error if the variable is missing.
+- `CMOX_IPC_TIMEOUT` – communication timeout in seconds. Override this to tune
+  connection waits. When unset, the default is `5.0` seconds.
+
+Most tests should rely on the fixture to manage these variables.
