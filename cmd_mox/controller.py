@@ -258,7 +258,6 @@ class CmdMox:
         """Exit context, optionally verifying and cleaning up."""
         if self._handle_auto_verify(exc_type):
             return
-
         self._stop_server_and_exit_env(exc_type, exc, tb)
 
     def _handle_auto_verify(self, exc_type: type[BaseException] | None) -> bool:
