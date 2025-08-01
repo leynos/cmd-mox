@@ -7,11 +7,16 @@ import typing as t
 
 
 class _ReprMixin:
-    """Provide a generic ``__repr__`` based on public attributes."""
+    """Generate ``repr`` from public attributes.
 
-    def __repr__(self) -> str:  # pragma: no cover - debug helper
+    Private attributes (those starting with ``_``) are omitted. Attributes are
+    sorted alphabetically to keep the output stable even if ``__init__`` order
+    changes.
+    """
+
+    def __repr__(self) -> str:
         attrs = ", ".join(
-            f"{k}={v!r}" for k, v in vars(self).items() if not k.startswith("_")
+            f"{k}={v!r}" for k, v in sorted(vars(self).items()) if not k.startswith("_")
         )
         return f"{self.__class__.__name__}({attrs})"
 
