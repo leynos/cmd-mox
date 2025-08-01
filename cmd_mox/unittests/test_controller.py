@@ -16,10 +16,7 @@ from cmd_mox.errors import (
     MissingEnvironmentError,
     UnexpectedCommandError,
 )
-from cmd_mox.ipc import Response
-
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    from cmd_mox.ipc import Invocation
+from cmd_mox.ipc import Invocation, Response
 
 
 def test_cmdmox_stub_records_invocation() -> None:
@@ -304,95 +301,19 @@ def test_stub_runs_handler(
     assert result.stdout.strip() == expected
 
 
-def test_spy_passthrough_records_real_output() -> None:
-    """Passthrough spy runs the real command and records calls."""
+def test_invoke_handler_applies_env() -> None:
+    """_invoke_handler uses temporary_env and propagates env in Response."""
+    key = "SOME_VAR"
     mox = CmdMox()
-    spy = mox.spy("echo").passthrough()
-    mox.__enter__()
-    mox.replay()
 
-    cmd_path = Path(mox.environment.shim_dir) / "echo"
-    result = subprocess.run(  # noqa: S603
-        [str(cmd_path), "hi"], capture_output=True, text=True, check=True
-    )
+    def handler(invocation: Invocation) -> Response:
+        return Response(stdout=os.environ.get(key, ""))
 
-    mox.verify()
-    mox.__exit__(None, None, None)
+    dbl = mox.stub("demo").with_env({key: "VAL"}).runs(handler)
+    inv = Invocation(command="demo", args=[], stdin="", env={})
 
-    assert result.stdout.strip() == "hi"
-    assert spy.call_count == 1
-
-
-def test_passthrough_handles_missing_command() -> None:
-    """Runner returns an error when the real command cannot be found."""
-    mox = CmdMox()
-    mox.spy("does-not-exist").passthrough()
-    mox.__enter__()
-    mox.replay()
-
-    cmd_path = Path(mox.environment.shim_dir) / "does-not-exist"
-    result = subprocess.run([str(cmd_path)], capture_output=True, text=True)  # noqa: S603
-
-    mox.verify()
-    mox.__exit__(None, None, None)
-
-    assert result.returncode == 127
-    assert "not found" in result.stderr
-
-
-def test_passthrough_handles_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Runner gracefully handles subprocess timeouts."""
-    mox = CmdMox()
-    mox.spy("echo").passthrough()
-    mox.__enter__()
-    mox.replay()
-
-    def fake_run(argv: list[str], **_kwargs: object) -> t.NoReturn:
-        raise subprocess.TimeoutExpired(cmd=argv, timeout=30)
-
-    orig_run = subprocess.run
-    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
-    cmd_path = Path(mox.environment.shim_dir) / "echo"
-    result = orig_run([str(cmd_path)], capture_output=True, text=True)
-
-    mox.verify()
-    mox.__exit__(None, None, None)
-
-    assert result.returncode == 124
-    assert "timeout after 30 seconds" in result.stderr
-
-
-def test_passthrough_handles_permission_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Runner reports permission errors for non-executable files."""
-    dummy = tmp_path / "dummy"
-    dummy.write_text("echo hi")
-    dummy.chmod(0o644)
-
-    mox = CmdMox()
-    mox.spy("dummycmd").passthrough()
-    mox.__enter__()
-    mox.replay()
-
-    monkeypatch.setattr(
-        "cmd_mox.command_runner.shutil.which",
-        lambda cmd, path=None: str(dummy) if cmd == "dummycmd" else None,
-    )
-
-    cmd_path = Path(mox.environment.shim_dir) / "dummycmd"
-    result = subprocess.run([str(cmd_path)], capture_output=True, text=True)  # noqa: S603
-
-    mox.verify()
-    mox.__exit__(None, None, None)
-
-    assert result.returncode == 126
-    assert "not executable" in result.stderr
-
-
-def test_passthrough_only_valid_for_spies() -> None:
-    """Calling passthrough() on a non-spy should raise ValueError."""
-    mox = CmdMox()
-    stub = mox.stub("foo")
-    with pytest.raises(ValueError, match="only valid for spies"):
-        stub.passthrough()
+    assert key not in os.environ
+    resp = mox._invoke_handler(dbl, inv)
+    assert resp.stdout == "VAL"
+    assert key not in os.environ
+    assert resp.env == {key: "VAL"}

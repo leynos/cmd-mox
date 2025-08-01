@@ -339,44 +339,31 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _invoke_handler(
+        self, double: CommandDouble, invocation: Invocation
+    ) -> Response:
+        """Run ``double``'s handler within its expectation environment."""
+        env = double.expectation.env
+        if double.handler is None:
+            resp = double.response
+        elif env:
+            with temporary_env(env):
+                resp = double.handler(invocation)
+        else:
+            resp = double.handler(invocation)
+        if env:
+            resp.env.update(env)
+        return resp
+
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
         self.journal.append(invocation)
-        dbl = self._doubles.get(invocation.command)
-        if not dbl:
+        double = self._doubles.get(invocation.command)
+        if not double:
             return Response(stdout=invocation.command)
-
-        if dbl.is_recording:
-            dbl.invocations.append(invocation)
-
-        return self._execute_double_strategy(invocation, dbl)
-
-    def _execute_double_strategy(
-        self, invocation: Invocation, dbl: CommandDouble
-    ) -> Response:
-        """Execute the appropriate strategy for the command double."""
-        env_vars = dbl.expectation.env
-
-        if dbl.kind == "spy" and dbl.passthrough_mode:
-            return self._runner.run(invocation, env_vars)
-
-        resp = dbl.response
-        handler = dbl.handler
-        if handler is not None:
-            resp = self._call_with_env(lambda: handler(invocation), env_vars)
-
-        for key, val in env_vars.items():
-            resp.env.setdefault(key, val)
-        return resp
-
-    def _call_with_env(
-        self, fn: t.Callable[[], Response], env: dict[str, str]
-    ) -> Response:
-        """Run ``fn`` with *env* temporarily applied if provided."""
-        if not env:
-            return fn()
-        with temporary_env(env):
-            return fn()
+        if double.is_recording:
+            double.invocations.append(invocation)
+        return self._invoke_handler(double, invocation)
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""
