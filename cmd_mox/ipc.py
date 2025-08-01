@@ -116,7 +116,6 @@ class IPCServer:
         self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
         self._server: _InnerServer | None = None
         self._thread: threading.Thread | None = None
-        self._stop = threading.Event()
 
     # ------------------------------------------------------------------
     # Context manager protocol
@@ -144,7 +143,6 @@ class IPCServer:
             msg = "IPC server already started"
             raise RuntimeError(msg)
 
-        self._stop.clear()
         if self.socket_path.exists():
             try:
                 # Verify the socket isn't in use before removing it to avoid
@@ -185,7 +183,6 @@ class IPCServer:
 
     def stop(self) -> None:
         """Stop the server and clean up the socket."""
-        self._stop.set()
         if self._server:
             self._server.shutdown()
             self._server.server_close()
