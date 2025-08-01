@@ -12,6 +12,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
     TracebackType = types.TracebackType
 
+from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
 from .expectations import Expectation
@@ -45,6 +46,7 @@ class CommandDouble:
         "invocations",
         "kind",
         "name",
+        "passthrough_mode",
         "response",
     )
 
@@ -57,6 +59,7 @@ class CommandDouble:
         self.response = Response()
         self.handler: t.Callable[[Invocation], Response] | None = None
         self.invocations: list[Invocation] = []
+        self.passthrough_mode = False
         self.expectation = Expectation(name)
 
     T_Self = t.TypeVar("T_Self", bound="CommandDouble")
@@ -127,6 +130,14 @@ class CommandDouble:
         self.expectation.with_env(mapping)
         return self
 
+    def passthrough(self: T_Self) -> T_Self:
+        """Execute the real command while recording invocations."""
+        if self.kind != "spy":
+            msg = "passthrough() is only valid for spies"
+            raise ValueError(msg)
+        self.passthrough_mode = True
+        return self
+
     # ------------------------------------------------------------------
     # Matching helpers
     # ------------------------------------------------------------------
@@ -143,6 +154,11 @@ class CommandDouble:
     def is_recording(self) -> bool:
         """Return ``True`` for mocks and spies."""
         return self.kind in ("mock", "spy")
+
+    @property
+    def call_count(self) -> int:
+        """Return the number of recorded invocations."""
+        return len(self.invocations)
 
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response."""
@@ -184,6 +200,7 @@ class CmdMox:
         """
         self.environment = EnvironmentManager()
         self._server: _CallbackIPCServer | None = None
+        self._runner = CommandRunner(self.environment)
         self._entered = False
         self._phase = Phase.RECORD
 
@@ -324,17 +341,38 @@ class CmdMox:
         dbl = self._doubles.get(invocation.command)
         if not dbl:
             return Response(stdout=invocation.command)
+
         if dbl.is_recording:
             dbl.invocations.append(invocation)
-        env = dbl.expectation.env
-        if env and dbl.handler is not None:
-            with temporary_env(env):
-                resp = dbl.handler(invocation)
-        else:
-            resp = dbl.handler(invocation) if dbl.handler is not None else dbl.response
-        if env:
-            resp.env.update(env)
+
+        return self._execute_double_strategy(invocation, dbl)
+
+    def _execute_double_strategy(
+        self, invocation: Invocation, dbl: CommandDouble
+    ) -> Response:
+        """Execute the appropriate strategy for the command double."""
+        env_vars = dbl.expectation.env
+
+        if dbl.kind == "spy" and dbl.passthrough_mode:
+            return self._runner.run(invocation, env_vars)
+
+        resp = dbl.response
+        handler = dbl.handler
+        if handler is not None:
+            resp = self._call_with_env(lambda: handler(invocation), env_vars)
+
+        for key, val in env_vars.items():
+            resp.env.setdefault(key, val)
         return resp
+
+    def _call_with_env(
+        self, fn: t.Callable[[], Response], env: dict[str, str]
+    ) -> Response:
+        """Run ``fn`` with *env* temporarily applied if provided."""
+        if not env:
+            return fn()
+        with temporary_env(env):
+            return fn()
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""
@@ -377,9 +415,7 @@ class CmdMox:
 
     def _cleanup_after_replay_error(self) -> None:
         """Stop the server and restore the environment after failure."""
-        self._stop_server()
-        self.environment.__exit__(None, None, None)
-        self._entered = False
+        self.__exit__(None, None, None)
 
     def _check_verify_preconditions(self) -> None:
         """Ensure verify() is called in the correct phase."""

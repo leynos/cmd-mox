@@ -18,6 +18,8 @@ harnesses and AIX cronjobs running `sccs`.
 
 If you've ever mocked `curl` with `cat`, this library is your penance.
 
+For detailed instructions, see [docs/usage-guide.md](docs/usage-guide.md).
+
 ## 🧪 Example: Testing a command-line script with CmdMox
 
 Let’s say your script under test calls `git clone` and `curl`. You want to test

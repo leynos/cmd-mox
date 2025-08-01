@@ -1159,3 +1159,23 @@ The controller's `replay()` and `verify()` methods were likewise broken down
 into dedicated helper functions such as ``_check_replay_preconditions`` and
 ``_finalize_verification``. This keeps the high-level workflow clear while
 localising error handling and environment cleanup details.
+
+### 8.6 Design Decisions for ``SpyCommand``
+
+Spies now support a ``passthrough()`` mode that executes the real command
+instead of a canned response. When a passthrough spy is invoked, the controller
+locates the real executable using the original ``PATH`` preserved by the
+``EnvironmentManager``. The manager exposes this via a new
+``original_environment`` property. A small ``CommandRunner`` helper
+encapsulates the lookup and ``subprocess.run`` call. It runs the command with
+the recorded environment (minus the shim directory) and captures its output and
+exit status. The results are stored alongside the invocation and returned to
+the shim so the calling process sees the real behaviour.
+
+The runner validates that the resolved command path is absolute and executable.
+It enforces a configurable timeout (30 seconds by default) to prevent hanging
+processes. Any unexpected exceptions are converted into error responses instead
+of bubbling up.
+
+Both mocks and spies maintain an ``invocations`` list. A convenience property
+``call_count`` exposes ``len(invocations)`` for assertion-style tests.
