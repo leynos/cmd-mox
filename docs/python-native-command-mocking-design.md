@@ -472,7 +472,6 @@ classDiagram
         - float timeout
         - _InnerServer _server
         - Thread _thread
-        - Event _stop
         + __enter__() IPCServer
         + __exit__(exc_type, exc, tb) None
         + start() None
