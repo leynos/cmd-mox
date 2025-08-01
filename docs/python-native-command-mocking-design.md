@@ -456,7 +456,8 @@ parsed into `Invocation` objects and processed in background threads with
 reasonable timeouts. Responses are JSON encoded `stdout`, `stderr`, and
 `exit_code` data. The server cleans up the socket on shutdown to prevent stale
 sockets from interfering with subsequent tests. The communication timeout is
-configurable via the `CMOX_IPC_TIMEOUT` environment variable.
+configurable via the :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV`
+environment variable.
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
@@ -536,7 +537,8 @@ that handles all modifications to the process environment.
 
   1. It will set any other necessary environment variables for the IPC
      mechanism, such as `CMOX_IPC_SOCKET`. Clients may additionally honour
-     `CMOX_IPC_TIMEOUT` to override the default connection timeout.
+     :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to override the default
+     connection timeout.
 
 - On `__exit__`:
 
