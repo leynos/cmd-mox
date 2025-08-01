@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
 import typing as t
 from pathlib import Path
 
 import pytest
+
+from tests.helpers import run_cmd
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.controller import CmdMox
@@ -20,9 +21,7 @@ def test_fixture_basic(cmd_mox: CmdMox) -> None:
     cmd_mox.stub("hello").returns(stdout="hi")
     cmd_mox.replay()
     cmd_path = Path(cmd_mox.environment.shim_dir) / "hello"
-    result = subprocess.run(  # noqa: S603
-        [str(cmd_path)], capture_output=True, text=True, check=True
-    )
+    result = run_cmd([str(cmd_path)])
     assert result.stdout.strip() == "hi"
     cmd_mox.verify()
 

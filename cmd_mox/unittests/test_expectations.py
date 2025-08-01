@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 # These tests invoke shim binaries with `shell=False` so the command
@@ -14,6 +13,7 @@ import pytest
 
 from cmd_mox import CmdMox, Regex, UnexpectedCommandError
 from cmd_mox.ipc import Invocation, Response
+from tests.helpers import run_cmd
 
 
 def test_mock_with_args_and_order() -> None:
@@ -26,12 +26,8 @@ def test_mock_with_args_and_order() -> None:
 
     path_first = Path(mox.environment.shim_dir) / "first"
     path_second = Path(mox.environment.shim_dir) / "second"
-    subprocess.run(  # noqa: S603
-        [str(path_first), "a"], capture_output=True, text=True, check=True, shell=False
-    )
-    subprocess.run(  # noqa: S603
-        [str(path_second), "b"], capture_output=True, text=True, check=True, shell=False
-    )
+    run_cmd([str(path_first), "a"])
+    run_cmd([str(path_second), "b"])
 
     mox.verify()
 
@@ -47,9 +43,7 @@ def test_mock_argument_mismatch() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "foo"
-    subprocess.run(  # noqa: S603
-        [str(path), "baz"], capture_output=True, text=True, check=True, shell=False
-    )
+    run_cmd([str(path), "baz"])
 
     with pytest.raises(UnexpectedCommandError):
         mox.verify()
@@ -63,14 +57,7 @@ def test_with_matching_args_and_stdin() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "grep"
-    subprocess.run(  # noqa: S603
-        [str(path), "foo=123"],
-        input="data",
-        text=True,
-        capture_output=True,
-        check=True,
-        shell=False,
-    )
+    run_cmd([str(path), "foo=123"], input="data")
 
     mox.verify()
 
@@ -87,9 +74,7 @@ def test_with_env_injection() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "env"
-    result = subprocess.run(  # noqa: S603
-        [str(path)], capture_output=True, text=True, check=True, shell=False
-    )
+    result = run_cmd([str(path)])
     mox.verify()
 
     assert result.stdout.strip() == "WORLD"

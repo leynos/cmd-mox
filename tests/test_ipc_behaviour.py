@@ -5,6 +5,7 @@ import subprocess
 
 from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
+from tests.helpers import run_cmd
 
 
 def test_shim_invokes_via_ipc() -> None:
@@ -18,12 +19,7 @@ def test_shim_invokes_via_ipc() -> None:
             create_shim_symlinks(env.shim_dir, commands)
 
             os.environ[CMOX_IPC_SOCKET_ENV] = str(socket_path)
-            result = subprocess.run(  # noqa: S603
-                [str(env.shim_dir / "foo")],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            result = run_cmd([str(env.shim_dir / "foo")])
             assert result.stdout.strip() == "foo"
             assert result.stderr == ""
             assert result.returncode == 0

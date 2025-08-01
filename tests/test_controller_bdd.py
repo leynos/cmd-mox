@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import contextlib
 import os
-import subprocess
 import typing as t
 from pathlib import Path
 
 from pytest_bdd import given, parsers, scenario, then, when
 
 from cmd_mox.controller import CmdMox
+from tests.helpers import run_cmd
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import subprocess
+
     import pytest
 
     from cmd_mox.ipc import Invocation
@@ -130,9 +132,7 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
 @when(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
 def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     """Invoke the stubbed command."""
-    return subprocess.run(  # noqa: S603
-        [cmd], capture_output=True, text=True, check=True, shell=False
-    )
+    return run_cmd([cmd])
 
 
 @when(
@@ -155,7 +155,7 @@ def run_command_args(
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with additional arguments."""
     argv = [cmd, *args.split()]
-    return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603
+    return run_cmd(argv)
 
 
 @when("I verify the controller")
@@ -174,9 +174,7 @@ def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess
     original_env = os.environ.copy()
     with mox:
         mox.replay()
-        result = subprocess.run(  # noqa: S603
-            [cmd], capture_output=True, text=True, check=True, shell=False
-        )
+        result = run_cmd([cmd])
     assert os.environ == original_env
     return result
 
