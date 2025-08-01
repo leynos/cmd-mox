@@ -16,12 +16,10 @@ from cmd_mox.errors import (
     MissingEnvironmentError,
     UnexpectedCommandError,
 )
-from cmd_mox.ipc import Response
+from cmd_mox.ipc import Response, Invokation
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
-
-    from cmd_mox.ipc import Invocation
 
 
 def test_cmdmox_stub_records_invocation(
