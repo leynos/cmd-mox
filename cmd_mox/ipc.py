@@ -92,9 +92,10 @@ class IPCServer:
     :class:`~cmd_mox.environment.EnvironmentManager`. Clients connect via the
     ``CMOX_IPC_SOCKET`` path and communicate using JSON messages. Connection
     attempts default to a five second timeout, but this can be overridden by
-    setting ``CMOX_IPC_TIMEOUT`` in the environment. See the `IPC server`
-    section of the design document for details on the rationale and
-    configuration: ``docs/python-native-command-mocking-design.md``.
+    setting :data:`~cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` in the
+    environment. See the `IPC server` section of the design document for
+    details on the rationale and configuration:
+    ``docs/python-native-command-mocking-design.md``.
     """
 
     def __init__(
