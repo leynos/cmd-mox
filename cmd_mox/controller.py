@@ -397,6 +397,10 @@ class CmdMox:
     ) -> None:
         """Stop the IPC server and exit the environment manager.
 
+        This helper underpins :py:meth:`__exit__`,
+        :py:meth:`_cleanup_after_replay_error`, and
+        :py:meth:`_finalize_verification`.
+
         Parameters
         ----------
         exc_type, exc, tb:
