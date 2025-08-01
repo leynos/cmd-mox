@@ -344,7 +344,9 @@ class CmdMox:
     ) -> Response:
         """Run ``double``'s handler within its expectation environment."""
         env = double.expectation.env
-        if double.handler is None:
+        if double.passthrough_mode:
+            resp = self._runner.run(invocation, env)
+        elif double.handler is None:
             resp = double.response
         elif env:
             with temporary_env(env):
