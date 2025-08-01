@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import typing as t
 from pathlib import Path
 
 # These tests invoke shim binaries with `shell=False` so the command
@@ -13,10 +13,15 @@ from pathlib import Path
 import pytest
 
 from cmd_mox import CmdMox, Regex, UnexpectedCommandError
+
+if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import subprocess
 from cmd_mox.ipc import Invocation, Response
 
 
-def test_mock_with_args_and_order() -> None:
+def test_mock_with_args_and_order(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Mocks require specific arguments and call order."""
     mox = CmdMox()
     mox.mock("first").with_args("a").returns(stdout="1").in_order().times(1)
@@ -26,12 +31,8 @@ def test_mock_with_args_and_order() -> None:
 
     path_first = Path(mox.environment.shim_dir) / "first"
     path_second = Path(mox.environment.shim_dir) / "second"
-    subprocess.run(  # noqa: S603
-        [str(path_first), "a"], capture_output=True, text=True, check=True, shell=False
-    )
-    subprocess.run(  # noqa: S603
-        [str(path_second), "b"], capture_output=True, text=True, check=True, shell=False
-    )
+    run([str(path_first), "a"], shell=False)
+    run([str(path_second), "b"], shell=False)
 
     mox.verify()
 
@@ -39,7 +40,9 @@ def test_mock_with_args_and_order() -> None:
     assert len(mox.mocks["second"].invocations) == 1
 
 
-def test_mock_argument_mismatch() -> None:
+def test_mock_argument_mismatch(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Verification fails when arguments differ from expectation."""
     mox = CmdMox()
     mox.mock("foo").with_args("bar")
@@ -47,15 +50,15 @@ def test_mock_argument_mismatch() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "foo"
-    subprocess.run(  # noqa: S603
-        [str(path), "baz"], capture_output=True, text=True, check=True, shell=False
-    )
+    run([str(path), "baz"], shell=False)
 
     with pytest.raises(UnexpectedCommandError):
         mox.verify()
 
 
-def test_with_matching_args_and_stdin() -> None:
+def test_with_matching_args_and_stdin(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Regular expressions and stdin matching are supported."""
     mox = CmdMox()
     mox.mock("grep").with_matching_args(Regex(r"foo=\d+")).with_stdin("data")
@@ -63,19 +66,18 @@ def test_with_matching_args_and_stdin() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "grep"
-    subprocess.run(  # noqa: S603
+    run(
         [str(path), "foo=123"],
         input="data",
-        text=True,
-        capture_output=True,
-        check=True,
         shell=False,
     )
 
     mox.verify()
 
 
-def test_with_env_injection() -> None:
+def test_with_env_injection(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
     """Environment variables provided via with_env() are applied."""
     mox = CmdMox()
 
@@ -87,9 +89,7 @@ def test_with_env_injection() -> None:
     mox.replay()
 
     path = Path(mox.environment.shim_dir) / "env"
-    result = subprocess.run(  # noqa: S603
-        [str(path)], capture_output=True, text=True, check=True, shell=False
-    )
+    result = run([str(path)], shell=False)
     mox.verify()
 
     assert result.stdout.strip() == "WORLD"
