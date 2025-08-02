@@ -424,7 +424,7 @@ class CmdMox:
 
     def _cleanup_after_replay_error(self) -> None:
         """Stop the server and restore the environment after failure."""
-        self._stop_server_and_exit_env()
+        self.__exit__(None, None, None)
 
     def _check_verify_preconditions(self) -> None:
         """Ensure verify() is called in the correct phase."""
