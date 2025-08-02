@@ -88,3 +88,52 @@ def test_fallback_to_system_path(
         runner._env_mgr.original_environment["PATH"] = old_path
 
     assert captured_path == os.environ["PATH"]
+
+
+def test_run_returns_not_found_for_missing_command(
+    runner: CommandRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Return ``127`` when *command* cannot be located."""
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which", lambda cmd, path=None: None
+    )
+
+    invocation = Invocation(command="missing", args=[], stdin="", env={})
+    response = runner.run(invocation, {})
+
+    assert response.exit_code == 127
+    assert response.stderr == "missing: not found"
+
+
+def test_run_rejects_relative_executable_paths(
+    runner: CommandRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject executables returned with non-absolute paths."""
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which", lambda cmd, path=None: "./rel"
+    )
+
+    invocation = Invocation(command="rel", args=[], stdin="", env={})
+    response = runner.run(invocation, {})
+
+    assert response.exit_code == 126
+    assert response.stderr == "rel: invalid executable path"
+
+
+def test_run_requires_executable_files(
+    runner: CommandRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject paths that are not executable files."""
+    dummy = tmp_path / "dummy"
+    dummy.write_text("echo hi")
+    dummy.chmod(0o644)
+
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which", lambda cmd, path=None: str(dummy)
+    )
+
+    invocation = Invocation(command="dummy", args=[], stdin="", env={})
+    response = runner.run(invocation, {})
+
+    assert response.exit_code == 126
+    assert response.stderr == "dummy: not executable"

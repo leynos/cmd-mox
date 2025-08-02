@@ -40,15 +40,15 @@ class CommandRunner:
         )
         real = shutil.which(command, path=path)
         if real is None:
-            return Response(stderr=f"{command}: not found", exit_code=127)
+            return self._response_error(command, "not found", 127)
 
         resolved = Path(real)
         if not resolved.is_absolute():
-            return Response(stderr=f"{command}: invalid executable path", exit_code=126)
+            return self._response_error(command, "invalid executable path", 126)
 
         resolved = resolved.resolve()
         if not resolved.is_file() or not os.access(resolved, os.X_OK):
-            return Response(stderr=f"{command}: not executable", exit_code=126)
+            return self._response_error(command, "not executable", 126)
 
         return resolved
 
@@ -92,4 +92,8 @@ class CommandRunner:
 
     def _error(self, invocation: Invocation, msg: str, code: int) -> Response:
         """Return a ``Response`` containing *msg* for *invocation*."""
-        return Response(stderr=f"{invocation.command}: {msg}", exit_code=code)
+        return self._response_error(invocation.command, msg, code)
+
+    def _response_error(self, command: str, message: str, code: int) -> Response:
+        """Return a ``Response`` for *command* containing *message*."""
+        return Response(stderr=f"{command}: {message}", exit_code=code)
