@@ -359,26 +359,32 @@ class CmdMox:
             double.invocations.append(invocation)
         return self._invoke_handler(double, invocation)
 
-    def _check_replay_preconditions(self) -> None:
-        """Validate state and environment before starting replay."""
-        if self._phase is not Phase.RECORD:
+    def _require_phase(self, expected: Phase) -> None:
+        """Raise :class:`LifecycleError` unless in ``expected`` phase."""
+        if self._phase is not expected:
             msg = (
-                "Cannot call replay(): not in 'record' phase "
-                f"(current phase: {self._phase.name.lower()})"
+                f"Invalid phase: expected '{expected.name.lower()}', "
+                f"current phase: {self._phase.name.lower()}"
             )
             raise LifecycleError(msg)
+
+    def _require_env_attrs(self, *attrs: str) -> None:
+        """Ensure ``EnvironmentManager`` attributes are non-``None``."""
+        for attr in attrs:
+            if getattr(self.environment, attr) is None:
+                msg = f"Environment attribute '{attr}' is missing (None)"
+                raise MissingEnvironmentError(msg)
+
+    def _check_replay_preconditions(self) -> None:
+        """Validate state and environment before starting replay."""
+        self._require_phase(Phase.RECORD)
         if not self._entered:
             msg = (
                 "replay() called without entering context "
                 f"(current phase: {self._phase.name.lower()})"
             )
             raise LifecycleError(msg)
-        if self.environment.shim_dir is None:
-            msg = "Environment attribute 'shim_dir' is missing (None)"
-            raise MissingEnvironmentError(msg)
-        if self.environment.socket_path is None:
-            msg = "Environment attribute 'socket_path' is missing (None)"
-            raise MissingEnvironmentError(msg)
+        self._require_env_attrs("shim_dir", "socket_path")
 
     def _start_ipc_server(self) -> None:
         """Prepare shims and launch the IPC server."""
@@ -428,12 +434,8 @@ class CmdMox:
 
     def _check_verify_preconditions(self) -> None:
         """Ensure verify() is called in the correct phase."""
-        if self._phase is not Phase.REPLAY:
-            msg = (
-                "verify() called out of order "
-                f"(current phase: {self._phase.name.lower()})"
-            )
-            raise LifecycleError(msg)
+        self._require_phase(Phase.REPLAY)
+        self._require_env_attrs("shim_dir", "socket_path")
 
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""

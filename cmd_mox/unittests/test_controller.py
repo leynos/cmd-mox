@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from cmd_mox.controller import CmdMox, MockCommand, SpyCommand, StubCommand
+from cmd_mox.controller import CmdMox, MockCommand, Phase, SpyCommand, StubCommand
 from cmd_mox.errors import (
     LifecycleError,
     MissingEnvironmentError,
@@ -127,6 +127,23 @@ def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(MissingEnvironmentError, match="socket_path"):
         mox.replay()
 
+    mox.__exit__(None, None, None)
+
+
+def test_require_phase_mismatch() -> None:
+    """_require_phase raises when current phase does not match."""
+    mox = CmdMox()
+    with pytest.raises(LifecycleError, match="expected 'replay'"):
+        mox._require_phase(Phase.REPLAY)
+
+
+def test_require_env_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_require_env_attrs reports missing EnvironmentManager attributes."""
+    mox = CmdMox()
+    mox.__enter__()
+    monkeypatch.setattr(mox.environment, "shim_dir", None)
+    with pytest.raises(MissingEnvironmentError, match="shim_dir"):
+        mox._require_env_attrs("shim_dir", "socket_path")
     mox.__exit__(None, None, None)
 
 
