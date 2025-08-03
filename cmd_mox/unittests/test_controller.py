@@ -133,8 +133,8 @@ def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
 def test_require_phase_mismatch() -> None:
     """_require_phase raises when current phase does not match."""
     mox = CmdMox()
-    with pytest.raises(LifecycleError, match="expected 'replay'"):
-        mox._require_phase(Phase.REPLAY)
+    with pytest.raises(LifecycleError, match="not in 'replay' phase"):
+        mox._require_phase(Phase.REPLAY, "replay")
 
 
 def test_require_env_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,9 +142,24 @@ def test_require_env_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
     mox = CmdMox()
     mox.__enter__()
     monkeypatch.setattr(mox.environment, "shim_dir", None)
-    with pytest.raises(MissingEnvironmentError, match="shim_dir"):
+    monkeypatch.setattr(mox.environment, "socket_path", None)
+    with pytest.raises(MissingEnvironmentError, match="shim_dir, socket_path"):
         mox._require_env_attrs("shim_dir", "socket_path")
     mox.__exit__(None, None, None)
+
+
+def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """verify() fails when environment attributes are missing."""
+    mox = CmdMox()
+    mox.stub("foo").returns(stdout="bar")
+    mox.__enter__()
+    mox.replay()
+
+    monkeypatch.setattr(mox.environment, "shim_dir", None)
+    monkeypatch.setattr(mox.environment, "socket_path", None)
+    with pytest.raises(MissingEnvironmentError, match="shim_dir.*socket_path"):
+        mox.verify()
+    mox._stop_server_and_exit_env()
 
 
 def test_factory_methods_create_distinct_objects() -> None:

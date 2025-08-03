@@ -359,25 +359,29 @@ class CmdMox:
             double.invocations.append(invocation)
         return self._invoke_handler(double, invocation)
 
-    def _require_phase(self, expected: Phase) -> None:
-        """Raise :class:`LifecycleError` unless in ``expected`` phase."""
-        if self._phase is not expected:
+    def _require_phase(self, expected: Phase, action: str) -> None:
+        """Ensure we're in ``expected`` phase before executing ``action``."""
+        if self._phase != expected:
             msg = (
-                f"Invalid phase: expected '{expected.name.lower()}', "
-                f"current phase: {self._phase.name.lower()}"
+                f"Cannot call {action}(): not in '{expected.name.lower()}' phase "
+                f"(current phase: {self._phase.name.lower()})"
             )
             raise LifecycleError(msg)
 
     def _require_env_attrs(self, *attrs: str) -> None:
-        """Ensure ``EnvironmentManager`` attributes are non-``None``."""
-        for attr in attrs:
-            if getattr(self.environment, attr) is None:
-                msg = f"Environment attribute '{attr}' is missing (None)"
-                raise MissingEnvironmentError(msg)
+        """Ensure all referenced ``EnvironmentManager`` attributes exist."""
+        env = self.environment
+        if env is None:  # pragma: no cover - defensive guard
+            raise MissingEnvironmentError
+        missing = [attr for attr in attrs if getattr(env, attr) is None]
+        if missing:
+            missing_list = ", ".join(missing)
+            msg = f"Missing environment attributes: {missing_list}"
+            raise MissingEnvironmentError(msg)
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""
-        self._require_phase(Phase.RECORD)
+        self._require_phase(Phase.RECORD, "replay")
         if not self._entered:
             msg = (
                 "replay() called without entering context "
@@ -434,7 +438,7 @@ class CmdMox:
 
     def _check_verify_preconditions(self) -> None:
         """Ensure verify() is called in the correct phase."""
-        self._require_phase(Phase.REPLAY)
+        self._require_phase(Phase.REPLAY, "verify")
         self._require_env_attrs("shim_dir", "socket_path")
 
     def _run_verifiers(self) -> None:
