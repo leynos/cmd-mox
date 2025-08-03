@@ -9,28 +9,45 @@ from pathlib import Path
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 
 
-def _validate_command_name(name: str) -> None:
-    """Validate *name* is a safe command filename."""
-    error_msg = f"Invalid command name: {name!r}"
-
-    # Disallow empty names so we never create ``directory/`` itself.
+def _validate_not_empty(name: str, error_msg: str) -> None:
+    """Raise ``ValueError`` if *name* is empty."""
     if not name:
         raise ValueError(error_msg)
 
-    # Reject ``.`` or ``..`` which would resolve to the current or parent directory.
+
+def _validate_not_dot_directories(name: str, error_msg: str) -> None:
+    """Disallow ``.`` and ``..`` which change directory semantics."""
     if name in {".", ".."}:
         raise ValueError(error_msg)
 
-    # Ensure the name does not include path separators for portability.
+
+def _validate_no_path_separators(name: str, error_msg: str) -> None:
+    """Ensure *name* contains no path separators for portability."""
     separators = {"/", "\\", os.sep}
     if os.altsep:
         separators.add(os.altsep)
     if any(sep in name for sep in separators):
         raise ValueError(error_msg)
 
-    # Reject names containing NUL bytes to avoid filename truncation.
+
+def _validate_no_nul_bytes(name: str, error_msg: str) -> None:
+    """Reject names containing NUL bytes to avoid truncation."""
     if "\x00" in name:
         raise ValueError(error_msg)
+
+
+def _validate_command_name(name: str) -> None:
+    """Validate *name* is a safe command filename."""
+    error_msg = f"Invalid command name: {name!r}"
+
+    validators: list[t.Callable[[str, str], None]] = [
+        _validate_not_empty,
+        _validate_not_dot_directories,
+        _validate_no_path_separators,
+        _validate_no_nul_bytes,
+    ]
+    for validator in validators:
+        validator(name, error_msg)
 
 
 def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
