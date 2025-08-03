@@ -47,3 +47,44 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mox._server is None
     assert not mox._entered
     assert os.environ == pre_env
+
+
+def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Propagate exception details to :meth:`CmdMox.__exit__`."""
+    mox = CmdMox()
+    pre_env = os.environ.copy()
+
+    called: list[
+        tuple[type[BaseException] | None, BaseException | None, TracebackType | None]
+    ] = []
+    orig_exit = CmdMox.__exit__
+
+    def fake_exit(
+        self: CmdMox,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        called.append((exc_type, exc, tb))
+        orig_exit(self, exc_type, exc, tb)
+
+    monkeypatch.setattr(CmdMox, "__exit__", fake_exit)
+
+    class BoomError(RuntimeError):
+        """Sentinel error used to trigger exceptional exit."""
+
+    def trigger() -> None:
+        with mox:
+            mox.replay()
+            raise BoomError("boom")
+
+    with pytest.raises(BoomError):
+        trigger()
+
+    exc_type, exc, tb = called[0]
+    assert exc_type is BoomError
+    assert isinstance(exc, BoomError)
+    assert tb is not None
+    assert mox._server is None
+    assert not mox._entered
+    assert os.environ == pre_env
