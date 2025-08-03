@@ -80,19 +80,21 @@ class CommandRunner:
             )
         except subprocess.TimeoutExpired:
             duration = int(self._timeout)
-            return self._error(invocation, f"timeout after {duration} seconds", 124)
+            return self._response_error(
+                invocation.command, f"timeout after {duration} seconds", 124
+            )
         except FileNotFoundError:
-            return self._error(invocation, "not found", 127)
+            return self._response_error(invocation.command, "not found", 127)
         except PermissionError as e:
-            return self._error(invocation, str(e), 126)
+            return self._response_error(invocation.command, str(e), 126)
         except OSError as e:
-            return self._error(invocation, f"execution failed: {e}", 126)
+            return self._response_error(
+                invocation.command, f"execution failed: {e}", 126
+            )
         except Exception as e:  # noqa: BLE001 - broad catch for safety
-            return self._error(invocation, f"unexpected error: {e}", 126)
-
-    def _error(self, invocation: Invocation, msg: str, code: int) -> Response:
-        """Return a ``Response`` containing *msg* for *invocation*."""
-        return self._response_error(invocation.command, msg, code)
+            return self._response_error(
+                invocation.command, f"unexpected error: {e}", 126
+            )
 
     def _response_error(self, command: str, message: str, code: int) -> Response:
         """Return a ``Response`` for *command* containing *message*."""
