@@ -4,10 +4,10 @@
 
 <!-- markdownlint-enable MD013 -->
 
-Replace your flaky bats tests, your brittle log-parsing hacks, and that one Bash
-script that only works on Tuesdays. CmdMox intercepts external commands with
-Python shims, speaks fluent IPC over Unix domain sockets, and enforces your
-expectations like a disappointed parent.
+Replace your flaky bats tests, your brittle log-parsing hacks, and that one
+Bash script that only works on Tuesdays. CmdMox intercepts external commands
+with Python shims, speaks fluent IPC over Unix domain sockets, and enforces
+your expectations like a disappointed parent.
 
 - Mocks? Verified.
 - Stubs? Quietly compliant.
@@ -23,8 +23,8 @@ For detailed instructions, see [docs/usage-guide.md](docs/usage-guide.md).
 ## 🧪 Example: Testing a command-line script with CmdMox
 
 Let’s say your script under test calls `git clone` and `curl`. You want to test
-it *without actually cloning anything* because you value your bandwidth and your
-sanity.
+it *without actually cloning anything* because you value your bandwidth and
+your sanity.
 
 ```python
 # test_my_script.py
@@ -52,8 +52,8 @@ def test_clone_and_fetch(mox):
 
 When it passes: your mocks were used exactly as expected.
 
-When it fails: you'll get a surgically precise diff of what was expected vs what
-your misbehaving code actually did.
+When it fails: you'll get a surgically precise diff of what was expected vs
+what your misbehaving code actually did.
 
 No subshells. No flaky greps. Just clean, high-fidelity, Pythonic command
 mocking.
@@ -68,7 +68,8 @@ Out of scope (for now, or forever):
 - 🧞 **Shell function mocking** – you want `eval`, you wait a year. Or just
   don’t.
 
-- 🪟 **Windows support** – maybe one day. Until then: enjoy your `.bat` files and
+- 🪟 **Windows support** – maybe one day. Until then: enjoy your `.bat` files
+  and
   pray to `CreateProcess()`.
 
 - 🦕 **Legacy UNIX support** – AIX, Solaris, IRIX? Sorry boys, the boat sailed,

@@ -55,8 +55,8 @@ dependencies = [
   [Reddit][5])
 - **`description` and `readme`:** Although not mandatory, they help with
   indexing and packaging tools; `readme = "README.md"` tells `uv` (and PyPI) to
-  include your README as the long description. ([Astral Docs][1],
-  [Python Packaging][4])
+  include your README as the long description. ([Astral Docs][1], [Python
+  Packaging][4])
 - **`requires-python`:** Constrains which Python interpreters your package
   supports (e.g. `>=3.10`). ([Python Packaging][4], [Reddit][5])
 - **`license = { text = "MIT" }`:** You can specify a license either as a SPDX
@@ -93,8 +93,9 @@ docs = [
 ```
 
 - **`[project.optional-dependencies]`:** Each table key (e.g. `dev`, `docs`)
-  defines a "dependency group." You can install a group via `uv add --group dev`
-  or `uv sync --include dev`. ([Python Packaging][4], [DevsJC][6])
+  defines a "dependency group." You can install a group via
+  `uv add --group dev` or `uv sync --include dev`. ([Python Packaging][4],
+  [DevsJC][6])
 - **Why use groups?** You keep the lockfile deterministic (via `uv.lock`) while
   still separating concerns (test‐only vs. production). ([Medium][7],
   [DevsJC][6])
@@ -116,8 +117,8 @@ mygui = "my_project.gui:start"
 ```
 
 - **`[project.scripts]`:** Defines console scripts. When you run `uv run mycli`,
-  `uv` will invoke the `main` function in `my_project/cli.py`.
-  ([Astral Docs][8])
+  `uv` will invoke the `main` function in `my_project/cli.py`. ([Astral
+  Docs][8])
 - **`[project.gui-scripts]`:** On Windows, `uv` will wrap these in a GUI
   executable; on Unix-like systems, they behave like normal console scripts.
   ([Astral Docs][8])
@@ -140,8 +141,8 @@ build-backend = "setuptools.build_meta"
 ```
 
 - **`requires`:** A list of packages needed at build time. For editable installs
-  in `uv`, you need at least `setuptools>=61.0` and `wheel`.
-  ([Python Packaging][4], [Astral Docs][8])
+  in `uv`, you need at least `setuptools>=61.0` and `wheel`. ([Python
+  Packaging][4], [Astral Docs][8])
 - **`build-backend`:** The entry point for your build backend.
   `setuptools.build_meta` is the PEP 517-compliant backend for setuptools.
   ([Python Packaging][4], [Astral Docs][8])
@@ -163,12 +164,12 @@ package = true
 ```
 
 - **`tool.uv.package = true`:** Forces `uv` to build and install your project
-  into its virtual environment every time you run `uv sync` or `uv run`. Without
-  this, `uv` only installs dependencies (not your own package) if
+  into its virtual environment every time you run `uv sync` or `uv run`.
+  Without this, `uv` only installs dependencies (not your own package) if
   `[build-system]` is missing. ([Astral Docs][8])
 - You may also set other `uv`-specific keys (e.g., custom indexes, resolver
-  policies) under `[tool.uv]`, but `package` is the most common.
-  ([Python Packaging][4], [Astral Docs][8])
+  policies) under `[tool.uv]`, but `package` is the most common. ([Python
+  Packaging][4], [Astral Docs][8])
 
 ______________________________________________________________________
 
@@ -257,8 +258,8 @@ package = true
 
    - `package = true` ensures that `uv sync` will build and install your own
      project (in editable mode) every time dependencies change. Otherwise, `uv`
-     treats your project as a collection of scripts only (no package).
-     ([Astral Docs][8])
+     treats your project as a collection of scripts only (no package). ([Astral
+     Docs][8])
 
 ______________________________________________________________________
 
@@ -274,8 +275,8 @@ ______________________________________________________________________
 
 3. **Semantic Versioning:** Follow [semver](https://semver.org/) for `version`
    values (e.g., `1.2.3`). Bump patch versions for bug fixes, minor for
-   backward-compatible changes, and major for breaking changes.
-   ([Python Packaging][4])
+   backward-compatible changes, and major for breaking changes. ([Python
+   Packaging][4])
 
 4. **Keep Build Constraints Minimal:** If you don't need editable installs, you
    can omit `[build-system]` (but then `uv` won't build your package; it will
@@ -309,11 +310,19 @@ A "modern" `pyproject.toml` for an Astral `uv` project should:
 Following these conventions ensures that your project is fully PEP-compliant,
 easy to maintain, and integrates seamlessly with Astral `uv`.
 
-[1]: https://docs.astral.sh/uv/guides/projects/?utm_source=chatgpt.com "Working on projects | uv - Astral Docs"
-[2]: https://www.ridgerun.ai/post/uv-tutorial-a-fast-python-package-and-project-manager?utm_source=chatgpt.com "UV Tutorial: A Fast Python Package and Project Manager"
-[3]: https://levelup.gitconnected.com/modern-python-development-with-pyproject-toml-and-uv-405dfb8b6ec8?utm_source=chatgpt.com "Modern Python Development with pyproject.toml and UV"
-[4]: https://packaging.python.org/en/latest/guides/writing-pyproject-toml/?utm_source=chatgpt.com "Writing your pyproject.toml - Python Packaging User Guide"
-[5]: https://www.reddit.com/r/Python/comments/1ixryec/anyone_used_uv_package_manager_in_production/?utm_source=chatgpt.com "Anyone used UV package manager in production : r/Python - Reddit"
-[6]: https://devsjc.github.io/blog/20240627-the-complete-guide-to-pyproject-toml/?utm_source=chatgpt.com "The Complete Guide to pyproject.toml · devsjc blogs //"
-[7]: https://medium.com/%40gnetkov/start-using-uv-python-package-manager-for-better-dependency-management-183e7e428760?utm_source=chatgpt.com "Start Using UV Python Package Manager for Better Dependency ..."
-[8]: https://docs.astral.sh/uv/concepts/projects/config/?utm_source=chatgpt.com "Configuring projects | uv - Astral Docs"
+[1]: https://docs.astral.sh/uv/guides/projects/?utm_source=chatgpt.com "Working
+on projects | uv - Astral Docs" [2]:
+https://www.ridgerun.ai/post/uv-tutorial-a-fast-python-package-and-project-manager?utm_source=chatgpt.com
+ "UV Tutorial: A Fast Python Package and Project Manager" [3]:
+https://levelup.gitconnected.com/modern-python-development-with-pyproject-toml-and-uv-405dfb8b6ec8?utm_source=chatgpt.com
+ "Modern Python Development with pyproject.toml and UV" [4]:
+https://packaging.python.org/en/latest/guides/writing-pyproject-toml/?utm_source=chatgpt.com
+ "Writing your pyproject.toml - Python Packaging User Guide" [5]:
+https://www.reddit.com/r/Python/comments/1ixryec/anyone_used_uv_package_manager_in_production/?utm_source=chatgpt.com
+ "Anyone used UV package manager in production : r/Python - Reddit" [6]:
+https://devsjc.github.io/blog/20240627-the-complete-guide-to-pyproject-toml/?utm_source=chatgpt.com
+ "The Complete Guide to pyproject.toml · devsjc blogs //" [7]:
+https://medium.com/%40gnetkov/start-using-uv-python-package-manager-for-better-dependency-management-183e7e428760?utm_source=chatgpt.com
+ "Start Using UV Python Package Manager for Better Dependency …" [8]:
+https://docs.astral.sh/uv/concepts/projects/config/?utm_source=chatgpt.com
+"Configuring projects | uv - Astral Docs"

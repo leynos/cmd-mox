@@ -153,7 +153,7 @@ def test_require_env_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     """verify() fails when environment attributes are missing."""
-    mox = CmdMox()
+    mox = CmdMox(verify_on_exit=False)  # Disable auto-verify to avoid double error
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
     mox.replay()

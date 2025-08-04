@@ -1,6 +1,7 @@
 # CmdMox Usage Guide
 
-CmdMox provides a fluent API for mocking, stubbing and spying on external commands in your tests. This guide shows common patterns for everyday use.
+CmdMox provides a fluent API for mocking, stubbing and spying on external
+commands in your tests. This guide shows common patterns for everyday use.
 
 ## Getting started
 
@@ -16,17 +17,23 @@ In your `conftest.py`:
 pytest_plugins = ("cmd_mox.pytest_plugin",)
 ```
 
-Each test receives a `cmd_mox` fixture that provides access to the controller object.
+Each test receives a `cmd_mox` fixture that provides access to the controller
+object.
 
 ## Basic workflow
 
-CmdMox follows a strict record → replay → verify lifecycle. First declare expectations, then run your code with the shims active, finally verify that interactions matched what was recorded.
+CmdMox follows a strict record → replay → verify lifecycle. First declare
+expectations, then run your code with the shims active, finally verify that
+interactions matched what was recorded.
 
 The three phases are defined in the design document:
 
-1. **Record** – describe each expected command call, including its arguments and behaviour.
-2. **Replay** – run the code under test while CmdMox intercepts command executions.
-3. **Verify** – ensure every expectation was met and nothing unexpected happened.
+1. **Record** – describe each expected command call, including its arguments
+   and behaviour.
+2. **Replay** – run the code under test while CmdMox intercepts command
+   executions.
+3. **Verify** – ensure every expectation was met and nothing unexpected
+   happened.
 
 These phases form a strict sequence for reliable command-line tests.
 
@@ -54,7 +61,8 @@ cmd_mox.spy("curl")
 - **Mocks** enforce exact usage during verification.
 - **Spies** record every call for later inspection and can behave like stubs.
 
-Each call returns a `CommandDouble` that offers a fluent DSL to configure behaviour.
+Each call returns a `CommandDouble` that offers a fluent DSL to configure
+behaviour.
 
 ## Defining expectations
 
@@ -84,7 +92,8 @@ The design document lists the available comparators:
 - `StartsWith`
 - `Predicate`
 
-which can be combined with `with_matching_args` or `with_stdin` for rich matching logic.
+which can be combined with `with_matching_args` or `with_stdin` for rich
+matching logic.
 
 ## Running tests
 
@@ -110,7 +119,8 @@ with CmdMox() as mox:
 
 ## Spies and passthrough mode
 
-Spies expose `invocations` and `call_count` after verification for assertion-style tests:
+Spies expose `invocations` and `call_count` after verification for
+assertion-style tests:
 
 ```python
 def test_spy(cmd_mox):
@@ -127,11 +137,13 @@ A spy can also forward to the real command while recording everything:
 mox.spy("aws").passthrough()
 ```
 
-This "record mode" is helpful for capturing real interactions and later turning them into mocks.
+This "record mode" is helpful for capturing real interactions and later turning
+them into mocks.
 
 ## Fluent API reference
 
-The DSL methods closely mirror those described in the design specification. A few common ones are:
+The DSL methods closely mirror those described in the design specification. A
+few common ones are:
 
 - `with_args(*args)` – require exact arguments.
 - `with_matching_args(*matchers)` – match arguments using comparators.
@@ -139,18 +151,22 @@ The DSL methods closely mirror those described in the design specification. A fe
 - `with_env(mapping)` – set additional environment variables for the invocation.
 - `returns(stdout="", stderr="", exit_code=0)` – static response.
 
-*Note: All examples use string values for `stdout` and `stderr`. If you need to return bytes, pass a bytes object such as `stdout=b"output"`. Mixing types is not recommended unless explicitly required and documented.*
+*Note: All examples use string values for `stdout` and `stderr`. If you need to
+return bytes, pass a bytes object such as `stdout=b"output"`. Mixing types is
+not recommended unless explicitly required and documented.*
 
 - `runs(handler)` – call a function to produce dynamic output.
 - `times(count)` – expect the command exactly `count` times.
 - `in_order()` – enforce strict ordering with other expectations.
 - `passthrough()` – for spies, run the real command while recording it.
 
-Refer to the [design document](./python-native-command-mocking-design.md) for the full table of methods and examples.
+Refer to the [design document](./python-native-command-mocking-design.md) for
+the full table of methods and examples.
 
 ## Environment variables
 
-CmdMox exposes two environment variables to coordinate shims with the IPC server.
+CmdMox exposes two environment variables to coordinate shims with the IPC
+server.
 
 - `CMOX_IPC_SOCKET` – path to the Unix domain socket used by shims. The
   `CmdMox` fixture sets this automatically when the server starts. Shims exit
