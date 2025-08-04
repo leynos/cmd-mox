@@ -5,10 +5,13 @@ from __future__ import annotations
 import os
 import stat
 import typing as t
+from dataclasses import dataclass  # noqa: ICN003
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+import cmd_mox.environment as envmod
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     EnvironmentManager,
@@ -190,8 +193,8 @@ def test_environment_manager_robust_cleanup_success() -> None:
     assert not env.shim_dir.exists()
 
 
-def test_environment_manager_cleanup_error_handling() -> None:
-    """Test EnvironmentManager handles cleanup errors appropriately."""
+def test_environment_manager_cleanup_error_basic() -> None:
+    """Ensure EnvironmentManager handles generic cleanup errors."""
     original_env = os.environ.copy()
 
     with patch("cmd_mox.environment._robust_rmtree") as mock_rmtree:
@@ -220,6 +223,75 @@ def test_environment_manager_cleanup_error_during_exception() -> None:
             raise ValueError(msg)
 
     assert os.environ == original_env
+
+
+@dataclass(frozen=True)
+class CleanupErrorTestConfig:
+    """Configuration for cleanup error test scenarios."""
+
+    check_cause: bool = False
+    manual_restore: bool = False
+
+
+@dataclass(frozen=True)
+class CleanupErrorTestCase:
+    """Test parameters for cleanup error scenarios."""
+
+    mock_target: str
+    error_message: str
+    expected_error_pattern: str
+    config: CleanupErrorTestConfig
+
+
+def _test_environment_cleanup_error(
+    test_case: CleanupErrorTestCase,
+) -> None:
+    """Validate cleanup error handling and state restoration."""
+    original_env = os.environ.copy()
+
+    with patch(test_case.mock_target) as mock_method:
+        mock_method.side_effect = OSError(test_case.error_message)
+        mgr = EnvironmentManager()
+        with (
+            pytest.raises(
+                RuntimeError, match=test_case.expected_error_pattern
+            ) as excinfo,
+            mgr,
+        ):
+            pass
+        assert envmod._active_manager is None
+        if test_case.config.check_cause:
+            assert isinstance(excinfo.value.__cause__, OSError)
+            assert str(excinfo.value.__cause__) == test_case.error_message
+
+    if test_case.config.manual_restore:
+        envmod._restore_env(original_env)
+
+    assert os.environ == original_env
+
+
+@pytest.mark.parametrize(
+    "test_case",
+    [
+        CleanupErrorTestCase(
+            "cmd_mox.environment._restore_env",
+            "restore failed",
+            "Cleanup failed: Environment restoration failed: restore failed",
+            CleanupErrorTestConfig(manual_restore=True),
+        ),
+        CleanupErrorTestCase(
+            "cmd_mox.environment._robust_rmtree",
+            "rmtree failed",
+            "Cleanup failed: Directory cleanup failed: rmtree failed",
+            CleanupErrorTestConfig(check_cause=True),
+        ),
+    ],
+)
+def test_environment_manager_cleanup_error_handling(
+    test_case: CleanupErrorTestCase,
+) -> None:
+    """Validate cleanup errors raise RuntimeError and reset state."""
+    _test_environment_cleanup_error(test_case)
 
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
