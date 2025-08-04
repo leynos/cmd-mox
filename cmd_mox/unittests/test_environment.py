@@ -190,8 +190,8 @@ def test_environment_manager_robust_cleanup_success() -> None:
     assert not env.shim_dir.exists()
 
 
-def test_environment_manager_cleanup_error_handling() -> None:
-    """Test EnvironmentManager handles cleanup errors appropriately."""
+def test_environment_manager_cleanup_error_basic() -> None:
+    """Ensure EnvironmentManager handles generic cleanup errors."""
     original_env = os.environ.copy()
 
     with patch("cmd_mox.environment._robust_rmtree") as mock_rmtree:
@@ -222,51 +222,72 @@ def test_environment_manager_cleanup_error_during_exception() -> None:
     assert os.environ == original_env
 
 
-def test_environment_manager_restoration_error_handling() -> None:
-    """Environment restoration errors raise RuntimeError and reset state."""
+def _test_environment_cleanup_error(
+    mock_target: str,
+    error_message: str,
+    expected_error_pattern: str,
+    check_cause: bool,  # noqa: FBT001
+    manual_restore: bool,  # noqa: FBT001
+) -> None:
+    """Validate cleanup error handling and state restoration."""
     original_env = os.environ.copy()
 
-    with patch("cmd_mox.environment._restore_env") as mock_restore:
-        mock_restore.side_effect = OSError("restore failed")
+    with patch(mock_target) as mock_method:
+        mock_method.side_effect = OSError(error_message)
         mgr = EnvironmentManager()
-        with (
-            pytest.raises(
-                RuntimeError,
-                match="Cleanup failed: Environment restoration failed: restore failed",
-            ),
-            mgr,
-        ):
+        with pytest.raises(RuntimeError, match=expected_error_pattern) as excinfo, mgr:
             pass
-        # Global state should reset even when restoration fails
         assert envmod._active_manager is None
+        if check_cause:
+            assert isinstance(excinfo.value.__cause__, OSError)
+            assert str(excinfo.value.__cause__) == error_message
 
-    # The environment wasn't restored by the manager; restore manually
-    envmod._restore_env(original_env)
+    if manual_restore:
+        envmod._restore_env(original_env)
+
     assert os.environ == original_env
 
 
-def test_environment_manager_directory_cleanup_error_handling() -> None:
-    """Directory cleanup errors raise RuntimeError and reset state."""
-    original_env = os.environ.copy()
-
-    with patch("cmd_mox.environment._robust_rmtree") as mock_rmtree:
-        mock_rmtree.side_effect = OSError("rmtree failed")
-        mgr = EnvironmentManager()
-        with (
-            pytest.raises(
-                RuntimeError,
-                match="Cleanup failed: Directory cleanup failed: rmtree failed",
-            ) as excinfo,
-            mgr,
-        ):
-            pass
-
-        # Global state should reset even when directory cleanup fails
-        assert envmod._active_manager is None
-        assert isinstance(excinfo.value.__cause__, OSError)
-        assert str(excinfo.value.__cause__) == "rmtree failed"
-
-    assert os.environ == original_env
+@pytest.mark.parametrize(
+    (
+        "mock_target",
+        "error_message",
+        "expected_error_pattern",
+        "check_cause",
+        "manual_restore",
+    ),
+    [
+        (
+            "cmd_mox.environment._restore_env",
+            "restore failed",
+            "Cleanup failed: Environment restoration failed: restore failed",
+            False,
+            True,
+        ),
+        (
+            "cmd_mox.environment._robust_rmtree",
+            "rmtree failed",
+            "Cleanup failed: Directory cleanup failed: rmtree failed",
+            True,
+            False,
+        ),
+    ],
+)
+def test_environment_manager_cleanup_error_handling(
+    mock_target: str,
+    error_message: str,
+    expected_error_pattern: str,
+    check_cause: bool,  # noqa: FBT001
+    manual_restore: bool,  # noqa: FBT001
+) -> None:
+    """Validate cleanup errors raise RuntimeError and reset state."""
+    _test_environment_cleanup_error(
+        mock_target,
+        error_message,
+        expected_error_pattern,
+        check_cause,
+        manual_restore,
+    )
 
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
