@@ -127,6 +127,9 @@ def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(MissingEnvironmentError, match="socket_path"):
         mox.replay()
 
+    # Use the public context-manager API to restore PATH and other state.
+    # Calling the private _stop_server_and_exit_env helper would bypass
+    # type checking, so tests rely on __exit__ instead.
     mox.__exit__(None, None, None)
 
 
