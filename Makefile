@@ -63,6 +63,7 @@ lint: ruff ## Run linters
 	ruff check
 
 typecheck: build ty ## Run typechecking
+	ty --version
 	ty check
 
 markdownlint: $(MDLINT) ## Lint Markdown files
