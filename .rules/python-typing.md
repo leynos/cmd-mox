@@ -7,8 +7,8 @@
 ## `enum.Enum`, `enum.IntEnum`, `enum.StrEnum`
 
 Use `Enum` for fixed sets of related constants. Use `enum.auto()` to avoid
-repeating values manually. Use `IntEnum` or `StrEnum` when interoperability with
-integers or strings is required (e.g. for database or JSON serialisation).
+repeating values manually. Use `IntEnum` or `StrEnum` when interoperability
+with integers or strings is required (e.g. for database or JSON serialisation).
 
 ```python
 import enum

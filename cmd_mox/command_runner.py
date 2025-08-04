@@ -40,15 +40,15 @@ class CommandRunner:
         )
         real = shutil.which(command, path=path)
         if real is None:
-            return Response(stderr=f"{command}: not found", exit_code=127)
+            return self._response_error(command, "not found", 127)
 
         resolved = Path(real)
         if not resolved.is_absolute():
-            return Response(stderr=f"{command}: invalid executable path", exit_code=126)
+            return self._response_error(command, "invalid executable path", 126)
 
         resolved = resolved.resolve()
         if not resolved.is_file() or not os.access(resolved, os.X_OK):
-            return Response(stderr=f"{command}: not executable", exit_code=126)
+            return self._response_error(command, "not executable", 126)
 
         return resolved
 
@@ -80,16 +80,22 @@ class CommandRunner:
             )
         except subprocess.TimeoutExpired:
             duration = int(self._timeout)
-            return self._error(invocation, f"timeout after {duration} seconds", 124)
+            return self._response_error(
+                invocation.command, f"timeout after {duration} seconds", 124
+            )
         except FileNotFoundError:
-            return self._error(invocation, "not found", 127)
+            return self._response_error(invocation.command, "not found", 127)
         except PermissionError as e:
-            return self._error(invocation, str(e), 126)
+            return self._response_error(invocation.command, str(e), 126)
         except OSError as e:
-            return self._error(invocation, f"execution failed: {e}", 126)
+            return self._response_error(
+                invocation.command, f"execution failed: {e}", 126
+            )
         except Exception as e:  # noqa: BLE001 - broad catch for safety
-            return self._error(invocation, f"unexpected error: {e}", 126)
+            return self._response_error(
+                invocation.command, f"unexpected error: {e}", 126
+            )
 
-    def _error(self, invocation: Invocation, msg: str, code: int) -> Response:
-        """Return a ``Response`` containing *msg* for *invocation*."""
-        return Response(stderr=f"{invocation.command}: {msg}", exit_code=code)
+    def _response_error(self, command: str, message: str, code: int) -> Response:
+        """Return a ``Response`` for *command* containing *message*."""
+        return Response(stderr=f"{command}: {message}", exit_code=code)

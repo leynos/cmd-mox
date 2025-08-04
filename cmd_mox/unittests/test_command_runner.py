@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import typing as t
+from dataclasses import dataclass  # noqa: ICN003
 
 import pytest
 
@@ -24,6 +25,23 @@ class DummyResult:
         self.stderr = ""
         self.returncode = 0
         self.env = env
+
+
+@dataclass
+class CommandTestScenario:
+    """Test case data for invalid command scenarios."""
+
+    command: str
+    which_result: str | None
+    create_file: bool
+    exit_code: int
+    stderr: str
+
+    def get_which_result_for_file_creation(self) -> str:
+        """Return ``which_result`` when a file should be created."""
+        assert self.create_file
+        assert self.which_result is not None
+        return self.which_result
 
 
 @pytest.fixture
@@ -88,3 +106,64 @@ def test_fallback_to_system_path(
         runner._env_mgr.original_environment["PATH"] = old_path
 
     assert captured_path == os.environ["PATH"]
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        pytest.param(
+            CommandTestScenario(
+                command="missing",
+                which_result=None,
+                create_file=False,
+                exit_code=127,
+                stderr="missing: not found",
+            ),
+            id="missing",
+        ),
+        pytest.param(
+            CommandTestScenario(
+                command="rel",
+                which_result="./rel",
+                create_file=False,
+                exit_code=126,
+                stderr="rel: invalid executable path",
+            ),
+            id="relative",
+        ),
+        pytest.param(
+            CommandTestScenario(
+                command="dummy",
+                which_result="dummy",
+                create_file=True,
+                exit_code=126,
+                stderr="dummy: not executable",
+            ),
+            id="non-executable",
+        ),
+    ],
+)
+def test_run_error_conditions(
+    runner: CommandRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    scenario: CommandTestScenario,
+) -> None:
+    """Return consistent errors for invalid or missing commands."""
+    if scenario.create_file:
+        dummy = tmp_path / scenario.get_which_result_for_file_creation()
+        dummy.write_text("echo hi")
+        dummy.chmod(0o644)
+        result_path = str(dummy)
+    else:
+        result_path = scenario.which_result
+
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which", lambda cmd, path=None: result_path
+    )
+
+    invocation = Invocation(command=scenario.command, args=[], stdin="", env={})
+    response = runner.run(invocation, {})
+
+    assert response.exit_code == scenario.exit_code
+    assert response.stderr == scenario.stderr

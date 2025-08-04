@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import typing as t
 
@@ -9,6 +10,8 @@ import pytest
 
 from .controller import CmdMox
 from .environment import EnvironmentManager
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -23,8 +26,17 @@ def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
 
     mox = CmdMox()
     mox.environment = EnvironmentManager(prefix=prefix)
-    mox.__enter__()
+
     try:
+        mox.__enter__()
         yield mox
+    except Exception:
+        logger.exception("Error during cmd_mox fixture setup or test execution")
+        raise
     finally:
-        mox.__exit__(None, None, None)
+        try:
+            mox.__exit__(None, None, None)
+        except OSError:
+            logger.exception("Error during cmd_mox fixture cleanup")
+            # Re-raise cleanup errors to ensure test failure visibility
+            pytest.fail("cmd_mox fixture cleanup failed")

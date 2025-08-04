@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
+import stat
 import typing as t
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     EnvironmentManager,
+    _robust_rmtree,
     temporary_env,
 )
 
@@ -122,3 +126,112 @@ def test_nested_temporary_env() -> None:
         assert os.environ["A"] == "1"
         assert "C" not in os.environ
     assert os.environ == original_env
+
+
+def test_robust_rmtree_success(tmp_path: Path) -> None:
+    """Test that _robust_rmtree successfully removes a directory."""
+    test_dir = tmp_path / "test_remove"
+    test_dir.mkdir()
+    (test_dir / "file.txt").write_text("test")
+
+    assert test_dir.exists()
+    _robust_rmtree(test_dir)
+    assert not test_dir.exists()
+
+
+def test_robust_rmtree_nonexistent_path(tmp_path: Path) -> None:
+    """Test that _robust_rmtree handles nonexistent paths gracefully."""
+    nonexistent = tmp_path / "does_not_exist"
+    assert not nonexistent.exists()
+    _robust_rmtree(nonexistent)  # Should not raise
+
+
+def test_robust_rmtree_retry_on_failure(tmp_path: Path) -> None:
+    """Test that _robust_rmtree retries on failure."""
+    test_dir = tmp_path / "test_retry"
+    test_dir.mkdir()
+
+    with patch("cmd_mox.environment.shutil.rmtree") as mock_rmtree:
+        # Simulate transient failure followed by success
+        mock_rmtree.side_effect = [OSError("Permission denied"), None]
+
+        _robust_rmtree(test_dir, max_retries=2, retry_delay=0.01)
+
+        assert mock_rmtree.call_count == 2
+
+
+def test_robust_rmtree_max_retries_exceeded(tmp_path: Path) -> None:
+    """Test that _robust_rmtree raises after max retries exceeded."""
+    test_dir = tmp_path / "test_fail"
+    test_dir.mkdir()
+
+    with patch("cmd_mox.environment.shutil.rmtree") as mock_rmtree:
+        mock_rmtree.side_effect = OSError("Persistent permission denied")
+
+        with pytest.raises(OSError, match="Persistent permission denied"):
+            _robust_rmtree(test_dir, max_retries=1, retry_delay=0.01)
+
+        assert mock_rmtree.call_count == 2  # Initial + 1 retry
+
+
+def test_environment_manager_robust_cleanup_success() -> None:
+    """Test EnvironmentManager uses robust cleanup successfully."""
+    original_env = os.environ.copy()
+
+    with EnvironmentManager() as env:
+        assert env.shim_dir is not None
+        test_file = env.shim_dir / "test.txt"
+        test_file.write_text("test content")
+        assert test_file.exists()
+
+    assert os.environ == original_env
+    assert env.shim_dir is not None
+    assert not env.shim_dir.exists()
+
+
+def test_environment_manager_cleanup_error_handling() -> None:
+    """Test EnvironmentManager handles cleanup errors appropriately."""
+    original_env = os.environ.copy()
+
+    with patch("cmd_mox.environment._robust_rmtree") as mock_rmtree:
+        mock_rmtree.side_effect = OSError("Cleanup failed")
+
+        with pytest.raises(RuntimeError, match="Cleanup failed"), EnvironmentManager():
+            pass
+
+    # Environment should still be restored despite cleanup failure
+    assert os.environ == original_env
+
+
+def test_environment_manager_cleanup_error_during_exception() -> None:
+    """Test cleanup errors are logged but don't mask original exceptions."""
+    original_env = os.environ.copy()
+
+    with patch("cmd_mox.environment._robust_rmtree") as mock_rmtree:
+        mock_rmtree.side_effect = OSError("Cleanup failed")
+
+        # Original exception should be preserved, cleanup error logged
+        msg = "original error"
+        with (
+            pytest.raises(ValueError, match="original error"),
+            EnvironmentManager(),
+        ):
+            raise ValueError(msg)
+
+    assert os.environ == original_env
+
+
+def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
+    """Test that cleanup handles read-only files appropriately."""
+    # This test primarily checks the Windows-specific path but runs on all platforms
+    test_dir = tmp_path / "readonly_test"
+    test_dir.mkdir()
+    readonly_file = test_dir / "readonly.txt"
+    readonly_file.write_text("readonly content")
+
+    # Make file read-only
+    readonly_file.chmod(stat.S_IREAD)
+
+    # The robust cleanup should handle this
+    _robust_rmtree(test_dir)
+    assert not test_dir.exists()

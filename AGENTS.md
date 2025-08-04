@@ -65,8 +65,8 @@ When implementing changes, adhere to the following testing procedures:
 
 - **Atomicity:** Aim for small, focused, atomic changes. Each change (and
   subsequent commit) should represent a single logical unit of work. **Quality
-  Gates:** Before considering a change complete or proposing a commit, ensure it
-  meets the following criteria:
+  Gates:** Before considering a change complete or proposing a commit, ensure
+  it meets the following criteria:
 
   - For Python files:
 

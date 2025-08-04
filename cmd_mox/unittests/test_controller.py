@@ -127,6 +127,9 @@ def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(MissingEnvironmentError, match="socket_path"):
         mox.replay()
 
+    # Use the public context-manager API to restore PATH and other state.
+    # Calling the private _stop_server_and_exit_env helper would bypass
+    # type checking, so tests rely on __exit__ instead.
     mox.__exit__(None, None, None)
 
 
@@ -150,7 +153,7 @@ def test_require_env_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     """verify() fails when environment attributes are missing."""
-    mox = CmdMox()
+    mox = CmdMox(verify_on_exit=False)  # Disable auto-verify to avoid double error
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
     mox.replay()
@@ -159,7 +162,7 @@ def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(mox.environment, "socket_path", None)
     with pytest.raises(MissingEnvironmentError, match="shim_dir.*socket_path"):
         mox.verify()
-    mox._stop_server_and_exit_env()
+    mox.__exit__(None, None, None)
 
 
 def test_factory_methods_create_distinct_objects() -> None:
