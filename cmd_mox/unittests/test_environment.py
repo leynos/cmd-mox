@@ -15,11 +15,12 @@ import cmd_mox.environment as envmod
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     EnvironmentManager,
+    RobustRmtreeError,
     _robust_rmtree,
     temporary_env,
 )
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if t.TYPE_CHECKING:  # pragma: no cover - imported for type hints
     from pathlib import Path
 
 
@@ -157,23 +158,24 @@ def test_robust_rmtree_retry_on_failure(tmp_path: Path) -> None:
         # Simulate transient failure followed by success
         mock_rmtree.side_effect = [OSError("Permission denied"), None]
 
-        _robust_rmtree(test_dir, max_retries=2, retry_delay=0.01)
+        _robust_rmtree(test_dir, max_attempts=3, retry_delay=0.01)
 
         assert mock_rmtree.call_count == 2
 
 
-def test_robust_rmtree_max_retries_exceeded(tmp_path: Path) -> None:
-    """Test that _robust_rmtree raises after max retries exceeded."""
+def test_robust_rmtree_max_attempts_exceeded(tmp_path: Path) -> None:
+    """Test that _robust_rmtree raises after max attempts exceeded."""
     test_dir = tmp_path / "test_fail"
     test_dir.mkdir()
 
     with patch("cmd_mox.environment.shutil.rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Persistent permission denied")
 
-        with pytest.raises(OSError, match="Persistent permission denied"):
-            _robust_rmtree(test_dir, max_retries=1, retry_delay=0.01)
+        with pytest.raises(RobustRmtreeError) as exc:
+            _robust_rmtree(test_dir, max_attempts=2, retry_delay=0.01)
 
         assert mock_rmtree.call_count == 2  # Initial + 1 retry
+    assert isinstance(exc.value.__cause__, OSError)
 
 
 def test_environment_manager_robust_cleanup_success() -> None:
