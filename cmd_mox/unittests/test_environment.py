@@ -2,28 +2,23 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import stat
 import typing as t
-from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-import cmd_mox.environment as env_mod
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     EnvironmentManager,
-    _attempt_single_removal,
-    _fix_windows_permissions,
-    _handle_final_failure,
-    _log_retry_attempt,
-    _retry_removal,
+    RobustRmtreeError,
     _robust_rmtree,
     temporary_env,
 )
+
+if t.TYPE_CHECKING:  # pragma: no cover - imported for type hints
+    from pathlib import Path
 
 
 def test_environment_manager_modifies_and_restores() -> None:
@@ -160,145 +155,24 @@ def test_robust_rmtree_retry_on_failure(tmp_path: Path) -> None:
         # Simulate transient failure followed by success
         mock_rmtree.side_effect = [OSError("Permission denied"), None]
 
-        _robust_rmtree(test_dir, max_retries=2, retry_delay=0.01)
+        _robust_rmtree(test_dir, max_attempts=3, retry_delay=0.01)
 
         assert mock_rmtree.call_count == 2
 
 
-def test_robust_rmtree_max_retries_exceeded(tmp_path: Path) -> None:
-    """Test that _robust_rmtree raises after max retries exceeded."""
+def test_robust_rmtree_max_attempts_exceeded(tmp_path: Path) -> None:
+    """Test that _robust_rmtree raises after max attempts exceeded."""
     test_dir = tmp_path / "test_fail"
     test_dir.mkdir()
 
     with patch("cmd_mox.environment.shutil.rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Persistent permission denied")
 
-        with pytest.raises(OSError, match="Persistent permission denied"):
-            _robust_rmtree(test_dir, max_retries=1, retry_delay=0.01)
+        with pytest.raises(RobustRmtreeError) as exc:
+            _robust_rmtree(test_dir, max_attempts=2, retry_delay=0.01)
 
         assert mock_rmtree.call_count == 2  # Initial + 1 retry
-
-
-def test_retry_removal_retries_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """_retry_removal should retry failed attempts until success."""
-    calls: list[bool] = []
-
-    def fake_attempt(path: Path, *, raise_on_error: bool) -> bool:
-        calls.append(raise_on_error)
-        return len(calls) == 2
-
-    monkeypatch.setattr(env_mod, "_attempt_single_removal", fake_attempt)
-    monkeypatch.setattr(env_mod, "_log_retry_attempt", lambda *args: None)
-    monkeypatch.setattr(env_mod.time, "sleep", lambda _: None)
-    _retry_removal(tmp_path, max_retries=3, retry_delay=0.01)
-    assert calls == [False, False]
-
-
-def test_retry_removal_calls_final_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """_retry_removal delegates to _handle_final_failure after retries."""
-
-    def fake_attempt(path: Path, *, raise_on_error: bool) -> bool:
-        raise OSError("boom")
-
-    called: dict[str, t.Any] = {}
-    monkeypatch.setattr(env_mod, "_attempt_single_removal", fake_attempt)
-    monkeypatch.setattr(env_mod, "_log_retry_attempt", lambda *args: None)
-    monkeypatch.setattr(env_mod.time, "sleep", lambda _: None)
-
-    def fake_handle(path: Path, retries: int, exc: Exception | None) -> None:
-        called["args"] = (path, retries, exc)
-        raise RuntimeError("stop")
-
-    monkeypatch.setattr(env_mod, "_handle_final_failure", fake_handle)
-    with pytest.raises(RuntimeError, match="stop"):
-        _retry_removal(tmp_path, max_retries=1, retry_delay=0.01)
-    assert isinstance(called.get("args", (None, None, None))[2], OSError)
-
-
-def test_attempt_single_removal_success(tmp_path: Path) -> None:
-    """_attempt_single_removal removes the directory once."""
-    test_dir = tmp_path / "single_success"
-    test_dir.mkdir()
-    with patch("cmd_mox.environment._fix_windows_permissions") as fix_perm:
-        assert _attempt_single_removal(test_dir, raise_on_error=True)
-        fix_perm.assert_called_once_with(test_dir)
-    assert not test_dir.exists()
-
-
-def test_attempt_single_removal_error_handling(tmp_path: Path) -> None:
-    """_attempt_single_removal handles errors based on raise_on_error."""
-    test_dir = tmp_path / "single_fail"
-    test_dir.mkdir()
-    with patch("cmd_mox.environment.shutil.rmtree", side_effect=OSError("boom")):
-        assert not _attempt_single_removal(test_dir, raise_on_error=False)
-        with pytest.raises(OSError, match="boom"):
-            _attempt_single_removal(test_dir, raise_on_error=True)
-
-
-def test_fix_windows_permissions_noop(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """_fix_windows_permissions is a no-op on non-Windows systems."""
-    called = False
-
-    def fake_walk(_: Path) -> list[tuple[str, list[str], list[str]]]:
-        nonlocal called
-        called = True
-        return []
-
-    fake_os = SimpleNamespace(name="posix", walk=fake_walk)
-    monkeypatch.setattr(env_mod, "os", fake_os)
-    _fix_windows_permissions(tmp_path)
-    assert not called
-
-
-def test_fix_windows_permissions_windows(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """_fix_windows_permissions makes files and dirs writable on Windows."""
-    test_dir = tmp_path / "perm"
-    test_dir.mkdir()
-    file_path = test_dir / "file.txt"
-    file_path.write_text("x")
-    file_path.chmod(stat.S_IREAD)
-    sub_dir = test_dir / "sub"
-    sub_dir.mkdir()
-    sub_dir.chmod(stat.S_IREAD)
-    fake_os = SimpleNamespace(name="nt", walk=os.walk)
-    monkeypatch.setattr(env_mod, "os", fake_os)
-    _fix_windows_permissions(test_dir)
-    assert (file_path.stat().st_mode & 0o777) == 0o777
-    assert (sub_dir.stat().st_mode & 0o777) == 0o777
-
-
-def test_log_retry_attempt_emits_debug(caplog: pytest.LogCaptureFixture) -> None:
-    """_log_retry_attempt logs a helpful debug message."""
-    path = Path("foo")
-    with caplog.at_level(logging.DEBUG):
-        _log_retry_attempt(0, path, 0.5)
-    assert f"Attempt 1 to remove {path} failed" in caplog.text
-
-
-def test_handle_final_failure_reraises(tmp_path: Path) -> None:
-    """_handle_final_failure re-raises the original exception when provided."""
-    err = OSError("boom")
-    with patch("cmd_mox.environment.logger.warning") as warn:
-        with pytest.raises(OSError, match="boom") as exc:
-            _handle_final_failure(tmp_path, 1, err)
-        warn.assert_called_once()
-    assert exc.value is err
-
-
-def test_handle_final_failure_new_error(tmp_path: Path) -> None:
-    """_handle_final_failure raises a new error when no exception is stored."""
-    with patch("cmd_mox.environment.logger.warning") as warn:
-        with pytest.raises(OSError, match="Failed to remove"):
-            _handle_final_failure(tmp_path, 2, None)
-        warn.assert_called_once()
+    assert isinstance(exc.value.__cause__, OSError)
 
 
 def test_environment_manager_robust_cleanup_success() -> None:

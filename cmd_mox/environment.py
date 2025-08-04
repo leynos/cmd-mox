@@ -28,28 +28,41 @@ def _restore_env(orig_env: dict[str, str]) -> None:
     os.environ.update(orig_env)
 
 
-def _robust_rmtree(path: Path, max_retries: int = 3, retry_delay: float = 0.1) -> None:
+class RobustRmtreeError(OSError):
+    """Raised when :func:`_robust_rmtree` exhausts all removal attempts."""
+
+    def __init__(
+        self, path: Path, attempts: int, last_exception: Exception | None
+    ) -> None:
+        msg = f"Failed to remove {path} after {attempts} attempts"
+        super().__init__(msg)
+        self.path = path
+        self.attempts = attempts
+        self.last_exception = last_exception
+
+
+def _robust_rmtree(path: Path, max_attempts: int = 4, retry_delay: float = 0.1) -> None:
     """Remove directory tree with retries and better error handling."""
     if not path.exists():
         return
-    _retry_removal(path, max_retries, retry_delay)
+    _retry_removal(path, max_attempts, retry_delay)
 
 
-def _retry_removal(path: Path, max_retries: int, retry_delay: float) -> None:
-    """Attempt to remove *path* up to ``max_retries`` times."""
+def _retry_removal(path: Path, attempts: int, retry_delay: float) -> None:
+    """Attempt to remove *path* up to ``attempts`` times."""
     last_exception: Exception | None = None
-    for attempt in range(max_retries + 1):
+    for attempt in range(attempts):
         try:
-            raise_on_error = attempt == max_retries
+            raise_on_error = attempt == attempts - 1
             if _attempt_single_removal(path, raise_on_error=raise_on_error):
                 return
         except OSError as exc:
             last_exception = exc
-        if attempt < max_retries:
+        if attempt < attempts - 1:
             _log_retry_attempt(attempt, path, retry_delay)
             time.sleep(retry_delay)
         else:
-            _handle_final_failure(path, max_retries, last_exception)
+            _handle_final_failure(path, attempts, last_exception)
 
 
 def _attempt_single_removal(path: Path, *, raise_on_error: bool) -> bool:
@@ -73,11 +86,11 @@ def _fix_windows_permissions(path: Path) -> None:
     for root, dirs, files in os.walk(path):
         for name in files:
             p = Path(root) / name
-            if p.exists():
+            if p.exists() and not p.is_symlink():
                 p.chmod(0o777)
         for name in dirs:
             p = Path(root) / name
-            if p.exists():
+            if p.exists() and not p.is_symlink():
                 p.chmod(0o777)
 
 
@@ -92,18 +105,15 @@ def _log_retry_attempt(attempt: int, path: Path, delay: float) -> None:
 
 
 def _handle_final_failure(
-    path: Path, max_retries: int, last_exception: Exception | None
+    path: Path, attempts: int, last_exception: Exception | None
 ) -> None:
     """Log and raise after exhausting all retries."""
     logger.warning(
         "Failed to remove temporary directory %s after %d attempts",
         path,
-        max_retries + 1,
+        attempts,
     )
-    if last_exception is not None:
-        raise last_exception
-    msg = f"Failed to remove {path} after {max_retries + 1} attempts"
-    raise OSError(msg)
+    raise RobustRmtreeError(path, attempts, last_exception) from last_exception
 
 
 class EnvironmentManager:
