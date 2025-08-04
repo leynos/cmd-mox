@@ -11,7 +11,14 @@ import pytest
 
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
 from cmd_mox.ipc import IPCServer
-from cmd_mox.shimgen import SHIM_PATH, create_shim_symlinks
+from cmd_mox.shimgen import (
+    SHIM_PATH,
+    _validate_no_nul_bytes,
+    _validate_no_path_separators,
+    _validate_not_dot_directories,
+    _validate_not_empty,
+    create_shim_symlinks,
+)
 
 
 def test_create_shim_symlinks_and_execution(
@@ -84,3 +91,33 @@ def test_create_shim_symlinks_invalid_command_name(name: str) -> None:
         assert env.shim_dir is not None
         with pytest.raises(ValueError, match="Invalid command name"):
             create_shim_symlinks(env.shim_dir, [name])
+
+
+@pytest.mark.parametrize(
+    ("validator", "bad_name"),
+    [
+        (_validate_not_empty, ""),
+        (_validate_not_dot_directories, "."),
+        (_validate_not_dot_directories, ".."),
+        (_validate_no_path_separators, "bad/name"),
+        (_validate_no_path_separators, "bad\\name"),
+        (_validate_no_nul_bytes, "bad\x00name"),
+    ],
+)
+def test_validators_raise_error(
+    validator: t.Callable[[str, str], None], bad_name: str
+) -> None:
+    """Each validator rejects bad input."""
+    with pytest.raises(ValueError, match="error"):
+        validator(bad_name, "error")
+
+
+def test_validators_accept_valid_name() -> None:
+    """Validators accept well-formed names."""
+    for validator in [
+        _validate_not_empty,
+        _validate_not_dot_directories,
+        _validate_no_path_separators,
+        _validate_no_nul_bytes,
+    ]:
+        validator("good", "error")
