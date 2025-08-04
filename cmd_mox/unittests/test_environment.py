@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+import cmd_mox.environment as envmod
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     EnvironmentManager,
@@ -218,6 +219,29 @@ def test_environment_manager_cleanup_error_during_exception() -> None:
         ):
             raise ValueError(msg)
 
+    assert os.environ == original_env
+
+
+def test_environment_manager_restoration_error_handling() -> None:
+    """Environment restoration errors raise RuntimeError and reset state."""
+    original_env = os.environ.copy()
+
+    with patch("cmd_mox.environment._restore_env") as mock_restore:
+        mock_restore.side_effect = OSError("restore failed")
+        mgr = EnvironmentManager()
+        with (
+            pytest.raises(
+                RuntimeError,
+                match="Cleanup failed: Environment restoration failed: restore failed",
+            ),
+            mgr,
+        ):
+            pass
+        # Global state should reset even when restoration fails
+        assert envmod._active_manager is None
+
+    # The environment wasn't restored by the manager; restore manually
+    envmod._restore_env(original_env)
     assert os.environ == original_env
 
 
