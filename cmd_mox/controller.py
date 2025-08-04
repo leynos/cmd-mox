@@ -254,11 +254,18 @@ class CmdMox:
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
         tb: TracebackType | None,
-    ) -> None:  # pragma: no cover - thin wrapper
+    ) -> None:
         """Exit context, optionally verifying and cleaning up."""
         if self._handle_auto_verify(exc_type):
             return
-        self._stop_server_and_exit_env(exc_type, exc, tb)
+        if self._server is not None:
+            try:
+                self._server.stop()
+            finally:
+                self._server = None
+        if self._entered:
+            self.environment.__exit__(exc_type, exc, tb)
+            self._entered = False
 
     def _handle_auto_verify(self, exc_type: type[BaseException] | None) -> bool:
         """Invoke :meth:`verify` when exiting a replay block."""
@@ -390,41 +397,9 @@ class CmdMox:
         )
         self._server.start()
 
-    def _stop_server_and_exit_env(
-        self,
-        exc_type: type[BaseException] | None = None,
-        exc: BaseException | None = None,
-        tb: TracebackType | None = None,
-    ) -> None:
-        """Stop the IPC server and exit the environment manager.
-
-        This helper underpins :py:meth:`__exit__`,
-        :py:meth:`_cleanup_after_replay_error`, and
-        :py:meth:`_finalize_verification`.
-
-        Parameters
-        ----------
-        exc_type, exc, tb:
-            Exception information forwarded to
-            :meth:`EnvironmentManager.__exit__`. Pass ``None`` for all three
-            when no exception is being handled.
-
-        This method is idempotent so it is safe to call multiple times from
-        different cleanup paths.
-        """
-        if self._server is not None:
-            try:
-                self._server.stop()
-            finally:
-                self._server = None
-
-        if self._entered:
-            self.environment.__exit__(exc_type, exc, tb)
-            self._entered = False
-
     def _cleanup_after_replay_error(self) -> None:
         """Stop the server and restore the environment after failure."""
-        self._stop_server_and_exit_env()
+        self.__exit__(None, None, None)
 
     def _check_verify_preconditions(self) -> None:
         """Ensure verify() is called in the correct phase."""
@@ -446,5 +421,10 @@ class CmdMox:
 
     def _finalize_verification(self) -> None:
         """Stop the server, clean up the environment, and update phase."""
-        self._stop_server_and_exit_env()
+        verify_on_exit = self._verify_on_exit
+        self._verify_on_exit = False
+        try:
+            self.__exit__(None, None, None)
+        finally:
+            self._verify_on_exit = verify_on_exit
         self._phase = Phase.VERIFY
