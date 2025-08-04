@@ -37,6 +37,12 @@ class CommandTestScenario:
     exit_code: int
     stderr: str
 
+    def get_which_result_for_file_creation(self) -> str:
+        """Return ``which_result`` when a file should be created."""
+        assert self.create_file
+        assert self.which_result is not None
+        return self.which_result
+
 
 @pytest.fixture
 def runner() -> cabc.Iterator[CommandRunner]:
@@ -145,7 +151,7 @@ def test_run_error_conditions(
 ) -> None:
     """Return consistent errors for invalid or missing commands."""
     if scenario.create_file:
-        dummy = tmp_path / scenario.which_result  # type: ignore[arg-type]
+        dummy = tmp_path / scenario.get_which_result_for_file_creation()
         dummy.write_text("echo hi")
         dummy.chmod(0o644)
         result_path = str(dummy)
