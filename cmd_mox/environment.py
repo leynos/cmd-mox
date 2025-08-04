@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
 import os
 import shutil
@@ -98,6 +99,39 @@ def _robust_rmtree(path: Path, max_retries: int = 3, retry_delay: float = 0.1) -
             raise OSError(msg)
 
 
+CleanupError = tuple[str, BaseException]
+
+
+def _collect_os_error(
+    message: str,
+) -> t.Callable[
+    [t.Callable[[EnvironmentManager, list[CleanupError]], t.Any]],
+    t.Callable[[EnvironmentManager, list[CleanupError]], None],
+]:
+    """Return a decorator that records ``OSError``s in ``cleanup_errors``.
+
+    The decorated function is expected to take ``(self, cleanup_errors)`` and
+    should raise ``OSError`` on failure. Any such exception is captured and the
+    formatted message appended to ``cleanup_errors``.
+    """
+
+    def decorator(
+        func: t.Callable[[EnvironmentManager, list[CleanupError]], t.Any],
+    ) -> t.Callable[[EnvironmentManager, list[CleanupError]], None]:
+        @functools.wraps(func)
+        def wrapper(
+            self: EnvironmentManager, cleanup_errors: list[CleanupError]
+        ) -> None:
+            try:
+                func(self, cleanup_errors)
+            except OSError as e:  # pragma: no cover - exercised via tests
+                cleanup_errors.append((f"{message}: {e}", e))
+
+        return wrapper
+
+    return decorator
+
+
 class EnvironmentManager:
     """Manage temporary environment modifications for CmdMox.
 
@@ -137,28 +171,29 @@ class EnvironmentManager:
         tb: types.TracebackType | None,
     ) -> None:
         """Restore the original environment and clean up."""
-        cleanup_errors: list[str] = []
+        cleanup_errors: list[CleanupError] = []
 
         self._restore_original_environment(cleanup_errors)
         self._reset_global_state()
         self._cleanup_temporary_directory(cleanup_errors)
         self._handle_cleanup_errors(cleanup_errors, exc_type)
 
-    def _restore_original_environment(self, cleanup_errors: list[str]) -> None:
+    @_collect_os_error("Environment restoration failed")
+    def _restore_original_environment(
+        self, _cleanup_errors: list[CleanupError]
+    ) -> None:
         """Return the process environment to its original state."""
-        try:
-            if self._orig_env is not None:
-                _restore_env(self._orig_env)
-                self._orig_env = None
-        except OSError as e:  # pragma: no cover - exercised via tests
-            cleanup_errors.append(f"Environment restoration failed: {e}")
+        if self._orig_env is not None:
+            _restore_env(self._orig_env)
+            self._orig_env = None
 
     def _reset_global_state(self) -> None:
         """Reset module-level state tracking the active manager."""
         global _active_manager
         _active_manager = None
 
-    def _cleanup_temporary_directory(self, cleanup_errors: list[str]) -> None:
+    @_collect_os_error("Directory cleanup failed")
+    def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
         """Remove the temporary directory created by ``__enter__``."""
         try:
             if (
@@ -168,22 +203,24 @@ class EnvironmentManager:
                 and self.shim_dir.exists()
             ):
                 _robust_rmtree(self.shim_dir)
-        except OSError as e:  # pragma: no cover - exercised via tests
-            cleanup_errors.append(f"Directory cleanup failed: {e}")
         finally:
             self._created_dir = None
 
     def _handle_cleanup_errors(
-        self, cleanup_errors: list[str], exc_type: type[BaseException] | None
+        self,
+        cleanup_errors: list[CleanupError],
+        exc_type: type[BaseException] | None,
     ) -> None:
         """Log and potentially raise aggregated cleanup errors."""
         if cleanup_errors:
-            error_msg = "; ".join(cleanup_errors)
+            messages = [msg for msg, _ in cleanup_errors]
+            error_msg = "; ".join(messages)
             logger.error("EnvironmentManager cleanup encountered errors: %s", error_msg)
             # Only raise if we're not already handling an exception
             if exc_type is None:
+                primary_exc = cleanup_errors[0][1]
                 msg = f"Cleanup failed: {error_msg}"
-                raise RuntimeError(msg)
+                raise RuntimeError(msg) from primary_exc
 
     @property
     def original_environment(self) -> dict[str, str]:

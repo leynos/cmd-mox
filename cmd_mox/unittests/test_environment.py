@@ -245,6 +245,30 @@ def test_environment_manager_restoration_error_handling() -> None:
     assert os.environ == original_env
 
 
+def test_environment_manager_directory_cleanup_error_handling() -> None:
+    """Directory cleanup errors raise RuntimeError and reset state."""
+    original_env = os.environ.copy()
+
+    with patch("cmd_mox.environment._robust_rmtree") as mock_rmtree:
+        mock_rmtree.side_effect = OSError("rmtree failed")
+        mgr = EnvironmentManager()
+        with (
+            pytest.raises(
+                RuntimeError,
+                match="Cleanup failed: Directory cleanup failed: rmtree failed",
+            ) as excinfo,
+            mgr,
+        ):
+            pass
+
+        # Global state should reset even when directory cleanup fails
+        assert envmod._active_manager is None
+        assert isinstance(excinfo.value.__cause__, OSError)
+        assert str(excinfo.value.__cause__) == "rmtree failed"
+
+    assert os.environ == original_env
+
+
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     """Test that cleanup handles read-only files appropriately."""
     # This test primarily checks the Windows-specific path but runs on all platforms
