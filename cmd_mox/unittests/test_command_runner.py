@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import typing as t
+from dataclasses import dataclass  # noqa: ICN003
 
 import pytest
 
@@ -24,6 +25,17 @@ class DummyResult:
         self.stderr = ""
         self.returncode = 0
         self.env = env
+
+
+@dataclass
+class CommandTestScenario:
+    """Test case data for invalid command scenarios."""
+
+    command: str
+    which_result: str | None
+    create_file: bool
+    exit_code: int
+    stderr: str
 
 
 @pytest.fixture
@@ -91,36 +103,36 @@ def test_fallback_to_system_path(
 
 
 @pytest.mark.parametrize(
-    (
-        "command",
-        "which_result",
-        "create_file",
-        "exit_code",
-        "stderr",
-    ),
+    "scenario",
     [
         pytest.param(
-            "missing",
-            None,
-            False,
-            127,
-            "missing: not found",
+            CommandTestScenario(
+                command="missing",
+                which_result=None,
+                create_file=False,
+                exit_code=127,
+                stderr="missing: not found",
+            ),
             id="missing",
         ),
         pytest.param(
-            "rel",
-            "./rel",
-            False,
-            126,
-            "rel: invalid executable path",
+            CommandTestScenario(
+                command="rel",
+                which_result="./rel",
+                create_file=False,
+                exit_code=126,
+                stderr="rel: invalid executable path",
+            ),
             id="relative",
         ),
         pytest.param(
-            "dummy",
-            "dummy",
-            True,
-            126,
-            "dummy: not executable",
+            CommandTestScenario(
+                command="dummy",
+                which_result="dummy",
+                create_file=True,
+                exit_code=126,
+                stderr="dummy: not executable",
+            ),
             id="non-executable",
         ),
     ],
@@ -129,28 +141,23 @@ def test_run_error_conditions(
     runner: CommandRunner,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    command: str,
-    which_result: str | None,
-    *,
-    create_file: bool,
-    exit_code: int,
-    stderr: str,
+    scenario: CommandTestScenario,
 ) -> None:
     """Return consistent errors for invalid or missing commands."""
-    if create_file:
-        dummy = tmp_path / which_result  # type: ignore[arg-type]
+    if scenario.create_file:
+        dummy = tmp_path / scenario.which_result  # type: ignore[arg-type]
         dummy.write_text("echo hi")
         dummy.chmod(0o644)
         result_path = str(dummy)
     else:
-        result_path = which_result
+        result_path = scenario.which_result
 
     monkeypatch.setattr(
         "cmd_mox.command_runner.shutil.which", lambda cmd, path=None: result_path
     )
 
-    invocation = Invocation(command=command, args=[], stdin="", env={})
+    invocation = Invocation(command=scenario.command, args=[], stdin="", env={})
     response = runner.run(invocation, {})
 
-    assert response.exit_code == exit_code
-    assert response.stderr == stderr
+    assert response.exit_code == scenario.exit_code
+    assert response.stderr == scenario.stderr
