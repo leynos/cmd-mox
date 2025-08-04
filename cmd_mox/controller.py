@@ -247,7 +247,7 @@ class CmdMox:
         """Enter context, applying environment changes."""
         try:
             self.environment.__enter__()
-        except RuntimeError as exc:
+        except RuntimeError:
             self._entered = False
             raise
 
