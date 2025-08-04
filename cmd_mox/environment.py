@@ -43,7 +43,7 @@ def _robust_rmtree(path: Path, max_retries: int = 3, retry_delay: float = 0.1) -
     if not path.exists():
         return
 
-    def _attempt_removal() -> bool:
+    def _attempt_removal(*, raise_on_error: bool = False) -> bool:
         """Attempt to remove the directory tree. Return True on success."""
         try:
             # First try to remove read-only attributes if on Windows
@@ -61,13 +61,21 @@ def _robust_rmtree(path: Path, max_retries: int = 3, retry_delay: float = 0.1) -
             shutil.rmtree(path)
             logger.debug("Successfully removed temporary directory: %s", path)
         except OSError:
+            if raise_on_error:
+                raise  # Re-raise the exception
             return False
         else:
             return True
 
+    last_exception: Exception | None = None
     for attempt in range(max_retries + 1):
-        if _attempt_removal():
-            return
+        try:
+            # On the final attempt, re-raise any exceptions
+            raise_on_error = attempt == max_retries
+            if _attempt_removal(raise_on_error=raise_on_error):
+                return
+        except OSError as e:
+            last_exception = e
 
         if attempt < max_retries:
             logger.debug(
@@ -83,8 +91,9 @@ def _robust_rmtree(path: Path, max_retries: int = 3, retry_delay: float = 0.1) -
                 path,
                 max_retries + 1,
             )
-            # Final attempt with exception propagation
-            _attempt_removal()
+            # Re-raise the last exception we caught
+            if last_exception is not None:
+                raise last_exception
             msg = f"Failed to remove {path} after {max_retries + 1} attempts"
             raise OSError(msg)
 
