@@ -162,7 +162,7 @@ def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(mox.environment, "socket_path", None)
     with pytest.raises(MissingEnvironmentError, match="shim_dir.*socket_path"):
         mox.verify()
-    mox._stop_server_and_exit_env()
+    mox.__exit__(None, None, None)
 
 
 def test_factory_methods_create_distinct_objects() -> None:
