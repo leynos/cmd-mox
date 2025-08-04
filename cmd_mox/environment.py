@@ -9,7 +9,7 @@ import tempfile
 import typing as t
 from pathlib import Path
 
-_active_manager: EnvironmentManager | None = None
+_active_manager: EnvironmentManager | None = None  # type: ignore[name-defined]
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types

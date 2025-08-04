@@ -245,7 +245,12 @@ class CmdMox:
     # ------------------------------------------------------------------
     def __enter__(self) -> CmdMox:
         """Enter context, applying environment changes."""
-        self.environment.__enter__()
+        try:
+            self.environment.__enter__()
+        except RuntimeError as exc:
+            self._entered = False
+            raise
+
         self._entered = True
         return self
 
