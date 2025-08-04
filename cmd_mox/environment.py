@@ -29,73 +29,81 @@ def _restore_env(orig_env: dict[str, str]) -> None:
 
 
 def _robust_rmtree(path: Path, max_retries: int = 3, retry_delay: float = 0.1) -> None:
-    """Remove directory tree with retries and better error handling.
-
-    Parameters
-    ----------
-    path
-        Directory path to remove
-    max_retries
-        Maximum number of retry attempts
-    retry_delay
-        Delay between retries in seconds
-    """
+    """Remove directory tree with retries and better error handling."""
     if not path.exists():
         return
+    _retry_removal(path, max_retries, retry_delay)
 
-    def _attempt_removal(*, raise_on_error: bool = False) -> bool:
-        """Attempt to remove the directory tree. Return True on success."""
-        try:
-            # First try to remove read-only attributes if on Windows
-            if os.name == "nt":
-                for root, dirs, files in os.walk(path):
-                    for file in files:
-                        file_path = Path(root) / file
-                        if file_path.exists():
-                            file_path.chmod(0o777)
-                    for dir_name in dirs:
-                        dir_path = Path(root) / dir_name
-                        if dir_path.exists():
-                            dir_path.chmod(0o777)
 
-            shutil.rmtree(path)
-            logger.debug("Successfully removed temporary directory: %s", path)
-        except OSError:
-            if raise_on_error:
-                raise  # Re-raise the exception
-            return False
-        else:
-            return True
-
+def _retry_removal(path: Path, max_retries: int, retry_delay: float) -> None:
+    """Attempt to remove *path* up to ``max_retries`` times."""
     last_exception: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
-            # On the final attempt, re-raise any exceptions
             raise_on_error = attempt == max_retries
-            if _attempt_removal(raise_on_error=raise_on_error):
+            if _attempt_single_removal(path, raise_on_error=raise_on_error):
                 return
-        except OSError as e:
-            last_exception = e
-
+        except OSError as exc:
+            last_exception = exc
         if attempt < max_retries:
-            logger.debug(
-                "Attempt %d to remove %s failed. Retrying in %.1fs...",
-                attempt + 1,
-                path,
-                retry_delay,
-            )
+            _log_retry_attempt(attempt, path, retry_delay)
             time.sleep(retry_delay)
         else:
-            logger.warning(
-                "Failed to remove temporary directory %s after %d attempts",
-                path,
-                max_retries + 1,
-            )
-            # Re-raise the last exception we caught
-            if last_exception is not None:
-                raise last_exception
-            msg = f"Failed to remove {path} after {max_retries + 1} attempts"
-            raise OSError(msg)
+            _handle_final_failure(path, max_retries, last_exception)
+
+
+def _attempt_single_removal(path: Path, *, raise_on_error: bool) -> bool:
+    """Try removing *path* once; return ``True`` on success."""
+    try:
+        _fix_windows_permissions(path)
+        shutil.rmtree(path)
+        logger.debug("Successfully removed temporary directory: %s", path)
+    except OSError:
+        if raise_on_error:
+            raise
+        return False
+    else:
+        return True
+
+
+def _fix_windows_permissions(path: Path) -> None:
+    """Ensure all files under *path* are writable on Windows."""
+    if os.name != "nt":
+        return
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            p = Path(root) / name
+            if p.exists():
+                p.chmod(0o777)
+        for name in dirs:
+            p = Path(root) / name
+            if p.exists():
+                p.chmod(0o777)
+
+
+def _log_retry_attempt(attempt: int, path: Path, delay: float) -> None:
+    """Log that a removal attempt failed and will retry."""
+    logger.debug(
+        "Attempt %d to remove %s failed. Retrying in %.1fs...",
+        attempt + 1,
+        path,
+        delay,
+    )
+
+
+def _handle_final_failure(
+    path: Path, max_retries: int, last_exception: Exception | None
+) -> None:
+    """Log and raise after exhausting all retries."""
+    logger.warning(
+        "Failed to remove temporary directory %s after %d attempts",
+        path,
+        max_retries + 1,
+    )
+    if last_exception is not None:
+        raise last_exception
+    msg = f"Failed to remove {path} after {max_retries + 1} attempts"
+    raise OSError(msg)
 
 
 class EnvironmentManager:
