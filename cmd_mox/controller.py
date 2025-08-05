@@ -179,27 +179,32 @@ class CommandDouble(_ExpectationProxy):
     __str__ = __repr__
 
 
-def _make_proxy(name: str, exp_name: str) -> t.Callable[..., CommandDouble]:
-    def proxy(self: CommandDouble, *args: object, **kwargs: object) -> CommandDouble:
-        getattr(self.expectation, exp_name)(*args, **kwargs)
-        if name == "in_order":
-            self._ensure_in_order()
-        elif name == "any_order":
-            self._ensure_any_order()
-        return self
-
-    proxy.__name__ = name
-    proxy.__doc__ = f"Proxy to expectation.{exp_name}"
-    return proxy
+_ORDER_HANDLERS = {
+    "in_order": lambda self: self._ensure_in_order(),
+    "any_order": lambda self: self._ensure_any_order(),
+}
 
 
 def _setup_delegated_methods() -> None:
     """Set up proxy methods on CommandDouble for expectation delegation."""
-    for _name, _exp_name in CommandDouble._DELEGATED_METHODS.items():
-        if not hasattr(Expectation, _exp_name):  # pragma: no cover - sanity check
-            msg = f"Expectation has no method {_exp_name}"
-            raise AttributeError(msg)
-        setattr(CommandDouble, _name, _make_proxy(_name, _exp_name))
+
+    def make_proxy(
+        method_name: str, expectation_method: str
+    ) -> t.Callable[..., CommandDouble]:
+        order_handler = _ORDER_HANDLERS.get(method_name, lambda self: None)
+
+        def proxy(
+            self: CommandDouble, *args: object, **kwargs: object
+        ) -> CommandDouble:
+            getattr(self.expectation, expectation_method)(*args, **kwargs)
+            order_handler(self)
+            return self
+
+        proxy.__name__ = method_name
+        return proxy
+
+    for method_name, expectation_method in CommandDouble._DELEGATED_METHODS.items():
+        setattr(CommandDouble, method_name, make_proxy(method_name, expectation_method))
 
 
 _setup_delegated_methods()
