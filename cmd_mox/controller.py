@@ -6,12 +6,6 @@ import enum
 import typing as t
 from collections import deque
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import types
-    from pathlib import Path
-
-    TracebackType = types.TracebackType
-
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
@@ -19,6 +13,40 @@ from .expectations import Expectation
 from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
+
+if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import types
+    from pathlib import Path
+
+    TracebackType = types.TracebackType
+
+T_Self = t.TypeVar("T_Self", bound="CommandDouble")
+
+
+if t.TYPE_CHECKING:  # pragma: no cover - typing only
+
+    class _ExpectationProxy(t.Protocol):
+        def with_args(self: T_Self, *args: str) -> T_Self: ...
+
+        def with_matching_args(
+            self: T_Self, *matchers: t.Callable[[str], bool]
+        ) -> T_Self: ...
+
+        def with_stdin(self: T_Self, data: str | t.Callable[[str], bool]) -> T_Self: ...
+
+        def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self: ...
+
+        def times(self: T_Self, count: int) -> T_Self: ...
+
+        def times_called(self: T_Self, count: int) -> T_Self: ...
+
+        def in_order(self: T_Self) -> T_Self: ...
+
+        def any_order(self: T_Self) -> T_Self: ...
+else:  # pragma: no cover - runtime placeholder
+
+    class _ExpectationProxy:
+        pass
 
 
 class _CallbackIPCServer(IPCServer):
@@ -36,7 +64,7 @@ class _CallbackIPCServer(IPCServer):
         return self._handler(invocation)
 
 
-class CommandDouble:
+class CommandDouble(_ExpectationProxy):
     """Configuration for a stub, mock, or spy command."""
 
     __slots__ = (
@@ -61,8 +89,6 @@ class CommandDouble:
         self.invocations: list[Invocation] = []
         self.passthrough_mode = False
         self.expectation = Expectation(name)
-
-    T_Self = t.TypeVar("T_Self", bound="CommandDouble")
 
     def returns(
         self: T_Self, stdout: str = "", stderr: str = "", exit_code: int = 0
@@ -89,46 +115,28 @@ class CommandDouble:
         return self
 
     # ------------------------------------------------------------------
-    # Expectation configuration
+    # Expectation configuration via delegation
     # ------------------------------------------------------------------
-    def with_args(self: T_Self, *args: str) -> T_Self:
-        """Match invocations with exactly ``args``."""
-        self.expectation.with_args(*args)
-        return self
+    _DELEGATED_METHODS: t.ClassVar[dict[str, str]] = {
+        "with_args": "with_args",
+        "with_matching_args": "with_matching_args",
+        "with_stdin": "with_stdin",
+        "with_env": "with_env",
+        "times": "times_called",
+        "times_called": "times_called",
+        "in_order": "in_order",
+        "any_order": "any_order",
+    }
 
-    def with_matching_args(self: T_Self, *matchers: t.Callable[[str], bool]) -> T_Self:
-        """Match invocations using comparator callables."""
-        self.expectation.with_matching_args(*matchers)
-        return self
-
-    def with_stdin(self: T_Self, data: str | t.Callable[[str], bool]) -> T_Self:
-        """Expect standard input to match ``data``."""
-        self.expectation.with_stdin(data)
-        return self
-
-    def times(self: T_Self, count: int) -> T_Self:
-        """Expect exactly ``count`` invocations."""
-        self.expectation.times_called(count)
-        return self
-
-    def in_order(self: T_Self) -> T_Self:
-        """Require this mock to be called in registration order."""
+    def _ensure_in_order(self) -> None:
+        """Register this expectation for ordered verification."""
         if self.expectation not in self.controller._ordered:
             self.controller._ordered.append(self.expectation)
-        self.expectation.in_order()
-        return self
 
-    def any_order(self: T_Self) -> T_Self:
-        """Allow this mock to be called in any order."""
+    def _ensure_any_order(self) -> None:
+        """Remove this expectation from ordered verification."""
         if self.expectation in self.controller._ordered:
             self.controller._ordered.remove(self.expectation)
-        self.expectation.any_order()
-        return self
-
-    def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self:
-        """Inject additional environment variables when invoked."""
-        self.expectation.with_env(mapping)
-        return self
 
     def passthrough(self: T_Self) -> T_Self:
         """Execute the real command while recording invocations."""
@@ -169,6 +177,37 @@ class CommandDouble:
         )
 
     __str__ = __repr__
+
+
+_ORDER_HANDLERS = {
+    "in_order": lambda self: self._ensure_in_order(),
+    "any_order": lambda self: self._ensure_any_order(),
+}
+
+
+def _setup_delegated_methods() -> None:
+    """Set up proxy methods on CommandDouble for expectation delegation."""
+
+    def make_proxy(
+        method_name: str, expectation_method: str
+    ) -> t.Callable[..., CommandDouble]:
+        order_handler = _ORDER_HANDLERS.get(method_name, lambda self: None)
+
+        def proxy(
+            self: CommandDouble, *args: object, **kwargs: object
+        ) -> CommandDouble:
+            getattr(self.expectation, expectation_method)(*args, **kwargs)
+            order_handler(self)
+            return self
+
+        proxy.__name__ = method_name
+        return proxy
+
+    for method_name, expectation_method in CommandDouble._DELEGATED_METHODS.items():
+        setattr(CommandDouble, method_name, make_proxy(method_name, expectation_method))
+
+
+_setup_delegated_methods()
 
 
 # Backwards compatibility aliases
