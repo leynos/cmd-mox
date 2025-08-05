@@ -20,11 +20,6 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
     TracebackType = types.TracebackType
 
-T_Self = t.TypeVar("T_Self", bound="CommandDouble")
-
-
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
-
     class _ExpectationProxy(t.Protocol):
         def with_args(self: T_Self, *args: str) -> T_Self: ...
 
@@ -47,6 +42,9 @@ else:  # pragma: no cover - runtime placeholder
 
     class _ExpectationProxy:
         pass
+
+
+T_Self = t.TypeVar("T_Self", bound="CommandDouble")
 
 
 class _CallbackIPCServer(IPCServer):
