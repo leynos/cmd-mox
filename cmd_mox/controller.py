@@ -89,46 +89,37 @@ class CommandDouble:
         return self
 
     # ------------------------------------------------------------------
-    # Expectation configuration
+    # Expectation configuration via delegation
     # ------------------------------------------------------------------
-    def with_args(self: T_Self, *args: str) -> T_Self:
-        """Match invocations with exactly ``args``."""
-        self.expectation.with_args(*args)
-        return self
+    _DELEGATED_METHODS: t.ClassVar[dict[str, str]] = {
+        "with_args": "with_args",
+        "with_matching_args": "with_matching_args",
+        "with_stdin": "with_stdin",
+        "with_env": "with_env",
+        "times": "times_called",
+        "times_called": "times_called",
+        "in_order": "in_order",
+        "any_order": "any_order",
+    }
 
-    def with_matching_args(self: T_Self, *matchers: t.Callable[[str], bool]) -> T_Self:
-        """Match invocations using comparator callables."""
-        self.expectation.with_matching_args(*matchers)
-        return self
+    def __getattr__(self, name: str) -> t.Callable[..., CommandDouble]:
+        """Proxy expectation configuration methods to ``self.expectation``."""
+        exp_name = self._DELEGATED_METHODS.get(name)
+        if exp_name is None:
+            msg = f"{type(self).__name__!s} object has no attribute {name!r}"
+            raise AttributeError(msg)
 
-    def with_stdin(self: T_Self, data: str | t.Callable[[str], bool]) -> T_Self:
-        """Expect standard input to match ``data``."""
-        self.expectation.with_stdin(data)
-        return self
+        exp_method = getattr(self.expectation, exp_name)
 
-    def times(self: T_Self, count: int) -> T_Self:
-        """Expect exactly ``count`` invocations."""
-        self.expectation.times_called(count)
-        return self
+        def _wrapper(*args: object, **kwargs: object) -> CommandDouble:
+            exp_method(*args, **kwargs)
+            if name == "in_order" and self.expectation not in self.controller._ordered:
+                self.controller._ordered.append(self.expectation)
+            elif name == "any_order" and self.expectation in self.controller._ordered:
+                self.controller._ordered.remove(self.expectation)
+            return self
 
-    def in_order(self: T_Self) -> T_Self:
-        """Require this mock to be called in registration order."""
-        if self.expectation not in self.controller._ordered:
-            self.controller._ordered.append(self.expectation)
-        self.expectation.in_order()
-        return self
-
-    def any_order(self: T_Self) -> T_Self:
-        """Allow this mock to be called in any order."""
-        if self.expectation in self.controller._ordered:
-            self.controller._ordered.remove(self.expectation)
-        self.expectation.any_order()
-        return self
-
-    def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self:
-        """Inject additional environment variables when invoked."""
-        self.expectation.with_env(mapping)
-        return self
+        return _wrapper
 
     def passthrough(self: T_Self) -> T_Self:
         """Execute the real command while recording invocations."""
