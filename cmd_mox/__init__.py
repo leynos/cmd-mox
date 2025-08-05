@@ -1,7 +1,7 @@
 """Python-native command mocking built around a record-replay-verify lifecycle.
 
 For an overview of the architecture and guiding design, see the documentation
-in ``docs/``.
+in ``docs/contents.md``.
 """
 
 from __future__ import annotations
