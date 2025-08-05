@@ -6,12 +6,6 @@ import enum
 import typing as t
 from collections import deque
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import types
-    from pathlib import Path
-
-    TracebackType = types.TracebackType
-
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
@@ -19,6 +13,40 @@ from .expectations import Expectation
 from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
+
+if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import types
+    from pathlib import Path
+
+    TracebackType = types.TracebackType
+
+T_Self = t.TypeVar("T_Self", bound="CommandDouble")
+
+
+if t.TYPE_CHECKING:  # pragma: no cover - typing only
+
+    class _ExpectationProxy(t.Protocol):
+        def with_args(self: T_Self, *args: str) -> T_Self: ...
+
+        def with_matching_args(
+            self: T_Self, *matchers: t.Callable[[str], bool]
+        ) -> T_Self: ...
+
+        def with_stdin(self: T_Self, data: str | t.Callable[[str], bool]) -> T_Self: ...
+
+        def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self: ...
+
+        def times(self: T_Self, count: int) -> T_Self: ...
+
+        def times_called(self: T_Self, count: int) -> T_Self: ...
+
+        def in_order(self: T_Self) -> T_Self: ...
+
+        def any_order(self: T_Self) -> T_Self: ...
+else:  # pragma: no cover - runtime placeholder
+
+    class _ExpectationProxy:
+        pass
 
 
 class _CallbackIPCServer(IPCServer):
@@ -36,7 +64,7 @@ class _CallbackIPCServer(IPCServer):
         return self._handler(invocation)
 
 
-class CommandDouble:
+class CommandDouble(_ExpectationProxy):
     """Configuration for a stub, mock, or spy command."""
 
     __slots__ = (
@@ -61,8 +89,6 @@ class CommandDouble:
         self.invocations: list[Invocation] = []
         self.passthrough_mode = False
         self.expectation = Expectation(name)
-
-    T_Self = t.TypeVar("T_Self", bound="CommandDouble")
 
     def returns(
         self: T_Self, stdout: str = "", stderr: str = "", exit_code: int = 0
@@ -102,24 +128,15 @@ class CommandDouble:
         "any_order": "any_order",
     }
 
-    def __getattr__(self, name: str) -> t.Callable[..., CommandDouble]:
-        """Proxy expectation configuration methods to ``self.expectation``."""
-        exp_name = self._DELEGATED_METHODS.get(name)
-        if exp_name is None:
-            msg = f"{type(self).__name__!s} object has no attribute {name!r}"
-            raise AttributeError(msg)
+    def _ensure_in_order(self) -> None:
+        """Register this expectation for ordered verification."""
+        if self.expectation not in self.controller._ordered:
+            self.controller._ordered.append(self.expectation)
 
-        exp_method = getattr(self.expectation, exp_name)
-
-        def _wrapper(*args: object, **kwargs: object) -> CommandDouble:
-            exp_method(*args, **kwargs)
-            if name == "in_order" and self.expectation not in self.controller._ordered:
-                self.controller._ordered.append(self.expectation)
-            elif name == "any_order" and self.expectation in self.controller._ordered:
-                self.controller._ordered.remove(self.expectation)
-            return self
-
-        return _wrapper
+    def _ensure_any_order(self) -> None:
+        """Remove this expectation from ordered verification."""
+        if self.expectation in self.controller._ordered:
+            self.controller._ordered.remove(self.expectation)
 
     def passthrough(self: T_Self) -> T_Self:
         """Execute the real command while recording invocations."""
@@ -160,6 +177,27 @@ class CommandDouble:
         )
 
     __str__ = __repr__
+
+
+def _make_proxy(name: str, exp_name: str) -> t.Callable[..., CommandDouble]:
+    def proxy(self: CommandDouble, *args: object, **kwargs: object) -> CommandDouble:
+        getattr(self.expectation, exp_name)(*args, **kwargs)
+        if name == "in_order":
+            self._ensure_in_order()
+        elif name == "any_order":
+            self._ensure_any_order()
+        return self
+
+    proxy.__name__ = name
+    proxy.__doc__ = f"Proxy to expectation.{exp_name}"
+    return proxy
+
+
+for _name, _exp_name in CommandDouble._DELEGATED_METHODS.items():
+    if not hasattr(Expectation, _exp_name):  # pragma: no cover - sanity check
+        msg = f"Expectation has no method {_exp_name}"
+        raise AttributeError(msg)
+    setattr(CommandDouble, _name, _make_proxy(_name, _exp_name))
 
 
 # Backwards compatibility aliases
