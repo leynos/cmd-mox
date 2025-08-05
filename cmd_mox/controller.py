@@ -193,11 +193,16 @@ def _make_proxy(name: str, exp_name: str) -> t.Callable[..., CommandDouble]:
     return proxy
 
 
-for _name, _exp_name in CommandDouble._DELEGATED_METHODS.items():
-    if not hasattr(Expectation, _exp_name):  # pragma: no cover - sanity check
-        msg = f"Expectation has no method {_exp_name}"
-        raise AttributeError(msg)
-    setattr(CommandDouble, _name, _make_proxy(_name, _exp_name))
+def _setup_delegated_methods() -> None:
+    """Set up proxy methods on CommandDouble for expectation delegation."""
+    for _name, _exp_name in CommandDouble._DELEGATED_METHODS.items():
+        if not hasattr(Expectation, _exp_name):  # pragma: no cover - sanity check
+            msg = f"Expectation has no method {_exp_name}"
+            raise AttributeError(msg)
+        setattr(CommandDouble, _name, _make_proxy(_name, _exp_name))
+
+
+_setup_delegated_methods()
 
 
 # Backwards compatibility aliases
