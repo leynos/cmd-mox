@@ -316,6 +316,25 @@ def test_should_remove_created_dir_returns_false_after_exit() -> None:
     assert not env._should_remove_created_dir()
 
 
+def test_should_remove_created_dir_returns_false_when_never_entered() -> None:
+    """Return False if EnvironmentManager was never entered."""
+    env = EnvironmentManager()
+    assert not env._should_remove_created_dir()
+
+
+def test_cleanup_temporary_directory_skips_when_predicate_false() -> None:
+    """Skip directory removal if predicate returns False."""
+    mgr = EnvironmentManager()
+    with (
+        patch.object(mgr, "_should_remove_created_dir", return_value=False) as pred,
+        patch("cmd_mox.environment._robust_rmtree") as rm,
+    ):
+        cleanup_errors: list[envmod.CleanupError] = []
+        EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
+    pred.assert_called_once()
+    rm.assert_not_called()
+
+
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     """Test that cleanup handles read-only files appropriately."""
     # This test primarily checks the Windows-specific path but runs on all platforms

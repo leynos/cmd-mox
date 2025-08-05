@@ -223,8 +223,8 @@ class EnvironmentManager:
     def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
         """Remove the temporary directory created by ``__enter__``."""
         try:
-            if self._should_remove_created_dir():
-                _robust_rmtree(t.cast("Path", self.shim_dir))
+            if self._should_remove_created_dir() and self.shim_dir is not None:
+                _robust_rmtree(self.shim_dir)
         finally:
             self._created_dir = None
 
