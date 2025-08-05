@@ -294,6 +294,47 @@ def test_environment_manager_cleanup_error_handling(
     _test_environment_cleanup_error(test_case)
 
 
+def test_should_remove_created_dir_when_directory_exists() -> None:
+    """Return True when the manager created a directory that still exists."""
+    with EnvironmentManager() as env:
+        assert env._should_remove_created_dir()
+
+
+def test_should_remove_created_dir_returns_false_when_directory_missing() -> None:
+    """Return False if the managed directory has been removed."""
+    with EnvironmentManager() as env:
+        assert env.shim_dir is not None
+        _robust_rmtree(env.shim_dir)
+        assert not env._should_remove_created_dir()
+
+
+def test_should_remove_created_dir_returns_false_after_exit() -> None:
+    """Return False once the context has cleaned up state."""
+    env = EnvironmentManager()
+    with env:
+        pass
+    assert not env._should_remove_created_dir()
+
+
+def test_should_remove_created_dir_returns_false_when_never_entered() -> None:
+    """Return False if EnvironmentManager was never entered."""
+    env = EnvironmentManager()
+    assert not env._should_remove_created_dir()
+
+
+def test_cleanup_temporary_directory_skips_when_predicate_false() -> None:
+    """Skip directory removal if predicate returns False."""
+    mgr = EnvironmentManager()
+    with (
+        patch.object(mgr, "_should_remove_created_dir", return_value=False) as pred,
+        patch("cmd_mox.environment._robust_rmtree") as rm,
+    ):
+        cleanup_errors: list[envmod.CleanupError] = []
+        EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
+    pred.assert_called_once()
+    rm.assert_not_called()
+
+
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     """Test that cleanup handles read-only files appropriately."""
     # This test primarily checks the Windows-specific path but runs on all platforms

@@ -210,16 +210,20 @@ class EnvironmentManager:
         global _active_manager
         _active_manager = None
 
+    def _should_remove_created_dir(self) -> bool:
+        """Return ``True`` if the manager created a directory that still exists."""
+        return (
+            self._created_dir is not None
+            and self.shim_dir is not None
+            and self.shim_dir == self._created_dir
+            and self.shim_dir.exists()
+        )
+
     @_collect_os_error("Directory cleanup failed")
     def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
         """Remove the temporary directory created by ``__enter__``."""
         try:
-            if (
-                self._created_dir
-                and self.shim_dir
-                and self.shim_dir == self._created_dir
-                and self.shim_dir.exists()
-            ):
+            if self._should_remove_created_dir() and self.shim_dir is not None:
                 _robust_rmtree(self.shim_dir)
         finally:
             self._created_dir = None
