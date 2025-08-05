@@ -1,4 +1,8 @@
-"""cmd-mox package."""
+"""Python-native command mocking built around a record-replay-verify lifecycle.
+
+For an overview of the architecture and guiding design, see the documentation
+in ``docs/``.
+"""
 
 from __future__ import annotations
 
