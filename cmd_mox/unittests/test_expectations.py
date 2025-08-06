@@ -12,7 +12,12 @@ from pathlib import Path
 # subprocess command injection issues.
 import pytest
 
-from cmd_mox import CmdMox, Regex, UnexpectedCommandError
+from cmd_mox import (
+    CmdMox,
+    Regex,
+    UnexpectedCommandError,
+    UnfulfilledExpectationError,
+)
 from cmd_mox.expectations import Expectation
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -116,7 +121,70 @@ def test_any_order_expectations_allow_flexible_sequence(
     mox.verify()
 
 
-def test_expectation_times_alias() -> None:
-    """Expectation.times() should mirror times_called()."""
+def test_in_order_expectations_fail_on_out_of_order(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """in_order() expectations should fail when invoked out of sequence."""
+    mox = CmdMox()
+    mox.mock("first").returns(stdout="1").in_order()
+    mox.mock("second").returns(stdout="2").in_order()
+    mox.__enter__()
+    mox.replay()
+
+    path_first = Path(mox.environment.shim_dir) / "first"
+    path_second = Path(mox.environment.shim_dir) / "second"
+
+    # Call "second" before "first", then attempt verification
+    run([str(path_second)], shell=False)
+    run([str(path_first)], shell=False)
+
+    with pytest.raises(UnfulfilledExpectationError):
+        mox.verify()
+
+
+def test_expectation_times_alias(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Expectation.times() and times_called() behave interchangeably."""
     exp = Expectation("foo").times(3)
     assert exp.count == 3
+
+    mox = CmdMox()
+    mox.mock("first").returns(stdout="1").times(2)
+    mox.mock("second").returns(stdout="2").times_called(2)
+    mox.__enter__()
+    mox.replay()
+
+    path_first = Path(mox.environment.shim_dir) / "first"
+    path_second = Path(mox.environment.shim_dir) / "second"
+
+    run([str(path_first)], shell=False)
+    run([str(path_first)], shell=False)
+    run([str(path_second)], shell=False)
+    run([str(path_second)], shell=False)
+
+    mox.verify()
+
+    assert len(mox.mocks["first"].invocations) == 2
+    assert len(mox.mocks["second"].invocations) == 2
+
+
+def test_expectation_times_alias_mismatch_fails(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """times() and times_called() should both enforce invocation counts."""
+    mox = CmdMox()
+    mox.mock("first").returns(stdout="1").times(2)
+    mox.mock("second").returns(stdout="2").times_called(2)
+    mox.__enter__()
+    mox.replay()
+
+    path_first = Path(mox.environment.shim_dir) / "first"
+    path_second = Path(mox.environment.shim_dir) / "second"
+
+    # Each mock is invoked only once, below the expected count
+    run([str(path_first)], shell=False)
+    run([str(path_second)], shell=False)
+
+    with pytest.raises(UnfulfilledExpectationError):
+        mox.verify()
