@@ -141,25 +141,6 @@ def _test_expectation_failure_helper(
         mox.verify()
 
 
-def test_in_order_expectations_fail_on_out_of_order(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
-    """in_order() expectations should fail when invoked out of sequence."""
-
-    def configure(mox: CmdMox) -> None:
-        mox.mock("first").returns(stdout="1").in_order()
-        mox.mock("second").returns(stdout="2").in_order()
-
-    def execute(
-        run: t.Callable[..., subprocess.CompletedProcess[str]], paths: dict[str, Path]
-    ) -> None:
-        # Call "second" before "first", then attempt verification
-        run([str(paths["second"])], shell=False)
-        run([str(paths["first"])], shell=False)
-
-    _test_expectation_failure_helper(run, configure, execute)
-
-
 def test_expectation_times_alias(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -187,20 +168,47 @@ def test_expectation_times_alias(
     assert len(mox.mocks["second"].invocations) == 2
 
 
-def test_expectation_times_alias_mismatch_fails(
+@pytest.mark.parametrize(
+    (
+        "case_description",
+        "mock_configurator",
+        "execution_strategy",
+    ),
+    [
+        pytest.param(
+            "in_order() expectations should fail when invoked out of sequence.",
+            lambda mox: (
+                mox.mock("first").returns(stdout="1").in_order(),
+                mox.mock("second").returns(stdout="2").in_order(),
+            ),
+            lambda run, paths: (
+                run([str(paths["second"])], shell=False),
+                run([str(paths["first"])], shell=False),
+            ),
+            id="order-validation",
+        ),
+        pytest.param(
+            "times() and times_called() should both enforce invocation counts.",
+            lambda mox: (
+                mox.mock("first").returns(stdout="1").times(2),
+                mox.mock("second").returns(stdout="2").times_called(2),
+            ),
+            lambda run, paths: (
+                run([str(paths["first"])], shell=False),
+                run([str(paths["second"])], shell=False),
+            ),
+            id="count-validation",
+        ),
+    ],
+)
+def test_expectation_failures(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
+    case_description: str,
+    mock_configurator: t.Callable[[CmdMox], None],
+    execution_strategy: t.Callable[
+        [t.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
+    ],
 ) -> None:
-    """times() and times_called() should both enforce invocation counts."""
-
-    def configure(mox: CmdMox) -> None:
-        mox.mock("first").returns(stdout="1").times(2)
-        mox.mock("second").returns(stdout="2").times_called(2)
-
-    def execute(
-        run: t.Callable[..., subprocess.CompletedProcess[str]], paths: dict[str, Path]
-    ) -> None:
-        # Each mock is invoked only once, below the expected count
-        run([str(paths["first"])], shell=False)
-        run([str(paths["second"])], shell=False)
-
-    _test_expectation_failure_helper(run, configure, execute)
+    """Verify expectation scenarios that should fail verification."""
+    assert case_description
+    _test_expectation_failure_helper(run, mock_configurator, execution_strategy)
