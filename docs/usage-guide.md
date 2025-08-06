@@ -158,6 +158,7 @@ not recommended unless explicitly required and documented.*
 - `runs(handler)` – call a function to produce dynamic output.
 - `times(count)` – expect the command exactly `count` times.
 - `in_order()` – enforce strict ordering with other expectations.
+- `any_order()` – allow the expectation to be satisfied in any position.
 - `passthrough()` – for spies, run the real command while recording it.
 
 Refer to the [design document](./python-native-command-mocking-design.md) for

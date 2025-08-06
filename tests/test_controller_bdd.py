@@ -79,6 +79,16 @@ def mock_with_args_in_order(mox: CmdMox, cmd: str, args: str, text: str) -> None
     mox.mock(cmd).with_args(*args.split()).returns(stdout=text).in_order()
 
 
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked with args "{args}" returning "{text}" any order'
+    )
+)
+def mock_with_args_any_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
+    """Configure an unordered mock with arguments."""
+    mox.mock(cmd).with_args(*args.split()).returns(stdout=text).any_order()
+
+
 @given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))
 def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     """Stub command that outputs an injected env variable."""

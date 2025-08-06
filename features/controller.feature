@@ -65,6 +65,16 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal order should be first,second
 
+  Scenario: any_order mock can run before ordered expectation
+    Given a CmdMox controller
+    And the command "first" is mocked with args "a" returning "one" in order
+    And the command "second" is mocked with args "b" returning "two" any order
+    When I replay the controller
+    And I run the command "second" with arguments "b"
+    And I run the command "first" with arguments "a"
+    When I verify the controller
+    Then the journal order should be second,first
+
   Scenario: environment variables can be injected
     Given a CmdMox controller
     And the command "envcmd" is stubbed with env var "HELLO"="WORLD"

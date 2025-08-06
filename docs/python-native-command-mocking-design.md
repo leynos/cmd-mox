@@ -301,6 +301,11 @@ provided `exit_code`.
   `.any_order()` modifier can be provided for expectations where the calling
   order is not significant, mirroring PyMox's behavior.
 
+Implementation note: the concrete implementation stores the expected call count
+in a ``count`` attribute but exposes a ``times()`` convenience method to match
+the DSL described here. The more explicit ``times_called()`` alias remains
+available for readability when desired.
+
 To ensure `CmdMox` is a compelling replacement for `shellmock`, the following
 table maps the core features of `shellmock` to their more expressive `CmdMox`
 API equivalents, demonstrating complete functional parity.
@@ -955,6 +960,7 @@ Language (DSL) used to build expectations.
 | .runs(handler)                      | Provides a callable for dynamic, stateful behavior.               | .runs(my_handler_func)                              |
 | .times(count)                       | Sets the expected number of times the command will be called.     | .times(2)                                           |
 | .in_order()                         | Marks this expectation as part of an ordered sequence.            | .in_order()                                         |
+| .any_order()                        | Explicitly opts out of ordered verification.                      | .any_order()                                        |
 | .passthrough()                      | (Spy only) Executes the real command and records the interaction. | mox.spy('ssh').passthrough()                        |
 
 <!-- markdownlint-enable MD013 -->

@@ -18,7 +18,7 @@ class Expectation:
     match_args: list[t.Callable[[str], bool]] | None = None
     stdin: str | t.Callable[[str], bool] | None = None
     env: dict[str, str] = dc.field(default_factory=dict)
-    times: int = 1
+    count: int = 1
     ordered: bool = False
 
     def with_args(self, *args: str) -> Expectation:
@@ -43,8 +43,12 @@ class Expectation:
 
     def times_called(self, count: int) -> Expectation:
         """Set the required invocation count to ``count``."""
-        self.times = count
+        self.count = count
         return self
+
+    def times(self, count: int) -> Expectation:
+        """Alias for :meth:`times_called` matching the fluent DSL."""
+        return self.times_called(count)
 
     def in_order(self) -> Expectation:
         """Mark this expectation as ordered relative to others."""

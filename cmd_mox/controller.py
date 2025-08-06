@@ -120,7 +120,7 @@ class CommandDouble(_ExpectationProxy):
         "with_matching_args": "with_matching_args",
         "with_stdin": "with_stdin",
         "with_env": "with_env",
-        "times": "times_called",
+        "times": "times",
         "times_called": "times_called",
         "in_order": "in_order",
         "any_order": "any_order",

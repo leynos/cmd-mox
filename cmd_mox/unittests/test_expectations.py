@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from cmd_mox import CmdMox, Regex, UnexpectedCommandError
+from cmd_mox.expectations import Expectation
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
@@ -93,3 +94,29 @@ def test_with_env_injection(
     mox.verify()
 
     assert result.stdout.strip() == "WORLD"
+
+
+def test_any_order_expectations_allow_flexible_sequence(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Expectations marked any_order() should not enforce call ordering."""
+    mox = CmdMox()
+    mox.mock("first").returns(stdout="1").in_order()
+    mox.mock("second").returns(stdout="2").any_order()
+    mox.__enter__()
+    mox.replay()
+
+    path_first = Path(mox.environment.shim_dir) / "first"
+    path_second = Path(mox.environment.shim_dir) / "second"
+
+    # Invoke the any_order expectation before the ordered one
+    run([str(path_second)], shell=False)
+    run([str(path_first)], shell=False)
+
+    mox.verify()
+
+
+def test_expectation_times_alias() -> None:
+    """Expectation.times() should mirror times_called()."""
+    exp = Expectation("foo").times(3)
+    assert exp.count == 3
