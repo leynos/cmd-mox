@@ -12,7 +12,13 @@ from pathlib import Path
 # subprocess command injection issues.
 import pytest
 
-from cmd_mox import CmdMox, Regex, UnexpectedCommandError
+from cmd_mox import (
+    CmdMox,
+    Regex,
+    UnexpectedCommandError,
+    UnfulfilledExpectationError,
+)
+from cmd_mox.expectations import Expectation
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
@@ -93,3 +99,116 @@ def test_with_env_injection(
     mox.verify()
 
     assert result.stdout.strip() == "WORLD"
+
+
+def test_any_order_expectations_allow_flexible_sequence(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Expectations marked any_order() should not enforce call ordering."""
+    mox = CmdMox()
+    mox.mock("first").returns(stdout="1").in_order()
+    mox.mock("second").returns(stdout="2").any_order()
+    mox.__enter__()
+    mox.replay()
+
+    path_first = Path(mox.environment.shim_dir) / "first"
+    path_second = Path(mox.environment.shim_dir) / "second"
+
+    # Invoke the any_order expectation before the ordered one
+    run([str(path_second)], shell=False)
+    run([str(path_first)], shell=False)
+
+    mox.verify()
+
+
+def _test_expectation_failure_helper(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    mock_configurator: t.Callable[[CmdMox], None],
+    execution_strategy: t.Callable[
+        [t.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
+    ],
+) -> None:
+    """Execute a scenario expected to fail verification."""
+    mox = CmdMox()
+    mock_configurator(mox)
+    mox.__enter__()
+    mox.replay()
+
+    paths = {name: Path(mox.environment.shim_dir) / name for name in mox.mocks}
+    execution_strategy(run, paths)
+
+    with pytest.raises(UnfulfilledExpectationError):
+        mox.verify()
+
+
+def test_expectation_times_alias(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Expectation.times() and times_called() behave interchangeably."""
+    exp = Expectation("foo").times(3)
+    assert exp.count == 3
+
+    mox = CmdMox()
+    mox.mock("first").returns(stdout="1").times(2)
+    mox.mock("second").returns(stdout="2").times_called(2)
+    mox.__enter__()
+    mox.replay()
+
+    path_first = Path(mox.environment.shim_dir) / "first"
+    path_second = Path(mox.environment.shim_dir) / "second"
+
+    run([str(path_first)], shell=False)
+    run([str(path_first)], shell=False)
+    run([str(path_second)], shell=False)
+    run([str(path_second)], shell=False)
+
+    mox.verify()
+
+    assert len(mox.mocks["first"].invocations) == 2
+    assert len(mox.mocks["second"].invocations) == 2
+
+
+@pytest.mark.parametrize(
+    (
+        "case_description",
+        "mock_configurator",
+        "execution_strategy",
+    ),
+    [
+        pytest.param(
+            "in_order() expectations should fail when invoked out of sequence.",
+            lambda mox: (
+                mox.mock("first").returns(stdout="1").in_order(),
+                mox.mock("second").returns(stdout="2").in_order(),
+            ),
+            lambda run, paths: (
+                run([str(paths["second"])], shell=False),
+                run([str(paths["first"])], shell=False),
+            ),
+            id="order-validation",
+        ),
+        pytest.param(
+            "times() and times_called() should both enforce invocation counts.",
+            lambda mox: (
+                mox.mock("first").returns(stdout="1").times(2),
+                mox.mock("second").returns(stdout="2").times_called(2),
+            ),
+            lambda run, paths: (
+                run([str(paths["first"])], shell=False),
+                run([str(paths["second"])], shell=False),
+            ),
+            id="count-validation",
+        ),
+    ],
+)
+def test_expectation_failures(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    case_description: str,
+    mock_configurator: t.Callable[[CmdMox], None],
+    execution_strategy: t.Callable[
+        [t.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
+    ],
+) -> None:
+    """Verify expectation scenarios that should fail verification."""
+    assert case_description
+    _test_expectation_failure_helper(run, mock_configurator, execution_strategy)

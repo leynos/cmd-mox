@@ -41,7 +41,7 @@ class OrderVerifier:
         """Ensure ordered expectations appear in order within *journal*."""
         ordered_seq: list[Expectation] = []
         for exp in self._ordered:
-            ordered_seq.extend([exp] * exp.times)
+            ordered_seq.extend([exp] * exp.count)
         index = 0
         for inv in journal:
             if index >= len(ordered_seq):
@@ -65,7 +65,7 @@ class CountVerifier:
     ) -> None:
         """Validate invocation counts against ``expectations``."""
         for name, exp in expectations.items():
-            expected = exp.times
+            expected = exp.count
             actual = len(invocations.get(name, []))
             if actual < expected:
                 msg = f"Expected {name} to be called {expected} times but got {actual}"
