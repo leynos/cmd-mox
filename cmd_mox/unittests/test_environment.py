@@ -259,7 +259,7 @@ def _test_environment_cleanup_error(
             mgr,
         ):
             pass
-        assert envmod._active_manager is None
+        assert envmod.EnvironmentManager._active_manager is None
         if test_case.config.check_cause:
             assert isinstance(excinfo.value.__cause__, OSError)
             assert str(excinfo.value.__cause__) == test_case.error_message
