@@ -1,8 +1,5 @@
 # Documentation Contents
 
-- [Usage Guide](./usage-guide.md): Common patterns for mocking, stubbing and
-  spying on external commands.
-- [Python-native Command Mocking Design](./python-native-command-mocking-design.md)
-  : Architectural design and rationale.
-- [CmdMox Implementation Roadmap](./cmd-mox-roadmap.md): Planned features and
-  project progression.
+- [Usage Guide](./usage-guide.md): Mocking, stubbing, and spying on commands.
+- [Design Doc](./python-native-command-mocking-design.md): Design rationale.
+- [Roadmap](./cmd-mox-roadmap.md): Planned features and progression.
