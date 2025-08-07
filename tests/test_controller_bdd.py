@@ -39,21 +39,21 @@ def mock_command(mox: CmdMox, cmd: str, text: str) -> None:
 
 
 @given(
-    parsers.cfparse('the command "{cmd}" is mocked to return "{text}" times {count:d}')
-)
-def mock_command_times(mox: CmdMox, cmd: str, text: str, count: int) -> None:
-    """Configure a mocked command with an expected call count."""
-    mox.mock(cmd).returns(stdout=text).times(count)
-
-
-@given(
-    parsers.cfparse(
-        'the command "{cmd}" is mocked to return "{text}" times called {count:d}'
+    parsers.re(
+        r'the command "(?P<cmd>[^"]+)" is mocked to return "(?P<text>[^"]+)" '
+        r"times(?P<alias> called)? (?P<count>\d+)"
     )
 )
-def mock_command_times_called(mox: CmdMox, cmd: str, text: str, count: int) -> None:
-    """Configure a mocked command with a times_called expectation."""
-    mox.mock(cmd).returns(stdout=text).times_called(count)
+def mock_command_times(
+    mox: CmdMox, cmd: str, text: str, count: str, alias: str | None = None
+) -> None:
+    """Configure a mocked command with an expected call count."""
+    expectation = mox.mock(cmd).returns(stdout=text)
+    count_int = int(count)
+    if alias:
+        expectation.times_called(count_int)
+    else:
+        expectation.times(count_int)
 
 
 @given(parsers.cfparse('the command "{cmd}" is spied to return "{text}"'))
