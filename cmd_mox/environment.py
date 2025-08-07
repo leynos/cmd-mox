@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 import time
 import typing as t
 from pathlib import Path
@@ -156,7 +157,23 @@ class EnvironmentManager:
     inadvertent environment leakage.
     """
 
-    _active_manager: t.ClassVar[EnvironmentManager | None] = None
+    # Track the active manager per thread to avoid cross-thread interference.
+    _state: t.ClassVar[threading.local] = threading.local()
+
+    @classmethod
+    def get_active_manager(cls) -> EnvironmentManager | None:
+        """Return the active manager for the current thread, if any."""
+        return getattr(cls._state, "active_manager", None)
+
+    @classmethod
+    def reset_active_manager(cls) -> None:
+        """Clear any active manager for the current thread."""
+        cls._state.active_manager = None
+
+    @classmethod
+    def _set_active_manager(cls, mgr: EnvironmentManager) -> None:
+        """Record *mgr* as active for the current thread."""
+        cls._state.active_manager = mgr
 
     def __init__(self, *, prefix: str = "cmdmox-") -> None:
         self._orig_env: dict[str, str] | None = None
@@ -168,10 +185,10 @@ class EnvironmentManager:
     def __enter__(self) -> EnvironmentManager:
         """Set up the temporary environment."""
         cls = type(self)
-        if self._orig_env is not None or cls._active_manager is not None:
+        if self._orig_env is not None or cls.get_active_manager() is not None:
             msg = "EnvironmentManager cannot be nested"
             raise RuntimeError(msg)
-        cls._active_manager = self
+        cls._set_active_manager(self)
         self._orig_env = os.environ.copy()
         self.shim_dir = Path(tempfile.mkdtemp(prefix=self._prefix))
         self._created_dir = self.shim_dir
@@ -206,8 +223,8 @@ class EnvironmentManager:
             self._orig_env = None
 
     def _reset_global_state(self) -> None:
-        """Reset class-level state tracking the active manager."""
-        type(self)._active_manager = None
+        """Reset thread-local state tracking the active manager."""
+        type(self).reset_active_manager()
 
     def _should_remove_created_dir(self) -> bool:
         """Return ``True`` if the manager created a directory that still exists."""

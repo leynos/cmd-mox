@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+import threading
 import typing as t
 from dataclasses import dataclass  # noqa: ICN003
 from pathlib import Path
@@ -259,7 +260,7 @@ def _test_environment_cleanup_error(
             mgr,
         ):
             pass
-        assert envmod.EnvironmentManager._active_manager is None
+        assert envmod.EnvironmentManager.get_active_manager() is None
         if test_case.config.check_cause:
             assert isinstance(excinfo.value.__cause__, OSError)
             assert str(excinfo.value.__cause__) == test_case.error_message
@@ -349,3 +350,18 @@ def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     # The robust cleanup should handle this
     _robust_rmtree(test_dir)
     assert not test_dir.exists()
+
+
+def test_active_manager_is_thread_local() -> None:
+    """Each thread should track its own active EnvironmentManager."""
+    results: list[EnvironmentManager | None] = []
+
+    def check_manager() -> None:
+        results.append(EnvironmentManager.get_active_manager())
+
+    with EnvironmentManager():
+        thread = threading.Thread(target=check_manager)
+        thread.start()
+        thread.join()
+
+    assert results == [None]
