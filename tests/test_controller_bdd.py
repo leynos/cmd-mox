@@ -46,6 +46,16 @@ def mock_command_times(mox: CmdMox, cmd: str, text: str, count: int) -> None:
     mox.mock(cmd).returns(stdout=text).times(count)
 
 
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked to return "{text}" times called {count:d}'
+    )
+)
+def mock_command_times_called(mox: CmdMox, cmd: str, text: str, count: int) -> None:
+    """Configure a mocked command with a times_called expectation."""
+    mox.mock(cmd).returns(stdout=text).times_called(count)
+
+
 @given(parsers.cfparse('the command "{cmd}" is spied to return "{text}"'))
 def spy_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a spied command."""
@@ -272,6 +282,12 @@ def test_spy_records_invocation() -> None:
 )
 def test_journal_preserves_order() -> None:
     """Journal records commands in order."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "times alias maps to times_called")
+def test_times_alias_maps_to_times_called() -> None:
+    """times() and times_called() behave identically in the DSL."""
     pass
 
 

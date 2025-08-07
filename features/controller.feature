@@ -39,6 +39,19 @@ Feature: CmdMox basic functionality
     And the mock "foo" should record 2 invocation
     And the spy "bar" should record 1 invocation
 
+  Scenario: times alias maps to times_called
+    Given a CmdMox controller
+    And the command "first" is mocked to return "one" times 2
+    And the command "second" is mocked to return "two" times called 2
+    When I replay the controller
+    And I run the command "first"
+    And I run the command "first"
+    And I run the command "second"
+    And I run the command "second"
+    When I verify the controller
+    Then the mock "first" should record 2 invocation
+    And the mock "second" should record 2 invocation
+
   Scenario: context manager usage
     Given a CmdMox controller
     And the command "hi" is stubbed to return "hello"
