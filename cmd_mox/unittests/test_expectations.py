@@ -121,23 +121,51 @@ def test_any_order_expectations_allow_flexible_sequence(
     mox.verify()
 
 
+def test_multiple_any_order_expectations_do_not_enforce_order(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Unordered expectations remain unordered when combined."""
+    with CmdMox() as mox:
+        mox.mock("first").returns(stdout="1").any_order()
+        mox.mock("second").returns(stdout="2").any_order()
+        mox.mock("third").returns(stdout="3").any_order()
+        mox.replay()
+
+        path_first = Path(mox.environment.shim_dir) / "first"
+        path_second = Path(mox.environment.shim_dir) / "second"
+        path_third = Path(mox.environment.shim_dir) / "third"
+
+        # Call expectations in a different order than defined
+        run([str(path_third)], shell=False)
+        run([str(path_first)], shell=False)
+        run([str(path_second)], shell=False)
+
+        mox.verify()
+
+        assert len(mox.mocks["first"].invocations) == 1
+        assert len(mox.mocks["second"].invocations) == 1
+        assert len(mox.mocks["third"].invocations) == 1
+
+
 def _test_expectation_failure_helper(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
     mock_configurator: t.Callable[[CmdMox], None],
     execution_strategy: t.Callable[
         [t.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
     ],
+    expected_exception: type[Exception] = UnfulfilledExpectationError,
 ) -> None:
-    """Execute a scenario expected to fail verification."""
+    """Execute a scenario expected to fail."""
     mox = CmdMox()
     mock_configurator(mox)
     mox.__enter__()
     mox.replay()
 
     paths = {name: Path(mox.environment.shim_dir) / name for name in mox.mocks}
+
     execution_strategy(run, paths)
 
-    with pytest.raises(UnfulfilledExpectationError):
+    with pytest.raises(expected_exception):
         mox.verify()
 
 
@@ -170,13 +198,12 @@ def test_expectation_times_alias(
 
 @pytest.mark.parametrize(
     (
-        "case_description",
         "mock_configurator",
         "execution_strategy",
+        "expected_exception",
     ),
     [
         pytest.param(
-            "in_order() expectations should fail when invoked out of sequence.",
             lambda mox: (
                 mox.mock("first").returns(stdout="1").in_order(),
                 mox.mock("second").returns(stdout="2").in_order(),
@@ -185,10 +212,10 @@ def test_expectation_times_alias(
                 run([str(paths["second"])], shell=False),
                 run([str(paths["first"])], shell=False),
             ),
+            UnfulfilledExpectationError,
             id="order-validation",
         ),
         pytest.param(
-            "times() and times_called() should both enforce invocation counts.",
             lambda mox: (
                 mox.mock("first").returns(stdout="1").times(2),
                 mox.mock("second").returns(stdout="2").times_called(2),
@@ -197,18 +224,54 @@ def test_expectation_times_alias(
                 run([str(paths["first"])], shell=False),
                 run([str(paths["second"])], shell=False),
             ),
+            UnfulfilledExpectationError,
             id="count-validation",
+        ),
+        pytest.param(
+            lambda mox: (mox.mock("first").returns(stdout="1").any_order().times(2),),
+            lambda run, paths: (run([str(paths["first"])], shell=False),),
+            UnfulfilledExpectationError,
+            id="any_order_call_count_fail",
+        ),
+        pytest.param(
+            lambda mox: (
+                mox.mock("first").returns(stdout="1").any_order().times_called(2),
+            ),
+            lambda run, paths: (run([str(paths["first"])], shell=False),),
+            UnfulfilledExpectationError,
+            id="any_order_call_count_fail_times_called",
+        ),
+        pytest.param(
+            lambda mox: (mox.mock("first").returns(stdout="1").any_order().times(1),),
+            lambda run, paths: (
+                run([str(paths["first"])], shell=False),
+                run([str(paths["first"])], shell=False),
+            ),
+            UnexpectedCommandError,
+            id="any_order_call_count_excess_times",
+        ),
+        pytest.param(
+            lambda mox: (
+                mox.mock("first").returns(stdout="1").any_order().times_called(1),
+            ),
+            lambda run, paths: (
+                run([str(paths["first"])], shell=False),
+                run([str(paths["first"])], shell=False),
+            ),
+            UnexpectedCommandError,
+            id="any_order_call_count_excess_times_called",
         ),
     ],
 )
 def test_expectation_failures(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
-    case_description: str,
     mock_configurator: t.Callable[[CmdMox], None],
     execution_strategy: t.Callable[
         [t.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
     ],
+    expected_exception: type[Exception],
 ) -> None:
     """Verify expectation scenarios that should fail verification."""
-    assert case_description
-    _test_expectation_failure_helper(run, mock_configurator, execution_strategy)
+    _test_expectation_failure_helper(
+        run, mock_configurator, execution_strategy, expected_exception
+    )
