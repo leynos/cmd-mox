@@ -198,14 +198,12 @@ def test_expectation_times_alias(
 
 @pytest.mark.parametrize(
     (
-        "case_description",
         "mock_configurator",
         "execution_strategy",
         "expected_exception",
     ),
     [
         pytest.param(
-            "in_order() expectations should fail when invoked out of sequence.",
             lambda mox: (
                 mox.mock("first").returns(stdout="1").in_order(),
                 mox.mock("second").returns(stdout="2").in_order(),
@@ -218,7 +216,6 @@ def test_expectation_times_alias(
             id="order-validation",
         ),
         pytest.param(
-            "times() and times_called() should both enforce invocation counts.",
             lambda mox: (
                 mox.mock("first").returns(stdout="1").times(2),
                 mox.mock("second").returns(stdout="2").times_called(2),
@@ -231,17 +228,12 @@ def test_expectation_times_alias(
             id="count-validation",
         ),
         pytest.param(
-            "any_order() expectations should fail when call count is incorrect.",
             lambda mox: (mox.mock("first").returns(stdout="1").any_order().times(2),),
             lambda run, paths: (run([str(paths["first"])], shell=False),),
             UnfulfilledExpectationError,
             id="any_order_call_count_fail",
         ),
         pytest.param(
-            (
-                "any_order() expectations should fail when call count is incorrect "
-                "for times_called()."
-            ),
             lambda mox: (
                 mox.mock("first").returns(stdout="1").any_order().times_called(2),
             ),
@@ -250,7 +242,6 @@ def test_expectation_times_alias(
             id="any_order_call_count_fail_times_called",
         ),
         pytest.param(
-            "any_order() should fail when calls exceed expected for times().",
             lambda mox: (mox.mock("first").returns(stdout="1").any_order().times(1),),
             lambda run, paths: (
                 run([str(paths["first"])], shell=False),
@@ -260,7 +251,6 @@ def test_expectation_times_alias(
             id="any_order_call_count_excess_times",
         ),
         pytest.param(
-            "any_order() should fail when calls exceed expected for times_called().",
             lambda mox: (
                 mox.mock("first").returns(stdout="1").any_order().times_called(1),
             ),
@@ -275,7 +265,6 @@ def test_expectation_times_alias(
 )
 def test_expectation_failures(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
-    case_description: str,
     mock_configurator: t.Callable[[CmdMox], None],
     execution_strategy: t.Callable[
         [t.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
@@ -283,7 +272,6 @@ def test_expectation_failures(
     expected_exception: type[Exception],
 ) -> None:
     """Verify expectation scenarios that should fail verification."""
-    assert case_description
     _test_expectation_failure_helper(
         run, mock_configurator, execution_strategy, expected_exception
     )
