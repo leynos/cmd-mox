@@ -265,6 +265,13 @@ def spy_assert_called_with(mox: CmdMox, cmd: str, args: str) -> None:
     mox.spies[cmd].assert_called_with(*args.split())
 
 
+@then(parsers.cfparse('the spy "{cmd}" should not have been called'))
+def spy_assert_not_called(mox: CmdMox, cmd: str) -> None:
+    """Assert the spy was never invoked."""
+    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
+    mox.spies[cmd].assert_not_called()
+
+
 @then(parsers.cfparse('the mock "{cmd}" should record {count:d} invocation'))
 def check_mock(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the mock recorded the invocation."""

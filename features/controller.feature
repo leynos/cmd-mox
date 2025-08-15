@@ -29,11 +29,13 @@ Feature: CmdMox basic functionality
   Scenario: spy assertion helpers
     Given a CmdMox controller
     And the command "hi" is spied to return "hello"
+    And the command "bye" is spied to return "goodbye"
     When I replay the controller
     And I run the command "hi" with arguments "foo bar"
     When I verify the controller
     Then the spy "hi" should have been called
     And the spy "hi" should have been called with arguments "foo bar"
+    And the spy "bye" should not have been called
 
   Scenario: journal preserves invocation order
     Given a CmdMox controller

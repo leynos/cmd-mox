@@ -175,20 +175,49 @@ class CommandDouble(_ExpectationProxy):
             msg = "assert_called() is only valid for spies"
             raise AssertionError(msg)
         if not self.invocations:
-            msg = f"{self.name!r} was not called"
+            msg = (
+                f"Expected {self.name!r} to be called at least once but it was"
+                " never called"
+            )
             raise AssertionError(msg)
 
-    def assert_called_with(self, *args: str) -> None:
-        """Assert the most recent call used ``args`` exactly."""
+    def assert_not_called(self) -> None:
+        """Raise ``AssertionError`` if this spy was invoked."""
+        if self.kind != "spy":  # pragma: no cover - defensive guard
+            msg = "assert_not_called() is only valid for spies"
+            raise AssertionError(msg)
+        if self.invocations:
+            last = self.invocations[-1]
+            msg = (
+                f"Expected {self.name!r} to be uncalled but it was called"
+                f" {len(self.invocations)} time(s); last args={last.args!r}"
+            )
+            raise AssertionError(msg)
+
+    def assert_called_with(
+        self,
+        *args: str,
+        stdin: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        """Assert the most recent call used the given arguments and context."""
         if self.kind != "spy":  # pragma: no cover - defensive guard
             msg = "assert_called_with() is only valid for spies"
             raise AssertionError(msg)
         if not self.invocations:
-            msg = f"{self.name!r} was not called"
+            msg = f"Expected {self.name!r} to be called but it was never called"
             raise AssertionError(msg)
         last = self.invocations[-1]
         if list(args) != list(last.args):
-            msg = f"{self.name!r} called with {list(last.args)}, expected {list(args)}"
+            msg = (
+                f"{self.name!r} called with args {last.args!r}, expected {list(args)!r}"
+            )
+            raise AssertionError(msg)
+        if stdin is not None and last.stdin != stdin:
+            msg = f"{self.name!r} called with stdin {last.stdin!r}, expected {stdin!r}"
+            raise AssertionError(msg)
+        if env is not None and last.env != env:
+            msg = f"{self.name!r} called with env {last.env!r}, expected {env!r}"
             raise AssertionError(msg)
 
     def __repr__(self) -> str:
