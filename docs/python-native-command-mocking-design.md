@@ -791,6 +791,9 @@ for this purpose:
 - `spy.invocations`: A list of `Invocation` objects, where each object provides
   structured access to a single call's details.
 
+- `spy.assert_called()` / `spy.assert_called_with(*args)`: Convenience helpers
+  mirroring ``unittest.mock`` for asserting call presence and arguments.
+
 *Example Assertion-Style Verification:*
 ```python
 def test_downloader_uses_correct_user_agent(mox):
@@ -1178,6 +1181,12 @@ encapsulates the lookup and ``subprocess.run`` call. It runs the command with
 the recorded environment (minus the shim directory) and captures its output and
 exit status. The results are stored alongside the invocation and returned to
 the shim so the calling process sees the real behaviour.
+
+To simplify post-replay assertions, spies expose ``assert_called`` and
+``assert_called_with`` methods modelled after ``unittest.mock``. These raise
+``AssertionError`` when a spy was never invoked or when the most recent call's
+arguments do not match, offering a lightweight alternative to inspecting the
+``invocations`` list directly.
 
 The runner validates that the resolved command path is absolute and executable.
 It enforces a configurable timeout (30 seconds by default) to prevent hanging

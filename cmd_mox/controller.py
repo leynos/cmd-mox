@@ -166,6 +166,31 @@ class CommandDouble(_ExpectationProxy):
         """Return the number of recorded invocations."""
         return len(self.invocations)
 
+    # ------------------------------------------------------------------
+    # Spy assertions
+    # ------------------------------------------------------------------
+    def assert_called(self) -> None:
+        """Raise ``AssertionError`` if this spy was never invoked."""
+        if self.kind != "spy":  # pragma: no cover - defensive guard
+            msg = "assert_called() is only valid for spies"
+            raise AssertionError(msg)
+        if not self.invocations:
+            msg = f"{self.name!r} was not called"
+            raise AssertionError(msg)
+
+    def assert_called_with(self, *args: str) -> None:
+        """Assert the most recent call used ``args`` exactly."""
+        if self.kind != "spy":  # pragma: no cover - defensive guard
+            msg = "assert_called_with() is only valid for spies"
+            raise AssertionError(msg)
+        if not self.invocations:
+            msg = f"{self.name!r} was not called"
+            raise AssertionError(msg)
+        last = self.invocations[-1]
+        if list(args) != list(last.args):
+            msg = f"{self.name!r} called with {list(last.args)}, expected {list(args)}"
+            raise AssertionError(msg)
+
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response."""
         return (
