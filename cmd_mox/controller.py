@@ -201,23 +201,54 @@ class CommandDouble(_ExpectationProxy):
         env: dict[str, str] | None = None,
     ) -> None:
         """Assert the most recent call used the given arguments and context."""
+        self._validate_spy_usage("assert_called_with")
+        invocation = self._get_last_invocation()
+        self._validate_arguments(invocation, args)
+        self._validate_stdin(invocation, stdin)
+        self._validate_environment(invocation, env)
+
+    # ------------------------------------------------------------------
+    # Spy assertion helpers
+    # ------------------------------------------------------------------
+    def _validate_spy_usage(self, method_name: str) -> None:
         if self.kind != "spy":  # pragma: no cover - defensive guard
-            msg = "assert_called_with() is only valid for spies"
+            msg = f"{method_name}() is only valid for spies"
             raise AssertionError(msg)
+
+    def _get_last_invocation(self) -> Invocation:
         if not self.invocations:
             msg = f"Expected {self.name!r} to be called but it was never called"
             raise AssertionError(msg)
-        last = self.invocations[-1]
-        if list(args) != list(last.args):
+        return self.invocations[-1]
+
+    def _validate_arguments(
+        self, invocation: Invocation, expected_args: tuple[str, ...]
+    ) -> None:
+        if list(expected_args) != list(invocation.args):
             msg = (
-                f"{self.name!r} called with args {last.args!r}, expected {list(args)!r}"
+                f"{self.name!r} called with args {invocation.args!r}, "
+                f"expected {list(expected_args)!r}"
             )
             raise AssertionError(msg)
-        if stdin is not None and last.stdin != stdin:
-            msg = f"{self.name!r} called with stdin {last.stdin!r}, expected {stdin!r}"
+
+    def _validate_stdin(
+        self, invocation: Invocation, expected_stdin: str | None
+    ) -> None:
+        if expected_stdin is not None and invocation.stdin != expected_stdin:
+            msg = (
+                f"{self.name!r} called with stdin {invocation.stdin!r}, "
+                f"expected {expected_stdin!r}"
+            )
             raise AssertionError(msg)
-        if env is not None and last.env != env:
-            msg = f"{self.name!r} called with env {last.env!r}, expected {env!r}"
+
+    def _validate_environment(
+        self, invocation: Invocation, expected_env: dict[str, str] | None
+    ) -> None:
+        if expected_env is not None and invocation.env != expected_env:
+            msg = (
+                f"{self.name!r} called with env {invocation.env!r}, "
+                f"expected {expected_env!r}"
+            )
             raise AssertionError(msg)
 
     def __repr__(self) -> str:
