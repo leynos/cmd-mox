@@ -166,6 +166,87 @@ class CommandDouble(_ExpectationProxy):
         """Return the number of recorded invocations."""
         return len(self.invocations)
 
+    # ------------------------------------------------------------------
+    # Spy assertions
+    # ------------------------------------------------------------------
+    def assert_called(self) -> None:
+        """Raise ``AssertionError`` if this spy was never invoked."""
+        self._validate_spy_usage("assert_called")
+        if not self.invocations:
+            msg = (
+                f"Expected {self.name!r} to be called at least once but it was"
+                " never called"
+            )
+            raise AssertionError(msg)
+
+    def assert_not_called(self) -> None:
+        """Raise ``AssertionError`` if this spy was invoked."""
+        self._validate_spy_usage("assert_not_called")
+        if self.invocations:
+            last = self.invocations[-1]
+            msg = (
+                f"Expected {self.name!r} to be uncalled but it was called"
+                f" {len(self.invocations)} time(s); last args={last.args!r}"
+            )
+            raise AssertionError(msg)
+
+    def assert_called_with(
+        self,
+        *args: str,
+        stdin: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        """Assert the most recent call used the given arguments and context."""
+        self._validate_spy_usage("assert_called_with")
+        invocation = self._get_last_invocation()
+        self._validate_arguments(invocation, args)
+        self._validate_stdin(invocation, stdin)
+        self._validate_environment(invocation, env)
+
+    # ------------------------------------------------------------------
+    # Spy assertion helpers
+    # ------------------------------------------------------------------
+    def _validate_spy_usage(self, method_name: str) -> None:
+        if self.kind != "spy":  # pragma: no cover - defensive guard
+            msg = f"{method_name}() is only valid for spies"
+            raise AssertionError(msg)
+
+    def _get_last_invocation(self) -> Invocation:
+        if not self.invocations:
+            msg = f"Expected {self.name!r} to be called but it was never called"
+            raise AssertionError(msg)
+        return self.invocations[-1]
+
+    def _validate_arguments(
+        self, invocation: Invocation, expected_args: tuple[str, ...]
+    ) -> None:
+        if list(expected_args) != list(invocation.args):
+            msg = (
+                f"{self.name!r} called with args {invocation.args!r}, "
+                f"expected {list(expected_args)!r}"
+            )
+            raise AssertionError(msg)
+
+    def _validate_stdin(
+        self, invocation: Invocation, expected_stdin: str | None
+    ) -> None:
+        if expected_stdin is not None and invocation.stdin != expected_stdin:
+            msg = (
+                f"{self.name!r} called with stdin {invocation.stdin!r}, "
+                f"expected {expected_stdin!r}"
+            )
+            raise AssertionError(msg)
+
+    def _validate_environment(
+        self, invocation: Invocation, expected_env: dict[str, str] | None
+    ) -> None:
+        if expected_env is not None and invocation.env != expected_env:
+            msg = (
+                f"{self.name!r} called with env {invocation.env!r}, "
+                f"expected {expected_env!r}"
+            )
+            raise AssertionError(msg)
+
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response."""
         return (

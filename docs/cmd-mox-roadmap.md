@@ -100,8 +100,8 @@
 - [x] Fluent expectation DSL (see
     [design section](python-native-command-mocking-design.md#24-the-fluent-api-for-defining-expectations)
     )
-- [ ] Assertion helpers for spy inspection mirroring `unittest.mock`
-    semantics (`assert_called`, `assert_called_with`)
+- [x] Assertion helpers for spy inspection mirroring `unittest.mock`
+    semantics (`assert_called`, `assert_called_with`, `assert_not_called`)
 
 ## **V. Matching & Verification Engine**
 
