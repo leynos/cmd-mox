@@ -1,5 +1,6 @@
 """Tests for spy assertion helpers."""
 
+import os
 import subprocess
 import typing as t
 from pathlib import Path
@@ -26,6 +27,28 @@ def test_spy_assert_called_and_called_with(
 
     spy.assert_called()
     spy.assert_called_with("foo", "bar", stdin="stdin")
+
+
+def test_spy_assert_called_with_env(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """assert_called_with validates the environment mapping."""
+    mox = CmdMox()
+    spy = mox.spy("hi").returns(stdout="hello")
+    mox.__enter__()
+    mox.replay()
+
+    cmd_path = Path(mox.environment.shim_dir) / "hi"
+    env = dict(os.environ, MYVAR="VALUE")
+    run([str(cmd_path), "foo"], env=env, input="stdin")
+
+    mox.verify()
+
+    spy.assert_called_with("foo", stdin="stdin", env=env)
+    with pytest.raises(AssertionError):
+        spy.assert_called_with(
+            "foo", stdin="stdin", env=dict(os.environ, MYVAR="OTHER")
+        )
 
 
 def test_spy_assert_called_raises_when_never_called() -> None:

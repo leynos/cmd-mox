@@ -171,9 +171,7 @@ class CommandDouble(_ExpectationProxy):
     # ------------------------------------------------------------------
     def assert_called(self) -> None:
         """Raise ``AssertionError`` if this spy was never invoked."""
-        if self.kind != "spy":  # pragma: no cover - defensive guard
-            msg = "assert_called() is only valid for spies"
-            raise AssertionError(msg)
+        self._validate_spy_usage("assert_called")
         if not self.invocations:
             msg = (
                 f"Expected {self.name!r} to be called at least once but it was"
@@ -183,9 +181,7 @@ class CommandDouble(_ExpectationProxy):
 
     def assert_not_called(self) -> None:
         """Raise ``AssertionError`` if this spy was invoked."""
-        if self.kind != "spy":  # pragma: no cover - defensive guard
-            msg = "assert_not_called() is only valid for spies"
-            raise AssertionError(msg)
+        self._validate_spy_usage("assert_not_called")
         if self.invocations:
             last = self.invocations[-1]
             msg = (
