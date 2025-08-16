@@ -45,10 +45,11 @@ def test_spy_assert_called_with_env(
     mox.verify()
 
     spy.assert_called_with("foo", stdin="stdin", env=env)
-    with pytest.raises(AssertionError):
-        spy.assert_called_with(
-            "foo", stdin="stdin", env=dict(os.environ, MYVAR="OTHER")
-        )
+
+    bad_env = dict(os.environ, MYVAR="DIFFERENT")
+    with pytest.raises(AssertionError) as exc:
+        spy.assert_called_with("foo", stdin="stdin", env=bad_env)
+    assert str(exc.value) == f"'hi' called with env {env!r}, expected {bad_env!r}"
 
 
 def test_spy_assert_called_raises_when_never_called() -> None:
