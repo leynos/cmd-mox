@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import enum
+import types  # noqa: TC003
 import typing as t
 from collections import deque
+
+from typing_extensions import Self
 
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
@@ -15,36 +18,28 @@ from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import types
     from pathlib import Path
 
-    TracebackType = types.TracebackType
-
     class _ExpectationProxy(t.Protocol):
-        def with_args(self: T_Self, *args: str) -> T_Self: ...
+        def with_args(self, *args: str) -> Self: ...
 
-        def with_matching_args(
-            self: T_Self, *matchers: t.Callable[[str], bool]
-        ) -> T_Self: ...
+        def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self: ...
 
-        def with_stdin(self: T_Self, data: str | t.Callable[[str], bool]) -> T_Self: ...
+        def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
 
-        def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self: ...
+        def with_env(self, mapping: dict[str, str]) -> Self: ...
 
-        def times(self: T_Self, count: int) -> T_Self: ...
+        def times(self, count: int) -> Self: ...
 
-        def times_called(self: T_Self, count: int) -> T_Self: ...
+        def times_called(self, count: int) -> Self: ...
 
-        def in_order(self: T_Self) -> T_Self: ...
+        def in_order(self) -> Self: ...
 
-        def any_order(self: T_Self) -> T_Self: ...
+        def any_order(self) -> Self: ...
 else:  # pragma: no cover - runtime placeholder
 
     class _ExpectationProxy:
         pass
-
-
-T_Self = t.TypeVar("T_Self", bound="CommandDouble")
 
 
 class _CallbackIPCServer(IPCServer):
@@ -88,18 +83,16 @@ class CommandDouble(_ExpectationProxy):
         self.passthrough_mode = False
         self.expectation = Expectation(name)
 
-    def returns(
-        self: T_Self, stdout: str = "", stderr: str = "", exit_code: int = 0
-    ) -> T_Self:
+    def returns(self, stdout: str = "", stderr: str = "", exit_code: int = 0) -> Self:
         """Set the static response and return ``self``."""
         self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
         self.handler = None
         return self
 
     def runs(
-        self: T_Self,
+        self,
         handler: t.Callable[[Invocation], tuple[str, str, int] | Response],
-    ) -> T_Self:
+    ) -> Self:
         """Use *handler* to generate responses dynamically."""
 
         def _wrap(invocation: Invocation) -> Response:
@@ -115,17 +108,6 @@ class CommandDouble(_ExpectationProxy):
     # ------------------------------------------------------------------
     # Expectation configuration via delegation
     # ------------------------------------------------------------------
-    _DELEGATED_METHODS: t.ClassVar[dict[str, str]] = {
-        "with_args": "with_args",
-        "with_matching_args": "with_matching_args",
-        "with_stdin": "with_stdin",
-        "with_env": "with_env",
-        "times": "times",
-        "times_called": "times_called",
-        "in_order": "in_order",
-        "any_order": "any_order",
-    }
-
     def _ensure_in_order(self) -> None:
         """Register this expectation for ordered verification."""
         if self.expectation not in self.controller._ordered:
@@ -136,7 +118,49 @@ class CommandDouble(_ExpectationProxy):
         if self.expectation in self.controller._ordered:
             self.controller._ordered.remove(self.expectation)
 
-    def passthrough(self: T_Self) -> T_Self:
+    def with_args(self, *args: str) -> Self:
+        """Require the command be invoked with *args*."""
+        self.expectation.with_args(*args)
+        return self
+
+    def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self:
+        """Validate arguments using matcher predicates."""
+        self.expectation.with_matching_args(*matchers)
+        return self
+
+    def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self:
+        """Expect the given stdin ``data`` or matcher."""
+        self.expectation.with_stdin(data)
+        return self
+
+    def with_env(self, mapping: dict[str, str]) -> Self:
+        """Expect the provided environment mapping."""
+        self.expectation.with_env(mapping)
+        return self
+
+    def times(self, count: int) -> Self:
+        """Require the command be invoked exactly ``count`` times."""
+        self.expectation.times(count)
+        return self
+
+    def times_called(self, count: int) -> Self:
+        """Verify the spy was called ``count`` times."""
+        self.expectation.times_called(count)
+        return self
+
+    def in_order(self) -> Self:
+        """Mark this expectation as ordered."""
+        self.expectation.in_order()
+        self._ensure_in_order()
+        return self
+
+    def any_order(self) -> Self:
+        """Mark this expectation as unordered."""
+        self.expectation.any_order()
+        self._ensure_any_order()
+        return self
+
+    def passthrough(self) -> Self:
         """Execute the real command while recording invocations."""
         if self.kind != "spy":
             msg = "passthrough() is only valid for spies"
@@ -166,6 +190,89 @@ class CommandDouble(_ExpectationProxy):
         """Return the number of recorded invocations."""
         return len(self.invocations)
 
+    # ------------------------------------------------------------------
+    # Spy assertions
+    # ------------------------------------------------------------------
+    def assert_called(self) -> None:
+        """Raise ``AssertionError`` if this spy was never invoked."""
+        self._validate_spy_usage("assert_called")
+        if not self.invocations:
+            msg = (
+                f"Expected {self.name!r} to be called at least once but it was"
+                " never called"
+            )
+            raise AssertionError(msg)
+
+    def assert_not_called(self) -> None:
+        """Raise ``AssertionError`` if this spy was invoked."""
+        self._validate_spy_usage("assert_not_called")
+        if self.invocations:
+            last = self.invocations[-1]
+            msg = (
+                f"Expected {self.name!r} to be uncalled but it was called"
+                f" {len(self.invocations)} time(s); "
+                f"last args={last.args!r}, stdin={last.stdin!r}, env={last.env!r}"
+            )
+            raise AssertionError(msg)
+
+    def assert_called_with(
+        self,
+        *args: str,
+        stdin: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        """Assert the most recent call used the given arguments and context."""
+        self._validate_spy_usage("assert_called_with")
+        invocation = self._get_last_invocation()
+        self._validate_arguments(invocation, args)
+        self._validate_stdin(invocation, stdin)
+        self._validate_environment(invocation, env)
+
+    # ------------------------------------------------------------------
+    # Spy assertion helpers
+    # ------------------------------------------------------------------
+    def _validate_spy_usage(self, method_name: str) -> None:
+        if self.kind != "spy":  # pragma: no cover - defensive guard
+            msg = f"{method_name}() is only valid for spies"
+            raise AssertionError(msg)
+
+    def _get_last_invocation(self) -> Invocation:
+        if not self.invocations:
+            msg = f"Expected {self.name!r} to be called but it was never called"
+            raise AssertionError(msg)
+        return self.invocations[-1]
+
+    def _validate_arguments(
+        self, invocation: Invocation, expected_args: tuple[str, ...]
+    ) -> None:
+        actual_args = tuple(invocation.args)
+        if expected_args != actual_args:
+            msg = (
+                f"{self.name!r} called with args {actual_args!r}, "
+                f"expected {expected_args!r}"
+            )
+            raise AssertionError(msg)
+
+    def _validate_stdin(
+        self, invocation: Invocation, expected_stdin: str | None
+    ) -> None:
+        if expected_stdin is not None and invocation.stdin != expected_stdin:
+            msg = (
+                f"{self.name!r} called with stdin {invocation.stdin!r}, "
+                f"expected {expected_stdin!r}"
+            )
+            raise AssertionError(msg)
+
+    def _validate_environment(
+        self, invocation: Invocation, expected_env: dict[str, str] | None
+    ) -> None:
+        if expected_env is not None and invocation.env != expected_env:
+            msg = (
+                f"{self.name!r} called with env {invocation.env!r}, "
+                f"expected {expected_env!r}"
+            )
+            raise AssertionError(msg)
+
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response."""
         return (
@@ -175,37 +282,6 @@ class CommandDouble(_ExpectationProxy):
         )
 
     __str__ = __repr__
-
-
-_ORDER_HANDLERS = {
-    "in_order": lambda self: self._ensure_in_order(),
-    "any_order": lambda self: self._ensure_any_order(),
-}
-
-
-def _setup_delegated_methods() -> None:
-    """Set up proxy methods on CommandDouble for expectation delegation."""
-
-    def make_proxy(
-        method_name: str, expectation_method: str
-    ) -> t.Callable[..., CommandDouble]:
-        order_handler = _ORDER_HANDLERS.get(method_name, lambda self: None)
-
-        def proxy(
-            self: CommandDouble, *args: object, **kwargs: object
-        ) -> CommandDouble:
-            getattr(self.expectation, expectation_method)(*args, **kwargs)
-            order_handler(self)
-            return self
-
-        proxy.__name__ = method_name
-        return proxy
-
-    for method_name, expectation_method in CommandDouble._DELEGATED_METHODS.items():
-        setattr(CommandDouble, method_name, make_proxy(method_name, expectation_method))
-
-
-_setup_delegated_methods()
 
 
 # Backwards compatibility aliases
@@ -295,7 +371,7 @@ class CmdMox:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        tb: TracebackType | None,
+        tb: types.TracebackType | None,
     ) -> None:
         """Exit context, optionally verifying and cleaning up."""
         if self._handle_auto_verify(exc_type):

@@ -249,6 +249,29 @@ def check_spy_call_count(mox: CmdMox, cmd: str, count: int) -> None:
     assert spy.call_count == count
 
 
+@then(parsers.cfparse('the spy "{cmd}" should have been called'))
+def spy_assert_called(mox: CmdMox, cmd: str) -> None:
+    """Assert the spy was invoked at least once."""
+    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
+    mox.spies[cmd].assert_called()
+
+
+@then(
+    parsers.cfparse('the spy "{cmd}" should have been called with arguments "{args}"')
+)
+def spy_assert_called_with(mox: CmdMox, cmd: str, args: str) -> None:
+    """Assert the spy's last call used the given arguments."""
+    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
+    mox.spies[cmd].assert_called_with(*args.split())
+
+
+@then(parsers.cfparse('the spy "{cmd}" should not have been called'))
+def spy_assert_not_called(mox: CmdMox, cmd: str) -> None:
+    """Assert the spy was never invoked."""
+    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
+    mox.spies[cmd].assert_not_called()
+
+
 @then(parsers.cfparse('the mock "{cmd}" should record {count:d} invocation'))
 def check_mock(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the mock recorded the invocation."""
@@ -280,6 +303,12 @@ def test_mocked_command_execution() -> None:
 @scenario(str(FEATURES_DIR / "controller.feature"), "spy records invocation")
 def test_spy_records_invocation() -> None:
     """Spy records command invocation."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "spy assertion helpers")
+def test_spy_assertion_helpers() -> None:
+    """Spy exposes assert_called helpers."""
     pass
 
 
