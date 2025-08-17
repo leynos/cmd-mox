@@ -23,6 +23,16 @@ class SpyCommandConfig:
     stdout_return: str = "hello"
 
 
+@dc.dataclass
+class AssertionTestConfig:
+    """Configuration for assertion failure tests."""
+
+    method_name: str
+    args: tuple[object, ...] = ()
+    kwargs: dict[str, object] = dc.field(default_factory=dict)
+    expected_message: str | None = None
+
+
 class TestSpyAssertions:
     """Tests covering the spy assertion helper API."""
 
@@ -75,17 +85,14 @@ class TestSpyAssertions:
     def _assert_raises_assertion_error(
         self,
         spy: CommandDouble,
-        method_name: str,
-        *args: object,
-        expected_message: str | None = None,
-        **kwargs: object,
+        config: AssertionTestConfig,
     ) -> None:
-        """Invoke ``spy.method_name`` and assert it raises ``AssertionError``."""
-        method = getattr(spy, method_name)
+        """Invoke ``spy`` method and assert it raises ``AssertionError``."""
+        method = getattr(spy, config.method_name)
         with pytest.raises(AssertionError) as exc:
-            method(*args, **kwargs)
-        if expected_message is not None:
-            assert str(exc.value) == expected_message
+            method(*config.args, **config.kwargs)
+        if config.expected_message is not None:
+            assert str(exc.value) == config.expected_message
 
     # ------------------------------------------------------------------
     def test_spy_assert_called_and_called_with(
@@ -115,12 +122,13 @@ class TestSpyAssertions:
         bad_env = dict(actual_env, MYVAR="DIFFERENT")
         self._assert_raises_assertion_error(
             spy,
-            "assert_called_with",
-            "foo",
-            stdin="stdin",
-            env=bad_env,
-            expected_message=(
-                f"'hi' called with env {actual_env!r}, expected {bad_env!r}"
+            AssertionTestConfig(
+                method_name="assert_called_with",
+                args=("foo",),
+                kwargs={"stdin": "stdin", "env": bad_env},
+                expected_message=(
+                    f"'hi' called with env {actual_env!r}, expected {bad_env!r}"
+                ),
             ),
         )
 
@@ -133,7 +141,9 @@ class TestSpyAssertions:
         mox.replay()
         mox.verify()
 
-        self._assert_raises_assertion_error(spy, "assert_called")
+        self._assert_raises_assertion_error(
+            spy, AssertionTestConfig(method_name="assert_called")
+        )
         spy.assert_not_called()
 
     # ------------------------------------------------------------------
@@ -144,9 +154,12 @@ class TestSpyAssertions:
         _, spy = self._create_spy_and_run_command(run)
         self._assert_raises_assertion_error(
             spy,
-            "assert_not_called",
-            expected_message=(
-                "Expected 'hi' to be uncalled but it was called 1 time(s); last args=[]"
+            AssertionTestConfig(
+                method_name="assert_not_called",
+                expected_message=(
+                    "Expected 'hi' to be uncalled but it was called 1 time(s); "
+                    "last args=[]"
+                ),
             ),
         )
 
@@ -160,18 +173,23 @@ class TestSpyAssertions:
         )
         self._assert_raises_assertion_error(
             spy,
-            "assert_called_with",
-            "foo",
-            expected_message="'hi' called with args ['foo', 'bar'], expected ['foo']",
+            AssertionTestConfig(
+                method_name="assert_called_with",
+                args=("foo",),
+                expected_message=(
+                    "'hi' called with args ['foo', 'bar'], expected ['foo']"
+                ),
+            ),
         )
         self._assert_raises_assertion_error(
             spy,
-            "assert_called_with",
-            "foo",
-            "bar",
-            "baz",
-            expected_message=(
-                "'hi' called with args ['foo', 'bar'], expected ['foo', 'bar', 'baz']"
+            AssertionTestConfig(
+                method_name="assert_called_with",
+                args=("foo", "bar", "baz"),
+                expected_message=(
+                    "'hi' called with args ['foo', 'bar'], expected "
+                    "['foo', 'bar', 'baz']"
+                ),
             ),
         )
 
@@ -184,9 +202,11 @@ class TestSpyAssertions:
         mock = mox.mock("mock_cmd")
         self._assert_raises_assertion_error(
             mock,
-            "_validate_spy_usage",
-            "assert_called_with",
-            expected_message="assert_called_with() is only valid for spies",
+            AssertionTestConfig(
+                method_name="_validate_spy_usage",
+                args=("assert_called_with",),
+                expected_message="assert_called_with() is only valid for spies",
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -196,8 +216,10 @@ class TestSpyAssertions:
         spy = mox.spy("hi")
         self._assert_raises_assertion_error(
             spy,
-            "_get_last_invocation",
-            expected_message="Expected 'hi' to be called but it was never called",
+            AssertionTestConfig(
+                method_name="_get_last_invocation",
+                expected_message="Expected 'hi' to be called but it was never called",
+            ),
         )
         invocation = Invocation("hi", ["foo"], "", {})
         spy.invocations.append(invocation)
@@ -286,10 +308,12 @@ class TestSpyAssertions:
         )
         self._assert_raises_assertion_error(
             spy,
-            scenario["method"],
-            *args,
-            expected_message=scenario["expected_message"],
-            **kwargs,
+            AssertionTestConfig(
+                method_name=scenario["method"],
+                args=args,
+                kwargs=kwargs,
+                expected_message=scenario["expected_message"],
+            ),
         )
 
         post_validations = {
