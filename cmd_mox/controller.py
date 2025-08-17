@@ -6,6 +6,7 @@ import enum
 import types  # noqa: TC003
 import typing as t
 from collections import deque
+from pathlib import Path  # noqa: TC003
 
 from typing_extensions import Self
 
@@ -17,29 +18,39 @@ from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    from pathlib import Path
 
-    class _ExpectationProxy(t.Protocol):
-        def with_args(self, *args: str) -> Self: ...
+def _create_expectation_proxy() -> type:
+    if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+        from pathlib import Path  # noqa: F401
 
-        def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self: ...
+        class _ExpectationProxy(t.Protocol):
+            def with_args(self, *args: str) -> Self: ...
 
-        def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
+            def with_matching_args(
+                self, *matchers: t.Callable[[str], bool]
+            ) -> Self: ...
 
-        def with_env(self, mapping: dict[str, str]) -> Self: ...
+            def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
 
-        def times(self, count: int) -> Self: ...
+            def with_env(self, mapping: dict[str, str]) -> Self: ...
 
-        def times_called(self, count: int) -> Self: ...
+            def times(self, count: int) -> Self: ...
 
-        def in_order(self) -> Self: ...
+            def times_called(self, count: int) -> Self: ...
 
-        def any_order(self) -> Self: ...
-else:  # pragma: no cover - runtime placeholder
+            def in_order(self) -> Self: ...
 
-    class _ExpectationProxy:
+            def any_order(self) -> Self: ...
+
+        return _ExpectationProxy
+
+    class _ExpectationProxy:  # pragma: no cover - runtime placeholder
         pass
+
+    return _ExpectationProxy
+
+
+_ExpectationProxy = _create_expectation_proxy()
 
 
 class _CallbackIPCServer(IPCServer):
