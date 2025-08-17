@@ -9,9 +9,6 @@ from collections import deque
 
 from typing_extensions import Self
 
-if t.TYPE_CHECKING:  # pragma: no cover
-    from pathlib import Path
-
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
@@ -21,6 +18,7 @@ from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    from pathlib import Path
 
     class _ExpectationProxy(t.Protocol):
         def with_args(self, *args: str) -> Self: ...
