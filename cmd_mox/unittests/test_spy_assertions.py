@@ -147,18 +147,16 @@ class TestSpyAssertions:
         spy.assert_not_called()
 
     # ------------------------------------------------------------------
-    def test_spy_assert_not_called_raises_when_called(
-        self, run: t.Callable[..., subprocess.CompletedProcess[str]]
-    ) -> None:
+    def test_spy_assert_not_called_raises_when_called(self) -> None:
         """assert_not_called raises if the spy was invoked."""
-        _, spy = self._create_spy_and_run_command(run)
+        spy = self._create_spy_with_invocation("hi", [], "", {})
         self._assert_raises_assertion_error(
             spy,
             AssertionTestConfig(
                 method_name="assert_not_called",
                 expected_message=(
                     "Expected 'hi' to be uncalled but it was called 1 time(s); "
-                    "last args=[]"
+                    "last args=[], stdin='', env={}"
                 ),
             ),
         )
@@ -177,7 +175,7 @@ class TestSpyAssertions:
                 method_name="assert_called_with",
                 args=("foo",),
                 expected_message=(
-                    "'hi' called with args ['foo', 'bar'], expected ['foo']"
+                    "'hi' called with args ('foo', 'bar'), expected ('foo',)"
                 ),
             ),
         )
@@ -187,8 +185,8 @@ class TestSpyAssertions:
                 method_name="assert_called_with",
                 args=("foo", "bar", "baz"),
                 expected_message=(
-                    "'hi' called with args ['foo', 'bar'], expected "
-                    "['foo', 'bar', 'baz']"
+                    "'hi' called with args ('foo', 'bar'), expected "
+                    "('foo', 'bar', 'baz')"
                 ),
             ),
         )
@@ -236,7 +234,7 @@ class TestSpyAssertions:
             "args": lambda spy: ("expected",),
             "kwargs": lambda spy: {},
             "expected_message": (
-                "'hi' called with args ['actual'], expected ['expected']"
+                "'hi' called with args ('actual',), expected ('expected',)"
             ),
         },
         {
@@ -259,7 +257,7 @@ class TestSpyAssertions:
             "method": "_validate_arguments",
             "args": lambda spy: (spy.invocations[0], ("bar",)),
             "kwargs": lambda spy: {},
-            "expected_message": ("'hi' called with args ['foo'], expected ['bar']"),
+            "expected_message": ("'hi' called with args ('foo',), expected ('bar',)"),
         },
         {
             "name": "validate_stdin_raises_on_mismatch",
