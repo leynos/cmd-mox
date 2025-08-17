@@ -6,6 +6,9 @@ import enum
 import typing as t
 from collections import deque
 
+if t.TYPE_CHECKING:  # pragma: no cover
+    from pathlib import Path
+
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
@@ -14,37 +17,53 @@ from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import types
-    from pathlib import Path
+_ExpectationProxy: t.Any
+TracebackType: t.Any
+_ORDER_HANDLERS: dict[str, t.Callable[[t.Any], None]]
 
-    TracebackType = types.TracebackType
 
-    class _ExpectationProxy(t.Protocol):
-        def with_args(self: T_Self, *args: str) -> T_Self: ...
+def _initialize_type_system() -> tuple[type, t.Any]:
+    """Initialize type checking components and return them."""
+    if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+        import types
+        from pathlib import Path  # noqa: F401
 
-        def with_matching_args(
-            self: T_Self, *matchers: t.Callable[[str], bool]
-        ) -> T_Self: ...
+        TracebackType = types.TracebackType  # noqa: N806
 
-        def with_stdin(self: T_Self, data: str | t.Callable[[str], bool]) -> T_Self: ...
+        class _ExpectationProxy(t.Protocol):
+            def with_args(self: T_Self, *args: str) -> T_Self: ...
 
-        def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self: ...
+            def with_matching_args(
+                self: T_Self, *matchers: t.Callable[[str], bool]
+            ) -> T_Self: ...
 
-        def times(self: T_Self, count: int) -> T_Self: ...
+            def with_stdin(
+                self: T_Self, data: str | t.Callable[[str], bool]
+            ) -> T_Self: ...
 
-        def times_called(self: T_Self, count: int) -> T_Self: ...
+            def with_env(self: T_Self, mapping: dict[str, str]) -> T_Self: ...
 
-        def in_order(self: T_Self) -> T_Self: ...
+            def times(self: T_Self, count: int) -> T_Self: ...
 
-        def any_order(self: T_Self) -> T_Self: ...
-else:  # pragma: no cover - runtime placeholder
+            def times_called(self: T_Self, count: int) -> T_Self: ...
 
+            def in_order(self: T_Self) -> T_Self: ...
+
+            def any_order(self: T_Self) -> T_Self: ...
+
+        return _ExpectationProxy, TracebackType
+
+    # pragma: no cover - runtime placeholder
     class _ExpectationProxy:
         pass
 
+    return _ExpectationProxy, None
+
 
 T_Self = t.TypeVar("T_Self", bound="CommandDouble")
+
+
+_ExpectationProxy, TracebackType = _initialize_type_system()
 
 
 class _CallbackIPCServer(IPCServer):
@@ -62,7 +81,7 @@ class _CallbackIPCServer(IPCServer):
         return self._handler(invocation)
 
 
-class CommandDouble(_ExpectationProxy):
+class CommandDouble(_ExpectationProxy):  # type: ignore[unsupported-base]
     """Configuration for a stub, mock, or spy command."""
 
     __slots__ = (
@@ -258,10 +277,12 @@ class CommandDouble(_ExpectationProxy):
     __str__ = __repr__
 
 
-_ORDER_HANDLERS = {
-    "in_order": lambda self: self._ensure_in_order(),
-    "any_order": lambda self: self._ensure_any_order(),
-}
+def _create_order_handlers() -> dict[str, t.Callable[[CommandDouble], None]]:
+    """Create the order handlers dictionary."""
+    return {
+        "in_order": lambda self: self._ensure_in_order(),
+        "any_order": lambda self: self._ensure_any_order(),
+    }
 
 
 def _setup_delegated_methods() -> None:
@@ -286,7 +307,15 @@ def _setup_delegated_methods() -> None:
         setattr(CommandDouble, method_name, make_proxy(method_name, expectation_method))
 
 
-_setup_delegated_methods()
+def _initialize_module_components() -> None:
+    """Initialize all module-level components to reduce global complexity."""
+    global _ExpectationProxy, TracebackType, _ORDER_HANDLERS
+    _ExpectationProxy, TracebackType = _initialize_type_system()
+    _ORDER_HANDLERS = _create_order_handlers()
+    _setup_delegated_methods()
+
+
+_initialize_module_components()
 
 
 # Backwards compatibility aliases
