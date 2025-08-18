@@ -6,6 +6,7 @@ import enum
 import types  # noqa: TC003
 import typing as t
 from collections import deque
+from pathlib import Path  # noqa: TC003
 
 from typing_extensions import Self
 
@@ -17,29 +18,68 @@ from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    from pathlib import Path
 
-    class _ExpectationProxy(t.Protocol):
-        def with_args(self, *args: str) -> Self: ...
+def _create_expectation_proxy() -> type:
+    """Return a proxy type for expectation delegation.
 
-        def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self: ...
+    Static type checking requires a protocol so ``CommandDouble`` exposes the
+    full expectation interface.  At runtime we return a minimal placeholder
+    whose methods raise ``NotImplementedError`` if accessed directly, making
+    this typing-only pattern explicit.
+    """
+    if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+        from pathlib import Path  # noqa: F401
 
-        def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
+        class _ExpectationProxy(t.Protocol):
+            def with_args(self, *args: str) -> Self: ...
 
-        def with_env(self, mapping: dict[str, str]) -> Self: ...
+            def with_matching_args(
+                self, *matchers: t.Callable[[str], bool]
+            ) -> Self: ...
 
-        def times(self, count: int) -> Self: ...
+            def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
 
-        def times_called(self, count: int) -> Self: ...
+            def with_env(self, mapping: dict[str, str]) -> Self: ...
 
-        def in_order(self) -> Self: ...
+            def times(self, count: int) -> Self: ...
 
-        def any_order(self) -> Self: ...
-else:  # pragma: no cover - runtime placeholder
+            def times_called(self, count: int) -> Self: ...
 
-    class _ExpectationProxy:
-        pass
+            def in_order(self) -> Self: ...
+
+            def any_order(self) -> Self: ...
+
+        return _ExpectationProxy
+
+    class _ExpectationProxy:  # pragma: no cover - runtime placeholder
+        def with_args(self, *args: str) -> Self:
+            raise NotImplementedError("with_args is typing-only")
+
+        def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self:
+            raise NotImplementedError("with_matching_args is typing-only")
+
+        def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self:
+            raise NotImplementedError("with_stdin is typing-only")
+
+        def with_env(self, mapping: dict[str, str]) -> Self:
+            raise NotImplementedError("with_env is typing-only")
+
+        def times(self, count: int) -> Self:
+            raise NotImplementedError("times is typing-only")
+
+        def times_called(self, count: int) -> Self:
+            raise NotImplementedError("times_called is typing-only")
+
+        def in_order(self) -> Self:
+            raise NotImplementedError("in_order is typing-only")
+
+        def any_order(self) -> Self:
+            raise NotImplementedError("any_order is typing-only")
+
+    return _ExpectationProxy
+
+
+_ExpectationProxy = _create_expectation_proxy()
 
 
 class _CallbackIPCServer(IPCServer):
