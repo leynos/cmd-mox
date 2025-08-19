@@ -226,21 +226,37 @@ class EnvironmentManager:
         """Reset thread-local state tracking the active manager."""
         type(self).reset_active_manager()
 
-    def _should_remove_created_dir(self) -> bool:
-        """Return ``True`` if the manager created a directory that still exists."""
-        return (
+    @_collect_os_error("Directory cleanup failed")
+    def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
+        """Remove the temporary directory created by ``__enter__``.
+
+        The manager only removes the directory when it created it and the
+        directory still exists. Otherwise, the method exits early after clearing
+        bookkeeping state. This keeps cleanup idempotent and avoids touching
+        paths managed by the caller.
+
+        - *No directory to remove*: ``_created_dir`` is ``None`` or differs from
+          ``shim_dir`` (perhaps replaced or deleted). In this case the function
+          returns immediately.
+        - *Directory exists*: attempt removal via :func:`_robust_rmtree`. Any
+          ``OSError`` bubbles to ``_collect_os_error`` which aggregates errors
+          for later reporting.
+        """
+        # Determine if there is a directory we are responsible for. If not,
+        # clear state and exit without touching the filesystem.
+        should_remove = (
             self._created_dir is not None
             and self.shim_dir is not None
             and self.shim_dir == self._created_dir
             and self.shim_dir.exists()
         )
+        if not should_remove:
+            self._created_dir = None
+            return
 
-    @_collect_os_error("Directory cleanup failed")
-    def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
-        """Remove the temporary directory created by ``__enter__``."""
+        # We created this directory and it still exists, so attempt removal.
         try:
-            if self._should_remove_created_dir() and self.shim_dir is not None:
-                _robust_rmtree(self.shim_dir)
+            _robust_rmtree(self.shim_dir)
         finally:
             self._created_dir = None
 
