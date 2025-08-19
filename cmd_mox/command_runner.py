@@ -22,7 +22,18 @@ class CommandRunner:
         self._timeout = timeout
 
     def run(self, invocation: Invocation, extra_env: dict[str, str]) -> Response:
-        """Execute *invocation* in the original environment."""
+        """Execute ``invocation`` with environment overrides.
+
+        ``extra_env`` values override the runner's original environment, while
+        any keys in ``invocation.env`` take precedence over both. The returned
+        :class:`Response` includes the applied overrides in ``Response.env``.
+
+        Common failures follow POSIX conventions:
+
+        * ``127`` - command not found
+        * ``126`` - target exists but is not executable
+        * ``124`` - execution timed out
+        """
         resolved = self._resolve_and_validate_command(invocation.command)
         if isinstance(resolved, Response):
             return resolved
