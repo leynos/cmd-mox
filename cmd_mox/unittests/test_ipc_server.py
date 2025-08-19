@@ -68,10 +68,21 @@ def test_invoke_server_retries_connection(
     thread.start()
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
-    response = invoke_server(invocation, timeout=1.0)
+    response = invoke_server(invocation, timeout=1.0, retries=5, backoff=0.01)
     assert response.stdout == "ls"
     thread.join()
     server.stop()
+
+
+def test_invoke_server_exhausts_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Client gives up after exceeding the retry limit."""
+    socket_path = tmp_path / "ipc.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    invocation = Invocation(command="ls", args=[], stdin="", env={})
+    with pytest.raises(FileNotFoundError):
+        invoke_server(invocation, timeout=0.1, retries=1, backoff=0.01)
 
 
 def test_invoke_server_invalid_json(

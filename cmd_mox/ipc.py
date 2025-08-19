@@ -50,6 +50,35 @@ def _read_all(sock: socket.socket) -> bytes:
     return b"".join(chunks)
 
 
+def _connect_with_retries(
+    sock_path: Path,
+    timeout: float,
+    retries: int,
+    backoff: float,
+) -> socket.socket:
+    """Connect to *sock_path* retrying on :class:`OSError`.
+
+    Uses :func:`socket.create_connection` to open the socket, attempting up to
+    ``retries`` times. The delay between attempts scales linearly with
+    ``backoff`` and the attempt number. Raises the underlying ``OSError`` if
+    all attempts fail.
+    """
+    last_err: OSError | None = None
+    address = str(sock_path)
+    for attempt in range(retries):
+        try:
+            return socket.create_connection(address, timeout=timeout)  # type: ignore[arg-type]
+        except OSError as exc:  # noqa: PERF203 - per-attempt retry requires looped try
+            last_err = exc
+            if attempt == retries - 1:
+                break
+            time.sleep(backoff * (attempt + 1))
+    if last_err is None:  # pragma: no cover - defensive
+        msg = f"Failed to connect to {sock_path}"
+        raise RuntimeError(msg)
+    raise last_err
+
+
 class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
@@ -202,29 +231,29 @@ class IPCServer:
         return Response(stdout=invocation.command)
 
 
-def invoke_server(invocation: Invocation, timeout: float) -> Response:
-    """Send *invocation* to the IPC server and return its response."""
+def invoke_server(
+    invocation: Invocation,
+    timeout: float,
+    retries: int = 3,
+    backoff: float = 0.05,
+) -> Response:
+    """Send *invocation* to the IPC server and return its response.
+
+    Connection attempts are retried ``retries`` times with a linear backoff
+    of ``backoff`` seconds between attempts. The underlying :class:`OSError`
+    bubbles up if the client cannot connect. A :class:`RuntimeError` is raised
+    if the server responds with invalid JSON.
+    """
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
     if sock is None:
         msg = f"{CMOX_IPC_SOCKET_ENV} is not set"
         raise RuntimeError(msg)
 
     sock_path = Path(sock)
-    attempt = 0
-    while True:
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(timeout)
-                client.connect(str(sock_path))
-                client.sendall(json.dumps(dc.asdict(invocation)).encode())
-                client.shutdown(socket.SHUT_WR)
-                raw = _read_all(client)
-            break
-        except OSError:
-            if attempt >= 2:
-                raise
-            time.sleep(0.05 * (attempt + 1))
-            attempt += 1
+    with _connect_with_retries(sock_path, timeout, retries, backoff) as client:
+        client.sendall(json.dumps(dc.asdict(invocation)).encode())
+        client.shutdown(socket.SHUT_WR)
+        raw = _read_all(client)
 
     try:
         payload = json.loads(raw.decode())
