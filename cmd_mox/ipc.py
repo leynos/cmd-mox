@@ -21,6 +21,9 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CONNECT_RETRIES = 3
+DEFAULT_CONNECT_BACKOFF = 0.05
+
 
 @dc.dataclass(slots=True)
 class Invocation:
@@ -58,23 +61,28 @@ def _connect_with_retries(
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`.
 
-    Uses :func:`socket.create_connection` to open the socket, attempting up to
-    ``retries`` times. The delay between attempts scales linearly with
-    ``backoff`` and the attempt number. Raises the underlying ``OSError`` if
-    all attempts fail.
+    Opens an ``AF_UNIX`` socket and attempts to connect up to ``retries``
+    times. The delay between attempts scales linearly with ``backoff`` and the
+    attempt number. Raises the last ``OSError`` if all attempts fail.
     """
     last_err: OSError | None = None
     address = str(sock_path)
     for attempt in range(retries):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
         try:
-            return socket.create_connection(address, timeout=timeout)  # type: ignore[arg-type]
-        except OSError as exc:  # noqa: PERF203 - per-attempt retry requires looped try
+            sock.connect(address)
+        except OSError as exc:
             last_err = exc
-            if attempt == retries - 1:
-                break
-            time.sleep(backoff * (attempt + 1))
-    if last_err is None:  # pragma: no cover - defensive
-        msg = f"Failed to connect to {sock_path}"
+            sock.close()
+            if attempt < retries - 1:
+                time.sleep(backoff * (attempt + 1))
+                continue
+            break
+        else:
+            return sock
+    if last_err is None:  # pragma: no cover - defensive; retries >=1 ensures this
+        msg = "Retries exhausted without error captured"
         raise RuntimeError(msg)
     raise last_err
 
@@ -234,15 +242,16 @@ class IPCServer:
 def invoke_server(
     invocation: Invocation,
     timeout: float,
-    retries: int = 3,
-    backoff: float = 0.05,
+    retries: int = DEFAULT_CONNECT_RETRIES,
+    backoff: float = DEFAULT_CONNECT_BACKOFF,
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
-    Connection attempts are retried ``retries`` times with a linear backoff
-    of ``backoff`` seconds between attempts. The underlying :class:`OSError`
-    bubbles up if the client cannot connect. A :class:`RuntimeError` is raised
-    if the server responds with invalid JSON.
+    Connection attempts are retried ``retries`` times (default:
+    :data:`DEFAULT_CONNECT_RETRIES`) with a linear backoff of ``backoff``
+    seconds (default: :data:`DEFAULT_CONNECT_BACKOFF`) between attempts. The
+    underlying :class:`OSError` bubbles up if the client cannot connect. A
+    :class:`RuntimeError` is raised if the server responds with invalid JSON.
     """
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
     if sock is None:
