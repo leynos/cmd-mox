@@ -341,3 +341,9 @@ class TestSpyAssertions:
         post = post_validations.get(scenario["method"])
         if post is not None:
             post(spy)
+
+    # ------------------------------------------------------------------
+    def test_assert_equal_passes_on_match(self) -> None:
+        """_assert_equal returns quietly when values match."""
+        spy = self._create_spy_with_invocation("hi", [], "", {})
+        assert spy._assert_equal("label", "expected", "expected") is None
