@@ -304,6 +304,43 @@ def test_cleanup_temporary_directory_skips_when_no_directory() -> None:
     rm.assert_not_called()
 
 
+def test_cleanup_temporary_directory_skips_when_shim_dir_missing(
+    tmp_path: Path,
+) -> None:
+    """Skip directory removal if ``shim_dir`` was removed externally."""
+    mgr = EnvironmentManager()
+    path = tmp_path / "missing"
+    path.mkdir()
+    mgr._created_dir = path
+    mgr.shim_dir = path
+    path.rmdir()
+    with patch("cmd_mox.environment._robust_rmtree") as rm:
+        cleanup_errors: list[envmod.CleanupError] = []
+        EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
+    rm.assert_not_called()
+    assert mgr._created_dir is None
+
+
+def test_cleanup_temporary_directory_skips_when_shim_dir_replaced(
+    tmp_path: Path,
+) -> None:
+    """Skip directory removal when ``shim_dir`` differs from ``_created_dir``."""
+    mgr = EnvironmentManager()
+    original = tmp_path / "original"
+    replacement = tmp_path / "replacement"
+    original.mkdir()
+    replacement.mkdir()
+    mgr._created_dir = original
+    mgr.shim_dir = replacement
+    with patch("cmd_mox.environment._robust_rmtree") as rm:
+        cleanup_errors: list[envmod.CleanupError] = []
+        EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
+    rm.assert_not_called()
+    assert mgr._created_dir is None
+    assert original.exists()
+    assert replacement.exists()
+
+
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     """Test that cleanup handles read-only files appropriately."""
     # This test primarily checks the Windows-specific path but runs on all platforms

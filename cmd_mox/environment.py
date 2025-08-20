@@ -226,38 +226,21 @@ class EnvironmentManager:
         """Reset thread-local state tracking the active manager."""
         type(self).reset_active_manager()
 
-    @_collect_os_error("Directory cleanup failed")
-    def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
-        """Remove the temporary directory created by ``__enter__``.
-
-        The manager only removes the directory when it created it and the
-        directory still exists. Otherwise, the method exits early after clearing
-        bookkeeping state. This keeps cleanup idempotent and avoids touching
-        paths managed by the caller.
-
-        - *No directory to remove*: ``_created_dir`` is ``None`` or differs from
-          ``shim_dir`` (perhaps replaced or deleted). In this case the function
-          returns immediately.
-        - *Directory exists*: attempt removal via :func:`_robust_rmtree`. Any
-          ``OSError`` bubbles to ``_collect_os_error`` which aggregates errors
-          for later reporting.
-        """
-        # Determine if there is a directory we are responsible for. If not,
-        # clear state and exit without touching the filesystem.
-        should_remove = (
-            self._created_dir is not None
-            and self.shim_dir is not None
+    def _should_remove_created_dir(self) -> bool:
+        return (
+            self._created_dir
             and self.shim_dir == self._created_dir
             and self.shim_dir.exists()
         )
-        if not should_remove:
-            self._created_dir = None
-            return
 
-        # We created this directory and it still exists, so attempt removal.
+    @_collect_os_error("Directory cleanup failed")
+    def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
+        """Remove the temporary directory created by ``__enter__``."""
         try:
-            _robust_rmtree(self.shim_dir)
+            if self._should_remove_created_dir():
+                _robust_rmtree(self.shim_dir)
         finally:
+            # Clear bookkeeping regardless of removal success
             self._created_dir = None
 
     def _handle_cleanup_errors(
