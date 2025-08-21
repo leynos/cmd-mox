@@ -28,10 +28,11 @@ class CommandRunner:
         any keys in ``invocation.env`` take precedence over both. The returned
         :class:`Response` includes the applied overrides in ``Response.env``.
 
-        Common failures follow POSIX conventions:
+        Common failures follow POSIX-like shell conventions:
 
         * ``127`` - command not found
-        * ``126`` - target exists but is not executable
+        * ``126`` - command found but not executable or execution failed
+          (e.g., permission denied)
         * ``124`` - execution timed out
         """
         resolved = self._resolve_and_validate_command(invocation.command)
