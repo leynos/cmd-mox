@@ -21,8 +21,8 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONNECT_RETRIES = 3
-DEFAULT_CONNECT_BACKOFF = 0.05
+DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
+DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
 
 
 @dc.dataclass(slots=True)
@@ -53,6 +53,19 @@ def _read_all(sock: socket.socket) -> bytes:
     return b"".join(chunks)
 
 
+def _validate_connection_params(retries: int, timeout: float, backoff: float) -> None:
+    """Ensure connection retry parameters are sensible."""
+    if retries < 1:
+        msg = "retries must be >= 1"
+        raise ValueError(msg)
+    if timeout <= 0 or not (timeout < float("inf")):
+        msg = "timeout must be > 0"
+        raise ValueError(msg)
+    if backoff < 0 or not (backoff < float("inf")):
+        msg = "backoff must be >= 0"
+        raise ValueError(msg)
+
+
 def _connect_with_retries(
     sock_path: Path,
     timeout: float,
@@ -67,25 +80,14 @@ def _connect_with_retries(
     number. ``timeout`` must be positive and ``backoff`` non-negative. The
     last ``OSError`` is raised if every attempt fails.
     """
-    if retries < 1:
-        msg = "retries must be >= 1"
-        raise ValueError(msg)
-    if timeout <= 0:
-        msg = "timeout must be > 0"
-        raise ValueError(msg)
-    if backoff < 0:
-        msg = "backoff must be >= 0"
-        raise ValueError(msg)
-
-    last_err: OSError | None = None
+    _validate_connection_params(retries, timeout, backoff)
     address = str(sock_path)
-    for attempt in range(retries):
+    for attempt in range(retries - 1):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         try:
             sock.connect(address)
         except OSError as exc:
-            last_err = exc
             sock.close()
             logger.debug(
                 "IPC connect attempt %d/%d to %s failed: %s",
@@ -94,13 +96,14 @@ def _connect_with_retries(
                 address,
                 exc,
             )
-            if attempt < retries - 1:
-                time.sleep(backoff * (attempt + 1))
-                continue
-            break
+            time.sleep(backoff * (attempt + 1))
+            continue
         else:
             return sock
-    raise t.cast("OSError", last_err)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    sock.connect(address)
+    return sock
 
 
 class _IPCHandler(socketserver.StreamRequestHandler):
@@ -268,9 +271,10 @@ def invoke_server(
     seconds (default: :data:`DEFAULT_CONNECT_BACKOFF`). ``retries`` counts the
     total number of attempts and must be at least one. ``timeout`` must be
     positive and ``backoff`` non-negative. The underlying :class:`OSError`
-    bubbles up if the client cannot connect. A :class:`ValueError` is raised
-    for invalid parameters and :class:`RuntimeError` if the server responds
-    with invalid JSON.
+    bubbles up if the client cannot connect. The same timeout also applies
+    to send/receive operations and may surface as :class:`socket.timeout`.
+    A :class:`ValueError` is raised for invalid parameters and
+    :class:`RuntimeError` if the server responds with invalid JSON.
     """
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
     if sock is None:
