@@ -283,6 +283,18 @@ class TestSpyAssertions:
                 "'hi' called with env {'A': '1'}, expected {'B': '2'}"
             ),
         },
+        {
+            "name": "assert_equal_raises_on_mismatch",
+            "setup": lambda self, run: self._create_spy_with_invocation(
+                "hi", [], "", {}
+            ),
+            "method": "_assert_equal",
+            "args": lambda spy: ("label", "actual", "expected"),
+            "kwargs": lambda spy: {},
+            "expected_message": (
+                "'hi' called with label 'actual', expected 'expected'"
+            ),
+        },
     ]
 
     # ------------------------------------------------------------------
@@ -324,7 +336,14 @@ class TestSpyAssertions:
             "_validate_environment": lambda s: s._validate_environment(
                 s.invocations[0], s.invocations[0].env
             ),
+            "_assert_equal": lambda s: s._assert_equal("label", "expected", "expected"),
         }
         post = post_validations.get(scenario["method"])
         if post is not None:
             post(spy)
+
+    # ------------------------------------------------------------------
+    def test_assert_equal_passes_on_match(self) -> None:
+        """_assert_equal returns quietly when values match."""
+        spy = self._create_spy_with_invocation("hi", [], "", {})
+        assert spy._assert_equal("label", "expected", "expected") is None

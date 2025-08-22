@@ -18,6 +18,8 @@ from .ipc import Invocation, IPCServer, Response
 from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
+T = t.TypeVar("T")
+
 
 def _create_expectation_proxy() -> type:
     """Return a proxy type for expectation delegation.
@@ -282,36 +284,32 @@ class CommandDouble(_ExpectationProxy):
             raise AssertionError(msg)
         return self.invocations[-1]
 
+    def _assert_equal(self, label: str, actual: T, expected: T) -> None:
+        """Raise ``AssertionError`` if *actual* != *expected*.
+
+        The *label* provides contextual information for the error message,
+        yielding a consistent formatting across different validations.
+        """
+        if actual != expected:
+            msg = f"{self.name!r} called with {label} {actual!r}, expected {expected!r}"
+            raise AssertionError(msg)
+
     def _validate_arguments(
         self, invocation: Invocation, expected_args: tuple[str, ...]
     ) -> None:
-        actual_args = tuple(invocation.args)
-        if expected_args != actual_args:
-            msg = (
-                f"{self.name!r} called with args {actual_args!r}, "
-                f"expected {expected_args!r}"
-            )
-            raise AssertionError(msg)
+        self._assert_equal("args", tuple(invocation.args), expected_args)
 
     def _validate_stdin(
         self, invocation: Invocation, expected_stdin: str | None
     ) -> None:
-        if expected_stdin is not None and invocation.stdin != expected_stdin:
-            msg = (
-                f"{self.name!r} called with stdin {invocation.stdin!r}, "
-                f"expected {expected_stdin!r}"
-            )
-            raise AssertionError(msg)
+        if expected_stdin is not None:
+            self._assert_equal("stdin", invocation.stdin, expected_stdin)
 
     def _validate_environment(
         self, invocation: Invocation, expected_env: dict[str, str] | None
     ) -> None:
-        if expected_env is not None and invocation.env != expected_env:
-            msg = (
-                f"{self.name!r} called with env {invocation.env!r}, "
-                f"expected {expected_env!r}"
-            )
-            raise AssertionError(msg)
+        if expected_env is not None:
+            self._assert_equal("env", invocation.env, expected_env)
 
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response."""
