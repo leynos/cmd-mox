@@ -226,20 +226,20 @@ class EnvironmentManager:
         """Reset thread-local state tracking the active manager."""
         type(self).reset_active_manager()
 
-    @_collect_os_error("Directory cleanup failed")
-    def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
-        """Remove the temporary directory created by ``__enter__``.
-
-        If the directory was removed or replaced, skip deletion but still clear
-        internal bookkeeping. Otherwise, remove the directory and clear
-        bookkeeping afterward.
-        """
+    def _should_skip_directory_removal(self) -> bool:
+        """Return ``True`` if no matching temporary directory remains."""
         shim = self.shim_dir
         created = self._created_dir
-        if created is None or shim is None or shim != created or not shim.exists():
+        return created is None or shim is None or shim != created or not shim.exists()
+
+    @_collect_os_error("Directory cleanup failed")
+    def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
+        """Remove the temporary directory created by ``__enter__``."""
+        if self._should_skip_directory_removal():
             self._created_dir = None
             return
 
+        shim = t.cast("Path", self.shim_dir)  # helper ensures this is a Path
         try:
             _robust_rmtree(shim)
         finally:

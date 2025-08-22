@@ -295,6 +295,45 @@ def test_environment_manager_cleanup_error_handling(
     _test_environment_cleanup_error(test_case)
 
 
+def test_should_skip_directory_removal_no_directory() -> None:
+    """Return ``True`` when no directory was created or it's gone."""
+    mgr = EnvironmentManager()
+    assert mgr._should_skip_directory_removal()
+
+
+def test_should_skip_directory_removal_missing_shim(tmp_path: Path) -> None:
+    """Return ``True`` when the created directory was removed."""
+    mgr = EnvironmentManager()
+    path = tmp_path / "missing"
+    path.mkdir()
+    mgr._created_dir = path
+    mgr.shim_dir = path
+    path.rmdir()
+    assert mgr._should_skip_directory_removal()
+
+
+def test_should_skip_directory_removal_replaced(tmp_path: Path) -> None:
+    """Return ``True`` when ``shim_dir`` differs from ``_created_dir``."""
+    mgr = EnvironmentManager()
+    original = tmp_path / "original"
+    replacement = tmp_path / "replacement"
+    original.mkdir()
+    replacement.mkdir()
+    mgr._created_dir = original
+    mgr.shim_dir = replacement
+    assert mgr._should_skip_directory_removal()
+
+
+def test_should_skip_directory_removal_returns_false(tmp_path: Path) -> None:
+    """Return ``False`` when the original directory still exists."""
+    mgr = EnvironmentManager()
+    path = tmp_path / "dir"
+    path.mkdir()
+    mgr._created_dir = path
+    mgr.shim_dir = path
+    assert not mgr._should_skip_directory_removal()
+
+
 def test_cleanup_temporary_directory_skips_when_no_directory() -> None:
     """Skip directory removal when no directory was created or it's gone."""
     mgr = EnvironmentManager()
