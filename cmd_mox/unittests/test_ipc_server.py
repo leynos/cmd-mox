@@ -2,6 +2,7 @@
 
 import socket
 import threading
+import typing as t
 from pathlib import Path
 
 import pytest
@@ -83,6 +84,36 @@ def test_invoke_server_exhausts_retries(
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     with pytest.raises(FileNotFoundError):
         invoke_server(invocation, timeout=0.1, retries=1, backoff=0.01)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"retries": 0}, "retries must"),
+        ({"timeout": 0.0}, "timeout must"),
+        ({"backoff": -0.1}, "backoff must"),
+    ],
+)
+def test_invoke_server_validates_params(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kwargs: dict[str, t.Any],
+    match: str,
+) -> None:
+    """Client rejects invalid retry configuration."""
+    socket_path = tmp_path / "ipc.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    invocation = Invocation(command="ls", args=[], stdin="", env={})
+    timeout = t.cast("float", kwargs.get("timeout", 1.0))
+    retries = t.cast("int", kwargs.get("retries", 1))
+    backoff = t.cast("float", kwargs.get("backoff", 0.0))
+    with pytest.raises(ValueError, match=match):
+        invoke_server(
+            invocation,
+            timeout=timeout,
+            retries=retries,
+            backoff=backoff,
+        )
 
 
 def test_invoke_server_invalid_json(

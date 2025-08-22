@@ -61,10 +61,22 @@ def _connect_with_retries(
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`.
 
-    Opens an ``AF_UNIX`` socket and attempts to connect up to ``retries``
-    times. The delay between attempts scales linearly with ``backoff`` and the
-    attempt number. Raises the last ``OSError`` if all attempts fail.
+    Opens an ``AF_UNIX`` socket and performs ``retries`` connection attempts.
+    ``retries`` is the total number of attempts and must be at least one. The
+    delay between attempts scales linearly with ``backoff`` and the attempt
+    number. ``timeout`` must be positive and ``backoff`` non-negative. The
+    last ``OSError`` is raised if every attempt fails.
     """
+    if retries < 1:
+        msg = "retries must be >= 1"
+        raise ValueError(msg)
+    if timeout <= 0:
+        msg = "timeout must be > 0"
+        raise ValueError(msg)
+    if backoff < 0:
+        msg = "backoff must be >= 0"
+        raise ValueError(msg)
+
     last_err: OSError | None = None
     address = str(sock_path)
     for attempt in range(retries):
@@ -75,16 +87,20 @@ def _connect_with_retries(
         except OSError as exc:
             last_err = exc
             sock.close()
+            logger.debug(
+                "IPC connect attempt %d/%d to %s failed: %s",
+                attempt + 1,
+                retries,
+                address,
+                exc,
+            )
             if attempt < retries - 1:
                 time.sleep(backoff * (attempt + 1))
                 continue
             break
         else:
             return sock
-    if last_err is None:  # pragma: no cover - defensive; retries >=1 ensures this
-        msg = "Retries exhausted without error captured"
-        raise RuntimeError(msg)
-    raise last_err
+    raise t.cast("OSError", last_err)
 
 
 class _IPCHandler(socketserver.StreamRequestHandler):
@@ -247,11 +263,14 @@ def invoke_server(
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
-    Connection attempts are retried ``retries`` times (default:
+    Attempts to connect ``retries`` times (default:
     :data:`DEFAULT_CONNECT_RETRIES`) with a linear backoff of ``backoff``
-    seconds (default: :data:`DEFAULT_CONNECT_BACKOFF`) between attempts. The
-    underlying :class:`OSError` bubbles up if the client cannot connect. A
-    :class:`RuntimeError` is raised if the server responds with invalid JSON.
+    seconds (default: :data:`DEFAULT_CONNECT_BACKOFF`). ``retries`` counts the
+    total number of attempts and must be at least one. ``timeout`` must be
+    positive and ``backoff`` non-negative. The underlying :class:`OSError`
+    bubbles up if the client cannot connect. A :class:`ValueError` is raised
+    for invalid parameters and :class:`RuntimeError` if the server responds
+    with invalid JSON.
     """
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
     if sock is None:
