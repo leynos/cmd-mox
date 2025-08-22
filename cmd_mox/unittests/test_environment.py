@@ -295,45 +295,6 @@ def test_environment_manager_cleanup_error_handling(
     _test_environment_cleanup_error(test_case)
 
 
-def test_should_cleanup_directory_returns_false_when_no_directory() -> None:
-    """Return False when no directory was created."""
-    mgr = EnvironmentManager()
-    assert not mgr._should_cleanup_directory()
-
-
-def test_should_cleanup_directory_returns_true(tmp_path: Path) -> None:
-    """Return True when created and shim directories match and exist."""
-    mgr = EnvironmentManager()
-    path = tmp_path / "match"
-    path.mkdir()
-    mgr._created_dir = path
-    mgr.shim_dir = path
-    assert mgr._should_cleanup_directory()
-
-
-def test_should_cleanup_directory_returns_false_when_missing(tmp_path: Path) -> None:
-    """Return False if ``shim_dir`` was removed externally."""
-    mgr = EnvironmentManager()
-    path = tmp_path / "missing"
-    path.mkdir()
-    mgr._created_dir = path
-    mgr.shim_dir = path
-    path.rmdir()
-    assert not mgr._should_cleanup_directory()
-
-
-def test_should_cleanup_directory_returns_false_when_replaced(tmp_path: Path) -> None:
-    """Return False when ``shim_dir`` differs from ``_created_dir``."""
-    mgr = EnvironmentManager()
-    original = tmp_path / "original"
-    replacement = tmp_path / "replacement"
-    original.mkdir()
-    replacement.mkdir()
-    mgr._created_dir = original
-    mgr.shim_dir = replacement
-    assert not mgr._should_cleanup_directory()
-
-
 def test_cleanup_temporary_directory_skips_when_no_directory() -> None:
     """Skip directory removal when no directory was created or it's gone."""
     mgr = EnvironmentManager()
