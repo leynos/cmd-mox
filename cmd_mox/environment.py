@@ -226,6 +226,15 @@ class EnvironmentManager:
         """Reset thread-local state tracking the active manager."""
         type(self).reset_active_manager()
 
+    def _should_cleanup_directory(self) -> bool:
+        """Return True if we should remove the temporary directory we created."""
+        return (
+            self._created_dir is not None
+            and self.shim_dir is not None
+            and self.shim_dir == self._created_dir
+            and self.shim_dir.exists()
+        )
+
     @_collect_os_error("Directory cleanup failed")
     def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
         """Idempotently remove the temporary directory created by ``__enter__``.
@@ -234,12 +243,7 @@ class EnvironmentManager:
         or replaced). Always clears internal bookkeeping in a ``finally`` block.
         """
         try:
-            if (
-                self._created_dir is not None
-                and self.shim_dir is not None
-                and self.shim_dir == self._created_dir
-                and self.shim_dir.exists()
-            ):
+            if self._should_cleanup_directory():
                 _robust_rmtree(self.shim_dir)
         finally:
             # Clear bookkeeping regardless of removal success
