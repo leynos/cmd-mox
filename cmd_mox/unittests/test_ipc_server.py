@@ -2,6 +2,7 @@
 
 import socket
 import threading
+import typing as t
 from pathlib import Path
 
 import pytest
@@ -64,14 +65,59 @@ def test_invoke_server_retries_connection(
         time.sleep(0.05)
         server.start()
 
-    thread = threading.Thread(target=delayed_start)
+    thread = threading.Thread(target=delayed_start, daemon=True)
     thread.start()
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
-    response = invoke_server(invocation, timeout=1.0)
-    assert response.stdout == "ls"
-    thread.join()
-    server.stop()
+    try:
+        response = invoke_server(invocation, timeout=1.0, retries=5, backoff=0.01)
+        assert response.stdout == "ls"
+    finally:
+        thread.join()
+        server.stop()
+
+
+def test_invoke_server_exhausts_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Client gives up after exceeding the retry limit."""
+    socket_path = tmp_path / "ipc.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    invocation = Invocation(command="ls", args=[], stdin="", env={})
+    with pytest.raises(FileNotFoundError):
+        invoke_server(invocation, timeout=0.1, retries=1, backoff=0.01)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"retries": 0}, "retries must"),
+        ({"timeout": 0.0}, "timeout must"),
+        ({"timeout": float("inf")}, "timeout must"),
+        ({"backoff": -0.1}, "backoff must"),
+        ({"backoff": float("nan")}, "backoff must"),
+    ],
+)
+def test_invoke_server_validates_params(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kwargs: dict[str, t.Any],
+    match: str,
+) -> None:
+    """Client rejects invalid retry configuration."""
+    socket_path = tmp_path / "ipc.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    invocation = Invocation(command="ls", args=[], stdin="", env={})
+    timeout = t.cast("float", kwargs.get("timeout", 1.0))
+    retries = t.cast("int", kwargs.get("retries", 1))
+    backoff = t.cast("float", kwargs.get("backoff", 0.0))
+    with pytest.raises(ValueError, match=match):
+        invoke_server(
+            invocation,
+            timeout=timeout,
+            retries=retries,
+            backoff=backoff,
+        )
 
 
 def test_invoke_server_invalid_json(
