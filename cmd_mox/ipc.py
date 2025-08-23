@@ -6,6 +6,7 @@ import contextlib
 import dataclasses as dc
 import json
 import logging
+import math
 import os
 import socket
 import socketserver
@@ -58,10 +59,10 @@ def _validate_connection_params(retries: int, timeout: float, backoff: float) ->
     if retries < 1:
         msg = "retries must be >= 1"
         raise ValueError(msg)
-    if timeout <= 0 or not (timeout < float("inf")):
+    if not (timeout > 0 and math.isfinite(timeout)):
         msg = "timeout must be > 0"
         raise ValueError(msg)
-    if backoff < 0 or not (backoff < float("inf")):
+    if not (backoff >= 0 and math.isfinite(backoff)):
         msg = "backoff must be >= 0"
         raise ValueError(msg)
 
@@ -97,7 +98,10 @@ def _connect_with_retries(
                 exc,
             )
             if attempt < retries - 1:
-                time.sleep(backoff * (attempt + 1))
+                delay = backoff * (attempt + 1)
+                # Optional: add jitter to spread retries under contention
+                # delay *= 0.8 + random.random() * 0.4
+                time.sleep(delay)
                 continue
             raise
         else:
@@ -283,15 +287,17 @@ def invoke_server(
 
     sock_path = Path(sock)
     with _connect_with_retries(sock_path, timeout, retries, backoff) as client:
-        client.sendall(json.dumps(dc.asdict(invocation)).encode())
+        payload_bytes = json.dumps(dc.asdict(invocation)).encode("utf-8")
+        client.sendall(payload_bytes)
         client.shutdown(socket.SHUT_WR)
         raw = _read_all(client)
 
     try:
-        payload = json.loads(raw.decode())
+        payload = json.loads(raw.decode("utf-8"))
     except json.JSONDecodeError as exc:
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg) from exc
-
-    payload_dict = t.cast("dict[str, t.Any]", payload)
-    return Response(**payload_dict)
+    if not isinstance(payload, dict):
+        msg = f"Invalid JSON object from IPC server: {type(payload).__name__}"
+        raise RuntimeError(msg)  # noqa: TRY004
+    return Response(**t.cast("dict[str, t.Any]", payload))

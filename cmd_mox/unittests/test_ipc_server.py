@@ -8,12 +8,7 @@ from pathlib import Path
 import pytest
 
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
-from cmd_mox.ipc import (
-    Invocation,
-    IPCServer,
-    _validate_connection_params,
-    invoke_server,
-)
+from cmd_mox.ipc import Invocation, IPCServer, invoke_server
 
 
 def test_ipc_server_start_stop(tmp_path: Path) -> None:
@@ -70,14 +65,16 @@ def test_invoke_server_retries_connection(
         time.sleep(0.05)
         server.start()
 
-    thread = threading.Thread(target=delayed_start)
+    thread = threading.Thread(target=delayed_start, daemon=True)
     thread.start()
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
-    response = invoke_server(invocation, timeout=1.0, retries=5, backoff=0.01)
-    assert response.stdout == "ls"
-    thread.join()
-    server.stop()
+    try:
+        response = invoke_server(invocation, timeout=1.0, retries=5, backoff=0.01)
+        assert response.stdout == "ls"
+    finally:
+        thread.join()
+        server.stop()
 
 
 def test_invoke_server_exhausts_retries(
@@ -119,29 +116,6 @@ def test_invoke_server_validates_params(
             retries=retries,
             backoff=backoff,
         )
-
-
-def test_validate_connection_params_accepts_valid_values() -> None:
-    """Validation passes for sensible parameters."""
-    _validate_connection_params(1, 1.0, 0.0)
-
-
-@pytest.mark.parametrize(
-    ("retries", "timeout", "backoff", "match"),
-    [
-        (0, 1.0, 0.0, "retries must"),
-        (1, 0.0, 0.0, "timeout must"),
-        (1, 1.0, -0.1, "backoff must"),
-        (1, float("inf"), 0.0, "timeout must"),
-        (1, 1.0, float("inf"), "backoff must"),
-    ],
-)
-def test_validate_connection_params_rejects_invalid_values(
-    retries: int, timeout: float, backoff: float, match: str
-) -> None:
-    """Validation fails with helpful messages for bad parameters."""
-    with pytest.raises(ValueError, match=match):
-        _validate_connection_params(retries, timeout, backoff)
 
 
 def test_invoke_server_invalid_json(
