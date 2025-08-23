@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import random
 import socket
 import socketserver
 import threading
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
+DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 
 
 @dc.dataclass(slots=True)
@@ -96,7 +98,9 @@ def _attempt_connection(sock: socket.socket, address: str) -> bool:
     return True
 
 
-def _validate_connection_params(retries: int, timeout: float, backoff: float) -> None:
+def _validate_connection_params(
+    retries: int, timeout: float, backoff: float, jitter: float
+) -> None:
     """Ensure connection retry parameters are sensible."""
     if retries < 1:
         msg = "retries must be >= 1"
@@ -107,6 +111,9 @@ def _validate_connection_params(retries: int, timeout: float, backoff: float) ->
     if not (backoff >= 0 and math.isfinite(backoff)):
         msg = "backoff must be >= 0 and finite"
         raise ValueError(msg)
+    if not (0.0 <= jitter <= 1.0 and math.isfinite(jitter)):
+        msg = "jitter must be between 0 and 1 and finite"
+        raise ValueError(msg)
 
 
 def _connect_with_retries(
@@ -114,16 +121,18 @@ def _connect_with_retries(
     timeout: float,
     retries: int,
     backoff: float,
+    jitter: float,
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`.
 
     Opens an ``AF_UNIX`` socket and performs ``retries`` connection attempts.
     ``retries`` is the total number of attempts and must be at least one. The
     delay between attempts scales linearly with ``backoff`` and the attempt
-    number. ``timeout`` must be positive and ``backoff`` non-negative. The
-    last ``OSError`` is raised if every attempt fails.
+    number. ``timeout`` must be positive, ``backoff`` non-negative, and
+    ``jitter`` within ``[0, 1]``. The last ``OSError`` is raised if every
+    attempt fails.
     """
-    _validate_connection_params(retries, timeout, backoff)
+    _validate_connection_params(retries, timeout, backoff, jitter)
     address = str(sock_path)
     for attempt in range(retries):
         sock = _create_unix_socket(timeout)
@@ -140,15 +149,23 @@ def _connect_with_retries(
             )
             if attempt < retries - 1:
                 delay = backoff * (attempt + 1)
-                # Optional: add jitter to spread retries under contention
-                # delay *= 0.8 + random.random() * 0.4
+                if jitter:
+                    factor = (
+                        1.0 - jitter + random.random() * 2 * jitter  # noqa: S311
+                    )
+                    delay *= factor
                 time.sleep(delay)
                 continue
             raise
         else:
             return sock
     # Loop always returns or raises; this is defensive.
-    raise RuntimeError  # pragma: no cover
+    msg = (
+        "Unreachable code reached in socket connection loop: all retry "
+        "attempts exhausted and no socket returned. This indicates a logic "
+        "error or unexpected control flow."
+    )
+    raise RuntimeError(msg)  # pragma: no cover
 
 
 def _cleanup_stale_socket(socket_path: Path) -> None:
@@ -171,9 +188,9 @@ def _cleanup_stale_socket(socket_path: Path) -> None:
 
 def _wait_for_socket(socket_path: Path, timeout: float) -> None:
     """Poll for *socket_path* to appear within *timeout* seconds."""
-    timeout_end = time.time() + timeout
+    timeout_end = time.monotonic() + timeout
     wait_time = 0.001
-    while time.time() < timeout_end:
+    while time.monotonic() < timeout_end:
         if socket_path.exists():
             return
         time.sleep(wait_time)
@@ -308,21 +325,25 @@ def invoke_server(
     timeout: float,
     retries: int = DEFAULT_CONNECT_RETRIES,
     backoff: float = DEFAULT_CONNECT_BACKOFF,
+    jitter: float = DEFAULT_CONNECT_JITTER,
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
     Attempts to connect ``retries`` times (default:
     :data:`DEFAULT_CONNECT_RETRIES`) with a linear backoff of ``backoff``
-    seconds (default: :data:`DEFAULT_CONNECT_BACKOFF`). ``retries`` counts the
-    total number of attempts and must be at least one. ``timeout`` must be
-    positive and ``backoff`` non-negative. The underlying :class:`OSError`
+    seconds (default: :data:`DEFAULT_CONNECT_BACKOFF`). A jitter fraction
+    (default: :data:`DEFAULT_CONNECT_JITTER`) spreads delays to avoid
+    synchronized retries. ``retries`` counts the total number of attempts and
+    must be at least one. ``timeout`` must be positive, ``backoff``
+    non-negative, and ``jitter`` within ``[0, 1]``. The underlying
+    :class:`OSError`
     bubbles up if the client cannot connect. The same timeout also applies
     to send/receive operations and may surface as :class:`socket.timeout`.
     A :class:`ValueError` is raised for invalid parameters and
     :class:`RuntimeError` if the server responds with invalid JSON.
     """
     sock_path = _get_validated_socket_path()
-    with _connect_with_retries(sock_path, timeout, retries, backoff) as client:
+    with _connect_with_retries(sock_path, timeout, retries, backoff, jitter) as client:
         payload_bytes = json.dumps(dc.asdict(invocation)).encode("utf-8")
         client.sendall(payload_bytes)
         client.shutdown(socket.SHUT_WR)

@@ -8,7 +8,12 @@ from pathlib import Path
 import pytest
 
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
-from cmd_mox.ipc import Invocation, IPCServer, invoke_server
+from cmd_mox.ipc import (
+    DEFAULT_CONNECT_JITTER,
+    Invocation,
+    IPCServer,
+    invoke_server,
+)
 
 
 def test_ipc_server_start_stop(tmp_path: Path) -> None:
@@ -65,7 +70,7 @@ def test_invoke_server_retries_connection(
         time.sleep(0.05)
         server.start()
 
-    thread = threading.Thread(target=delayed_start, daemon=True)
+    thread = threading.Thread(target=delayed_start)
     thread.start()
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
@@ -96,6 +101,9 @@ def test_invoke_server_exhausts_retries(
         ({"timeout": float("inf")}, "timeout must"),
         ({"backoff": -0.1}, "backoff must"),
         ({"backoff": float("nan")}, "backoff must"),
+        ({"jitter": -0.1}, "jitter must"),
+        ({"jitter": 1.1}, "jitter must"),
+        ({"jitter": float("nan")}, "jitter must"),
     ],
 )
 def test_invoke_server_validates_params(
@@ -111,12 +119,14 @@ def test_invoke_server_validates_params(
     timeout = t.cast("float", kwargs.get("timeout", 1.0))
     retries = t.cast("int", kwargs.get("retries", 1))
     backoff = t.cast("float", kwargs.get("backoff", 0.0))
+    jitter = t.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER))
     with pytest.raises(ValueError, match=match):
         invoke_server(
             invocation,
             timeout=timeout,
             retries=retries,
             backoff=backoff,
+            jitter=jitter,
         )
 
 
