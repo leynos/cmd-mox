@@ -82,7 +82,7 @@ def _connect_with_retries(
     """
     _validate_connection_params(retries, timeout, backoff)
     address = str(sock_path)
-    for attempt in range(retries - 1):
+    for attempt in range(retries):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         try:
@@ -96,14 +96,14 @@ def _connect_with_retries(
                 address,
                 exc,
             )
-            time.sleep(backoff * (attempt + 1))
-            continue
+            if attempt < retries - 1:
+                time.sleep(backoff * (attempt + 1))
+                continue
+            raise
         else:
             return sock
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    sock.connect(address)
-    return sock
+    # Loop always returns or raises; this is defensive.
+    raise RuntimeError  # pragma: no cover
 
 
 class _IPCHandler(socketserver.StreamRequestHandler):
