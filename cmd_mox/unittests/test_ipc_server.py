@@ -93,7 +93,9 @@ def test_invoke_server_exhausts_retries(
     [
         ({"retries": 0}, "retries must"),
         ({"timeout": 0.0}, "timeout must"),
+        ({"timeout": float("inf")}, "timeout must"),
         ({"backoff": -0.1}, "backoff must"),
+        ({"backoff": float("nan")}, "backoff must"),
     ],
 )
 def test_invoke_server_validates_params(

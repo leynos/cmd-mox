@@ -60,10 +60,10 @@ def _validate_connection_params(retries: int, timeout: float, backoff: float) ->
         msg = "retries must be >= 1"
         raise ValueError(msg)
     if not (timeout > 0 and math.isfinite(timeout)):
-        msg = "timeout must be > 0"
+        msg = "timeout must be > 0 and finite"
         raise ValueError(msg)
     if not (backoff >= 0 and math.isfinite(backoff)):
-        msg = "backoff must be >= 0"
+        msg = "backoff must be >= 0 and finite"
         raise ValueError(msg)
 
 
