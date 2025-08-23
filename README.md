@@ -69,8 +69,7 @@ Out of scope (for now, or forever):
   don’t.
 
 - 🪟 **Windows support** – maybe one day. Until then: enjoy your `.bat` files
-  and
-  pray to `CreateProcess()`.
+  and pray to `CreateProcess()`.
 
 - 🦕 **Legacy UNIX support** – AIX, Solaris, IRIX? Sorry boys, the boat sailed,
   caught fire, and sank in 2003.
