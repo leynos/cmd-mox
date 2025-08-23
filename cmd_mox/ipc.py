@@ -54,6 +54,48 @@ def _read_all(sock: socket.socket) -> bytes:
     return b"".join(chunks)
 
 
+def _parse_json_safely(data: bytes) -> dict[str, t.Any] | None:
+    """Return a JSON object parsed from *data* or ``None`` on failure."""
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return t.cast("dict[str, t.Any]", payload)
+
+
+def _validate_invocation_payload(payload: dict[str, t.Any]) -> Invocation | None:
+    """Return an :class:`Invocation` if *payload* has the required fields."""
+    try:
+        return Invocation(**payload)  # type: ignore[arg-type]
+    except TypeError:
+        logger.exception("IPC payload missing required fields: %r", payload)
+        return None
+
+
+def _get_validated_socket_path() -> Path:
+    """Fetch the IPC socket path from the environment."""
+    sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
+    if sock is None:
+        msg = f"{CMOX_IPC_SOCKET_ENV} is not set"
+        raise RuntimeError(msg)
+    return Path(sock)
+
+
+def _create_unix_socket(timeout: float) -> socket.socket:
+    """Create a Unix stream socket with *timeout* applied."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    return sock
+
+
+def _attempt_connection(sock: socket.socket, address: str) -> bool:
+    """Attempt to connect *sock* to *address* returning ``True`` on success."""
+    sock.connect(address)
+    return True
+
+
 def _validate_connection_params(retries: int, timeout: float, backoff: float) -> None:
     """Ensure connection retry parameters are sensible."""
     if retries < 1:
@@ -84,10 +126,9 @@ def _connect_with_retries(
     _validate_connection_params(retries, timeout, backoff)
     address = str(sock_path)
     for attempt in range(retries):
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
+        sock = _create_unix_socket(timeout)
         try:
-            sock.connect(address)
+            _attempt_connection(sock, address)
         except OSError as exc:
             sock.close()
             logger.debug(
@@ -110,29 +151,58 @@ def _connect_with_retries(
     raise RuntimeError  # pragma: no cover
 
 
+def _cleanup_stale_socket(socket_path: Path) -> None:
+    """Remove a pre-existing socket file if no server is listening."""
+    if not socket_path.exists():
+        return
+    try:
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.connect(str(socket_path))
+            probe.close()
+            msg = f"Socket {socket_path} is still in use"
+            raise RuntimeError(msg)
+        except (ConnectionRefusedError, OSError):
+            pass
+        socket_path.unlink()
+    except OSError as exc:  # pragma: no cover - unlikely race
+        logger.warning("Could not unlink stale socket %s: %s", socket_path, exc)
+
+
+def _wait_for_socket(socket_path: Path, timeout: float) -> None:
+    """Poll for *socket_path* to appear within *timeout* seconds."""
+    timeout_end = time.time() + timeout
+    wait_time = 0.001
+    while time.time() < timeout_end:
+        if socket_path.exists():
+            return
+        time.sleep(wait_time)
+        wait_time = min(wait_time * 1.5, 0.1)
+    msg = f"Socket file {socket_path} not created within timeout"
+    raise RuntimeError(msg)
+
+
 class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
         raw = self.rfile.read()
-        try:
-            payload = json.loads(raw.decode())
-        except json.JSONDecodeError:
-            logger.exception("IPC received malformed JSON")
+        payload = _parse_json_safely(raw)
+        if payload is None:
+            try:
+                obj = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                logger.exception("IPC received malformed JSON")
+            else:
+                logger.error("IPC payload not a dict: %r", obj)
             return
-        if not isinstance(payload, dict):
-            logger.error("IPC payload not a dict: %r", payload)
-            return
-        try:
-            payload_dict = t.cast("dict[str, t.Any]", payload)
-            invocation = Invocation(**payload_dict)  # type: ignore[arg-type] - payload validated
-        except TypeError:
-            logger.exception("IPC payload missing required fields: %r", payload)
+        invocation = _validate_invocation_payload(payload)
+        if invocation is None:
             return
         response = self.server.outer.handle_invocation(  # type: ignore[attr-defined]
             invocation
         )
-        self.wfile.write(json.dumps(dc.asdict(response)).encode())
+        self.wfile.write(json.dumps(dc.asdict(response)).encode("utf-8"))
         self.wfile.flush()
 
 
@@ -203,43 +273,14 @@ class IPCServer:
             msg = "IPC server already started"
             raise RuntimeError(msg)
 
-        if self.socket_path.exists():
-            try:
-                # Verify the socket isn't in use before removing it to avoid
-                # clobbering another process's server.
-                probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                try:
-                    probe.connect(str(self.socket_path))
-                    probe.close()
-                    msg = f"Socket {self.socket_path} is still in use"
-                    raise RuntimeError(msg)
-                except (ConnectionRefusedError, OSError):
-                    # No listener found; safe to remove the stale file.
-                    pass
-                self.socket_path.unlink()
-            except OSError as exc:  # pragma: no cover - unlikely race
-                logger.warning(
-                    "Could not unlink stale socket %s: %s", self.socket_path, exc
-                )
+        _cleanup_stale_socket(self.socket_path)
 
         self._server = _InnerServer(self.socket_path, self)
         self._server.timeout = self.accept_timeout
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
-        # Poll for the socket path using exponential backoff to avoid races on
-        # slower systems while failing quickly when something goes wrong.
-        timeout_end = time.time() + self.timeout
-        wait_time = 0.001
-        while time.time() < timeout_end:
-            if self.socket_path.exists():
-                break
-            time.sleep(wait_time)
-            wait_time = min(wait_time * 1.5, 0.1)
-
-        if not self.socket_path.exists():
-            msg = f"Socket file {self.socket_path} not created within timeout"
-            raise RuntimeError(msg)
+        _wait_for_socket(self.socket_path, self.timeout)
 
     def stop(self) -> None:
         """Stop the server and clean up the socket."""
@@ -280,24 +321,15 @@ def invoke_server(
     A :class:`ValueError` is raised for invalid parameters and
     :class:`RuntimeError` if the server responds with invalid JSON.
     """
-    sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
-    if sock is None:
-        msg = f"{CMOX_IPC_SOCKET_ENV} is not set"
-        raise RuntimeError(msg)
-
-    sock_path = Path(sock)
+    sock_path = _get_validated_socket_path()
     with _connect_with_retries(sock_path, timeout, retries, backoff) as client:
         payload_bytes = json.dumps(dc.asdict(invocation)).encode("utf-8")
         client.sendall(payload_bytes)
         client.shutdown(socket.SHUT_WR)
         raw = _read_all(client)
 
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except json.JSONDecodeError as exc:
+    payload = _parse_json_safely(raw)
+    if payload is None:
         msg = "Invalid JSON from IPC server"
-        raise RuntimeError(msg) from exc
-    if not isinstance(payload, dict):
-        msg = f"Invalid JSON object from IPC server: {type(payload).__name__}"
-        raise RuntimeError(msg)  # noqa: TRY004
-    return Response(**t.cast("dict[str, t.Any]", payload))
+        raise RuntimeError(msg)
+    return Response(**payload)
