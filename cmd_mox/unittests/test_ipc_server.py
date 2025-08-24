@@ -12,6 +12,8 @@ from cmd_mox.ipc import (
     DEFAULT_CONNECT_JITTER,
     Invocation,
     IPCServer,
+    RetryConfig,
+    _calculate_retry_delay,
     invoke_server,
 )
 
@@ -75,7 +77,8 @@ def test_invoke_server_retries_connection(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     try:
-        response = invoke_server(invocation, timeout=1.0, retries=5, backoff=0.01)
+        retry_config = RetryConfig(retries=5, backoff=0.01)
+        response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
         assert response.stdout == "ls"
     finally:
         thread.join()
@@ -90,7 +93,11 @@ def test_invoke_server_exhausts_retries(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     with pytest.raises(FileNotFoundError):
-        invoke_server(invocation, timeout=0.1, retries=1, backoff=0.01)
+        invoke_server(
+            invocation,
+            timeout=0.1,
+            retry_config=RetryConfig(retries=1, backoff=0.01),
+        )
 
 
 @pytest.mark.parametrize(
@@ -117,16 +124,16 @@ def test_invoke_server_validates_params(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     timeout = t.cast("float", kwargs.get("timeout", 1.0))
-    retries = t.cast("int", kwargs.get("retries", 1))
-    backoff = t.cast("float", kwargs.get("backoff", 0.0))
-    jitter = t.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER))
+    retry_kwargs = {
+        "retries": t.cast("int", kwargs.get("retries", 1)),
+        "backoff": t.cast("float", kwargs.get("backoff", 0.0)),
+        "jitter": t.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER)),
+    }
     with pytest.raises(ValueError, match=match):
         invoke_server(
             invocation,
             timeout=timeout,
-            retries=retries,
-            backoff=backoff,
-            jitter=jitter,
+            retry_config=RetryConfig(**retry_kwargs),
         )
 
 
@@ -153,3 +160,10 @@ def test_invoke_server_invalid_json(
     with pytest.raises(RuntimeError, match="Invalid JSON"):
         invoke_server(invocation, timeout=1.0)
     thread.join()
+
+
+def test_calculate_retry_delay() -> None:
+    """Retry delay scales linearly and applies jitter bounds."""
+    assert _calculate_retry_delay(1, 0.1, 0.0) == pytest.approx(0.2)
+    delay = _calculate_retry_delay(0, 1.0, 0.5)
+    assert 0.5 <= delay <= 1.5

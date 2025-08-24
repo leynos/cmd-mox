@@ -29,6 +29,22 @@ DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 
 
 @dc.dataclass(slots=True)
+class RetryConfig:
+    """Configuration for connection retry behavior."""
+
+    retries: int = DEFAULT_CONNECT_RETRIES
+    backoff: float = DEFAULT_CONNECT_BACKOFF
+    jitter: float = DEFAULT_CONNECT_JITTER
+
+    def __post_init__(self) -> None:
+        """Validate retry configuration values."""
+        # ``_validate_connection_params`` also checks the timeout value, which
+        # is unrelated to this dataclass. Pass a dummy positive timeout to
+        # validate the retry parameters.
+        _validate_connection_params(1.0, self)
+
+
+@dc.dataclass(slots=True)
 class Invocation:
     """Information reported by a shim to the IPC server."""
 
@@ -98,43 +114,68 @@ def _attempt_connection(sock: socket.socket, address: str) -> bool:
     return True
 
 
-def _validate_connection_params(
-    retries: int, timeout: float, backoff: float, jitter: float
-) -> None:
-    """Ensure connection retry parameters are sensible."""
+def _validate_retries(retries: int) -> None:
+    """Validate retry attempt count."""
     if retries < 1:
         msg = "retries must be >= 1"
         raise ValueError(msg)
+
+
+def _validate_timeout(timeout: float) -> None:
+    """Validate overall timeout value."""
     if not (timeout > 0 and math.isfinite(timeout)):
         msg = "timeout must be > 0 and finite"
         raise ValueError(msg)
+
+
+def _validate_backoff(backoff: float) -> None:
+    """Validate linear backoff value."""
     if not (backoff >= 0 and math.isfinite(backoff)):
         msg = "backoff must be >= 0 and finite"
         raise ValueError(msg)
+
+
+def _validate_jitter(jitter: float) -> None:
+    """Validate jitter fraction."""
     if not (0.0 <= jitter <= 1.0 and math.isfinite(jitter)):
         msg = "jitter must be between 0 and 1 and finite"
         raise ValueError(msg)
 
 
+def _validate_connection_params(timeout: float, retry_config: RetryConfig) -> None:
+    """Ensure connection retry parameters are sensible."""
+    _validate_retries(retry_config.retries)
+    _validate_timeout(timeout)
+    _validate_backoff(retry_config.backoff)
+    _validate_jitter(retry_config.jitter)
+
+
+def _calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
+    """Return the sleep delay for a given *attempt*."""
+    delay = backoff * (attempt + 1)
+    if jitter:
+        factor = 1.0 - jitter + random.random() * 2 * jitter  # noqa: S311
+        delay *= factor
+    return delay
+
+
 def _connect_with_retries(
     sock_path: Path,
     timeout: float,
-    retries: int,
-    backoff: float,
-    jitter: float,
+    retry_config: RetryConfig,
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`.
 
-    Opens an ``AF_UNIX`` socket and performs ``retries`` connection attempts.
-    ``retries`` is the total number of attempts and must be at least one. The
-    delay between attempts scales linearly with ``backoff`` and the attempt
-    number. ``timeout`` must be positive, ``backoff`` non-negative, and
-    ``jitter`` within ``[0, 1]``. The last ``OSError`` is raised if every
-    attempt fails.
+    Opens an ``AF_UNIX`` socket and performs ``retry_config.retries`` connection
+    attempts. ``retry_config.retries`` is the total number of attempts and must
+    be at least one. The delay between attempts scales linearly with
+    ``retry_config.backoff`` and the attempt number. ``timeout`` must be
+    positive, ``retry_config.backoff`` non-negative, and ``retry_config.jitter``
+    within ``[0, 1]``. The last ``OSError`` is raised if every attempt fails.
     """
-    _validate_connection_params(retries, timeout, backoff, jitter)
+    _validate_connection_params(timeout, retry_config)
     address = str(sock_path)
-    for attempt in range(retries):
+    for attempt in range(retry_config.retries):
         sock = _create_unix_socket(timeout)
         try:
             _attempt_connection(sock, address)
@@ -143,17 +184,14 @@ def _connect_with_retries(
             logger.debug(
                 "IPC connect attempt %d/%d to %s failed: %s",
                 attempt + 1,
-                retries,
+                retry_config.retries,
                 address,
                 exc,
             )
-            if attempt < retries - 1:
-                delay = backoff * (attempt + 1)
-                if jitter:
-                    factor = (
-                        1.0 - jitter + random.random() * 2 * jitter  # noqa: S311
-                    )
-                    delay *= factor
+            if attempt < retry_config.retries - 1:
+                delay = _calculate_retry_delay(
+                    attempt, retry_config.backoff, retry_config.jitter
+                )
                 time.sleep(delay)
                 continue
             raise
@@ -323,27 +361,28 @@ class IPCServer:
 def invoke_server(
     invocation: Invocation,
     timeout: float,
-    retries: int = DEFAULT_CONNECT_RETRIES,
-    backoff: float = DEFAULT_CONNECT_BACKOFF,
-    jitter: float = DEFAULT_CONNECT_JITTER,
+    retry_config: RetryConfig | None = None,
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
-    Attempts to connect ``retries`` times (default:
-    :data:`DEFAULT_CONNECT_RETRIES`) with a linear backoff of ``backoff``
-    seconds (default: :data:`DEFAULT_CONNECT_BACKOFF`). A jitter fraction
-    (default: :data:`DEFAULT_CONNECT_JITTER`) spreads delays to avoid
-    synchronized retries. ``retries`` counts the total number of attempts and
-    must be at least one. ``timeout`` must be positive, ``backoff``
-    non-negative, and ``jitter`` within ``[0, 1]``. The underlying
+    Attempts to connect ``retry_config.retries`` times (default:
+    :data:`DEFAULT_CONNECT_RETRIES`) with a linear backoff of
+    ``retry_config.backoff`` seconds (default:
+    :data:`DEFAULT_CONNECT_BACKOFF`). A jitter fraction (default:
+    :data:`DEFAULT_CONNECT_JITTER`) spreads delays to avoid synchronized retries.
+    ``retry_config.retries`` counts the total number of attempts and must be at
+    least one. ``timeout`` must be positive,
+    ``retry_config.backoff`` non-negative, and ``retry_config.jitter`` within
+    ``[0, 1]``. The underlying
     :class:`OSError`
     bubbles up if the client cannot connect. The same timeout also applies
     to send/receive operations and may surface as :class:`socket.timeout`.
     A :class:`ValueError` is raised for invalid parameters and
     :class:`RuntimeError` if the server responds with invalid JSON.
     """
+    retry_config = retry_config or RetryConfig()
     sock_path = _get_validated_socket_path()
-    with _connect_with_retries(sock_path, timeout, retries, backoff, jitter) as client:
+    with _connect_with_retries(sock_path, timeout, retry_config) as client:
         payload_bytes = json.dumps(dc.asdict(invocation)).encode("utf-8")
         client.sendall(payload_bytes)
         client.shutdown(socket.SHUT_WR)
