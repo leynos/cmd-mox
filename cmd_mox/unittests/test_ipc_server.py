@@ -59,10 +59,20 @@ def test_ipc_server_start_fails_if_in_use(tmp_path: Path) -> None:
             other.start()
 
 
-def test_invoke_server_retries_connection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("jitter", "_description"),
+    [
+        (None, "default jitter"),
+        (0.5, "custom jitter=0.5"),
+    ],
+)
+def test_invoke_server_retries_connection_parametrized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    jitter: float | None,
+    _description: str,
 ) -> None:
-    """Client retries connecting until the server becomes available."""
+    """Client retries until the server becomes available."""
     socket_path = tmp_path / "ipc.sock"
 
     server = IPCServer(socket_path)
@@ -78,33 +88,10 @@ def test_invoke_server_retries_connection(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     try:
-        retry_config = RetryConfig(retries=5, backoff=0.01)
-        response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
-        assert response.stdout == "ls"
-    finally:
-        thread.join()
-        server.stop()
-
-
-def test_invoke_server_retries_connection_with_jitter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Client retries with jitter until the server becomes available."""
-    socket_path = tmp_path / "ipc.sock"
-    server = IPCServer(socket_path)
-
-    def delayed_start() -> None:
-        import time
-
-        time.sleep(0.05)
-        server.start()
-
-    thread = threading.Thread(target=delayed_start)
-    thread.start()
-    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
-    invocation = Invocation(command="ls", args=[], stdin="", env={})
-    try:
-        retry_config = RetryConfig(retries=5, backoff=0.01, jitter=0.5)
+        if jitter is None:
+            retry_config = RetryConfig(retries=5, backoff=0.01)
+        else:
+            retry_config = RetryConfig(retries=5, backoff=0.01, jitter=jitter)
         response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
         assert response.stdout == "ls"
     finally:
