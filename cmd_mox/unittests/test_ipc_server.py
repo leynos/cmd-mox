@@ -86,6 +86,32 @@ def test_invoke_server_retries_connection(
         server.stop()
 
 
+def test_invoke_server_retries_connection_with_jitter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Client retries with jitter until the server becomes available."""
+    socket_path = tmp_path / "ipc.sock"
+    server = IPCServer(socket_path)
+
+    def delayed_start() -> None:
+        import time
+
+        time.sleep(0.05)
+        server.start()
+
+    thread = threading.Thread(target=delayed_start)
+    thread.start()
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    invocation = Invocation(command="ls", args=[], stdin="", env={})
+    try:
+        retry_config = RetryConfig(retries=5, backoff=0.01, jitter=0.5)
+        response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
+        assert response.stdout == "ls"
+    finally:
+        thread.join()
+        server.stop()
+
+
 def test_invoke_server_exhausts_retries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
