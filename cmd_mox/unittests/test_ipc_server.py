@@ -14,7 +14,7 @@ from cmd_mox.ipc import (
     Invocation,
     IPCServer,
     RetryConfig,
-    _calculate_retry_delay,
+    calculate_retry_delay,
     invoke_server,
 )
 
@@ -191,8 +191,8 @@ def test_invoke_server_invalid_json(
 
 def test_calculate_retry_delay() -> None:
     """Retry delay scales linearly and applies jitter bounds."""
-    assert _calculate_retry_delay(1, 0.1, 0.0) == pytest.approx(0.2)
+    assert calculate_retry_delay(1, 0.1, 0.0) == pytest.approx(0.2)
     with patch("cmd_mox.ipc.random.uniform", return_value=1.25) as mock_uniform:
-        delay = _calculate_retry_delay(0, 1.0, 0.5)
+        delay = calculate_retry_delay(0, 1.0, 0.5)
         assert delay == pytest.approx(1.25)
         mock_uniform.assert_called_once_with(0.5, 1.5)

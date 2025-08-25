@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
 DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
+MIN_RETRY_SLEEP: t.Final[float] = 0.001
 
 
 @dc.dataclass(slots=True)
@@ -38,10 +39,10 @@ class RetryConfig:
 
     def __post_init__(self) -> None:
         """Validate retry configuration values."""
-        # ``_validate_connection_params`` also checks the timeout value, which
-        # is unrelated to this dataclass. Pass a dummy positive timeout to
-        # validate the retry parameters.
-        _validate_connection_params(1.0, self)
+        # Validate only retry-related parameters here to avoid coupling to timeout.
+        _validate_retries(self.retries)
+        _validate_backoff(self.backoff)
+        _validate_jitter(self.jitter)
 
 
 @dc.dataclass(slots=True)
@@ -150,7 +151,7 @@ def _validate_connection_params(timeout: float, retry_config: RetryConfig) -> No
     _validate_jitter(retry_config.jitter)
 
 
-def _calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
+def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     """Return the sleep delay for a given *attempt*."""
     delay = backoff * (attempt + 1)
     if jitter:
@@ -158,7 +159,8 @@ def _calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float
         # thundering herds if many clients retry simultaneously.
         factor = random.uniform(1.0 - jitter, 1.0 + jitter)  # noqa: S311
         delay *= factor
-    return delay
+    # Prevent a zero-length sleep which can spin on some platforms.
+    return max(delay, MIN_RETRY_SLEEP)
 
 
 def _connect_with_retries(
@@ -191,7 +193,7 @@ def _connect_with_retries(
                 exc,
             )
             if attempt < retry_config.retries - 1:
-                delay = _calculate_retry_delay(
+                delay = calculate_retry_delay(
                     attempt, retry_config.backoff, retry_config.jitter
                 )
                 time.sleep(delay)
