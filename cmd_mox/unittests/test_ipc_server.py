@@ -4,11 +4,19 @@ import socket
 import threading
 import typing as t
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
-from cmd_mox.ipc import Invocation, IPCServer, invoke_server
+from cmd_mox.ipc import (
+    DEFAULT_CONNECT_JITTER,
+    Invocation,
+    IPCServer,
+    RetryConfig,
+    calculate_retry_delay,
+    invoke_server,
+)
 
 
 def test_ipc_server_start_stop(tmp_path: Path) -> None:
@@ -65,12 +73,39 @@ def test_invoke_server_retries_connection(
         time.sleep(0.05)
         server.start()
 
-    thread = threading.Thread(target=delayed_start, daemon=True)
+    thread = threading.Thread(target=delayed_start)
     thread.start()
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     try:
-        response = invoke_server(invocation, timeout=1.0, retries=5, backoff=0.01)
+        retry_config = RetryConfig(retries=5, backoff=0.01)
+        response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
+        assert response.stdout == "ls"
+    finally:
+        thread.join()
+        server.stop()
+
+
+def test_invoke_server_retries_connection_with_jitter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Client retries with jitter until the server becomes available."""
+    socket_path = tmp_path / "ipc.sock"
+    server = IPCServer(socket_path)
+
+    def delayed_start() -> None:
+        import time
+
+        time.sleep(0.05)
+        server.start()
+
+    thread = threading.Thread(target=delayed_start)
+    thread.start()
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    invocation = Invocation(command="ls", args=[], stdin="", env={})
+    try:
+        retry_config = RetryConfig(retries=5, backoff=0.01, jitter=0.5)
+        response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
         assert response.stdout == "ls"
     finally:
         thread.join()
@@ -85,7 +120,11 @@ def test_invoke_server_exhausts_retries(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     with pytest.raises(FileNotFoundError):
-        invoke_server(invocation, timeout=0.1, retries=1, backoff=0.01)
+        invoke_server(
+            invocation,
+            timeout=0.1,
+            retry_config=RetryConfig(retries=1, backoff=0.01),
+        )
 
 
 @pytest.mark.parametrize(
@@ -96,6 +135,9 @@ def test_invoke_server_exhausts_retries(
         ({"timeout": float("inf")}, "timeout must"),
         ({"backoff": -0.1}, "backoff must"),
         ({"backoff": float("nan")}, "backoff must"),
+        ({"jitter": -0.1}, "jitter must"),
+        ({"jitter": 1.1}, "jitter must"),
+        ({"jitter": float("nan")}, "jitter must"),
     ],
 )
 def test_invoke_server_validates_params(
@@ -109,14 +151,16 @@ def test_invoke_server_validates_params(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     timeout = t.cast("float", kwargs.get("timeout", 1.0))
-    retries = t.cast("int", kwargs.get("retries", 1))
-    backoff = t.cast("float", kwargs.get("backoff", 0.0))
+    retry_kwargs = {
+        "retries": t.cast("int", kwargs.get("retries", 1)),
+        "backoff": t.cast("float", kwargs.get("backoff", 0.0)),
+        "jitter": t.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER)),
+    }
     with pytest.raises(ValueError, match=match):
         invoke_server(
             invocation,
             timeout=timeout,
-            retries=retries,
-            backoff=backoff,
+            retry_config=RetryConfig(**retry_kwargs),
         )
 
 
@@ -143,3 +187,12 @@ def test_invoke_server_invalid_json(
     with pytest.raises(RuntimeError, match="Invalid JSON"):
         invoke_server(invocation, timeout=1.0)
     thread.join()
+
+
+def test_calculate_retry_delay() -> None:
+    """Retry delay scales linearly and applies jitter bounds."""
+    assert calculate_retry_delay(1, 0.1, 0.0) == pytest.approx(0.2)
+    with patch("cmd_mox.ipc.random.uniform", return_value=1.25) as mock_uniform:
+        delay = calculate_retry_delay(0, 1.0, 0.5)
+        assert delay == pytest.approx(1.25)
+        mock_uniform.assert_called_once_with(0.5, 1.5)
