@@ -154,7 +154,9 @@ def _calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float
     """Return the sleep delay for a given *attempt*."""
     delay = backoff * (attempt + 1)
     if jitter:
-        factor = 1.0 - jitter + random.random() * 2 * jitter  # noqa: S311
+        # Randomise the linear backoff within the jitter bounds to avoid
+        # thundering herds if many clients retry simultaneously.
+        factor = random.uniform(1.0 - jitter, 1.0 + jitter)  # noqa: S311
         delay *= factor
     return delay
 
