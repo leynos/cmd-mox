@@ -105,11 +105,11 @@
 
 ## **V. Matching & Verification Engine**
 
-- [ ] **Comparator Classes**
+- [x] **Comparator Classes**
 
-  - [ ] Implement: `Any`, `IsA`, `Regex`, `Contains`, `StartsWith`, `Predicate`
+  - [x] Implement: `Any`, `IsA`, `Regex`, `Contains`, `StartsWith`, `Predicate`
 
-  - [ ] Flexible matcher plumbing in mock argument matching
+  - [x] Flexible matcher plumbing in mock argument matching
 
 - [ ] **Invocation Journal**
 
