@@ -10,6 +10,7 @@ from pathlib import Path
 
 from pytest_bdd import given, parsers, scenario, then, when
 
+from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.controller import CmdMox
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -36,6 +37,23 @@ def stub_command(mox: CmdMox, cmd: str, text: str) -> None:
 def mock_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a mocked command."""
     mox.mock(cmd).returns(stdout=text)
+
+
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked to return "{text}" with comparator args'
+    )
+)
+def mock_with_comparator_args(mox: CmdMox, cmd: str, text: str) -> None:
+    """Mock command using various comparators for argument matching."""
+    mox.mock(cmd).with_matching_args(
+        Any(),
+        IsA(int),
+        Regex(r"^foo\d+$"),
+        Contains("bar"),
+        StartsWith("baz"),
+        Predicate(str.isupper),
+    ).returns(stdout=text)
 
 
 @given(
@@ -379,4 +397,13 @@ def test_passthrough_spy_permission_error() -> None:
 @scenario(str(FEATURES_DIR / "controller.feature"), "passthrough spy handles timeout")
 def test_passthrough_spy_timeout() -> None:
     """Spy records timeouts from the real command."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "mock matches arguments with comparators",
+)
+def test_mock_matches_arguments_with_comparators() -> None:
+    """Mocks can use comparator objects for flexible argument matching."""
     pass

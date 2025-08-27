@@ -149,3 +149,12 @@ Feature: CmdMox basic functionality
     And the stderr should contain "timeout after 30 seconds"
     When I verify the controller
     Then the spy "echo" should record 1 invocation
+
+  Scenario: mock matches arguments with comparators
+    Given a CmdMox controller
+    And the command "flex" is mocked to return "ok" with comparator args
+    When I replay the controller
+    And I run the command "flex" with arguments "anything 123 foo7 barbar bazooka HELLO"
+    Then the output should be "ok"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "flex"
