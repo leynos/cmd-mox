@@ -731,8 +731,8 @@ engine is the key to writing flexible yet precise tests. If a comparator
 rejects an argument, the verifier reports the failing index and comparator
 representation to aid debugging. If a comparator raises an exception, the
 message includes the exception type and text. These diagnostics originate from
-`Expectation.explain_mismatch()`, which pinpoints the failing argument index
-and comparator.
+`Expectation.explain_mismatch()`. It pinpoints the failing argument index and
+comparator.
 
 ### 5.2 Verification Logic: The Heart of `mox.verify()`
 
@@ -1214,8 +1214,9 @@ Comparator helpers such as :class:`Any`, :class:`IsA`, :class:`Regex`,
 as simple callables. Each inherits a lightweight ``_ReprMixin`` so failing
 tests display meaningful values. ``Expectation.with_matching_args`` accepts
 callables of the form ``Callable[[str], bool]`` and requires one comparator per
-positional argument. The matcher result is interpreted truthily. This keeps the
-matching engine agnostic of comparator implementations while enabling
+positional argument. The matcher result is interpreted as truthy. This keeps
+the matching engine agnostic to comparator implementations while enabling
 user-supplied predicates to participate alongside the built-ins. Regular
 expressions are compiled once per comparator and ``IsA`` relies on type
-conversion to avoid bespoke parsing logic.
+conversion to avoid bespoke parsing logic. Comparator exceptions surface their
+class and message in mismatch reports.

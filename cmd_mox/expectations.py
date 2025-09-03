@@ -5,6 +5,15 @@ from __future__ import annotations
 import dataclasses as dc
 import typing as t
 
+SENSITIVE_ENV_KEY_TOKENS = ("secret", "token", "key", "password")
+
+
+def _is_sensitive_env_key(key: str) -> bool:
+    """Return True if key likely holds secret material."""
+    k = key.lower()
+    return any(tkn in k for tkn in SENSITIVE_ENV_KEY_TOKENS)
+
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .ipc import Invocation
 
@@ -105,7 +114,7 @@ class Expectation:
             reason = checker(invocation)
             if reason:
                 return reason
-        return "args or stdin mismatch"
+        return "args, stdin, or env mismatch"
 
     def _explain_command_mismatch(self, invocation: Invocation) -> str | None:
         """Return a message if the command name differs."""
@@ -166,13 +175,12 @@ class Expectation:
         for key, value in self.env.items():
             actual = invocation.env.get(key)
             if actual != value:
-
-                def _is_sensitive(k: str) -> bool:
-                    k = k.lower()
-                    return any(s in k for s in ("secret", "token", "key", "password"))
-
-                exp = "***" if _is_sensitive(key) else value
-                act = "***" if (actual is not None and _is_sensitive(key)) else actual
+                exp = "***" if _is_sensitive_env_key(key) else value
+                act = (
+                    "***"
+                    if actual is not None and _is_sensitive_env_key(key)
+                    else actual
+                )
                 return f"env[{key!r}]={act!r} != {exp!r}"
         return None
 
