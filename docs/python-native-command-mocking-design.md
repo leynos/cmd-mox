@@ -729,7 +729,8 @@ list of recorded expectations. For each expectation, it compares the incoming
 arguments against the stored comparators to determine if there is a match. This
 engine is the key to writing flexible yet precise tests. If a comparator
 rejects an argument, the verifier reports the failing index and comparator
-representation to aid debugging. These diagnostics originate from
+representation to aid debugging. If a comparator raises an exception, the
+message includes the exception type and text. These diagnostics originate from
 `Expectation.explain_mismatch()`, which pinpoints the failing argument index
 and comparator.
 

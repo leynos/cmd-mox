@@ -85,8 +85,11 @@ class Expectation:
         """Return ``True`` if ``args`` satisfy ``match_args`` validators."""
         if len(args) != len(self.match_args):
             return False
-        for arg, matcher in zip(args, self.match_args, strict=True):
-            if not matcher(arg):
+        for arg, matcher in zip(args, self.match_args):  # noqa: B905
+            try:
+                if not matcher(arg):
+                    return False
+            except Exception:  # noqa: BLE001, PERF203
                 return False
         return True
 
@@ -125,9 +128,16 @@ class Expectation:
                 f"expected {len(self.match_args)} args but got {len(invocation.args)}"
             )
         for i, (arg, matcher) in enumerate(
-            zip(invocation.args, self.match_args, strict=True)
+            zip(invocation.args, self.match_args),  # noqa: B905
         ):
-            if not matcher(arg):
+            try:
+                ok = bool(matcher(arg))
+            except Exception as exc:  # noqa: BLE001
+                return (
+                    f"arg[{i}] predicate {matcher!r} raised "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+            if not ok:
                 return f"arg[{i}]={arg!r} failed {matcher!r}"
         return None
 

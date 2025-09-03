@@ -173,6 +173,34 @@ def test_expectation_with_matchers_failure_message() -> None:
     assert "arg[0]='oops' failed IsA(typ=<class 'int'>)" in str(excinfo.value)
 
 
+def test_expectation_matcher_exception_returns_false() -> None:
+    """Expectation treats comparator exceptions as mismatches."""
+
+    def boom(_: str) -> bool:
+        raise ValueError("boom")
+
+    exp = Expectation("cmd").with_matching_args(Predicate(boom))
+    inv = Invocation(command="cmd", args=["x"], stdin="", env={})
+    assert not exp.matches(inv)
+
+
+def test_expectation_matcher_exception_message() -> None:
+    """Failure reason reports matcher exceptions with context."""
+
+    def boom(_: str) -> bool:
+        raise ValueError("boom")
+
+    exp = Expectation("cmd").with_matching_args(Predicate(boom))
+    inv = Invocation(command="cmd", args=["x"], stdin="", env={})
+    verifier = UnexpectedCommandVerifier()
+    dbl = SimpleNamespace(expectation=exp, kind="mock")
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        verifier.verify([inv], {"cmd": dbl})
+    msg = str(excinfo.value)
+    assert "arg[0] predicate" in msg
+    assert "ValueError: boom" in msg
+
+
 def test_expectation_stdin_predicate_failure_message() -> None:
     """Reports a helpful reason when stdin predicate fails."""
     exp = Expectation("cmd").with_stdin(lambda s: s == "ok")
