@@ -1,25 +1,49 @@
-"""Tests for comparator helpers and expectation matcher plumbing."""
+"""Comparator helpers and expectation matching tests."""
 
 from __future__ import annotations
 
-from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
+import re
+import typing as t
+from types import SimpleNamespace
+
+import pytest
+
+from cmd_mox.comparators import (
+    Any as AnyComparator,
+)
+from cmd_mox.comparators import (
+    Contains,
+    IsA,
+    Predicate,
+    Regex,
+    StartsWith,
+)
+from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
+from cmd_mox.verifiers import UnexpectedCommandVerifier
 
 
-def test_any_matches_and_repr() -> None:
-    """Any matches all values and has a simple repr."""
-    matcher = Any()
-    assert matcher("anything")
-    assert repr(matcher) == "Any()"
-
-
-def test_is_a_matches_and_repr() -> None:
-    """IsA converts the value to the given type for matching."""
-    matcher = IsA(int)
-    assert matcher("42")
-    assert not matcher("nope")
-    assert repr(matcher) == "IsA(typ=<class 'int'>)"
+@pytest.mark.parametrize(
+    ("matcher", "good", "bad", "expected_repr"),
+    [
+        (AnyComparator(), "anything", None, "Any()"),
+        (IsA(int), "42", "nope", "IsA(typ=<class 'int'>)"),
+        (Contains("bar"), "foobarbaz", "qux", "Contains(substring='bar')"),
+        (StartsWith("bar"), "barfly", "foobar", "StartsWith(prefix='bar')"),
+    ],
+)
+def test_matchers_match_and_repr(
+    matcher: t.Callable[[object], bool],
+    good: object,
+    bad: object | None,
+    expected_repr: str,
+) -> None:
+    """Matchers evaluate values and provide helpful reprs."""
+    assert matcher(good)
+    if bad is not None:
+        assert not matcher(bad)
+    assert repr(matcher) == expected_repr
 
 
 class CustomType:
@@ -29,34 +53,49 @@ class CustomType:
 
 
 def test_is_a_repr_with_custom_type() -> None:
-    """User-defined classes show their fully-qualified name."""
+    """User-defined classes show their fully-qualified name in repr."""
     expected = f"IsA(typ=<class '{CustomType.__module__}.{CustomType.__qualname__}'>)"
     assert repr(IsA(CustomType)) == expected
 
 
 def test_regex_matches_and_repr() -> None:
     """Regex matches via search and exposes its pattern."""
-    pattern = "^foo\\d$"
+    pattern = r"^foo\d$"
     matcher = Regex(pattern)
     assert matcher("foo1")
     assert not matcher("bar")
     assert repr(matcher) == f"Regex(pattern={pattern!r})"
 
 
-def test_contains_matches_and_repr() -> None:
-    """Contains checks for substring membership."""
-    matcher = Contains("bar")
-    assert matcher("foobarbaz")
-    assert not matcher("qux")
-    assert repr(matcher) == "Contains(substring='bar')"
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, False),
+        ("", False),
+        (123, True),
+        (123.0, True),
+        ([], False),
+        ({}, False),
+    ],
+)
+def test_is_a_edge_cases(value: object, *, expected: bool) -> None:
+    """IsA handles unexpected value types gracefully."""
+    matcher = IsA(int)
+    assert matcher(value) is expected  # type: ignore[arg-type]
 
 
-def test_startswith_matches_and_repr() -> None:
-    """StartsWith verifies prefix matches."""
-    matcher = StartsWith("bar")
-    assert matcher("barfly")
-    assert not matcher("foobar")
-    assert repr(matcher) == "StartsWith(prefix='bar')"
+def test_regex_invalid_pattern_raises() -> None:
+    """Regex raises an error when the pattern is malformed."""
+    with pytest.raises(re.error):
+        Regex("[unclosed")
+
+
+@pytest.mark.parametrize("value", [123, None, ["foo1"]])
+def test_regex_non_string_input(value: object) -> None:
+    """Regex matcher raises TypeError for non-string values."""
+    matcher = Regex(r"^foo\d$")
+    with pytest.raises(TypeError):
+        matcher(value)  # type: ignore[arg-type]
 
 
 def test_predicate_matches_and_repr() -> None:
@@ -69,10 +108,30 @@ def test_predicate_matches_and_repr() -> None:
     assert rep.endswith(")")
 
 
+def test_predicate_raises_exception() -> None:
+    """Predicate propagates exceptions from the wrapped function."""
+
+    def raises_exc(_: str) -> bool:
+        msg = "Test exception"
+        raise ValueError(msg)
+
+    matcher = Predicate(raises_exc)
+    with pytest.raises(ValueError, match="Test exception"):
+        matcher("anything")
+
+
+def test_predicate_non_boolean_return() -> None:
+    """Predicate coerces the function result to bool."""
+    matcher_true = Predicate(lambda _: "not a bool")
+    assert matcher_true("anything")
+    matcher_false = Predicate(lambda _: "")
+    assert not matcher_false("anything")
+
+
 def test_expectation_with_matchers() -> None:
     """Expectation uses comparator objects for flexible argument matching."""
     exp = Expectation("cmd").with_matching_args(
-        Any(),
+        AnyComparator(),
         IsA(int),
         Regex(r"^foo\d+$"),
         Contains("bar"),
@@ -88,8 +147,27 @@ def test_expectation_with_matchers() -> None:
     assert exp.matches(inv)
 
 
-def test_expectation_with_matchers_failure() -> None:
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["oops", "foo"],  # first matcher fails
+        ["123", "bar"],  # second matcher fails
+        ["123"],  # argument count mismatch
+    ],
+)
+def test_expectation_with_matchers_failure(args: list[str]) -> None:
     """Expectation fails when arguments do not satisfy matchers."""
+    exp = Expectation("cmd").with_matching_args(IsA(int), Contains("foo"))
+    inv = Invocation(command="cmd", args=args, stdin="", env={})
+    assert not exp.matches(inv)
+
+
+def test_expectation_with_matchers_failure_message() -> None:
+    """Failure message identifies which comparator rejected the argument."""
     exp = Expectation("cmd").with_matching_args(IsA(int))
     inv = Invocation(command="cmd", args=["oops"], stdin="", env={})
-    assert not exp.matches(inv)
+    verifier = UnexpectedCommandVerifier()
+    dbl = SimpleNamespace(expectation=exp, kind="mock")
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        verifier.verify([inv], {"cmd": dbl})
+    assert "arg[0]='oops' failed IsA(typ=<class 'int'>)" in str(excinfo.value)

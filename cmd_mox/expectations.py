@@ -90,6 +90,34 @@ class Expectation:
                 return False
         return True
 
+    def explain_mismatch(self, invocation: Invocation) -> str:
+        """Return a reason why ``invocation`` failed to match."""
+        if self.args is not None and invocation.args != self.args:
+            return f"arguments {invocation.args!r} != {self.args!r}"
+        if self.match_args is not None:
+            if len(invocation.args) != len(self.match_args):
+                return (
+                    f"expected {len(self.match_args)} args but got "
+                    f"{len(invocation.args)}"
+                )
+            for i, (arg, matcher) in enumerate(
+                zip(invocation.args, self.match_args, strict=True)
+            ):
+                if not matcher(arg):
+                    return f"arg[{i}]={arg!r} failed {matcher!r}"
+        if self.stdin is not None:
+            if callable(self.stdin):
+                if not bool(self.stdin(invocation.stdin)):
+                    return f"stdin {invocation.stdin!r} failed {self.stdin!r}"
+            elif invocation.stdin != self.stdin:
+                return f"stdin {invocation.stdin!r} != {self.stdin!r}"
+        if self.env:
+            for key, value in self.env.items():
+                actual = invocation.env.get(key)
+                if actual != value:
+                    return f"env[{key!r}]={actual!r} != {value!r}"
+        return "args or stdin mismatch"
+
     def _matches_stdin(self, invocation: Invocation) -> bool:
         """Check stdin data or predicate."""
         if self.stdin is None:
