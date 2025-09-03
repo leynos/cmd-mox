@@ -92,6 +92,8 @@ class Expectation:
 
     def explain_mismatch(self, invocation: Invocation) -> str:
         """Return a reason why ``invocation`` failed to match."""
+        if not self._matches_command(invocation):
+            return f"command {invocation.command!r} != {self.name!r}"
         if self.args is not None and invocation.args != self.args:
             return f"arguments {invocation.args!r} != {self.args!r}"
         if self.match_args is not None:
@@ -107,7 +109,14 @@ class Expectation:
                     return f"arg[{i}]={arg!r} failed {matcher!r}"
         if self.stdin is not None:
             if callable(self.stdin):
-                if not bool(self.stdin(invocation.stdin)):
+                try:
+                    ok = bool(self.stdin(invocation.stdin))
+                except Exception as exc:  # noqa: BLE001
+                    return (
+                        f"stdin predicate {self.stdin!r} raised "
+                        f"{exc.__class__.__name__}: {exc}"
+                    )
+                if not ok:
                     return f"stdin {invocation.stdin!r} failed {self.stdin!r}"
             elif invocation.stdin != self.stdin:
                 return f"stdin {invocation.stdin!r} != {self.stdin!r}"
@@ -115,7 +124,18 @@ class Expectation:
             for key, value in self.env.items():
                 actual = invocation.env.get(key)
                 if actual != value:
-                    return f"env[{key!r}]={actual!r} != {value!r}"
+
+                    def _is_sensitive(k: str) -> bool:
+                        k = k.lower()
+                        return any(
+                            s in k for s in ("secret", "token", "key", "password")
+                        )
+
+                    exp = "***" if _is_sensitive(key) else value
+                    act = (
+                        "***" if (actual is not None and _is_sensitive(key)) else actual
+                    )
+                    return f"env[{key!r}]={act!r} != {exp!r}"
         return "args or stdin mismatch"
 
     def _matches_stdin(self, invocation: Invocation) -> bool:

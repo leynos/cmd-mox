@@ -729,7 +729,9 @@ list of recorded expectations. For each expectation, it compares the incoming
 arguments against the stored comparators to determine if there is a match. This
 engine is the key to writing flexible yet precise tests. If a comparator
 rejects an argument, the verifier reports the failing index and comparator
-representation to aid debugging.
+representation to aid debugging. These diagnostics originate from
+`Expectation.explain_mismatch()`, which pinpoints the failing argument index
+and comparator.
 
 ### 5.2 Verification Logic: The Heart of `mox.verify()`
 
@@ -1209,9 +1211,10 @@ Both mocks and spies maintain an ``invocations`` list. A convenience property
 Comparator helpers such as :class:`Any`, :class:`IsA`, :class:`Regex`,
 :class:`Contains`, :class:`StartsWith`, and :class:`Predicate` are implemented
 as simple callables. Each inherits a lightweight ``_ReprMixin`` so failing
-tests display meaningful values. ``Expectation.with_matching_args`` accepts any
-callables and validates them positionally against the invocation's argument
-list. This keeps the matching engine agnostic of comparator implementations
-while enabling user-supplied predicates to participate alongside the built-ins.
-Regular expressions are compiled once per comparator and ``IsA`` relies on type
+tests display meaningful values. ``Expectation.with_matching_args`` accepts
+callables of the form ``Callable[[str], bool]`` and requires one comparator per
+positional argument. The matcher result is interpreted truthily. This keeps the
+matching engine agnostic of comparator implementations while enabling
+user-supplied predicates to participate alongside the built-ins. Regular
+expressions are compiled once per comparator and ``IsA`` relies on type
 conversion to avoid bespoke parsing logic.

@@ -34,9 +34,9 @@ from cmd_mox.verifiers import UnexpectedCommandVerifier
     ],
 )
 def test_matchers_match_and_repr(
-    matcher: t.Callable[[object], bool],
-    good: object,
-    bad: object | None,
+    matcher: t.Callable[[t.Any], bool],
+    good: t.Any,  # noqa: ANN401
+    bad: t.Any,  # noqa: ANN401
     expected_repr: str,
 ) -> None:
     """Matchers evaluate values and provide helpful reprs."""
@@ -171,3 +171,32 @@ def test_expectation_with_matchers_failure_message() -> None:
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
     assert "arg[0]='oops' failed IsA(typ=<class 'int'>)" in str(excinfo.value)
+
+
+def test_expectation_stdin_predicate_failure_message() -> None:
+    """Reports a helpful reason when stdin predicate fails."""
+    exp = Expectation("cmd").with_stdin(lambda s: s == "ok")
+    inv = Invocation(command="cmd", args=[], stdin="nope", env={})
+    verifier = UnexpectedCommandVerifier()
+    dbl = SimpleNamespace(expectation=exp, kind="mock")
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        verifier.verify([inv], {"cmd": dbl})
+    assert "stdin 'nope' failed" in str(excinfo.value)
+
+
+def test_expectation_env_mismatch_message() -> None:
+    """Reports missing or mismatched env values."""
+    exp = Expectation("cmd").with_env({"FOO": "bar"})
+    inv = Invocation(command="cmd", args=[], stdin="", env={"FOO": "baz"})
+    verifier = UnexpectedCommandVerifier()
+    dbl = SimpleNamespace(expectation=exp, kind="mock")
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        verifier.verify([inv], {"cmd": dbl})
+    assert "env['FOO']='baz' != 'bar'" in str(excinfo.value)
+
+
+def test_expectation_command_mismatch_message() -> None:
+    """Explain mismatch when command names differ."""
+    exp = Expectation("cmd")
+    inv = Invocation(command="other", args=[], stdin="", env={})
+    assert exp.explain_mismatch(inv) == "command 'other' != 'cmd'"
