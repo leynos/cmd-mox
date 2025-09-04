@@ -5,6 +5,15 @@ from __future__ import annotations
 import dataclasses as dc
 import typing as t
 
+SENSITIVE_ENV_KEY_TOKENS = ("secret", "token", "key", "password")
+
+
+def _is_sensitive_env_key(key: str) -> bool:
+    """Return True if key likely holds secret material."""
+    k = key.lower()
+    return any(tkn in k for tkn in SENSITIVE_ENV_KEY_TOKENS)
+
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .ipc import Invocation
 
@@ -85,10 +94,95 @@ class Expectation:
         """Return ``True`` if ``args`` satisfy ``match_args`` validators."""
         if len(args) != len(self.match_args):
             return False
-        for arg, matcher in zip(args, self.match_args, strict=True):
-            if not matcher(arg):
+        for arg, matcher in zip(args, self.match_args):  # noqa: B905
+            try:
+                if not matcher(arg):
+                    return False
+            except Exception:  # noqa: BLE001, PERF203
                 return False
         return True
+
+    def explain_mismatch(self, invocation: Invocation) -> str:
+        """Return a reason why ``invocation`` failed to match."""
+        for checker in (
+            self._explain_command_mismatch,
+            self._explain_args_mismatch,
+            self._explain_match_args_mismatch,
+            self._explain_stdin_mismatch,
+            self._explain_env_mismatch,
+        ):
+            reason = checker(invocation)
+            if reason:
+                return reason
+        return "args, stdin, or env mismatch"
+
+    def _explain_command_mismatch(self, invocation: Invocation) -> str | None:
+        """Return a message if the command name differs."""
+        if self._matches_command(invocation):
+            return None
+        return f"command {invocation.command!r} != {self.name!r}"
+
+    def _explain_args_mismatch(self, invocation: Invocation) -> str | None:
+        """Return a message if explicit args do not match."""
+        if self.args is None or invocation.args == self.args:
+            return None
+        return f"arguments {invocation.args!r} != {self.args!r}"
+
+    def _explain_match_args_mismatch(self, invocation: Invocation) -> str | None:
+        """Return a message when matcher-based args fail."""
+        if self.match_args is None:
+            return None
+        if len(invocation.args) != len(self.match_args):
+            return (
+                f"expected {len(self.match_args)} args but got {len(invocation.args)}"
+            )
+        for i, (arg, matcher) in enumerate(
+            zip(invocation.args, self.match_args),  # noqa: B905
+        ):
+            try:
+                ok = bool(matcher(arg))
+            except Exception as exc:  # noqa: BLE001
+                return (
+                    f"arg[{i}] predicate {matcher!r} raised "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+            if not ok:
+                return f"arg[{i}]={arg!r} failed {matcher!r}"
+        return None
+
+    def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:
+        """Return a message if stdin fails to satisfy the expectation."""
+        if self.stdin is None:
+            return None
+        if callable(self.stdin):
+            try:
+                ok = bool(self.stdin(invocation.stdin))
+            except Exception as exc:  # noqa: BLE001
+                return (
+                    f"stdin predicate {self.stdin!r} raised "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+            if not ok:
+                return f"stdin {invocation.stdin!r} failed {self.stdin!r}"
+        elif invocation.stdin != self.stdin:
+            return f"stdin {invocation.stdin!r} != {self.stdin!r}"
+        return None
+
+    def _explain_env_mismatch(self, invocation: Invocation) -> str | None:
+        """Return a message if an env variable mismatch is found."""
+        if not self.env:
+            return None
+        for key, value in self.env.items():
+            actual = invocation.env.get(key)
+            if actual != value:
+                exp = "***" if _is_sensitive_env_key(key) else value
+                act = (
+                    "***"
+                    if actual is not None and _is_sensitive_env_key(key)
+                    else actual
+                )
+                return f"env[{key!r}]={act!r} != {exp!r}"
+        return None
 
     def _matches_stdin(self, invocation: Invocation) -> bool:
         """Check stdin data or predicate."""

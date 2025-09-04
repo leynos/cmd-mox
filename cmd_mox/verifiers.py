@@ -27,7 +27,11 @@ class UnexpectedCommandVerifier:
                 msg = f"Unexpected commands invoked: {inv.command}"
                 raise UnexpectedCommandError(msg)
             if dbl.kind != "stub" and not dbl.expectation.matches(inv):
-                msg = f"Unexpected invocation for {inv.command}: args or stdin mismatch"
+                reason = dbl.expectation.explain_mismatch(inv)
+                msg = (
+                    f"Unexpected invocation for {inv.command}: {reason}; "
+                    f"args={inv.args!r}"
+                )
                 raise UnexpectedCommandError(msg)
 
 
