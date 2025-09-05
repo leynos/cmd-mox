@@ -99,7 +99,7 @@ class _CallbackIPCServer(IPCServer):
         return self._handler(invocation)
 
 
-class CommandDouble(_ExpectationProxy):
+class CommandDouble(_ExpectationProxy):  # type: ignore[misc]
     """Configuration for a stub, mock, or spy command."""
 
     __slots__ = (
