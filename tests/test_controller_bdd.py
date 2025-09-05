@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses as dc
 import os
+import shlex
 import subprocess
 import typing as t
-from dataclasses import dataclass  # noqa: ICN003
 from pathlib import Path
 
 from pytest_bdd import given, parsers, scenario, then, when
@@ -20,7 +21,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.ipc import Invocation
 
 
-@dataclass
+@dc.dataclass(slots=True, frozen=True)
 class CommandExecution:
     """Parameters for command execution with stdin and environment."""
 
@@ -31,11 +32,10 @@ class CommandExecution:
     env_val: str
 
 
-@dataclass
-class JournalEntryExpectation:
+@dc.dataclass(slots=True, frozen=True)
+class ExpectedInvocation:
     """Expected invocation parameters for journal verification."""
 
-    cmd: str
     args: str
     stdin: str
     env_var: str
@@ -208,7 +208,7 @@ def _execute_command_with_params(
 ) -> subprocess.CompletedProcess[str]:
     """Execute a command using the provided parameters."""
     env = os.environ | {params.env_var: params.env_val}
-    argv = [params.cmd, *params.args.split()]
+    argv = [params.cmd, *shlex.split(params.args)]
     return subprocess.run(  # noqa: S603
         argv,
         input=params.stdin,
@@ -464,20 +464,29 @@ def run_command_args_stdin_env(
     stdin: str,
     var: str,
     val: str,
-) -> subprocess.CompletedProcess[str]:
+) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step requires all parsed params
     """Run *cmd* with arguments, stdin, and an environment variable."""
     params = CommandExecution(cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val)
     return _execute_command_with_params(params)
 
 
-def _verify_journal_entry_with_expectation(
-    mox: CmdMox, expected: JournalEntryExpectation
-) -> None:
+def _verify_journal_entry(mox: CmdMox, cmd: str, expected: ExpectedInvocation) -> None:
     """Verify that journal entry matches expected invocation."""
-    inv = next(inv for inv in mox.journal if inv.command == expected.cmd)
-    assert inv.args == expected.args.split()
-    assert inv.stdin == expected.stdin
-    assert inv.env.get(expected.env_var) == expected.env_val
+    inv = next((inv for inv in mox.journal if inv.command == cmd), None)
+    assert inv is not None, (
+        f"No journal entry for command {cmd!r}; "
+        f"got {[i.command for i in mox.journal]!r}"
+    )
+    assert list(inv.args) == shlex.split(expected.args), (
+        f"args mismatch: {list(inv.args)!r} != {shlex.split(expected.args)!r}"
+    )
+    assert inv.stdin == expected.stdin, (
+        f"stdin mismatch: {inv.stdin!r} != {expected.stdin!r}"
+    )
+    assert inv.env.get(expected.env_var) == expected.env_val, (
+        f"env[{expected.env_var!r}] mismatch: "
+        f"{inv.env.get(expected.env_var)!r} != {expected.env_val!r}"
+    )
 
 
 @then(
@@ -486,7 +495,7 @@ def _verify_journal_entry_with_expectation(
         'stdin "{stdin}" env var "{var}"="{val}"'
     )
 )
-def check_journal_entry_details(
+def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step requires all parsed params
     mox: CmdMox,
     cmd: str,
     args: str,
@@ -495,9 +504,8 @@ def check_journal_entry_details(
     val: str,
 ) -> None:
     """Validate journal entry records invocation details."""
-    _verify_journal_entry_with_expectation(
-        mox, JournalEntryExpectation(cmd, args, stdin, var, val)
-    )
+    expected = ExpectedInvocation(args, stdin, var, val)
+    _verify_journal_entry(mox, cmd, expected)
 
 
 @scenario(

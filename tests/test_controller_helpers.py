@@ -11,9 +11,9 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
 from test_controller_bdd import (
     CommandExecution,
-    JournalEntryExpectation,
+    ExpectedInvocation,
     _execute_command_with_params,
-    _verify_journal_entry_with_expectation,
+    _verify_journal_entry,
 )
 
 
@@ -40,11 +40,10 @@ def test_execute_and_verify_helpers() -> None:
         )
         _execute_command_with_params(params)
 
-    expectation = JournalEntryExpectation(
-        cmd="foo",
+    expectation = ExpectedInvocation(
         args="--flag",
         stdin="stdin",
         env_var="ENV_VAR",
         env_val="VALUE",
     )
-    _verify_journal_entry_with_expectation(mox, expectation)
+    _verify_journal_entry(mox, "foo", expectation)
