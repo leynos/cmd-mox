@@ -494,15 +494,10 @@ def check_journal_entry_details(
     var: str,
     val: str,
 ) -> None:
-    """Verify journal captures arguments, stdin, and environment."""
-    expectation = JournalEntryExpectation(
-        cmd=cmd,
-        args=args,
-        stdin=stdin,
-        env_var=var,
-        env_val=val,
+    """Validate journal entry records invocation details."""
+    _verify_journal_entry_with_expectation(
+        mox, JournalEntryExpectation(cmd, args, stdin, var, val)
     )
-    _verify_journal_entry_with_expectation(mox, expectation)
 
 
 @scenario(
