@@ -407,3 +407,61 @@ def test_passthrough_spy_timeout() -> None:
 def test_mock_matches_arguments_with_comparators() -> None:
     """Mocks can use comparator objects for flexible argument matching."""
     pass
+
+
+@when(
+    parsers.cfparse(
+        'I run the command "{cmd}" with arguments "{args}" '
+        'using stdin "{stdin}" and env var "{var}"="{val}"'
+    ),
+    target_fixture="result",
+)
+def run_command_args_stdin_env(
+    mox: CmdMox,
+    cmd: str,
+    args: str,
+    stdin: str,
+    var: str,
+    val: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* with arguments, stdin, and an environment variable."""
+    env = os.environ | {var: val}
+    argv = [cmd, *args.split()]
+    return subprocess.run(  # noqa: S603
+        argv,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=True,
+        shell=False,
+        env=env,
+    )
+
+
+@then(
+    parsers.cfparse(
+        'the journal entry for "{cmd}" should record arguments "{args}" '
+        'stdin "{stdin}" env var "{var}"="{val}"'
+    )
+)
+def check_journal_entry_details(
+    mox: CmdMox,
+    cmd: str,
+    args: str,
+    stdin: str,
+    var: str,
+    val: str,
+) -> None:
+    """Verify journal captures arguments, stdin, and environment."""
+    inv = next(inv for inv in mox.journal if inv.command == cmd)
+    assert inv.args == args.split()
+    assert inv.stdin == stdin
+    assert inv.env.get(var) == val
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "journal captures invocation details"
+)
+def test_journal_captures_invocation_details() -> None:
+    """Journal records full invocation details."""
+    pass

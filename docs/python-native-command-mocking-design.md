@@ -538,11 +538,11 @@ that handles all modifications to the process environment.
 
   1. It will save a copy of the original `os.environ`.
 
-  1. It will create the temporary shim directory.
+  2. It will create the temporary shim directory.
 
-  1. It will prepend the shim directory's path to `os.environ`.
+  3. It will prepend the shim directory's path to `os.environ`.
 
-  1. It will set any other necessary environment variables for the IPC
+  4. It will set any other necessary environment variables for the IPC
      mechanism, such as `CMOX_IPC_SOCKET`. Clients may additionally honour
      :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to override the default
      connection timeout.
@@ -552,10 +552,10 @@ that handles all modifications to the process environment.
   1. It will execute in a `finally` block to guarantee cleanup, even if the test
      fails with an exception.
 
-  1. It will restore the original `PATH` and unset any `CmdMox`-specific
+  2. It will restore the original `PATH` and unset any `CmdMox`-specific
      environment variables.
 
-  1. It will perform a recursive deletion of the temporary shim directory and
+  3. It will perform a recursive deletion of the temporary shim directory and
      all its contents (symlinks and the IPC socket).
 
 The manager is not reentrant. Nested usage would overwrite the saved
@@ -1220,3 +1220,13 @@ user-supplied predicates to participate alongside the built-ins. Regular
 expressions are compiled once per comparator and ``IsA`` relies on type
 conversion to avoid bespoke parsing logic. Comparator exceptions surface their
 class and message in mismatch reports.
+
+### 8.8 Design Decisions for the Invocation Journal
+
+The controller maintains a ``journal`` attribute to record every invocation in
+chronological order. Each entry is an :class:`Invocation` dataclass containing
+the command name, argument list, captured standard input, and the environment
+at call time. A ``collections.deque`` backs the journal to guarantee append
+performance and preserve ordering for later verification. Verifiers consume
+this deque directly, ensuring that verification reflects the exact sequence
+observed during replay.

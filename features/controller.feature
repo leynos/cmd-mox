@@ -156,5 +156,13 @@ Feature: CmdMox basic functionality
     When I replay the controller
     And I run the command "flex" with arguments "anything 123 foo7 barbar bazooka HELLO"
     Then the output should be "ok"
+  When I verify the controller
+  Then the journal should contain 1 invocation of "flex"
+
+  Scenario: journal captures invocation details
+    Given a CmdMox controller
+    And the command "rec" is stubbed to return "ok"
+    When I replay the controller
+    And I run the command "rec" with arguments "alpha beta" using stdin "payload" and env var "EXTRA"="42"
     When I verify the controller
-    Then the journal should contain 1 invocation of "flex"
+    Then the journal entry for "rec" should record arguments "alpha beta" stdin "payload" env var "EXTRA"="42"
