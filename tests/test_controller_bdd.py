@@ -6,6 +6,7 @@ import contextlib
 import os
 import subprocess
 import typing as t
+from dataclasses import dataclass  # noqa: ICN003
 from pathlib import Path
 
 from pytest_bdd import given, parsers, scenario, then, when
@@ -17,6 +18,28 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import pytest
 
     from cmd_mox.ipc import Invocation
+
+
+@dataclass
+class CommandExecution:
+    """Parameters for command execution with stdin and environment."""
+
+    cmd: str
+    args: str
+    stdin: str
+    env_var: str
+    env_val: str
+
+
+@dataclass
+class ExpectedInvocation:
+    """Expected invocation parameters for journal verification."""
+
+    args: str
+    stdin: str
+    env_var: str
+    env_val: str
+
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
@@ -425,17 +448,26 @@ def run_command_args_stdin_env(
     val: str,
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with arguments, stdin, and an environment variable."""
-    env = os.environ | {var: val}
-    argv = [cmd, *args.split()]
+    params = CommandExecution(cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val)
+    env = os.environ | {params.env_var: params.env_val}
+    argv = [params.cmd, *params.args.split()]
     return subprocess.run(  # noqa: S603
         argv,
-        input=stdin,
+        input=params.stdin,
         capture_output=True,
         text=True,
         check=True,
         shell=False,
         env=env,
     )
+
+
+def _verify_journal_entry(mox: CmdMox, cmd: str, expected: ExpectedInvocation) -> None:
+    """Verify that journal entry matches expected invocation."""
+    inv = next(inv for inv in mox.journal if inv.command == cmd)
+    assert inv.args == expected.args.split()
+    assert inv.stdin == expected.stdin
+    assert inv.env.get(expected.env_var) == expected.env_val
 
 
 @then(
@@ -453,10 +485,13 @@ def check_journal_entry_details(
     val: str,
 ) -> None:
     """Verify journal captures arguments, stdin, and environment."""
-    inv = next(inv for inv in mox.journal if inv.command == cmd)
-    assert inv.args == args.split()
-    assert inv.stdin == stdin
-    assert inv.env.get(var) == val
+    expected = ExpectedInvocation(
+        args=args,
+        stdin=stdin,
+        env_var=var,
+        env_val=val,
+    )
+    _verify_journal_entry(mox, cmd, expected)
 
 
 @scenario(
