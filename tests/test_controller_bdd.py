@@ -134,7 +134,7 @@ def stub_runs(mox: CmdMox, cmd: str) -> None:
 )
 def mock_with_args_in_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
     """Configure an ordered mock with arguments."""
-    mox.mock(cmd).with_args(*args.split()).returns(stdout=text).in_order()
+    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text).in_order()
 
 
 @given(
@@ -144,7 +144,7 @@ def mock_with_args_in_order(mox: CmdMox, cmd: str, args: str, text: str) -> None
 )
 def mock_with_args_any_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
     """Configure an unordered mock with arguments."""
-    mox.mock(cmd).with_args(*args.split()).returns(stdout=text).any_order()
+    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text).any_order()
 
 
 @given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))
@@ -239,7 +239,7 @@ def run_command_args(
     mox: CmdMox, cmd: str, args: str
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with additional arguments."""
-    argv = [cmd, *args.split()]
+    argv = [cmd, *shlex.split(args)]
     return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603
 
 
@@ -321,7 +321,7 @@ def spy_assert_called(mox: CmdMox, cmd: str) -> None:
 def spy_assert_called_with(mox: CmdMox, cmd: str, args: str) -> None:
     """Assert the spy's last call used the given arguments."""
     assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
-    mox.spies[cmd].assert_called_with(*args.split())
+    mox.spies[cmd].assert_called_with(*shlex.split(args))
 
 
 @then(parsers.cfparse('the spy "{cmd}" should not have been called'))

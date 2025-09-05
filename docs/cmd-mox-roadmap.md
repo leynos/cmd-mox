@@ -115,7 +115,7 @@
 
   - [x] Capture: command, args, stdin, env per invocation
 
-  - [x] Store as list or deque, preserve order for verify
+  - [x] Store as deque, preserve order for verify
 
 - [ ] **Verification Algorithm**
 

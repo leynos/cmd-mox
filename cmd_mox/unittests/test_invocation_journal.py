@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import typing as t
-from pathlib import Path
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
+    from pathlib import Path
 
 from cmd_mox.controller import CmdMox
 
@@ -17,15 +16,13 @@ def test_journal_records_full_invocation(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Journal records command, arguments, stdin, and environment."""
-    mox = CmdMox()
-    mox.stub("rec").returns(stdout="ok")
-    mox.__enter__()
-    mox.replay()
-
-    cmd_path = Path(mox.environment.shim_dir) / "rec"
-    env = os.environ | {"EXTRA": "1"}
-    result = run([str(cmd_path), "a", "b"], input="payload", env=env)
-    mox.verify()
+    with CmdMox(verify_on_exit=False) as mox:
+        mox.stub("rec").returns(stdout="ok")
+        mox.replay()
+        cmd_path = t.cast("Path", mox.environment.shim_dir) / "rec"
+        env = os.environ | {"EXTRA": "1"}
+        result = run([str(cmd_path), "a", "b"], input="payload", env=env)
+        mox.verify()
 
     assert result.stdout == "ok"
     assert len(mox.journal) == 1

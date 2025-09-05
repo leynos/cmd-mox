@@ -538,25 +538,25 @@ that handles all modifications to the process environment.
 
   1. It will save a copy of the original `os.environ`.
 
-  2. It will create the temporary shim directory.
+  2. Create the temporary shim directory.
 
-  3. It will prepend the shim directory's path to `os.environ`.
+  3. Prepend the shim directory's path to `os.environ`.
 
-  4. It will set any other necessary environment variables for the IPC
+  4. Set any other necessary environment variables for the IPC
      mechanism, such as `CMOX_IPC_SOCKET`. Clients may additionally honour
      :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to override the default
      connection timeout.
 
 - On `__exit__`:
 
-  1. It will execute in a `finally` block to guarantee cleanup, even if the test
-     fails with an exception.
+  1. Execute in a `finally` block to guarantee cleanup, even if the test fails
+     with an exception.
 
-  2. It will restore the original `PATH` and unset any `CmdMox`-specific
-     environment variables.
+  2. Restore the original `PATH` and unset any `CmdMox`-specific environment
+     variables.
 
-  3. It will perform a recursive deletion of the temporary shim directory and
-     all its contents (symlinks and the IPC socket).
+  3. Perform a recursive deletion of the temporary shim directory and all its
+     contents (symlinks and the IPC socket).
 
 The manager is not reentrant. Nested usage would overwrite the saved
 environment snapshot, so attempts to use it recursively will raise
