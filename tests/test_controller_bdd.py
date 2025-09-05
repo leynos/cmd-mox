@@ -220,6 +220,14 @@ def _execute_command_with_params(
     )
 
 
+def execute_command_with_details(
+    mox: CmdMox, execution: CommandExecution
+) -> subprocess.CompletedProcess[str]:
+    """Execute command described by execution."""
+    del mox
+    return _execute_command_with_params(execution)
+
+
 @when(
     parsers.cfparse('I run the command "{cmd}" expecting failure'),
     target_fixture="result",
@@ -464,10 +472,10 @@ def run_command_args_stdin_env(
     stdin: str,
     var: str,
     val: str,
-) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step requires all parsed params
+) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
     """Run *cmd* with arguments, stdin, and an environment variable."""
     params = CommandExecution(cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val)
-    return _execute_command_with_params(params)
+    return execute_command_with_details(mox, params)
 
 
 def _verify_journal_entry(mox: CmdMox, cmd: str, expected: ExpectedInvocation) -> None:
@@ -489,13 +497,20 @@ def _verify_journal_entry(mox: CmdMox, cmd: str, expected: ExpectedInvocation) -
     )
 
 
+def verify_journal_entry_details(
+    mox: CmdMox, cmd: str, expectation: ExpectedInvocation
+) -> None:
+    """Verify journal entry for cmd matches expectation."""
+    _verify_journal_entry(mox, cmd, expectation)
+
+
 @then(
     parsers.cfparse(
         'the journal entry for "{cmd}" should record arguments "{args}" '
         'stdin "{stdin}" env var "{var}"="{val}"'
     )
 )
-def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step requires all parsed params
+def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
     mox: CmdMox,
     cmd: str,
     args: str,
@@ -505,7 +520,7 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step requ
 ) -> None:
     """Validate journal entry records invocation details."""
     expected = ExpectedInvocation(args, stdin, var, val)
-    _verify_journal_entry(mox, cmd, expected)
+    verify_journal_entry_details(mox, cmd, expected)
 
 
 @scenario(
