@@ -32,9 +32,10 @@ class CommandExecution:
 
 
 @dataclass
-class ExpectedInvocation:
+class JournalEntryExpectation:
     """Expected invocation parameters for journal verification."""
 
+    cmd: str
     args: str
     stdin: str
     env_var: str
@@ -199,6 +200,23 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     """Invoke the stubbed command."""
     return subprocess.run(  # noqa: S603
         [cmd], capture_output=True, text=True, check=True, shell=False
+    )
+
+
+def _execute_command_with_params(
+    params: CommandExecution,
+) -> subprocess.CompletedProcess[str]:
+    """Execute a command using the provided parameters."""
+    env = os.environ | {params.env_var: params.env_val}
+    argv = [params.cmd, *params.args.split()]
+    return subprocess.run(  # noqa: S603
+        argv,
+        input=params.stdin,
+        capture_output=True,
+        text=True,
+        check=True,
+        shell=False,
+        env=env,
     )
 
 
@@ -449,22 +467,14 @@ def run_command_args_stdin_env(
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with arguments, stdin, and an environment variable."""
     params = CommandExecution(cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val)
-    env = os.environ | {params.env_var: params.env_val}
-    argv = [params.cmd, *params.args.split()]
-    return subprocess.run(  # noqa: S603
-        argv,
-        input=params.stdin,
-        capture_output=True,
-        text=True,
-        check=True,
-        shell=False,
-        env=env,
-    )
+    return _execute_command_with_params(params)
 
 
-def _verify_journal_entry(mox: CmdMox, cmd: str, expected: ExpectedInvocation) -> None:
+def _verify_journal_entry_with_expectation(
+    mox: CmdMox, expected: JournalEntryExpectation
+) -> None:
     """Verify that journal entry matches expected invocation."""
-    inv = next(inv for inv in mox.journal if inv.command == cmd)
+    inv = next(inv for inv in mox.journal if inv.command == expected.cmd)
     assert inv.args == expected.args.split()
     assert inv.stdin == expected.stdin
     assert inv.env.get(expected.env_var) == expected.env_val
@@ -485,13 +495,14 @@ def check_journal_entry_details(
     val: str,
 ) -> None:
     """Verify journal captures arguments, stdin, and environment."""
-    expected = ExpectedInvocation(
+    expectation = JournalEntryExpectation(
+        cmd=cmd,
         args=args,
         stdin=stdin,
         env_var=var,
         env_val=val,
     )
-    _verify_journal_entry(mox, cmd, expected)
+    _verify_journal_entry_with_expectation(mox, expectation)
 
 
 @scenario(
