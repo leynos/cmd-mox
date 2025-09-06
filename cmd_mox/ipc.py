@@ -71,7 +71,21 @@ class Invocation:
 
     def __repr__(self) -> str:
         """Return a convenient debug representation."""
-        return f"Invocation({self.to_dict()!r})"
+        data = self.to_dict()
+
+        for key in list(data["env"]):
+            if any(
+                token in key.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")
+            ):
+                data["env"][key] = "<redacted>"
+
+        def _truncate(s: str, limit: int = 256) -> str:
+            return s if len(s) <= limit else s[: limit - 1] + "…"
+
+        for field in ("stdin", "stdout", "stderr"):
+            data[field] = _truncate(data[field])
+
+        return f"Invocation({data!r})"
 
 
 @dc.dataclass(slots=True)

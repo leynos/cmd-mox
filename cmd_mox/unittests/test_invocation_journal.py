@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import typing as t
 from pathlib import Path
@@ -124,3 +125,25 @@ def test_invocation_to_dict() -> None:
         "stderr": "err",
         "exit_code": 2,
     }
+
+
+def test_invocation_repr_redacts_sensitive_info() -> None:
+    """__repr__ redacts secrets and truncates long streams."""
+    secret = "super-secret"  # noqa: S105 - test value
+    long = "x" * 300
+    inv = Invocation(
+        command="cmd",
+        args=[],
+        stdin=long,
+        env={"API_KEY": secret},
+        stdout=long,
+        stderr=long,
+        exit_code=0,
+    )
+    text = repr(inv)
+    data = ast.literal_eval(text[len("Invocation(") : -1])
+    assert data["env"]["API_KEY"] == "<redacted>"
+    for field in ("stdin", "stdout", "stderr"):
+        val = data[field]
+        assert len(val) <= 256
+        assert val.endswith("…")
