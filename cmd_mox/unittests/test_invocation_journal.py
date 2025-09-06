@@ -50,3 +50,19 @@ def test_journal_env_is_deep_copied(
     assert result.stdout == "ok"
     inv = mox.journal[0]
     assert inv.env["EXTRA"] == "1"
+
+
+def test_journal_prunes_to_maxlen(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Old journal entries are discarded once the max length is exceeded."""
+    with CmdMox(verify_on_exit=False, max_journal_entries=2) as mox:
+        mox.stub("rec").returns(stdout="ok")
+        mox.replay()
+        cmd_path = t.cast("Path", mox.environment.shim_dir) / "rec"
+        for i in range(3):
+            run([str(cmd_path), str(i)])
+        mox.verify()
+
+    assert len(mox.journal) == 2
+    assert [inv.args for inv in mox.journal] == [["1"], ["2"]]

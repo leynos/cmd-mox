@@ -339,7 +339,9 @@ class Phase(enum.Enum):
 class CmdMox:
     """Central orchestrator implementing the record-replay-verify lifecycle."""
 
-    def __init__(self, *, verify_on_exit: bool = True) -> None:
+    def __init__(
+        self, *, verify_on_exit: bool = True, max_journal_entries: int | None = None
+    ) -> None:
         """Create a new controller.
 
         Parameters
@@ -348,6 +350,9 @@ class CmdMox:
             When ``True`` (the default), :meth:`__exit__` will automatically
             call :meth:`verify`. This catches missed verifications and ensures
             the environment is restored. Disable for explicit control.
+        max_journal_entries:
+            Maximum number of invocations retained in the journal; older ones are
+            discarded once the limit is exceeded.
         """
         self.environment = EnvironmentManager()
         self._server: _CallbackIPCServer | None = None
@@ -355,10 +360,14 @@ class CmdMox:
         self._entered = False
         self._phase = Phase.RECORD
 
+        if max_journal_entries is not None and max_journal_entries <= 0:
+            msg = "max_journal_entries must be positive"
+            raise ValueError(msg)
+
         self._verify_on_exit = verify_on_exit
 
         self._doubles: dict[str, CommandDouble] = {}
-        self.journal: deque[Invocation] = deque()
+        self.journal: deque[Invocation] = deque(maxlen=max_journal_entries)
         self._commands: set[str] = set()
         self._ordered: list[Expectation] = []
 
@@ -589,4 +598,5 @@ class CmdMox:
             self.__exit__(None, None, None)
         finally:
             self._verify_on_exit = verify_on_exit
+
         self._phase = Phase.VERIFY

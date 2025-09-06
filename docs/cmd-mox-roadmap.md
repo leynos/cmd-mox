@@ -116,6 +116,7 @@
   - [x] Capture: command, args, stdin, env per invocation
 
   - [x] Store as deque, preserve order for verify
+  - [x] Configurable max journal size
 
 - [ ] **Verification Algorithm**
 

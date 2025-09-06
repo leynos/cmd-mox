@@ -1227,6 +1227,7 @@ The controller maintains a ``journal`` attribute to record every invocation in
 chronological order. Each entry is an :class:`Invocation` dataclass containing
 the command name, argument list, captured standard input, and the environment
 at call time. A ``collections.deque`` backs the journal to guarantee append
-performance and preserve ordering for later verification. Verifiers consume
-this deque directly, ensuring that verification reflects the exact sequence
-observed during replay.
+performance and preserve ordering for later verification. The deque may be
+bounded by ``CmdMox(max_journal_entries=n)`` to discard the oldest entries and
+cap memory use. Verifiers consume this deque directly, ensuring that
+verification reflects the exact sequence observed during replay.

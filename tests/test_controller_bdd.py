@@ -51,6 +51,15 @@ def create_controller() -> CmdMox:
     return CmdMox()
 
 
+@given(
+    parsers.cfparse("a CmdMox controller with max journal size {size:d}"),
+    target_fixture="mox",
+)
+def create_controller_with_limit(size: int) -> CmdMox:
+    """Create a CmdMox instance with bounded journal."""
+    return CmdMox(max_journal_entries=size)
+
+
 @given(parsers.cfparse('the command "{cmd}" is stubbed to return "{text}"'))
 def stub_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a stubbed command."""
@@ -534,4 +543,10 @@ def set_env_var(var: str, val: str) -> None:
 )
 def test_journal_captures_invocation_details() -> None:
     """Journal records full invocation details."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "journal prunes excess entries")
+def test_journal_prunes_excess_entries() -> None:
+    """Journal drops older entries beyond configured size."""
     pass
