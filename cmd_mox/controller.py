@@ -524,13 +524,12 @@ class CmdMox:
 
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
-        double = self._doubles.get(invocation.command)
-        if not double:
-            resp = Response(stdout=invocation.command)
-        else:
+        if double := self._doubles.get(invocation.command):
             if double.is_recording:
                 double.invocations.append(invocation)
             resp = self._invoke_handler(double, invocation)
+        else:
+            resp = Response(stdout=invocation.command)
         invocation.stdout = resp.stdout
         invocation.stderr = resp.stderr
         invocation.exit_code = resp.exit_code

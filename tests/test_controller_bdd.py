@@ -16,6 +16,7 @@ from cmd_mox.controller import CmdMox
 from tests.helpers.controller import (
     CommandExecution,
     JournalEntryExpectation,
+    _verify_journal_entry_with_expectation,
     execute_command_with_details,
     verify_journal_entry_details,
 )
@@ -464,11 +465,8 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
     val: str,
 ) -> None:
     """Validate journal entry records invocation details."""
-    verify_journal_entry_details(
-        mox,
-        JournalEntryExpectation(
-            cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val
-        ),
+    _verify_journal_entry_with_expectation(
+        mox, JournalEntryExpectation(cmd, args, stdin, var, val)
     )
 
 

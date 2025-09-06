@@ -85,26 +85,21 @@ def _verify_journal_entry_with_expectation(
             f"with args {expectation.args!r}. Available: {available!r}"
         )
         raise AssertionError(msg)
-    if expectation.stdin is not None:
-        assert inv.stdin == expectation.stdin, (
-            f"stdin mismatch: {inv.stdin!r} != {expectation.stdin!r}"
-        )
+    checks = {
+        "stdin": expectation.stdin,
+        "stdout": expectation.stdout,
+        "stderr": expectation.stderr,
+        "exit_code": expectation.exit_code,
+    }
+    for field, expected in checks.items():
+        if expected is not None:
+            actual = getattr(inv, field)
+            assert actual == expected, f"{field} mismatch: {actual!r} != {expected!r}"
     if expectation.env_var is not None:
-        assert inv.env.get(expectation.env_var) == expectation.env_val, (
+        actual_env = inv.env.get(expectation.env_var)
+        assert actual_env == expectation.env_val, (
             f"env[{expectation.env_var!r}] mismatch: "
-            f"{inv.env.get(expectation.env_var)!r} != {expectation.env_val!r}"
-        )
-    if expectation.stdout is not None:
-        assert inv.stdout == expectation.stdout, (
-            f"stdout mismatch: {inv.stdout!r} != {expectation.stdout!r}"
-        )
-    if expectation.stderr is not None:
-        assert inv.stderr == expectation.stderr, (
-            f"stderr mismatch: {inv.stderr!r} != {expectation.stderr!r}"
-        )
-    if expectation.exit_code is not None:
-        assert inv.exit_code == expectation.exit_code, (
-            f"exit_code mismatch: {inv.exit_code!r} != {expectation.exit_code!r}"
+            f"{actual_env!r} != {expectation.env_val!r}"
         )
 
 
