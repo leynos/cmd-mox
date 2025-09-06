@@ -53,6 +53,25 @@ class Invocation:
     args: list[str]
     stdin: str
     env: dict[str, str]
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
+
+    def to_dict(self) -> dict[str, t.Any]:
+        """Return a JSON-serializable mapping of this invocation."""
+        return {
+            "command": self.command,
+            "args": list(self.args),
+            "stdin": self.stdin,
+            "env": dict(self.env),
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "exit_code": self.exit_code,
+        }
+
+    def __repr__(self) -> str:
+        """Return a convenient debug representation."""
+        return f"Invocation({self.to_dict()!r})"
 
 
 @dc.dataclass(slots=True)

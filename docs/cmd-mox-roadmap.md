@@ -111,11 +111,12 @@
 
   - [x] Flexible matcher plumbing in mock argument matching
 
-- [ ] **Invocation Journal**
+- [x] **Invocation Journal**
 
-  - [ ] Capture: command, args, stdin, env per invocation
+  - [x] Capture: command, args, stdin, env per invocation
 
-  - [ ] Store as list or deque, preserve order for verify
+  - [x] Store as deque, preserve order for verify
+  - [x] Configurable max journal size
 
 - [ ] **Verification Algorithm**
 

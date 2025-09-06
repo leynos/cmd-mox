@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
@@ -25,7 +26,7 @@ def main() -> None:
         command=cmd_name,
         args=sys.argv[1:],
         stdin=stdin_data,
-        env=dict(os.environ),
+        env=dict(copy.deepcopy(os.environ)),
     )
 
     try:

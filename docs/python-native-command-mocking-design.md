@@ -288,9 +288,11 @@ provided `exit_code`.
   behavior. The `handler` is a Python callable that will be executed by the
   `CmdMox` framework when the mock is invoked. The callable receives a
   structured `Invocation` object containing details of the call (args, `stdin`,
-  env) and must return a tuple of `(stdout_bytes, stderr_bytes, exit_code)`.
-  This is a significant enhancement of PyMox's callback feature, enabling
-  stateful mocks and complex conditional logic.
+  env). The handler must return a tuple of
+  `(stdout_bytes, stderr_bytes, exit_code)`, which the controller records back
+  onto the `Invocation` for journal inspection. This is a significant
+  enhancement of PyMox's callback feature, enabling stateful mocks and complex
+  conditional logic.
 
 - `.times(count: int)`**:** Specifies the exact number of times this specific
   expectation is expected to be met. This is inspired by PyMox's
@@ -429,14 +431,16 @@ same host. The workflow is as follows:
 
 4. **Invocation Reporting:** The shim gathers all relevant invocation data: the
    command name, the list of arguments (`sys.argv[1:]`), the complete content
-   of its standard input, and a snapshot of its current environment variables.
-   It serializes this data into a structured format like JSON and sends it over
-   the socket to the server.
+   of its standard input, and a deep-copied snapshot of its current environment
+   variables. It serializes this data into a structured format like JSON and
+   sends it over the socket to the server.
 
 5. **Server-Side Processing:** The server thread in the main process receives
    the JSON payload. It deserializes it into an `Invocation` object and records
-   it in the in-memory Invocation Journal. It then searches its list of
-   `Expectation` objects to find a match for this invocation.
+   it in the in-memory Invocation Journal after the handler runs. At that point
+   the invocation also captures the resulting `stdout`, `stderr`, and
+   `exit_code`. The server then searches its list of `Expectation` objects to
+   find a match for this invocation.
 
 6. **Response Delivery:** Once a matching expectation is found, the server
    determines the prescribed response. If it's a static `.returns()` value, it
@@ -458,11 +462,11 @@ The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
 socket path provided by the `EnvironmentManager`. Incoming JSON messages are
 parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts. Responses are JSON encoded `stdout`, `stderr`, and
-`exit_code` data. The server cleans up the socket on shutdown to prevent stale
-sockets from interfering with subsequent tests. The communication timeout is
-configurable via the :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV`
-environment variable.
+reasonable timeouts. The corresponding response data (`stdout`, `stderr`, and
+`exit_code`) is attached to the invocation before it is journaled. The server
+cleans up the socket on shutdown to prevent stale sockets from interfering with
+subsequent tests. The communication timeout is configurable via the
+:data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` environment variable.
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
@@ -499,6 +503,10 @@ classDiagram
         + list[str] args
         + str stdin
         + dict[str, str] env
+        + str stdout
+        + str stderr
+        + int exit_code
+        + dict[str, Any] to_dict()
     }
     class Response {
         + str stdout
@@ -538,25 +546,25 @@ that handles all modifications to the process environment.
 
   1. It will save a copy of the original `os.environ`.
 
-  1. It will create the temporary shim directory.
+  2. Create the temporary shim directory.
 
-  1. It will prepend the shim directory's path to `os.environ`.
+  3. Prepend the shim directory's path to `os.environ`.
 
-  1. It will set any other necessary environment variables for the IPC
+  4. Set any other necessary environment variables for the IPC
      mechanism, such as `CMOX_IPC_SOCKET`. Clients may additionally honour
      :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to override the default
      connection timeout.
 
 - On `__exit__`:
 
-  1. It will execute in a `finally` block to guarantee cleanup, even if the test
-     fails with an exception.
+  1. Execute in a `finally` block to guarantee cleanup, even if the test fails
+     with an exception.
 
-  1. It will restore the original `PATH` and unset any `CmdMox`-specific
-     environment variables.
+  2. Restore the original `PATH` and unset any `CmdMox`-specific environment
+     variables.
 
-  1. It will perform a recursive deletion of the temporary shim directory and
-     all its contents (symlinks and the IPC socket).
+  3. Perform a recursive deletion of the temporary shim directory and all its
+     contents (symlinks and the IPC socket).
 
 The manager is not reentrant. Nested usage would overwrite the saved
 environment snapshot, so attempts to use it recursively will raise
@@ -578,10 +586,12 @@ chronological record of all command calls that occurred during the replay phase.
 
 Each time the IPC server thread receives an invocation report from a shim, it
 constructs a structured `Invocation` object (e.g., a dataclass or `NamedTuple`)
-containing the command name, arguments, `stdin`, and environment. This object
-is then appended to the journal. The `verify()` method uses this journal as the
-definitive record of what actually happened, comparing it against the
-predefined expectations to detect any discrepancies.
+containing the command name, arguments, `stdin`, and environment. After the
+handler runs, the controller attaches the resulting `stdout`, `stderr`, and
+`exit_code` to that `Invocation` before appending it to the journal. The
+`verify()` method uses this enriched journal as the definitive record of what
+actually happened, comparing it against the predefined expectations to detect
+any discrepancies.
 
 ## IV. Feature Deep Dive: Stubbing
 
@@ -640,7 +650,9 @@ The implementation of this feature leverages the IPC architecture:
 
 3. The IPC server thread—which runs within the main test process and therefore
    has direct access to `my_date_handler`—executes the handler. It passes the
-   structured `Invocation` object as an argument to the handler.
+   structured `Invocation` object as an argument to the handler and, after the
+   handler returns, records the resulting output streams and exit code on that
+   invocation.
 
 4. The handler performs its logic (which can involve accessing or modifying
    state within the test function's scope) and returns a result tuple:
@@ -797,7 +809,8 @@ for this purpose:
   command was called.
 
 - `spy.invocations`: A list of `Invocation` objects, where each object provides
-  structured access to a single call's details.
+  structured access to a single call's details, including captured `stdout`,
+  `stderr`, and `exit_code`.
 
 - `spy.assert_called()`, `spy.assert_not_called()`, and
   `spy.assert_called_with(*args, stdin=None, env=None)`: Convenience helpers
@@ -1220,3 +1233,14 @@ user-supplied predicates to participate alongside the built-ins. Regular
 expressions are compiled once per comparator and ``IsA`` relies on type
 conversion to avoid bespoke parsing logic. Comparator exceptions surface their
 class and message in mismatch reports.
+
+### 8.8 Design Decisions for the Invocation Journal
+
+The controller maintains a ``journal`` attribute to record every invocation in
+chronological order. Each entry is an :class:`Invocation` dataclass containing
+the command name, argument list, captured standard input, and the environment
+at call time. A ``collections.deque`` backs the journal to guarantee append
+performance and preserve ordering for later verification. The deque may be
+bounded by ``CmdMox(max_journal_entries=n)`` to discard the oldest entries and
+cap memory use. Verifiers consume this deque directly, ensuring that
+verification reflects the exact sequence observed during replay.
