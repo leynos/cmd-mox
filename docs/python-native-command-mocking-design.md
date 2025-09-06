@@ -289,10 +289,10 @@ provided `exit_code`.
   `CmdMox` framework when the mock is invoked. The callable receives a
   structured `Invocation` object containing details of the call (args, `stdin`,
   env). The handler must return a tuple of `(stdout, stderr, exit_code)` using
-  UTF-8 decoded strings. Handlers may return raw bytes, which are decoded with
-  UTF-8 before being recorded onto the `Invocation` for journal inspection.
-  This is a significant enhancement of PyMox's callback feature, enabling
-  stateful mocks and complex conditional logic.
+  UTF-8–decoded strings. Handlers may return raw bytes; these are decoded as
+  UTF-8 before the values are recorded on the `Invocation` for journal
+  inspection. This is a significant enhancement of PyMox's callback feature,
+  enabling stateful mocks and complex conditional logic.
 
 - `.times(count: int)`**:** Specifies the exact number of times this specific
   expectation is expected to be met. This is inspired by PyMox's
@@ -463,11 +463,11 @@ The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
 socket path provided by the `EnvironmentManager`. Incoming JSON messages are
 parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts (default: 10.0s). The corresponding response data
-(`stdout`, `stderr`, and `exit_code`) is attached to the invocation before it
-is journaled. The server cleans up the socket on shutdown to prevent stale
-sockets from interfering with subsequent tests. The timeout is configurable via
-:data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
+reasonable timeouts (default: 10.0s). The server attaches the corresponding
+response data (`stdout`, `stderr`, `exit_code`) to the `Invocation` before
+appending it to the journal. The server cleans up the socket on shutdown to
+prevent stale sockets interfering with subsequent tests. The timeout is
+configurable via :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
@@ -591,7 +591,7 @@ constructs an `Invocation` object containing the command name, arguments,
 `stdin`, and environment. After the handler runs, the controller attaches the
 resulting `stdout`, `stderr`, and `exit_code` to the `Invocation` and then
 appends it to the journal. `verify()` uses this enriched journal as the
-definitive record, comparing it against the predefined expectations to detect
+definitive record, comparing it against predefined expectations to detect
 discrepancies.
 
 ## IV. Feature Deep Dive: Stubbing
