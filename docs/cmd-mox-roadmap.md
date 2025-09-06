@@ -113,10 +113,11 @@
 
 - [x] **Invocation Journal**
 
-  - [x] Capture: command, args, stdin, env per invocation
+- [x] Capture: command, args, stdin, env, stdout, stderr, exit_code per
+  invocation
 
-  - [x] Store as deque, preserve order for verify
-  - [x] Configurable max journal size
+  - [x] Store as a deque to preserve order during verification
+  - [x] Configurable max journal size via `max_journal_entries`
 
 - [ ] **Verification Algorithm**
 

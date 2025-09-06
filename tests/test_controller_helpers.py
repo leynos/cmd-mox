@@ -19,7 +19,6 @@ from tests.helpers.controller import (
 
 def test_execute_and_verify_helpers() -> None:
     """Ensure helper functions execute and verify invocations."""
-    mox = CmdMox()
 
     def handler(inv: Invocation) -> tuple[str, str, int]:
         assert inv.args == ["--flag"]
@@ -27,9 +26,8 @@ def test_execute_and_verify_helpers() -> None:
         assert inv.env.get("ENV_VAR") == "VALUE"
         return ("handled", "", 0)
 
-    mox.stub("foo").runs(handler)
-
-    with mox:
+    with CmdMox() as mox:
+        mox.stub("foo").runs(handler)
         mox.replay()
         params = CommandExecution(
             cmd="foo",

@@ -21,17 +21,22 @@ def main() -> None:
         sys.exit(1)
 
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+    env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     invocation = Invocation(
         command=cmd_name,
         args=sys.argv[1:],
         stdin=stdin_data,
-        env=dict(os.environ),
+        env=env,
     )
 
     try:
         timeout = float(os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0"))
         response = invoke_server(invocation, timeout=timeout)
-    except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover - network issues
+    except (
+        OSError,
+        RuntimeError,
+        json.JSONDecodeError,
+    ) as exc:  # pragma: no cover - network issues
         print(f"IPC error: {exc}", file=sys.stderr)
         sys.exit(1)
 

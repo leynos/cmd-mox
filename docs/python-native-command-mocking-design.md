@@ -288,11 +288,11 @@ provided `exit_code`.
   behavior. The `handler` is a Python callable that will be executed by the
   `CmdMox` framework when the mock is invoked. The callable receives a
   structured `Invocation` object containing details of the call (args, `stdin`,
-  env). The handler must return a tuple of
-  `(stdout_bytes, stderr_bytes, exit_code)`, which the controller records back
-  onto the `Invocation` for journal inspection. This is a significant
-  enhancement of PyMox's callback feature, enabling stateful mocks and complex
-  conditional logic.
+  env). The handler must return a tuple of `(stdout, stderr, exit_code)` using
+  UTF-8 decoded strings. Handlers may return raw bytes, which are decoded with
+  UTF-8 before being recorded onto the `Invocation` for journal inspection.
+  This is a significant enhancement of PyMox's callback feature, enabling
+  stateful mocks and complex conditional logic.
 
 - `.times(count: int)`**:** Specifies the exact number of times this specific
   expectation is expected to be met. This is inspired by PyMox's
@@ -465,8 +465,8 @@ parsed into `Invocation` objects and processed in background threads with
 reasonable timeouts. The corresponding response data (`stdout`, `stderr`, and
 `exit_code`) is attached to the invocation before it is journaled. The server
 cleans up the socket on shutdown to prevent stale sockets from interfering with
-subsequent tests. The communication timeout is configurable via the
-:data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` environment variable.
+subsequent tests. The client connection timeout is configurable via
+:data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV`.
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
@@ -1238,9 +1238,10 @@ class and message in mismatch reports.
 
 The controller maintains a ``journal`` attribute to record every invocation in
 chronological order. Each entry is an :class:`Invocation` dataclass containing
-the command name, argument list, captured standard input, and the environment
-at call time. A ``collections.deque`` backs the journal to guarantee append
-performance and preserve ordering for later verification. The deque may be
-bounded by ``CmdMox(max_journal_entries=n)`` to discard the oldest entries and
-cap memory use. Verifiers consume this deque directly, ensuring that
-verification reflects the exact sequence observed during replay.
+the command name, argument list, captured standard input, environment at call
+time, and the resulting ``stdout``, ``stderr``, and ``exit_code``. A
+``collections.deque`` backs the journal to guarantee append performance and
+preserve ordering for later verification. Configure bounds via
+``CmdMox(max_journal_entries=n)``; when full, the oldest entries are pruned.
+Verifiers consume this deque directly, ensuring that verification reflects the
+exact sequence observed during replay.

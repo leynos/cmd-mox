@@ -266,10 +266,9 @@ def check_stderr(result: subprocess.CompletedProcess[str], text: str) -> None:
 
 @then(parsers.cfparse('the journal should contain {count:d} invocation of "{cmd}"'))
 def check_journal(mox: CmdMox, count: int, cmd: str) -> None:
-    """Verify the journal contains the expected command invocation."""
-    assert len(mox.journal) == count
-    if count > 0:
-        assert mox.journal[0].command == cmd
+    """Verify the journal records *count* invocations of *cmd*."""
+    matches = [inv for inv in mox.journal if inv.command == cmd]
+    assert len(matches) == count
 
 
 @then(parsers.cfparse('the spy "{cmd}" should record {count:d} invocation'))

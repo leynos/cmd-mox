@@ -351,8 +351,9 @@ class CmdMox:
             call :meth:`verify`. This catches missed verifications and ensures
             the environment is restored. Disable for explicit control.
         max_journal_entries:
-            Maximum number of invocations retained in the journal; older ones are
-            discarded once the limit is exceeded.
+            Maximum number of invocations retained in the journal. When ``None``,
+            the journal is unbounded. Older entries are discarded once the limit
+            is exceeded. The journal is cleared at the start of each ``replay()``.
         """
         self.environment = EnvironmentManager()
         self._server: _CallbackIPCServer | None = None

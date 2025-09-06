@@ -23,6 +23,7 @@ class CommandExecution:
     stdin: str
     env_var: str
     env_val: str
+    check: bool = True
 
 
 @dc.dataclass(slots=True, frozen=True)
@@ -50,7 +51,7 @@ def _execute_command_with_params(
         input=params.stdin,
         capture_output=True,
         text=True,
-        check=True,
+        check=params.check,
         shell=False,
         env=env,
         timeout=30,
@@ -69,12 +70,21 @@ def _verify_journal_entry_with_expectation(
     mox: CmdMox, expectation: JournalEntryExpectation
 ) -> None:
     """Assert journal entry for *expectation.cmd* matches provided expectation."""
-    inv = next((inv for inv in mox.journal if inv.command == expectation.cmd), None)
-    assert inv is not None, f"Journal does not contain command: {expectation.cmd!r}"
+    candidates = [inv for inv in mox.journal if inv.command == expectation.cmd]
     if expectation.args is not None:
-        assert list(inv.args) == shlex.split(expectation.args), (
-            f"args mismatch: {list(inv.args)!r} != {shlex.split(expectation.args)!r}"
+        wanted_args = shlex.split(expectation.args)
+        candidates = [inv for inv in candidates if list(inv.args) == wanted_args]
+    inv = candidates[-1] if candidates else None
+    if inv is None:
+        available = [
+            (i.command, list(i.args))
+            for i in mox.journal  # type: ignore[attr-defined]
+        ]
+        msg = (
+            f"Journal does not contain expected entry for {expectation.cmd!r} "
+            f"with args {expectation.args!r}. Available: {available!r}"
         )
+        raise AssertionError(msg)
     if expectation.stdin is not None:
         assert inv.stdin == expectation.stdin, (
             f"stdin mismatch: {inv.stdin!r} != {expectation.stdin!r}"
