@@ -450,6 +450,13 @@ def run_command_args_stdin_env(
     return execute_command_with_details(mox, params)
 
 
+def _validate_journal_entry_details(
+    mox: CmdMox, expectation: JournalEntryExpectation
+) -> None:
+    """Validate journal entry records invocation details."""
+    _verify_journal_entry_with_expectation(mox, expectation)
+
+
 @then(
     parsers.cfparse(
         'the journal entry for "{cmd}" should record arguments "{args}" '
@@ -465,9 +472,8 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
     val: str,
 ) -> None:
     """Validate journal entry records invocation details."""
-    _verify_journal_entry_with_expectation(
-        mox, JournalEntryExpectation(cmd, args, stdin, var, val)
-    )
+    expectation = JournalEntryExpectation(cmd, args, stdin, var, val)
+    _validate_journal_entry_details(mox, expectation)
 
 
 @then(
