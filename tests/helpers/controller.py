@@ -10,6 +10,8 @@ import shlex
 import subprocess
 import typing as t
 
+RUN_TIMEOUT_SECONDS = 30
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.controller import CmdMox
     from cmd_mox.ipc import Invocation
@@ -55,7 +57,7 @@ def _execute_command_with_params(
         check=params.check,
         shell=False,
         env=env,
-        timeout=30,
+        timeout=RUN_TIMEOUT_SECONDS,
     )
 
 
@@ -77,10 +79,7 @@ def _find_matching_journal_entry(
         candidates = [inv for inv in candidates if list(inv.args) == wanted_args]
     inv = candidates[-1] if candidates else None
     if inv is None:
-        available = [
-            (i.command, list(i.args))
-            for i in mox.journal  # type: ignore[attr-defined]
-        ]
+        available = [(i.command, list(i.args)) for i in mox.journal]
         msg = (
             f"Journal does not contain expected entry for {expectation.cmd!r} "
             f"with args {expectation.args!r}. Available: {available!r}"

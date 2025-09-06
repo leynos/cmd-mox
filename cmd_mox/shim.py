@@ -29,8 +29,16 @@ def main() -> None:
         env=env,
     )
 
+    timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     try:
-        timeout = float(os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0"))
+        timeout = float(timeout_raw)
+    except ValueError:
+        print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
+        sys.exit(1)
+    if timeout <= 0:
+        print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
+        sys.exit(1)
+    try:
         response = invoke_server(invocation, timeout=timeout)
     except (
         OSError,

@@ -181,4 +181,8 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal should contain 1 invocation of "beta"
     And the journal should contain 1 invocation of "gamma"
+    And the journal should contain 0 invocation of "alpha"
     And the journal order should be beta,gamma
+
+  Scenario: invalid max journal size is rejected
+    Given creating a CmdMox controller with max journal size -1 fails

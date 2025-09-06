@@ -99,7 +99,7 @@ class _CallbackIPCServer(IPCServer):
         return self._handler(invocation)
 
 
-class CommandDouble(_ExpectationProxy):  # type: ignore[misc]
+class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
 
     __slots__ = (
@@ -525,14 +525,14 @@ class CmdMox:
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
         if double := self._doubles.get(invocation.command):
-            if double.is_recording:
-                double.invocations.append(invocation)
             resp = self._invoke_handler(double, invocation)
         else:
             resp = Response(stdout=invocation.command)
         invocation.stdout = resp.stdout
         invocation.stderr = resp.stderr
         invocation.exit_code = resp.exit_code
+        if double and double.is_recording:
+            double.invocations.append(invocation)
         self.journal.append(invocation)
         return resp
 

@@ -9,6 +9,7 @@ import subprocess
 import typing as t
 from pathlib import Path
 
+import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
@@ -16,14 +17,11 @@ from cmd_mox.controller import CmdMox
 from tests.helpers.controller import (
     CommandExecution,
     JournalEntryExpectation,
-    _verify_journal_entry_with_expectation,
     execute_command_with_details,
     verify_journal_entry_details,
 )
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import pytest
-
     from cmd_mox.ipc import Invocation
 
 
@@ -43,6 +41,15 @@ def create_controller() -> CmdMox:
 def create_controller_with_limit(size: int) -> CmdMox:
     """Create a CmdMox instance with bounded journal."""
     return CmdMox(max_journal_entries=size)
+
+
+@given(
+    parsers.cfparse("creating a CmdMox controller with max journal size {size:d} fails")
+)
+def create_controller_with_limit_fails(size: int) -> None:
+    """Assert constructing a controller with invalid journal size fails."""
+    with pytest.raises(ValueError, match="max_journal_entries must be positive"):
+        CmdMox(max_journal_entries=size)
 
 
 @given(parsers.cfparse('the command "{cmd}" is stubbed to return "{text}"'))
@@ -454,7 +461,7 @@ def _validate_journal_entry_details(
     mox: CmdMox, expectation: JournalEntryExpectation
 ) -> None:
     """Validate journal entry records invocation details."""
-    _verify_journal_entry_with_expectation(mox, expectation)
+    verify_journal_entry_details(mox, expectation)
 
 
 @then(
@@ -513,4 +520,12 @@ def test_journal_captures_invocation_details() -> None:
 @scenario(str(FEATURES_DIR / "controller.feature"), "journal prunes excess entries")
 def test_journal_prunes_excess_entries() -> None:
     """Journal drops older entries beyond configured size."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "invalid max journal size is rejected"
+)
+def test_invalid_max_journal_size_is_rejected() -> None:
+    """Controller rejects non-positive journal size."""
     pass
