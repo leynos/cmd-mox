@@ -431,9 +431,9 @@ same host. The workflow is as follows:
 
 4. **Invocation Reporting:** The shim gathers all relevant invocation data: the
    command name, the list of arguments (`sys.argv[1:]`), the complete content
-   of its standard input, and a deep-copied snapshot of its current environment
-   variables. It serializes this data into a structured format like JSON and
-   sends it over the socket to the server.
+   of its standard input, and a copy of its current environment variables. It
+   serializes this data into a structured format like JSON and sends it over
+   the socket to the server.
 
 5. **Server-Side Processing:** The server thread in the main process receives
    the JSON payload. It deserializes it into an `Invocation` object and records

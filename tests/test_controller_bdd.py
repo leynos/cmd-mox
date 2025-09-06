@@ -491,9 +491,9 @@ def check_journal_entry_result(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapp
 
 
 @when(parsers.cfparse('I set environment variable "{var}" to "{val}"'))
-def set_env_var(var: str, val: str) -> None:
-    """Adjust environment variable to new value."""
-    os.environ[var] = val
+def set_env_var(monkeypatch: pytest.MonkeyPatch, var: str, val: str) -> None:
+    """Adjust environment variable to new value (scoped to the test)."""
+    monkeypatch.setenv(var, val)
 
 
 @scenario(
