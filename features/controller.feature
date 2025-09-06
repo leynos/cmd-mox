@@ -164,5 +164,6 @@ Feature: CmdMox basic functionality
     And the command "rec" is stubbed to return "ok"
     When I replay the controller
     And I run the command "rec" with arguments "alpha beta" using stdin "payload" and env var "EXTRA"="42"
+    And I set environment variable "EXTRA" to "99"
     When I verify the controller
     Then the journal entry for "rec" should record arguments "alpha beta" stdin "payload" env var "EXTRA"="42"

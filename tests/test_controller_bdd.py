@@ -523,6 +523,12 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
     verify_journal_entry_details(mox, cmd, expected)
 
 
+@when(parsers.cfparse('I set environment variable "{var}" to "{val}"'))
+def set_env_var(var: str, val: str) -> None:
+    """Adjust environment variable to new value."""
+    os.environ[var] = val
+
+
 @scenario(
     str(FEATURES_DIR / "controller.feature"), "journal captures invocation details"
 )
