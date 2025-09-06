@@ -431,9 +431,10 @@ same host. The workflow is as follows:
 
 4. **Invocation Reporting:** The shim gathers all relevant invocation data: the
    command name, the list of arguments (`sys.argv[1:]`), the complete content
-   of its standard input, and a copy of its current environment variables. It
-   serializes this data into a structured format like JSON and sends it over
-   the socket to the server.
+   of its standard input, and a copy of its current environment variables.
+   Large payloads may require future streaming or truncation. It serializes
+   this data into a structured format like JSON and sends it over the socket to
+   the server.
 
 5. **Server-Side Processing:** The server thread in the main process receives
    the JSON payload. It deserializes it into an `Invocation` object and records
@@ -462,11 +463,11 @@ The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
 socket path provided by the `EnvironmentManager`. Incoming JSON messages are
 parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts. The corresponding response data (`stdout`, `stderr`, and
-`exit_code`) is attached to the invocation before it is journaled. The server
-cleans up the socket on shutdown to prevent stale sockets from interfering with
-subsequent tests. The client connection timeout is configurable via
-:data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV`.
+reasonable timeouts (default: 10.0s). The corresponding response data
+(`stdout`, `stderr`, and `exit_code`) is attached to the invocation before it
+is journaled. The server cleans up the socket on shutdown to prevent stale
+sockets from interfering with subsequent tests. The timeout is configurable via
+:data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
@@ -580,18 +581,18 @@ reliable testing framework.
 ### 3.4 The Invocation Journal
 
 The Invocation Journal is a simple but crucial in-memory data structure within
-each `CmdMox` controller instance. It will likely be implemented as a
-`collections.deque` or a standard `list`. Its sole purpose is to store a
-chronological record of all command calls that occurred during the replay phase.
+each `CmdMox` controller instance. A `collections.deque` backs the journal,
+preserving call order and enabling efficient pruning when bounded. Its sole
+purpose is to store a chronological record of command calls during the replay
+phase.
 
 Each time the IPC server thread receives an invocation report from a shim, it
-constructs a structured `Invocation` object (e.g., a dataclass or `NamedTuple`)
-containing the command name, arguments, `stdin`, and environment. After the
-handler runs, the controller attaches the resulting `stdout`, `stderr`, and
-`exit_code` to that `Invocation` before appending it to the journal. The
-`verify()` method uses this enriched journal as the definitive record of what
-actually happened, comparing it against the predefined expectations to detect
-any discrepancies.
+constructs an `Invocation` object containing the command name, arguments,
+`stdin`, and environment. After the handler runs, the controller attaches the
+resulting `stdout`, `stderr`, and `exit_code` to the `Invocation` and then
+appends it to the journal. `verify()` uses this enriched journal as the
+definitive record, comparing it against the predefined expectations to detect
+discrepancies.
 
 ## IV. Feature Deep Dive: Stubbing
 

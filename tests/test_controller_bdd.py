@@ -465,7 +465,10 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
 ) -> None:
     """Validate journal entry records invocation details."""
     verify_journal_entry_details(
-        mox, JournalEntryExpectation(cmd, args, stdin, var, val)
+        mox,
+        JournalEntryExpectation(
+            cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val
+        ),
     )
 
 
@@ -484,7 +487,7 @@ def check_journal_entry_result(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapp
 ) -> None:
     """Validate journal entry records command results."""
     expectation = JournalEntryExpectation(
-        cmd, stdout=stdout, stderr=stderr, exit_code=int(code)
+        cmd=cmd, stdout=stdout, stderr=stderr, exit_code=int(code)
     )
     verify_journal_entry_details(mox, expectation)
 
