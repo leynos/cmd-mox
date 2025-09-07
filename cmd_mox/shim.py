@@ -21,17 +21,30 @@ def main() -> None:
         sys.exit(1)
 
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+    env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     invocation = Invocation(
         command=cmd_name,
         args=sys.argv[1:],
         stdin=stdin_data,
-        env=dict(os.environ),
+        env=env,
     )
 
+    timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     try:
-        timeout = float(os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0"))
+        timeout = float(timeout_raw)
+    except ValueError:
+        print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
+        sys.exit(1)
+    if timeout <= 0:
+        print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
+        sys.exit(1)
+    try:
         response = invoke_server(invocation, timeout=timeout)
-    except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover - network issues
+    except (
+        OSError,
+        RuntimeError,
+        json.JSONDecodeError,
+    ) as exc:  # pragma: no cover - network issues
         print(f"IPC error: {exc}", file=sys.stderr)
         sys.exit(1)
 

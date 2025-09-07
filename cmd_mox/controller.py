@@ -99,7 +99,7 @@ class _CallbackIPCServer(IPCServer):
         return self._handler(invocation)
 
 
-class CommandDouble(_ExpectationProxy):
+class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
 
     __slots__ = (
@@ -339,7 +339,9 @@ class Phase(enum.Enum):
 class CmdMox:
     """Central orchestrator implementing the record-replay-verify lifecycle."""
 
-    def __init__(self, *, verify_on_exit: bool = True) -> None:
+    def __init__(
+        self, *, verify_on_exit: bool = True, max_journal_entries: int | None = None
+    ) -> None:
         """Create a new controller.
 
         Parameters
@@ -348,6 +350,10 @@ class CmdMox:
             When ``True`` (the default), :meth:`__exit__` will automatically
             call :meth:`verify`. This catches missed verifications and ensures
             the environment is restored. Disable for explicit control.
+        max_journal_entries:
+            Maximum number of invocations retained in the journal. When ``None``,
+            the journal is unbounded. Older entries are discarded once the limit
+            is exceeded. The journal is cleared at the start of each ``replay()``.
         """
         self.environment = EnvironmentManager()
         self._server: _CallbackIPCServer | None = None
@@ -355,10 +361,14 @@ class CmdMox:
         self._entered = False
         self._phase = Phase.RECORD
 
+        if max_journal_entries is not None and max_journal_entries <= 0:
+            msg = "max_journal_entries must be positive"
+            raise ValueError(msg)
+
         self._verify_on_exit = verify_on_exit
 
         self._doubles: dict[str, CommandDouble] = {}
-        self.journal: deque[Invocation] = deque()
+        self.journal: deque[Invocation] = deque(maxlen=max_journal_entries)
         self._commands: set[str] = set()
         self._ordered: list[Expectation] = []
 
@@ -514,13 +524,17 @@ class CmdMox:
 
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
-        self.journal.append(invocation)
-        double = self._doubles.get(invocation.command)
-        if not double:
-            return Response(stdout=invocation.command)
-        if double.is_recording:
+        if double := self._doubles.get(invocation.command):
+            resp = self._invoke_handler(double, invocation)
+        else:
+            resp = Response(stdout=invocation.command)
+        invocation.stdout = resp.stdout
+        invocation.stderr = resp.stderr
+        invocation.exit_code = resp.exit_code
+        if double and double.is_recording:
             double.invocations.append(invocation)
-        return self._invoke_handler(double, invocation)
+        self.journal.append(invocation)
+        return resp
 
     def _require_phase(self, expected: Phase, action: str) -> None:
         """Ensure we're in ``expected`` phase before executing ``action``."""
@@ -589,4 +603,5 @@ class CmdMox:
             self.__exit__(None, None, None)
         finally:
             self._verify_on_exit = verify_on_exit
+
         self._phase = Phase.VERIFY

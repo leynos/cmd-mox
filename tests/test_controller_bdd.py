@@ -4,19 +4,26 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shlex
 import subprocess
 import typing as t
 from pathlib import Path
 
+import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.controller import CmdMox
+from tests.helpers.controller import (
+    CommandExecution,
+    JournalEntryExpectation,
+    execute_command_with_details,
+    verify_journal_entry_details,
+)
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import pytest
-
     from cmd_mox.ipc import Invocation
+
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
@@ -25,6 +32,24 @@ FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 def create_controller() -> CmdMox:
     """Create a fresh CmdMox instance."""
     return CmdMox()
+
+
+@given(
+    parsers.cfparse("a CmdMox controller with max journal size {size:d}"),
+    target_fixture="mox",
+)
+def create_controller_with_limit(size: int) -> CmdMox:
+    """Create a CmdMox instance with bounded journal."""
+    return CmdMox(max_journal_entries=size)
+
+
+@given(
+    parsers.cfparse("creating a CmdMox controller with max journal size {size:d} fails")
+)
+def create_controller_with_limit_fails(size: int) -> None:
+    """Assert constructing a controller with invalid journal size fails."""
+    with pytest.raises(ValueError, match="max_journal_entries must be positive"):
+        CmdMox(max_journal_entries=size)
 
 
 @given(parsers.cfparse('the command "{cmd}" is stubbed to return "{text}"'))
@@ -110,7 +135,7 @@ def stub_runs(mox: CmdMox, cmd: str) -> None:
 )
 def mock_with_args_in_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
     """Configure an ordered mock with arguments."""
-    mox.mock(cmd).with_args(*args.split()).returns(stdout=text).in_order()
+    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text).in_order()
 
 
 @given(
@@ -120,7 +145,7 @@ def mock_with_args_in_order(mox: CmdMox, cmd: str, args: str, text: str) -> None
 )
 def mock_with_args_any_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
     """Configure an unordered mock with arguments."""
-    mox.mock(cmd).with_args(*args.split()).returns(stdout=text).any_order()
+    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text).any_order()
 
 
 @given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))
@@ -135,7 +160,9 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
 
 @given(parsers.cfparse('the command "{cmd}" resolves to a non-executable file'))
 def non_executable_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cmd: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cmd: str,
 ) -> None:
     """Patch ``shutil.which`` so *cmd* resolves to a non-executable file."""
     dummy = tmp_path / cmd
@@ -195,10 +222,12 @@ def run_command_failure(cmd: str) -> subprocess.CompletedProcess[str]:
     target_fixture="result",
 )
 def run_command_args(
-    mox: CmdMox, cmd: str, args: str
+    mox: CmdMox,
+    cmd: str,
+    args: str,
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with additional arguments."""
-    argv = [cmd, *args.split()]
+    argv = [cmd, *shlex.split(args)]
     return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603
 
 
@@ -243,12 +272,16 @@ def check_stderr(result: subprocess.CompletedProcess[str], text: str) -> None:
     assert text in result.stderr
 
 
-@then(parsers.cfparse('the journal should contain {count:d} invocation of "{cmd}"'))
-def check_journal(mox: CmdMox, count: int, cmd: str) -> None:
-    """Verify the journal contains the expected command invocation."""
-    assert len(mox.journal) == count
-    if count > 0:
-        assert mox.journal[0].command == cmd
+@then(
+    parsers.re(
+        r"the journal should contain (?P<count>\d+) "
+        r'invocation(?:s)? of "(?P<cmd>[^\"]+)"'
+    )
+)
+def check_journal(mox: CmdMox, count: str, cmd: str) -> None:
+    """Verify the journal records *count* invocations of *cmd*."""
+    matches = [inv for inv in mox.journal if inv.command == cmd]
+    assert len(matches) == int(count)
 
 
 @then(parsers.cfparse('the spy "{cmd}" should record {count:d} invocation'))
@@ -280,7 +313,7 @@ def spy_assert_called(mox: CmdMox, cmd: str) -> None:
 def spy_assert_called_with(mox: CmdMox, cmd: str, args: str) -> None:
     """Assert the spy's last call used the given arguments."""
     assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
-    mox.spies[cmd].assert_called_with(*args.split())
+    mox.spies[cmd].assert_called_with(*shlex.split(args))
 
 
 @then(parsers.cfparse('the spy "{cmd}" should not have been called'))
@@ -406,4 +439,98 @@ def test_passthrough_spy_timeout() -> None:
 )
 def test_mock_matches_arguments_with_comparators() -> None:
     """Mocks can use comparator objects for flexible argument matching."""
+    pass
+
+
+@when(
+    parsers.cfparse(
+        'I run the command "{cmd}" with arguments "{args}" '
+        'using stdin "{stdin}" and env var "{var}"="{val}"'
+    ),
+    target_fixture="result",
+)
+def run_command_args_stdin_env(
+    mox: CmdMox,
+    cmd: str,
+    args: str,
+    stdin: str,
+    var: str,
+    val: str,
+) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
+    """Run *cmd* with arguments, stdin, and an environment variable."""
+    params = CommandExecution(cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val)
+    return execute_command_with_details(mox, params)
+
+
+def _validate_journal_entry_details(
+    mox: CmdMox, expectation: JournalEntryExpectation
+) -> None:
+    """Validate journal entry records invocation details."""
+    verify_journal_entry_details(mox, expectation)
+
+
+@then(
+    parsers.cfparse(
+        'the journal entry for "{cmd}" should record arguments "{args}" '
+        'stdin "{stdin}" env var "{var}"="{val}"'
+    )
+)
+def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
+    mox: CmdMox,
+    cmd: str,
+    args: str,
+    stdin: str,
+    var: str,
+    val: str,
+) -> None:
+    """Validate journal entry records invocation details."""
+    expectation = JournalEntryExpectation(cmd, args, stdin, var, val)
+    _validate_journal_entry_details(mox, expectation)
+
+
+@then(
+    parsers.re(
+        r'the journal entry for "(?P<cmd>[^"]+)" should record stdout '
+        r'"(?P<stdout>[^"]*)" stderr "(?P<stderr>[^"]*)" exit code (?P<code>\d+)'
+    )
+)
+def check_journal_entry_result(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
+    mox: CmdMox,
+    cmd: str,
+    stdout: str,
+    stderr: str,
+    code: str,
+) -> None:
+    """Validate journal entry records command results."""
+    expectation = JournalEntryExpectation(
+        cmd=cmd, stdout=stdout, stderr=stderr, exit_code=int(code)
+    )
+    verify_journal_entry_details(mox, expectation)
+
+
+@when(parsers.cfparse('I set environment variable "{var}" to "{val}"'))
+def set_env_var(monkeypatch: pytest.MonkeyPatch, var: str, val: str) -> None:
+    """Adjust environment variable to new value (scoped to the test)."""
+    monkeypatch.setenv(var, val)
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "journal captures invocation details"
+)
+def test_journal_captures_invocation_details() -> None:
+    """Journal records full invocation details."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "journal prunes excess entries")
+def test_journal_prunes_excess_entries() -> None:
+    """Journal drops older entries beyond configured size."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"), "invalid max journal size is rejected"
+)
+def test_invalid_max_journal_size_is_rejected() -> None:
+    """Controller rejects non-positive journal size."""
     pass

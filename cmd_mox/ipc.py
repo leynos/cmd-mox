@@ -53,6 +53,39 @@ class Invocation:
     args: list[str]
     stdin: str
     env: dict[str, str]
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
+
+    def to_dict(self) -> dict[str, t.Any]:
+        """Return a JSON-serializable mapping of this invocation."""
+        return {
+            "command": self.command,
+            "args": list(self.args),
+            "stdin": self.stdin,
+            "env": dict(self.env),
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "exit_code": self.exit_code,
+        }
+
+    def __repr__(self) -> str:
+        """Return a convenient debug representation."""
+        data = self.to_dict()
+
+        for key in list(data["env"]):
+            if any(
+                token in key.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")
+            ):
+                data["env"][key] = "<redacted>"
+
+        def _truncate(s: str, limit: int = 256) -> str:
+            return s if len(s) <= limit else s[: limit - 1] + "…"
+
+        for field in ("stdin", "stdout", "stderr"):
+            data[field] = _truncate(data[field])
+
+        return f"Invocation({data!r})"
 
 
 @dc.dataclass(slots=True)
