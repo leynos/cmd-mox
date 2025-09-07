@@ -291,8 +291,8 @@ provided `exit_code`.
   env). The handler must return a tuple of `(stdout, stderr, exit_code)` using
   UTF-8–decoded strings. Handlers may return raw bytes; these are decoded as
   UTF-8 before the values are recorded on the `Invocation` for journal
-  inspection. This is a significant enhancement of PyMox's callback feature,
-  enabling stateful mocks and complex conditional logic.
+  inspection. This significantly enhances PyMox's callback feature, enabling
+  stateful mocks and complex conditional logic.
 
 - `.times(count: int)`**:** Specifies the exact number of times this specific
   expectation is expected to be met. This is inspired by PyMox's
@@ -466,7 +466,7 @@ parsed into `Invocation` objects and processed in background threads with
 reasonable timeouts (default: 10.0s). The server attaches the corresponding
 response data (`stdout`, `stderr`, `exit_code`) to the `Invocation` before
 appending it to the journal. The server cleans up the socket on shutdown to
-prevent stale sockets interfering with subsequent tests. The timeout is
+prevent stale sockets from interfering with subsequent tests. The timeout is
 configurable via :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
@@ -582,17 +582,15 @@ reliable testing framework.
 
 The Invocation Journal is a simple but crucial in-memory data structure within
 each `CmdMox` controller instance. A `collections.deque` backs the journal,
-preserving call order and enabling efficient pruning when bounded. Its sole
-purpose is to store a chronological record of command calls during the replay
-phase.
+preserving call order and enabling efficient pruning when bounded. It stores a
+chronological record of command calls during replay.
 
 Each time the IPC server thread receives an invocation report from a shim, it
 constructs an `Invocation` object containing the command name, arguments,
 `stdin`, and environment. After the handler runs, the controller attaches the
-resulting `stdout`, `stderr`, and `exit_code` to the `Invocation` and then
-appends it to the journal. `verify()` uses this enriched journal as the
-definitive record, comparing it against predefined expectations to detect
-discrepancies.
+resulting `stdout`, `stderr`, and `exit_code` to the `Invocation` and appends
+it to the journal. `verify()` uses this enriched journal as the definitive
+record, comparing it against predefined expectations to detect discrepancies.
 
 ## IV. Feature Deep Dive: Stubbing
 

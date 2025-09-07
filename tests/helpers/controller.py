@@ -76,7 +76,7 @@ def _find_matching_journal_entry(
     candidates = [inv for inv in mox.journal if inv.command == expectation.cmd]
     if expectation.args is not None:
         wanted_args = shlex.split(expectation.args)
-        candidates = [inv for inv in candidates if list(inv.args) == wanted_args]
+        candidates = [inv for inv in candidates if inv.args == wanted_args]
     inv = candidates[-1] if candidates else None
     if inv is None:
         available = [(i.command, list(i.args)) for i in mox.journal]
