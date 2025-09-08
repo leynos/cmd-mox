@@ -80,7 +80,7 @@ class Invocation:
                 data["env"][key] = "<redacted>"
 
         def _truncate(s: str, limit: int = 256) -> str:
-            return s if len(s) <= limit else s[: limit - 1] + "…"
+            return s if len(s) <= limit else f"{s[: limit - 1]}…"
 
         for field in ("stdin", "stdout", "stderr"):
             data[field] = _truncate(data[field])

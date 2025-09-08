@@ -23,8 +23,10 @@ from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation
 
 
-def test_journal_records_full_invocation() -> None:
-    """Journal records command, arguments, stdin, and environment."""
+def _run_full_invocation() -> tuple[
+    CmdMox, subprocess.CompletedProcess[str], JournalEntryExpectation
+]:
+    """Run the rec shim and return execution details."""
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
@@ -38,8 +40,6 @@ def test_journal_records_full_invocation() -> None:
         )
         result = execute_command_with_details(mox, params)
         mox.verify()
-
-    assert result.stdout == "ok"
     expectation = JournalEntryExpectation(
         cmd="rec",
         args="a b",
@@ -50,6 +50,13 @@ def test_journal_records_full_invocation() -> None:
         stderr="",
         exit_code=0,
     )
+    return mox, result, expectation
+
+
+def test_journal_records_full_invocation() -> None:
+    """Journal records command, arguments, stdin, and environment."""
+    mox, result, expectation = _run_full_invocation()
+    assert result.stdout == "ok"
     verify_journal_entry_details(mox, expectation)
 
 
