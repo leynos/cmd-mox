@@ -522,17 +522,19 @@ class CmdMox:
             resp.env.update(env)
         return resp
 
+    def _make_response(self, invocation: Invocation) -> Response:
+        double = self._doubles.get(invocation.command)
+        if not double:
+            return Response(stdout=invocation.command)
+        resp = self._invoke_handler(double, invocation)
+        if double.is_recording:
+            double.invocations.append(invocation)
+        return resp
+
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
-        if double := self._doubles.get(invocation.command):
-            resp = self._invoke_handler(double, invocation)
-        else:
-            resp = Response(stdout=invocation.command)
-        invocation.stdout = resp.stdout
-        invocation.stderr = resp.stderr
-        invocation.exit_code = resp.exit_code
-        if double and double.is_recording:
-            double.invocations.append(invocation)
+        resp = self._make_response(invocation)
+        invocation.apply(resp)
         self.journal.append(invocation)
         return resp
 

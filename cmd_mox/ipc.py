@@ -40,6 +40,10 @@ DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
 
 
+def _shorten(text: str, limit: int = 256) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 @dc.dataclass(slots=True)
 class RetryConfig:
     """Configuration for connection retry behavior."""
@@ -80,26 +84,37 @@ class Invocation:
             "exit_code": self.exit_code,
         }
 
+    def apply(self, resp: Response) -> None:
+        """Copy response data back onto this invocation."""
+        self.stdout, self.stderr, self.exit_code = (
+            resp.stdout,
+            resp.stderr,
+            resp.exit_code,
+        )
+
     def __repr__(self) -> str:
         """Return a convenient debug representation."""
-        data = self.to_dict()
+        # Merge strategy:
+        # - Keep main's refactor (explicit dict + _shorten) for clarity.
+        # - Use this branch's more robust redaction using normalized tokens
+        #   and a regex that catches word boundaries and underscores.
+        safe_env = {}
+        for key, value in self.env.items():
+            key_cf = key.casefold()
+            should_redact = any(tok in key_cf for tok in _SENSITIVE_TOKENS) or (
+                SENSITIVE_ENV_KEY_PATTERN.search(key) is not None
+            )
+            safe_env[key] = "<redacted>" if should_redact else value
 
-        for key in list(data["env"]):
-            k = key.casefold()
-            # Merge: use refined token-based check and main's regex.
-            if any(
-                tok in k for tok in _SENSITIVE_TOKENS
-            ) or SENSITIVE_ENV_KEY_PATTERN.search(key):
-                data["env"][key] = "<redacted>"
-
-        def _truncate(s: str, limit: int = 256) -> str:
-            if limit <= 1:
-                return "" if len(s) <= limit else "…"
-            return s if len(s) <= limit else f"{s[: limit - 1]}…"
-
-        for field in ("stdin", "stdout", "stderr"):
-            data[field] = _truncate(data[field])
-
+        data = {
+            "command": self.command,
+            "args": list(self.args),
+            "stdin": _shorten(self.stdin, 256),
+            "stdout": _shorten(self.stdout, 256),
+            "stderr": _shorten(self.stderr, 256),
+            "exit_code": self.exit_code,
+            "env": safe_env,
+        }
         return f"Invocation({data!r})"
 
 
