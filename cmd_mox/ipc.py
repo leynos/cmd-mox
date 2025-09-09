@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import random
+import re
 import socket
 import socketserver
 import threading
@@ -22,6 +23,10 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types
 
 logger = logging.getLogger(__name__)
+
+SENSITIVE_ENV_KEY_PATTERN: t.Final[re.Pattern[str]] = re.compile(
+    r"(key|token|secret|password)", re.IGNORECASE
+)
 
 DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
@@ -74,9 +79,7 @@ class Invocation:
         data = self.to_dict()
 
         for key in list(data["env"]):
-            if any(
-                token in key.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")
-            ):
+            if SENSITIVE_ENV_KEY_PATTERN.search(key):
                 data["env"][key] = "<redacted>"
 
         def _truncate(s: str, limit: int = 256) -> str:

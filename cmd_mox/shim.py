@@ -32,10 +32,9 @@ def main() -> None:
     timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     try:
         timeout = float(timeout_raw)
+        if timeout <= 0:
+            raise ValueError  # noqa: TRY301 - unify error handling
     except ValueError:
-        print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
-        sys.exit(1)
-    if timeout <= 0:
         print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
         sys.exit(1)
     try:
