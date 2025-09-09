@@ -61,6 +61,39 @@ def test_journal_records_full_invocation() -> None:
     verify_journal_entry_details(mox, expectation)
 
 
+def test_journal_records_failed_invocation() -> None:
+    """Journal records command failure with non-zero exit code and stderr."""
+    with CmdMox(verify_on_exit=False) as mox:
+        mox.stub("failcmd").returns(stdout="", stderr="error occurred", exit_code=2)
+        mox.replay()
+        cmd_path = t.cast(Path, mox.environment.shim_dir) / "failcmd"  # noqa: TC006
+        params = CommandExecution(
+            cmd=str(cmd_path),
+            args="--fail",
+            stdin="input",
+            env_var="FAILMODE",
+            env_val="true",
+            check=False,
+        )
+        result = execute_command_with_details(mox, params)
+        mox.verify()
+
+    assert result.stdout == ""
+    assert result.stderr == "error occurred"
+    assert result.returncode == 2
+    expectation = JournalEntryExpectation(
+        cmd="failcmd",
+        args="--fail",
+        stdin="input",
+        env_var="FAILMODE",
+        env_val="true",
+        stdout="",
+        stderr="error occurred",
+        exit_code=2,
+    )
+    verify_journal_entry_details(mox, expectation)
+
+
 def test_journal_env_is_deep_copied(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
     monkeypatch: pytest.MonkeyPatch,
@@ -77,6 +110,13 @@ def test_journal_env_is_deep_copied(
         mox.verify()
 
     assert [inv.env.get("EXTRA") for inv in mox.journal] == ["1", "2"]
+
+
+@pytest.mark.parametrize("invalid_maxlen", [0, -1, -10])
+def test_journal_pruning_invalid_maxlen(invalid_maxlen: int) -> None:
+    """CmdMox raises ValueError for zero or negative max_journal_entries."""
+    with pytest.raises(ValueError, match="max_journal_entries"):
+        CmdMox(max_journal_entries=invalid_maxlen)
 
 
 @pytest.mark.parametrize(
@@ -136,14 +176,15 @@ def test_invocation_repr_redacts_sensitive_info() -> None:
         command="cmd",
         args=[],
         stdin=long,
-        env={"API_KEY": secret},
+        env={"API_KEY": secret, "PASSWORD": secret, "TOKEN": secret},
         stdout=long,
         stderr=long,
         exit_code=0,
     )
     text = repr(inv)
     data = ast.literal_eval(text[len("Invocation(") : -1])
-    assert data["env"]["API_KEY"] == "<redacted>"
+    for key in ("API_KEY", "PASSWORD", "TOKEN"):
+        assert data["env"][key] == "<redacted>"
     for field in ("stdin", "stdout", "stderr"):
         val = data[field]
         assert len(val) <= 256
