@@ -94,6 +94,7 @@ class Invocation:
 
     def __repr__(self) -> str:
         """Return a convenient debug representation."""
+<<<<<<< HEAD
         # Merge strategy:
         # - Keep main's refactor (explicit dict + _shorten) for clarity.
         # - Use this branch's more robust redaction using normalized tokens
@@ -114,7 +115,34 @@ class Invocation:
             "stderr": _shorten(self.stderr, 256),
             "exit_code": self.exit_code,
             "env": safe_env,
+||||||| parent of 1855b65 (Refactor Invocation.__repr__ using to_dict)
+        safe_env = {
+            k: "<redacted>"
+            if any(t in k.upper() for t in ("KEY", "TOKEN", "SECRET", "PASSWORD"))
+            else v
+            for k, v in self.env.items()
         }
+        data = {
+            "command": self.command,
+            "args": self.args,
+            "stdin": _shorten(self.stdin, 256),
+            "stdout": _shorten(self.stdout, 256),
+            "stderr": _shorten(self.stderr, 256),
+            "exit_code": self.exit_code,
+            "env": safe_env,
+=======
+        data = self.to_dict()
+        data["env"] = {
+            k: "<redacted>"
+            if any(
+                token in k.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")
+            )
+            else v
+            for k, v in data["env"].items()
+>>>>>>> 1855b65 (Refactor Invocation.__repr__ using to_dict)
+        }
+        for field in ("stdin", "stdout", "stderr"):
+            data[field] = _shorten(data[field], 256)
         return f"Invocation({data!r})"
 
 
