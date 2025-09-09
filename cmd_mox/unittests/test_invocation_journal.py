@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import os
 import typing as t
-from pathlib import Path
 
 import pytest
 
@@ -23,12 +22,15 @@ from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation
 
 
-def test_journal_records_full_invocation() -> None:
-    """Journal records command, arguments, stdin, and environment."""
+def _run_full_invocation() -> tuple[
+    CmdMox, subprocess.CompletedProcess[str], JournalEntryExpectation
+]:
+    """Run the rec shim and return execution details."""
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        cmd_path = t.cast(Path, mox.environment.shim_dir) / "rec"  # noqa: TC006
+        assert mox.environment.shim_dir is not None
+        cmd_path = mox.environment.shim_dir / "rec"
         params = CommandExecution(
             cmd=str(cmd_path),
             args="a b",
@@ -38,8 +40,6 @@ def test_journal_records_full_invocation() -> None:
         )
         result = execute_command_with_details(mox, params)
         mox.verify()
-
-    assert result.stdout == "ok"
     expectation = JournalEntryExpectation(
         cmd="rec",
         args="a b",
@@ -50,6 +50,14 @@ def test_journal_records_full_invocation() -> None:
         stderr="",
         exit_code=0,
     )
+    # Return mox only for journal inspection; context has exited.
+    return mox, result, expectation
+
+
+def test_journal_records_full_invocation() -> None:
+    """Journal records command, arguments, stdin, and environment."""
+    mox, result, expectation = _run_full_invocation()
+    assert result.stdout == "ok"
     verify_journal_entry_details(mox, expectation)
 
 
@@ -61,7 +69,8 @@ def test_journal_env_is_deep_copied(
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        cmd_path = t.cast(Path, mox.environment.shim_dir) / "rec"  # noqa: TC006
+        assert mox.environment.shim_dir is not None
+        cmd_path = mox.environment.shim_dir / "rec"
         run([str(cmd_path)], env=os.environ | {"EXTRA": "1"})
         monkeypatch.setenv("EXTRA", "3")
         run([str(cmd_path)], env=os.environ | {"EXTRA": "2"})
@@ -87,7 +96,8 @@ def test_journal_pruning(
     with CmdMox(verify_on_exit=False, max_journal_entries=maxlen) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        cmd_path = t.cast(Path, mox.environment.shim_dir) / "rec"  # noqa: TC006
+        assert mox.environment.shim_dir is not None
+        cmd_path = mox.environment.shim_dir / "rec"
         for i in range(3):
             run([str(cmd_path), str(i)])
         mox.verify()
