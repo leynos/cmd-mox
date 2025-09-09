@@ -22,74 +22,83 @@ from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation
 
 
-def _run_full_invocation() -> tuple[
-    CmdMox, subprocess.CompletedProcess[str], JournalEntryExpectation
-]:
-    """Run the rec shim and return execution details."""
+@pytest.mark.parametrize(
+    (
+        "stub_name",
+        "stub_returns",
+        "args",
+        "stdin",
+        "env_var",
+        "env_val",
+        "expected_stdout",
+        "expected_stderr",
+        "expected_exit",
+    ),
+    [
+        (
+            "rec",
+            {"stdout": "ok"},
+            "a b",
+            "payload",
+            "EXTRA",
+            "1",
+            "ok",
+            "",
+            0,
+        ),
+        (
+            "failcmd",
+            {"stdout": "", "stderr": "error occurred", "exit_code": 2},
+            "--fail",
+            "input",
+            "FAILMODE",
+            "true",
+            "",
+            "error occurred",
+            2,
+        ),
+    ],
+)
+def test_journal_records_invocation(
+    stub_name: str,
+    stub_returns: dict[str, t.Any],
+    args: str,
+    stdin: str,
+    env_var: str,
+    env_val: str,
+    expected_stdout: str,
+    expected_stderr: str,
+    expected_exit: int,
+) -> None:
+    """Journal records both successful and failed command invocations."""
     with CmdMox(verify_on_exit=False) as mox:
-        mox.stub("rec").returns(stdout="ok")
+        mox.stub(stub_name).returns(**stub_returns)
         mox.replay()
         assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / "rec"
+        cmd_path = mox.environment.shim_dir / stub_name
         params = CommandExecution(
             cmd=str(cmd_path),
-            args="a b",
-            stdin="payload",
-            env_var="EXTRA",
-            env_val="1",
-        )
-        result = execute_command_with_details(mox, params)
-        mox.verify()
-    expectation = JournalEntryExpectation(
-        cmd="rec",
-        args="a b",
-        stdin="payload",
-        env_var="EXTRA",
-        env_val="1",
-        stdout="ok",
-        stderr="",
-        exit_code=0,
-    )
-    # Return mox only for journal inspection; context has exited.
-    return mox, result, expectation
-
-
-def test_journal_records_full_invocation() -> None:
-    """Journal records command, arguments, stdin, and environment."""
-    mox, result, expectation = _run_full_invocation()
-    assert result.stdout == "ok"
-    verify_journal_entry_details(mox, expectation)
-
-
-def test_journal_records_failed_invocation() -> None:
-    """Journal records command failure with non-zero exit code and stderr."""
-    with CmdMox(verify_on_exit=False) as mox:
-        mox.stub("failcmd").returns(stdout="", stderr="error occurred", exit_code=2)
-        mox.replay()
-        cmd_path = t.cast(Path, mox.environment.shim_dir) / "failcmd"  # noqa: TC006
-        params = CommandExecution(
-            cmd=str(cmd_path),
-            args="--fail",
-            stdin="input",
-            env_var="FAILMODE",
-            env_val="true",
-            check=False,
+            args=args,
+            stdin=stdin,
+            env_var=env_var,
+            env_val=env_val,
+            check=expected_exit == 0,
         )
         result = execute_command_with_details(mox, params)
         mox.verify()
 
-    assert result.stdout == ""
-    assert result.stderr == "error occurred"
-    assert result.returncode == 2
+    assert result.stdout == expected_stdout
+    assert result.stderr == expected_stderr
+    assert result.returncode == expected_exit
     expectation = JournalEntryExpectation(
-        cmd="failcmd",
-        args="--fail",
-        stdin="input",
-        env_var="FAILMODE",
-        env_val="true",
-        stdout="",
-        stderr="error occurred",
-        exit_code=2,
+        cmd=stub_name,
+        args=args,
+        stdin=stdin,
+        env_var=env_var,
+        env_val=env_val,
+        stdout=expected_stdout,
+        stderr=expected_stderr,
+        exit_code=expected_exit,
     )
     verify_journal_entry_details(mox, expectation)
 
