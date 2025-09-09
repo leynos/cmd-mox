@@ -25,7 +25,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 logger = logging.getLogger(__name__)
 
 SENSITIVE_ENV_KEY_PATTERN: t.Final[re.Pattern[str]] = re.compile(
-    r"(key|token|secret|password)", re.IGNORECASE
+    r"(?<![A-Za-z0-9])(key|token|secret|password)(?![A-Za-z0-9])", re.IGNORECASE
 )
 
 DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
