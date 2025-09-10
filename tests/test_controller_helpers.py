@@ -104,7 +104,7 @@ def test_helpers_raise_on_mismatch() -> None:
         )
         _execute_command_with_params(params)
         expectation = JournalEntryExpectation(cmd="foo", exit_code=1)
-        with pytest.raises(AssertionError):
+        with pytest.raises(AssertionError, match="exit_code"):
             _verify_journal_entry_with_expectation(mox, expectation)
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="does not contain expected entry"):
         _find_matching_journal_entry(mox, JournalEntryExpectation(cmd="bar"))

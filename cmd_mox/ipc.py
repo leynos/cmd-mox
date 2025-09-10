@@ -38,10 +38,18 @@ DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
 DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
+_REPR_FIELD_LIMIT: t.Final[int] = 256
+_SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
+    r"(?i)(^|_)(KEY|TOKEN|SECRET|PASSWORD)(_|$)"
+)
 
 
-def _shorten(text: str, limit: int = 256) -> str:
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
 
 
 @dc.dataclass(slots=True)
@@ -133,16 +141,12 @@ class Invocation:
 =======
         data = self.to_dict()
         data["env"] = {
-            k: "<redacted>"
-            if any(
-                token in k.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")
-            )
-            else v
+            k: "<redacted>" if _SECRET_ENV_KEY_RE.search(k) else v
             for k, v in data["env"].items()
 >>>>>>> 1855b65 (Refactor Invocation.__repr__ using to_dict)
         }
         for field in ("stdin", "stdout", "stderr"):
-            data[field] = _shorten(data[field], 256)
+            data[field] = _shorten(data[field], _REPR_FIELD_LIMIT)
         return f"Invocation({data!r})"
 
 

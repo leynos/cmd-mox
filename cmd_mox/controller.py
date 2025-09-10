@@ -525,8 +525,11 @@ class CmdMox:
     def _make_response(self, invocation: Invocation) -> Response:
         double = self._doubles.get(invocation.command)
         if not double:
-            return Response(stdout=invocation.command)
+            resp = Response(stdout=invocation.command)
+            invocation.apply(resp)
+            return resp
         resp = self._invoke_handler(double, invocation)
+        invocation.apply(resp)
         if double.is_recording:
             double.invocations.append(invocation)
         return resp
@@ -534,7 +537,6 @@ class CmdMox:
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
         resp = self._make_response(invocation)
-        invocation.apply(resp)
         self.journal.append(invocation)
         return resp
 
