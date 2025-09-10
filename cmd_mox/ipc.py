@@ -18,6 +18,7 @@ import typing as t
 from pathlib import Path
 
 from .environment import CMOX_IPC_SOCKET_ENV
+from .expectations import SENSITIVE_ENV_KEY_TOKENS
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types
@@ -79,7 +80,9 @@ class Invocation:
         data = self.to_dict()
 
         for key in list(data["env"]):
-            if SENSITIVE_ENV_KEY_PATTERN.search(key):
+            k = key.lower()
+            # Preserve both main's regex and branch token list semantics.
+            if any(token in k for token in SENSITIVE_ENV_KEY_TOKENS) or SENSITIVE_ENV_KEY_PATTERN.search(key):
                 data["env"][key] = "<redacted>"
 
         def _truncate(s: str, limit: int = 256) -> str:
