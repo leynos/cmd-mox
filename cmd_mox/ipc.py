@@ -25,7 +25,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 logger = logging.getLogger(__name__)
 
 SENSITIVE_ENV_KEY_PATTERN: t.Final[re.Pattern[str]] = re.compile(
-    r"(?<![A-Za-z0-9])(key|token|secret|password)(?![A-Za-z0-9])", re.IGNORECASE
+    r"(?:^|_|\b)(?:key|token|secret|password)(?:_|$|\b)", re.IGNORECASE
 )
 
 DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
@@ -188,7 +188,9 @@ def _validate_connection_params(timeout: float, retry_config: RetryConfig) -> No
 
 
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
-    """Return the sleep delay for a given *attempt*."""
+    """Return the sleep delay for a 0-based *attempt*; never shorter than
+    MIN_RETRY_SLEEP.
+    """
     delay = backoff * (attempt + 1)
     if jitter:
         # Randomise the linear backoff within the jitter bounds to avoid
