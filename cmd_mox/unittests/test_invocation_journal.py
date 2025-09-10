@@ -106,6 +106,7 @@ def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
         stderr=test_case.expected_stderr,
         exit_code=test_case.expected_exit,
     )
+    assert len(mox.journal) == 1
     verify_journal_entry_details(mox, expectation)
 
 
@@ -121,6 +122,7 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
             stdin="input",
             env_var="FAILMODE",
             env_val="true",
+            check=True,
         )
         with pytest.raises(subprocess.CalledProcessError):
             execute_command_with_details(mox, params)
@@ -135,6 +137,7 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
         stderr="error occurred",
         exit_code=2,
     )
+    assert len(mox.journal) == 1
     verify_journal_entry_details(mox, expectation)
 
 
@@ -231,6 +234,7 @@ def test_invocation_repr_redacts_keys(key: str) -> None:
     text = repr(inv)
     data = ast.literal_eval(text[len("Invocation(") : -1])
     assert data["env"][key] == "<redacted>"
+    assert "super-secret" not in text
 
 
 def test_invocation_repr_does_not_redact_benign_key() -> None:
@@ -239,14 +243,14 @@ def test_invocation_repr_does_not_redact_benign_key() -> None:
         command="cmd",
         args=[],
         stdin="",
-        env={"PUBLIC": "ok"},
+        env={"MONKEY": "ok"},
         stdout="",
         stderr="",
         exit_code=0,
     )
     text = repr(inv)
     data = ast.literal_eval(text[len("Invocation(") : -1])
-    assert data["env"]["PUBLIC"] == "ok"
+    assert data["env"]["MONKEY"] == "ok"
 
 
 def test_invocation_repr_truncates_streams() -> None:

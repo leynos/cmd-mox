@@ -5,13 +5,17 @@ from __future__ import annotations
 import dataclasses as dc
 import typing as t
 
-SENSITIVE_ENV_KEY_TOKENS = ("secret", "token", "key", "password")
+SENSITIVE_ENV_KEY_TOKENS = ("secret", "token", "api_key", "password")
+# Pre-normalize tokens once for case-insensitive checks
+_SENSITIVE_TOKENS: tuple[str, ...] = tuple(
+    tok.casefold() for tok in SENSITIVE_ENV_KEY_TOKENS
+)
 
 
 def _is_sensitive_env_key(key: str) -> bool:
     """Return True if key likely holds secret material."""
-    k = key.lower()
-    return any(tkn in k for tkn in SENSITIVE_ENV_KEY_TOKENS)
+    k = key.casefold()
+    return any(tkn in k for tkn in _SENSITIVE_TOKENS)
 
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
