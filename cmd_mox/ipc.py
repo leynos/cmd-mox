@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import random
+import re
 import socket
 import socketserver
 import threading
@@ -22,6 +23,10 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types
 
 logger = logging.getLogger(__name__)
+
+SENSITIVE_ENV_KEY_PATTERN: t.Final[re.Pattern[str]] = re.compile(
+    r"(?:^|_|\b)(?:key|token|secret|password)(?:_|$|\b)", re.IGNORECASE
+)
 
 DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
@@ -74,9 +79,7 @@ class Invocation:
         data = self.to_dict()
 
         for key in list(data["env"]):
-            if any(
-                token in key.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")
-            ):
+            if SENSITIVE_ENV_KEY_PATTERN.search(key):
                 data["env"][key] = "<redacted>"
 
         def _truncate(s: str, limit: int = 256) -> str:
@@ -187,7 +190,9 @@ def _validate_connection_params(timeout: float, retry_config: RetryConfig) -> No
 
 
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
-    """Return the sleep delay for a given *attempt*."""
+    """Return the sleep delay for a 0-based *attempt*; never shorter than
+    MIN_RETRY_SLEEP.
+    """
     delay = backoff * (attempt + 1)
     if jitter:
         # Randomise the linear backoff within the jitter bounds to avoid
