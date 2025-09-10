@@ -1,6 +1,5 @@
 """Unit tests for shim timeout validation."""
 
-import io
 import sys
 import typing as t
 from pathlib import Path
@@ -13,7 +12,7 @@ from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 
 @pytest.mark.parametrize(
     "value",
-    ["-1", "0", "nan", "inf", "abc"],
+    ["-1", "0", "nan", "inf", "abc", "", " "],
 )
 def test_main_errors_on_invalid_timeout(
     value: str,
@@ -25,11 +24,7 @@ def test_main_errors_on_invalid_timeout(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(tmp_path / "sock"))
     monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, value)
 
-    class _Dummy(io.StringIO):
-        def isatty(self) -> bool:
-            return True
-
-    monkeypatch.setattr(sys, "stdin", _Dummy(""))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     with pytest.raises(SystemExit) as exc:

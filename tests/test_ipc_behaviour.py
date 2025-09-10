@@ -3,6 +3,8 @@
 import os
 import subprocess
 
+import pytest
+
 from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 
@@ -46,14 +48,14 @@ def test_shim_errors_when_socket_unset() -> None:
         assert result.returncode == 1
 
 
-def test_shim_errors_on_invalid_timeout() -> None:
+def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Shim prints an error if timeout env var is invalid."""
     commands = ["baz"]
     with EnvironmentManager() as env:
         assert env.shim_dir is not None
         create_shim_symlinks(env.shim_dir, commands)
-        os.environ[CMOX_IPC_SOCKET_ENV] = "dummy"
-        os.environ[CMOX_IPC_TIMEOUT_ENV] = "nan"
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "dummy")
+        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "nan")
         result = subprocess.run(  # noqa: S603
             [str(env.shim_dir / "baz")],
             capture_output=True,
