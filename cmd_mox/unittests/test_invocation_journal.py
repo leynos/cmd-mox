@@ -5,6 +5,13 @@ from __future__ import annotations
 import ast
 import os
 import typing as t
+<<<<<<< HEAD
+||||||| parent of fec38e5 (Refactor invocation test parameters)
+from pathlib import Path
+=======
+from dataclasses import dataclass  # noqa: ICN003
+from pathlib import Path
+>>>>>>> fec38e5 (Refactor invocation test parameters)
 
 import pytest
 
@@ -22,83 +29,84 @@ from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation
 
 
+@dataclass
+class InvocationTestCase:
+    """Parameters for invocation journal tests."""
+
+    stub_name: str
+    stub_returns: dict[str, t.Any]
+    args: str
+    stdin: str
+    env_var: str
+    env_val: str
+    expected_stdout: str
+    expected_stderr: str
+    expected_exit: int
+
+
 @pytest.mark.parametrize(
-    (
-        "stub_name",
-        "stub_returns",
-        "args",
-        "stdin",
-        "env_var",
-        "env_val",
-        "expected_stdout",
-        "expected_stderr",
-        "expected_exit",
-    ),
+    "test_case",
     [
-        (
-            "rec",
-            {"stdout": "ok"},
-            "a b",
-            "payload",
-            "EXTRA",
-            "1",
-            "ok",
-            "",
-            0,
+        InvocationTestCase(
+            stub_name="rec",
+            stub_returns={"stdout": "ok"},
+            args="a b",
+            stdin="payload",
+            env_var="EXTRA",
+            env_val="1",
+            expected_stdout="ok",
+            expected_stderr="",
+            expected_exit=0,
         ),
-        (
-            "failcmd",
-            {"stdout": "", "stderr": "error occurred", "exit_code": 2},
-            "--fail",
-            "input",
-            "FAILMODE",
-            "true",
-            "",
-            "error occurred",
-            2,
+        InvocationTestCase(
+            stub_name="failcmd",
+            stub_returns={"stdout": "", "stderr": "error occurred", "exit_code": 2},
+            args="--fail",
+            stdin="input",
+            env_var="FAILMODE",
+            env_val="true",
+            expected_stdout="",
+            expected_stderr="error occurred",
+            expected_exit=2,
         ),
     ],
 )
-def test_journal_records_invocation(
-    stub_name: str,
-    stub_returns: dict[str, t.Any],
-    args: str,
-    stdin: str,
-    env_var: str,
-    env_val: str,
-    expected_stdout: str,
-    expected_stderr: str,
-    expected_exit: int,
-) -> None:
+def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
     """Journal records both successful and failed command invocations."""
     with CmdMox(verify_on_exit=False) as mox:
-        mox.stub(stub_name).returns(**stub_returns)
+        mox.stub(test_case.stub_name).returns(**test_case.stub_returns)
         mox.replay()
+<<<<<<< HEAD
         assert mox.environment.shim_dir is not None
         cmd_path = mox.environment.shim_dir / stub_name
+||||||| parent of fec38e5 (Refactor invocation test parameters)
+        cmd_path = t.cast(Path, mox.environment.shim_dir) / stub_name  # noqa: TC006
+=======
+        cmd_path = t.cast(Path, mox.environment.shim_dir) / test_case.stub_name  # noqa: TC006
+>>>>>>> fec38e5 (Refactor invocation test parameters)
         params = CommandExecution(
             cmd=str(cmd_path),
-            args=args,
-            stdin=stdin,
-            env_var=env_var,
-            env_val=env_val,
-            check=expected_exit == 0,
+            args=test_case.args,
+            stdin=test_case.stdin,
+            env_var=test_case.env_var,
+            env_val=test_case.env_val,
+            check=test_case.expected_exit == 0,
         )
         result = execute_command_with_details(mox, params)
         mox.verify()
 
-    assert result.stdout == expected_stdout
-    assert result.stderr == expected_stderr
-    assert result.returncode == expected_exit
+    assert result.stdout == test_case.expected_stdout
+    assert result.stderr == test_case.expected_stderr
+    assert result.returncode == test_case.expected_exit
     expectation = JournalEntryExpectation(
-        cmd=stub_name,
-        args=args,
-        stdin=stdin,
-        env_var=env_var,
-        env_val=env_val,
-        stdout=expected_stdout,
-        stderr=expected_stderr,
-        exit_code=expected_exit,
+        cmd=test_case.stub_name,
+        args=test_case.args,
+        stdin=test_case.stdin,
+        env_var=test_case.env_var,
+        env_val=test_case.env_val,
+        stdout=test_case.expected_stdout,
+        stderr=test_case.expected_stderr,
+        exit_code=test_case.expected_exit,
     )
     verify_journal_entry_details(mox, expectation)
 
