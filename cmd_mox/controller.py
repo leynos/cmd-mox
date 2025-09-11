@@ -512,7 +512,14 @@ class CmdMox:
         if double.passthrough_mode:
             resp = self._runner.run(invocation, env)
         elif double.handler is None:
-            resp = double.response
+            base = double.response
+            # Clone to avoid mutating the shared static response instance
+            resp = Response(
+                stdout=base.stdout,
+                stderr=base.stderr,
+                exit_code=base.exit_code,
+                env=dict(base.env),
+            )
         elif env:
             with temporary_env(env):
                 resp = double.handler(invocation)
@@ -526,12 +533,11 @@ class CmdMox:
         double = self._doubles.get(invocation.command)
         if not double:
             resp = Response(stdout=invocation.command)
-            invocation.apply(resp)
-            return resp
-        resp = self._invoke_handler(double, invocation)
+        else:
+            resp = self._invoke_handler(double, invocation)
+            if double.is_recording:
+                double.invocations.append(invocation)
         invocation.apply(resp)
-        if double.is_recording:
-            double.invocations.append(invocation)
         return resp
 
     def _handle_invocation(self, invocation: Invocation) -> Response:

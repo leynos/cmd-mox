@@ -40,7 +40,7 @@ DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
 _REPR_FIELD_LIMIT: t.Final[int] = 256
 _SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?i)(^|_)(KEY|TOKEN|SECRET|PASSWORD)(_|$)"
+    r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD)(?=[_-]|\d|$)"
 )
 
 
@@ -49,7 +49,7 @@ def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:
         return ""
     if len(text) <= limit:
         return text
-    return text[: limit - 1] + "…"
+    return f"{text[: limit - 1]}…"
 
 
 @dc.dataclass(slots=True)
@@ -93,7 +93,7 @@ class Invocation:
         }
 
     def apply(self, resp: Response) -> None:
-        """Copy response data back onto this invocation."""
+        """Copy stdout/stderr/exit_code from resp (env is not copied)."""
         self.stdout, self.stderr, self.exit_code = (
             resp.stdout,
             resp.stderr,
@@ -204,10 +204,9 @@ def _create_unix_socket(timeout: float) -> socket.socket:
     return sock
 
 
-def _attempt_connection(sock: socket.socket, address: str) -> bool:
-    """Attempt to connect *sock* to *address* returning ``True`` on success."""
+def _attempt_connection(sock: socket.socket, address: str) -> None:
+    """Connect *sock* to *address* or raise on failure."""
     sock.connect(address)
-    return True
 
 
 def _validate_retries(retries: int) -> None:
@@ -493,4 +492,8 @@ def invoke_server(
     if payload is None:
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg)
-    return Response(**payload)
+    try:
+        return Response(**payload)
+    except TypeError as exc:
+        msg = "Invalid response payload from IPC server"
+        raise RuntimeError(msg) from exc
