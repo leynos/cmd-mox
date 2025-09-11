@@ -40,7 +40,7 @@ DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
 _REPR_FIELD_LIMIT: t.Final[int] = 256
 _SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD)(?=[_-]|\d|$)"
+    r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?|PASS(?:WORD)?|PWD)(?=[_-]|\d|$)"
 )
 
 
@@ -287,14 +287,17 @@ def _cleanup_stale_socket(socket_path: Path) -> None:
     if not socket_path.exists():
         return
     try:
-        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            probe.connect(str(socket_path))
-            probe.close()
-            msg = f"Socket {socket_path} is still in use"
-            raise RuntimeError(msg)
-        except (ConnectionRefusedError, OSError):
-            pass
+        # Ensure the probe socket is closed on all paths.
+        with contextlib.closing(
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        ) as probe:
+            try:
+                probe.connect(str(socket_path))
+                msg = f"Socket {socket_path} is still in use"
+                raise RuntimeError(msg)
+            except (ConnectionRefusedError, OSError):
+                # No server is listening; the file is stale and can be removed.
+                pass
         socket_path.unlink()
     except OSError as exc:  # pragma: no cover - unlikely race
         logger.warning("Could not unlink stale socket %s: %s", socket_path, exc)
@@ -469,6 +472,10 @@ def invoke_server(
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg)
     try:
+        # Normalize env to a dict if the server returned a malformed value.
+        env = payload.get("env")
+        if not isinstance(env, dict):
+            payload["env"] = {}
         return Response(**payload)
     except TypeError as exc:
         msg = "Invalid response payload from IPC server"
