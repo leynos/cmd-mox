@@ -18,6 +18,12 @@ import typing as t
 from pathlib import Path
 
 from .environment import CMOX_IPC_SOCKET_ENV
+from .expectations import SENSITIVE_ENV_KEY_TOKENS
+
+# Pre-normalize tokens once for case-insensitive checks
+_SENSITIVE_TOKENS: tuple[str, ...] = tuple(
+    tok.casefold() for tok in SENSITIVE_ENV_KEY_TOKENS
+)
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types
@@ -79,7 +85,11 @@ class Invocation:
         data = self.to_dict()
 
         for key in list(data["env"]):
-            if SENSITIVE_ENV_KEY_PATTERN.search(key):
+            k = key.casefold()
+            # Merge: use refined token-based check and main's regex.
+            if any(
+                tok in k for tok in _SENSITIVE_TOKENS
+            ) or SENSITIVE_ENV_KEY_PATTERN.search(key):
                 data["env"][key] = "<redacted>"
 
         def _truncate(s: str, limit: int = 256) -> str:
