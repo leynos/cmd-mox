@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import enum
 import types  # noqa: TC003
 import typing as t
@@ -514,12 +515,7 @@ class CmdMox:
         elif double.handler is None:
             base = double.response
             # Clone to avoid mutating the shared static response instance
-            resp = Response(
-                stdout=base.stdout,
-                stderr=base.stderr,
-                exit_code=base.exit_code,
-                env=dict(base.env),
-            )
+            resp = dc.replace(base, env=dict(base.env))
         elif env:
             with temporary_env(env):
                 resp = double.handler(invocation)
@@ -531,7 +527,7 @@ class CmdMox:
 
     def _make_response(self, invocation: Invocation) -> Response:
         double = self._doubles.get(invocation.command)
-        if not double:
+        if double is None:
             resp = Response(stdout=invocation.command)
         else:
             resp = self._invoke_handler(double, invocation)
