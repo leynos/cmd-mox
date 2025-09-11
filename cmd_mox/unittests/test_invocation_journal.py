@@ -6,13 +6,7 @@ import ast
 import os
 import subprocess
 import typing as t
-<<<<<<< HEAD
-||||||| parent of fec38e5 (Refactor invocation test parameters)
-from pathlib import Path
-=======
 from dataclasses import dataclass  # noqa: ICN003
-from pathlib import Path
->>>>>>> fec38e5 (Refactor invocation test parameters)
 
 import pytest
 
@@ -74,14 +68,8 @@ def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub(test_case.stub_name).returns(**test_case.stub_returns)
         mox.replay()
-<<<<<<< HEAD
         assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / stub_name
-||||||| parent of fec38e5 (Refactor invocation test parameters)
-        cmd_path = t.cast(Path, mox.environment.shim_dir) / stub_name  # noqa: TC006
-=======
-        cmd_path = t.cast(Path, mox.environment.shim_dir) / test_case.stub_name  # noqa: TC006
->>>>>>> fec38e5 (Refactor invocation test parameters)
+        cmd_path = mox.environment.shim_dir / test_case.stub_name
         params = CommandExecution(
             cmd=str(cmd_path),
             args=test_case.args,
@@ -115,7 +103,8 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("failcmd").returns(stdout="", stderr="error occurred", exit_code=2)
         mox.replay()
-        cmd_path = t.cast(Path, mox.environment.shim_dir) / "failcmd"  # noqa: TC006
+        assert mox.environment.shim_dir is not None
+        cmd_path = mox.environment.shim_dir / "failcmd"
         params = CommandExecution(
             cmd=str(cmd_path),
             args="--fail",

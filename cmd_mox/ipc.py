@@ -87,7 +87,9 @@ class Invocation:
         for key in list(data["env"]):
             k = key.casefold()
             # Merge: use refined token-based check and main's regex.
-            if any(tok in k for tok in _SENSITIVE_TOKENS) or SENSITIVE_ENV_KEY_PATTERN.search(key):
+            if any(
+                tok in k for tok in _SENSITIVE_TOKENS
+            ) or SENSITIVE_ENV_KEY_PATTERN.search(key):
                 data["env"][key] = "<redacted>"
 
         def _truncate(s: str, limit: int = 256) -> str:
