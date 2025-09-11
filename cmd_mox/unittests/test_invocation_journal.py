@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import ast
+import dataclasses as dc
 import os
 import subprocess
 import typing as t
-from dataclasses import dataclass  # noqa: ICN003
 
 import pytest
 
@@ -21,7 +21,7 @@ from tests.helpers.controller import (
 )
 
 
-@dataclass
+@dc.dataclass(slots=True)
 class InvocationTestCase:
     """Parameters for invocation journal tests."""
 
@@ -62,14 +62,16 @@ class InvocationTestCase:
             expected_exit=2,
         ),
     ],
+    ids=("success", "failure"),
 )
 def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
     """Journal records both successful and failed command invocations."""
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub(test_case.stub_name).returns(**test_case.stub_returns)
         mox.replay()
-        assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / test_case.stub_name
+        shim_dir = mox.environment.shim_dir
+        assert shim_dir is not None
+        cmd_path = shim_dir / test_case.stub_name
         params = CommandExecution(
             cmd=str(cmd_path),
             args=test_case.args,
@@ -103,8 +105,9 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("failcmd").returns(stdout="", stderr="error occurred", exit_code=2)
         mox.replay()
-        assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / "failcmd"
+        shim_dir = mox.environment.shim_dir
+        assert shim_dir is not None
+        cmd_path = shim_dir / "failcmd"
         params = CommandExecution(
             cmd=str(cmd_path),
             args="--fail",
@@ -138,8 +141,9 @@ def test_journal_env_is_deep_copied(
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / "rec"
+        shim_dir = mox.environment.shim_dir
+        assert shim_dir is not None
+        cmd_path = shim_dir / "rec"
         run([str(cmd_path)], env=os.environ | {"EXTRA": "1"})
         monkeypatch.setenv("EXTRA", "3")
         run([str(cmd_path)], env=os.environ | {"EXTRA": "2"})
@@ -172,8 +176,9 @@ def test_journal_pruning(
     with CmdMox(verify_on_exit=False, max_journal_entries=maxlen) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / "rec"
+        shim_dir = mox.environment.shim_dir
+        assert shim_dir is not None
+        cmd_path = shim_dir / "rec"
         for i in range(3):
             run([str(cmd_path), str(i)])
         mox.verify()

@@ -5,9 +5,14 @@ from __future__ import annotations
 import dataclasses as dc
 import typing as t
 
-SENSITIVE_ENV_KEY_TOKENS = ("secret", "token", "api_key", "password")
+SENSITIVE_ENV_KEY_TOKENS: t.Final[tuple[str, ...]] = (
+    "secret",
+    "token",
+    "api_key",
+    "password",
+)
 # Pre-normalize tokens once for case-insensitive checks
-_SENSITIVE_TOKENS: tuple[str, ...] = tuple(
+_SENSITIVE_TOKENS: t.Final[tuple[str, ...]] = tuple(
     tok.casefold() for tok in SENSITIVE_ENV_KEY_TOKENS
 )
 
