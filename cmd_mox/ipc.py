@@ -38,6 +38,18 @@ DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
 DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
+_REPR_FIELD_LIMIT: t.Final[int] = 256
+_SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
+    r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?|PASS(?:WORD)?|PWD)(?=[_-]|\d|$)"
+)
+
+
+def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 1]}…"
 
 
 @dc.dataclass(slots=True)
@@ -80,26 +92,37 @@ class Invocation:
             "exit_code": self.exit_code,
         }
 
+    def apply(self, resp: Response) -> None:
+        """Copy stdout/stderr/exit_code from resp (env is not copied)."""
+        self.stdout, self.stderr, self.exit_code = (
+            resp.stdout,
+            resp.stderr,
+            resp.exit_code,
+        )
+
     def __repr__(self) -> str:
         """Return a convenient debug representation."""
-        data = self.to_dict()
+        # Keep explicit dict construction and field shortening for readability.
+        # Redact env keys using both normalized token checks and a regex that
+        # matches word boundaries and common separators. This errs on the side
+        # of safety and keeps behavior compatible with main's improvements.
+        safe_env: dict[str, str] = {}
+        for key, value in self.env.items():
+            key_cf = key.casefold()
+            should_redact = any(tok in key_cf for tok in _SENSITIVE_TOKENS) or (
+                _SECRET_ENV_KEY_RE.search(key) is not None
+            )
+            safe_env[key] = "<redacted>" if should_redact else value
 
-        for key in list(data["env"]):
-            k = key.casefold()
-            # Merge: use refined token-based check and main's regex.
-            if any(
-                tok in k for tok in _SENSITIVE_TOKENS
-            ) or SENSITIVE_ENV_KEY_PATTERN.search(key):
-                data["env"][key] = "<redacted>"
-
-        def _truncate(s: str, limit: int = 256) -> str:
-            if limit <= 1:
-                return "" if len(s) <= limit else "…"
-            return s if len(s) <= limit else f"{s[: limit - 1]}…"
-
-        for field in ("stdin", "stdout", "stderr"):
-            data[field] = _truncate(data[field])
-
+        data = {
+            "command": self.command,
+            "args": list(self.args),
+            "stdin": _shorten(self.stdin, _REPR_FIELD_LIMIT),
+            "stdout": _shorten(self.stdout, _REPR_FIELD_LIMIT),
+            "stderr": _shorten(self.stderr, _REPR_FIELD_LIMIT),
+            "exit_code": self.exit_code,
+            "env": safe_env,
+        }
         return f"Invocation({data!r})"
 
 
@@ -157,10 +180,9 @@ def _create_unix_socket(timeout: float) -> socket.socket:
     return sock
 
 
-def _attempt_connection(sock: socket.socket, address: str) -> bool:
-    """Attempt to connect *sock* to *address* returning ``True`` on success."""
+def _attempt_connection(sock: socket.socket, address: str) -> None:
+    """Connect *sock* to *address* or raise on failure."""
     sock.connect(address)
-    return True
 
 
 def _validate_retries(retries: int) -> None:
@@ -265,14 +287,17 @@ def _cleanup_stale_socket(socket_path: Path) -> None:
     if not socket_path.exists():
         return
     try:
-        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            probe.connect(str(socket_path))
-            probe.close()
-            msg = f"Socket {socket_path} is still in use"
-            raise RuntimeError(msg)
-        except (ConnectionRefusedError, OSError):
-            pass
+        # Ensure the probe socket is closed on all paths.
+        with contextlib.closing(
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        ) as probe:
+            try:
+                probe.connect(str(socket_path))
+                msg = f"Socket {socket_path} is still in use"
+                raise RuntimeError(msg)
+            except (ConnectionRefusedError, OSError):
+                # No server is listening; the file is stale and can be removed.
+                pass
         socket_path.unlink()
     except OSError as exc:  # pragma: no cover - unlikely race
         logger.warning("Could not unlink stale socket %s: %s", socket_path, exc)
@@ -446,4 +471,12 @@ def invoke_server(
     if payload is None:
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg)
-    return Response(**payload)
+    try:
+        # Normalize env to a dict if the server returned a malformed value.
+        env = payload.get("env")
+        if not isinstance(env, dict):
+            payload["env"] = {}
+        return Response(**payload)
+    except TypeError as exc:
+        msg = "Invalid response payload from IPC server"
+        raise RuntimeError(msg) from exc

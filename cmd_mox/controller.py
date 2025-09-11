@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import enum
 import types  # noqa: TC003
 import typing as t
@@ -512,7 +513,9 @@ class CmdMox:
         if double.passthrough_mode:
             resp = self._runner.run(invocation, env)
         elif double.handler is None:
-            resp = double.response
+            base = double.response
+            # Clone to avoid mutating the shared static response instance
+            resp = dc.replace(base, env=dict(base.env))
         elif env:
             with temporary_env(env):
                 resp = double.handler(invocation)
@@ -522,17 +525,20 @@ class CmdMox:
             resp.env.update(env)
         return resp
 
+    def _make_response(self, invocation: Invocation) -> Response:
+        double = self._doubles.get(invocation.command)
+        if double is None:
+            resp = Response(stdout=invocation.command)
+        else:
+            resp = self._invoke_handler(double, invocation)
+            if double.is_recording:
+                double.invocations.append(invocation)
+        invocation.apply(resp)
+        return resp
+
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
-        if double := self._doubles.get(invocation.command):
-            resp = self._invoke_handler(double, invocation)
-        else:
-            resp = Response(stdout=invocation.command)
-        invocation.stdout = resp.stdout
-        invocation.stderr = resp.stderr
-        invocation.exit_code = resp.exit_code
-        if double and double.is_recording:
-            double.invocations.append(invocation)
+        resp = self._make_response(invocation)
         self.journal.append(invocation)
         return resp
 
