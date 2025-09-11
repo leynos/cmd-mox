@@ -8,6 +8,9 @@ import os
 import subprocess
 import typing as t
 
+if t.TYPE_CHECKING:
+    from pathlib import Path
+
 import pytest
 
 from cmd_mox.controller import CmdMox
@@ -21,7 +24,13 @@ from tests.helpers.controller import (
 )
 
 
-@dc.dataclass(slots=True)
+def _shim_cmd_path(mox: CmdMox, name: str) -> Path:
+    sd = mox.environment.shim_dir
+    assert sd is not None
+    return sd / name
+
+
+@dc.dataclass(slots=True, frozen=True)
 class InvocationTestCase:
     """Parameters for invocation journal tests."""
 
@@ -69,9 +78,7 @@ def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub(test_case.stub_name).returns(**test_case.stub_returns)
         mox.replay()
-        shim_dir = mox.environment.shim_dir
-        assert shim_dir is not None
-        cmd_path = shim_dir / test_case.stub_name
+        cmd_path = _shim_cmd_path(mox, test_case.stub_name)
         params = CommandExecution(
             cmd=str(cmd_path),
             args=test_case.args,
@@ -105,9 +112,7 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("failcmd").returns(stdout="", stderr="error occurred", exit_code=2)
         mox.replay()
-        shim_dir = mox.environment.shim_dir
-        assert shim_dir is not None
-        cmd_path = shim_dir / "failcmd"
+        cmd_path = _shim_cmd_path(mox, "failcmd")
         params = CommandExecution(
             cmd=str(cmd_path),
             args="--fail",
@@ -141,9 +146,7 @@ def test_journal_env_is_deep_copied(
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        shim_dir = mox.environment.shim_dir
-        assert shim_dir is not None
-        cmd_path = shim_dir / "rec"
+        cmd_path = _shim_cmd_path(mox, "rec")
         run([str(cmd_path)], env=os.environ | {"EXTRA": "1"})
         monkeypatch.setenv("EXTRA", "3")
         run([str(cmd_path)], env=os.environ | {"EXTRA": "2"})
@@ -176,9 +179,7 @@ def test_journal_pruning(
     with CmdMox(verify_on_exit=False, max_journal_entries=maxlen) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        shim_dir = mox.environment.shim_dir
-        assert shim_dir is not None
-        cmd_path = shim_dir / "rec"
+        cmd_path = _shim_cmd_path(mox, "rec")
         for i in range(3):
             run([str(cmd_path), str(i)])
         mox.verify()
