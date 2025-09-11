@@ -102,51 +102,27 @@ class Invocation:
 
     def __repr__(self) -> str:
         """Return a convenient debug representation."""
-<<<<<<< HEAD
-        # Merge strategy:
-        # - Keep main's refactor (explicit dict + _shorten) for clarity.
-        # - Use this branch's more robust redaction using normalized tokens
-        #   and a regex that catches word boundaries and underscores.
-        safe_env = {}
+        # Keep explicit dict construction and field shortening for readability.
+        # Redact env keys using both normalized token checks and a regex that
+        # matches word boundaries and common separators. This errs on the side
+        # of safety and keeps behavior compatible with main's improvements.
+        safe_env: dict[str, str] = {}
         for key, value in self.env.items():
             key_cf = key.casefold()
             should_redact = any(tok in key_cf for tok in _SENSITIVE_TOKENS) or (
-                SENSITIVE_ENV_KEY_PATTERN.search(key) is not None
+                _SECRET_ENV_KEY_RE.search(key) is not None
             )
             safe_env[key] = "<redacted>" if should_redact else value
 
         data = {
             "command": self.command,
             "args": list(self.args),
-            "stdin": _shorten(self.stdin, 256),
-            "stdout": _shorten(self.stdout, 256),
-            "stderr": _shorten(self.stderr, 256),
+            "stdin": _shorten(self.stdin, _REPR_FIELD_LIMIT),
+            "stdout": _shorten(self.stdout, _REPR_FIELD_LIMIT),
+            "stderr": _shorten(self.stderr, _REPR_FIELD_LIMIT),
             "exit_code": self.exit_code,
             "env": safe_env,
-||||||| parent of 1855b65 (Refactor Invocation.__repr__ using to_dict)
-        safe_env = {
-            k: "<redacted>"
-            if any(t in k.upper() for t in ("KEY", "TOKEN", "SECRET", "PASSWORD"))
-            else v
-            for k, v in self.env.items()
         }
-        data = {
-            "command": self.command,
-            "args": self.args,
-            "stdin": _shorten(self.stdin, 256),
-            "stdout": _shorten(self.stdout, 256),
-            "stderr": _shorten(self.stderr, 256),
-            "exit_code": self.exit_code,
-            "env": safe_env,
-=======
-        data = self.to_dict()
-        data["env"] = {
-            k: "<redacted>" if _SECRET_ENV_KEY_RE.search(k) else v
-            for k, v in data["env"].items()
->>>>>>> 1855b65 (Refactor Invocation.__repr__ using to_dict)
-        }
-        for field in ("stdin", "stdout", "stderr"):
-            data[field] = _shorten(data[field], _REPR_FIELD_LIMIT)
         return f"Invocation({data!r})"
 
 
