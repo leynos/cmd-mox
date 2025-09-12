@@ -30,6 +30,32 @@ def _shim_cmd_path(mox: CmdMox, name: str) -> Path:
     return sd / name
 
 
+def _setup_and_execute_command(
+    mox: CmdMox,
+    stub_name: str,
+    stub_returns: dict[str, t.Any],
+    *,
+    args: str,
+    stdin: str,
+    env_var: str,
+    env_val: str,
+    check: bool,
+) -> subprocess.CompletedProcess[str]:
+    """Create a stub, run it once, and return the result."""
+    mox.stub(stub_name).returns(**stub_returns)
+    mox.replay()
+    cmd_path = _shim_cmd_path(mox, stub_name)
+    params = CommandExecution(
+        cmd=str(cmd_path),
+        args=args,
+        stdin=stdin,
+        env_var=env_var,
+        env_val=env_val,
+        check=check,
+    )
+    return execute_command_with_details(mox, params)
+
+
 @dc.dataclass(slots=True, frozen=True)
 class InvocationTestCase:
     """Parameters for invocation journal tests."""
@@ -76,18 +102,16 @@ class InvocationTestCase:
 def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
     """Journal records both successful and failed command invocations."""
     with CmdMox(verify_on_exit=False) as mox:
-        mox.stub(test_case.stub_name).returns(**test_case.stub_returns)
-        mox.replay()
-        cmd_path = _shim_cmd_path(mox, test_case.stub_name)
-        params = CommandExecution(
-            cmd=str(cmd_path),
+        result = _setup_and_execute_command(
+            mox,
+            test_case.stub_name,
+            test_case.stub_returns,
             args=test_case.args,
             stdin=test_case.stdin,
             env_var=test_case.env_var,
             env_val=test_case.env_val,
             check=test_case.expected_exit == 0,
         )
-        result = execute_command_with_details(mox, params)
         mox.verify()
 
     assert result.stdout == test_case.expected_stdout
@@ -110,19 +134,17 @@ def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
 def test_journal_records_failed_invocation_raises_still_journaled() -> None:
     """Journal records failed command even when subprocess raises."""
     with CmdMox(verify_on_exit=False) as mox:
-        mox.stub("failcmd").returns(stdout="", stderr="error occurred", exit_code=2)
-        mox.replay()
-        cmd_path = _shim_cmd_path(mox, "failcmd")
-        params = CommandExecution(
-            cmd=str(cmd_path),
-            args="--fail",
-            stdin="input",
-            env_var="FAILMODE",
-            env_val="true",
-            check=True,
-        )
         with pytest.raises(subprocess.CalledProcessError):
-            execute_command_with_details(mox, params)
+            _setup_and_execute_command(
+                mox,
+                "failcmd",
+                {"stdout": "", "stderr": "error occurred", "exit_code": 2},
+                args="--fail",
+                stdin="input",
+                env_var="FAILMODE",
+                env_val="true",
+                check=True,
+            )
         mox.verify()
     expectation = JournalEntryExpectation(
         cmd="failcmd",
