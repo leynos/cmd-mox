@@ -24,16 +24,28 @@ from tests.helpers.controller import (
 )
 
 
+class StubReturns(t.TypedDict, total=False):
+    """Optional stub return values."""
+
+    stdout: str
+    stderr: str
+    exit_code: int
+
+
 def _shim_cmd_path(mox: CmdMox, name: str) -> Path:
+    """Return the shim path for a registered command.
+
+    Requires `mox.replay()` to have initialized shims.
+    """
     sd = mox.environment.shim_dir
-    assert sd is not None
+    assert sd is not None, "shim_dir is None; did you forget to call mox.replay()?"
     return sd / name
 
 
 def _setup_and_execute_command(
     mox: CmdMox,
     stub_name: str,
-    stub_returns: dict[str, t.Any],
+    stub_returns: StubReturns,
     *,
     args: str,
     stdin: str,
@@ -56,12 +68,20 @@ def _setup_and_execute_command(
     return execute_command_with_details(mox, params)
 
 
+def _assert_single_journal_entry(
+    mox: CmdMox, expectation: JournalEntryExpectation
+) -> None:
+    """Verify journal length and entry details."""
+    assert len(mox.journal) == 1
+    verify_journal_entry_details(mox, expectation)
+
+
 @dc.dataclass(slots=True, frozen=True)
 class InvocationTestCase:
     """Parameters for invocation journal tests."""
 
     stub_name: str
-    stub_returns: dict[str, t.Any]
+    stub_returns: StubReturns
     args: str
     stdin: str
     env_var: str
@@ -127,8 +147,7 @@ def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
         stderr=test_case.expected_stderr,
         exit_code=test_case.expected_exit,
     )
-    assert len(mox.journal) == 1
-    verify_journal_entry_details(mox, expectation)
+    _assert_single_journal_entry(mox, expectation)
 
 
 def test_journal_records_failed_invocation_raises_still_journaled() -> None:
@@ -156,8 +175,7 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
         stderr="error occurred",
         exit_code=2,
     )
-    assert len(mox.journal) == 1
-    verify_journal_entry_details(mox, expectation)
+    _assert_single_journal_entry(mox, expectation)
 
 
 def test_journal_env_is_deep_copied(
