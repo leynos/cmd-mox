@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import ast
+import dataclasses as dc
 import os
 import subprocess
 import typing as t
-from dataclasses import dataclass  # noqa: ICN003
+
+if t.TYPE_CHECKING:
+    from pathlib import Path
 
 import pytest
 
@@ -21,12 +24,64 @@ from tests.helpers.controller import (
 )
 
 
-@dataclass
+class StubReturns(t.TypedDict, total=False):
+    """Optional stub return values."""
+
+    stdout: str
+    stderr: str
+    exit_code: int
+
+
+def _shim_cmd_path(mox: CmdMox, name: str) -> Path:
+    """Return the shim path for a registered command.
+
+    Requires `mox.replay()` to have initialized shims.
+    """
+    sd = mox.environment.shim_dir
+    assert sd is not None, "shim_dir is None; did you forget to call mox.replay()?"
+    return sd / name
+
+
+def _setup_and_execute_command(
+    mox: CmdMox,
+    stub_name: str,
+    stub_returns: StubReturns,
+    *,
+    args: str,
+    stdin: str,
+    env_var: str,
+    env_val: str,
+    check: bool,
+) -> subprocess.CompletedProcess[str]:
+    """Create a stub, run it once, and return the result."""
+    mox.stub(stub_name).returns(**stub_returns)
+    mox.replay()
+    cmd_path = _shim_cmd_path(mox, stub_name)
+    params = CommandExecution(
+        cmd=str(cmd_path),
+        args=args,
+        stdin=stdin,
+        env_var=env_var,
+        env_val=env_val,
+        check=check,
+    )
+    return execute_command_with_details(mox, params)
+
+
+def _assert_single_journal_entry(
+    mox: CmdMox, expectation: JournalEntryExpectation
+) -> None:
+    """Verify journal length and entry details."""
+    assert len(mox.journal) == 1
+    verify_journal_entry_details(mox, expectation)
+
+
+@dc.dataclass(slots=True, frozen=True)
 class InvocationTestCase:
     """Parameters for invocation journal tests."""
 
     stub_name: str
-    stub_returns: dict[str, t.Any]
+    stub_returns: StubReturns
     args: str
     stdin: str
     env_var: str
@@ -62,23 +117,21 @@ class InvocationTestCase:
             expected_exit=2,
         ),
     ],
+    ids=("success", "failure"),
 )
 def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
     """Journal records both successful and failed command invocations."""
     with CmdMox(verify_on_exit=False) as mox:
-        mox.stub(test_case.stub_name).returns(**test_case.stub_returns)
-        mox.replay()
-        assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / test_case.stub_name
-        params = CommandExecution(
-            cmd=str(cmd_path),
+        result = _setup_and_execute_command(
+            mox,
+            test_case.stub_name,
+            test_case.stub_returns,
             args=test_case.args,
             stdin=test_case.stdin,
             env_var=test_case.env_var,
             env_val=test_case.env_val,
             check=test_case.expected_exit == 0,
         )
-        result = execute_command_with_details(mox, params)
         mox.verify()
 
     assert result.stdout == test_case.expected_stdout
@@ -94,27 +147,23 @@ def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
         stderr=test_case.expected_stderr,
         exit_code=test_case.expected_exit,
     )
-    assert len(mox.journal) == 1
-    verify_journal_entry_details(mox, expectation)
+    _assert_single_journal_entry(mox, expectation)
 
 
 def test_journal_records_failed_invocation_raises_still_journaled() -> None:
     """Journal records failed command even when subprocess raises."""
     with CmdMox(verify_on_exit=False) as mox:
-        mox.stub("failcmd").returns(stdout="", stderr="error occurred", exit_code=2)
-        mox.replay()
-        assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / "failcmd"
-        params = CommandExecution(
-            cmd=str(cmd_path),
-            args="--fail",
-            stdin="input",
-            env_var="FAILMODE",
-            env_val="true",
-            check=True,
-        )
         with pytest.raises(subprocess.CalledProcessError):
-            execute_command_with_details(mox, params)
+            _setup_and_execute_command(
+                mox,
+                "failcmd",
+                {"stdout": "", "stderr": "error occurred", "exit_code": 2},
+                args="--fail",
+                stdin="input",
+                env_var="FAILMODE",
+                env_val="true",
+                check=True,
+            )
         mox.verify()
     expectation = JournalEntryExpectation(
         cmd="failcmd",
@@ -126,8 +175,7 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
         stderr="error occurred",
         exit_code=2,
     )
-    assert len(mox.journal) == 1
-    verify_journal_entry_details(mox, expectation)
+    _assert_single_journal_entry(mox, expectation)
 
 
 def test_journal_env_is_deep_copied(
@@ -138,8 +186,7 @@ def test_journal_env_is_deep_copied(
     with CmdMox(verify_on_exit=False) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / "rec"
+        cmd_path = _shim_cmd_path(mox, "rec")
         run([str(cmd_path)], env=os.environ | {"EXTRA": "1"})
         monkeypatch.setenv("EXTRA", "3")
         run([str(cmd_path)], env=os.environ | {"EXTRA": "2"})
@@ -172,8 +219,7 @@ def test_journal_pruning(
     with CmdMox(verify_on_exit=False, max_journal_entries=maxlen) as mox:
         mox.stub("rec").returns(stdout="ok")
         mox.replay()
-        assert mox.environment.shim_dir is not None
-        cmd_path = mox.environment.shim_dir / "rec"
+        cmd_path = _shim_cmd_path(mox, "rec")
         for i in range(3):
             run([str(cmd_path), str(i)])
         mox.verify()
