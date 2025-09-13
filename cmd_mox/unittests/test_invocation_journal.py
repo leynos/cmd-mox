@@ -33,10 +33,7 @@ class StubReturns(t.TypedDict, total=False):
 
 
 def _shim_cmd_path(mox: CmdMox, name: str) -> Path:
-    """Return the shim path for a registered command.
-
-    Requires `mox.replay()` to have initialized shims.
-    """
+    """Return shim path for a command; requires prior mox.replay()."""
     sd = mox.environment.shim_dir
     assert sd is not None, "shim_dir is None; did you forget to call mox.replay()?"
     return sd / name
