@@ -11,6 +11,8 @@ import typing as t
 if t.TYPE_CHECKING:
     from pathlib import Path
 
+    from cmd_mox import EnvironmentManager
+
 import pytest
 
 from cmd_mox.controller import CmdMox
@@ -32,9 +34,10 @@ class StubReturns(t.TypedDict, total=False):
     exit_code: int
 
 
-def _shim_cmd_path(mox: CmdMox, name: str) -> Path:
-    """Return shim path for a command; requires prior mox.replay()."""
-    sd = mox.environment.shim_dir
+def _shim_cmd_path(obj: CmdMox | EnvironmentManager, name: str) -> Path:
+    """Return shim path for a command; requires initialized shims."""
+    env = t.cast("CmdMox | EnvironmentManager", getattr(obj, "environment", obj))
+    sd = env.shim_dir
     assert sd is not None, "shim_dir is None; did you forget to call mox.replay()?"
     return sd / name
 

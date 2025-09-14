@@ -24,14 +24,19 @@ TEST_CODE = textwrap.dedent(
     """
     import subprocess
     import pytest
+    from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
     pytest_plugins = ("cmd_mox.pytest_plugin",)
 
     def test_example(cmd_mox):
         cmd_mox.stub("hello").returns(stdout="hi")
         cmd_mox.replay()
-        path = cmd_mox.environment.shim_dir / "hello"
-        res = subprocess.run([str(path)], capture_output=True, text=True, check=True)
+        res = subprocess.run(
+            [_shim_cmd_path(cmd_mox, "hello")],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         assert res.stdout.strip() == "hi"
         cmd_mox.verify()
     """

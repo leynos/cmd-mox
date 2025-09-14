@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import subprocess
 import typing as t
-from pathlib import Path
 
 import pytest
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
+    from pathlib import Path
 
     from cmd_mox.controller import CmdMox
+
+
+def _shim_cmd_path(mox: CmdMox, name: str) -> Path:
+    sd = mox.environment.shim_dir
+    assert sd is not None, "shim_dir is None; did you forget to call mox.replay()?"
+    return sd / name
+
 
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
 
@@ -24,7 +31,7 @@ def test_fixture_basic(
     """Fixture yields a CmdMox instance and cleans up."""
     cmd_mox.stub("hello").returns(stdout="hi")
     cmd_mox.replay()
-    cmd_path = Path(cmd_mox.environment.shim_dir) / "hello"
+    cmd_path = _shim_cmd_path(cmd_mox, "hello")
     result = run([str(cmd_path)])
     assert result.stdout.strip() == "hi"
     cmd_mox.verify()
@@ -41,13 +48,17 @@ def test_worker_prefix(
         from cmd_mox.unittests.conftest import run_subprocess
         import pytest
 
+        def _shim_cmd_path(mox, name):
+            sd = mox.environment.shim_dir
+            assert sd is not None
+            return sd / name
+
         pytest_plugins = ("cmd_mox.pytest_plugin",)
 
         def test_worker(cmd_mox):
             cmd_mox.stub('foo').returns(stdout='bar')
             cmd_mox.replay()
-            path = cmd_mox.environment.shim_dir / 'foo'
-            res = run_subprocess([str(path)])
+            res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
             assert res.stdout.strip() == 'bar'
             assert 'gw99' in os.path.basename(cmd_mox.environment.shim_dir)
             cmd_mox.verify()
@@ -68,13 +79,17 @@ def test_default_prefix(
         from cmd_mox.unittests.conftest import run_subprocess
         import pytest
 
+        def _shim_cmd_path(mox, name):
+            sd = mox.environment.shim_dir
+            assert sd is not None
+            return sd / name
+
         pytest_plugins = ("cmd_mox.pytest_plugin",)
 
         def test_default(cmd_mox):
             cmd_mox.stub('foo').returns(stdout='bar')
             cmd_mox.replay()
-            path = cmd_mox.environment.shim_dir / 'foo'
-            res = run_subprocess([str(path)])
+            res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
             assert res.stdout.strip() == 'bar'
             assert 'main' in os.path.basename(cmd_mox.environment.shim_dir)
             cmd_mox.verify()
