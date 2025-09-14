@@ -34,38 +34,49 @@ class StubReturns(t.TypedDict, total=False):
     exit_code: int
 
 
-def _shim_cmd_path(obj: CmdMox | EnvironmentManager, name: str) -> Path:
-    """Return shim path for a command; requires initialized shims."""
-    env = t.cast("CmdMox | EnvironmentManager", getattr(obj, "environment", obj))
-    sd = env.shim_dir
-    assert sd is not None, "shim_dir is None; did you forget to call mox.replay()?"
-    return sd / name
+def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
+    """Return shim path for a command; requires prior mox.replay()."""
+    env = t.cast("EnvironmentManager", getattr(obj, "environment", obj))
+    shim_dir = env.shim_dir
+    assert shim_dir is not None, (
+        "shim_dir is None; did you forget to call mox.replay()?"
+    )
+    p = shim_dir
+    for part in parts:
+        p = p / part
+    return p
+
+
+@dc.dataclass(slots=True, frozen=True)
+class CommandExecutionParams:
+    """Parameters for command execution in tests."""
+
+    args: str
+    stdin: str
+    env_var: str
+    env_val: str
+    check: bool = True
 
 
 def _setup_and_execute_command(
     mox: CmdMox,
     stub_name: str,
     stub_returns: StubReturns,
-    *,
-    args: str,
-    stdin: str,
-    env_var: str,
-    env_val: str,
-    check: bool,
+    params: CommandExecutionParams,
 ) -> subprocess.CompletedProcess[str]:
     """Create a stub, run it once, and return the result."""
     mox.stub(stub_name).returns(**stub_returns)
     mox.replay()
     cmd_path = _shim_cmd_path(mox, stub_name)
-    params = CommandExecution(
+    execution = CommandExecution(
         cmd=str(cmd_path),
-        args=args,
-        stdin=stdin,
-        env_var=env_var,
-        env_val=env_val,
-        check=check,
+        args=params.args,
+        stdin=params.stdin,
+        env_var=params.env_var,
+        env_val=params.env_val,
+        check=params.check,
     )
-    return execute_command_with_details(mox, params)
+    return execute_command_with_details(mox, execution)
 
 
 def _assert_single_journal_entry(
@@ -126,11 +137,13 @@ def test_journal_records_invocation(test_case: InvocationTestCase) -> None:
             mox,
             test_case.stub_name,
             test_case.stub_returns,
-            args=test_case.args,
-            stdin=test_case.stdin,
-            env_var=test_case.env_var,
-            env_val=test_case.env_val,
-            check=test_case.expected_exit == 0,
+            CommandExecutionParams(
+                args=test_case.args,
+                stdin=test_case.stdin,
+                env_var=test_case.env_var,
+                env_val=test_case.env_val,
+                check=test_case.expected_exit == 0,
+            ),
         )
         mox.verify()
 
@@ -158,11 +171,13 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
                 mox,
                 "failcmd",
                 {"stdout": "", "stderr": "error occurred", "exit_code": 2},
-                args="--fail",
-                stdin="input",
-                env_var="FAILMODE",
-                env_val="true",
-                check=True,
+                CommandExecutionParams(
+                    args="--fail",
+                    stdin="input",
+                    env_var="FAILMODE",
+                    env_val="true",
+                    check=True,
+                ),
             )
         mox.verify()
     expectation = JournalEntryExpectation(
