@@ -41,10 +41,7 @@ def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
     assert shim_dir is not None, (
         "shim_dir is None; did you forget to call mox.replay()?"
     )
-    p = shim_dir
-    for part in parts:
-        p = p / part
-    return p
+    return shim_dir.joinpath(*parts)
 
 
 @dc.dataclass(slots=True, frozen=True)
@@ -68,15 +65,17 @@ def _setup_and_execute_command(
     mox.stub(stub_name).returns(**stub_returns)
     mox.replay()
     cmd_path = _shim_cmd_path(mox, stub_name)
-    execution = CommandExecution(
-        cmd=str(cmd_path),
-        args=params.args,
-        stdin=params.stdin,
-        env_var=params.env_var,
-        env_val=params.env_val,
-        check=params.check,
+    return execute_command_with_details(
+        mox,
+        CommandExecution(
+            cmd=str(cmd_path),
+            args=params.args,
+            stdin=params.stdin,
+            env_var=params.env_var,
+            env_val=params.env_val,
+            check=params.check,
+        ),
     )
-    return execute_command_with_details(mox, execution)
 
 
 def _assert_single_journal_entry(

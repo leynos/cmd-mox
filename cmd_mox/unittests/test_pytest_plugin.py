@@ -2,22 +2,16 @@
 
 from __future__ import annotations
 
-import subprocess
 import typing as t
 
 import pytest
 
+from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
-    from pathlib import Path
 
     from cmd_mox.controller import CmdMox
-
-
-def _shim_cmd_path(mox: CmdMox, name: str) -> Path:
-    sd = mox.environment.shim_dir
-    assert sd is not None, "shim_dir is None; did you forget to call mox.replay()?"
-    return sd / name
 
 
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")

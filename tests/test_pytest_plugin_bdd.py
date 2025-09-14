@@ -32,7 +32,7 @@ TEST_CODE = textwrap.dedent(
         cmd_mox.stub("hello").returns(stdout="hi")
         cmd_mox.replay()
         res = subprocess.run(
-            [_shim_cmd_path(cmd_mox, "hello")],
+            [str(_shim_cmd_path(cmd_mox, "hello"))],
             capture_output=True,
             text=True,
             check=True,
