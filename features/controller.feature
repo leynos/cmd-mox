@@ -186,3 +186,23 @@ Feature: CmdMox basic functionality
 
   Scenario: invalid max journal size is rejected
     Given creating a CmdMox controller with max journal size -1 fails
+
+  Scenario: verification reports unexpected invocation details
+    Given a CmdMox controller
+    And the command "git" is mocked with args "status" returning "ok" any order
+    When I replay the controller
+    And I run the command "git" with arguments "commit"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "Unexpected command invocation."
+    And the verification error message should contain "git('status')"
+    And the verification error message should contain "git('commit')"
+
+  Scenario: verification reports missing invocations
+    Given a CmdMox controller
+    And the command "sync" is mocked to return "ok" times 2
+    When I replay the controller
+    And I run the command "sync"
+    When I verify the controller expecting an UnfulfilledExpectationError
+    Then the verification error message should contain "Unfulfilled expectation."
+    And the verification error message should contain "expected calls=2"
+    And the verification error message should contain "Observed calls"

@@ -212,7 +212,7 @@ def test_expectation_times_alias(
                 run([str(paths["second"])], shell=False),
                 run([str(paths["first"])], shell=False),
             ),
-            UnfulfilledExpectationError,
+            UnexpectedCommandError,
             id="order-validation",
         ),
         pytest.param(

@@ -221,8 +221,7 @@ with cmd_mox.CmdMox() as mox:
 `__enter__` delegates to :class:`EnvironmentManager`, ensuring the PATH and IPC
 variables are set up. By default `__exit__` invokes :meth:`verify`, stopping
 any running server and restoring the original environment. This behaviour can
-be disabled via `CmdMox(verify_on_exit=False)` when manual control is
-required.
+be disabled via `CmdMox(verify_on_exit=False)` when manual control is required.
 
 ### 2.3 Creating Test Doubles: `mox.mock()`, `mox.stub()`, and `mox.spy()`
 
@@ -242,17 +241,16 @@ for further configuration.
   This is used to record invocations for later inspection without the strict
   upfront expectations of a mock.
 
-Early iterations of the library exposed distinct `StubCommand`,
-`MockCommand` and `SpyCommand` classes. These have since been unified into
-a single `CommandDouble` implementation tagged with a `kind` attribute. The
-factories `mox.stub()`, `mox.mock()` and `mox.spy()` still exist for
-ergonomics but internally return `CommandDouble` instances. Each double
-tracks invocations so verification can assert on call counts and order. Mocks
-and spies record calls (`double.is_recording` is `True`), while stubs do
-not.
+Early iterations of the library exposed distinct `StubCommand`, `MockCommand`
+and `SpyCommand` classes. These have since been unified into a single
+`CommandDouble` implementation tagged with a `kind` attribute. The factories
+`mox.stub()`, `mox.mock()` and `mox.spy()` still exist for ergonomics but
+internally return `CommandDouble` instances. Each double tracks invocations so
+verification can assert on call counts and order. Mocks and spies record calls
+(`double.is_recording` is `True`), while stubs do not.
 
-The `kind` flag determines whether a double is considered an expectation
-(stubs and mocks) or merely observational (spies). It also governs how
+The `kind` flag determines whether a double is considered an expectation (stubs
+and mocks) or merely observational (spies). It also governs how
 `CmdMox.verify()` checks the journal for unexpected or missing commands.
 
 ### 2.4 The Fluent API for Defining Expectations
@@ -304,9 +302,9 @@ provided `exit_code`.
   order is not significant, mirroring PyMox's behavior.
 
 Implementation note: the concrete implementation stores the expected call count
-in a `count` attribute but exposes a `times()` convenience method to match
-the DSL described here. The more explicit `times_called()` alias remains
-available for readability when desired.
+in a `count` attribute but exposes a `times()` convenience method to match the
+DSL described here. The more explicit `times_called()` alias remains available
+for readability when desired.
 
 To ensure `CmdMox` is a compelling replacement for `shellmock`, the following
 table maps the core features of `shellmock` to their more expressive `CmdMox`
@@ -813,8 +811,7 @@ for this purpose:
 
 - `spy.assert_called()`, `spy.assert_not_called()`, and
   `spy.assert_called_with(*args, stdin=None, env=None)`: Convenience helpers
-  mirroring `unittest.mock` for asserting call presence, absence, and
-  arguments.
+  mirroring `unittest.mock` for asserting call presence, absence, and arguments.
 
 *Example Assertion-Style Verification:*
 ```python
@@ -1052,11 +1049,10 @@ inter-process communication. Invocations from shims are appended to an internal
 journal. When a stub is registered for a command, the controller returns the
 configured :class:`Response`; otherwise it echoes the command name.
 
-During `verify()` the controller fails if unexpected commands were executed
-or if any registered mock command was never called. Stubs are ignored during
-this phase. This simplified verification establishes the record → replay →
-verify workflow and lays the groundwork for upcoming expectation and spy
-features.
+During `verify()` the controller fails if unexpected commands were executed or
+if any registered mock command was never called. Stubs are ignored during this
+phase. This simplified verification establishes the record → replay → verify
+workflow and lays the groundwork for upcoming expectation and spy features.
 ```mermaid
 sequenceDiagram
     actor Tester
@@ -1158,8 +1154,8 @@ The plugin exposes a `cmd_mox` fixture that yields a ready-to-use
 :class:`CmdMox` instance.  The fixture enters the :class:`EnvironmentManager`
 before yielding and always exits it afterwards to guarantee environment cleanup.
 
-To support `pytest-xdist` each fixture instance incorporates the worker ID
-into the temporary directory prefix.  The prefix takes the form
+To support `pytest-xdist` each fixture instance incorporates the worker ID into
+the temporary directory prefix.  The prefix takes the form
 `cmdmox-{worker}-{pid}-` ensuring that socket paths and shim directories are
 unique across parallel workers. When `PYTEST_XDIST_WORKER` is absent the
 fixture falls back to `main` so the prefix becomes `cmdmox-main-{pid}-`.
@@ -1182,6 +1178,17 @@ number of times. This modular approach simplifies the logic within
 :meth:`CmdMox.verify` and clarifies how mixed ordered and unordered calls are
 handled.
 
+The verifiers now emit diff-style diagnostics that show the expected call, the
+actual invocation, and any mismatching context such as stdin or environment
+variables. Sensitive environment values are redacted automatically so failure
+messages remain safe to copy into bug reports. `UnexpectedCommandVerifier`
+tracks call counts as it scans the journal, raising immediately when a mock is
+invoked more often than permitted. `OrderVerifier` prints both the expected and
+observed sequences with the first divergence highlighted, while `CountVerifier`
+lists the recorded invocations for expectations that were never fulfilled.
+These detailed reports make it obvious what changed between record and replay,
+reducing the time spent reverse-engineering verification failures.
+
 To keep the expectation matcher readable, `Expectation.matches` now delegates
 individual checks to small helper methods. These helpers verify the command
 name, arguments, standard input, and environment separately, reducing
@@ -1194,21 +1201,21 @@ localising error handling and environment cleanup details.
 
 ### 8.6 Design Decisions for `SpyCommand`
 
-Spies now support a `passthrough()` mode that executes the real command
-instead of a canned response. When a passthrough spy is invoked, the controller
-locates the real executable using the original `PATH` preserved by the
-`EnvironmentManager`. The manager exposes this via a new
-`original_environment` property. A small `CommandRunner` helper
-encapsulates the lookup and `subprocess.run` call. It runs the command with
-the recorded environment (minus the shim directory) and captures its output and
-exit status. The results are stored alongside the invocation and returned to
-the shim so the calling process sees the real behaviour.
+Spies now support a `passthrough()` mode that executes the real command instead
+of a canned response. When a passthrough spy is invoked, the controller locates
+the real executable using the original `PATH` preserved by the
+`EnvironmentManager`. The manager exposes this via a new `original_environment`
+property. A small `CommandRunner` helper encapsulates the lookup and
+`subprocess.run` call. It runs the command with the recorded environment (minus
+the shim directory) and captures its output and exit status. The results are
+stored alongside the invocation and returned to the shim so the calling process
+sees the real behaviour.
 
 To simplify post-replay assertions, spies expose `assert_called`,
 `assert_not_called`, and `assert_called_with` methods modelled after
-`unittest.mock`. `assert_called_with` accepts optional `stdin` and
-`env` keyword arguments to verify standard input and environment variables.
-Each helper raises `AssertionError` when expectations are unmet, offering a
+`unittest.mock`. `assert_called_with` accepts optional `stdin` and `env`
+keyword arguments to verify standard input and environment variables. Each
+helper raises `AssertionError` when expectations are unmet, offering a
 lightweight alternative to inspecting the `invocations` list directly.
 
 The runner validates that the resolved command path is absolute and executable.
@@ -1223,15 +1230,15 @@ Both mocks and spies maintain an `invocations` list. A convenience property
 
 Comparator helpers such as :class:`Any`, :class:`IsA`, :class:`Regex`,
 :class:`Contains`, :class:`StartsWith`, and :class:`Predicate` are implemented
-as simple callables. Each inherits a lightweight `_ReprMixin` so failing
-tests display meaningful values. `Expectation.with_matching_args` accepts
-callables of the form `Callable[[str], bool]` and requires one comparator per
-positional argument. The matcher result is interpreted as truthy. This keeps
-the matching engine agnostic to comparator implementations while enabling
-user-supplied predicates to participate alongside the built-ins. Regular
-expressions are compiled once per comparator and `IsA` relies on type
-conversion to avoid bespoke parsing logic. Comparator exceptions surface their
-class and message in mismatch reports.
+as simple callables. Each inherits a lightweight `_ReprMixin` so failing tests
+display meaningful values. `Expectation.with_matching_args` accepts callables
+of the form `Callable[[str], bool]` and requires one comparator per positional
+argument. The matcher result is interpreted as truthy. This keeps the matching
+engine agnostic to comparator implementations while enabling user-supplied
+predicates to participate alongside the built-ins. Regular expressions are
+compiled once per comparator and `IsA` relies on type conversion to avoid
+bespoke parsing logic. Comparator exceptions surface their class and message in
+mismatch reports.
 
 ### 8.8 Design Decisions for the Invocation Journal
 
