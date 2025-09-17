@@ -23,8 +23,9 @@ def _mask_env_value(key: str, value: str | None) -> str | None:
     """Redact *value* when *key* appears sensitive."""
     if value is None:
         return None
-    key_cf = key.casefold()
-    return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
+    else:  # noqa: RET505 - required for clarity per review guidance
+        key_cf = key.casefold()
+        return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
 
 
 def _format_env(mapping: t.Mapping[str, str | None]) -> str:
