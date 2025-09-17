@@ -169,6 +169,19 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     mox.stub(cmd).with_env({var: val}).runs(handler)
 
 
+@given(parsers.cfparse('the command "{cmd}" requires env var "{var}"="{val}"'))
+def command_requires_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
+    """Attach an environment requirement to an existing double."""
+    for collection in (mox.mocks, mox.stubs, mox.spies):
+        double = collection.get(cmd)
+        if double is not None:
+            double.expectation.with_env({var: val})
+            return
+
+    msg = f"Command {cmd!r} has not been registered"
+    raise AssertionError(msg)
+
+
 @given(parsers.cfparse('the command "{cmd}" resolves to a non-executable file'))
 def non_executable_command(
     tmp_path: Path,
@@ -581,6 +594,15 @@ def test_invalid_max_journal_size_is_rejected() -> None:
 )
 def test_verification_reports_unexpected_invocation_details() -> None:
     """Verification errors include details for unexpected invocations."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "verification redacts sensitive environment values",
+)
+def test_verification_redacts_sensitive_environment_values() -> None:
+    """Verification errors should redact sensitive environment variables."""
     pass
 
 

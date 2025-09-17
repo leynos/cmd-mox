@@ -810,8 +810,8 @@ for this purpose:
   `stderr`, and `exit_code`.
 
 - `spy.assert_called()`, `spy.assert_not_called()`, and
-  `spy.assert_called_with(*args, stdin=None, env=None)`: Convenience helpers
-  mirroring `unittest.mock` for asserting call presence, absence, and arguments.
+  `spy.assert_called_with(*args, stdin=None, env=None)`: Helpers mirroring
+  `unittest.mock` assertions for presence, absence, and arguments.
 
 *Example Assertion-Style Verification:*
 ```python

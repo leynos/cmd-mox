@@ -197,6 +197,16 @@ Feature: CmdMox basic functionality
     And the verification error message should contain "git('status')"
     And the verification error message should contain "git('commit')"
 
+  Scenario: verification redacts sensitive environment values
+    Given a CmdMox controller
+    And the command "deploy" is mocked to return "ok"
+    And the command "deploy" requires env var "API_KEY"="expected"
+    When I replay the controller
+    And I set environment variable "API_KEY" to "leaked-secret"
+    And I run the command "deploy"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "env={'API_KEY': '***'}"
+
   Scenario: verification reports missing invocations
     Given a CmdMox controller
     And the command "sync" is mocked to return "ok" times 2

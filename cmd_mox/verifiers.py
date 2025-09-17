@@ -24,9 +24,7 @@ def _mask_env_value(key: str, value: str | None) -> str | None:
     if value is None:
         return None
     key_cf = key.casefold()
-    if any(token in key_cf for token in _SENSITIVE_TOKENS):
-        return "***"
-    return value
+    return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
 
 
 def _format_env(mapping: t.Mapping[str, str | None]) -> str:
@@ -41,15 +39,11 @@ def _format_env(mapping: t.Mapping[str, str | None]) -> str:
 
 
 def _format_args(args: t.Sequence[str] | None) -> str:
-    if not args:
-        return ""
-    return ", ".join(repr(arg) for arg in args)
+    return "" if not args else ", ".join(repr(arg) for arg in args)
 
 
 def _format_matchers(matchers: t.Sequence[t.Callable[[str], bool]] | None) -> str:
-    if not matchers:
-        return ""
-    return ", ".join(repr(matcher) for matcher in matchers)
+    return "" if not matchers else ", ".join(repr(matcher) for matcher in matchers)
 
 
 def _format_call(name: str, args_repr: str) -> str:
@@ -136,17 +130,22 @@ def _format_sections(title: str, sections: list[tuple[str, str]]) -> str:
     for label, body in sections:
         if not body:
             continue
-        parts.append("")
-        parts.append(f"{label}:")
-        parts.append(indent(body, "  "))
+        parts.extend(("", f"{label}:", indent(body, "  ")))
     return "\n".join(parts)
 
 
 def _list_expected_commands(doubles: t.Mapping[str, CommandDouble]) -> str:
+    """Return a readable list of registered, invokable commands.
+
+    Commands registered as stubs are omitted because they are not validated as
+    part of unexpected-invocation checks.
+    """
     names = sorted(name for name, dbl in doubles.items() if dbl.kind != "stub")
-    if not names:
-        return "(none)"
-    return ", ".join(repr(name) for name in names)
+    return (
+        "(none: stubs are excluded from expected commands)"
+        if not names
+        else ", ".join(repr(name) for name in names)
+    )
 
 
 class UnexpectedCommandVerifier:
