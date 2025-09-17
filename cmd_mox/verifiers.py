@@ -210,11 +210,27 @@ class OrderVerifier:
 
     def verify(self, journal: t.Iterable[Invocation]) -> None:
         """Ensure ordered expectations appear in order within *journal*."""
+        data = self._prepare_validation_data(journal)
+        if data is None:
+            return
+        self._validate_invocation_order(*data)
+
+    def _prepare_validation_data(
+        self, journal: t.Iterable[Invocation]
+    ) -> (
+        tuple[
+            list[Expectation],
+            list[Invocation],
+            list[str],
+            list[str],
+        ]
+        | None
+    ):
         ordered_seq: list[Expectation] = []
         for exp in self._ordered:
             ordered_seq.extend([exp] * exp.count)
         if not ordered_seq:
-            return
+            return None
         relevant_commands = {exp.name for exp in ordered_seq}
         relevant_invocations = [
             inv for inv in journal if inv.command in relevant_commands
@@ -223,65 +239,143 @@ class OrderVerifier:
         actual_descriptions = [
             _describe_invocation(inv) for inv in relevant_invocations
         ]
+        return (
+            ordered_seq,
+            relevant_invocations,
+            expected_descriptions,
+            actual_descriptions,
+        )
+
+    def _validate_invocation_order(
+        self,
+        ordered_seq: list[Expectation],
+        relevant_invocations: list[Invocation],
+        expected_descriptions: list[str],
+        actual_descriptions: list[str],
+    ) -> None:
         for index, exp in enumerate(ordered_seq):
-            if index >= len(relevant_invocations):
-                remaining = _numbered(expected_descriptions[index:], start=index + 1)
-                msg = _format_sections(
-                    "Ordered expectations not satisfied.",
-                    [
-                        ("Expected order", _numbered(expected_descriptions)),
-                        ("Observed order", _numbered(actual_descriptions)),
-                        ("Missing", remaining),
-                    ],
-                )
-                raise UnfulfilledExpectationError(msg)
+            self._check_missing_invocations(
+                index,
+                relevant_invocations,
+                expected_descriptions,
+                actual_descriptions,
+            )
             actual_inv = relevant_invocations[index]
-            if exp.matches(actual_inv):
-                continue
-            reason = exp.explain_mismatch(actual_inv)
-            mismatch = "\n".join(
-                [
-                    f"position {index + 1}",
-                    "expected:\n"
-                    + indent(
-                        _describe_expectation(exp),
-                        "  ",
-                    ),
-                    "actual:\n"
-                    + indent(
-                        _describe_invocation(
-                            actual_inv,
-                            focus_env=exp.env.keys(),
-                            include_stdin=exp.stdin is not None,
-                        ),
-                        "  ",
-                    ),
-                ]
+            self._check_invocation_matches(
+                index,
+                exp,
+                actual_inv,
+                expected_descriptions,
+                actual_descriptions,
             )
-            msg = _format_sections(
-                "Ordered expectation violated.",
-                [
-                    ("Expected order", _numbered(expected_descriptions)),
-                    ("Observed order", _numbered(actual_descriptions)),
-                    ("First mismatch", mismatch),
-                    ("Reason", reason),
-                ],
-            )
-            raise UnexpectedCommandError(msg)
-        if len(relevant_invocations) > len(ordered_seq):
-            extras = relevant_invocations[len(ordered_seq) :]
-            msg = _format_sections(
-                "Unexpected additional invocation.",
-                [
-                    ("Expected order", _numbered(expected_descriptions)),
-                    ("Observed order", _numbered(actual_descriptions)),
-                    (
-                        "Unexpected calls",
-                        _describe_invocations(extras, include_stdin=False),
+        self._check_extra_invocations(
+            ordered_seq,
+            relevant_invocations,
+            expected_descriptions,
+            actual_descriptions,
+        )
+
+    def _check_missing_invocations(
+        self,
+        index: int,
+        relevant_invocations: list[Invocation],
+        expected_descriptions: list[str],
+        actual_descriptions: list[str],
+    ) -> None:
+        if index < len(relevant_invocations):
+            return
+        remaining = _numbered(expected_descriptions[index:], start=index + 1)
+        msg = _format_sections(
+            "Ordered expectations not satisfied.",
+            [
+                ("Expected order", _numbered(expected_descriptions)),
+                ("Observed order", _numbered(actual_descriptions)),
+                ("Missing", remaining),
+            ],
+        )
+        raise UnfulfilledExpectationError(msg)
+
+    def _check_invocation_matches(
+        self,
+        index: int,
+        exp: Expectation,
+        actual_inv: Invocation,
+        expected_descriptions: list[str],
+        actual_descriptions: list[str],
+    ) -> None:
+        if exp.matches(actual_inv):
+            return
+        reason = exp.explain_mismatch(actual_inv)
+        self._raise_mismatch_error(
+            index,
+            exp,
+            actual_inv,
+            reason,
+            expected_descriptions,
+            actual_descriptions,
+        )
+
+    def _check_extra_invocations(
+        self,
+        ordered_seq: list[Expectation],
+        relevant_invocations: list[Invocation],
+        expected_descriptions: list[str],
+        actual_descriptions: list[str],
+    ) -> None:
+        if len(relevant_invocations) <= len(ordered_seq):
+            return
+        extras = relevant_invocations[len(ordered_seq) :]
+        msg = _format_sections(
+            "Unexpected additional invocation.",
+            [
+                ("Expected order", _numbered(expected_descriptions)),
+                ("Observed order", _numbered(actual_descriptions)),
+                (
+                    "Unexpected calls",
+                    _describe_invocations(extras, include_stdin=False),
+                ),
+            ],
+        )
+        raise UnexpectedCommandError(msg)
+
+    def _raise_mismatch_error(
+        self,
+        index: int,
+        exp: Expectation,
+        actual_inv: Invocation,
+        reason: str,
+        expected_descriptions: list[str],
+        actual_descriptions: list[str],
+    ) -> None:
+        mismatch = "\n".join(
+            [
+                f"position {index + 1}",
+                "expected:\n"
+                + indent(
+                    _describe_expectation(exp),
+                    "  ",
+                ),
+                "actual:\n"
+                + indent(
+                    _describe_invocation(
+                        actual_inv,
+                        focus_env=exp.env.keys(),
+                        include_stdin=exp.stdin is not None,
                     ),
-                ],
-            )
-            raise UnexpectedCommandError(msg)
+                    "  ",
+                ),
+            ]
+        )
+        msg = _format_sections(
+            "Ordered expectation violated.",
+            [
+                ("Expected order", _numbered(expected_descriptions)),
+                ("Observed order", _numbered(actual_descriptions)),
+                ("First mismatch", mismatch),
+                ("Reason", reason),
+            ],
+        )
+        raise UnexpectedCommandError(msg)
 
 
 class CountVerifier:
