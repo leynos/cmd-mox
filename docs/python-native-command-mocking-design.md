@@ -1172,11 +1172,12 @@ state untouched.
 Verification is split into focused components. `UnexpectedCommandVerifier`
 checks that every journal entry matches a registered expectation.
 `OrderVerifier` ensures expectations marked `in_order()` appear in the same
-relative order in the journal, ignoring interleaved unordered mocks.
-`CountVerifier` verifies that each expectation was met exactly the declared
-number of times. This modular approach simplifies the logic within
-:meth:`CmdMox.verify` and clarifies how mixed ordered and unordered calls are
-handled.
+relative order in the journal. It filters the journal to invocations that match
+the ordered expectations so interleaved unordered mocks, even when they share a
+command name, are ignored. `CountVerifier` verifies that each expectation was
+met exactly the declared number of times. This modular approach simplifies the
+logic within :meth:`CmdMox.verify` and clarifies how mixed ordered and
+unordered calls are handled.
 
 The verifiers now emit diff-style diagnostics that show the expected call, the
 actual invocation, and any mismatching context such as stdin or environment
