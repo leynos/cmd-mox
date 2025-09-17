@@ -274,6 +274,8 @@ class OrderVerifier:
 
     def __init__(self, ordered: list[Expectation]) -> None:
         self._ordered = ordered
+        self._current_expected_descriptions: list[str] = []
+        self._current_actual_descriptions: list[str] = []
 
     def verify(self, journal: t.Iterable[Invocation]) -> None:
         """Ensure ordered expectations appear in order within *journal*."""
@@ -309,6 +311,8 @@ class OrderVerifier:
         actual_descriptions = [
             _describe_invocation(inv) for inv in relevant_invocations
         ]
+        self._current_expected_descriptions = expected_descriptions
+        self._current_actual_descriptions = actual_descriptions
 
         self._check_missing_expectations(
             ordered_seq,
@@ -370,8 +374,6 @@ class OrderVerifier:
                 exp,
                 actual_inv,
                 reason,
-                expected_descriptions,
-                actual_descriptions,
             )
             return
 
@@ -405,8 +407,6 @@ class OrderVerifier:
         exp: Expectation,
         actual_inv: Invocation,
         reason: str,
-        expected_descriptions: list[str],
-        actual_descriptions: list[str],
     ) -> None:
         mismatch = "\n".join(
             [
@@ -430,8 +430,14 @@ class OrderVerifier:
         msg = _format_sections(
             "Ordered expectation violated.",
             [
-                ("Expected order", _numbered(expected_descriptions)),
-                ("Observed order", _numbered(actual_descriptions)),
+                (
+                    "Expected order",
+                    _numbered(self._current_expected_descriptions),
+                ),
+                (
+                    "Observed order",
+                    _numbered(self._current_actual_descriptions),
+                ),
                 ("First mismatch", mismatch),
                 ("Reason", reason),
             ],
