@@ -295,8 +295,10 @@ class OrderVerifier:
         journal: t.Iterable[Invocation],
         ordered_seq: list[Expectation],
     ) -> list[Invocation]:
-        relevant_commands = {exp.name for exp in ordered_seq}
-        return [inv for inv in journal if inv.command in relevant_commands]
+        # Ignore invocations that do not satisfy any ordered expectation so
+        # unordered calls of the same command name do not trigger spurious
+        # ordering failures.
+        return [inv for inv in journal if any(exp.matches(inv) for exp in ordered_seq)]
 
     def _validate_expectations_order(
         self,
