@@ -119,15 +119,15 @@
   - [x] Store as a deque to preserve order during verification
   - [x] Configurable max journal size via `max_journal_entries`
 
-- [ ] **Verification Algorithm**
+- [x] **Verification Algorithm**
 
-  - [ ] Unexpected calls (fail early)
+  - [x] Unexpected calls (fail early)
 
-  - [ ] Unfulfilled expectations
+  - [x] Unfulfilled expectations
 
-  - [ ] Call counts, strict ordering checks
+  - [x] Call counts, strict ordering checks
 
-  - [ ] Clear diff-style error reporting (`VerificationError` etc.)
+  - [x] Clear diff-style error reporting (`VerificationError` etc.)
 
 ## **VI. Shim Behaviour**
 

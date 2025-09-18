@@ -14,6 +14,11 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.controller import CmdMox
+from cmd_mox.errors import (
+    UnexpectedCommandError,
+    UnfulfilledExpectationError,
+    VerificationError,
+)
 from tests.helpers.controller import (
     CommandExecution,
     JournalEntryExpectation,
@@ -26,6 +31,12 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
+
+_ERROR_TYPES: dict[str, type[VerificationError]] = {
+    "UnexpectedCommandError": UnexpectedCommandError,
+    "UnfulfilledExpectationError": UnfulfilledExpectationError,
+    "VerificationError": VerificationError,
+}
 
 
 @given("a CmdMox controller", target_fixture="mox")
@@ -158,6 +169,19 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     mox.stub(cmd).with_env({var: val}).runs(handler)
 
 
+@given(parsers.cfparse('the command "{cmd}" requires env var "{var}"="{val}"'))
+def command_requires_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
+    """Attach an environment requirement to an existing double."""
+    for collection in (mox.mocks, mox.stubs, mox.spies):
+        double = collection.get(cmd)
+        if double is not None:
+            double.expectation.with_env({var: val})
+            return
+
+    msg = f"Command {cmd!r} has not been registered"
+    raise AssertionError(msg)
+
+
 @given(parsers.cfparse('the command "{cmd}" resolves to a non-executable file'))
 def non_executable_command(
     tmp_path: Path,
@@ -239,6 +263,26 @@ def verify_controller(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
 
 
 @when(
+    parsers.cfparse("I verify the controller expecting an {error_name}"),
+    target_fixture="verification_error",
+)
+def verify_controller_expect_error(
+    mox: CmdMox, mox_stack: contextlib.ExitStack, error_name: str
+) -> VerificationError:
+    """Invoke verification expecting a specific error type."""
+    error_type = _ERROR_TYPES.get(error_name)
+    if error_type is None:  # pragma: no cover - invalid feature configuration
+        msg = f"Unknown verification error type: {error_name}"
+        raise ValueError(msg)
+    try:
+        with pytest.raises(error_type) as excinfo:
+            mox.verify()
+    finally:
+        mox_stack.close()
+    return t.cast("VerificationError", excinfo.value)
+
+
+@when(
     parsers.cfparse('I run the command "{cmd}" using a with block'),
     target_fixture="result",
 )
@@ -264,6 +308,14 @@ def check_output(result: subprocess.CompletedProcess[str], text: str) -> None:
 def check_exit_code(result: subprocess.CompletedProcess[str], code: int) -> None:
     """Assert the process exit code equals *code*."""
     assert result.returncode == code
+
+
+@then(parsers.cfparse('the verification error message should contain "{text}"'))
+def verification_error_contains(
+    verification_error: VerificationError, text: str
+) -> None:
+    """Assert the captured verification error contains *text*."""
+    assert text in str(verification_error)
 
 
 @then(parsers.cfparse('the stderr should contain "{text}"'))
@@ -533,4 +585,31 @@ def test_journal_prunes_excess_entries() -> None:
 )
 def test_invalid_max_journal_size_is_rejected() -> None:
     """Controller rejects non-positive journal size."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "verification reports unexpected invocation details",
+)
+def test_verification_reports_unexpected_invocation_details() -> None:
+    """Verification errors include details for unexpected invocations."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "verification redacts sensitive environment values",
+)
+def test_verification_redacts_sensitive_environment_values() -> None:
+    """Verification errors should redact sensitive environment variables."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "verification reports missing invocations",
+)
+def test_verification_reports_missing_invocations() -> None:
+    """Verification errors highlight unfulfilled expectations."""
     pass
