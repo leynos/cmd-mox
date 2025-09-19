@@ -92,8 +92,10 @@ The design document lists the available comparators:
 - `StartsWith`
 - `Predicate`
 
-which can be combined with `with_matching_args` or `with_stdin` for rich
-matching logic.
+Each comparator is a callable that returns `True` when a value matches.
+`with_matching_args` expects the same number of comparators as command line
+arguments, while `with_stdin` accepts either an exact string or a predicate for
+more flexible input checks.
 
 ## Running tests
 
@@ -119,8 +121,8 @@ with CmdMox() as mox:
 
 ## Spies and passthrough mode
 
-Spies expose `invocations` and `call_count` after verification for
-assertion-style tests:
+Spies expose `invocations` (a list of `Invocation` objects) and `call_count`
+during and after replay, making it easy to inspect what actually ran:
 
 ```python
 def test_spy(cmd_mox):
@@ -131,6 +133,9 @@ def test_spy(cmd_mox):
     assert spy.call_count == 1
 ```
 
+A spy expectation can also use `times_called(count)`—an alias of
+`times(count)`—to require a specific call count during verification.
+
 A spy can also forward to the real command while recording everything:
 
 ```python
@@ -140,6 +145,44 @@ mox.spy("aws").passthrough()
 This "record mode" is helpful for capturing real interactions and later turning
 them into mocks.
 
+After verification, spies provide assertion helpers inspired by
+`unittest.mock`:
+
+```python
+spy.assert_called()
+spy.assert_called_with("curl", "--silent", stdin="payload")
+spy.assert_not_called()
+```
+
+These methods raise `AssertionError` when expectations are not met and are
+restricted to spy doubles.
+
+## Controller configuration and journals
+
+`CmdMox` offers configuration hooks that surface through both the fixture and
+the context-manager API:
+
+- `verify_on_exit` (default `True`) automatically calls `verify()` when a replay
+  phase ends inside a `with CmdMox()` block. Disable it when you need to manage
+  verification manually.
+- `max_journal_entries` bounds the number of stored invocations. The journal is
+  exposed via `cmd_mox.journal`, a `collections.deque` of `Invocation` objects
+  recorded during replay.
+
+The journal is especially handy when debugging:
+
+```python
+cmd_mox.replay()
+exercise_system()
+cmd_mox.verify()
+assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
+```
+
+When you want to intercept a command without configuring a double—for example
+to ensure it is treated as unexpected—call `cmd_mox.register_command("name")`.
+CmdMox will create the shim so that the command is routed through the IPC server
+even without a stub, mock, or spy.
+
 ## Fluent API reference
 
 The DSL methods closely mirror those described in the design specification. A
@@ -147,19 +190,22 @@ few common ones are:
 
 - `with_args(*args)` – require exact arguments.
 - `with_matching_args(*matchers)` – match arguments using comparators.
-- `with_stdin(data)` – expect specific standard input.
-- `with_env(mapping)` – set additional environment variables for the invocation.
-- `returns(stdout="", stderr="", exit_code=0)` – static response.
-
-*Note: All examples use string values for `stdout` and `stderr`. If you need to
-return bytes, pass a bytes object such as `stdout=b"output"`. Mixing types is
-not recommended unless explicitly required and documented.*
-
-- `runs(handler)` – call a function to produce dynamic output.
+- `with_stdin(data_or_matcher)` – expect specific standard input or validate it
+  with a predicate.
+- `with_env(mapping)` – set additional environment variables for the invocation
+  and apply them when custom handlers run.
+- `returns(stdout="", stderr="", exit_code=0)` – static response using text
+  values; CmdMox operates in text mode, so provide `str` objects here.
+- `runs(handler)` – call a function to produce dynamic output. The handler
+  receives an `Invocation` and should return either a `(stdout, stderr,
+  exit_code)` tuple or a `Response` instance.
 - `times(count)` – expect the command exactly `count` times.
+- `times_called(count)` – alias for `times` that emphasises spy call counts.
 - `in_order()` – enforce strict ordering with other expectations.
 - `any_order()` – allow the expectation to be satisfied in any position.
 - `passthrough()` – for spies, run the real command while recording it.
+- `assert_called()`, `assert_not_called()`, `assert_called_with(*args,
+  stdin=None, env=None)` – spy-only helpers for post-verification assertions.
 
 Refer to the [design document](./python-native-command-mocking-design.md) for
 the full table of methods and examples.
