@@ -150,7 +150,8 @@ After verification, spies provide assertion helpers inspired by
 
 ```python
 spy.assert_called()
-spy.assert_called_with("curl", "--silent", stdin="payload")
+spy.assert_called_with("--silent", stdin="payload")
+# or, to ensure the spy never executed:
 spy.assert_not_called()
 ```
 
