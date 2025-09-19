@@ -92,10 +92,10 @@ The design document lists the available comparators:
 - `StartsWith`
 - `Predicate`
 
-Each comparator is a callable that returns `True` when a value matches.
-`with_matching_args` expects the same number of comparators as command line
-arguments, while `with_stdin` accepts either an exact string or a predicate for
-more flexible input checks.
+Each comparator is a callable returning `True` on match.
+`with_matching_args` expects one comparator per argv element (excluding the program name),
+and `with_stdin` accepts either an exact string or a predicate `Callable[[str], bool]`
+for flexible input checks.
 
 ## Running tests
 
@@ -165,10 +165,12 @@ the context-manager API:
 
 - `verify_on_exit` (default `True`) automatically calls `verify()` when a replay
   phase ends inside a `with CmdMox()` block. Disable it when you need to manage
-  verification manually.
-- `max_journal_entries` bounds the number of stored invocations. The journal is
-  exposed via `cmd_mox.journal`, a `collections.deque` of `Invocation` objects
-  recorded during replay.
+  verification manually. Verification still runs if the body raises; when both
+  verification and the body fail, the verification error is suppressed so the
+  original exception surfaces.
+- `max_journal_entries` bounds the number of stored invocations (oldest entries
+  are evicted FIFO when the bound is reached). The journal is exposed via
+  `cmd_mox.journal`, a `collections.deque[Invocation]` recorded during replay.
 
 The journal is especially handy when debugging:
 
@@ -179,10 +181,15 @@ cmd_mox.verify()
 assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 ```
 
-When you want to intercept a command without configuring a double—for example
-to ensure it is treated as unexpected—call `cmd_mox.register_command("name")`.
-CmdMox will create the shim so that the command is routed through the IPC server
-even without a stub, mock, or spy.
+When you want to intercept a command without configuring a double—for example to
+ensure it is treated as unexpected—register it explicitly:
+
+```python
+cmd_mox.register_command("name")
+```
+
+CmdMox will create the shim so the command is routed through the IPC server even
+without a stub, mock, or spy.
 
 ## Fluent API reference
 
@@ -191,12 +198,12 @@ few common ones are:
 
 - `with_args(*args)` – require exact arguments.
 - `with_matching_args(*matchers)` – match arguments using comparators.
-- `with_stdin(data_or_matcher)` – expect specific standard input or validate it
-  with a predicate.
+- `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
+  validate it with a predicate `Callable[[str], bool]`.
 - `with_env(mapping)` – set additional environment variables for the invocation
   and apply them when custom handlers run.
 - `returns(stdout="", stderr="", exit_code=0)` – static response using text
-  values; CmdMox operates in text mode, so provide `str` objects here.
+  values; CmdMox operates in text mode—pass `str` (bytes are not supported).
 - `runs(handler)` – call a function to produce dynamic output. The handler
   receives an `Invocation` and should return either a `(stdout, stderr,
   exit_code)` tuple or a `Response` instance.
