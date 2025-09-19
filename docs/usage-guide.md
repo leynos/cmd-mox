@@ -92,8 +92,8 @@ The design document lists the available comparators:
 - `StartsWith`
 - `Predicate`
 
-Each comparator is a callable returning `True` on match.
-`with_matching_args` expects one comparator per argv element (excluding the program name),
+Each comparator is a callable that returns `True` on match.
+`with_matching_args` expects one comparator per argv element (excluding the program name, i.e., `argv[1:]`),
 and `with_stdin` accepts either an exact string or a predicate `Callable[[str], bool]`
 for flexible input checks.
 
@@ -204,6 +204,8 @@ few common ones are:
   and apply them when custom handlers run.
 - `returns(stdout="", stderr="", exit_code=0)` – static response using text
   values; CmdMox operates in text mode—pass `str` (bytes are not supported).
+  Note: For binary payloads, prefer `passthrough()` or encode/decode at the
+  boundary (e.g., base64) so handlers exchange `str`.
 - `runs(handler)` – call a function to produce dynamic output. The handler
   receives an `Invocation` and should return either a `(stdout, stderr,
   exit_code)` tuple or a `Response` instance.
