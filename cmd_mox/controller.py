@@ -455,6 +455,9 @@ class CmdMox:
     def register_command(self, name: str) -> None:
         """Register *name* for shim creation during :meth:`replay`."""
         self._commands.add(name)
+        env = self.environment
+        if self._phase is Phase.REPLAY and env is not None and env.shim_dir is not None:
+            create_shim_symlinks(env.shim_dir, [name])
 
     def _get_double(
         self, command_name: str, kind: CommandDouble.T_Kind
