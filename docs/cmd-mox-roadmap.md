@@ -198,18 +198,72 @@
 
   - [ ] Announce project, collect early user feedback
 
-## **XI. Future/Epic: Windows and Record Mode**
+## **XI. Windows and Record Mode**
 
-- [ ] **Windows Support**
+- [ ] **Cross-Platform IPC Abstraction**
 
-  - [ ] Prototype `.bat`/`.exe` shims, named pipes IPC, Windows PATH handling
+  - [ ] **Research and select a Windows-compatible IPC mechanism.** The current
+        implementation uses Unix domain sockets, which are not available on
+        Windows. The design document suggests **named pipes** as a likely
+        replacement.
 
-- [ ] **Test Generation Utility**
+  - [ ] **Refactor `IPCServer` and `invoke_server`** to use a platform-agnostic
+        interface, with separate implementations for Unix domain sockets and the
+        chosen Windows IPC mechanism. This will likely involve conditional logic
+        based on `os.name`.
 
-  - [ ] Prototype tool for automatic pytest test file generation from
-    passthrough spy recordings
+- [ ] **Windows-Compatible Shim Generation**
 
-  - [ ] Export/serialise real command interactions to reusable mocks
+  - [ ] **Adapt the shim generation engine for Windows.** The current engine
+        creates POSIX-style executable shims and uses symbolic links, which are
+        not directly portable to Windows.
+
+  - [ ] **Implement `.bat` or `.cmd` shim creation.** These batch files will
+        serve as the entry point for mocked commands and will be responsible for
+        invoking the Python interpreter with the `shim.py` script.
+
+  - [ ] **Update `CommandRunner` for Windows.** The logic for finding and
+        executing real commands in passthrough mode will need to account for
+        Windows executable paths and file extensions (e.g., `.exe`, `.bat`,
+        `.cmd`).
+
+- [ ] **Environment and Filesystem Abstractions**
+
+  - [ ] **Verify `EnvironmentManager` behaviour on Windows.** While it already
+        uses `os.pathsep`, thorough testing is needed to ensure that `PATH`
+        manipulation works as expected on Windows.
+
+  - [ ] **Review and adapt filesystem interactions.** Any remaining
+        Unix-specific filesystem operations will need to be made cross-platform,
+        likely by expanding the use of `pathlib`. The existing
+        `_fix_windows_permissions` function in `cmd_mox/environment.py` is a
+        good starting point for this effort.
+
+- [ ] **CI and Testing Infrastructure**
+
+  - [ ] **Add Windows runners to the CI pipeline.** The GitHub Actions workflows
+        will need to be extended to run the test suite on Windows machines to
+        catch platform-specific regressions.
+
+  - [ ] **Develop a comprehensive test suite for Windows.** This should cover
+        all aspects of the library's functionality, from basic stubbing to
+        advanced passthrough spying.
+
+- [ ] **Documentation Updates**
+
+  - [ ] **Update the usage guide and design documents** to reflect the new
+        Windows support, including any platform-specific limitations or
+        configuration requirements.
+
+- [ ] **Record Mode Tooling**
+
+  - [ ] **Prototype a test generation utility.** This tool should transform
+        passthrough spy recordings into pytest test files that can be refined
+        into repeatable mocks.
+
+  - [ ] **Serialise recorded interactions for reuse.** Provide a mechanism to
+        export captured real command interactions and ingest them as reusable
+        mocks in future sessions.
 
 **Legend:**
 
