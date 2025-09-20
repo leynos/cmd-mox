@@ -1011,13 +1011,41 @@ complete toolkit for tackling a wide range of testing scenarios.
 While the design for version 1.0 is comprehensive for Linux, FreeBSD, and
 Darwin environments, several avenues for future expansion exist.
 
-- **Windows Support:** This is the most significant potential extension. It
-  would constitute a major architectural undertaking, as the `PATH`
-  interception mechanism is fundamentally different on Windows. It would
-  require generating `.bat` or `.exe` shims, handling a different `PATH`
-  separator, and likely using a different IPC mechanism (e.g., named pipes)
-  instead of Unix domain sockets. This would be a target for a version 2.0
-  release.
+- **Windows Support:** This is the most significant potential extension and
+  will require a coordinated set of architectural upgrades targeting a major
+  release (e.g., 2.0).
+
+  - **Cross-platform IPC abstraction.** The current IPC plumbing assumes Unix
+    domain sockets. Supporting Windows requires defining a platform-agnostic
+    interface that `IPCServer` and the shim-side `invoke_server` can both call
+    into. During the discovery spike we expect to validate Windows named pipes
+    as the transport and to select the correct backend at runtime via
+    `os.name`.
+
+  - **Windows-focused shim generation.** The shim engine today produces
+    POSIX-style executables and symlinks. Windows support will instead emit
+    `.bat`/`.cmd` launchers that invoke the shared `shim.py`. Both strategies
+    should live side-by-side in the generator, and `CommandRunner` must expand
+    its passthrough search to honour Windows executable extensions such as
+    `.exe`, `.bat`, and `.cmd`.
+
+  - **Environment and filesystem abstractions.** We need to verify the
+    `EnvironmentManager` under Windows to confirm that `PATH` manipulation via
+    `os.pathsep` behaves as intended. Any remaining direct `os.path` usages
+    should migrate to `pathlib` for consistent path handling across drives, and
+    the existing `_fix_windows_permissions` helper in
+    `cmd_mox/environment.py` will anchor permission adjustments for shim
+    directories.
+
+  - **CI and verification.** Once the abstractions are in place we will extend
+    GitHub Actions with Windows runners so the pytest suite exercises the new
+    code paths continuously. The test plan will include Windows-focused cases
+    covering passthrough spies, batch shim invocation, and named-pipe IPC to
+    guard against regressions.
+
+  - **Documentation updates.** The usage guide and this design specification
+    must spell out platform-specific setup, configuration requirements, and any
+    Windows-only limitations so that adopters can configure CmdMox correctly.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.
