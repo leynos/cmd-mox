@@ -16,6 +16,9 @@ PLATFORM_OVERRIDE_ENV: t.Final[str] = "CMD_MOX_PLATFORM_OVERRIDE"
 
 # Map ``sys.platform`` prefixes to user-facing skip reasons. Only Windows is
 # unsupported today, but the structure keeps future additions focused here.
+# Each entry pairs the prefix (as reported by ``sys.platform``) with the
+# human-readable skip reason to surface to pytest users. Prefixes should match
+# the start of ``sys.platform`` (e.g. ``"win"`` for ``"win32"``).
 _UNSUPPORTED_PLATFORMS: t.Final[tuple[tuple[str, str], ...]] = (
     ("win", "cmd-mox does not support Windows"),
 )
@@ -35,8 +38,7 @@ def _current_platform(platform: str | None = None) -> str:
     if platform:
         return _normalise(platform)
 
-    override = os.getenv(PLATFORM_OVERRIDE_ENV)
-    if override:
+    if override := os.getenv(PLATFORM_OVERRIDE_ENV):
         return _normalise(override)
 
     return _normalise(sys.platform)
@@ -45,10 +47,14 @@ def _current_platform(platform: str | None = None) -> str:
 def unsupported_reason(platform: str | None = None) -> str | None:
     """Return the skip reason for *platform*, or ``None`` when supported."""
     platform_name = _current_platform(platform)
-    for prefix, reason in _UNSUPPORTED_PLATFORMS:
-        if platform_name.startswith(prefix):
-            return reason
-    return None
+    return next(
+        (
+            reason
+            for prefix, reason in _UNSUPPORTED_PLATFORMS
+            if platform_name.startswith(prefix)
+        ),
+        None,
+    )
 
 
 def is_supported(platform: str | None = None) -> bool:
@@ -60,9 +66,12 @@ def skip_if_unsupported(
     *, reason: str | None = None, platform: str | None = None
 ) -> None:
     """Skip the current pytest test if cmd-mox is unavailable on *platform*."""
-    skip_reason = reason or unsupported_reason(platform)
+    skip_reason = unsupported_reason(platform)
     if skip_reason is None:
         return
+
+    if reason is not None:
+        skip_reason = reason
 
     try:
         import pytest
