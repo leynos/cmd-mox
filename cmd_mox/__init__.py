@@ -19,10 +19,21 @@ from .errors import (
 )
 from .expectations import Expectation
 from .ipc import Invocation, IPCServer, Response
+from .platform import (
+    PLATFORM_OVERRIDE_ENV,
+    skip_if_unsupported,
+    unsupported_reason,
+)
+from .platform import (
+    is_supported as is_supported_platform,
+)
 from .pytest_plugin import cmd_mox as cmd_mox_fixture
 from .shimgen import SHIM_PATH, create_shim_symlinks
 
+is_supported = is_supported_platform
+
 __all__ = [
+    "PLATFORM_OVERRIDE_ENV",
     "SHIM_PATH",
     "Any",
     "CmdMox",
@@ -47,5 +58,9 @@ __all__ = [
     "VerificationError",
     "cmd_mox_fixture",
     "create_shim_symlinks",
+    "is_supported",
+    "is_supported_platform",
+    "skip_if_unsupported",
     "temporary_env",
+    "unsupported_reason",
 ]
