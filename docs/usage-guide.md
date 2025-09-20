@@ -20,6 +20,28 @@ pytest_plugins = ("cmd_mox.pytest_plugin",)
 Each test receives a `cmd_mox` fixture that provides access to the controller
 object.
 
+## Platform support
+
+CmdMox targets POSIX systems today. Windows remains unsupported, and attempting
+to use the fixture there will now skip the test automatically with a clear
+message. You can therefore declare the plug-in unconditionally in
+`pytest_plugins` without wrapping it in platform checks.
+
+When you need to make an explicit decision in a test module (for instance when
+using the context manager API), import the helper re-exported from the package:
+
+```python
+from cmd_mox import skip_if_unsupported
+
+skip_if_unsupported()
+```
+
+`skip_if_unsupported` defers to `pytest.skip` on unsupported platforms. If you
+only need to gate a code path, `cmd_mox.is_supported_platform()` returns a
+boolean instead. Advanced tests can override the detected platform by setting
+the `CMD_MOX_PLATFORM_OVERRIDE` environment variable, which is primarily useful
+for simulating Windows behaviour inside CI pipelines.
+
 ## Basic workflow
 
 CmdMox follows a strict record → replay → verify lifecycle. First declare
@@ -93,9 +115,9 @@ The design document lists the available comparators:
 - `Predicate`
 
 Each comparator is a callable that returns `True` on match.
-`with_matching_args` expects one comparator per argv element (excluding the program name, i.e., `argv[1:]`),
-and `with_stdin` accepts either an exact string or a predicate `Callable[[str], bool]`
-for flexible input checks.
+`with_matching_args` expects one comparator per argv element (excluding the
+program name, i.e., `argv[1:]`), and `with_stdin` accepts either an exact
+string or a predicate `Callable[[str], bool]` for flexible input checks.
 
 ## Running tests
 
@@ -145,8 +167,7 @@ mox.spy("aws").passthrough()
 This "record mode" is helpful for capturing real interactions and later turning
 them into mocks.
 
-After verification, spies provide assertion helpers inspired by
-`unittest.mock`:
+After verification, spies provide assertion helpers inspired by `unittest.mock`:
 
 ```python
 spy.assert_called()
@@ -181,15 +202,15 @@ cmd_mox.verify()
 assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 ```
 
-When you want to intercept a command without configuring a double—for example to
-ensure it is treated as unexpected—register it explicitly:
+When you want to intercept a command without configuring a double—for example
+to ensure it is treated as unexpected—register it explicitly:
 
 ```python
 cmd_mox.register_command("name")
 ```
 
-CmdMox will create the shim so the command is routed through the IPC server even
-without a stub, mock, or spy.
+CmdMox will create the shim so the command is routed through the IPC server
+even without a stub, mock, or spy.
 
 ## Fluent API reference
 
@@ -207,8 +228,8 @@ few common ones are:
   Note: For binary payloads, prefer `passthrough()` or encode/decode at the
   boundary (e.g., base64) so handlers exchange `str`.
 - `runs(handler)` – call a function to produce dynamic output. The handler
-  receives an `Invocation` and should return either a `(stdout, stderr,
-  exit_code)` tuple or a `Response` instance.
+  receives an `Invocation` and should return either a
+  `(stdout, stderr, exit_code)` tuple or a `Response` instance.
 - `times(count)` – expect the command exactly `count` times.
 - `times_called(count)` – alias for `times` that emphasises spy call counts.
 - `in_order()` – enforce strict ordering with other expectations.

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cmd_mox import shim
+import cmd_mox.shim as shim
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 
 
