@@ -28,26 +28,22 @@ your sanity.
 
 ```python
 # test_my_script.py
-def test_clone_and_fetch(mox):
+def test_clone_and_fetch(cmd_mox):
     # Record phase
-    mox.mock("git") \
+    cmd_mox.mock("git") \
         .with_args("clone", "https://a.b/c.git") \
         .returns(exit_code=0)
 
-    mox.mock("curl") \
+    cmd_mox.mock("curl") \
         .with_args("-s", "https://a.b/c/info.json") \
         .returns(stdout='{"status":"ok"}')
-
-    mox.replay()
 
     # Code under test runs with mocked git and curl
     result = my_tool.clone_and_fetch("https://a.b/c.git")
 
     # Assert your code didn’t mess it up
     assert result.status == "ok"
-
-    # Verify phase: did the commands get called *correctly*?
-    mox.verify()
+    # The pytest fixture verifies expectations automatically during teardown.
 ```
 
 When it passes: your mocks were used exactly as expected.

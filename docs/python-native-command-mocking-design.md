@@ -172,7 +172,9 @@ The recommended and primary method for using `CmdMox` will be through a
 the broader Python testing ecosystem. Users will enable the plugin, and a
 `cmd_mox` fixture will be automatically available to their test functions. This
 fixture provides a fresh, properly configured `cmd_mox.CmdMox` instance for
-each test, with setup and teardown handled automatically.
+each test, with setup and teardown handled automatically. The fixture enters
+replay mode before the test body executes and calls `verify()` during teardown,
+removing the need for explicit lifecycle calls in most test code.
 
 *Example Usage:*
 ```python
@@ -185,15 +187,10 @@ def test_git_clone_functionality(cmd_mox):
     # Record phase:
     cmd_mox.mock('git').with_args('clone', 'https://a.b/c.git').returns(exit_code=0)
 
-    # Replay phase:
-    cmd_mox.replay()
     result = my_cli_tool.clone_repo('https://a.b/c.git')
 
     # Assertions on the code under test:
     assert result is True
-
-    # Verify phase:
-    cmd_mox.verify()
 ```
 
 #### Alternative Interface: Context Manager

@@ -18,7 +18,9 @@ pytest_plugins = ("cmd_mox.pytest_plugin",)
 ```
 
 Each test receives a `cmd_mox` fixture that provides access to the controller
-object.
+object. The plugin enters replay mode before your test body executes and
+performs verification during teardown, so most tests only need to declare
+expectations and exercise the code under test.
 
 ## Platform support
 
@@ -64,9 +66,8 @@ A typical test brings the three phases together:
 ```python
 cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
 
-cmd_mox.replay()
 my_tool.clone_repo("repo")
-cmd_mox.verify()
+# replay begins before the test body and verification runs during teardown
 ```
 
 ## Stubs, mocks and spies
@@ -127,9 +128,8 @@ Typical pytest usage looks like this:
 def test_clone(cmd_mox):
     cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
 
-    cmd_mox.replay()
     my_tool.clone_repo("repo")
-    cmd_mox.verify()
+    # No explicit replay() or verify() calls required.
 ```
 
 The context manager interface is available when pytest fixtures are not in play:
@@ -149,9 +149,7 @@ during and after replay, making it easy to inspect what actually ran:
 ```python
 def test_spy(cmd_mox):
     spy = cmd_mox.spy("curl").returns(stdout="ok")
-    cmd_mox.replay()
     run_download()
-    cmd_mox.verify()
     assert spy.call_count == 1
 ```
 
@@ -196,10 +194,9 @@ the context-manager API:
 The journal is especially handy when debugging:
 
 ```python
-cmd_mox.replay()
 exercise_system()
-cmd_mox.verify()
 assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
+# Verification will run during fixture teardown.
 ```
 
 When you want to intercept a command without configuring a double—for example

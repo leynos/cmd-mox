@@ -24,11 +24,9 @@ def test_fixture_basic(
 ) -> None:
     """Fixture yields a CmdMox instance and cleans up."""
     cmd_mox.stub("hello").returns(stdout="hi")
-    cmd_mox.replay()
     cmd_path = _shim_cmd_path(cmd_mox, "hello")
     result = run([str(cmd_path)])
     assert result.stdout.strip() == "hi"
-    cmd_mox.verify()
 
 
 def test_worker_prefix(
@@ -51,11 +49,9 @@ def test_worker_prefix(
 
         def test_worker(cmd_mox):
             cmd_mox.stub('foo').returns(stdout='bar')
-            cmd_mox.replay()
             res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
             assert res.stdout.strip() == 'bar'
             assert 'gw99' in os.path.basename(cmd_mox.environment.shim_dir)
-            cmd_mox.verify()
         """
     )
     result = pytester.runpytest("-s")
@@ -82,12 +78,28 @@ def test_default_prefix(
 
         def test_default(cmd_mox):
             cmd_mox.stub('foo').returns(stdout='bar')
-            cmd_mox.replay()
             res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
             assert res.stdout.strip() == 'bar'
             assert 'main' in os.path.basename(cmd_mox.environment.shim_dir)
-            cmd_mox.verify()
         """
     )
     result = pytester.runpytest("-s")
     result.assert_outcomes(passed=1)
+
+
+def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> None:
+    """Verification failures should fail the test even without explicit calls."""
+    test_file = pytester.makepyfile(
+        """
+        import pytest
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def test_missing_invocation(cmd_mox):
+            cmd_mox.mock("hello").returns(stdout="hi")
+        """
+    )
+
+    result = pytester.runpytest(str(test_file))
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines(["*Unfulfilled expectation.*"])
