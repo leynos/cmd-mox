@@ -472,13 +472,16 @@ class CmdMox:
         registrations remain idempotent.
         """
         self._commands.add(name)
-        env = self.environment
+
+        # Early return if not in replay phase
         if self._phase is not Phase.REPLAY:
             return
+        env = self.environment
         if env is None or env.shim_dir is None:
             return
         shim_dir = Path(env.shim_dir)
-        if (shim_dir / name).is_symlink():
+        shim_path = shim_dir / name
+        if shim_path.is_symlink():
             return
         create_shim_symlinks(shim_dir, [name])
 

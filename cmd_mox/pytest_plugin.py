@@ -69,69 +69,49 @@ def pytest_runtest_makereport(
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
-    if rep.when != "call":
-        return
-    _verify_during_call(item, rep)
+    if rep.when == "call":
+        _handle_auto_verification(item, rep)
 
 
-def _verify_during_call(item: pytest.Item, rep: pytest.TestReport) -> None:
-    """Run ``verify()`` for ``item`` when the call phase completes."""
+def _handle_auto_verification(item: pytest.Item, rep: pytest.TestReport) -> None:
+    """Handle automatic verification for cmd_mox if enabled."""
     mox: CmdMox | None = getattr(item, "_cmd_mox_instance", None)
-    if mox is None:
+    auto_lifecycle = getattr(item, "_cmd_mox_auto_lifecycle", True)
+
+    if mox is None or not auto_lifecycle or mox.phase is not Phase.REPLAY:
         return
-    if not getattr(item, "_cmd_mox_auto_lifecycle", True):
-        return
-    if mox.phase is not Phase.REPLAY:
-        return
+
     try:
         mox.verify()
     except Exception as err:
         logger.exception("Error during cmd_mox verification")
-        if rep.failed:
-            return
-        _apply_verify_failure(item, rep, err)
+        if not rep.failed:
+            _apply_verify_failure(item, rep, err)
 
 
 def _auto_lifecycle_enabled(request: pytest.FixtureRequest) -> bool:
     """Return whether the fixture should manage replay/verify automatically."""
-    marker_value = _marker_auto_lifecycle(request.node.get_closest_marker("cmd_mox"))
-    if marker_value is not None:
-        return marker_value
+    # Priority order: marker > fixture param > CLI option > INI setting
 
-    param_value = _param_auto_lifecycle(getattr(request, "param", None))
-    if param_value is not None:
-        return param_value
+    marker = request.node.get_closest_marker("cmd_mox")
+    if marker is not None and "auto_lifecycle" in marker.kwargs:
+        return bool(marker.kwargs["auto_lifecycle"])
 
-    cli_value = request.config.getoption("cmd_mox_auto_lifecycle")
+    param = getattr(request, "param", None)
+    if param is not None:
+        if isinstance(param, dict) and "auto_lifecycle" in param:
+            return bool(param["auto_lifecycle"])
+        if isinstance(param, bool):
+            return param
+        msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
+        raise TypeError(msg)
+
+    config = request.config
+    cli_value = config.getoption("cmd_mox_auto_lifecycle")
     if cli_value is not None:
         return bool(cli_value)
 
-    return bool(request.config.getini("cmd_mox_auto_lifecycle"))
-
-
-def _marker_auto_lifecycle(marker: pytest.Mark | None) -> bool | None:
-    """Return the auto-lifecycle override declared via ``@pytest.mark.cmd_mox``."""
-    if marker is None:
-        return None
-    if "auto_lifecycle" in marker.kwargs:
-        return bool(marker.kwargs["auto_lifecycle"])
-    return None
-
-
-def _param_auto_lifecycle(param: object | None) -> bool | None:
-    """Interpret parametrised fixture arguments for ``cmd_mox``."""
-    if param is None:
-        return None
-    if isinstance(param, dict):
-        mapping = t.cast("dict[str, object]", param)
-        if "auto_lifecycle" in mapping:
-            return bool(mapping["auto_lifecycle"])
-        msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
-        raise TypeError(msg)
-    if isinstance(param, bool):
-        return param
-    msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
-    raise TypeError(msg)
+    return bool(config.getini("cmd_mox_auto_lifecycle"))
 
 
 def _apply_verify_failure(
