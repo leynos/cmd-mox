@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import types
 
-from cmd_mox import verifiers as v
+import cmd_mox.verifiers as v
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
 

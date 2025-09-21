@@ -10,6 +10,7 @@ import pytest
 
 from .controller import CmdMox
 from .environment import EnvironmentManager
+from .platform import skip_if_unsupported
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 @pytest.fixture
 def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
     """Provide a :class:`CmdMox` instance with environment active."""
+    skip_if_unsupported()
+
     worker_id = os.getenv("PYTEST_XDIST_WORKER")
     if worker_id is None:
         worker_id = getattr(
