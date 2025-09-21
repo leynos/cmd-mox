@@ -69,52 +69,69 @@ def pytest_runtest_makereport(
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
-    if rep.when == "call":
-        mox: CmdMox | None = getattr(item, "_cmd_mox_instance", None)
-        auto_lifecycle = getattr(item, "_cmd_mox_auto_lifecycle", True)
-        if mox is None:
+    if rep.when != "call":
+        return
+    _verify_during_call(item, rep)
+
+
+def _verify_during_call(item: pytest.Item, rep: pytest.TestReport) -> None:
+    """Run ``verify()`` for ``item`` when the call phase completes."""
+    mox: CmdMox | None = getattr(item, "_cmd_mox_instance", None)
+    if mox is None:
+        return
+    if not getattr(item, "_cmd_mox_auto_lifecycle", True):
+        return
+    if mox.phase is not Phase.REPLAY:
+        return
+    try:
+        mox.verify()
+    except Exception as err:
+        logger.exception("Error during cmd_mox verification")
+        if rep.failed:
             return
-        if auto_lifecycle and mox.phase is Phase.REPLAY:
-            verify_error: Exception | None = None
-            try:
-                mox.verify()
-            except Exception as err:
-                verify_error = err
-                logger.exception("Error during cmd_mox verification")
-            if verify_error is not None and not rep.failed:
-                _apply_verify_failure(item, rep, verify_error)
+        _apply_verify_failure(item, rep, err)
 
 
 def _auto_lifecycle_enabled(request: pytest.FixtureRequest) -> bool:
     """Return whether the fixture should manage replay/verify automatically."""
-    config = request.config
-    auto_lifecycle: bool | None = None
+    marker_value = _marker_auto_lifecycle(request.node.get_closest_marker("cmd_mox"))
+    if marker_value is not None:
+        return marker_value
 
-    marker = request.node.get_closest_marker("cmd_mox")
-    if marker is not None and "auto_lifecycle" in marker.kwargs:
-        auto_lifecycle = bool(marker.kwargs["auto_lifecycle"])
+    param_value = _param_auto_lifecycle(getattr(request, "param", None))
+    if param_value is not None:
+        return param_value
 
-    param = getattr(request, "param", None)
-    if auto_lifecycle is None and param is not None:
-        if isinstance(param, dict) and "auto_lifecycle" in param:
-            auto_lifecycle = bool(param["auto_lifecycle"])
-        elif isinstance(param, bool):
-            auto_lifecycle = param
-        else:  # pragma: no cover - defensive validation
-            msg = (
-                "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
-            )
-            raise TypeError(msg)
+    cli_value = request.config.getoption("cmd_mox_auto_lifecycle")
+    if cli_value is not None:
+        return bool(cli_value)
 
-    if auto_lifecycle is None:
-        cli_value = config.getoption("cmd_mox_auto_lifecycle")
-        if cli_value is not None:
-            auto_lifecycle = bool(cli_value)
+    return bool(request.config.getini("cmd_mox_auto_lifecycle"))
 
-    if auto_lifecycle is None:
-        auto_lifecycle = bool(config.getini("cmd_mox_auto_lifecycle"))
 
-    return auto_lifecycle
+def _marker_auto_lifecycle(marker: pytest.Mark | None) -> bool | None:
+    """Return the auto-lifecycle override declared via ``@pytest.mark.cmd_mox``."""
+    if marker is None:
+        return None
+    if "auto_lifecycle" in marker.kwargs:
+        return bool(marker.kwargs["auto_lifecycle"])
+    return None
+
+
+def _param_auto_lifecycle(param: object | None) -> bool | None:
+    """Interpret parametrised fixture arguments for ``cmd_mox``."""
+    if param is None:
+        return None
+    if isinstance(param, dict):
+        mapping = t.cast("dict[str, object]", param)
+        if "auto_lifecycle" in mapping:
+            return bool(mapping["auto_lifecycle"])
+        msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
+        raise TypeError(msg)
+    if isinstance(param, bool):
+        return param
+    msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
+    raise TypeError(msg)
 
 
 def _apply_verify_failure(
@@ -130,37 +147,58 @@ def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
     """Provide a :class:`CmdMox` instance with environment active."""
     skip_if_unsupported()
 
-    worker_id = os.getenv("PYTEST_XDIST_WORKER")
-    if worker_id is None:
-        worker_id = getattr(
-            getattr(request.config, "workerinput", None), "workerid", "main"
-        )
-    prefix = f"cmdmox-{worker_id}-{os.getpid()}-"
-
     mox = CmdMox(verify_on_exit=False)
-    mox.environment = EnvironmentManager(prefix=prefix)
+    mox.environment = EnvironmentManager(prefix=_worker_prefix(request))
 
     auto_lifecycle = _auto_lifecycle_enabled(request)
     try:
-        mox.__enter__()
-        if auto_lifecycle:
-            mox.replay()
-        request.node._cmd_mox_instance = mox  # type: ignore[attr-defined]
-        request.node._cmd_mox_auto_lifecycle = auto_lifecycle  # type: ignore[attr-defined]
+        _enter_cmd_mox(mox, auto_lifecycle=auto_lifecycle)
+        _attach_node_state(request.node, mox, auto_lifecycle=auto_lifecycle)
         yield mox
     except Exception:
         logger.exception("Error during cmd_mox fixture setup or test execution")
         raise
     finally:
-        exit_needed = mox.phase is not Phase.VERIFY
-        try:
-            if exit_needed:
-                mox.__exit__(None, None, None)
-        except OSError:
-            logger.exception("Error during cmd_mox fixture cleanup")
-            # Re-raise cleanup errors to ensure test failure visibility
-            pytest.fail("cmd_mox fixture cleanup failed")
-        if getattr(request.node, "_cmd_mox_instance", None) is mox:
-            delattr(request.node, "_cmd_mox_instance")
-        if hasattr(request.node, "_cmd_mox_auto_lifecycle"):
-            delattr(request.node, "_cmd_mox_auto_lifecycle")
+        _teardown_cmd_mox(request.node, mox)
+
+
+def _worker_prefix(request: pytest.FixtureRequest) -> str:
+    """Build a stable prefix that keeps shims distinct per worker."""
+    worker_id = os.getenv("PYTEST_XDIST_WORKER")
+    if worker_id is None:
+        worker_input = getattr(request.config, "workerinput", None)
+        worker_id = getattr(worker_input, "workerid", "main")
+    return f"cmdmox-{worker_id}-{os.getpid()}-"
+
+
+def _enter_cmd_mox(mox: CmdMox, *, auto_lifecycle: bool) -> None:
+    """Enter the controller context and optionally replay immediately."""
+    mox.__enter__()
+    if auto_lifecycle:
+        mox.replay()
+
+
+def _attach_node_state(item: pytest.Item, mox: CmdMox, *, auto_lifecycle: bool) -> None:
+    """Expose ``mox`` on the test item for later teardown hooks."""
+    item._cmd_mox_instance = mox  # type: ignore[attr-defined]
+    item._cmd_mox_auto_lifecycle = auto_lifecycle  # type: ignore[attr-defined]
+
+
+def _teardown_cmd_mox(item: pytest.Item, mox: CmdMox) -> None:
+    """Exit the controller context and clear per-item state."""
+    try:
+        if mox.phase is not Phase.VERIFY:
+            mox.__exit__(None, None, None)
+    except OSError:
+        logger.exception("Error during cmd_mox fixture cleanup")
+        pytest.fail("cmd_mox fixture cleanup failed")
+    finally:
+        _detach_node_state(item, mox)
+
+
+def _detach_node_state(item: pytest.Item, mox: CmdMox) -> None:
+    """Remove per-item hooks referencing ``mox``."""
+    if getattr(item, "_cmd_mox_instance", None) is mox:
+        delattr(item, "_cmd_mox_instance")
+    if hasattr(item, "_cmd_mox_auto_lifecycle"):
+        delattr(item, "_cmd_mox_auto_lifecycle")

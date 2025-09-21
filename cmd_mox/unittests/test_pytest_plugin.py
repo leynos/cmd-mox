@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 import typing as t
 
 import pytest
@@ -35,56 +36,54 @@ def test_worker_prefix(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Worker ID is included in the environment prefix."""
-    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw99")
-    pytester.makepyfile(
-        """
-        import os
-        from cmd_mox.unittests.conftest import run_subprocess
-        import pytest
-
-        def _shim_cmd_path(mox, name):
-            sd = mox.environment.shim_dir
-            assert sd is not None
-            return sd / name
-
-        pytest_plugins = ("cmd_mox.pytest_plugin",)
-
-        def test_worker(cmd_mox):
-            cmd_mox.stub('foo').returns(stdout='bar')
-            res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
-            assert res.stdout.strip() == 'bar'
-            assert 'gw99' in os.path.basename(cmd_mox.environment.shim_dir)
-        """
+    _run_prefix_scenario(
+        pytester, monkeypatch, worker_id="gw99", expected_fragment="gw99"
     )
-    result = pytester.runpytest("-s")
-    result.assert_outcomes(passed=1)
 
 
 def test_default_prefix(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fall back to 'main' when no worker ID is present."""
-    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
-    pytester.makepyfile(
-        """
+    _run_prefix_scenario(
+        pytester, monkeypatch, worker_id=None, expected_fragment="main"
+    )
+
+
+def _run_prefix_scenario(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    worker_id: str | None,
+    expected_fragment: str,
+) -> None:
+    """Execute a minimal test module and assert the shim prefix fragment."""
+    if worker_id is None:
+        monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    else:
+        monkeypatch.setenv("PYTEST_XDIST_WORKER", worker_id)
+
+    test_module = textwrap.dedent(
+        f"""
         import os
         from cmd_mox.unittests.conftest import run_subprocess
-        import pytest
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
 
         def _shim_cmd_path(mox, name):
             sd = mox.environment.shim_dir
             assert sd is not None
             return sd / name
 
-        pytest_plugins = ("cmd_mox.pytest_plugin",)
-
-        def test_default(cmd_mox):
+        def test_prefix(cmd_mox):
             cmd_mox.stub('foo').returns(stdout='bar')
             res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
             assert res.stdout.strip() == 'bar'
-            assert 'main' in os.path.basename(cmd_mox.environment.shim_dir)
+            shim_dir = os.path.basename(cmd_mox.environment.shim_dir)
+            assert '{expected_fragment}' in shim_dir
         """
     )
+    pytester.makepyfile(test_module)
     result = pytester.runpytest("-s")
     result.assert_outcomes(passed=1)
 
