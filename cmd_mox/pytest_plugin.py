@@ -58,7 +58,7 @@ def pytest_runtest_call(item: pytest.Item) -> t.Generator[None, None, None]:
         return
 
     verify_error: Exception | None = None
-    should_verify = getattr(mox, "_phase", None) is Phase.REPLAY
+    should_verify = getattr(mox, "phase", None) is Phase.REPLAY
     if should_verify:
         try:
             mox.verify()
@@ -66,4 +66,4 @@ def pytest_runtest_call(item: pytest.Item) -> t.Generator[None, None, None]:
             verify_error = err
             logger.exception("Error during cmd_mox verification")
     if verify_error is not None and outcome.excinfo is None:
-        pytest.fail(str(verify_error))
+        raise verify_error.with_traceback(verify_error.__traceback__)

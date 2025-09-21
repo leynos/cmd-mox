@@ -326,7 +326,9 @@ disable MD013 -->
 ### 2.5 The Lifecycle in Practice: `replay()` and `verify()`
 
 The `CmdMox` controller provides two methods that demarcate the phases of the
-testing lifecycle.
+testing lifecycle. When using the pytest `cmd_mox` fixture, these are called
+for you (replay before the test body executes, verification during teardown) so
+most tests only declare expectations and exercise the system under test.
 
 - `mox.replay()`: This method must be called after all expectations have been
   recorded. It signals the end of the record phase and the beginning of the

@@ -102,4 +102,4 @@ def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> 
 
     result = pytester.runpytest(str(test_file))
     result.assert_outcomes(failed=1)
-    result.stdout.fnmatch_lines(["*Unfulfilled expectation.*"])
+    result.stdout.fnmatch_lines(["*UnfulfilledExpectationError:*"])

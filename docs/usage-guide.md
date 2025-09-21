@@ -20,7 +20,9 @@ pytest_plugins = ("cmd_mox.pytest_plugin",)
 Each test receives a `cmd_mox` fixture that provides access to the controller
 object. The plugin enters replay mode before your test body executes and
 performs verification during teardown, so most tests only need to declare
-expectations and exercise the code under test.
+expectations and exercise the code under test. If both the test body and
+verification fail, the verification error is suppressed so the original test
+failure surfaces.
 
 ## Platform support
 
@@ -67,7 +69,7 @@ A typical test brings the three phases together:
 cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
 
 my_tool.clone_repo("repo")
-# replay begins before the test body and verification runs during teardown
+# Replay begins automatically before the test function executes; verification runs during teardown.
 ```
 
 ## Stubs, mocks and spies
@@ -165,7 +167,8 @@ mox.spy("aws").passthrough()
 This "record mode" is helpful for capturing real interactions and later turning
 them into mocks.
 
-After verification, spies provide assertion helpers inspired by `unittest.mock`:
+Spies provide assertion helpers inspired by `unittest.mock` that you can call
+in the test body or after verification:
 
 ```python
 spy.assert_called()
@@ -200,14 +203,17 @@ assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 ```
 
 When you want to intercept a command without configuring a double—for example
-to ensure it is treated as unexpected—register it explicitly:
+to ensure it is treated as unexpected—register it explicitly. Any invocation of
+a registered command without a matching double will be reported as unexpected
+during verification:
 
 ```python
 cmd_mox.register_command("name")
 ```
 
 CmdMox will create the shim so the command is routed through the IPC server
-even without a stub, mock, or spy.
+even without a stub, mock, or spy. Shims are cleaned up automatically during
+fixture teardown.
 
 ## Fluent API reference
 
@@ -227,6 +233,18 @@ few common ones are:
 - `runs(handler)` – call a function to produce dynamic output. The handler
   receives an `Invocation` and should return either a
   `(stdout, stderr, exit_code)` tuple or a `Response` instance.
+
+  Example:
+
+  ```python
+  def handler(inv: Invocation) -> tuple[str, str, int]:
+      if "--fail" in inv.argv:
+          return ("", "boom", 2)  # non-zero exit
+      return ("ok", "", 0)
+
+  cmd_mox.mock("tool").with_args("run").runs(handler)
+  ```
+
 - `times(count)` – expect the command exactly `count` times.
 - `times_called(count)` – alias for `times` that emphasises spy call counts.
 - `in_order()` – enforce strict ordering with other expectations.

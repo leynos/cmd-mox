@@ -29,7 +29,7 @@ your sanity.
 ```python
 # test_my_script.py
 def test_clone_and_fetch(cmd_mox):
-    # Record phase
+    # Define expectations (fixture auto-enters REPLAY before the test body)
     cmd_mox.mock("git") \
         .with_args("clone", "https://a.b/c.git") \
         .returns(exit_code=0)
@@ -43,7 +43,7 @@ def test_clone_and_fetch(cmd_mox):
 
     # Assert your code didn’t mess it up
     assert result.status == "ok"
-    # The pytest fixture verifies expectations automatically during teardown.
+    # Verification happens automatically during pytest teardown.
 ```
 
 When it passes: your mocks were used exactly as expected.

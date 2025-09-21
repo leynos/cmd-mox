@@ -392,6 +392,14 @@ class CmdMox:
         return {n: d for n, d in self._doubles.items() if d.kind == "spy"}
 
     # ------------------------------------------------------------------
+    # Lifecycle state
+    # ------------------------------------------------------------------
+    @property
+    def phase(self) -> Phase:
+        """Return the current lifecycle phase."""
+        return self._phase
+
+    # ------------------------------------------------------------------
     # Internal helper accessors
     # ------------------------------------------------------------------
     def _registered_commands(self) -> set[str]:
@@ -453,7 +461,15 @@ class CmdMox:
     # Public API
     # ------------------------------------------------------------------
     def register_command(self, name: str) -> None:
-        """Register *name* for shim creation during :meth:`replay`."""
+        """Register *name* and ensure a shim exists during :meth:`replay`.
+
+        The command name is recorded for future replay transitions. When the
+        controller is already in :class:`Phase.REPLAY` and the environment has
+        been entered (``env.shim_dir`` is populated), the shim symlink is
+        created immediately so late-registered doubles work without restarting
+        the IPC server. Subsequent :meth:`_start_ipc_server` calls re-sync every
+        shim, keeping repeated registrations idempotent.
+        """
         self._commands.add(name)
         env = self.environment
         if self._phase is not Phase.REPLAY:
