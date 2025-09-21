@@ -59,6 +59,14 @@ def test_skip_if_unsupported_allows_custom_reason() -> None:
     assert str(excinfo.value) == custom_reason
 
 
+def test_skip_if_unsupported_ignores_reason_on_supported_platform() -> None:
+    """Providing a reason must not skip when the platform is supported."""
+    try:
+        platform.skip_if_unsupported(platform="linux", reason="custom skip")
+    except pytest.skip.Exception as exc:  # pragma: no cover - indicates a bug
+        pytest.fail(f"unexpected skip: {exc}")
+
+
 def test_skip_if_unsupported_noop_on_supported_platform() -> None:
     """On supported platforms the helper should return quietly."""
     platform.skip_if_unsupported(platform="linux")

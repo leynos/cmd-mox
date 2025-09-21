@@ -66,12 +66,14 @@ def skip_if_unsupported(
     *, reason: str | None = None, platform: str | None = None
 ) -> None:
     """Skip the current pytest test if cmd-mox is unavailable on *platform*."""
-    skip_reason = unsupported_reason(platform)
-    if skip_reason is None:
+    platform_reason = unsupported_reason(platform)
+    if platform_reason is None:
         return
 
-    if reason is not None:
-        skip_reason = reason
+    # Custom skip messages should only apply once we've confirmed cmd-mox is
+    # unavailable on the requested platform. Supported systems must never skip
+    # just because a caller provided a message.
+    skip_reason = reason if reason is not None else platform_reason
 
     try:
         import pytest
