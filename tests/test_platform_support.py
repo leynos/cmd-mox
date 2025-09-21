@@ -33,7 +33,7 @@ def test_override_env_forces_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     assert platform.unsupported_reason() == WINDOWS_REASON
 
 
-def test_override_env_reports_supported_platform(
+def test_override_env_forces_supported_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Overrides should allow tests to simulate supported platforms as well."""
@@ -55,6 +55,19 @@ def test_skip_if_unsupported_allows_custom_reason() -> None:
     custom_reason = "custom skip message"
     with pytest.raises(pytest.skip.Exception) as excinfo:
         platform.skip_if_unsupported(platform="win32", reason=custom_reason)
+
+    assert str(excinfo.value) == custom_reason
+
+
+def test_skip_if_unsupported_uses_custom_reason_with_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overrides should not stop callers from surfacing custom skip reasons."""
+    monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, "win32")
+    custom_reason = "custom skip via override"
+
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        platform.skip_if_unsupported(reason=custom_reason)
 
     assert str(excinfo.value) == custom_reason
 
