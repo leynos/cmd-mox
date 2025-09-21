@@ -24,7 +24,9 @@ _UNSUPPORTED_PLATFORMS: t.Final[tuple[tuple[str, str], ...]] = (
 )
 
 _PYTEST_REQUIRED_MESSAGE: t.Final[str] = (
-    "pytest is required to automatically skip unsupported platforms."
+    "pytest is required to automatically skip unsupported platforms. "
+    "Install it with 'pip install pytest' or only call skip_if_unsupported within "
+    "pytest."
 )
 
 
@@ -45,7 +47,20 @@ def _current_platform(platform: str | None = None) -> str:
 
 
 def unsupported_reason(platform: str | None = None) -> str | None:
-    """Return the skip reason for *platform*, or ``None`` when supported."""
+    """Return the skip reason for a platform, or None when supported.
+
+    Parameters
+    ----------
+    platform : str, optional
+        A ``sys.platform``-like string. When ``None``, the current platform is
+        used and ``CMD_MOX_PLATFORM_OVERRIDE`` is honoured.
+
+    Returns
+    -------
+    str or None
+        The user-facing reason if the platform is unsupported; otherwise
+        ``None``.
+    """
     platform_name = _current_platform(platform)
     return next(
         (
@@ -58,14 +73,41 @@ def unsupported_reason(platform: str | None = None) -> str | None:
 
 
 def is_supported(platform: str | None = None) -> bool:
-    """Return ``True`` when *platform* (default: current) supports cmd-mox."""
+    """Return True when the platform supports cmd-mox.
+
+    Parameters
+    ----------
+    platform : str, optional
+        A ``sys.platform``-like string. When ``None``, the current platform is
+        used and ``CMD_MOX_PLATFORM_OVERRIDE`` is honoured.
+
+    Returns
+    -------
+    bool
+        ``True`` if cmd-mox is supported; ``False`` if unsupported.
+    """
     return unsupported_reason(platform) is None
 
 
 def skip_if_unsupported(
     *, reason: str | None = None, platform: str | None = None
 ) -> None:
-    """Skip the current pytest test if cmd-mox is unavailable on *platform*."""
+    """Skip the current pytest test on unsupported platforms.
+
+    Parameters
+    ----------
+    reason : str, optional
+        Custom message to display when skipping. Used only if the platform is
+        unsupported.
+    platform : str, optional
+        A ``sys.platform``-like string to evaluate. When ``None``, the current
+        platform is used and ``CMD_MOX_PLATFORM_OVERRIDE`` is honoured.
+
+    Raises
+    ------
+    RuntimeError
+        If pytest cannot be imported in the current environment.
+    """
     platform_reason = unsupported_reason(platform)
     if platform_reason is None:
         return
@@ -83,9 +125,9 @@ def skip_if_unsupported(
     pytest.skip(skip_reason)
 
 
-__all__ = [
+__all__ = (
     "PLATFORM_OVERRIDE_ENV",
     "is_supported",
     "skip_if_unsupported",
     "unsupported_reason",
-]
+)
