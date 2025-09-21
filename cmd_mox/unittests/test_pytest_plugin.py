@@ -6,6 +6,7 @@ import typing as t
 
 import pytest
 
+from cmd_mox.controller import Phase
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -24,6 +25,7 @@ def test_fixture_basic(
 ) -> None:
     """Fixture yields a CmdMox instance and cleans up."""
     cmd_mox.stub("hello").returns(stdout="hi")
+    assert cmd_mox.phase is Phase.REPLAY
     cmd_path = _shim_cmd_path(cmd_mox, "hello")
     result = run([str(cmd_path)])
     assert result.stdout.strip() == "hi"
@@ -97,6 +99,89 @@ def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> 
 
         def test_missing_invocation(cmd_mox):
             cmd_mox.mock("hello").returns(stdout="hi")
+        """
+    )
+
+    result = pytester.runpytest(str(test_file))
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines(["*UnfulfilledExpectationError:*"])
+
+
+def test_verification_error_suppressed_on_test_failure(
+    pytester: pytest.Pytester,
+) -> None:
+    """Primary test failures should mask verification errors."""
+    test_file = pytester.makepyfile(
+        """
+        import pytest
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def test_failure(cmd_mox):
+            cmd_mox.mock("late").returns(stdout="ok")
+            assert False
+        """
+    )
+
+    result = pytester.runpytest(str(test_file))
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines(["*assert False*"])
+
+
+def test_disable_auto_lifecycle_via_ini(pytester: pytest.Pytester) -> None:
+    """Global configuration can disable automatic replay/verify."""
+    pytester.makeini(
+        """
+        [pytest]
+        cmd_mox_auto_lifecycle = false
+        """
+    )
+
+    test_file = pytester.makepyfile(
+        """
+        import pytest
+        from cmd_mox.controller import Phase
+        from cmd_mox.unittests.conftest import run_subprocess
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def _shim_cmd_path(mox, name):
+            sd = mox.environment.shim_dir
+            assert sd is not None
+            return sd / name
+
+        def test_manual(cmd_mox):
+            assert cmd_mox.phase is Phase.RECORD
+            cmd_mox.stub("tool").returns(stdout="ok")
+            cmd_mox.replay()
+            res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+            assert res.stdout.strip() == "ok"
+            cmd_mox.verify()
+        """
+    )
+
+    result = pytester.runpytest(str(test_file))
+    result.assert_outcomes(passed=1)
+
+
+def test_marker_overrides_ini(pytester: pytest.Pytester) -> None:
+    """Per-test markers override the ini-driven lifecycle setting."""
+    pytester.makeini(
+        """
+        [pytest]
+        cmd_mox_auto_lifecycle = false
+        """
+    )
+
+    test_file = pytester.makepyfile(
+        """
+        import pytest
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        @pytest.mark.cmd_mox(auto_lifecycle=True)
+        def test_marker(cmd_mox):
+            cmd_mox.mock("never-called").returns(stdout="nope")
         """
     )
 

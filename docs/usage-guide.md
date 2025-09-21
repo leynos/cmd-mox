@@ -18,11 +18,15 @@ pytest_plugins = ("cmd_mox.pytest_plugin",)
 ```
 
 Each test receives a `cmd_mox` fixture that provides access to the controller
-object. The plugin enters replay mode before your test body executes and
+object. The plugin enters replay mode before the test body executes and
 performs verification during teardown, so most tests only need to declare
 expectations and exercise the code under test. If both the test body and
 verification fail, the verification error is suppressed so the original test
-failure surfaces.
+failure surfaces. Automatic replay/verify can be disabled globally via the
+``cmd_mox_auto_lifecycle`` pytest.ini option or per test with
+``@pytest.mark.cmd_mox(auto_lifecycle=False)``. Command-line flags
+``--cmd-mox-auto-lifecycle`` and ``--no-cmd-mox-auto-lifecycle`` override both
+settings for a single pytest run.
 
 ## Platform support
 
@@ -246,7 +250,7 @@ few common ones are:
   ```
 
 - `times(count)` – expect the command exactly `count` times.
-- `times_called(count)` – alias for `times` that emphasises spy call counts.
+- `times_called(count)` – alias for `times` that emphasizes spy call counts.
 - `in_order()` – enforce strict ordering with other expectations.
 - `any_order()` – allow the expectation to be satisfied in any position.
 - `passthrough()` – for spies, run the real command while recording it.

@@ -7,7 +7,7 @@ import enum
 import types  # noqa: TC003
 import typing as t
 from collections import deque
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 
 from typing_extensions import Self
 
@@ -467,8 +467,9 @@ class CmdMox:
         controller is already in :class:`Phase.REPLAY` and the environment has
         been entered (``env.shim_dir`` is populated), the shim symlink is
         created immediately so late-registered doubles work without restarting
-        the IPC server. Subsequent :meth:`_start_ipc_server` calls re-sync every
-        shim, keeping repeated registrations idempotent.
+        the IPC server. Existing symlinks are left untouched, and subsequent
+        :meth:`_start_ipc_server` calls re-sync every shim so repeated
+        registrations remain idempotent.
         """
         self._commands.add(name)
         env = self.environment
@@ -476,7 +477,10 @@ class CmdMox:
             return
         if env is None or env.shim_dir is None:
             return
-        create_shim_symlinks(env.shim_dir, [name])
+        shim_dir = Path(env.shim_dir)
+        if (shim_dir / name).is_symlink():
+            return
+        create_shim_symlinks(shim_dir, [name])
 
     def _get_double(
         self, command_name: str, kind: CommandDouble.T_Kind

@@ -174,7 +174,12 @@ the broader Python testing ecosystem. Users will enable the plugin, and a
 fixture provides a fresh, properly configured `cmd_mox.CmdMox` instance for
 each test, with setup and teardown handled automatically. The fixture enters
 replay mode before the test body executes and calls `verify()` during teardown,
-removing the need for explicit lifecycle calls in most test code.
+removing the need for explicit lifecycle calls in most test code. Teams can opt
+out globally with the ``cmd_mox_auto_lifecycle`` pytest.ini flag, override the
+setting for a single run via ``--cmd-mox-auto-lifecycle`` or
+``--no-cmd-mox-auto-lifecycle``, and apply per-test overrides with
+``@pytest.mark.cmd_mox(auto_lifecycle=False)`` when manual lifecycle control is
+required.
 
 *Example Usage:*
 ```python
