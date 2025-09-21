@@ -1012,22 +1012,27 @@ While the design for version 1.0 is comprehensive for Linux, FreeBSD, and
 Darwin environments, several avenues for future expansion exist.
 
 - **Windows Support:** This is the most significant potential extension and
-  will require a coordinated set of architectural upgrades targeting a major
-  release (e.g., 2.0).
+  will require coordinated upgrades targeting a major release (e.g., 2.0).
+  Features may ship earlier behind a `CMDMOX_WINDOWS_EXPERIMENTAL=1` flag.
 
   - **Cross-platform IPC abstraction.** The current IPC plumbing assumes Unix
     domain sockets. Supporting Windows requires defining a platform-agnostic
     interface that `IPCServer` and the shim-side `invoke_server` can both call
-    into. During the discovery spike we expect to validate Windows named pipes
-    as the transport and to select the correct backend at runtime via
-    `os.name`.
+    into. Windows 10 build 17134 (version 1803) and later, paired with CPython
+    3.9+, expose `AF_UNIX`, but the port omits ancillary-data/`SCM_RIGHTS`
+    semantics—so we must avoid file-descriptor passing. When capability checks
+    (`hasattr(socket, 'AF_UNIX')` plus a bind probe) fail or fd-passing is
+    required, fall back to Windows Named Pipes (`\\.\\pipe\\cmdmox-<id>`)
+    with per-test unique pipe names for isolation. Document the minimum
+    Windows/Python versions and runtime fallback behaviour so adopters
+    understand the selection flow.
 
   - **Windows-focused shim generation.** The shim engine today produces
-    POSIX-style executables and symlinks. Windows support will instead emit
-    `.bat`/`.cmd` launchers that invoke the shared `shim.py`. Both strategies
-    should live side-by-side in the generator, and `CommandRunner` must expand
-    its passthrough search to honour Windows executable extensions such as
-    `.exe`, `.bat`, and `.cmd`.
+    POSIX-style executables and symlinks. Windows support will emit `.cmd`
+    launchers (CRLF) that chain to the shared `shim.py`, carefully quoting and
+    escaping arguments that contain spaces or carets. Batch shims must respect
+    `PATHEXT` resolution rules, while `CommandRunner` honours `.EXE`, `.BAT`,
+    `.CMD` precedence and prefers absolute paths when provided.
 
   - **Environment and filesystem abstractions.** We need to verify the
     `EnvironmentManager` under Windows to confirm that `PATH` manipulation via
@@ -1035,17 +1040,20 @@ Darwin environments, several avenues for future expansion exist.
     should migrate to `pathlib` for consistent path handling across drives, and
     the existing `_fix_windows_permissions` helper in
     `cmd_mox/environment.py` will anchor permission adjustments for shim
-    directories.
+    directories. Also account for `MAX_PATH` constraints (prefer temp-based
+    directories or long-path enablement) and avoid symlink requirements by
+    leaning on wrappers when elevated privileges are unavailable.
 
-  - **CI and verification.** Once the abstractions are in place we will extend
-    GitHub Actions with Windows runners so the pytest suite exercises the new
-    code paths continuously. The test plan will include Windows-focused cases
-    covering passthrough spies, batch shim invocation, and named-pipe IPC to
-    guard against regressions.
+  - **CI and verification.** Add a `windows-latest` job in GitHub Actions to
+    exercise named-pipe IPC, batch shim invocation, passthrough spies, and
+    environment restoration. Publish IPC/server logs as artefacts on failure to
+    streamline debugging.
 
   - **Documentation updates.** The usage guide and this design specification
     must spell out platform-specific setup, configuration requirements, and any
     Windows-only limitations so that adopters can configure CmdMox correctly.
+    Cross-link to the roadmap epic “Future/Epic XI. Windows Platform Support &
+    Record Mode”.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.

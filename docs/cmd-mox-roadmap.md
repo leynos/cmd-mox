@@ -203,12 +203,18 @@
 - [ ] **Windows Platform Enablement**
 
   - [ ] Establish cross-platform IPC and shim abstractions that include Windows
-        implementations.
+        implementations (acceptance: end-to-end pytest suite passes on
+        `windows-latest` GH runner with IPC + shims enabled).
 
   - [ ] Validate environment management and filesystem helpers on Windows,
-        addressing portability gaps discovered during testing.
+        addressing portability gaps discovered during testing (cover:
+        `PATHEXT` lookup semantics, CRLF line endings for batch shims, argument
+        quoting/escaping rules with spaces and carets, max path handling,
+        case-insensitive filesystem behaviour).
 
-  - [ ] Extend CI and automated testing to exercise core workflows on Windows.
+  - [ ] Extend CI and automated testing to exercise core workflows on Windows
+        (`windows-latest` matrix job; minimal smoke: create shims, run mocked
+        command, run passthrough spy; artefacts include IPC logs for debugging).
 
 - [ ] **Record Mode Evolution**
 
