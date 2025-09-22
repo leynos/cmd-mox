@@ -78,7 +78,13 @@ def _handle_auto_verification(item: pytest.Item, rep: pytest.TestReport) -> None
     mox: CmdMox | None = getattr(item, "_cmd_mox_instance", None)
     auto_lifecycle = getattr(item, "_cmd_mox_auto_lifecycle", True)
 
-    if mox is None or not auto_lifecycle or mox.phase is not Phase.REPLAY:
+    if mox is None:
+        return
+
+    if not auto_lifecycle:
+        return
+
+    if mox.phase is not Phase.REPLAY:
         return
 
     try:
@@ -93,18 +99,13 @@ def _auto_lifecycle_enabled(request: pytest.FixtureRequest) -> bool:
     """Return whether the fixture should manage replay/verify automatically."""
     # Priority order: marker > fixture param > CLI option > INI setting
 
-    marker = request.node.get_closest_marker("cmd_mox")
-    if marker is not None and "auto_lifecycle" in marker.kwargs:
-        return bool(marker.kwargs["auto_lifecycle"])
+    marker_value = _get_marker_auto_lifecycle(request)
+    if marker_value is not None:
+        return marker_value
 
-    param = getattr(request, "param", None)
-    if param is not None:
-        if isinstance(param, dict) and "auto_lifecycle" in param:
-            return bool(param["auto_lifecycle"])
-        if isinstance(param, bool):
-            return param
-        msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
-        raise TypeError(msg)
+    param_value = _get_param_auto_lifecycle(request)
+    if param_value is not None:
+        return param_value
 
     config = request.config
     cli_value = config.getoption("cmd_mox_auto_lifecycle")
@@ -112,6 +113,30 @@ def _auto_lifecycle_enabled(request: pytest.FixtureRequest) -> bool:
         return bool(cli_value)
 
     return bool(config.getini("cmd_mox_auto_lifecycle"))
+
+
+def _get_marker_auto_lifecycle(request: pytest.FixtureRequest) -> bool | None:
+    """Return marker override for auto lifecycle if present."""
+    marker = request.node.get_closest_marker("cmd_mox")
+    if marker is None or "auto_lifecycle" not in marker.kwargs:
+        return None
+    return bool(marker.kwargs["auto_lifecycle"])
+
+
+def _get_param_auto_lifecycle(request: pytest.FixtureRequest) -> bool | None:
+    """Return fixture parameter override for auto lifecycle if present."""
+    param = getattr(request, "param", None)
+    if param is None:
+        return None
+    if isinstance(param, dict):
+        if "auto_lifecycle" in param:
+            return bool(param["auto_lifecycle"])
+        msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
+        raise TypeError(msg)
+    if isinstance(param, bool):
+        return param
+    msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
+    raise TypeError(msg)
 
 
 def _apply_verify_failure(
