@@ -142,7 +142,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
             result = handler(invocation)
             if isinstance(result, Response):
                 return result
-            stdout, stderr, exit_code = t.cast("tuple[str, str, int]", result)
+            stdout, stderr, exit_code = result
             return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
         self.handler = _wrap
