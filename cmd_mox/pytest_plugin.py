@@ -199,8 +199,7 @@ def _attach_node_state(item: pytest.Item, mox: CmdMox, *, auto_lifecycle: bool) 
 def _teardown_cmd_mox(item: pytest.Item, mox: CmdMox) -> None:
     """Exit the controller context and clear per-item state."""
     try:
-        if mox.phase is not Phase.VERIFY:
-            mox.__exit__(None, None, None)
+        mox.__exit__(None, None, None)
     except OSError:
         logger.exception("Error during cmd_mox fixture cleanup")
         pytest.fail("cmd_mox fixture cleanup failed")
