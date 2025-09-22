@@ -172,7 +172,14 @@ def _worker_prefix(request: pytest.FixtureRequest) -> str:
     worker_id = os.getenv("PYTEST_XDIST_WORKER")
     if worker_id is None:
         worker_input = getattr(request.config, "workerinput", None)
-        worker_id = getattr(worker_input, "workerid", "main")
+        if isinstance(worker_input, dict):
+            mapping_worker_id = worker_input.get("workerid")
+            worker_id = "main" if mapping_worker_id is None else str(mapping_worker_id)
+        else:
+            attribute_worker_id = getattr(worker_input, "workerid", None)
+            worker_id = (
+                "main" if attribute_worker_id is None else str(attribute_worker_id)
+            )
     return f"cmdmox-{worker_id}-{os.getpid()}-"
 
 
