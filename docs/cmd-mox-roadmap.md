@@ -198,18 +198,31 @@
 
   - [ ] Announce project, collect early user feedback
 
-## **XI. Future/Epic: Windows and Record Mode**
+## **Future/Epic XI. Windows Platform Support & Record Mode**
 
-- [ ] **Windows Support**
+- [ ] **Windows Platform Enablement**
 
-  - [ ] Prototype `.bat`/`.exe` shims, named pipes IPC, Windows PATH handling
+  - [ ] Establish cross-platform IPC and shim abstractions that include Windows
+        implementations (acceptance: end-to-end pytest suite passes on
+        `windows-latest` GH runner with IPC + shims enabled).
 
-- [ ] **Test Generation Utility**
+  - [ ] Validate environment management and filesystem helpers on Windows,
+        addressing portability gaps discovered during testing (cover:
+        `PATHEXT` lookup semantics, CRLF line endings for batch shims, argument
+        quoting/escaping rules with spaces and carets, max path handling,
+        case-insensitive filesystem behaviour).
 
-  - [ ] Prototype tool for automatic pytest test file generation from
-    passthrough spy recordings
+  - [ ] Extend CI and automated testing to exercise core workflows on Windows
+        (`windows-latest` matrix job; minimal smoke: create shims, run mocked
+        command, run passthrough spy; artefacts include IPC logs for debugging).
 
-  - [ ] Export/serialise real command interactions to reusable mocks
+- [ ] **Record Mode Evolution**
+
+  - [ ] Provide tooling that turns passthrough recordings into reusable
+        fixtures or tests.
+
+  - [ ] Support persisting recorded interactions for later reuse within
+        CmdMox sessions.
 
 **Legend:**
 
