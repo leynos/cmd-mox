@@ -60,11 +60,22 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
+class _CmdMoxItem(t.Protocol):
+    """pytest item carrying cmd_mox lifecycle metadata."""
+
+    _cmd_mox_instance: CmdMox | None
+    _cmd_mox_auto_lifecycle: bool
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[t.Any]
 ) -> t.Generator[None, None, None]:
-    """Attach the call/report objects to each collected test item."""
+    """Attach the call/report objects to each collected test item.
+
+    This enables later hooks to inspect outcomes and trigger cmd_mox
+    verification based on the test's success or failure.
+    """
     del call
     outcome = yield
     rep = outcome.get_result()
@@ -131,11 +142,18 @@ def _get_param_auto_lifecycle(request: pytest.FixtureRequest) -> bool | None:
     if isinstance(param, dict):
         if "auto_lifecycle" in param:
             return bool(param["auto_lifecycle"])
-        msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
+        keys = list(param.keys())
+        msg = (
+            "cmd_mox fixture param dict must contain 'auto_lifecycle' key, "
+            f"got keys: {keys}"
+        )
         raise TypeError(msg)
     if isinstance(param, bool):
         return param
-    msg = "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key"
+    msg = (
+        "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key, "
+        f"got {type(param).__name__}"
+    )
     raise TypeError(msg)
 
 
@@ -192,8 +210,9 @@ def _enter_cmd_mox(mox: CmdMox, *, auto_lifecycle: bool) -> None:
 
 def _attach_node_state(item: pytest.Item, mox: CmdMox, *, auto_lifecycle: bool) -> None:
     """Expose ``mox`` on the test item for later teardown hooks."""
-    item._cmd_mox_instance = mox  # type: ignore[attr-defined]
-    item._cmd_mox_auto_lifecycle = auto_lifecycle  # type: ignore[attr-defined]
+    typed_item = t.cast("_CmdMoxItem", item)
+    typed_item._cmd_mox_instance = mox
+    typed_item._cmd_mox_auto_lifecycle = auto_lifecycle
 
 
 def _teardown_cmd_mox(item: pytest.Item, mox: CmdMox) -> None:
@@ -209,7 +228,8 @@ def _teardown_cmd_mox(item: pytest.Item, mox: CmdMox) -> None:
 
 def _detach_node_state(item: pytest.Item, mox: CmdMox) -> None:
     """Remove per-item hooks referencing ``mox``."""
-    if getattr(item, "_cmd_mox_instance", None) is mox:
-        delattr(item, "_cmd_mox_instance")
-    if hasattr(item, "_cmd_mox_auto_lifecycle"):
-        delattr(item, "_cmd_mox_auto_lifecycle")
+    typed_item = t.cast("_CmdMoxItem", item)
+    if getattr(typed_item, "_cmd_mox_instance", None) is mox:
+        delattr(typed_item, "_cmd_mox_instance")
+    if hasattr(typed_item, "_cmd_mox_auto_lifecycle"):
+        delattr(typed_item, "_cmd_mox_auto_lifecycle")

@@ -485,8 +485,10 @@ class CmdMox:
         registrations remain idempotent.
         """
         self._commands.add(name)
+        self._ensure_shim_during_replay(name)
 
-        # Early return if not in replay phase
+    def _ensure_shim_during_replay(self, name: str) -> None:
+        """Create a shim symlink when replay is active and shims are writable."""
         if self._phase is not Phase.REPLAY:
             return
         env = self.environment
