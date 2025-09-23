@@ -11,6 +11,8 @@ import pytest
 from cmd_mox.controller import Phase
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
+PhaseLiteral = t.Literal["RECORD", "REPLAY", "auto_fail"]
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 
@@ -25,7 +27,7 @@ class AutoLifecycleTestCase:
     ini_setting: str | None
     cli_args: tuple[str, ...]
     test_decorator: str
-    expected_phase: t.Literal["RECORD", "REPLAY", "auto_fail"]
+    expected_phase: PhaseLiteral
     should_fail: bool
 
 
@@ -81,7 +83,7 @@ def _run_prefix_scenario(
 
     test_module = textwrap.dedent(
         f"""
-        import os
+        from pathlib import Path
         from cmd_mox.unittests.conftest import run_subprocess
 
         pytest_plugins = ("cmd_mox.pytest_plugin",)
@@ -89,14 +91,14 @@ def _run_prefix_scenario(
         def _shim_cmd_path(mox, name):
             sd = mox.environment.shim_dir
             assert sd is not None
-            return sd / name
+            return Path(sd) / name
 
         def test_prefix(cmd_mox):
             cmd_mox.stub('foo').returns(stdout='bar')
             res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
             assert res.stdout.strip() == 'bar'
-            shim_dir = os.path.basename(cmd_mox.environment.shim_dir)
-            assert '{expected_fragment}' in shim_dir
+            shim_base = Path(cmd_mox.environment.shim_dir).name
+            assert '{expected_fragment}' in shim_base
         """
     )
     pytester.makepyfile(test_module)
@@ -118,7 +120,8 @@ def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> 
     )
 
     result = pytester.runpytest(str(test_file))
-    result.assert_outcomes(passed=1, errors=1)
+    outcomes = result.parseoutcomes()
+    assert outcomes.get("errors") == 1
     result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
 
 
@@ -165,7 +168,8 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
     )
 
     result = pytester.runpytest(str(test_file))
-    result.assert_outcomes(passed=1, errors=1)
+    outcomes = result.parseoutcomes()
+    assert outcomes.get("errors") == 1
     result.stdout.fnmatch_lines(["*cmd_mox fixture cleanup failed*"])
 
 
@@ -289,14 +293,18 @@ def test_auto_lifecycle_configuration(
     result = pytester.runpytest(*test_case.cli_args, str(test_file), **run_kwargs)
 
     if test_case.should_fail:
-        result.assert_outcomes(passed=1, errors=1)
+        outcomes = result.parseoutcomes()
+        assert outcomes.get("errors") == 1
         result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
     else:
         result.assert_outcomes(passed=1)
 
 
 def _generate_lifecycle_test_module(
-    decorator: str, expected_phase: str, *, should_fail: bool
+    decorator: str,
+    expected_phase: PhaseLiteral,
+    *,
+    should_fail: bool,
 ) -> str:
     """Return a self-contained test module for lifecycle precedence cases."""
     lines = []
@@ -307,7 +315,7 @@ def _generate_lifecycle_test_module(
     return textwrap.dedent("\n".join(lines))
 
 
-def _build_module_imports(expected_phase: str) -> list[str]:
+def _build_module_imports(expected_phase: PhaseLiteral) -> list[str]:
     """Return the import statements required for the generated module."""
     lines = ["import pytest", "from cmd_mox.controller import Phase"]
     if expected_phase != "auto_fail":
@@ -315,7 +323,7 @@ def _build_module_imports(expected_phase: str) -> list[str]:
     return lines
 
 
-def _build_module_setup(expected_phase: str) -> list[str]:
+def _build_module_setup(expected_phase: PhaseLiteral) -> list[str]:
     """Return module-level setup such as plugin registration and helpers."""
     lines = ["", 'pytest_plugins = ("cmd_mox.pytest_plugin",)', ""]
     if expected_phase != "auto_fail":
@@ -340,7 +348,11 @@ def _build_decorator_section(decorator: str) -> list[str]:
     return lines
 
 
-def _build_test_function(expected_phase: str, *, should_fail: bool) -> list[str]:
+def _build_test_function(
+    expected_phase: PhaseLiteral,
+    *,
+    should_fail: bool,
+) -> list[str]:
     """Construct the test function definition and body for the scenario."""
     lines = ["def test_case(cmd_mox):"]
     match expected_phase:
@@ -440,48 +452,49 @@ def test_build_decorator_section_empty_is_noop() -> None:
     assert _build_decorator_section("") == []
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        (
-            "RECORD",
-            False,
-            [
-                "def test_case(cmd_mox):",
-                "    assert cmd_mox.phase is Phase.RECORD",
-                '    cmd_mox.stub("tool").returns(stdout="ok")',
-                "    cmd_mox.replay()",
-                '    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])',
-                '    assert res.stdout.strip() == "ok"',
-                "    cmd_mox.verify()",
-                "",
-            ],
-        ),
-        (
-            "REPLAY",
-            False,
-            [
-                "def test_case(cmd_mox):",
-                "    assert cmd_mox.phase is Phase.REPLAY",
-                '    cmd_mox.stub("tool").returns(stdout="ok")',
-                '    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])',
-                '    assert res.stdout.strip() == "ok"',
-                "",
-            ],
-        ),
-        (
-            "auto_fail",
-            True,
-            [
-                "def test_case(cmd_mox):",
-                "    assert cmd_mox.phase is Phase.REPLAY",
-                '    cmd_mox.mock("never-called").returns(stdout="nope")',
-                "",
-            ],
-        ),
-    ],
-)
-def test_build_test_function(case: tuple[str, bool, list[str]]) -> None:
+CaseType = tuple[PhaseLiteral, bool, list[str]]
+_BUILD_TEST_CASES: list[CaseType] = [
+    (
+        "RECORD",
+        False,
+        [
+            "def test_case(cmd_mox):",
+            "    assert cmd_mox.phase is Phase.RECORD",
+            '    cmd_mox.stub("tool").returns(stdout="ok")',
+            "    cmd_mox.replay()",
+            '    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])',
+            '    assert res.stdout.strip() == "ok"',
+            "    cmd_mox.verify()",
+            "",
+        ],
+    ),
+    (
+        "REPLAY",
+        False,
+        [
+            "def test_case(cmd_mox):",
+            "    assert cmd_mox.phase is Phase.REPLAY",
+            '    cmd_mox.stub("tool").returns(stdout="ok")',
+            '    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])',
+            '    assert res.stdout.strip() == "ok"',
+            "",
+        ],
+    ),
+    (
+        "auto_fail",
+        True,
+        [
+            "def test_case(cmd_mox):",
+            "    assert cmd_mox.phase is Phase.REPLAY",
+            '    cmd_mox.mock("never-called").returns(stdout="nope")',
+            "",
+        ],
+    ),
+]
+
+
+@pytest.mark.parametrize("case", _BUILD_TEST_CASES)
+def test_build_test_function(case: CaseType) -> None:
     """The test function builder should mirror the legacy code paths."""
     expected_phase, should_fail, expected_lines = case
     assert (
@@ -491,5 +504,6 @@ def test_build_test_function(case: tuple[str, bool, list[str]]) -> None:
 
 def test_build_test_function_raises_for_invalid_phase() -> None:
     """Unexpected lifecycle values should raise the defensive error."""
+    unexpected_phase = t.cast("PhaseLiteral", "UNKNOWN")
     with pytest.raises(ValueError, match="Unsupported expected_phase: UNKNOWN"):
-        _build_test_function("UNKNOWN", should_fail=False)
+        _build_test_function(unexpected_phase, should_fail=False)
