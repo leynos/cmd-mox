@@ -11,7 +11,7 @@ import pytest
 from cmd_mox.controller import Phase
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
-PhaseLiteral = t.Literal["RECORD", "REPLAY", "auto_fail"]
+PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "auto_fail"]
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
@@ -48,10 +48,8 @@ def test_fixture_basic(
 
 @pytest.mark.parametrize(
     ("worker_id", "expected_fragment"),
-    [
-        ("gw99", "gw99"),
-        (None, "main"),
-    ],
+    [("gw99", "gw99"), (None, "main")],
+    ids=["xdist-worker", "main-process"],
 )
 def test_worker_prefixes(
     pytester: pytest.Pytester,
@@ -120,8 +118,7 @@ def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> 
     )
 
     result = pytester.runpytest(str(test_file))
-    outcomes = result.parseoutcomes()
-    assert outcomes.get("errors") == 1
+    result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
 
 
@@ -168,8 +165,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
     )
 
     result = pytester.runpytest(str(test_file))
-    outcomes = result.parseoutcomes()
-    assert outcomes.get("errors") == 1
+    result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*cmd_mox fixture cleanup failed*"])
 
 
@@ -286,15 +282,11 @@ def test_auto_lifecycle_configuration(
     module = f"# scenario: {test_case.config_method}\n" + module
     test_file = pytester.makepyfile(**{f"test_{test_case.config_method}.py": module})
 
-    run_kwargs: dict[str, t.Any] = {}
-    if test_case.cli_args:
-        run_kwargs["plugins"] = ("cmd_mox.pytest_plugin",)
-
-    result = pytester.runpytest(*test_case.cli_args, str(test_file), **run_kwargs)
+    plugins: tuple[str, ...] = ("cmd_mox.pytest_plugin",) if test_case.cli_args else ()
+    result = pytester.runpytest(*test_case.cli_args, str(test_file), plugins=plugins)
 
     if test_case.should_fail:
-        outcomes = result.parseoutcomes()
-        assert outcomes.get("errors") == 1
+        result.assert_outcomes(passed=1, errors=1)
         result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
     else:
         result.assert_outcomes(passed=1)
@@ -452,7 +444,7 @@ def test_build_decorator_section_empty_is_noop() -> None:
     assert _build_decorator_section("") == []
 
 
-CaseType = tuple[PhaseLiteral, bool, list[str]]
+CaseType: t.TypeAlias = tuple[PhaseLiteral, bool, list[str]]
 _BUILD_TEST_CASES: list[CaseType] = [
     (
         "RECORD",
