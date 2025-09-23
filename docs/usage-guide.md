@@ -18,7 +18,15 @@ pytest_plugins = ("cmd_mox.pytest_plugin",)
 ```
 
 Each test receives a `cmd_mox` fixture that provides access to the controller
-object.
+object. The plugin enters replay mode before the test body executes and
+performs verification during teardown, so most tests only need to declare
+expectations and exercise the code under test. If both the test body and
+verification fail, the verification error is suppressed so the original test
+failure surfaces. Automatic replay/verify can be disabled globally via the
+``cmd_mox_auto_lifecycle`` pytest.ini option or per test with
+``@pytest.mark.cmd_mox(auto_lifecycle=False)``. Command-line flags
+``--cmd-mox-auto-lifecycle`` and ``--no-cmd-mox-auto-lifecycle`` override both
+settings for a single pytest run.
 
 ## Platform support
 
@@ -64,9 +72,8 @@ A typical test brings the three phases together:
 ```python
 cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
 
-cmd_mox.replay()
 my_tool.clone_repo("repo")
-cmd_mox.verify()
+# Replay begins automatically before the test function executes; verification runs during teardown.
 ```
 
 ## Stubs, mocks and spies
@@ -127,9 +134,8 @@ Typical pytest usage looks like this:
 def test_clone(cmd_mox):
     cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
 
-    cmd_mox.replay()
     my_tool.clone_repo("repo")
-    cmd_mox.verify()
+    # No explicit replay() or verify() calls required.
 ```
 
 The context manager interface is available when pytest fixtures are not in play:
@@ -149,9 +155,7 @@ during and after replay, making it easy to inspect what actually ran:
 ```python
 def test_spy(cmd_mox):
     spy = cmd_mox.spy("curl").returns(stdout="ok")
-    cmd_mox.replay()
     run_download()
-    cmd_mox.verify()
     assert spy.call_count == 1
 ```
 
@@ -167,8 +171,7 @@ mox.spy("aws").passthrough()
 This "record mode" is helpful for capturing real interactions and later turning
 them into mocks.
 
-After verification, spies provide assertion helpers inspired by `unittest.mock`:
-
+Spies provide assertion helpers inspired by `unittest.mock` that can be called in the test body or after verification:
 ```python
 spy.assert_called()
 spy.assert_called_with("--silent", stdin="payload")
@@ -196,22 +199,17 @@ the context-manager API:
 The journal is especially handy when debugging:
 
 ```python
-cmd_mox.replay()
 exercise_system()
-cmd_mox.verify()
 assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
+# Verification will run during fixture teardown.
 ```
 
-When you want to intercept a command without configuring a double—for example
-to ensure it is treated as unexpected—register it explicitly:
-
+When you want to intercept a command without configuring a double—for example to ensure it is treated as unexpected—register it explicitly. Any invocation of a registered command without a matching double will be reported as unexpected during verification:
 ```python
 cmd_mox.register_command("name")
 ```
 
-CmdMox will create the shim so the command is routed through the IPC server
-even without a stub, mock, or spy.
-
+CmdMox will create the shim so the command is routed through the IPC server even without a stub, mock, or spy. Shims are cleaned up automatically during fixture teardown.
 ## Fluent API reference
 
 The DSL methods closely mirror those described in the design specification. A
@@ -227,11 +225,19 @@ few common ones are:
   values; CmdMox operates in text mode—pass `str` (bytes are not supported).
   Note: For binary payloads, prefer `passthrough()` or encode/decode at the
   boundary (e.g., base64) so handlers exchange `str`.
-- `runs(handler)` – call a function to produce dynamic output. The handler
-  receives an `Invocation` and should return either a
-  `(stdout, stderr, exit_code)` tuple or a `Response` instance.
-- `times(count)` – expect the command exactly `count` times.
-- `times_called(count)` – alias for `times` that emphasises spy call counts.
+- `runs(handler)` – call a function to produce dynamic output. The handler receives an `Invocation` and should return either a `(stdout, stderr, exit_code)` tuple or a `Response` instance.
+
+  Example:
+
+  ```python
+  def handler(inv: Invocation) -> tuple[str, str, int]:
+      if "--fail" in inv.argv:
+          return ("", "boom", 2)  # non-zero exit
+      return ("ok", "", 0)
+
+  cmd_mox.mock("tool").with_args("run").runs(handler)
+  ```- `times(count)` – expect the command exactly `count` times.
+- `times_called(count)` – alias for `times` that emphasizes spy call counts.
 - `in_order()` – enforce strict ordering with other expectations.
 - `any_order()` – allow the expectation to be satisfied in any position.
 - `passthrough()` – for spies, run the real command while recording it.
