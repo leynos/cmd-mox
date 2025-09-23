@@ -172,7 +172,14 @@ The recommended and primary method for using `CmdMox` will be through a
 the broader Python testing ecosystem. Users will enable the plugin, and a
 `cmd_mox` fixture will be automatically available to their test functions. This
 fixture provides a fresh, properly configured `cmd_mox.CmdMox` instance for
-each test, with setup and teardown handled automatically.
+each test, with setup and teardown handled automatically. The fixture enters
+replay mode before the test body executes and calls `verify()` during teardown,
+removing the need for explicit lifecycle calls in most test code. Teams can opt
+out globally with the ``cmd_mox_auto_lifecycle`` pytest.ini flag, override the
+setting for a single run via ``--cmd-mox-auto-lifecycle`` or
+``--no-cmd-mox-auto-lifecycle``, and apply per-test overrides with
+``@pytest.mark.cmd_mox(auto_lifecycle=False)`` when manual lifecycle control is
+required.
 
 *Example Usage:*
 ```python
@@ -185,15 +192,10 @@ def test_git_clone_functionality(cmd_mox):
     # Record phase:
     cmd_mox.mock('git').with_args('clone', 'https://a.b/c.git').returns(exit_code=0)
 
-    # Replay phase:
-    cmd_mox.replay()
     result = my_cli_tool.clone_repo('https://a.b/c.git')
 
     # Assertions on the code under test:
     assert result is True
-
-    # Verify phase:
-    cmd_mox.verify()
 ```
 
 #### Alternative Interface: Context Manager
@@ -329,7 +331,38 @@ disable MD013 -->
 ### 2.5 The Lifecycle in Practice: `replay()` and `verify()`
 
 The `CmdMox` controller provides two methods that demarcate the phases of the
-testing lifecycle.
+testing lifecycle. When using the pytest `cmd_mox` fixture, these are called
+automatically (replay before the test body executes, verification during
+teardown) so most tests only declare expectations and exercise the system under
+test.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Runner as Pytest Runner
+  participant Pytest as pytest
+  participant Fixture as cmd_mox fixture
+  participant CmdMox as CmdMox
+  Note over Pytest,Fixture: resolve auto_lifecycle (marker → param → CLI → ini)
+  Pytest->>Fixture: request fixture (setup)
+  Fixture->>CmdMox: __enter__(verify_on_exit=False, env_prefix=worker_prefix)
+  alt auto_lifecycle enabled
+    Fixture->>CmdMox: replay()
+    Note right of CmdMox #DDF2E9: Phase → REPLAY
+  end
+  Pytest-->>Runner: run test body
+  Runner->>Pytest: test completes
+  Pytest->>Fixture: pytest_runtest_makereport
+  alt auto_lifecycle enabled and eligible
+    Fixture->>CmdMox: verify()
+    Note right of CmdMox #E8F5E9: Phase → VERIFY
+    Fixture->>Pytest: attach verification outcome to report
+  else skip/failed
+    Note over Fixture: verification suppressed or recorded differently
+  end
+  Pytest->>Fixture: teardown
+  Fixture->>CmdMox: __exit__ (cleanup)
+```
 
 - `mox.replay()`: This method must be called after all expectations have been
   recorded. It signals the end of the record phase and the beginning of the

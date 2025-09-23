@@ -30,7 +30,6 @@ TEST_CODE = textwrap.dedent(
 
     def test_example(cmd_mox):
         cmd_mox.stub("hello").returns(stdout="hi")
-        cmd_mox.replay()
         res = subprocess.run(
             [str(_shim_cmd_path(cmd_mox, "hello"))],
             capture_output=True,
@@ -38,7 +37,6 @@ TEST_CODE = textwrap.dedent(
             check=True,
         )
         assert res.stdout.strip() == "hi"
-        cmd_mox.verify()
     """
 )
 

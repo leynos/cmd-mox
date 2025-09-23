@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import cmd_mox.controller as controller
 from cmd_mox.controller import CmdMox, MockCommand, Phase, SpyCommand, StubCommand
 from cmd_mox.errors import (
     LifecycleError,
@@ -61,6 +62,19 @@ def test_cmdmox_replay_verify_out_of_order(
         mox.verify()
 
 
+def test_phase_property_tracks_lifecycle() -> None:
+    """The phase property reflects lifecycle transitions."""
+    mox = CmdMox()
+    assert mox.phase is Phase.RECORD
+
+    mox.__enter__()
+    mox.replay()
+    assert mox.phase is Phase.REPLAY
+
+    mox.verify()
+    assert mox.phase is Phase.VERIFY
+
+
 def test_cmdmox_nonstubbed_command_behavior(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -77,6 +91,96 @@ def test_cmdmox_nonstubbed_command_behavior(
 
     with pytest.raises(UnexpectedCommandError):
         mox.verify()
+
+
+def test_register_command_creates_shim_during_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """register_command creates missing shims immediately during replay."""
+    mox = CmdMox()
+    mox.__enter__()
+    mox.replay()
+
+    calls: list[tuple[Path, tuple[str, ...]]] = []
+
+    def _capture(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        recorded = tuple(commands)
+        calls.append((directory, recorded))
+        return {name: directory / name for name in recorded}
+
+    monkeypatch.setattr(controller, "create_shim_symlinks", _capture)
+    mox.register_command("late")
+
+    env = mox.environment
+    assert env is not None
+    assert env.shim_dir is not None
+    assert calls == [(env.shim_dir, ("late",))]
+
+    mox.verify()
+
+
+def test_register_command_fails_when_path_exists() -> None:
+    """register_command refuses to overwrite existing non-symlink files."""
+    mox = CmdMox(verify_on_exit=False)
+    mox.__enter__()
+    mox.replay()
+
+    env = mox.environment
+    assert env is not None
+    assert env.shim_dir is not None
+
+    collision = env.shim_dir / "late"
+    collision.write_text("collision")
+
+    with pytest.raises(FileExistsError, match="already exists and is not a symlink"):
+        mox.register_command("late")
+
+    mox.__exit__(None, None, None)
+
+
+def test_register_command_propagates_shim_creation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """register_command surfaces errors from shim creation helpers."""
+    mox = CmdMox(verify_on_exit=False)
+    mox.__enter__()
+    mox.replay()
+
+    def _boom(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        raise PermissionError
+
+    monkeypatch.setattr(controller, "create_shim_symlinks", _boom)
+
+    with pytest.raises(PermissionError):
+        mox.register_command("late")
+
+    mox.__exit__(None, None, None)
+
+
+def test_register_command_skips_existing_shim(monkeypatch: pytest.MonkeyPatch) -> None:
+    """register_command avoids recreating an existing shim."""
+    mox = CmdMox()
+    mox.__enter__()
+    mox.replay()
+
+    env = mox.environment
+    assert env is not None
+    assert env.shim_dir is not None
+    controller.create_shim_symlinks(env.shim_dir, ["again"])
+
+    called = False
+
+    def _fail(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        nonlocal called
+        called = True
+        return {name: directory / name for name in commands}
+
+    monkeypatch.setattr(controller, "create_shim_symlinks", _fail)
+    mox.register_command("again")
+
+    assert not called
+
+    mox.verify()
 
 
 @pytest.mark.parametrize("call_replay_before_exception", [True, False])

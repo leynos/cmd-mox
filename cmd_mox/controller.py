@@ -7,7 +7,7 @@ import enum
 import types  # noqa: TC003
 import typing as t
 from collections import deque
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 
 from typing_extensions import Self
 
@@ -142,8 +142,15 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
             result = handler(invocation)
             if isinstance(result, Response):
                 return result
-            stdout, stderr, exit_code = t.cast("tuple[str, str, int]", result)
-            return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
+            match result:
+                case (str() as stdout, str() as stderr, int() as exit_code):
+                    return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
+                case _:
+                    msg = (
+                        "Handler result must be a tuple of (str, str, int), "
+                        f"got {type(result)}: {result}"
+                    )
+                    raise TypeError(msg)
 
         self.handler = _wrap
         return self
@@ -392,6 +399,14 @@ class CmdMox:
         return {n: d for n, d in self._doubles.items() if d.kind == "spy"}
 
     # ------------------------------------------------------------------
+    # Lifecycle state
+    # ------------------------------------------------------------------
+    @property
+    def phase(self) -> Phase:
+        """Return the current lifecycle phase."""
+        return self._phase
+
+    # ------------------------------------------------------------------
     # Internal helper accessors
     # ------------------------------------------------------------------
     def _registered_commands(self) -> set[str]:
@@ -453,8 +468,34 @@ class CmdMox:
     # Public API
     # ------------------------------------------------------------------
     def register_command(self, name: str) -> None:
-        """Register *name* for shim creation during :meth:`replay`."""
+        """Register *name* and ensure a shim exists during :meth:`replay`.
+
+        The command name is recorded for future replay transitions. When the
+        controller is already in :class:`Phase.REPLAY` and the environment has
+        been entered (``env.shim_dir`` is populated), the shim symlink is
+        created immediately so late-registered doubles work without restarting
+        the IPC server. Existing symlinks are left untouched, and subsequent
+        :meth:`_start_ipc_server` calls re-sync every shim so repeated
+        registrations remain idempotent.
+        """
         self._commands.add(name)
+        self._ensure_shim_during_replay(name)
+
+    def _ensure_shim_during_replay(self, name: str) -> None:
+        """Create a shim symlink when replay is active and shims are writable."""
+        if self._phase is not Phase.REPLAY:
+            return
+        env = self.environment
+        if env is None or env.shim_dir is None:
+            return
+        shim_dir = Path(env.shim_dir)
+        shim_path = shim_dir / name
+        if shim_path.is_symlink():
+            return
+        if shim_path.exists():
+            msg = f"{shim_path} already exists and is not a symlink"
+            raise FileExistsError(msg)
+        create_shim_symlinks(shim_dir, [name])
 
     def _get_double(
         self, command_name: str, kind: CommandDouble.T_Kind
