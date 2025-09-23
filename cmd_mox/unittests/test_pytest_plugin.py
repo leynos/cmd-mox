@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import textwrap
 import typing as t
 
@@ -14,6 +15,18 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 
     from cmd_mox.controller import CmdMox
+
+
+@dc.dataclass
+class AutoLifecycleTestCase:
+    """Test case data for auto-lifecycle configuration scenarios."""
+
+    config_method: str
+    ini_setting: str | None
+    cli_args: tuple[str, ...]
+    test_decorator: str
+    expected_phase: str
+    should_fail: bool
 
 
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
@@ -154,116 +167,121 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
 
 
 @pytest.mark.parametrize(
-    (
-        "config_method",
-        "ini_setting",
-        "cli_args",
-        "test_decorator",
-        "expected_phase",
-        "should_fail",
-    ),
+    "test_case",
     [
         pytest.param(
-            "ini_disables",
-            "cmd_mox_auto_lifecycle = false",
-            (),
-            "",
-            "RECORD",
-            False,
+            AutoLifecycleTestCase(
+                config_method="ini_disables",
+                ini_setting="cmd_mox_auto_lifecycle = false",
+                cli_args=(),
+                test_decorator="",
+                expected_phase="RECORD",
+                should_fail=False,
+            ),
             id="ini-disables",
         ),
         pytest.param(
-            "cli_disables",
-            None,
-            ("-p", "cmd_mox.pytest_plugin", "--no-cmd-mox-auto-lifecycle"),
-            "",
-            "RECORD",
-            False,
+            AutoLifecycleTestCase(
+                config_method="cli_disables",
+                ini_setting=None,
+                cli_args=("-p", "cmd_mox.pytest_plugin", "--no-cmd-mox-auto-lifecycle"),
+                test_decorator="",
+                expected_phase="RECORD",
+                should_fail=False,
+            ),
             id="cli-disables",
         ),
         pytest.param(
-            "marker_overrides_ini",
-            "cmd_mox_auto_lifecycle = false",
-            (),
-            "@pytest.mark.cmd_mox(auto_lifecycle=True)",
-            "auto_fail",
-            True,
+            AutoLifecycleTestCase(
+                config_method="marker_overrides_ini",
+                ini_setting="cmd_mox_auto_lifecycle = false",
+                cli_args=(),
+                test_decorator="@pytest.mark.cmd_mox(auto_lifecycle=True)",
+                expected_phase="auto_fail",
+                should_fail=True,
+            ),
             id="marker-overrides-ini",
         ),
         pytest.param(
-            "marker_overrides_cli",
-            None,
-            ("-p", "cmd_mox.pytest_plugin", "--no-cmd-mox-auto-lifecycle"),
-            "@pytest.mark.cmd_mox(auto_lifecycle=True)",
-            "REPLAY",
-            False,
+            AutoLifecycleTestCase(
+                config_method="marker_overrides_cli",
+                ini_setting=None,
+                cli_args=("-p", "cmd_mox.pytest_plugin", "--no-cmd-mox-auto-lifecycle"),
+                test_decorator="@pytest.mark.cmd_mox(auto_lifecycle=True)",
+                expected_phase="REPLAY",
+                should_fail=False,
+            ),
             id="marker-overrides-cli",
         ),
         pytest.param(
-            "fixture_param_bool",
-            None,
-            (),
-            '@pytest.mark.parametrize("cmd_mox", [False], indirect=True)',
-            "RECORD",
-            False,
+            AutoLifecycleTestCase(
+                config_method="fixture_param_bool",
+                ini_setting=None,
+                cli_args=(),
+                test_decorator=(
+                    '@pytest.mark.parametrize("cmd_mox", [False], indirect=True)'
+                ),
+                expected_phase="RECORD",
+                should_fail=False,
+            ),
             id="fixture-param-bool",
         ),
         pytest.param(
-            "fixture_param_dict",
-            "cmd_mox_auto_lifecycle = false",
-            (),
-            "\n".join(
-                [
-                    "@pytest.mark.parametrize(",
-                    '    "cmd_mox", [{"auto_lifecycle": True}], indirect=True',
-                    ")",
-                ]
+            AutoLifecycleTestCase(
+                config_method="fixture_param_dict",
+                ini_setting="cmd_mox_auto_lifecycle = false",
+                cli_args=(),
+                test_decorator="\n".join(
+                    [
+                        "@pytest.mark.parametrize(",
+                        '    "cmd_mox", [{"auto_lifecycle": True}], indirect=True',
+                        ")",
+                    ]
+                ),
+                expected_phase="REPLAY",
+                should_fail=False,
             ),
-            "REPLAY",
-            False,
             id="fixture-param-dict",
         ),
         pytest.param(
-            "cli_overrides_ini",
-            "cmd_mox_auto_lifecycle = false",
-            ("-p", "cmd_mox.pytest_plugin", "--cmd-mox-auto-lifecycle"),
-            "",
-            "REPLAY",
-            False,
+            AutoLifecycleTestCase(
+                config_method="cli_overrides_ini",
+                ini_setting="cmd_mox_auto_lifecycle = false",
+                cli_args=("-p", "cmd_mox.pytest_plugin", "--cmd-mox-auto-lifecycle"),
+                test_decorator="",
+                expected_phase="REPLAY",
+                should_fail=False,
+            ),
             id="cli-overrides-ini",
         ),
     ],
 )
 def test_auto_lifecycle_configuration(
     pytester: pytest.Pytester,
-    config_method: str,
-    ini_setting: str | None,
-    cli_args: tuple[str, ...],
-    test_decorator: str,
-    expected_phase: str,
-    *,
-    should_fail: bool,
+    test_case: AutoLifecycleTestCase,
 ) -> None:
     """Exercise lifecycle precedence without duplicating module scaffolding."""
-    if ini_setting:
+    if test_case.ini_setting:
         pytester.makeini(
             textwrap.dedent(
                 f"""
                 [pytest]
-                {ini_setting}
+                {test_case.ini_setting}
                 """
             )
         )
 
     module = _generate_lifecycle_test_module(
-        test_decorator, expected_phase, should_fail=should_fail
+        test_case.test_decorator,
+        test_case.expected_phase,
+        should_fail=test_case.should_fail,
     )
-    module = f"# scenario: {config_method}\n" + module
-    test_file = pytester.makepyfile(**{f"test_{config_method}.py": module})
+    module = f"# scenario: {test_case.config_method}\n" + module
+    test_file = pytester.makepyfile(**{f"test_{test_case.config_method}.py": module})
 
-    result = pytester.runpytest(*cli_args, str(test_file))
+    result = pytester.runpytest(*test_case.cli_args, str(test_file))
 
-    if should_fail:
+    if test_case.should_fail:
         result.assert_outcomes(passed=1, errors=1)
         result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
     else:
