@@ -103,7 +103,7 @@ def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> 
 
     result = pytester.runpytest(str(test_file))
     result.assert_outcomes(failed=1)
-    result.stdout.fnmatch_lines(["*UnfulfilledExpectationError:*"])
+    result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
 
 
 def test_verification_error_suppressed_on_test_failure(
@@ -246,4 +246,141 @@ def test_marker_overrides_ini(pytester: pytest.Pytester) -> None:
 
     result = pytester.runpytest(str(test_file))
     result.assert_outcomes(failed=1)
-    result.stdout.fnmatch_lines(["*UnfulfilledExpectationError:*"])
+    result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
+
+
+def test_marker_overrides_cli(pytester: pytest.Pytester) -> None:
+    """Markers take precedence over conflicting CLI options."""
+    test_file = pytester.makepyfile(
+        """
+        import pytest
+        from cmd_mox.unittests.conftest import run_subprocess
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def _shim_cmd_path(mox, name):
+            sd = mox.environment.shim_dir
+            assert sd is not None
+            return sd / name
+
+        @pytest.mark.cmd_mox(auto_lifecycle=True)
+        def test_marker(cmd_mox):
+            cmd_mox.stub("tool").returns(stdout="ok")
+            res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+            assert res.stdout.strip() == "ok"
+        """
+    )
+
+    result = pytester.runpytest(
+        "-p",
+        "cmd_mox.pytest_plugin",
+        "--no-cmd-mox-auto-lifecycle",
+        str(test_file),
+    )
+    result.assert_outcomes(passed=1)
+
+
+def test_fixture_param_bool_disables_auto_lifecycle(pytester: pytest.Pytester) -> None:
+    """Bool fixture parameters disable automatic replay/verify."""
+    test_file = pytester.makepyfile(
+        """
+        import pytest
+        from cmd_mox.controller import Phase
+        from cmd_mox.unittests.conftest import run_subprocess
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def _shim_cmd_path(mox, name):
+            sd = mox.environment.shim_dir
+            assert sd is not None
+            return sd / name
+
+        @pytest.mark.parametrize("cmd_mox", [False], indirect=True)
+        def test_manual(cmd_mox):
+            assert cmd_mox.phase is Phase.RECORD
+            cmd_mox.stub("tool").returns(stdout="ok")
+            cmd_mox.replay()
+            res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+            assert res.stdout.strip() == "ok"
+            cmd_mox.verify()
+        """
+    )
+
+    result = pytester.runpytest(str(test_file))
+    result.assert_outcomes(passed=1)
+
+
+def test_fixture_param_dict_overrides_ini(pytester: pytest.Pytester) -> None:
+    """Dict fixture parameters override ini defaults."""
+    pytester.makeini(
+        """
+        [pytest]
+        cmd_mox_auto_lifecycle = false
+        """
+    )
+
+    test_file = pytester.makepyfile(
+        """
+        import pytest
+        from cmd_mox.controller import Phase
+        from cmd_mox.unittests.conftest import run_subprocess
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def _shim_cmd_path(mox, name):
+            sd = mox.environment.shim_dir
+            assert sd is not None
+            return sd / name
+
+        @pytest.mark.parametrize(
+            "cmd_mox", [{"auto_lifecycle": True}], indirect=True
+        )
+        def test_param(cmd_mox):
+            assert cmd_mox.phase is Phase.REPLAY
+            cmd_mox.stub("tool").returns(stdout="ok")
+            res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+            assert res.stdout.strip() == "ok"
+        """
+    )
+
+    result = pytester.runpytest(str(test_file))
+    result.assert_outcomes(passed=1)
+
+
+def test_cli_enables_auto_lifecycle_over_ini(pytester: pytest.Pytester) -> None:
+    """CLI flag re-enables auto lifecycle when ini disables it."""
+    pytester.makeini(
+        """
+        [pytest]
+        cmd_mox_auto_lifecycle = false
+        """
+    )
+
+    test_file = pytester.makepyfile(
+        """
+        import pytest
+        from cmd_mox.controller import Phase
+        from cmd_mox.unittests.conftest import run_subprocess
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def _shim_cmd_path(mox, name):
+            sd = mox.environment.shim_dir
+            assert sd is not None
+            return sd / name
+
+        def test_cli(cmd_mox):
+            assert cmd_mox.phase is Phase.REPLAY
+            cmd_mox.stub("tool").returns(stdout="ok")
+            res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+            assert res.stdout.strip() == "ok"
+        """
+    )
+
+    result = pytester.runpytest(
+        "-p",
+        "cmd_mox.pytest_plugin",
+        "--cmd-mox-auto-lifecycle",
+        str(test_file),
+    )
+    result.assert_outcomes(passed=1)

@@ -142,15 +142,21 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
             result = handler(invocation)
             if isinstance(result, Response):
                 return result
-            match result:
-                case (str() as stdout, str() as stderr, int() as exit_code):
-                    return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
-                case _:
-                    msg = (
-                        "Handler result must be a tuple of (str, str, int), "
-                        f"got {type(result)}: {result}"
-                    )
-                    raise TypeError(msg)
+            if (
+                isinstance(result, tuple)
+                and len(result) == 3
+                and isinstance(result[0], str)
+                and isinstance(result[1], str)
+                and isinstance(result[2], int)
+            ):
+                stdout, stderr, exit_code = result
+                return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+            msg = (
+                "Handler result must be a tuple of (str, str, int), "
+                f"got {type(result)}: {result}"
+            )
+            raise TypeError(msg)
 
         self.handler = _wrap
         return self
@@ -490,6 +496,9 @@ class CmdMox:
         shim_path = shim_dir / name
         if shim_path.is_symlink():
             return
+        if shim_path.exists():
+            msg = f"{shim_path} already exists and is not a symlink"
+            raise FileExistsError(msg)
         create_shim_symlinks(shim_dir, [name])
 
     def _get_double(

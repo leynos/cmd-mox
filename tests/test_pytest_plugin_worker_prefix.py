@@ -83,6 +83,32 @@ def test_worker_prefix_uses_mapping_workerinput(
     assert prefix.startswith("cmdmox-gw-dict-")
 
 
+def test_worker_prefix_with_none_workerinput(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """None workerinput falls back to the default worker prefix."""
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+
+    request = _StubRequest(config=_StubConfig(workerinput=None))
+
+    prefix = _worker_prefix(request)  # type: ignore[arg-type]
+
+    assert prefix.startswith("cmdmox-main-")
+
+
+def test_worker_prefix_with_unexpected_workerinput_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected workerinput types do not break prefix generation."""
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+
+    request = _StubRequest(config=_StubConfig(workerinput=42))
+
+    prefix = _worker_prefix(request)  # type: ignore[arg-type]
+
+    assert prefix.startswith("cmdmox-main-")
+
+
 def test_enter_cmd_mox_replays_when_enabled() -> None:
     """_enter_cmd_mox triggers replay when auto lifecycle is enabled."""
     stub = _StubMox()

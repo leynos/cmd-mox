@@ -119,6 +119,44 @@ def test_register_command_creates_shim_during_replay(
     mox.verify()
 
 
+def test_register_command_fails_when_path_exists() -> None:
+    """register_command refuses to overwrite existing non-symlink files."""
+    mox = CmdMox(verify_on_exit=False)
+    mox.__enter__()
+    mox.replay()
+
+    env = mox.environment
+    assert env is not None
+    assert env.shim_dir is not None
+
+    collision = env.shim_dir / "late"
+    collision.write_text("collision")
+
+    with pytest.raises(FileExistsError, match="already exists and is not a symlink"):
+        mox.register_command("late")
+
+    mox.__exit__(None, None, None)
+
+
+def test_register_command_propagates_shim_creation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """register_command surfaces errors from shim creation helpers."""
+    mox = CmdMox(verify_on_exit=False)
+    mox.__enter__()
+    mox.replay()
+
+    def _boom(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        raise PermissionError
+
+    monkeypatch.setattr(controller, "create_shim_symlinks", _boom)
+
+    with pytest.raises(PermissionError):
+        mox.register_command("late")
+
+    mox.__exit__(None, None, None)
+
+
 def test_register_command_skips_existing_shim(monkeypatch: pytest.MonkeyPatch) -> None:
     """register_command avoids recreating an existing shim."""
     mox = CmdMox()
