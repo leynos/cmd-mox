@@ -229,7 +229,7 @@ def _teardown_cmd_mox(item: pytest.Item, mox: CmdMox) -> None:
             should_raise = should_fail
     try:
         mox.__exit__(None, None, None)
-    except OSError:
+    except Exception:
         logger.exception("Error during cmd_mox fixture cleanup")
         pytest.fail("cmd_mox fixture cleanup failed")
     finally:
