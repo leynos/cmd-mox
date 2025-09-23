@@ -336,6 +336,34 @@ automatically (replay before the test body executes, verification during
 teardown) so most tests only declare expectations and exercise the system under
 test.
 
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Runner as Pytest Runner
+  participant Pytest as pytest
+  participant Fixture as cmd_mox fixture
+  participant CmdMox as CmdMox
+  Note over Pytest,Fixture: resolve auto_lifecycle (marker → param → CLI → ini)
+  Pytest->>Fixture: request fixture (setup)
+  Fixture->>CmdMox: __enter__(verify_on_exit=False, env_prefix=worker_prefix)
+  alt auto_lifecycle enabled
+    Fixture->>CmdMox: replay()
+    Note right of CmdMox #DDF2E9: Phase → REPLAY
+  end
+  Pytest-->>Runner: run test body
+  Runner->>Pytest: test completes
+  Pytest->>Fixture: pytest_runtest_makereport
+  alt auto_lifecycle enabled and eligible
+    Fixture->>CmdMox: verify()
+    Note right of CmdMox #E8F5E9: Phase → VERIFY
+    Fixture->>Pytest: attach verification outcome to report
+  else skip/failed
+    Note over Fixture: verification suppressed or recorded differently
+  end
+  Pytest->>Fixture: teardown
+  Fixture->>CmdMox: __exit__ (cleanup)
+```
+
 - `mox.replay()`: This method must be called after all expectations have been
   recorded. It signals the end of the record phase and the beginning of the
   replay phase. Internally, this call triggers the creation of the temporary

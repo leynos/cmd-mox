@@ -65,6 +65,8 @@ class _CmdMoxItem(t.Protocol):
 
     _cmd_mox_instance: CmdMox | None
     _cmd_mox_auto_lifecycle: bool
+    _cmd_mox_verify_error: Exception | None
+    _cmd_mox_verify_should_fail: bool
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -80,30 +82,8 @@ def pytest_runtest_makereport(
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
-    if rep.when == "call":
-        _handle_auto_verification(item, rep)
-
-
-def _handle_auto_verification(item: pytest.Item, rep: pytest.TestReport) -> None:
-    """Handle automatic verification for cmd_mox if enabled."""
-    mox: CmdMox | None = getattr(item, "_cmd_mox_instance", None)
-    auto_lifecycle = getattr(item, "_cmd_mox_auto_lifecycle", True)
-
-    if mox is None:
-        return
-
-    if not auto_lifecycle:
-        return
-
-    if mox.phase is not Phase.REPLAY:
-        return
-
-    try:
-        mox.verify()
-    except Exception as err:
-        logger.exception("Error during cmd_mox verification")
-        if not rep.failed:
-            _apply_verify_failure(item, rep, err)
+    if rep.when == "teardown":
+        _apply_deferred_verify_failure(item, rep)
 
 
 def _auto_lifecycle_enabled(request: pytest.FixtureRequest) -> bool:
@@ -165,6 +145,21 @@ def _apply_verify_failure(
     report.longrepr = f"{type(err).__name__}: {err}"
 
 
+def _apply_deferred_verify_failure(
+    item: pytest.Item, report: pytest.TestReport
+) -> None:
+    """Apply any deferred verification error captured during teardown."""
+    err: Exception | None = getattr(item, "_cmd_mox_verify_error", None)
+    if err is None:
+        return
+    delattr(item, "_cmd_mox_verify_error")
+    should_fail = getattr(item, "_cmd_mox_verify_should_fail", False)
+    if hasattr(item, "_cmd_mox_verify_should_fail"):
+        delattr(item, "_cmd_mox_verify_should_fail")
+    if not should_fail:
+        report.sections.append(("cmd_mox verification", f"{type(err).__name__}: {err}"))
+
+
 @pytest.fixture
 def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
     """Provide a :class:`CmdMox` instance with environment active."""
@@ -213,10 +208,25 @@ def _attach_node_state(item: pytest.Item, mox: CmdMox, *, auto_lifecycle: bool) 
     typed_item = t.cast("_CmdMoxItem", item)
     typed_item._cmd_mox_instance = mox
     typed_item._cmd_mox_auto_lifecycle = auto_lifecycle
+    typed_item._cmd_mox_verify_error = None
+    typed_item._cmd_mox_verify_should_fail = False
 
 
 def _teardown_cmd_mox(item: pytest.Item, mox: CmdMox) -> None:
     """Exit the controller context and clear per-item state."""
+    typed_item = t.cast("_CmdMoxItem", item)
+    auto_lifecycle = getattr(typed_item, "_cmd_mox_auto_lifecycle", True)
+    should_verify = auto_lifecycle and mox.phase is Phase.REPLAY
+    should_raise = False
+    if should_verify:
+        try:
+            mox.verify()
+        except Exception as err:
+            logger.exception("Error during cmd_mox verification")
+            typed_item._cmd_mox_verify_error = err
+            should_fail = not _call_stage_failed(item)
+            typed_item._cmd_mox_verify_should_fail = should_fail
+            should_raise = should_fail
     try:
         mox.__exit__(None, None, None)
     except OSError:
@@ -224,6 +234,9 @@ def _teardown_cmd_mox(item: pytest.Item, mox: CmdMox) -> None:
         pytest.fail("cmd_mox fixture cleanup failed")
     finally:
         _detach_node_state(item, mox)
+    if should_raise:
+        err = typed_item._cmd_mox_verify_error
+        pytest.fail(f"{type(err).__name__}: {err}")
 
 
 def _detach_node_state(item: pytest.Item, mox: CmdMox) -> None:
@@ -233,3 +246,9 @@ def _detach_node_state(item: pytest.Item, mox: CmdMox) -> None:
         delattr(typed_item, "_cmd_mox_instance")
     if hasattr(typed_item, "_cmd_mox_auto_lifecycle"):
         delattr(typed_item, "_cmd_mox_auto_lifecycle")
+
+
+def _call_stage_failed(item: pytest.Item) -> bool:
+    """Return ``True`` when the test body has already failed."""
+    rep_call = getattr(item, "rep_call", None)
+    return bool(rep_call and rep_call.failed)

@@ -6,6 +6,7 @@ import typing as t
 
 import pytest
 
+from cmd_mox.controller import Phase
 from cmd_mox.pytest_plugin import (
     _attach_node_state,
     _detach_node_state,
@@ -39,11 +40,15 @@ class _StubRequest:
 class _StubMox:
     """Minimal CmdMox stand-in for exercising helper logic."""
 
-    def __init__(self, *, raise_on_exit: bool = False) -> None:
+    def __init__(
+        self, *, phase: Phase = Phase.REPLAY, raise_on_exit: bool = False
+    ) -> None:
         self.raise_on_exit = raise_on_exit
         self.enter_calls = 0
         self.replay_calls = 0
         self.exit_calls: list[tuple[object | None, object | None, object | None]] = []
+        self.verify_calls = 0
+        self.phase = phase
 
     def __enter__(self) -> _StubMox:
         self.enter_calls += 1
@@ -61,6 +66,10 @@ class _StubMox:
         self.exit_calls.append((exc_type, exc, tb))
         if self.raise_on_exit:
             raise OSError("boom")
+
+    def verify(self) -> None:
+        self.verify_calls += 1
+        self.phase = Phase.VERIFY
 
 
 class _StubItem:

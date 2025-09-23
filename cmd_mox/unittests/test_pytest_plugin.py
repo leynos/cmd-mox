@@ -102,7 +102,7 @@ def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> 
     )
 
     result = pytester.runpytest(str(test_file))
-    result.assert_outcomes(failed=1)
+    result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
 
 
@@ -149,7 +149,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
     )
 
     result = pytester.runpytest(str(test_file))
-    result.assert_outcomes(failed=1, errors=1)
+    result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*cmd_mox fixture cleanup failed*"])
 
 
@@ -245,7 +245,7 @@ def test_marker_overrides_ini(pytester: pytest.Pytester) -> None:
     )
 
     result = pytester.runpytest(str(test_file))
-    result.assert_outcomes(failed=1)
+    result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
 
 
