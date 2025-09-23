@@ -17,7 +17,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.controller import CmdMox
 
 
-@dc.dataclass
+@dc.dataclass(slots=True, frozen=True)
 class AutoLifecycleTestCase:
     """Test case data for auto-lifecycle configuration scenarios."""
 
@@ -25,14 +25,13 @@ class AutoLifecycleTestCase:
     ini_setting: str | None
     cli_args: tuple[str, ...]
     test_decorator: str
-    expected_phase: str
+    expected_phase: t.Literal["RECORD", "REPLAY", "auto_fail"]
     should_fail: bool
 
 
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
 
 
-@pytest.mark.usefixtures("cmd_mox")
 def test_fixture_basic(
     cmd_mox: CmdMox,
     run: t.Callable[..., subprocess.CompletedProcess[str]],
@@ -45,21 +44,25 @@ def test_fixture_basic(
     assert result.stdout.strip() == "hi"
 
 
-def test_worker_prefix(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("worker_id", "expected_fragment"),
+    [
+        ("gw99", "gw99"),
+        (None, "main"),
+    ],
+)
+def test_worker_prefixes(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    worker_id: str | None,
+    expected_fragment: str,
 ) -> None:
-    """Worker ID is included in the environment prefix."""
+    """Worker ID is reflected in the environment prefix; falls back to 'main'."""
     _run_prefix_scenario(
-        pytester, monkeypatch, worker_id="gw99", expected_fragment="gw99"
-    )
-
-
-def test_default_prefix(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Fall back to 'main' when no worker ID is present."""
-    _run_prefix_scenario(
-        pytester, monkeypatch, worker_id=None, expected_fragment="main"
+        pytester,
+        monkeypatch,
+        worker_id=worker_id,
+        expected_fragment=expected_fragment,
     )
 
 
@@ -184,7 +187,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
             AutoLifecycleTestCase(
                 config_method="cli_disables",
                 ini_setting=None,
-                cli_args=("-p", "cmd_mox.pytest_plugin", "--no-cmd-mox-auto-lifecycle"),
+                cli_args=("--no-cmd-mox-auto-lifecycle",),
                 test_decorator="",
                 expected_phase="RECORD",
                 should_fail=False,
@@ -206,7 +209,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
             AutoLifecycleTestCase(
                 config_method="marker_overrides_cli",
                 ini_setting=None,
-                cli_args=("-p", "cmd_mox.pytest_plugin", "--no-cmd-mox-auto-lifecycle"),
+                cli_args=("--no-cmd-mox-auto-lifecycle",),
                 test_decorator="@pytest.mark.cmd_mox(auto_lifecycle=True)",
                 expected_phase="REPLAY",
                 should_fail=False,
@@ -247,7 +250,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
             AutoLifecycleTestCase(
                 config_method="cli_overrides_ini",
                 ini_setting="cmd_mox_auto_lifecycle = false",
-                cli_args=("-p", "cmd_mox.pytest_plugin", "--cmd-mox-auto-lifecycle"),
+                cli_args=("--cmd-mox-auto-lifecycle",),
                 test_decorator="",
                 expected_phase="REPLAY",
                 should_fail=False,
@@ -279,7 +282,11 @@ def test_auto_lifecycle_configuration(
     module = f"# scenario: {test_case.config_method}\n" + module
     test_file = pytester.makepyfile(**{f"test_{test_case.config_method}.py": module})
 
-    result = pytester.runpytest(*test_case.cli_args, str(test_file))
+    run_kwargs: dict[str, t.Any] = {}
+    if test_case.cli_args:
+        run_kwargs["plugins"] = ("cmd_mox.pytest_plugin",)
+
+    result = pytester.runpytest(*test_case.cli_args, str(test_file), **run_kwargs)
 
     if test_case.should_fail:
         result.assert_outcomes(passed=1, errors=1)
@@ -336,15 +343,16 @@ def _build_decorator_section(decorator: str) -> list[str]:
 def _build_test_function(expected_phase: str, *, should_fail: bool) -> list[str]:
     """Construct the test function definition and body for the scenario."""
     lines = ["def test_case(cmd_mox):"]
-    if expected_phase == "RECORD":
-        lines.extend(_build_record_test_body())
-    elif expected_phase == "REPLAY" and not should_fail:
-        lines.extend(_build_replay_test_body())
-    elif expected_phase == "auto_fail":
-        lines.extend(_build_auto_fail_test_body())
-    else:  # pragma: no cover - defensive guard for unexpected parameters
-        msg = f"Unsupported expected_phase: {expected_phase}"
-        raise ValueError(msg)
+    match expected_phase:
+        case "RECORD":
+            lines.extend(_build_record_test_body())
+        case "REPLAY" if not should_fail:
+            lines.extend(_build_replay_test_body())
+        case "auto_fail":
+            lines.extend(_build_auto_fail_test_body())
+        case _:  # pragma: no cover - defensive guard for unexpected parameters
+            msg = f"Unsupported expected_phase: {expected_phase}"
+            raise ValueError(msg)
     lines.append("")
     return lines
 
