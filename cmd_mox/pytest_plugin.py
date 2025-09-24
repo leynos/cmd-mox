@@ -87,9 +87,12 @@ def pytest_runtest_makereport(
 
 
 def _auto_lifecycle_enabled(request: pytest.FixtureRequest) -> bool:
-    """Return whether the fixture should manage replay/verify automatically."""
-    # Priority order: marker > fixture param > CLI option > INI setting
+    """Return whether the fixture should manage replay/verify automatically.
 
+    Precedence flows from the most granular override to the global default:
+    a ``@pytest.mark.cmd_mox`` marker beats a fixture parameter, which in turn
+    overrides the command-line flag, and finally the ``pytest.ini`` value.
+    """
     marker_value = _get_marker_auto_lifecycle(request)
     if marker_value is not None:
         return marker_value
