@@ -207,8 +207,8 @@
         `windows-latest` GH runner with IPC + shims enabled).
 
   - [ ] Validate environment management and filesystem helpers on Windows,
-        addressing portability gaps discovered during testing (cover:
-        `PATHEXT` lookup semantics, CRLF line endings for batch shims, argument
+        addressing portability gaps discovered during testing (cover: `PATHEXT`
+        lookup semantics, CRLF line endings for batch shims, argument
         quoting/escaping rules with spaces and carets, max path handling,
         case-insensitive filesystem behaviour).
 

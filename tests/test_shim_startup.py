@@ -23,6 +23,21 @@ class _FakeInput(io.StringIO):
         return False
 
 
+class _InteractiveInput:
+    """Stub stdin that behaves like an interactive terminal."""
+
+    def __init__(self) -> None:
+        self.read_called = False
+
+    def isatty(self) -> bool:  # pragma: no cover - trivial
+        return True
+
+    def read(self) -> str:  # pragma: no cover - defensive guard
+        self.read_called = True
+        msg = "stdin.read() should not be called for ttys"
+        raise AssertionError(msg)
+
+
 def test_main_reports_invocation_details(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -65,3 +80,65 @@ def test_main_reports_invocation_details(
     assert invocation.stdin == "payload"
     assert invocation.env.get("SAMPLE") == "value"
     assert captured["timeout"] == pytest.approx(5.0)
+
+
+def test_main_skips_interactive_stdin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``shim.main`` does not read stdin when connected to a tty."""
+    captured: dict[str, Invocation] = {}
+
+    def fake_invoke(invocation: Invocation, timeout: float) -> Response:
+        captured["invocation"] = invocation
+        return Response(stdout="", stderr="", exit_code=0)
+
+    socket_path = tmp_path / "dummy.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    monkeypatch.delenv(CMOX_IPC_TIMEOUT_ENV, raising=False)
+    shim_path = tmp_path / "shims" / "alpha"
+    monkeypatch.setattr(sys, "argv", [str(shim_path)])
+    interactive = _InteractiveInput()
+    monkeypatch.setattr(sys, "stdin", interactive)
+    monkeypatch.setattr("cmd_mox.shim.invoke_server", fake_invoke)
+
+    import cmd_mox.shim as shim
+
+    with pytest.raises(SystemExit) as excinfo:
+        shim.main()
+
+    assert t.cast("SystemExit", excinfo.value).code == 0
+    invocation = captured["invocation"]
+    assert invocation.stdin == ""
+    assert not interactive.read_called
+
+
+def test_main_honours_custom_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``shim.main`` applies non-default IPC timeout overrides."""
+    captured: dict[str, float] = {}
+
+    def fake_invoke(invocation: Invocation, timeout: float) -> Response:
+        captured["timeout"] = timeout
+        return Response(stdout="custom", stderr="", exit_code=0)
+
+    socket_path = tmp_path / "dummy.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "1.75")
+    monkeypatch.setattr(sys, "argv", ["shimcmd"])
+    monkeypatch.setattr(sys, "stdin", _FakeInput("ignored"))
+    monkeypatch.setattr("cmd_mox.shim.invoke_server", fake_invoke)
+
+    import cmd_mox.shim as shim
+
+    with pytest.raises(SystemExit) as excinfo:
+        shim.main()
+
+    assert t.cast("SystemExit", excinfo.value).code == 0
+    assert captured["timeout"] == pytest.approx(1.75)
+    out = capsys.readouterr()
+    assert out.out == "custom"
+    assert out.err == ""
