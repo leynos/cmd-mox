@@ -9,9 +9,10 @@ import typing as t
 import pytest
 
 from cmd_mox.controller import Phase
+from cmd_mox.unittests import pytest_plugin_module_utils as plugin_utils
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
-PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "auto_fail"]
+PhaseLiteral = plugin_utils.PhaseLiteral
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
@@ -279,7 +280,7 @@ def test_auto_lifecycle_configuration(
             )
         )
 
-    module = _generate_lifecycle_test_module(
+    module = plugin_utils.generate_lifecycle_test_module(
         test_case.test_decorator,
         test_case.expected_phase,
         should_fail=test_case.should_fail,
@@ -297,108 +298,9 @@ def test_auto_lifecycle_configuration(
         result.assert_outcomes(passed=1)
 
 
-def _generate_lifecycle_test_module(
-    decorator: str,
-    expected_phase: PhaseLiteral,
-    *,
-    should_fail: bool,
-) -> str:
-    """Return a self-contained test module for lifecycle precedence cases."""
-    lines = []
-    lines.extend(_build_module_imports(expected_phase))
-    lines.extend(_build_module_setup(expected_phase))
-    lines.extend(_build_decorator_section(decorator))
-    lines.extend(_build_test_function(expected_phase, should_fail=should_fail))
-    return textwrap.dedent("\n".join(lines))
-
-
-def _build_module_imports(expected_phase: PhaseLiteral) -> list[str]:
-    """Return the import statements required for the generated module."""
-    lines = ["import pytest", "from cmd_mox.controller import Phase"]
-    if expected_phase != "auto_fail":
-        lines.append("from cmd_mox.unittests.conftest import run_subprocess")
-    return lines
-
-
-def _build_module_setup(expected_phase: PhaseLiteral) -> list[str]:
-    """Return module-level setup such as plugin registration and helpers."""
-    lines = ["", 'pytest_plugins = ("cmd_mox.pytest_plugin",)', ""]
-    if expected_phase != "auto_fail":
-        lines.extend(
-            [
-                "def _shim_cmd_path(mox, name):",
-                "    sd = mox.environment.shim_dir",
-                "    assert sd is not None",
-                "    return sd / name",
-                "",
-            ]
-        )
-    return lines
-
-
-def _build_decorator_section(decorator: str) -> list[str]:
-    """Return any decorator lines preceding the generated test function."""
-    if not decorator:
-        return []
-    lines = decorator.splitlines()
-    lines.append("")
-    return lines
-
-
-def _build_test_function(
-    expected_phase: PhaseLiteral,
-    *,
-    should_fail: bool,
-) -> list[str]:
-    """Construct the test function definition and body for the scenario."""
-    lines = ["def test_case(cmd_mox):"]
-    match expected_phase:
-        case "RECORD":
-            lines.extend(_build_record_test_body())
-        case "REPLAY" if not should_fail:
-            lines.extend(_build_replay_test_body())
-        case "auto_fail":
-            lines.extend(_build_auto_fail_test_body())
-        case _:  # pragma: no cover - defensive guard for unexpected parameters
-            msg = f"Unsupported expected_phase: {expected_phase}"
-            raise ValueError(msg)
-    lines.append("")
-    return lines
-
-
-def _build_record_test_body() -> list[str]:
-    """Return the assertions and expectations for record-phase scenarios."""
-    return [
-        "    assert cmd_mox.phase is Phase.RECORD",
-        '    cmd_mox.stub("tool").returns(stdout="ok")',
-        "    cmd_mox.replay()",
-        '    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])',
-        '    assert res.stdout.strip() == "ok"',
-        "    cmd_mox.verify()",
-    ]
-
-
-def _build_replay_test_body() -> list[str]:
-    """Return the test body used when replay begins automatically."""
-    return [
-        "    assert cmd_mox.phase is Phase.REPLAY",
-        '    cmd_mox.stub("tool").returns(stdout="ok")',
-        '    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])',
-        '    assert res.stdout.strip() == "ok"',
-    ]
-
-
-def _build_auto_fail_test_body() -> list[str]:
-    """Return the test body for scenarios expecting verification failure."""
-    return [
-        "    assert cmd_mox.phase is Phase.REPLAY",
-        '    cmd_mox.mock("never-called").returns(stdout="nope")',
-    ]
-
-
 def test_build_module_imports_handles_auto_fail() -> None:
     """Auto-fail scenarios should omit the subprocess helper import."""
-    assert _build_module_imports("auto_fail") == [
+    assert plugin_utils._build_module_imports("auto_fail") == [
         "import pytest",
         "from cmd_mox.controller import Phase",
     ]
@@ -406,7 +308,7 @@ def test_build_module_imports_handles_auto_fail() -> None:
 
 def test_build_module_imports_includes_helper_for_replay() -> None:
     """Replay scenarios should import the subprocess helper."""
-    assert _build_module_imports("REPLAY") == [
+    assert plugin_utils._build_module_imports("REPLAY") == [
         "import pytest",
         "from cmd_mox.controller import Phase",
         "from cmd_mox.unittests.conftest import run_subprocess",
@@ -415,7 +317,7 @@ def test_build_module_imports_includes_helper_for_replay() -> None:
 
 def test_build_module_setup_includes_helper_when_needed() -> None:
     """Replay modules should provide the shim path helper."""
-    assert _build_module_setup("REPLAY") == [
+    assert plugin_utils._build_module_setup("REPLAY") == [
         "",
         'pytest_plugins = ("cmd_mox.pytest_plugin",)',
         "",
@@ -429,7 +331,7 @@ def test_build_module_setup_includes_helper_when_needed() -> None:
 
 def test_build_module_setup_auto_fail_only_registers_plugin() -> None:
     """Auto-fail modules do not need the shim helper."""
-    assert _build_module_setup("auto_fail") == [
+    assert plugin_utils._build_module_setup("auto_fail") == [
         "",
         'pytest_plugins = ("cmd_mox.pytest_plugin",)',
         "",
@@ -438,7 +340,7 @@ def test_build_module_setup_auto_fail_only_registers_plugin() -> None:
 
 def test_build_decorator_section_appends_blank_line() -> None:
     """Decorators should retain their blank line separator."""
-    assert _build_decorator_section("@pytest.mark.something") == [
+    assert plugin_utils._build_decorator_section("@pytest.mark.something") == [
         "@pytest.mark.something",
         "",
     ]
@@ -446,7 +348,7 @@ def test_build_decorator_section_appends_blank_line() -> None:
 
 def test_build_decorator_section_empty_is_noop() -> None:
     """An empty decorator string should leave the module unchanged."""
-    assert _build_decorator_section("") == []
+    assert plugin_utils._build_decorator_section("") == []
 
 
 CaseType: t.TypeAlias = tuple[PhaseLiteral, bool, list[str]]
@@ -495,7 +397,8 @@ def test_build_test_function(case: CaseType) -> None:
     """The test function builder should mirror the legacy code paths."""
     expected_phase, should_fail, expected_lines = case
     assert (
-        _build_test_function(expected_phase, should_fail=should_fail) == expected_lines
+        plugin_utils._build_test_function(expected_phase, should_fail=should_fail)
+        == expected_lines
     )
 
 
@@ -503,4 +406,4 @@ def test_build_test_function_raises_for_invalid_phase() -> None:
     """Unexpected lifecycle values should raise the defensive error."""
     unexpected_phase = t.cast("PhaseLiteral", "UNKNOWN")
     with pytest.raises(ValueError, match="Unsupported expected_phase: UNKNOWN"):
-        _build_test_function(unexpected_phase, should_fail=False)
+        plugin_utils._build_test_function(unexpected_phase, should_fail=False)
