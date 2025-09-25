@@ -119,6 +119,74 @@ def test_register_command_creates_shim_during_replay(
     mox.verify()
 
 
+def test_ensure_shim_during_replay_skips_outside_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shim creation is skipped when CmdMox is not replaying."""
+    mox = CmdMox()
+
+    called = False
+
+    def _record(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        nonlocal called
+        called = True
+        return {name: directory / name for name in commands}
+
+    monkeypatch.setattr(controller, "create_shim_symlinks", _record)
+
+    mox._ensure_shim_during_replay("late")
+
+    assert not called
+
+
+def test_ensure_shim_during_replay_skips_without_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shim creation waits until the environment provides a shim directory."""
+    mox = CmdMox()
+    mox._phase = Phase.REPLAY
+
+    called = False
+
+    def _record(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        nonlocal called
+        called = True
+        return {name: directory / name for name in commands}
+
+    monkeypatch.setattr(controller, "create_shim_symlinks", _record)
+
+    mox._ensure_shim_during_replay("late")
+
+    assert not called
+
+
+def test_ensure_shim_during_replay_creates_symlink(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shim creation occurs immediately when replaying with an active environment."""
+    mox = CmdMox()
+    mox.__enter__()
+    mox.replay()
+
+    calls: list[tuple[Path, tuple[str, ...]]] = []
+
+    def _capture(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        recorded = tuple(commands)
+        calls.append((directory, recorded))
+        return {name: directory / name for name in recorded}
+
+    monkeypatch.setattr(controller, "create_shim_symlinks", _capture)
+
+    mox._ensure_shim_during_replay("late")
+
+    env = mox.environment
+    assert env is not None
+    assert env.shim_dir is not None
+    assert calls == [(env.shim_dir, ("late",))]
+
+    mox.__exit__(None, None, None)
+
+
 def test_register_command_fails_when_path_exists() -> None:
     """register_command refuses to overwrite existing non-symlink files."""
     mox = CmdMox(verify_on_exit=False)

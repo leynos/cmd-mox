@@ -206,10 +206,10 @@ assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 # Verification will run during fixture teardown.
 ```
 
-When you want to intercept a command without configuring a double—for example
-to ensure it is treated as unexpected—register it explicitly. Any invocation of
-a registered command without a matching double will be reported as unexpected
-during verification:
+To intercept a command without configuring a double—for example, to ensure it
+is treated as unexpected—register it explicitly. Any invocation of a registered
+command without a matching double will be reported as unexpected during
+verification:
 
 ```python
 cmd_mox.register_command("name")
