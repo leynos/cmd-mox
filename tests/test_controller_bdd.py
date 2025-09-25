@@ -75,9 +75,10 @@ def stub_command(mox: CmdMox, cmd: str, text: str) -> None:
         r'"(?P<stdout>[^"]*)" stderr "(?P<stderr>[^"]*)" exit code (?P<code>\d+)'
     )
 )
-def stub_command_full(mox: CmdMox, cmd: str, stdout: str, stderr: str, code: str) -> None:
+def stub_command_full(
+    mox: CmdMox, cmd: str, stdout: str, stderr: str, code: str
+) -> None:
     """Configure a stubbed command with explicit streams and exit code."""
-
     mox.stub(cmd).returns(stdout=stdout, stderr=stderr, exit_code=int(code))
 
 
