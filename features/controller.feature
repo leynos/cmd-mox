@@ -18,6 +18,7 @@ Feature: CmdMox basic functionality
     And the exit code should be 3
     When I verify the controller
     Then the journal should contain 1 invocation of "shimcmd"
+    And the journal entry for "shimcmd" should record stdout "shim says" stderr "warn" exit code 3
 
   Scenario: shim merges environment overrides across invocations
     Given a CmdMox controller
