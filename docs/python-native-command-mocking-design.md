@@ -490,6 +490,23 @@ This socket-based IPC architecture is the key technical differentiator for
 exchange of rich, complex data structures, providing a foundation for advanced
 features that are infeasible with file-based logging.
 
+#### Implementation Notes
+
+- The shim infers the command name from ``argv[0]`` via :class:`pathlib.Path`
+  so that the same script can impersonate any executable linked into the shim
+  directory.
+- Standard input is eagerly read when the shim detects it is connected to a
+  pipe. Guarding the read with ``sys.stdin.isatty()`` avoids blocking when a
+  user invokes an interactive command during a test run.
+- The shim sends a shallow copy of ``os.environ`` to the IPC server. This
+  captures environment variables at call time without mutating the caller's
+  process state.
+- Responses received from the server are written directly to ``stdout`` and
+  ``stderr`` before the process exits using the supplied exit code. Any
+  environment overrides returned by the server are merged into the shim's
+  process environment, enabling later invocations in the same process to see
+  those changes.
+
 The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
 socket path provided by the `EnvironmentManager`. Incoming JSON messages are

@@ -69,6 +69,18 @@ def stub_command(mox: CmdMox, cmd: str, text: str) -> None:
     mox.stub(cmd).returns(stdout=text)
 
 
+@given(
+    parsers.re(
+        r'the command "(?P<cmd>[^"]+)" is stubbed to return stdout '
+        r'"(?P<stdout>[^"]*)" stderr "(?P<stderr>[^"]*)" exit code (?P<code>\d+)'
+    )
+)
+def stub_command_full(mox: CmdMox, cmd: str, stdout: str, stderr: str, code: str) -> None:
+    """Configure a stubbed command with explicit streams and exit code."""
+
+    mox.stub(cmd).returns(stdout=stdout, stderr=stderr, exit_code=int(code))
+
+
 @given(parsers.cfparse('the command "{cmd}" is mocked to return "{text}"'))
 def mock_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a mocked command."""

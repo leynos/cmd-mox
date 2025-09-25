@@ -131,17 +131,17 @@
 
 ## **VI. Shim Behaviour**
 
-- [ ] **Shim Startup Logic**
+- [x] **Shim Startup Logic**
 
-  - [ ] Determine which command to simulate via `argv[0]`
+  - [x] Determine which command to simulate via `argv[0]`
 
-  - [ ] Connect to IPC socket
+  - [x] Connect to IPC socket
 
-  - [ ] Capture stdin, argv, env
+  - [x] Capture stdin, argv, env
 
-  - [ ] Send invocation to IPC server, wait for response
+  - [x] Send invocation to IPC server, wait for response
 
-  - [ ] Apply returned behaviour: print `stdout`, `stderr`, exit with code
+  - [x] Apply returned behaviour: print `stdout`, `stderr`, exit with code
 
 - [ ] **Passthrough Spies**
 
