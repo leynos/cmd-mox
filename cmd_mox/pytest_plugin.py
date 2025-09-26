@@ -282,16 +282,13 @@ def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
 
     manager = _CmdMoxManager(request)
     body_failed = False
-    entered = False
 
     try:
         manager.enter()
-        entered = True
     except Exception:
         logger.exception("Error during cmd_mox fixture setup or test execution")
-        if entered:
+        if manager.entered:
             manager.exit(body_failed=body_failed)
-            entered = False
         raise
 
     try:
@@ -299,10 +296,9 @@ def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
     except Exception:
         body_failed = True
         logger.exception("Error during cmd_mox fixture setup or test execution")
-        if entered:
+        if manager.entered:
             manager.exit(body_failed=True)
-            entered = False
         raise
     finally:
-        if entered:
+        if manager.entered:
             manager.exit(body_failed=body_failed)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import textwrap
 import typing as t
 
 import pytest
@@ -10,6 +12,9 @@ from cmd_mox import pytest_plugin
 from cmd_mox.controller import Phase
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.pytest_plugin import _CmdMoxManager
+
+if t.TYPE_CHECKING:
+    from pathlib import Path
 
 _VERIFY_ERROR_MESSAGE = "verify boom"
 _EXIT_ERROR_MESSAGE = "exit boom"
@@ -189,6 +194,49 @@ def test_worker_prefix_generation(
     env = manager.mox.environment
     assert isinstance(env, EnvironmentManager)
     assert env._prefix.startswith(expected_prefix)
+
+
+def test_cmd_mox_fixture_restores_path_on_replay_failure(
+    pytester: pytest.Pytester, tmp_path: Path
+) -> None:
+    """Fixture teardown restores PATH after replay raises during setup."""
+    original_path = os.environ.get("PATH", "")
+    dump_path = tmp_path / "path_snapshot.txt"
+
+    test_module = textwrap.dedent(
+        f"""
+        import os
+        import pytest
+        from pathlib import Path
+
+        from cmd_mox.controller import CmdMox
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        PATH_DUMP = Path({str(dump_path)!r})
+
+        @pytest.fixture(autouse=True)
+        def break_replay(monkeypatch):
+            def _boom(self):
+                PATH_DUMP.write_text(os.environ.get("PATH", ""))
+                raise RuntimeError("replay boom")
+
+            monkeypatch.setattr(CmdMox, "replay", _boom)
+
+        def test_replay_failure(cmd_mox):
+            assert False, "fixture should error before running"
+        """
+    )
+
+    pytester.makepyfile(test_module)
+    result = pytester.runpytest_inprocess()
+    result.assert_outcomes(errors=1)
+
+    assert dump_path.exists()
+    recorded_path = dump_path.read_text().strip()
+    assert recorded_path != original_path
+    assert "cmdmox-" in recorded_path
+    assert os.environ.get("PATH", "") == original_path
 
 
 def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
