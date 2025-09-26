@@ -23,14 +23,12 @@ def _build_worker_prefix(config: pytest.Config) -> str:
     worker_id = os.getenv("PYTEST_XDIST_WORKER")
     if worker_id is None:
         worker_input = getattr(config, "workerinput", None)
+        wid = None
         if isinstance(worker_input, dict):
-            mapping_worker_id = worker_input.get("workerid")
-            worker_id = "main" if mapping_worker_id is None else str(mapping_worker_id)
+            wid = worker_input.get("workerid")
         else:
-            attribute_worker_id = getattr(worker_input, "workerid", None)
-            worker_id = (
-                "main" if attribute_worker_id is None else str(attribute_worker_id)
-            )
+            wid = getattr(worker_input, "workerid", None)
+        worker_id = "main" if wid is None else str(wid)
     return f"cmdmox-{worker_id}-{os.getpid()}-"
 
 
@@ -125,6 +123,9 @@ class _CmdMoxManager:
             verify_on_exit=False,
             environment=EnvironmentManager(prefix=_build_worker_prefix(self.config)),
         )
+        # CmdMox wires its command runner to the provided environment during
+        # initialisation, so injecting the worker-scoped manager here ensures the
+        # replay lifecycle observes the correct PATH mutations once entered.
         self._entered = False
 
     @property
@@ -194,6 +195,19 @@ class _CmdMoxManager:
     ) -> None:
         """Aggregate teardown errors and fail the test."""
         errors = _aggregate_teardown_errors(verify_error, exit_error)
+        add_section = getattr(self.request.node, "add_report_section", None)
+        if callable(add_section):
+            for stage, err in errors:
+                if stage == "verification":
+                    # Verification failures already register a section when they
+                    # occur so suppressed errors remain visible without
+                    # duplicating entries here.
+                    continue
+                add_section(
+                    "teardown",
+                    f"cmd_mox {stage}",
+                    f"{type(err).__name__}: {err}",
+                )
         message = _format_teardown_failure(errors)
         pytest.fail(message)
 
@@ -301,7 +315,10 @@ def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
             yield manager.mox
         except Exception:
             body_failed = True
-            logger.exception("Error during cmd_mox fixture setup or test execution")
+            logger.debug(
+                "Error during cmd_mox fixture setup or test execution",
+                exc_info=True,
+            )
             raise
     finally:
         manager.exit(body_failed=body_failed)

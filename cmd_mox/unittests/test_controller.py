@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import tempfile
 import typing as t
 from pathlib import Path
@@ -176,6 +175,9 @@ def test_ensure_shim_during_replay_behaviour(
     mox = CmdMox()
 
     if setup == "phase_only":
+        # Directly toggle the private phase to isolate replay behaviour without
+        # invoking the full environment machinery. The test accepts the tighter
+        # coupling in exchange for targeting this edge case explicitly.
         mox._phase = Phase.REPLAY
     elif setup == "full_replay":
         mox.__enter__()

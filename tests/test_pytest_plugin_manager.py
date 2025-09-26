@@ -378,7 +378,7 @@ def test_exit_cmd_mox_reports_cleanup_error_when_body_failed(
 
     message = str(excinfo.value)
     assert "cleanup OSError: exit boom" in message
-    assert node.sections == []
+    assert node.sections == [("teardown", "cmd_mox cleanup", "OSError: exit boom")]
 
 
 def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
@@ -386,6 +386,7 @@ def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
 ) -> None:
     """Verification errors fail the test when the body succeeded."""
     request = _StubRequest(config=_StubConfig())
+    node = request.node
     manager = _make_manager(monkeypatch, request, raise_on_verify=True)
 
     manager.enter()
@@ -394,11 +395,15 @@ def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
         manager.exit(body_failed=False)
 
     assert "cmd_mox verification RuntimeError: verify boom" in str(excinfo.value)
+    assert node.sections == [
+        ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
+    ]
 
 
 def test_exit_cmd_mox_fails_on_cleanup_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cleanup errors always fail the test."""
     request = _StubRequest(config=_StubConfig())
+    node = request.node
     manager = _make_manager(monkeypatch, request, raise_on_exit=True)
 
     manager.enter()
@@ -408,6 +413,7 @@ def test_exit_cmd_mox_fails_on_cleanup_error(monkeypatch: pytest.MonkeyPatch) ->
 
     message = str(excinfo.value)
     assert "cmd_mox cleanup OSError: exit boom" in message
+    assert node.sections == [("teardown", "cmd_mox cleanup", "OSError: exit boom")]
 
 
 def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
@@ -415,6 +421,7 @@ def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
 ) -> None:
     """Combined teardown failures report both verification and cleanup issues."""
     request = _StubRequest(config=_StubConfig())
+    node = request.node
     manager = _make_manager(
         monkeypatch, request, raise_on_exit=True, raise_on_verify=True
     )
@@ -427,6 +434,10 @@ def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
     message = str(excinfo.value)
     assert "verification RuntimeError: verify boom" in message
     assert "cleanup OSError: exit boom" in message
+    assert node.sections == [
+        ("teardown", "cmd_mox verification", "RuntimeError: verify boom"),
+        ("teardown", "cmd_mox cleanup", "OSError: exit boom"),
+    ]
 
 
 def test_exit_cmd_mox_is_idempotent_without_enter(
