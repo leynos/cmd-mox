@@ -105,21 +105,53 @@ class _CmdMoxManager:
         if not self._entered:
             return
 
-        call_failed = bool(getattr(self.request.node, "_cmd_mox_call_failed", False))
-        if hasattr(self.request.node, "_cmd_mox_call_failed"):
-            delattr(self.request.node, "_cmd_mox_call_failed")
-        effective_body_failed = body_failed or call_failed
+        self._body_failed_context = body_failed
+        try:
+            effective_body_failed = self._determine_effective_failure()
+        finally:
+            del self._body_failed_context
 
-        verify_error = self._verify_if_needed()
-        exit_error = self._close_controller()
+        verify_error, exit_error = self._run_teardown_operations()
         self._entered = False
 
         if verify_error is None and exit_error is None:
             return
 
-        if verify_error is not None and exit_error is None and effective_body_failed:
+        if self._should_suppress_errors(
+            verify_error, exit_error, effective_body_failed=effective_body_failed
+        ):
             return
 
+        self._handle_teardown_errors(verify_error, exit_error)
+
+    def _determine_effective_failure(self) -> bool:
+        """Return whether the body or call stage reported a failure."""
+        body_failed = bool(getattr(self, "_body_failed_context", False))
+        call_failed = bool(getattr(self.request.node, "_cmd_mox_call_failed", False))
+        if hasattr(self.request.node, "_cmd_mox_call_failed"):
+            delattr(self.request.node, "_cmd_mox_call_failed")
+        return body_failed or call_failed
+
+    def _run_teardown_operations(self) -> tuple[Exception | None, Exception | None]:
+        """Execute verification and cleanup, returning any captured errors."""
+        verify_error = self._verify_if_needed()
+        exit_error = self._close_controller()
+        return verify_error, exit_error
+
+    def _should_suppress_errors(
+        self,
+        verify_error: Exception | None,
+        exit_error: Exception | None,
+        *,
+        effective_body_failed: bool,
+    ) -> bool:
+        """Return True when teardown errors should be suppressed."""
+        return verify_error is not None and exit_error is None and effective_body_failed
+
+    def _handle_teardown_errors(
+        self, verify_error: Exception | None, exit_error: Exception | None
+    ) -> None:
+        """Aggregate teardown errors and fail the test."""
         errors: list[tuple[str, Exception]] = []
         if verify_error is not None:
             errors.append(("verification", verify_error))
