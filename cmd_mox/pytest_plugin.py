@@ -121,9 +121,9 @@ class _CmdMoxManager:
         self.request = request
         self.config = request.config
         self._auto_lifecycle = self._auto_lifecycle_enabled()
-        self.mox = CmdMox(verify_on_exit=False)
-        self.mox.environment = EnvironmentManager(
-            prefix=_build_worker_prefix(self.config)
+        self.mox = CmdMox(
+            verify_on_exit=False,
+            environment=EnvironmentManager(prefix=_build_worker_prefix(self.config)),
         )
         self._entered = False
 

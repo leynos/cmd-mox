@@ -99,6 +99,7 @@ class _StubMox:
         raise_on_exit: bool = False,
         raise_on_verify: bool = False,
         verify_on_exit: bool = False,
+        environment: EnvironmentManager | None = None,
     ) -> None:
         self.phase = phase
         self.raise_on_exit = raise_on_exit
@@ -108,7 +109,7 @@ class _StubMox:
         self.replay_calls = 0
         self.verify_calls = 0
         self.exit_calls: list[tuple[object | None, object | None, object | None]] = []
-        self.environment: object | None = None
+        self.environment: object | None = environment
 
     def __enter__(self) -> _StubMox:
         self.enter_calls += 1
@@ -143,8 +144,16 @@ def _make_manager(
 ) -> _CmdMoxManager:
     """Instantiate a manager while substituting the CmdMox dependency."""
 
-    def _factory(*, verify_on_exit: bool = False) -> _StubMox:
-        return _StubMox(verify_on_exit=verify_on_exit, **stub_kwargs)
+    def _factory(
+        *,
+        verify_on_exit: bool = False,
+        environment: EnvironmentManager | None = None,
+    ) -> _StubMox:
+        return _StubMox(
+            verify_on_exit=verify_on_exit,
+            environment=environment,
+            **stub_kwargs,
+        )
 
     monkeypatch.setattr(pytest_plugin, "CmdMox", _factory)
     manager = _CmdMoxManager(t.cast("pytest.FixtureRequest", request))

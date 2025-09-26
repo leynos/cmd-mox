@@ -348,7 +348,11 @@ class CmdMox:
     """Central orchestrator implementing the record-replay-verify lifecycle."""
 
     def __init__(
-        self, *, verify_on_exit: bool = True, max_journal_entries: int | None = None
+        self,
+        *,
+        verify_on_exit: bool = True,
+        max_journal_entries: int | None = None,
+        environment: EnvironmentManager | None = None,
     ) -> None:
         """Create a new controller.
 
@@ -362,8 +366,13 @@ class CmdMox:
             Maximum number of invocations retained in the journal. When ``None``,
             the journal is unbounded. Older entries are discarded once the limit
             is exceeded. The journal is cleared at the start of each ``replay()``.
+        environment:
+            Optional :class:`EnvironmentManager` instance used to prepare shim and
+            PATH state. When omitted a fresh manager is created automatically.
         """
-        self.environment = EnvironmentManager()
+        self.environment = (
+            environment if environment is not None else EnvironmentManager()
+        )
         self._server: _CallbackIPCServer | None = None
         self._runner = CommandRunner(self.environment)
         self._entered = False
