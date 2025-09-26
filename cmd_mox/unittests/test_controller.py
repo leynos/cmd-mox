@@ -23,6 +23,30 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 
 
+class _ShimSymlinkSpy:
+    """Capture shim creation attempts for assertions."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[Path, tuple[str, ...]]] = []
+
+    def __call__(self, directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        recorded = tuple(commands)
+        self.calls.append((directory, recorded))
+        return {name: directory / name for name in recorded}
+
+    @property
+    def called(self) -> bool:
+        return bool(self.calls)
+
+
+@pytest.fixture
+def shim_symlink_spy(monkeypatch: pytest.MonkeyPatch) -> _ShimSymlinkSpy:
+    """Redirect ``create_shim_symlinks`` to a spy for reuse across tests."""
+    spy = _ShimSymlinkSpy()
+    monkeypatch.setattr(controller, "create_shim_symlinks", spy)
+    return spy
+
+
 def test_cmdmox_stub_records_invocation(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -94,97 +118,63 @@ def test_cmdmox_nonstubbed_command_behavior(
 
 
 def test_register_command_creates_shim_during_replay(
-    monkeypatch: pytest.MonkeyPatch,
+    shim_symlink_spy: _ShimSymlinkSpy,
 ) -> None:
     """register_command creates missing shims immediately during replay."""
     mox = CmdMox()
     mox.__enter__()
     mox.replay()
+    shim_symlink_spy.calls.clear()
 
-    calls: list[tuple[Path, tuple[str, ...]]] = []
-
-    def _capture(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
-        recorded = tuple(commands)
-        calls.append((directory, recorded))
-        return {name: directory / name for name in recorded}
-
-    monkeypatch.setattr(controller, "create_shim_symlinks", _capture)
     mox.register_command("late")
 
     env = mox.environment
     assert env is not None
     assert env.shim_dir is not None
-    assert calls == [(env.shim_dir, ("late",))]
+    assert shim_symlink_spy.calls == [(env.shim_dir, ("late",))]
 
     mox.verify()
 
 
-def test_ensure_shim_during_replay_skips_outside_replay(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("setup", "expected_call_count", "cleanup"),
+    [
+        pytest.param("no_replay", 0, None, id="outside-replay"),
+        pytest.param("phase_only", 0, None, id="replay-without-environment"),
+        pytest.param("full_replay", 1, "exit", id="replay-with-environment"),
+    ],
+)
+def test_ensure_shim_during_replay_behaviour(
+    setup: str,
+    expected_call_count: int,
+    cleanup: str | None,
+    shim_symlink_spy: _ShimSymlinkSpy,
 ) -> None:
-    """Shim creation is skipped when CmdMox is not replaying."""
+    """_ensure_shim_during_replay handles replay state and environment availability."""
     mox = CmdMox()
 
-    called = False
-
-    def _record(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
-        nonlocal called
-        called = True
-        return {name: directory / name for name in commands}
-
-    monkeypatch.setattr(controller, "create_shim_symlinks", _record)
+    if setup == "phase_only":
+        mox._phase = Phase.REPLAY
+    elif setup == "full_replay":
+        mox.__enter__()
+        mox.replay()
+        shim_symlink_spy.calls.clear()
 
     mox._ensure_shim_during_replay("late")
 
-    assert not called
+    if expected_call_count:
+        env = mox.environment
+        assert env is not None
+        assert env.shim_dir is not None
+        assert shim_symlink_spy.calls == [(env.shim_dir, ("late",))]
+    else:
+        assert not shim_symlink_spy.called
+        assert shim_symlink_spy.calls == []
 
+    assert len(shim_symlink_spy.calls) == expected_call_count
 
-def test_ensure_shim_during_replay_skips_without_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Shim creation waits until the environment provides a shim directory."""
-    mox = CmdMox()
-    mox._phase = Phase.REPLAY
-
-    called = False
-
-    def _record(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
-        nonlocal called
-        called = True
-        return {name: directory / name for name in commands}
-
-    monkeypatch.setattr(controller, "create_shim_symlinks", _record)
-
-    mox._ensure_shim_during_replay("late")
-
-    assert not called
-
-
-def test_ensure_shim_during_replay_creates_symlink(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Shim creation occurs immediately when replaying with an active environment."""
-    mox = CmdMox()
-    mox.__enter__()
-    mox.replay()
-
-    calls: list[tuple[Path, tuple[str, ...]]] = []
-
-    def _capture(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
-        recorded = tuple(commands)
-        calls.append((directory, recorded))
-        return {name: directory / name for name in recorded}
-
-    monkeypatch.setattr(controller, "create_shim_symlinks", _capture)
-
-    mox._ensure_shim_during_replay("late")
-
-    env = mox.environment
-    assert env is not None
-    assert env.shim_dir is not None
-    assert calls == [(env.shim_dir, ("late",))]
-
-    mox.__exit__(None, None, None)
+    if cleanup == "exit":
+        mox.__exit__(None, None, None)
 
 
 def test_register_command_fails_when_path_exists() -> None:

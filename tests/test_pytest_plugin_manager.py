@@ -146,47 +146,49 @@ def _make_manager(
     return manager
 
 
-def test_worker_prefix_uses_mapping_workerinput(
+@pytest.mark.parametrize(
+    ("env_var", "workerinput", "expected_prefix"),
+    [
+        pytest.param(
+            None,
+            {"workerid": "gw-dict"},
+            "cmdmox-gw-dict-",
+            id="mapping-workerinput",
+        ),
+        pytest.param(
+            "env-worker",
+            {"workerid": "gw-dict"},
+            "cmdmox-env-worker-",
+            id="env-override",
+        ),
+        pytest.param(
+            None,
+            object(),
+            "cmdmox-main-",
+            id="unexpected-workerinput",
+        ),
+    ],
+)
+def test_worker_prefix_generation(
     monkeypatch: pytest.MonkeyPatch,
+    env_var: str | None,
+    workerinput: object,
+    expected_prefix: str,
 ) -> None:
-    """Ensure xdist-style dict payloads produce unique worker prefixes."""
-    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
-    config = _StubConfig(workerinput={"workerid": "gw-dict"})
+    """Ensure worker prefix generation from various input sources."""
+    if env_var is None:
+        monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    else:
+        monkeypatch.setenv("PYTEST_XDIST_WORKER", env_var)
+
+    config = _StubConfig(workerinput=workerinput)
     request = _StubRequest(config=config)
 
     manager = _make_manager(monkeypatch, request)
 
     env = manager.mox.environment
     assert isinstance(env, EnvironmentManager)
-    assert env._prefix.startswith("cmdmox-gw-dict-")
-
-
-def test_worker_prefix_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure PYTEST_XDIST_WORKER env var overrides config.workerinput."""
-    monkeypatch.setenv("PYTEST_XDIST_WORKER", "env-worker")
-    config = _StubConfig(workerinput={"workerid": "gw-dict"})
-    request = _StubRequest(config=config)
-
-    manager = _make_manager(monkeypatch, request)
-
-    env = manager.mox.environment
-    assert isinstance(env, EnvironmentManager)
-    assert env._prefix.startswith("cmdmox-env-worker-")
-
-
-def test_worker_prefix_with_unexpected_workerinput(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Unexpected workerinput types fall back to the main-process prefix."""
-    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
-    config = _StubConfig(workerinput=object())
-    request = _StubRequest(config=config)
-
-    manager = _make_manager(monkeypatch, request)
-
-    env = manager.mox.environment
-    assert isinstance(env, EnvironmentManager)
-    assert env._prefix.startswith("cmdmox-main-")
+    assert env._prefix.startswith(expected_prefix)
 
 
 def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
