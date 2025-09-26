@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import textwrap
 import typing as t
+from dataclasses import dataclass  # noqa: ICN003
 
 import pytest
 
@@ -89,6 +90,15 @@ class _StubRequest:
             self.param = param
 
 
+@dataclass
+class StubMoxBehaviorConfig:
+    """Configuration for _StubMox behavioral flags."""
+
+    raise_on_exit: bool = False
+    raise_on_verify: bool = False
+    verify_on_exit: bool = False
+
+
 class _StubMox:
     """Minimal CmdMox stand-in for exercising manager behaviour."""
 
@@ -96,15 +106,14 @@ class _StubMox:
         self,
         *,
         phase: Phase = Phase.REPLAY,
-        raise_on_exit: bool = False,
-        raise_on_verify: bool = False,
-        verify_on_exit: bool = False,
+        behavior: StubMoxBehaviorConfig | None = None,
         environment: EnvironmentManager | None = None,
     ) -> None:
         self.phase = phase
-        self.raise_on_exit = raise_on_exit
-        self.raise_on_verify = raise_on_verify
-        self.verify_on_exit = verify_on_exit
+        config = behavior or StubMoxBehaviorConfig()
+        self.raise_on_exit = config.raise_on_exit
+        self.raise_on_verify = config.raise_on_verify
+        self.verify_on_exit = config.verify_on_exit
         self.enter_calls = 0
         self.replay_calls = 0
         self.verify_calls = 0
@@ -150,10 +159,16 @@ def _make_manager(
         environment: EnvironmentManager | None = None,
     ) -> _StubMox:
         # Keep signature compatible with real CmdMox; forward kwargs to stub.
-        return _StubMox(
-            environment=environment,
+        behavior_config = StubMoxBehaviorConfig(
             verify_on_exit=verify_on_exit,
-            **stub_kwargs,
+            raise_on_exit=t.cast("bool", stub_kwargs.get("raise_on_exit", False)),
+            raise_on_verify=t.cast("bool", stub_kwargs.get("raise_on_verify", False)),
+        )
+        phase = t.cast("Phase", stub_kwargs.get("phase", Phase.REPLAY))
+        return _StubMox(
+            phase=phase,
+            behavior=behavior_config,
+            environment=environment,
         )
 
     monkeypatch.setattr(pytest_plugin, "CmdMox", _factory)
