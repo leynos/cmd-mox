@@ -14,6 +14,9 @@ from .platform import skip_if_unsupported
 
 logger = logging.getLogger(__name__)
 
+# Stash key to record per-item call-stage failure state.
+STASH_CALL_FAILED: pytest.StashKey[bool] = pytest.StashKey()
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register command-line and ini options for the plugin."""
@@ -69,7 +72,7 @@ def pytest_runtest_makereport(
     outcome = yield
     rep = outcome.get_result()
     if rep.when == "call":
-        item._cmd_mox_call_failed = rep.failed  # type: ignore[attr-defined]
+        item.stash[STASH_CALL_FAILED] = rep.failed
 
 
 class _CmdMoxManager:
@@ -105,11 +108,9 @@ class _CmdMoxManager:
         if not self._entered:
             return
 
-        self._body_failed_context = body_failed
-        try:
-            effective_body_failed = self._determine_effective_failure()
-        finally:
-            del self._body_failed_context
+        effective_body_failed = self._determine_effective_failure(
+            body_failed=body_failed
+        )
 
         verify_error, exit_error = self._run_teardown_operations()
         self._entered = False
@@ -124,12 +125,11 @@ class _CmdMoxManager:
 
         self._handle_teardown_errors(verify_error, exit_error)
 
-    def _determine_effective_failure(self) -> bool:
+    def _determine_effective_failure(self, *, body_failed: bool) -> bool:
         """Return whether the body or call stage reported a failure."""
-        body_failed = bool(getattr(self, "_body_failed_context", False))
-        call_failed = bool(getattr(self.request.node, "_cmd_mox_call_failed", False))
-        if hasattr(self.request.node, "_cmd_mox_call_failed"):
-            delattr(self.request.node, "_cmd_mox_call_failed")
+        call_failed = bool(self.request.node.stash.get(STASH_CALL_FAILED, False))
+        if STASH_CALL_FAILED in self.request.node.stash:
+            del self.request.node.stash[STASH_CALL_FAILED]
         return body_failed or call_failed
 
     def _run_teardown_operations(self) -> tuple[Exception | None, Exception | None]:
@@ -281,24 +281,12 @@ def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
     skip_if_unsupported()
 
     manager = _CmdMoxManager(request)
-    body_failed = False
-
     try:
         manager.enter()
-    except Exception:
-        logger.exception("Error during cmd_mox fixture setup or test execution")
-        if manager.entered:
-            manager.exit(body_failed=body_failed)
-        raise
-
-    try:
         yield manager.mox
     except Exception:
-        body_failed = True
         logger.exception("Error during cmd_mox fixture setup or test execution")
-        if manager.entered:
-            manager.exit(body_failed=True)
+        manager.exit(body_failed=True)
         raise
     finally:
-        if manager.entered:
-            manager.exit(body_failed=body_failed)
+        manager.exit(body_failed=False)

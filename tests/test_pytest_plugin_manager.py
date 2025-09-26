@@ -57,11 +57,12 @@ class _StubMarker:
 class _StubNode:
     """Minimal pytest node supporting markers and report sections."""
 
-    __slots__ = ("_marker", "sections")
+    __slots__ = ("_marker", "sections", "stash")
 
     def __init__(self, marker: _StubMarker | None = None) -> None:
         self._marker = marker
         self.sections: list[tuple[str, str, str]] = []
+        self.stash = pytest.Stash()
 
     def get_closest_marker(self, name: str) -> _StubMarker | None:
         return self._marker if name == "cmd_mox" else None
