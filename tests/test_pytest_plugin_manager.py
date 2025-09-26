@@ -11,7 +11,7 @@ import pytest
 from cmd_mox import pytest_plugin
 from cmd_mox.controller import Phase
 from cmd_mox.environment import EnvironmentManager
-from cmd_mox.pytest_plugin import _CmdMoxManager
+from cmd_mox.pytest_plugin import STASH_CALL_FAILED, _CmdMoxManager
 
 if t.TYPE_CHECKING:
     from pathlib import Path
@@ -308,6 +308,28 @@ def test_exit_cmd_mox_records_verify_error_when_test_failed(
 
     manager.enter()
     manager.exit(body_failed=True)
+
+    stub = t.cast("_StubMox", manager.mox)
+    assert stub.verify_calls == 1
+    assert node.sections == [
+        ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
+    ]
+
+
+def test_exit_cmd_mox_records_verify_error_when_call_stage_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Call-stage failure suppresses verify error and records a section."""
+    node = _StubNode()
+    request = _StubRequest(config=_StubConfig(), node=node)
+    manager = _make_manager(monkeypatch, request, raise_on_verify=True)
+
+    manager.enter()
+    # Simulate pytest_runtest_makereport storing call failure on the node.
+    node.stash[STASH_CALL_FAILED] = True
+
+    # Should not raise; error is suppressed and recorded as a teardown section.
+    manager.exit(body_failed=False)
 
     stub = t.cast("_StubMox", manager.mox)
     assert stub.verify_calls == 1
