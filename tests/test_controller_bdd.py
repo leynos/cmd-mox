@@ -6,6 +6,8 @@ import contextlib
 import os
 import shlex
 import subprocess
+import sys
+import textwrap
 import typing as t
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from cmd_mox.errors import (
     UnfulfilledExpectationError,
     VerificationError,
 )
+from cmd_mox.ipc import Response
 from tests.helpers.controller import (
     CommandExecution,
     JournalEntryExpectation,
@@ -67,6 +70,19 @@ def create_controller_with_limit_fails(size: int) -> None:
 def stub_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a stubbed command."""
     mox.stub(cmd).returns(stdout=text)
+
+
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is stubbed to return stdout "{stdout}" '
+        'stderr "{stderr}" exit code {code:d}'
+    )
+)
+def stub_command_full(
+    mox: CmdMox, cmd: str, stdout: str, stderr: str, code: int
+) -> None:
+    """Configure a stubbed command with explicit streams and exit code."""
+    mox.stub(cmd).returns(stdout=stdout, stderr=stderr, exit_code=code)
 
 
 @given(parsers.cfparse('the command "{cmd}" is mocked to return "{text}"'))
@@ -169,6 +185,70 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     mox.stub(cmd).with_env({var: val}).runs(handler)
 
 
+@given(parsers.cfparse('the command "{cmd}" seeds shim env var "{var}"="{val}"'))
+def stub_seeds_shim_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
+    """Stub command that injects an environment override for future shims."""
+
+    def handler(_: Invocation) -> Response:
+        return Response(env={var: val})
+
+    mox.stub(cmd).runs(handler)
+
+
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" expects shim env var "{expected}"="{value}" '
+        'and seeds "{var}"="{val}"'
+    )
+)
+def stub_expect_and_seed_env(
+    mox: CmdMox, cmd: str, expected: str, value: str, var: str, val: str
+) -> None:
+    """Stub that validates an inherited env var before injecting another."""
+
+    def handler(invocation: Invocation) -> Response:
+        actual = invocation.env.get(expected)
+        if actual != value:
+            msg = (
+                f"expected shim env {expected!r} to equal {value!r} but got {actual!r}"
+            )
+            raise AssertionError(msg)
+        return Response(env={var: val})
+
+    mox.stub(cmd).runs(handler)
+
+
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" records shim env vars "{first}"="{first_val}" '
+        'and "{second}"="{second_val}"'
+    )
+)
+def stub_records_merged_env(
+    mox: CmdMox, cmd: str, first: str, first_val: str, second: str, second_val: str
+) -> None:
+    """Stub that asserts merged shim environment values."""
+
+    def handler(invocation: Invocation) -> tuple[str, str, int]:
+        actual_first = invocation.env.get(first)
+        actual_second = invocation.env.get(second)
+        if actual_first != first_val:
+            msg = (
+                "expected shim env "
+                f"{first!r} to equal {first_val!r} but got {actual_first!r}"
+            )
+            raise AssertionError(msg)
+        if actual_second != second_val:
+            msg = (
+                "expected shim env "
+                f"{second!r} to equal {second_val!r} but got {actual_second!r}"
+            )
+            raise AssertionError(msg)
+        return (f"{actual_first}+{actual_second}", "", 0)
+
+    mox.stub(cmd).runs(handler)
+
+
 @given(parsers.cfparse('the command "{cmd}" requires env var "{var}"="{val}"'))
 def command_requires_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     """Attach an environment requirement to an existing double."""
@@ -228,6 +308,63 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
         [cmd], capture_output=True, text=True, check=True, shell=False
     )
+
+
+@when(
+    parsers.cfparse('I run the shim sequence "{sequence}"'),
+    target_fixture="result",
+)
+def run_shim_sequence(sequence: str) -> subprocess.CompletedProcess[str]:
+    """Invoke a list of shim commands within a single Python process."""
+    commands = shlex.split(sequence)
+    script = textwrap.dedent(
+        """
+        import contextlib
+        import io
+        import sys
+
+        import cmd_mox.shim as shim
+
+        def invoke(name: str) -> tuple[str, str, int]:
+            original_argv = sys.argv[:]
+            original_stdin = sys.stdin
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            sys.argv = [name]
+            sys.stdin = io.StringIO("")
+            try:
+                with contextlib.redirect_stdout(stdout):
+                    with contextlib.redirect_stderr(stderr):
+                        try:
+                            shim.main()
+                        except SystemExit as exc:
+                            code = exc.code
+                            if code is None:
+                                code = 0
+                            elif not isinstance(code, int):
+                                code = 1
+                        else:
+                            code = 0
+            finally:
+                sys.argv = original_argv
+                sys.stdin = original_stdin
+            return stdout.getvalue(), stderr.getvalue(), code
+
+        last_stdout = ""
+        last_stderr = ""
+        code = 0
+        for cmd_name in sys.argv[1:]:
+            last_stdout, last_stderr, code = invoke(cmd_name)
+            if code != 0:
+                break
+
+        sys.stdout.write(last_stdout)
+        sys.stderr.write(last_stderr)
+        sys.exit(code)
+        """
+    )
+    argv = [sys.executable, "-c", script, *commands]
+    return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603
 
 
 @when(
@@ -394,6 +531,24 @@ def check_journal_order(mox: CmdMox, commands: str) -> None:
 @scenario(str(FEATURES_DIR / "controller.feature"), "stubbed command execution")
 def test_stubbed_command_execution() -> None:
     """Stubbed command returns expected output."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "shim forwards stdout stderr and exit code",
+)
+def test_shim_forwards_streams() -> None:
+    """Shim applies server provided stdout, stderr, and exit code."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "shim merges environment overrides across invocations",
+)
+def test_shim_merges_env_overrides() -> None:
+    """Shim persists environment overrides between invocations."""
     pass
 
 

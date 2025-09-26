@@ -171,7 +171,9 @@ mox.spy("aws").passthrough()
 This "record mode" is helpful for capturing real interactions and later turning
 them into mocks.
 
-Spies provide assertion helpers inspired by `unittest.mock` that can be called in the test body or after verification:
+Spies provide assertion helpers inspired by `unittest.mock` that can be called
+in the test body or after verification:
+
 ```python
 spy.assert_called()
 spy.assert_called_with("--silent", stdin="payload")
@@ -204,12 +206,19 @@ assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 # Verification will run during fixture teardown.
 ```
 
-When you want to intercept a command without configuring a double—for example to ensure it is treated as unexpected—register it explicitly. Any invocation of a registered command without a matching double will be reported as unexpected during verification:
+When you want to intercept a command without configuring a double—for example
+to ensure it is treated as unexpected—register it explicitly. Any invocation of
+a registered command without a matching double will be reported as unexpected
+during verification:
+
 ```python
 cmd_mox.register_command("name")
 ```
 
-CmdMox will create the shim so the command is routed through the IPC server even without a stub, mock, or spy. Shims are cleaned up automatically during fixture teardown.
+CmdMox will create the shim so the command is routed through the IPC server
+even without a stub, mock, or spy. Shims are cleaned up automatically during
+fixture teardown.
+
 ## Fluent API reference
 
 The DSL methods closely mirror those described in the design specification. A
@@ -225,7 +234,9 @@ few common ones are:
   values; CmdMox operates in text mode—pass `str` (bytes are not supported).
   Note: For binary payloads, prefer `passthrough()` or encode/decode at the
   boundary (e.g., base64) so handlers exchange `str`.
-- `runs(handler)` – call a function to produce dynamic output. The handler receives an `Invocation` and should return either a `(stdout, stderr, exit_code)` tuple or a `Response` instance.
+- `runs(handler)` – call a function to produce dynamic output. The handler
+  receives an `Invocation` and should return either a
+  `(stdout, stderr, exit_code)` tuple or a `Response` instance.
 
   Example:
 
@@ -238,6 +249,7 @@ few common ones are:
   cmd_mox.mock("tool").with_args("run").runs(handler)
   ```- `times(count)` – expect the command exactly `count` times.
 - `times_called(count)` – alias for `times` that emphasizes spy call counts.
+
 - `in_order()` – enforce strict ordering with other expectations.
 - `any_order()` – allow the expectation to be satisfied in any position.
 - `passthrough()` – for spies, run the real command while recording it.

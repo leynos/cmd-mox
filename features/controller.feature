@@ -8,6 +8,31 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal should contain 1 invocation of "hi"
 
+  Scenario: shim forwards stdout stderr and exit code
+    Given a CmdMox controller
+    And the command "shimcmd" is stubbed to return stdout "shim says" stderr "warn" exit code 3
+    When I replay the controller
+    And I run the command "shimcmd" expecting failure
+    Then the output should be "shim says"
+    And the stderr should contain "warn"
+    And the exit code should be 3
+    When I verify the controller
+    Then the journal should contain 1 invocation of "shimcmd"
+    And the journal entry for "shimcmd" should record stdout "shim says" stderr "warn" exit code 3
+
+  Scenario: shim merges environment overrides across invocations
+    Given a CmdMox controller
+    And the command "seedshim" seeds shim env var "ALPHA"="one"
+    And the command "propagateshim" expects shim env var "ALPHA"="one" and seeds "BETA"="two"
+    And the command "inspectshim" records shim env vars "ALPHA"="one" and "BETA"="two"
+    When I replay the controller
+    And I run the shim sequence "seedshim propagateshim inspectshim"
+    Then the output should be "one+two"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "seedshim"
+    And the journal should contain 1 invocation of "propagateshim"
+    And the journal should contain 1 invocation of "inspectshim"
+
   Scenario: mocked command execution
     Given a CmdMox controller
     And the command "hi" is mocked to return "hello"

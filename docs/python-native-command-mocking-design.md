@@ -490,11 +490,33 @@ This socket-based IPC architecture is the key technical differentiator for
 exchange of rich, complex data structures, providing a foundation for advanced
 features that are infeasible with file-based logging.
 
+#### Implementation Notes
+
+- The shim infers the command name from ``argv[0]`` via :class:`pathlib.Path`
+  so that the same script can impersonate any executable linked into the shim
+  directory.
+- Standard input is eagerly read when the shim detects it is connected to a
+  pipe. Guarding the read with ``sys.stdin.isatty()`` avoids blocking when a
+  user invokes an interactive command during a test run, and the implementation
+  explicitly skips calling ``read()`` on terminal-bound streams.
+- The shim sends a shallow copy of ``os.environ`` to the IPC server. This
+  captures environment variables at call time without mutating the caller's
+  process state.
+- Responses received from the server are written directly to ``stdout`` and
+  ``stderr`` before the process exits using the supplied exit code. Any
+  environment overrides returned by the server are merged into the shim's
+  process environment, enabling later invocations in the same process to see
+  those changes. Successive overrides accumulate, so commands executed within
+  the same process observe the union of all previously injected variables.
+- The shim reads :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to determine
+  its IPC timeout, defaulting to ``5.0`` seconds. Non-default overrides are
+  validated to ensure they remain positive, finite floats before being applied.
+
 The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
 socket path provided by the `EnvironmentManager`. Incoming JSON messages are
 parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts (default: 10.0s). The server attaches the corresponding
+reasonable timeouts (default: 5.0s). The server attaches the corresponding
 response data (`stdout`, `stderr`, `exit_code`) to the `Invocation` before
 appending it to the journal. The server cleans up the socket on shutdown to
 prevent stale sockets from interfering with subsequent tests. The timeout is
@@ -1055,8 +1077,8 @@ Darwin environments, several avenues for future expansion exist.
     3.9+, expose `AF_UNIX`, but the port omits ancillary-data/`SCM_RIGHTS`
     semantics—so we must avoid file-descriptor passing. When capability checks
     (`hasattr(socket, 'AF_UNIX')` plus a bind probe) fail or fd-passing is
-    required, fall back to Windows Named Pipes (`\\.\\pipe\\cmdmox-<id>`)
-    with per-test unique pipe names for isolation. Document the minimum
+    required, fall back to Windows Named Pipes (`\\.\\pipe\\cmdmox-<id>`) with
+    per-test unique pipe names for isolation. Document the minimum
     Windows/Python versions and runtime fallback behaviour so adopters
     understand the selection flow.
 
@@ -1071,11 +1093,11 @@ Darwin environments, several avenues for future expansion exist.
     `EnvironmentManager` under Windows to confirm that `PATH` manipulation via
     `os.pathsep` behaves as intended. Any remaining direct `os.path` usages
     should migrate to `pathlib` for consistent path handling across drives, and
-    the existing `_fix_windows_permissions` helper in
-    `cmd_mox/environment.py` will anchor permission adjustments for shim
-    directories. Also account for `MAX_PATH` constraints (prefer temp-based
-    directories or long-path enablement) and avoid symlink requirements by
-    leaning on wrappers when elevated privileges are unavailable.
+    the existing `_fix_windows_permissions` helper in `cmd_mox/environment.py`
+    will anchor permission adjustments for shim directories. Also account for
+    `MAX_PATH` constraints (prefer temp-based directories or long-path
+    enablement) and avoid symlink requirements by leaning on wrappers when
+    elevated privileges are unavailable.
 
   - **CI and verification.** Add a `windows-latest` job in GitHub Actions to
     exercise named-pipe IPC, batch shim invocation, passthrough spies, and

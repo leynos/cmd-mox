@@ -131,17 +131,17 @@
 
 ## **VI. Shim Behaviour**
 
-- [ ] **Shim Startup Logic**
+- [x] **Shim Startup Logic**
 
-  - [ ] Determine which command to simulate via `argv[0]`
+  - [x] Determine which command to simulate via `argv[0]`
 
-  - [ ] Connect to IPC socket
+  - [x] Connect to IPC socket
 
-  - [ ] Capture stdin, argv, env
+  - [x] Capture stdin, argv, env
 
-  - [ ] Send invocation to IPC server, wait for response
+  - [x] Send invocation to IPC server, wait for response
 
-  - [ ] Apply returned behaviour: print `stdout`, `stderr`, exit with code
+  - [x] Apply returned behaviour: print `stdout`, `stderr`, exit with code
 
 - [ ] **Passthrough Spies**
 
@@ -207,8 +207,8 @@
         `windows-latest` GH runner with IPC + shims enabled).
 
   - [ ] Validate environment management and filesystem helpers on Windows,
-        addressing portability gaps discovered during testing (cover:
-        `PATHEXT` lookup semantics, CRLF line endings for batch shims, argument
+        addressing portability gaps discovered during testing (cover: `PATHEXT`
+        lookup semantics, CRLF line endings for batch shims, argument
         quoting/escaping rules with spaces and carets, max path handling,
         case-insensitive filesystem behaviour).
 
