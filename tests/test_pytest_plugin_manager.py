@@ -268,28 +268,24 @@ def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
     assert stub.replay_calls == 1
 
 
-def test_enter_cmd_mox_skips_replay_when_disabled(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [
+        pytest.param(
+            {"node": _StubNode(marker=_StubMarker(auto_lifecycle=False))},
+            id="marker-override",
+        ),
+        pytest.param(
+            {"param": {"auto_lifecycle": False}},
+            id="param-override",
+        ),
+    ],
+)
+def test_enter_cmd_mox_auto_lifecycle_overrides(
+    monkeypatch: pytest.MonkeyPatch, request_kwargs: dict[str, object]
 ) -> None:
-    """Marker override disables automatic replay."""
-    marker = _StubMarker(auto_lifecycle=False)
-    request = _StubRequest(config=_StubConfig(), node=_StubNode(marker=marker))
-    manager = _make_manager(monkeypatch, request)
-
-    assert not manager.auto_lifecycle
-
-    manager.enter()
-
-    stub = t.cast("_StubMox", manager.mox)
-    assert stub.enter_calls == 1
-    assert stub.replay_calls == 0
-
-
-def test_enter_cmd_mox_param_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fixture param overrides automatic replay configuration."""
-    request = _StubRequest(config=_StubConfig(), param={"auto_lifecycle": False})
+    """Marker and fixture parameter overrides disable automatic replay."""
+    request = _StubRequest(config=_StubConfig(), **request_kwargs)
     manager = _make_manager(monkeypatch, request)
 
     assert not manager.auto_lifecycle
@@ -393,12 +389,34 @@ def test_enter_cmd_mox_param_override_precedes_marker(
     assert stub.replay_calls == 0
 
 
-def test_exit_cmd_mox_reports_cleanup_error_when_body_failed(
+@pytest.mark.parametrize(
+    ("mode", "expected_message"),
+    [
+        pytest.param(
+            "explicit-node",
+            "cleanup OSError: exit boom",
+            id="body-failed",
+        ),
+        pytest.param(
+            "request-node",
+            "cmd_mox cleanup OSError: exit boom",
+            id="always-fails",
+        ),
+    ],
+)
+def test_exit_cmd_mox_cleanup_error_handling(
     monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    expected_message: str,
 ) -> None:
-    """Cleanup errors fail the test even when the body has already failed."""
-    node = _StubNode()
-    request = _StubRequest(config=_StubConfig(), node=node)
+    """Cleanup errors fail the test and emit teardown sections across scenarios."""
+    if mode == "explicit-node":
+        node = _StubNode()
+        request = _StubRequest(config=_StubConfig(), node=node)
+    else:
+        request = _StubRequest(config=_StubConfig())
+        node = request.node
+
     manager = _make_manager(monkeypatch, request, raise_on_exit=True)
 
     manager.enter()
@@ -407,7 +425,7 @@ def test_exit_cmd_mox_reports_cleanup_error_when_body_failed(
         manager.exit(body_failed=True)
 
     message = str(excinfo.value)
-    assert "cleanup OSError: exit boom" in message
+    assert expected_message in message
     assert node.sections == [("teardown", "cmd_mox cleanup", "OSError: exit boom")]
 
 
@@ -428,22 +446,6 @@ def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
     ]
-
-
-def test_exit_cmd_mox_fails_on_cleanup_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Cleanup errors always fail the test."""
-    request = _StubRequest(config=_StubConfig())
-    node = request.node
-    manager = _make_manager(monkeypatch, request, raise_on_exit=True)
-
-    manager.enter()
-
-    with pytest.raises(pytest.fail.Exception) as excinfo:
-        manager.exit(body_failed=True)
-
-    message = str(excinfo.value)
-    assert "cmd_mox cleanup OSError: exit boom" in message
-    assert node.sections == [("teardown", "cmd_mox cleanup", "OSError: exit boom")]
 
 
 def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
