@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import typing as t
 
 import pytest
@@ -29,7 +30,13 @@ def _build_worker_prefix(config: pytest.Config) -> str:
         else:
             wid = getattr(worker_input, "workerid", None)
         worker_id = "main" if wid is None else str(wid)
-    return f"cmdmox-{worker_id}-{os.getpid()}-"
+    safe = _sanitize_worker_id(str(worker_id))
+    return f"cmdmox-{safe}-{os.getpid()}-"
+
+
+def _sanitize_worker_id(value: str) -> str:
+    """Collapse worker identifiers to filesystem-safe characters."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", value)
 
 
 def _aggregate_teardown_errors(
@@ -214,18 +221,17 @@ class _CmdMoxManager:
     def _auto_lifecycle_enabled(self) -> bool:
         """Resolve the auto-lifecycle flag respecting all configuration sources.
 
-        Precedence flows from the most granular override to the global default:
-        a ``@pytest.mark.cmd_mox`` marker has priority over a fixture parameter,
-        which in turn outranks the command-line option, followed by the
-        ``pytest.ini`` setting.
+        The fixture parameter provides the most granular override, followed by
+        a ``@pytest.mark.cmd_mox`` marker, the command-line option, and finally
+        the ``pytest.ini`` default.
         """
-        marker_value = self._marker_override()
-        if marker_value is not None:
-            return marker_value
-
         param_value = self._param_override()
         if param_value is not None:
             return param_value
+
+        marker_value = self._marker_override()
+        if marker_value is not None:
+            return marker_value
 
         cli_value = self.config.getoption("cmd_mox_auto_lifecycle")
         if cli_value is not None:

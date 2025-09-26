@@ -149,9 +149,10 @@ def _make_manager(
         verify_on_exit: bool = False,
         environment: EnvironmentManager | None = None,
     ) -> _StubMox:
+        # Keep signature compatible with real CmdMox; forward kwargs to stub.
         return _StubMox(
-            verify_on_exit=verify_on_exit,
             environment=environment,
+            verify_on_exit=verify_on_exit,
             **stub_kwargs,
         )
 
@@ -181,6 +182,12 @@ def _make_manager(
             object(),
             "cmdmox-main-",
             id="unexpected-workerinput",
+        ),
+        pytest.param(
+            "env worker*!",
+            {"workerid": "gw/unsafe"},
+            "cmdmox-env-worker--",
+            id="sanitised-worker",
         ),
     ],
 )
@@ -361,6 +368,29 @@ def test_exit_cmd_mox_records_verify_error_when_call_stage_failed(
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
     ]
+    # Stash flag is consumed and cleared
+    assert STASH_CALL_FAILED not in node.stash
+
+
+def test_enter_cmd_mox_param_override_precedes_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fixture param takes precedence over marker configuration."""
+    marker = _StubMarker(auto_lifecycle=True)
+    request = _StubRequest(
+        config=_StubConfig(),
+        node=_StubNode(marker=marker),
+        param={"auto_lifecycle": False},
+    )
+    manager = _make_manager(monkeypatch, request)
+
+    assert not manager.auto_lifecycle
+
+    manager.enter()
+
+    stub = t.cast("_StubMox", manager.mox)
+    assert stub.enter_calls == 1
+    assert stub.replay_calls == 0
 
 
 def test_exit_cmd_mox_reports_cleanup_error_when_body_failed(
