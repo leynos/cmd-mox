@@ -269,6 +269,22 @@ def test_enter_cmd_mox_skips_replay_when_disabled(
     assert stub.replay_calls == 0
 
 
+def test_enter_cmd_mox_param_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fixture param overrides automatic replay configuration."""
+    request = _StubRequest(config=_StubConfig(), param={"auto_lifecycle": False})
+    manager = _make_manager(monkeypatch, request)
+
+    assert not manager.auto_lifecycle
+
+    manager.enter()
+
+    stub = t.cast("_StubMox", manager.mox)
+    assert stub.enter_calls == 1
+    assert stub.replay_calls == 0
+
+
 def test_exit_cmd_mox_verifies_when_needed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replay phase triggers verification during teardown."""
     request = _StubRequest(config=_StubConfig())
@@ -338,6 +354,24 @@ def test_exit_cmd_mox_records_verify_error_when_call_stage_failed(
     ]
 
 
+def test_exit_cmd_mox_reports_cleanup_error_when_body_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cleanup errors fail the test even when the body has already failed."""
+    node = _StubNode()
+    request = _StubRequest(config=_StubConfig(), node=node)
+    manager = _make_manager(monkeypatch, request, raise_on_exit=True)
+
+    manager.enter()
+
+    with pytest.raises(pytest.fail.Exception) as excinfo:
+        manager.exit(body_failed=True)
+
+    message = str(excinfo.value)
+    assert "cleanup OSError: exit boom" in message
+    assert node.sections == []
+
+
 def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -397,3 +431,20 @@ def test_exit_cmd_mox_is_idempotent_without_enter(
 
     stub = t.cast("_StubMox", manager.mox)
     assert stub.exit_calls == []
+
+
+def test_exit_cmd_mox_is_idempotent_after_teardown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated exit calls after teardown keep succeeding."""
+    request = _StubRequest(config=_StubConfig())
+    manager = _make_manager(monkeypatch, request)
+
+    manager.enter()
+    manager.exit(body_failed=False)
+
+    # A second exit should be a no-op and not trigger additional cleanup.
+    manager.exit(body_failed=False)
+
+    stub = t.cast("_StubMox", manager.mox)
+    assert len(stub.exit_calls) == 1

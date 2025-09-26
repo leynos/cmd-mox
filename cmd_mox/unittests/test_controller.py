@@ -23,6 +23,9 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 
 
+_SYMLINK_FAILURE_MESSAGE = "symlink failure"
+
+
 class _ShimSymlinkSpy:
     """Capture shim creation attempts for assertions."""
 
@@ -134,6 +137,25 @@ def test_register_command_creates_shim_during_replay(
     assert shim_symlink_spy.calls == [(env.shim_dir, ("late",))]
 
     mox.verify()
+
+
+def test_ensure_shim_during_replay_propagates_symlink_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shim creation failures bubble up so callers can surface them."""
+    mox = CmdMox()
+    mox.__enter__()
+    mox.replay()
+
+    def _boom(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+        raise RuntimeError(_SYMLINK_FAILURE_MESSAGE)
+
+    monkeypatch.setattr(controller, "create_shim_symlinks", _boom)
+
+    with pytest.raises(RuntimeError, match=_SYMLINK_FAILURE_MESSAGE):
+        mox._ensure_shim_during_replay("late")
+
+    mox.__exit__(None, None, None)
 
 
 @pytest.mark.parametrize(

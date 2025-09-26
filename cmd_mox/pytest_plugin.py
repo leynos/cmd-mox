@@ -18,6 +18,45 @@ logger = logging.getLogger(__name__)
 STASH_CALL_FAILED: pytest.StashKey[bool] = pytest.StashKey()
 
 
+def _build_worker_prefix(config: pytest.Config) -> str:
+    """Return an EnvironmentManager prefix scoped to the current worker."""
+    worker_id = os.getenv("PYTEST_XDIST_WORKER")
+    if worker_id is None:
+        worker_input = getattr(config, "workerinput", None)
+        if isinstance(worker_input, dict):
+            mapping_worker_id = worker_input.get("workerid")
+            worker_id = "main" if mapping_worker_id is None else str(mapping_worker_id)
+        else:
+            attribute_worker_id = getattr(worker_input, "workerid", None)
+            worker_id = (
+                "main" if attribute_worker_id is None else str(attribute_worker_id)
+            )
+    return f"cmdmox-{worker_id}-{os.getpid()}-"
+
+
+def _aggregate_teardown_errors(
+    verify_error: Exception | None, exit_error: Exception | None
+) -> list[tuple[str, Exception]]:
+    """Collect teardown errors for aggregation and reporting."""
+    errors: list[tuple[str, Exception]] = []
+    if verify_error is not None:
+        errors.append(("verification", verify_error))
+    if exit_error is not None:
+        errors.append(("cleanup", exit_error))
+    return errors
+
+
+def _format_teardown_failure(errors: list[tuple[str, Exception]]) -> str:
+    """Format an aggregated error message for pytest failures."""
+    if not errors:
+        return "cmd_mox teardown failure"
+    if len(errors) == 1:
+        stage, err = errors[0]
+        return f"cmd_mox {stage} {type(err).__name__}: {err}"
+    joined = "; ".join(f"{stage} {type(err).__name__}: {err}" for stage, err in errors)
+    return f"cmd_mox teardown failure: {joined}"
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register command-line and ini options for the plugin."""
     group = parser.getgroup("cmd_mox")
@@ -83,7 +122,9 @@ class _CmdMoxManager:
         self.config = request.config
         self._auto_lifecycle = self._auto_lifecycle_enabled()
         self.mox = CmdMox(verify_on_exit=False)
-        self.mox.environment = EnvironmentManager(prefix=self._worker_prefix())
+        self.mox.environment = EnvironmentManager(
+            prefix=_build_worker_prefix(self.config)
+        )
         self._entered = False
 
     @property
@@ -152,13 +193,8 @@ class _CmdMoxManager:
         self, verify_error: Exception | None, exit_error: Exception | None
     ) -> None:
         """Aggregate teardown errors and fail the test."""
-        errors: list[tuple[str, Exception]] = []
-        if verify_error is not None:
-            errors.append(("verification", verify_error))
-        if exit_error is not None:
-            errors.append(("cleanup", exit_error))
-
-        message = self._format_combined_error(errors)
+        errors = _aggregate_teardown_errors(verify_error, exit_error)
+        message = _format_teardown_failure(errors)
         pytest.fail(message)
 
     def _auto_lifecycle_enabled(self) -> bool:
@@ -214,23 +250,6 @@ class _CmdMoxManager:
         )
         raise TypeError(msg)
 
-    def _worker_prefix(self) -> str:
-        """Build a stable prefix that keeps shims distinct per worker."""
-        worker_id = os.getenv("PYTEST_XDIST_WORKER")
-        if worker_id is None:
-            worker_input = getattr(self.config, "workerinput", None)
-            if isinstance(worker_input, dict):
-                mapping_worker_id = worker_input.get("workerid")
-                worker_id = (
-                    "main" if mapping_worker_id is None else str(mapping_worker_id)
-                )
-            else:
-                attribute_worker_id = getattr(worker_input, "workerid", None)
-                worker_id = (
-                    "main" if attribute_worker_id is None else str(attribute_worker_id)
-                )
-        return f"cmdmox-{worker_id}-{os.getpid()}-"
-
     def _verify_if_needed(self) -> Exception | None:
         """Run :meth:`CmdMox.verify` when auto lifecycle is active."""
         if not self._auto_lifecycle or self.mox.phase is not Phase.REPLAY:
@@ -262,18 +281,6 @@ class _CmdMoxManager:
                 f"{type(err).__name__}: {err}",
             )
 
-    def _format_combined_error(self, errors: list[tuple[str, Exception]]) -> str:
-        """Format an aggregated error message for pytest failures."""
-        if not errors:
-            return "cmd_mox teardown failure"
-        if len(errors) == 1:
-            stage, err = errors[0]
-            return f"cmd_mox {stage} {type(err).__name__}: {err}"
-        joined = "; ".join(
-            f"{stage} {type(err).__name__}: {err}" for stage, err in errors
-        )
-        return f"cmd_mox teardown failure: {joined}"
-
 
 @pytest.fixture
 def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
@@ -281,12 +288,20 @@ def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
     skip_if_unsupported()
 
     manager = _CmdMoxManager(request)
+    body_failed = False
     try:
-        manager.enter()
-        yield manager.mox
-    except Exception:
-        logger.exception("Error during cmd_mox fixture setup or test execution")
-        manager.exit(body_failed=True)
-        raise
+        try:
+            manager.enter()
+        except Exception:
+            body_failed = True
+            logger.exception("Error during cmd_mox fixture setup or test execution")
+            raise
+
+        try:
+            yield manager.mox
+        except Exception:
+            body_failed = True
+            logger.exception("Error during cmd_mox fixture setup or test execution")
+            raise
     finally:
-        manager.exit(body_failed=False)
+        manager.exit(body_failed=body_failed)
