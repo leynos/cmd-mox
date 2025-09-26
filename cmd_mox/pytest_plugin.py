@@ -176,8 +176,11 @@ class _CmdMoxManager:
 
     def _determine_effective_failure(self, *, body_failed: bool) -> bool:
         """Return whether the body or call stage reported a failure."""
-        call_failed = bool(self.request.node.stash.get(STASH_CALL_FAILED, False))
-        if STASH_CALL_FAILED in self.request.node.stash:
+        try:
+            call_failed = bool(self.request.node.stash[STASH_CALL_FAILED])
+        except KeyError:
+            call_failed = False
+        else:
             del self.request.node.stash[STASH_CALL_FAILED]
         return body_failed or call_failed
 
@@ -195,6 +198,9 @@ class _CmdMoxManager:
         effective_body_failed: bool,
     ) -> bool:
         """Return True when teardown errors should be suppressed."""
+        # Suppress verification errors when the test already failed and cleanup
+        # succeeded. This preserves the original assertion failure while still
+        # recording verification details as a teardown section.
         return verify_error is not None and exit_error is None and effective_body_failed
 
     def _handle_teardown_errors(
