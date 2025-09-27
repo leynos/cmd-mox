@@ -58,13 +58,11 @@ def _format_teardown_failure(
     if not errors:
         return "cmd_mox teardown failure"
     if len(errors) == 1:
-        return _format_single_teardown_error(errors[0], nodeid=nodeid)
-    return _format_multiple_teardown_errors(errors, nodeid=nodeid)
+        return _format_single_error(errors[0], nodeid=nodeid)
+    return _format_multiple_errors(errors, nodeid=nodeid)
 
 
-def _format_single_teardown_error(
-    error: tuple[str, Exception], *, nodeid: str | None
-) -> str:
+def _format_single_error(error: tuple[str, Exception], *, nodeid: str | None) -> str:
     """Render a message when exactly one teardown stage failed."""
     stage, err = error
     if stage == "cleanup":
@@ -75,7 +73,7 @@ def _format_single_teardown_error(
     return f"cmd_mox {stage} {type(err).__name__}: {err}"
 
 
-def _format_multiple_teardown_errors(
+def _format_multiple_errors(
     errors: list[tuple[str, Exception]], *, nodeid: str | None
 ) -> str:
     """Render a combined error message for multiple teardown failures."""
