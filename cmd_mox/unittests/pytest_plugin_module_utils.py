@@ -7,6 +7,54 @@ import typing as t
 
 PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "auto_fail"]
 
+_MODULE_TMPL = """\
+import pytest
+from cmd_mox.controller import Phase
+{extra_import}
+pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+{shim_code}{decorator}def test_case(cmd_mox):
+{test_body}
+"""
+
+_AUTO_FAIL_BODY = """\
+    assert cmd_mox.phase is Phase.REPLAY
+    cmd_mox.mock("never-called").returns(stdout="nope")
+"""
+
+_REPLAY_BODY = """\
+    assert cmd_mox.phase is Phase.REPLAY
+    cmd_mox.stub("tool").returns(stdout="ok")
+    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+    assert res.stdout.strip() == "ok"
+"""
+
+_RECORD_BODY = """\
+    assert cmd_mox.phase is Phase.RECORD
+    cmd_mox.stub("tool").returns(stdout="ok")
+    cmd_mox.replay()
+    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+    assert res.stdout.strip() == "ok"
+    cmd_mox.verify()
+"""
+
+_TEST_BODIES: dict[str, str] = {
+    "RECORD": _RECORD_BODY,
+    "REPLAY": _REPLAY_BODY,
+    "auto_fail": _AUTO_FAIL_BODY,
+}
+
+_SHIM_HELPER = textwrap.dedent(
+    """\
+    def _shim_cmd_path(mox, name):
+        sd = mox.environment.shim_dir
+        assert sd is not None
+        return sd / name
+
+
+"""
+)
+
 
 def generate_lifecycle_test_module(
     decorator: str,
@@ -15,106 +63,27 @@ def generate_lifecycle_test_module(
     should_fail: bool,
 ) -> str:
     """Return a self-contained test module for lifecycle precedence cases."""
-    lines: list[str] = []
-    lines.extend(_build_module_imports(expected_phase))
-    lines.extend(_build_module_setup(expected_phase))
-    lines.extend(_build_decorator_section(decorator))
-    lines.extend(_build_test_function(expected_phase, should_fail=should_fail))
-    return textwrap.dedent("\n".join(lines))
+    body_key: str = expected_phase
+    if expected_phase == "REPLAY" and should_fail:
+        body_key = "auto_fail"
+
+    uses_subprocess_helper = body_key != "auto_fail"
+    extra_import = (
+        "from cmd_mox.unittests.conftest import run_subprocess\n"
+        if uses_subprocess_helper
+        else ""
+    )
+    shim_code = _SHIM_HELPER if uses_subprocess_helper else ""
+
+    body = textwrap.indent(textwrap.dedent(_TEST_BODIES[body_key]), "    ")
+    decorator_block = f"{decorator.rstrip()}\n" if decorator else ""
+
+    return _MODULE_TMPL.format(
+        extra_import=extra_import,
+        shim_code=shim_code,
+        decorator=decorator_block,
+        test_body=body,
+    )
 
 
-def _build_module_imports(expected_phase: PhaseLiteral) -> list[str]:
-    """Return the import statements required for the generated module."""
-    lines = ["import pytest", "from cmd_mox.controller import Phase"]
-    if expected_phase != "auto_fail":
-        lines.append("from cmd_mox.unittests.conftest import run_subprocess")
-    return lines
-
-
-def _build_module_setup(expected_phase: PhaseLiteral) -> list[str]:
-    """Return module-level setup such as plugin registration and helpers."""
-    lines = ["", 'pytest_plugins = ("cmd_mox.pytest_plugin",)', ""]
-    if expected_phase != "auto_fail":
-        lines.extend(
-            [
-                "def _shim_cmd_path(mox, name):",
-                "    sd = mox.environment.shim_dir",
-                "    assert sd is not None",
-                "    return sd / name",
-                "",
-            ]
-        )
-    return lines
-
-
-def _build_decorator_section(decorator: str) -> list[str]:
-    """Return any decorator lines preceding the generated test function."""
-    if not decorator:
-        return []
-    lines = decorator.splitlines()
-    lines.append("")
-    return lines
-
-
-def _build_test_function(
-    expected_phase: PhaseLiteral,
-    *,
-    should_fail: bool,
-) -> list[str]:
-    """Construct the test function definition and body for the scenario."""
-    lines = ["def test_case(cmd_mox):"]
-    match expected_phase:
-        case "RECORD":
-            lines.extend(_build_record_test_body())
-        case "REPLAY" if not should_fail:
-            lines.extend(_build_replay_test_body())
-        case "auto_fail":
-            lines.extend(_build_auto_fail_test_body())
-        case _:  # pragma: no cover - defensive guard for unexpected parameters
-            msg = f"Unsupported expected_phase: {expected_phase}"
-            raise ValueError(msg)
-    lines.append("")
-    return lines
-
-
-def _build_record_test_body() -> list[str]:
-    """Return the assertions and expectations for record-phase scenarios."""
-    return [
-        "    assert cmd_mox.phase is Phase.RECORD",
-        '    cmd_mox.stub("tool").returns(stdout="ok")',
-        "    cmd_mox.replay()",
-        '    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])',
-        '    assert res.stdout.strip() == "ok"',
-        "    cmd_mox.verify()",
-    ]
-
-
-def _build_replay_test_body() -> list[str]:
-    """Return the test body used when replay begins automatically."""
-    return [
-        "    assert cmd_mox.phase is Phase.REPLAY",
-        '    cmd_mox.stub("tool").returns(stdout="ok")',
-        '    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])',
-        '    assert res.stdout.strip() == "ok"',
-    ]
-
-
-def _build_auto_fail_test_body() -> list[str]:
-    """Return the test body for scenarios expecting verification failure."""
-    return [
-        "    assert cmd_mox.phase is Phase.REPLAY",
-        '    cmd_mox.mock("never-called").returns(stdout="nope")',
-    ]
-
-
-__all__ = [
-    "PhaseLiteral",
-    "_build_auto_fail_test_body",
-    "_build_decorator_section",
-    "_build_module_imports",
-    "_build_module_setup",
-    "_build_record_test_body",
-    "_build_replay_test_body",
-    "_build_test_function",
-    "generate_lifecycle_test_module",
-]
+__all__ = ["PhaseLiteral", "generate_lifecycle_test_module"]
