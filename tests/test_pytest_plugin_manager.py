@@ -90,7 +90,7 @@ class _StubRequest:
             self.param = param
 
 
-@dataclass
+@dataclass(slots=True)
 class StubMoxBehaviorConfig:
     """Configuration for _StubMox behavioral flags."""
 
