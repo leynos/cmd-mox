@@ -7,85 +7,86 @@ import typing as t
 
 PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "auto_fail"]
 
-_MODULE_TMPL = textwrap.dedent(
-    """\
-    import pytest
-    from cmd_mox.controller import Phase
-    {extra_import}
-    pytest_plugins = ("cmd_mox.pytest_plugin",)
-
-    {shim_code}{decorator}def test_case(cmd_mox):
-    {test_body}
-    """
-)
-
-_AUTO_FAIL_BODY = """\
-    assert cmd_mox.phase is Phase.REPLAY
-    cmd_mox.mock("never-called").returns(stdout="nope")
-"""
-
-_REPLAY_BODY = """\
-    assert cmd_mox.phase is Phase.REPLAY
-    cmd_mox.stub("tool").returns(stdout="ok")
-    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
-    assert res.stdout.strip() == "ok"
-"""
-
-_RECORD_BODY = """\
-    assert cmd_mox.phase is Phase.RECORD
-    cmd_mox.stub("tool").returns(stdout="ok")
-    cmd_mox.replay()
-    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
-    assert res.stdout.strip() == "ok"
-    cmd_mox.verify()
-"""
+_UNKNOWN_PHASE_ERR = "Unknown phase"
 
 _TEST_BODIES: dict[str, str] = {
-    "RECORD": _RECORD_BODY,
-    "REPLAY": _REPLAY_BODY,
-    "auto_fail": _AUTO_FAIL_BODY,
+    "RECORD": """
+        assert cmd_mox.phase is Phase.RECORD
+        cmd_mox.stub("tool").returns(stdout="ok")
+        cmd_mox.replay()
+        res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+        assert res.stdout.strip() == "ok"
+        cmd_mox.verify()
+    """,
+    "REPLAY": """
+        assert cmd_mox.phase is Phase.REPLAY
+        cmd_mox.stub("tool").returns(stdout="ok")
+        res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+        assert res.stdout.strip() == "ok"
+    """,
+    "auto_fail": """
+        assert cmd_mox.phase is Phase.REPLAY
+        cmd_mox.mock("never-called").returns(stdout="nope")
+    """,
 }
-
-_SHIM_HELPER = textwrap.dedent(
-    """\
-    def _shim_cmd_path(mox, name):
-        sd = mox.environment.shim_dir
-        assert sd is not None
-        return sd / name
-
-
-"""
-)
 
 
 def generate_lifecycle_test_module(
     decorator: str,
     expected_phase: PhaseLiteral,
     *,
-    should_fail: bool,
+    expect_auto_fail: bool,
 ) -> str:
-    """Return a self-contained test module for lifecycle precedence cases."""
-    body_key: str = expected_phase
-    if expected_phase == "REPLAY" and should_fail:
-        body_key = "auto_fail"
+    """Return a synthetic pytest module tuned to a lifecycle scenario.
+
+    ``decorator`` is emitted verbatim (when provided) immediately above the
+    generated test so callers can inject parametrization or marks without
+    needing to post-process the module text. Setting ``expect_auto_fail`` to
+    ``True`` swaps the REPLAY test body for the auto-fail variant and omits the
+    subprocess shim helpers; this mirrors how the plugin behaves when a
+    lifecycle override expects failure. Passing ``expected_phase`` as
+    ``"auto_fail"`` has the same effect regardless of ``expect_auto_fail``,
+    allowing callers to assert the pure auto-fail module layout.
+    """
+    if expected_phase not in ("RECORD", "REPLAY", "auto_fail"):
+        raise ValueError(_UNKNOWN_PHASE_ERR)
+
+    body_key = (
+        "auto_fail"
+        if expected_phase == "REPLAY" and expect_auto_fail
+        else expected_phase
+    )
 
     uses_subprocess_helper = body_key != "auto_fail"
-    extra_import = (
-        "from cmd_mox.unittests.conftest import run_subprocess\n"
-        if uses_subprocess_helper
-        else ""
+    decorator_block = (
+        textwrap.dedent(decorator).rstrip("\n") + "\n" if decorator else ""
     )
-    shim_code = _SHIM_HELPER if uses_subprocess_helper else ""
 
-    body = textwrap.indent(textwrap.dedent(_TEST_BODIES[body_key]), "    ")
-    decorator_block = decorator.rstrip("\n") + "\n" if decorator else ""
+    header_lines = [
+        "import pytest",
+        "from cmd_mox.controller import Phase",
+    ]
+    if uses_subprocess_helper:
+        header_lines.append("from cmd_mox.unittests.conftest import run_subprocess")
+    header_lines.append('pytest_plugins = ("cmd_mox.pytest_plugin",)')
+    module = "\n".join(header_lines) + "\n\n"
 
-    return _MODULE_TMPL.format(
-        extra_import=extra_import,
-        shim_code=shim_code,
-        decorator=decorator_block,
-        test_body=body,
-    )
+    if uses_subprocess_helper:
+        module += textwrap.dedent(
+            """\
+            def _shim_cmd_path(mox, name):
+                sd = mox.environment.shim_dir
+                assert sd is not None
+                return sd / name
+
+
+            """
+        )
+
+    module += f"{decorator_block}def test_case(cmd_mox):\n"
+    module += textwrap.indent(textwrap.dedent(_TEST_BODIES[body_key]), "    ")
+
+    return module
 
 
 __all__ = ["PhaseLiteral", "generate_lifecycle_test_module"]

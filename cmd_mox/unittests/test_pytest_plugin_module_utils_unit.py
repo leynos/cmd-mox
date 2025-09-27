@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import textwrap
+import typing as t
 
 import pytest
 
@@ -44,11 +45,11 @@ CaseType = tuple[plugin_utils.PhaseLiteral, bool, tuple[str, ...]]
 )
 def test_generate_module_includes_expected_snippets(case: CaseType) -> None:
     """Generated modules should include the imports and body for each phase."""
-    expected_phase, should_fail, expected_snippets = case
+    expected_phase, expect_auto_fail, expected_snippets = case
     module_text = plugin_utils.generate_lifecycle_test_module(
         decorator="",
         expected_phase=expected_phase,
-        should_fail=should_fail,
+        expect_auto_fail=expect_auto_fail,
     )
 
     for snippet in expected_snippets:
@@ -60,11 +61,25 @@ def test_generate_module_overrides_replay_body_when_failures_expected() -> None:
     module_text = plugin_utils.generate_lifecycle_test_module(
         decorator="",
         expected_phase="REPLAY",
-        should_fail=True,
+        expect_auto_fail=True,
     )
 
     assert 'cmd_mox.mock("never-called").returns(stdout="nope")' in module_text
     assert "from cmd_mox.unittests.conftest import run_subprocess" not in module_text
+    assert "def _shim_cmd_path" not in module_text
+
+
+def test_generate_module_forces_auto_fail_body_without_helpers() -> None:
+    """Pure auto-fail modules should omit shim helpers and include failure body."""
+    module_text = plugin_utils.generate_lifecycle_test_module(
+        decorator="",
+        expected_phase="auto_fail",
+        expect_auto_fail=False,
+    )
+
+    assert 'cmd_mox.mock("never-called").returns(stdout="nope")' in module_text
+    assert "from cmd_mox.unittests.conftest import run_subprocess" not in module_text
+    assert "def _shim_cmd_path" not in module_text
 
 
 def test_generate_module_includes_decorators_with_trailing_newline() -> None:
@@ -73,7 +88,7 @@ def test_generate_module_includes_decorators_with_trailing_newline() -> None:
     module_text = plugin_utils.generate_lifecycle_test_module(
         decorator=decorator,
         expected_phase="RECORD",
-        should_fail=False,
+        expect_auto_fail=False,
     )
 
     expected_block = textwrap.dedent(
@@ -83,3 +98,45 @@ def test_generate_module_includes_decorators_with_trailing_newline() -> None:
         """
     )
     assert expected_block in module_text
+
+
+def test_generate_module_preserves_multiline_decorators() -> None:
+    """Multi-line decorators should be dedented and placed flush with the test."""
+    decorator = """
+        @pytest.mark.parametrize(
+            "flag",
+            [
+                True,
+                False,
+            ],
+        )
+    """
+    module_text = plugin_utils.generate_lifecycle_test_module(
+        decorator=decorator,
+        expected_phase="REPLAY",
+        expect_auto_fail=False,
+    )
+
+    expected_block = textwrap.dedent(
+        """\
+        @pytest.mark.parametrize(
+            "flag",
+            [
+                True,
+                False,
+            ],
+        )
+        def test_case(cmd_mox):
+        """
+    )
+    assert expected_block in module_text
+
+
+def test_generate_module_rejects_unknown_phases() -> None:
+    """An invalid phase should raise an explicit error for callers."""
+    with pytest.raises(ValueError, match="Unknown phase"):
+        plugin_utils.generate_lifecycle_test_module(
+            decorator="",
+            expected_phase=t.cast("plugin_utils.PhaseLiteral", "INVALID"),
+            expect_auto_fail=False,
+        )
