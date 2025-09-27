@@ -364,6 +364,44 @@ sequenceDiagram
   Fixture->>CmdMox: __exit__ (cleanup)
 ```
 
+The `_CmdMoxManager` consolidates the auto-lifecycle orchestration that the
+fixture previously delegated to individual helper functions. The following
+sequence diagram highlights how the manager collaborates with pytest and the
+`CmdMox` controller while capturing verification and cleanup failures.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant PyTest as PyTest
+  participant Plugin as _CmdMoxManager
+  participant Mox as CmdMox
+
+  rect rgb(245,248,255)
+    PyTest->>Plugin: fixture setup (enter)
+    Plugin->>Mox: __enter__()
+    alt auto_lifecycle
+      Plugin->>Mox: replay()
+    end
+  end
+
+  PyTest->>PyTest: run test body
+  note over PyTest: pytest_runtest_makereport records call failure flag
+
+  rect rgb(245,255,245)
+    PyTest->>Plugin: fixture teardown (exit, body_failed?)
+    alt auto_lifecycle and in REPLAY
+      Plugin->>Mox: verify()
+      note over Plugin: record verification section if error
+    end
+    Plugin->>Mox: __exit__()  %% cleanup
+    alt any errors
+      Plugin-->>PyTest: pytest.fail(formatted combined error)
+    else
+      Plugin-->>PyTest: teardown complete
+    end
+  end
+```
+
 - `mox.replay()`: This method must be called after all expectations have been
   recorded. It signals the end of the record phase and the beginning of the
   replay phase. Internally, this call triggers the creation of the temporary

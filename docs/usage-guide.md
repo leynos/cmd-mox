@@ -206,18 +206,19 @@ assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 # Verification will run during fixture teardown.
 ```
 
-When you want to intercept a command without configuring a double—for example
-to ensure it is treated as unexpected—register it explicitly. Any invocation of
-a registered command without a matching double will be reported as unexpected
-during verification:
+To intercept a command without configuring a double—for example, to ensure it
+is treated as unexpected—register it explicitly. Any invocation of a registered
+command without a matching double will be reported as unexpected during
+verification:
 
 ```python
 cmd_mox.register_command("name")
 ```
 
-CmdMox will create the shim so the command is routed through the IPC server
-even without a stub, mock, or spy. Shims are cleaned up automatically during
-fixture teardown.
+CmdMox creates the shim at replay start (or immediately when registration
+occurs during an active replay) so the command is routed through the IPC
+server, even without a stub, mock, or spy. Shims are cleaned up automatically
+during fixture teardown.
 
 ## Fluent API reference
 
@@ -247,7 +248,9 @@ few common ones are:
       return ("ok", "", 0)
 
   cmd_mox.mock("tool").with_args("run").runs(handler)
-  ```- `times(count)` – expect the command exactly `count` times.
+  ```
+
+- `times(count)` – expect the command exactly `count` times.
 - `times_called(count)` – alias for `times` that emphasizes spy call counts.
 
 - `in_order()` – enforce strict ordering with other expectations.
