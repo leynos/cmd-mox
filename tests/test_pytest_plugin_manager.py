@@ -447,7 +447,8 @@ def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
     with pytest.raises(pytest.fail.Exception) as excinfo:
         manager.exit(body_failed=False)
 
-    assert "cmd_mox verification RuntimeError: verify boom" in str(excinfo.value)
+    expected = f"cmd_mox verification for {node.nodeid} RuntimeError: verify boom"
+    assert expected in str(excinfo.value)
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
     ]
