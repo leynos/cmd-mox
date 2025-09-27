@@ -7,15 +7,17 @@ import typing as t
 
 PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "auto_fail"]
 
-_MODULE_TMPL = """\
-import pytest
-from cmd_mox.controller import Phase
-{extra_import}
-pytest_plugins = ("cmd_mox.pytest_plugin",)
+_MODULE_TMPL = textwrap.dedent(
+    """\
+    import pytest
+    from cmd_mox.controller import Phase
+    {extra_import}
+    pytest_plugins = ("cmd_mox.pytest_plugin",)
 
-{shim_code}{decorator}def test_case(cmd_mox):
-{test_body}
-"""
+    {shim_code}{decorator}def test_case(cmd_mox):
+    {test_body}
+    """
+)
 
 _AUTO_FAIL_BODY = """\
     assert cmd_mox.phase is Phase.REPLAY
@@ -76,7 +78,7 @@ def generate_lifecycle_test_module(
     shim_code = _SHIM_HELPER if uses_subprocess_helper else ""
 
     body = textwrap.indent(textwrap.dedent(_TEST_BODIES[body_key]), "    ")
-    decorator_block = f"{decorator.rstrip()}\n" if decorator else ""
+    decorator_block = decorator.rstrip("\n") + "\n" if decorator else ""
 
     return _MODULE_TMPL.format(
         extra_import=extra_import,

@@ -12,19 +12,14 @@ dependencies = []
 dev = [
     "pytest",
     "ruff",
-    "pyright",
     "pytest-timeout",
     "pytest-bdd",
     "parse_type",
 ]
 
-[tool.pyright]
-pythonVersion = "3.13"
-typeCheckingMode = "strict"
-include = ["cmd_mox"]
-
 [tool.ruff]
 line-length = 88
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
