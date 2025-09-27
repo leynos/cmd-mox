@@ -70,7 +70,10 @@ def _format_single_error(error: tuple[str, Exception], *, nodeid: str | None) ->
         if nodeid:
             base += f" for {nodeid}"
         return f"{base}: {type(err).__name__}: {err}"
-    return f"cmd_mox {stage} {type(err).__name__}: {err}"
+    base = f"cmd_mox {stage}"
+    if nodeid:
+        base += f" for {nodeid}"
+    return f"{base} {type(err).__name__}: {err}"
 
 
 def _format_multiple_errors(
