@@ -51,14 +51,30 @@ def _aggregate_teardown_errors(
     return errors
 
 
-def _format_teardown_failure(errors: list[tuple[str, Exception]]) -> str:
+def _format_teardown_failure(
+    errors: list[tuple[str, Exception]], *, nodeid: str | None = None
+) -> str:
     """Format an aggregated error message for pytest failures."""
     if not errors:
         return "cmd_mox teardown failure"
     if len(errors) == 1:
         stage, err = errors[0]
+        if stage == "cleanup":
+            base = "cmd_mox fixture cleanup failed"
+            if nodeid:
+                base += f" for {nodeid}"
+            return f"{base}: {type(err).__name__}: {err}"
         return f"cmd_mox {stage} {type(err).__name__}: {err}"
-    joined = "; ".join(f"{stage} {type(err).__name__}: {err}" for stage, err in errors)
+    parts: list[str] = []
+    for stage, err in errors:
+        if stage == "cleanup" and nodeid:
+            detail = f"{stage} for {nodeid} {type(err).__name__}: {err}"
+        else:
+            detail = f"{stage} {type(err).__name__}: {err}"
+        parts.append(detail)
+    joined = "; ".join(parts)
+    if nodeid:
+        return f"cmd_mox teardown failure for {nodeid}: {joined}"
     return f"cmd_mox teardown failure: {joined}"
 
 
@@ -125,6 +141,8 @@ class _CmdMoxManager:
     def __init__(self, request: pytest.FixtureRequest) -> None:
         self.request = request
         self.config = request.config
+        node = getattr(request, "node", None)
+        self._nodeid = getattr(node, "nodeid", "<cmd_mox item>")
         self._auto_lifecycle = self._auto_lifecycle_enabled()
         self.mox = CmdMox(
             verify_on_exit=False,
@@ -221,7 +239,7 @@ class _CmdMoxManager:
                     f"cmd_mox {stage}",
                     f"{type(err).__name__}: {err}",
                 )
-        message = _format_teardown_failure(errors)
+        message = _format_teardown_failure(errors, nodeid=self._nodeid)
         pytest.fail(message)
 
     def _auto_lifecycle_enabled(self) -> bool:
@@ -283,7 +301,7 @@ class _CmdMoxManager:
         try:
             self.mox.verify()
         except Exception as err:
-            logger.exception("Error during cmd_mox verification")
+            logger.exception("cmd_mox verification failed for %s", self._nodeid)
             self._add_verification_section(err)
             return err
         return None
@@ -293,7 +311,9 @@ class _CmdMoxManager:
         try:
             self.mox.__exit__(None, None, None)
         except Exception as err:
-            logger.exception("Error during cmd_mox fixture cleanup")
+            logger.exception(
+                "Error during cmd_mox fixture cleanup for %s", self._nodeid
+            )
             return err
         return None
 

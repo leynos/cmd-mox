@@ -167,12 +167,13 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
 
     result = pytester.runpytest(str(test_file))
     result.assert_outcomes(passed=1, errors=1)
-    result.stdout.fnmatch_lines(
-        [
-            "*cmd_mox teardown failure: verification OSError: kaboom;"
-            " cleanup OSError: kaboom*"
-        ]
+    expected = (
+        "*cmd_mox teardown failure for "
+        "test_teardown_error_reports_failure.py::test_cleanup_error: "
+        "verification OSError: kaboom; cleanup for "
+        "test_teardown_error_reports_failure.py::test_cleanup_error OSError: kaboom*"
     )
+    result.stdout.fnmatch_lines([expected])
 
 
 @pytest.mark.parametrize(
