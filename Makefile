@@ -12,10 +12,10 @@ VENV_TOOLS = pytest
 all: build check-fmt test typecheck
 
 .venv: pyproject.toml
-	uv venv --clear
+	UV_CACHE_DIR=.uv-cache uv venv --clear
 
 build: uv .venv ## Build virtual-env and install deps
-	uv sync --group dev
+	UV_CACHE_DIR=.uv-cache uv sync --group dev
 
 build-release: ## Build artefacts (sdist & wheel)
 	python -m build --sdist --wheel
@@ -34,7 +34,7 @@ define ensure_tool
 endef
 
 define ensure_tool_venv
-	@uv run which $(1) >/dev/null 2>&1 || { \
+	UV_CACHE_DIR=.uv-cache @uv run which $(1) >/dev/null 2>&1 || { \
 	  printf "Error: '%s' is required in the virtualenv, but is not installed\n" "$(1)" >&2; \
 	  exit 1; \
 	}
@@ -77,7 +77,7 @@ nixie: $(NIXIE) ## Validate Mermaid diagrams
 	  -not -path './.venv/*' -print0 | xargs -0 $(NIXIE)
 
 test: build uv $(VENV_TOOLS) ## Run tests
-	uv run pytest -v
+	UV_CACHE_DIR=.uv-cache uv run pytest -v -n auto
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \

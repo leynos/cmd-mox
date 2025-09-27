@@ -58,12 +58,15 @@ class _StubMarker:
 class _StubNode:
     """Minimal pytest node supporting markers and report sections."""
 
-    __slots__ = ("_marker", "sections", "stash")
+    __slots__ = ("_marker", "nodeid", "sections", "stash")
 
-    def __init__(self, marker: _StubMarker | None = None) -> None:
+    def __init__(
+        self, marker: _StubMarker | None = None, nodeid: str = "test::stub"
+    ) -> None:
         self._marker = marker
         self.sections: list[tuple[str, str, str]] = []
         self.stash = pytest.Stash()
+        self.nodeid = nodeid
 
     def get_closest_marker(self, name: str) -> _StubMarker | None:
         return self._marker if name == "cmd_mox" else None
@@ -404,25 +407,10 @@ def test_enter_cmd_mox_param_override_precedes_marker(
     assert stub.replay_calls == 0
 
 
-@pytest.mark.parametrize(
-    ("mode", "expected_message"),
-    [
-        pytest.param(
-            "explicit-node",
-            "cleanup OSError: exit boom",
-            id="body-failed",
-        ),
-        pytest.param(
-            "request-node",
-            "cmd_mox cleanup OSError: exit boom",
-            id="always-fails",
-        ),
-    ],
-)
+@pytest.mark.parametrize("mode", ["explicit-node", "request-node"])
 def test_exit_cmd_mox_cleanup_error_handling(
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
-    expected_message: str,
 ) -> None:
     """Cleanup errors fail the test and emit teardown sections across scenarios."""
     if mode == "explicit-node":
@@ -440,7 +428,9 @@ def test_exit_cmd_mox_cleanup_error_handling(
         manager.exit(body_failed=True)
 
     message = str(excinfo.value)
-    assert expected_message in message
+    assert "cmd_mox fixture cleanup failed" in message
+    assert node.nodeid in message
+    assert "OSError: exit boom" in message
     assert node.sections == [("teardown", "cmd_mox cleanup", "OSError: exit boom")]
 
 
@@ -480,11 +470,45 @@ def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
 
     message = str(excinfo.value)
     assert "verification RuntimeError: verify boom" in message
-    assert "cleanup OSError: exit boom" in message
+    assert f"cleanup for {node.nodeid} OSError: exit boom" in message
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom"),
         ("teardown", "cmd_mox cleanup", "OSError: exit boom"),
     ]
+
+
+def test_exit_cmd_mox_logs_verification_context(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verification failures include node context in logs."""
+    caplog.set_level("ERROR")
+    request = _StubRequest(config=_StubConfig())
+    manager = _make_manager(monkeypatch, request, raise_on_verify=True)
+
+    manager.enter()
+
+    with pytest.raises(pytest.fail.Exception):
+        manager.exit(body_failed=False)
+
+    message = f"cmd_mox verification failed for {request.node.nodeid}"
+    assert message in caplog.text
+
+
+def test_exit_cmd_mox_logs_cleanup_context(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Cleanup failures include node context in logs."""
+    caplog.set_level("ERROR")
+    request = _StubRequest(config=_StubConfig())
+    manager = _make_manager(monkeypatch, request, raise_on_exit=True)
+
+    manager.enter()
+
+    with pytest.raises(pytest.fail.Exception):
+        manager.exit(body_failed=False)
+
+    message = f"Error during cmd_mox fixture cleanup for {request.node.nodeid}"
+    assert message in caplog.text
 
 
 def test_exit_cmd_mox_is_idempotent_without_enter(

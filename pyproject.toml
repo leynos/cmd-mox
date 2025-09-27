@@ -11,6 +11,7 @@ dependencies = []
 [dependency-groups]
 dev = [
     "pytest",
+	"pytest-xdist",
     "ruff",
     "pytest-timeout",
     "pytest-bdd",
@@ -81,8 +82,6 @@ dataclasses = "dc"
 convention = "numpy"
 
 [tool.pytest.ini_options]
-# Ensure asyncio fixtures create a new event loop for each test
-asyncio_default_fixture_loop_scope = "function"
 # Tests automatically killed after seconds elapsed
 timeout = 30
 
