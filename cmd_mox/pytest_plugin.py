@@ -58,20 +58,33 @@ def _format_teardown_failure(
     if not errors:
         return "cmd_mox teardown failure"
     if len(errors) == 1:
-        stage, err = errors[0]
-        if stage == "cleanup":
-            base = "cmd_mox fixture cleanup failed"
-            if nodeid:
-                base += f" for {nodeid}"
-            return f"{base}: {type(err).__name__}: {err}"
-        return f"cmd_mox {stage} {type(err).__name__}: {err}"
+        return _format_single_teardown_error(errors[0], nodeid=nodeid)
+    return _format_multiple_teardown_errors(errors, nodeid=nodeid)
+
+
+def _format_single_teardown_error(
+    error: tuple[str, Exception], *, nodeid: str | None
+) -> str:
+    """Render a message when exactly one teardown stage failed."""
+    stage, err = error
+    if stage == "cleanup":
+        base = "cmd_mox fixture cleanup failed"
+        if nodeid:
+            base += f" for {nodeid}"
+        return f"{base}: {type(err).__name__}: {err}"
+    return f"cmd_mox {stage} {type(err).__name__}: {err}"
+
+
+def _format_multiple_teardown_errors(
+    errors: list[tuple[str, Exception]], *, nodeid: str | None
+) -> str:
+    """Render a combined error message for multiple teardown failures."""
     parts: list[str] = []
     for stage, err in errors:
         if stage == "cleanup" and nodeid:
-            detail = f"{stage} for {nodeid} {type(err).__name__}: {err}"
+            parts.append(f"{stage} for {nodeid} {type(err).__name__}: {err}")
         else:
-            detail = f"{stage} {type(err).__name__}: {err}"
-        parts.append(detail)
+            parts.append(f"{stage} {type(err).__name__}: {err}")
     joined = "; ".join(parts)
     if nodeid:
         return f"cmd_mox teardown failure for {nodeid}: {joined}"
