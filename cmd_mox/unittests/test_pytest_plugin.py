@@ -29,7 +29,7 @@ class AutoLifecycleTestCase:
     cli_args: tuple[str, ...]
     test_decorator: str
     expected_phase: PhaseLiteral
-    expect_auto_fail: bool
+    expect_auto_fail: bool = False
 
 
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")

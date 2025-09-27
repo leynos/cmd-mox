@@ -100,6 +100,23 @@ def test_generate_module_includes_decorators_with_trailing_newline() -> None:
     assert expected_block in module_text
 
 
+def test_generate_module_includes_decorators_with_leading_trailing_whitespace() -> None:
+    """Decorator formatting should be resilient to surrounding whitespace."""
+    module_text = plugin_utils.generate_lifecycle_test_module(
+        decorator="   @pytest.mark.some_marker   ",
+        expected_phase="RECORD",
+        expect_auto_fail=False,
+    )
+    assert "@pytest.mark.some_marker" in module_text
+
+    module_text = plugin_utils.generate_lifecycle_test_module(
+        decorator="\n@pytest.mark.some_marker\n",
+        expected_phase="RECORD",
+        expect_auto_fail=False,
+    )
+    assert "@pytest.mark.some_marker" in module_text
+
+
 def test_generate_module_preserves_multiline_decorators() -> None:
     """Multi-line decorators should be dedented and placed flush with the test."""
     decorator = """
@@ -134,7 +151,7 @@ def test_generate_module_preserves_multiline_decorators() -> None:
 
 def test_generate_module_rejects_unknown_phases() -> None:
     """An invalid phase should raise an explicit error for callers."""
-    with pytest.raises(ValueError, match="Unknown phase"):
+    with pytest.raises(ValueError, match=r"Unknown phase: INVALID"):
         plugin_utils.generate_lifecycle_test_module(
             decorator="",
             expected_phase=t.cast("plugin_utils.PhaseLiteral", "INVALID"),

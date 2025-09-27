@@ -7,9 +7,9 @@ import typing as t
 
 PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "auto_fail"]
 
-_UNKNOWN_PHASE_ERR = "Unknown phase"
+_UNKNOWN_PHASE_ERR = "Unknown phase: {phase}"
 
-_TEST_BODIES: dict[str, str] = {
+_TEST_BODIES: dict[PhaseLiteral, str] = {
     "RECORD": """
         assert cmd_mox.phase is Phase.RECORD
         cmd_mox.stub("tool").returns(stdout="ok")
@@ -31,6 +31,43 @@ _TEST_BODIES: dict[str, str] = {
 }
 
 
+def _format_block(block: str, *, indent: int = 0) -> str:
+    """Return a dedented block optionally indented by ``indent`` spaces."""
+    normalized = textwrap.dedent(block).strip("\n")
+    if not normalized:
+        return ""
+
+    normalized = f"{normalized}\n"
+    if indent:
+        normalized = textwrap.indent(normalized, " " * indent)
+    return normalized
+
+
+def _build_module_prefix(*, include_subprocess_helper: bool) -> str:
+    """Compose the module header and optional shim helper."""
+    header_lines = [
+        "import pytest",
+        "from cmd_mox.controller import Phase",
+    ]
+    if include_subprocess_helper:
+        header_lines.append("from cmd_mox.unittests.conftest import run_subprocess")
+    header_lines.append('pytest_plugins = ("cmd_mox.pytest_plugin",)')
+
+    prefix = "\n".join(header_lines) + "\n\n"
+    if include_subprocess_helper:
+        prefix += _format_block(
+            """\
+            def _shim_cmd_path(mox, name):
+                sd = mox.environment.shim_dir
+                assert sd is not None
+                return sd / name
+            """
+        )
+        prefix += "\n"
+
+    return prefix
+
+
 def generate_lifecycle_test_module(
     decorator: str,
     expected_phase: PhaseLiteral,
@@ -49,42 +86,22 @@ def generate_lifecycle_test_module(
     allowing callers to assert the pure auto-fail module layout.
     """
     if expected_phase not in ("RECORD", "REPLAY", "auto_fail"):
-        raise ValueError(_UNKNOWN_PHASE_ERR)
+        raise ValueError(_UNKNOWN_PHASE_ERR.format(phase=expected_phase))
 
-    body_key = (
+    body_key: PhaseLiteral = (
         "auto_fail"
         if expected_phase == "REPLAY" and expect_auto_fail
         else expected_phase
     )
 
     uses_subprocess_helper = body_key != "auto_fail"
-    decorator_block = (
-        textwrap.dedent(decorator).rstrip("\n") + "\n" if decorator else ""
-    )
+    module = _build_module_prefix(include_subprocess_helper=uses_subprocess_helper)
 
-    header_lines = [
-        "import pytest",
-        "from cmd_mox.controller import Phase",
-    ]
-    if uses_subprocess_helper:
-        header_lines.append("from cmd_mox.unittests.conftest import run_subprocess")
-    header_lines.append('pytest_plugins = ("cmd_mox.pytest_plugin",)')
-    module = "\n".join(header_lines) + "\n\n"
-
-    if uses_subprocess_helper:
-        module += textwrap.dedent(
-            """\
-            def _shim_cmd_path(mox, name):
-                sd = mox.environment.shim_dir
-                assert sd is not None
-                return sd / name
-
-
-            """
-        )
+    decorator_block = _format_block(decorator) if decorator else ""
+    body_block = _format_block(_TEST_BODIES[body_key], indent=4)
 
     module += f"{decorator_block}def test_case(cmd_mox):\n"
-    module += textwrap.indent(textwrap.dedent(_TEST_BODIES[body_key]), "    ")
+    module += body_block
 
     return module
 
