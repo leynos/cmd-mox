@@ -29,7 +29,7 @@ class AutoLifecycleTestCase:
     cli_args: tuple[str, ...]
     test_decorator: str
     expected_phase: PhaseLiteral
-    should_fail: bool
+    expect_auto_fail: bool = False
 
 
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
@@ -186,7 +186,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 cli_args=(),
                 test_decorator="",
                 expected_phase="RECORD",
-                should_fail=False,
+                expect_auto_fail=False,
             ),
             id="ini-disables",
         ),
@@ -197,7 +197,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 cli_args=("--no-cmd-mox-auto-lifecycle",),
                 test_decorator="",
                 expected_phase="RECORD",
-                should_fail=False,
+                expect_auto_fail=False,
             ),
             id="cli-disables",
         ),
@@ -208,7 +208,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 cli_args=(),
                 test_decorator="@pytest.mark.cmd_mox(auto_lifecycle=True)",
                 expected_phase="auto_fail",
-                should_fail=True,
+                expect_auto_fail=True,
             ),
             id="marker-overrides-ini",
         ),
@@ -219,7 +219,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 cli_args=("--no-cmd-mox-auto-lifecycle",),
                 test_decorator="@pytest.mark.cmd_mox(auto_lifecycle=True)",
                 expected_phase="REPLAY",
-                should_fail=False,
+                expect_auto_fail=False,
             ),
             id="marker-overrides-cli",
         ),
@@ -232,7 +232,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                     '@pytest.mark.parametrize("cmd_mox", [False], indirect=True)'
                 ),
                 expected_phase="RECORD",
-                should_fail=False,
+                expect_auto_fail=False,
             ),
             id="fixture-param-bool",
         ),
@@ -249,7 +249,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                     ]
                 ),
                 expected_phase="REPLAY",
-                should_fail=False,
+                expect_auto_fail=False,
             ),
             id="fixture-param-dict",
         ),
@@ -260,7 +260,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 cli_args=("--cmd-mox-auto-lifecycle",),
                 test_decorator="",
                 expected_phase="REPLAY",
-                should_fail=False,
+                expect_auto_fail=False,
             ),
             id="cli-overrides-ini",
         ),
@@ -284,7 +284,7 @@ def test_auto_lifecycle_configuration(
     module = plugin_utils.generate_lifecycle_test_module(
         test_case.test_decorator,
         test_case.expected_phase,
-        should_fail=test_case.should_fail,
+        expect_auto_fail=test_case.expect_auto_fail,
     )
     module = f"# scenario: {test_case.config_method}\n" + module
     test_file = pytester.makepyfile(**{f"test_{test_case.config_method}.py": module})
@@ -292,7 +292,7 @@ def test_auto_lifecycle_configuration(
     plugins: tuple[str, ...] = ("cmd_mox.pytest_plugin",) if test_case.cli_args else ()
     result = pytester.runpytest(*test_case.cli_args, str(test_file), plugins=plugins)
 
-    if test_case.should_fail:
+    if test_case.expect_auto_fail:
         result.assert_outcomes(passed=1, errors=1)
         result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
     else:

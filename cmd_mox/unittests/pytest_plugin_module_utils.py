@@ -7,85 +7,103 @@ import typing as t
 
 PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "auto_fail"]
 
-_MODULE_TMPL = textwrap.dedent(
-    """\
-    import pytest
-    from cmd_mox.controller import Phase
-    {extra_import}
-    pytest_plugins = ("cmd_mox.pytest_plugin",)
+_UNKNOWN_PHASE_ERR = "Unknown phase: {phase}"
 
-    {shim_code}{decorator}def test_case(cmd_mox):
-    {test_body}
-    """
-)
-
-_AUTO_FAIL_BODY = """\
-    assert cmd_mox.phase is Phase.REPLAY
-    cmd_mox.mock("never-called").returns(stdout="nope")
-"""
-
-_REPLAY_BODY = """\
-    assert cmd_mox.phase is Phase.REPLAY
-    cmd_mox.stub("tool").returns(stdout="ok")
-    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
-    assert res.stdout.strip() == "ok"
-"""
-
-_RECORD_BODY = """\
-    assert cmd_mox.phase is Phase.RECORD
-    cmd_mox.stub("tool").returns(stdout="ok")
-    cmd_mox.replay()
-    res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
-    assert res.stdout.strip() == "ok"
-    cmd_mox.verify()
-"""
-
-_TEST_BODIES: dict[str, str] = {
-    "RECORD": _RECORD_BODY,
-    "REPLAY": _REPLAY_BODY,
-    "auto_fail": _AUTO_FAIL_BODY,
+_TEST_BODIES: dict[PhaseLiteral, str] = {
+    "RECORD": """
+        assert cmd_mox.phase is Phase.RECORD
+        cmd_mox.stub("tool").returns(stdout="ok")
+        cmd_mox.replay()
+        res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+        assert res.stdout.strip() == "ok"
+        cmd_mox.verify()
+    """,
+    "REPLAY": """
+        assert cmd_mox.phase is Phase.REPLAY
+        cmd_mox.stub("tool").returns(stdout="ok")
+        res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
+        assert res.stdout.strip() == "ok"
+    """,
+    "auto_fail": """
+        assert cmd_mox.phase is Phase.REPLAY
+        cmd_mox.mock("never-called").returns(stdout="nope")
+    """,
 }
 
-_SHIM_HELPER = textwrap.dedent(
-    """\
-    def _shim_cmd_path(mox, name):
-        sd = mox.environment.shim_dir
-        assert sd is not None
-        return sd / name
+
+def _format_block(block: str, *, indent: int = 0) -> str:
+    """Return a dedented block optionally indented by ``indent`` spaces."""
+    normalized = textwrap.dedent(block).strip("\n")
+    if not normalized:
+        return ""
+
+    normalized = f"{normalized}\n"
+    if indent:
+        normalized = textwrap.indent(normalized, " " * indent)
+    return normalized
 
 
-"""
-)
+def _build_module_prefix(*, include_subprocess_helper: bool) -> str:
+    """Compose the module header and optional shim helper."""
+    header_lines = [
+        "import pytest",
+        "from cmd_mox.controller import Phase",
+    ]
+    if include_subprocess_helper:
+        header_lines.append("from cmd_mox.unittests.conftest import run_subprocess")
+    header_lines.append('pytest_plugins = ("cmd_mox.pytest_plugin",)')
+
+    prefix = "\n".join(header_lines) + "\n\n"
+    if include_subprocess_helper:
+        prefix += _format_block(
+            """\
+            def _shim_cmd_path(mox, name):
+                sd = mox.environment.shim_dir
+                assert sd is not None
+                return sd / name
+            """
+        )
+        prefix += "\n"
+
+    return prefix
 
 
 def generate_lifecycle_test_module(
     decorator: str,
     expected_phase: PhaseLiteral,
     *,
-    should_fail: bool,
+    expect_auto_fail: bool,
 ) -> str:
-    """Return a self-contained test module for lifecycle precedence cases."""
-    body_key: str = expected_phase
-    if expected_phase == "REPLAY" and should_fail:
-        body_key = "auto_fail"
+    """Return a synthetic pytest module tuned to a lifecycle scenario.
+
+    ``decorator`` is emitted verbatim (when provided) immediately above the
+    generated test so callers can inject parametrization or marks without
+    needing to post-process the module text. Setting ``expect_auto_fail`` to
+    ``True`` swaps the REPLAY test body for the auto-fail variant and omits the
+    subprocess shim helpers; this mirrors how the plugin behaves when a
+    lifecycle override expects failure. Passing ``expected_phase`` as
+    ``"auto_fail"`` has the same effect regardless of ``expect_auto_fail``,
+    allowing callers to assert the pure auto-fail module layout.
+    """
+    if expected_phase not in ("RECORD", "REPLAY", "auto_fail"):
+        raise ValueError(_UNKNOWN_PHASE_ERR.format(phase=expected_phase))
+
+    body_key: PhaseLiteral = (
+        "auto_fail"
+        if expected_phase == "REPLAY" and expect_auto_fail
+        else expected_phase
+    )
 
     uses_subprocess_helper = body_key != "auto_fail"
-    extra_import = (
-        "from cmd_mox.unittests.conftest import run_subprocess\n"
-        if uses_subprocess_helper
-        else ""
-    )
-    shim_code = _SHIM_HELPER if uses_subprocess_helper else ""
+    module = _build_module_prefix(include_subprocess_helper=uses_subprocess_helper)
 
-    body = textwrap.indent(textwrap.dedent(_TEST_BODIES[body_key]), "    ")
-    decorator_block = decorator.rstrip("\n") + "\n" if decorator else ""
+    decorator_block = _format_block(decorator) if decorator else ""
+    body_block = _format_block(_TEST_BODIES[body_key], indent=4)
 
-    return _MODULE_TMPL.format(
-        extra_import=extra_import,
-        shim_code=shim_code,
-        decorator=decorator_block,
-        test_body=body,
-    )
+    module += f"{decorator_block}def test_case(cmd_mox):\n"
+    module += body_block
+
+    return module
 
 
 __all__ = ["PhaseLiteral", "generate_lifecycle_test_module"]
