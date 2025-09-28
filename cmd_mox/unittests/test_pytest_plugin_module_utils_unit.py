@@ -56,30 +56,28 @@ def test_generate_module_includes_expected_snippets(case: CaseType) -> None:
         assert snippet in module_text
 
 
-def test_generate_module_overrides_replay_body_when_failures_expected() -> None:
-    """REPLAY scenarios expecting failure should use the auto-fail body."""
+def _assert_auto_fail_module_properties(
+    expected_phase: plugin_utils.PhaseLiteral, *, expect_auto_fail: bool
+) -> None:
     module_text = plugin_utils.generate_lifecycle_test_module(
         decorator="",
-        expected_phase="REPLAY",
-        expect_auto_fail=True,
+        expected_phase=expected_phase,
+        expect_auto_fail=expect_auto_fail,
     )
 
     assert 'cmd_mox.mock("never-called").returns(stdout="nope")' in module_text
     assert "from cmd_mox.unittests.conftest import run_subprocess" not in module_text
     assert "def _shim_cmd_path" not in module_text
+
+
+def test_generate_module_overrides_replay_body_when_failures_expected() -> None:
+    """REPLAY scenarios expecting failure should use the auto-fail body."""
+    _assert_auto_fail_module_properties("REPLAY", expect_auto_fail=True)
 
 
 def test_generate_module_forces_auto_fail_body_without_helpers() -> None:
     """Pure auto-fail modules should omit shim helpers and include failure body."""
-    module_text = plugin_utils.generate_lifecycle_test_module(
-        decorator="",
-        expected_phase="auto_fail",
-        expect_auto_fail=False,
-    )
-
-    assert 'cmd_mox.mock("never-called").returns(stdout="nope")' in module_text
-    assert "from cmd_mox.unittests.conftest import run_subprocess" not in module_text
-    assert "def _shim_cmd_path" not in module_text
+    _assert_auto_fail_module_properties("auto_fail", expect_auto_fail=False)
 
 
 def test_generate_module_includes_decorators_with_trailing_newline() -> None:
