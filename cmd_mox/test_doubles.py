@@ -48,29 +48,13 @@ def _create_expectation_proxy() -> type:
         return _ExpectationProxy
 
     class _ExpectationProxy:  # pragma: no cover - runtime placeholder
-        def with_args(self, *args: str) -> Self:
-            raise NotImplementedError("with_args is typing-only")
+        def __getattr__(self, name: str) -> t.Callable[..., t.Any]:
+            """Raise NotImplementedError for any method access."""
 
-        def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self:
-            raise NotImplementedError("with_matching_args is typing-only")
+            def _method(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+                raise NotImplementedError(f"{name} is typing-only")
 
-        def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self:
-            raise NotImplementedError("with_stdin is typing-only")
-
-        def with_env(self, mapping: dict[str, str]) -> Self:
-            raise NotImplementedError("with_env is typing-only")
-
-        def times(self, count: int) -> Self:
-            raise NotImplementedError("times is typing-only")
-
-        def times_called(self, count: int) -> Self:
-            raise NotImplementedError("times_called is typing-only")
-
-        def in_order(self) -> Self:
-            raise NotImplementedError("in_order is typing-only")
-
-        def any_order(self) -> Self:
-            raise NotImplementedError("any_order is typing-only")
+            return _method
 
     return _ExpectationProxy
 
