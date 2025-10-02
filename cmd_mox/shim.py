@@ -138,13 +138,16 @@ def _run_real_command(
 ) -> Response:
     """Resolve and execute the real command as instructed by *directive*."""
     override = os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}")
+    
+    # Resolve command path (override or PATH-based)
     if override:
         resolved = _validate_override_path(invocation.command, override)
+        if isinstance(resolved, Response):
+            return resolved
     else:
         resolved = resolve_command_path(invocation.command, directive.lookup_path)
-
-    if isinstance(resolved, Response):
-        return resolved
+        if isinstance(resolved, Response):
+            return resolved
 
     env = prepare_environment(
         directive.lookup_path, directive.extra_env, invocation.env
