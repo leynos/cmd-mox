@@ -51,7 +51,7 @@ def _create_expectation_proxy() -> type:
         def __getattr__(self, name: str) -> t.Callable[..., t.Any]:
             """Raise NotImplementedError for any method access."""
 
-            def _method(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+            def _method(*args: object, **kwargs: object) -> t.NoReturn:
                 raise NotImplementedError(f"{name} is typing-only")
 
             return _method

@@ -95,7 +95,7 @@ def _write_response(response: Response) -> None:
 def main() -> None:
     """Connect to the IPC server and execute the command behaviour."""
     cmd_name = Path(sys.argv[0]).name
-    socket_path, timeout = _validate_environment()
+    _, timeout = _validate_environment()
     invocation = _create_invocation(cmd_name)
     response = _execute_invocation(invocation, timeout)
     _write_response(response)
@@ -137,21 +137,37 @@ def _run_real_command(
     invocation: Invocation, directive: PassthroughRequest
 ) -> Response:
     """Resolve and execute the real command as instructed by *directive*."""
-    # Resolve command path (override or PATH)
-    override = os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}")
-    resolved = (
-        _validate_override_path(invocation.command, override)
-        if override
-        else resolve_command_path(invocation.command, directive.lookup_path)
-    )
-
-    # Early return if resolution failed
-    if isinstance(resolved, Response):
-        return resolved
-
     env = prepare_environment(
         directive.lookup_path, directive.extra_env, invocation.env
     )
+
+    override = os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}")
+    resolved: Path | Response
+    if override:
+        resolved = _validate_override_path(invocation.command, override)
+    else:
+        merged_path = env.get("PATH")
+        socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
+        shim_dir = Path(socket_path).parent if socket_path else None
+        path_parts: list[str] = []
+        if merged_path:
+            for entry in merged_path.split(os.pathsep):
+                if not entry:
+                    continue
+                if shim_dir and Path(entry) == shim_dir:
+                    continue
+                path_parts.append(entry)
+
+        for entry in directive.lookup_path.split(os.pathsep):
+            if entry and entry not in path_parts:
+                path_parts.append(entry)
+
+        search_path = os.pathsep.join(path_parts)
+        resolved = resolve_command_path(invocation.command, search_path)
+
+    if isinstance(resolved, Response):
+        return resolved
+
     return execute_command(resolved, invocation, env, timeout=directive.timeout)
 
 

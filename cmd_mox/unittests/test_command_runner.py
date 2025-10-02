@@ -182,3 +182,65 @@ def test_execute_command_handles_timeout(monkeypatch: pytest.MonkeyPatch) -> Non
     response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
     assert response.exit_code == 124
     assert response.stderr == "sleepy: timeout after 30 seconds"
+
+
+def test_execute_command_handles_file_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FileNotFoundError should map to a 127 exit code."""
+    invocation = Invocation(command="missing", args=[], stdin="", env={})
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise FileNotFoundError
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
+    assert response.exit_code == 127
+    assert response.stderr == "missing: not found"
+
+
+def test_execute_command_handles_permission_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PermissionError should propagate the original message."""
+    invocation = Invocation(command="restricted", args=[], stdin="", env={})
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
+    assert response.exit_code == 126
+    assert response.stderr == "restricted: denied"
+
+
+def test_execute_command_handles_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Generic OSError should be reported as an execution failure."""
+    invocation = Invocation(command="broken", args=[], stdin="", env={})
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise OSError("oops")
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
+    assert response.exit_code == 126
+    assert response.stderr == "broken: execution failed: oops"
+
+
+def test_execute_command_handles_unexpected_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Other exceptions are surfaced as unexpected errors."""
+    invocation = Invocation(command="weird", args=[], stdin="", env={})
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
+    assert response.exit_code == 126
+    assert response.stderr == "weird: unexpected error: boom"

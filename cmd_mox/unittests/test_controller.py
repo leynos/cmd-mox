@@ -566,6 +566,23 @@ def test_prepare_passthrough_registers_pending_invocation() -> None:
         mox.__exit__(None, None, None)
 
 
+def test_handle_passthrough_result_rejects_unknown_invocation() -> None:
+    """Unexpected passthrough results should raise a clear RuntimeError."""
+    mox = CmdMox()
+    mox.__enter__()
+    try:
+        result = PassthroughResult(
+            invocation_id="missing",
+            stdout="",
+            stderr="",
+            exit_code=0,
+        )
+        with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
+            mox._handle_passthrough_result(result)
+    finally:
+        mox.__exit__(None, None, None)
+
+
 def test_handle_passthrough_result_finalises_invocation() -> None:
     """_handle_passthrough_result records journal entries and clears state."""
     mox = CmdMox()
