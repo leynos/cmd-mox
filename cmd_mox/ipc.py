@@ -574,11 +574,13 @@ class CallbackIPCServer(IPCServer):
     def handle_invocation(
         self, invocation: Invocation
     ) -> Response:  # pragma: no cover - wrapper
+        """Delegate *invocation* processing to the configured handler."""
         return self._handler(invocation)
 
     def handle_passthrough_result(
         self, result: PassthroughResult
     ) -> Response:  # pragma: no cover - wrapper
+        """Forward passthrough completion to the configured handler."""
         return self._passthrough_handler(result)
 
 

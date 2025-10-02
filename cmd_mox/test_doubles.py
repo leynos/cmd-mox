@@ -9,6 +9,9 @@ from typing_extensions import Self
 from .expectations import Expectation
 from .ipc import Invocation, Response
 
+if t.TYPE_CHECKING:
+    from .controller import CmdMox
+
 T = t.TypeVar("T")
 
 
@@ -91,10 +94,10 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
 
     T_Kind = t.Literal["stub", "mock", "spy"]
 
-    def __init__(self, name: str, controller: t.Any, kind: T_Kind) -> None:  # noqa: UP037
+    def __init__(self, name: str, controller: CmdMox, kind: T_Kind) -> None:
         self.name = name
         self.kind = kind
-        self.controller: t.Any = controller  # CmdMox instance
+        self.controller = controller
         self.response = Response()
         self.handler: t.Callable[[Invocation], Response] | None = None
         self.invocations: list[Invocation] = []

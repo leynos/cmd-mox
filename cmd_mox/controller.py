@@ -6,18 +6,21 @@ import dataclasses as dc
 import enum
 import os
 import types  # noqa: TC003
+import typing as t
 from collections import deque
 from pathlib import Path
 
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
-from .expectations import Expectation
 from .ipc import CallbackIPCServer, Invocation, PassthroughResult, Response
 from .passthrough import PassthroughCoordinator
-from .test_doubles import CommandDouble
 from .shimgen import create_shim_symlinks
+from .test_doubles import CommandDouble
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
+
+if t.TYPE_CHECKING:
+    from .expectations import Expectation
 
 
 class Phase(enum.Enum):

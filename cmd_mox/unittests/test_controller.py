@@ -11,13 +11,13 @@ import pytest
 
 import cmd_mox.controller as controller
 from cmd_mox.controller import CmdMox, Phase
-from cmd_mox.test_doubles import CommandDouble, MockCommand, SpyCommand, StubCommand
 from cmd_mox.errors import (
     LifecycleError,
     MissingEnvironmentError,
     UnexpectedCommandError,
 )
 from cmd_mox.ipc import Invocation, PassthroughResult, Response
+from cmd_mox.test_doubles import MockCommand, SpyCommand, StubCommand
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess

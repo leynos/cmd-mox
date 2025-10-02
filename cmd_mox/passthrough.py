@@ -53,7 +53,9 @@ class PassthroughCoordinator:
         )
         return Response(env=dict(env), passthrough=passthrough)
 
-    def finalize_result(self, result: PassthroughResult) -> tuple[CommandDouble, Invocation, Response]:
+    def finalize_result(
+        self, result: PassthroughResult
+    ) -> tuple[CommandDouble, Invocation, Response]:
         """Finalize passthrough and return (double, invocation, response)."""
         with self._lock:
             entry = self._pending.pop(result.invocation_id, None)
