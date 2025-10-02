@@ -94,29 +94,32 @@ def _handle_passthrough(
     return report_passthrough_result(passthrough_result, timeout=timeout)
 
 
+def _validate_override_path(command: str, override: str) -> Path | Response:
+    """Validate and resolve an override command path from environment variable."""
+    resolved = Path(override)
+    if not resolved.is_absolute():
+        resolved = resolved.resolve()
+    if not resolved.exists():
+        return Response(stderr=f"{command}: not found", exit_code=127)
+    if not resolved.is_file():
+        return Response(stderr=f"{command}: invalid executable path", exit_code=126)
+    if not os.access(resolved, os.X_OK):
+        return Response(stderr=f"{command}: not executable", exit_code=126)
+    return resolved
+
+
 def _run_real_command(
     invocation: Invocation, directive: PassthroughRequest
 ) -> Response:
     """Resolve and execute the real command as instructed by *directive*."""
     override = os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}")
     if override:
-        resolved = Path(override)
-        if not resolved.is_absolute():
-            resolved = resolved.resolve()
-        if not resolved.exists():
-            return Response(stderr=f"{invocation.command}: not found", exit_code=127)
-        if not resolved.is_file():
-            return Response(
-                stderr=f"{invocation.command}: invalid executable path", exit_code=126
-            )
-        if not os.access(resolved, os.X_OK):
-            return Response(
-                stderr=f"{invocation.command}: not executable", exit_code=126
-            )
+        resolved = _validate_override_path(invocation.command, override)
     else:
         resolved = resolve_command_path(invocation.command, directive.lookup_path)
-        if isinstance(resolved, Response):
-            return resolved
+
+    if isinstance(resolved, Response):
+        return resolved
 
     env = prepare_environment(
         directive.lookup_path, directive.extra_env, invocation.env
