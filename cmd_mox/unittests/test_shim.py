@@ -1,15 +1,220 @@
-"""Unit tests for shim passthrough helpers."""
+"""Unit tests for shim helper utilities."""
 
 from __future__ import annotations
 
 import os
+import sys
 import typing as t
 from pathlib import Path
 
 import pytest
 
-from cmd_mox.ipc import Response
-from cmd_mox.shim import _validate_override_path
+import cmd_mox.shim as shim
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
+from cmd_mox.ipc import Invocation, PassthroughRequest, Response
+from cmd_mox.shim import (
+    _create_invocation,
+    _execute_invocation,
+    _validate_environment,
+    _validate_override_path,
+    _write_response,
+)
+
+
+class _DummyStdin:
+    """Test double to simulate ``sys.stdin`` behaviour."""
+
+    def __init__(self, data: str, *, is_tty: bool) -> None:
+        self._data = data
+        self._is_tty = is_tty
+        self.read_calls = 0
+
+    def isatty(self) -> bool:
+        return self._is_tty
+
+    def read(self) -> str:
+        self.read_calls += 1
+        return self._data
+
+
+def _assert_exit_code(exc: pytest.ExceptionInfo[BaseException], expected: int) -> None:
+    """Assert that *exc* wraps a :class:`SystemExit` with the desired code."""
+    err = exc.value
+    assert isinstance(err, SystemExit)
+    assert err.code == expected
+
+
+def test_validate_environment_returns_socket_and_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Valid environment variables should produce socket path and timeout."""
+    sock_path = tmp_path / "cmd-mox.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(sock_path))
+    monkeypatch.delenv(CMOX_IPC_TIMEOUT_ENV, raising=False)
+
+    socket_path, timeout = _validate_environment()
+
+    assert socket_path == os.fspath(sock_path)
+    assert timeout == pytest.approx(5.0)
+
+
+def test_validate_environment_requires_socket(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Socket validation should exit when the environment variable is missing."""
+    monkeypatch.delenv(CMOX_IPC_SOCKET_ENV, raising=False)
+    monkeypatch.delenv(CMOX_IPC_TIMEOUT_ENV, raising=False)
+
+    with pytest.raises(SystemExit) as exc:
+        _validate_environment()
+
+    _assert_exit_code(exc, 1)
+    assert "IPC socket not specified" in capsys.readouterr().err
+
+
+def test_validate_environment_rejects_invalid_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Timeout parsing errors should surface as a fatal IPC message."""
+    sock_path = tmp_path / "cmd-mox.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(sock_path))
+    monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "nan")
+
+    with pytest.raises(SystemExit) as exc:
+        _validate_environment()
+
+    _assert_exit_code(exc, 1)
+    assert "invalid timeout" in capsys.readouterr().err
+
+
+def test_create_invocation_skips_tty_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When stdin is a TTY, invocation payload should contain empty stdin."""
+    dummy_stdin = _DummyStdin("ignored", is_tty=True)
+    monkeypatch.setattr(sys, "stdin", dummy_stdin)
+    monkeypatch.setattr(sys, "argv", ["shim", "--flag"])
+    monkeypatch.setenv("EXTRA", "value")
+
+    invocation = _create_invocation("shim")
+
+    assert invocation.command == "shim"
+    assert invocation.args == ["--flag"]
+    assert invocation.stdin == ""
+    assert dummy_stdin.read_calls == 0
+    assert invocation.env["EXTRA"] == "value"
+
+
+def test_create_invocation_reads_stdin_when_not_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-TTY stdin should be captured into the invocation."""
+    dummy_stdin = _DummyStdin("payload", is_tty=False)
+    monkeypatch.setattr(sys, "stdin", dummy_stdin)
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    invocation = _create_invocation("shim")
+
+    assert invocation.stdin == "payload"
+    assert dummy_stdin.read_calls == 1
+
+
+def test_execute_invocation_returns_response_without_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regular IPC responses should be returned directly."""
+    invocation = Invocation(
+        command="cmd", args=[], stdin="", env={}, invocation_id="abc"
+    )
+    expected = Response(stdout="ok", stderr="", exit_code=0)
+
+    calls: dict[str, t.Any] = {}
+
+    def fake_invoke(inv: Invocation, timeout: float) -> Response:
+        calls["invocation"] = inv
+        calls["timeout"] = timeout
+        return expected
+
+    monkeypatch.setattr(shim, "invoke_server", fake_invoke)
+    monkeypatch.setattr(
+        shim,
+        "_handle_passthrough",
+        lambda *args, **kwargs: pytest.fail("passthrough handler should not run"),
+    )
+
+    result = _execute_invocation(invocation, timeout=1.5)
+
+    assert result is expected
+    assert calls["invocation"] is invocation
+    assert calls["timeout"] == 1.5
+
+
+def test_execute_invocation_processes_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Passthrough responses should be resolved through the passthrough handler."""
+    invocation = Invocation(
+        command="cmd", args=[], stdin="", env={}, invocation_id="abc"
+    )
+    directive = PassthroughRequest(
+        invocation_id="abc",
+        lookup_path="/bin",
+        extra_env={},
+        timeout=2.0,
+    )
+    intermediate = Response(passthrough=directive)
+    final = Response(stdout="done", stderr="", exit_code=0)
+
+    monkeypatch.setattr(shim, "invoke_server", lambda *args, **kwargs: intermediate)
+
+    def fake_passthrough(inv: Invocation, resp: Response, timeout: float) -> Response:
+        assert inv is invocation
+        assert resp is intermediate
+        assert timeout == 2.0
+        return final
+
+    monkeypatch.setattr(shim, "_handle_passthrough", fake_passthrough)
+
+    result = _execute_invocation(invocation, timeout=2.0)
+
+    assert result is final
+
+
+def test_execute_invocation_surfaces_ipc_errors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exceptions raised by IPC helpers should trigger a controlled exit."""
+    invocation = Invocation(
+        command="cmd", args=[], stdin="", env={}, invocation_id="abc"
+    )
+
+    def raise_error(*_: object, **__: object) -> t.NoReturn:
+        raise OSError("boom")
+
+    monkeypatch.setattr(shim, "invoke_server", raise_error)
+
+    with pytest.raises(SystemExit) as exc:
+        _execute_invocation(invocation, timeout=1.0)
+
+    _assert_exit_code(exc, 1)
+    assert "IPC error: boom" in capsys.readouterr().err
+
+
+def test_write_response_updates_environment_and_streams(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Writing a response should forward IO and propagate exit status."""
+    monkeypatch.setenv("EXISTING", "1")
+    response = Response(stdout="out", stderr="err", exit_code=3, env={"NEW": "value"})
+
+    with pytest.raises(SystemExit) as exc:
+        _write_response(response)
+
+    _assert_exit_code(exc, 3)
+    captured = capsys.readouterr()
+    assert captured.out == "out"
+    assert captured.err == "err"
+    assert os.environ["NEW"] == "value"
 
 
 @pytest.mark.parametrize(

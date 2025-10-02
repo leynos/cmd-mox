@@ -7,6 +7,7 @@ import json
 import math
 import os
 import sys
+import typing as t
 import uuid
 from pathlib import Path
 
@@ -30,23 +31,14 @@ from cmd_mox.ipc import (
 )
 
 
-def main() -> None:
-    """Connect to the IPC server and execute the command behaviour."""
-    cmd_name = Path(sys.argv[0]).name
+def _validate_environment() -> tuple[str, float]:
+    """Validate required environment variables and return (socket_path, timeout)."""
     socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
     if socket_path is None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)
 
-    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
-    env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
-    invocation = Invocation(
-        command=cmd_name,
-        args=sys.argv[1:],
-        stdin=stdin_data,
-        env=env,
-        invocation_id=uuid.uuid4().hex,
-    )
+    socket_path = t.cast("str", socket_path)
 
     timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     try:
@@ -56,10 +48,27 @@ def main() -> None:
     except ValueError:
         print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
         sys.exit(1)
+
+    return socket_path, timeout
+
+
+def _create_invocation(cmd_name: str) -> Invocation:
+    """Create an Invocation from command-line arguments and stdin."""
+    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+    env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
+    return Invocation(
+        command=cmd_name,
+        args=sys.argv[1:],
+        stdin=stdin_data,
+        env=env,
+        invocation_id=uuid.uuid4().hex,
+    )
+
+
+def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
+    """Execute invocation via IPC, handling passthrough if needed."""
     try:
         response = invoke_server(invocation, timeout=timeout)
-        if response.passthrough is not None:
-            response = _handle_passthrough(invocation, response, timeout)
     except (
         OSError,
         RuntimeError,
@@ -68,12 +77,28 @@ def main() -> None:
         print(f"IPC error: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    if response.passthrough is not None:
+        response = _handle_passthrough(invocation, response, timeout)
+    return response
+
+
+def _write_response(response: Response) -> None:
+    """Write response to stdout/stderr and update environment if needed."""
     if response.env:
         os.environ |= response.env
 
     sys.stdout.write(response.stdout)
     sys.stderr.write(response.stderr)
     sys.exit(response.exit_code)
+
+
+def main() -> None:
+    """Connect to the IPC server and execute the command behaviour."""
+    cmd_name = Path(sys.argv[0]).name
+    socket_path, timeout = _validate_environment()
+    invocation = _create_invocation(cmd_name)
+    response = _execute_invocation(invocation, timeout)
+    _write_response(response)
 
 
 def _handle_passthrough(
