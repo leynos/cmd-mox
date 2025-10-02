@@ -262,14 +262,20 @@ class CmdMox:
         double = self._doubles.get(invocation.command)
         if double is None:
             resp = Response(stdout=invocation.command)
+        elif double.passthrough_mode:
+            resp = self._prepare_passthrough(double, invocation)
         else:
-            if double.passthrough_mode:
-                resp = self._prepare_passthrough(double, invocation)
-            else:
-                resp = self._invoke_handler(double, invocation)
-                if double.is_recording:
-                    double.invocations.append(invocation)
+            resp = self._handle_regular_invocation(double, invocation)
         invocation.apply(resp)
+        return resp
+
+    def _handle_regular_invocation(
+        self, double: CommandDouble, invocation: Invocation
+    ) -> Response:
+        """Handle a non-passthrough invocation with optional recording."""
+        resp = self._invoke_handler(double, invocation)
+        if double.is_recording:
+            double.invocations.append(invocation)
         return resp
 
     def _handle_invocation(self, invocation: Invocation) -> Response:
