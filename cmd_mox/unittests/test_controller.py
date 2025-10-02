@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 import cmd_mox.controller as controller
-from cmd_mox.controller import CmdMox, MockCommand, Phase, SpyCommand, StubCommand
+from cmd_mox.controller import CmdMox, Phase
+from cmd_mox.test_doubles import CommandDouble, MockCommand, SpyCommand, StubCommand
 from cmd_mox.errors import (
     LifecycleError,
     MissingEnvironmentError,
@@ -559,7 +560,8 @@ def test_prepare_passthrough_registers_pending_invocation() -> None:
         assert directive.lookup_path == mox.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
-        assert mox._pending_passthrough[directive.invocation_id][1].command == "echo"
+        pending = mox._passthrough_coordinator._pending
+        assert pending[directive.invocation_id][1].command == "echo"
     finally:
         mox.__exit__(None, None, None)
 
@@ -588,6 +590,7 @@ def test_handle_passthrough_result_finalises_invocation() -> None:
         assert len(mox.journal) == 1
         recorded = mox.journal[0]
         assert recorded.exit_code == 7
-        assert directive.invocation_id not in mox._pending_passthrough
+        pending = mox._passthrough_coordinator._pending
+        assert directive.invocation_id not in pending
     finally:
         mox.__exit__(None, None, None)

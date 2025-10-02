@@ -558,6 +558,30 @@ class IPCServer:
         raise RuntimeError(msg)
 
 
+class CallbackIPCServer(IPCServer):
+    """IPCServer variant that delegates to callbacks."""
+
+    def __init__(
+        self,
+        socket_path: Path,
+        handler: t.Callable[[Invocation], Response],
+        passthrough_handler: t.Callable[[PassthroughResult], Response],
+    ) -> None:
+        super().__init__(socket_path)
+        self._handler = handler
+        self._passthrough_handler = passthrough_handler
+
+    def handle_invocation(
+        self, invocation: Invocation
+    ) -> Response:  # pragma: no cover - wrapper
+        return self._handler(invocation)
+
+    def handle_passthrough_result(
+        self, result: PassthroughResult
+    ) -> Response:  # pragma: no cover - wrapper
+        return self._passthrough_handler(result)
+
+
 def invoke_server(
     invocation: Invocation,
     timeout: float,

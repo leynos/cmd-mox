@@ -5,353 +5,19 @@ from __future__ import annotations
 import dataclasses as dc
 import enum
 import os
-import threading
 import types  # noqa: TC003
-import typing as t
-import uuid
 from collections import deque
 from pathlib import Path
-
-from typing_extensions import Self
 
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
 from .expectations import Expectation
-from .ipc import (
-    Invocation,
-    IPCServer,
-    PassthroughRequest,
-    PassthroughResult,
-    Response,
-)
+from .ipc import CallbackIPCServer, Invocation, PassthroughResult, Response
+from .passthrough import PassthroughCoordinator
+from .test_doubles import CommandDouble
 from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
-
-T = t.TypeVar("T")
-
-
-def _create_expectation_proxy() -> type:
-    """Return a proxy type for expectation delegation.
-
-    Static type checking requires a protocol so ``CommandDouble`` exposes the
-    full expectation interface.  At runtime we return a minimal placeholder
-    whose methods raise ``NotImplementedError`` if accessed directly, making
-    this typing-only pattern explicit.
-    """
-    if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-        from pathlib import Path  # noqa: F401
-
-        class _ExpectationProxy(t.Protocol):
-            def with_args(self, *args: str) -> Self: ...
-
-            def with_matching_args(
-                self, *matchers: t.Callable[[str], bool]
-            ) -> Self: ...
-
-            def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
-
-            def with_env(self, mapping: dict[str, str]) -> Self: ...
-
-            def times(self, count: int) -> Self: ...
-
-            def times_called(self, count: int) -> Self: ...
-
-            def in_order(self) -> Self: ...
-
-            def any_order(self) -> Self: ...
-
-        return _ExpectationProxy
-
-    class _ExpectationProxy:  # pragma: no cover - runtime placeholder
-        def with_args(self, *args: str) -> Self:
-            raise NotImplementedError("with_args is typing-only")
-
-        def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self:
-            raise NotImplementedError("with_matching_args is typing-only")
-
-        def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self:
-            raise NotImplementedError("with_stdin is typing-only")
-
-        def with_env(self, mapping: dict[str, str]) -> Self:
-            raise NotImplementedError("with_env is typing-only")
-
-        def times(self, count: int) -> Self:
-            raise NotImplementedError("times is typing-only")
-
-        def times_called(self, count: int) -> Self:
-            raise NotImplementedError("times_called is typing-only")
-
-        def in_order(self) -> Self:
-            raise NotImplementedError("in_order is typing-only")
-
-        def any_order(self) -> Self:
-            raise NotImplementedError("any_order is typing-only")
-
-    return _ExpectationProxy
-
-
-_ExpectationProxy = _create_expectation_proxy()
-
-
-class _CallbackIPCServer(IPCServer):
-    """IPCServer variant that delegates to callbacks."""
-
-    def __init__(
-        self,
-        socket_path: Path,
-        handler: t.Callable[[Invocation], Response],
-        passthrough_handler: t.Callable[[PassthroughResult], Response],
-    ) -> None:
-        super().__init__(socket_path)
-        self._handler = handler
-        self._passthrough_handler = passthrough_handler
-
-    def handle_invocation(
-        self, invocation: Invocation
-    ) -> Response:  # pragma: no cover - wrapper
-        return self._handler(invocation)
-
-    def handle_passthrough_result(
-        self, result: PassthroughResult
-    ) -> Response:  # pragma: no cover - wrapper
-        return self._passthrough_handler(result)
-
-
-class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; satisfies typing-only protocol
-    """Configuration for a stub, mock, or spy command."""
-
-    __slots__ = (
-        "controller",
-        "expectation",
-        "handler",
-        "invocations",
-        "kind",
-        "name",
-        "passthrough_mode",
-        "response",
-    )
-
-    T_Kind = t.Literal["stub", "mock", "spy"]
-
-    def __init__(self, name: str, controller: "CmdMox", kind: T_Kind) -> None:  # noqa: UP037
-        self.name = name
-        self.kind = kind
-        self.controller = controller
-        self.response = Response()
-        self.handler: t.Callable[[Invocation], Response] | None = None
-        self.invocations: list[Invocation] = []
-        self.passthrough_mode = False
-        self.expectation = Expectation(name)
-
-    def returns(self, stdout: str = "", stderr: str = "", exit_code: int = 0) -> Self:
-        """Set the static response and return ``self``."""
-        self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
-        self.handler = None
-        return self
-
-    def runs(
-        self,
-        handler: t.Callable[[Invocation], tuple[str, str, int] | Response],
-    ) -> Self:
-        """Use *handler* to generate responses dynamically."""
-
-        def _wrap(invocation: Invocation) -> Response:
-            result = handler(invocation)
-            if isinstance(result, Response):
-                return result
-            match result:
-                case (str() as stdout, str() as stderr, int() as exit_code):
-                    return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
-                case _:
-                    msg = (
-                        "Handler result must be a tuple of (str, str, int), "
-                        f"got {type(result)}: {result}"
-                    )
-                    raise TypeError(msg)
-
-        self.handler = _wrap
-        return self
-
-    # ------------------------------------------------------------------
-    # Expectation configuration via delegation
-    # ------------------------------------------------------------------
-    def _ensure_in_order(self) -> None:
-        """Register this expectation for ordered verification."""
-        if self.expectation not in self.controller._ordered:
-            self.controller._ordered.append(self.expectation)
-
-    def _ensure_any_order(self) -> None:
-        """Remove this expectation from ordered verification."""
-        if self.expectation in self.controller._ordered:
-            self.controller._ordered.remove(self.expectation)
-
-    def with_args(self, *args: str) -> Self:
-        """Require the command be invoked with *args*."""
-        self.expectation.with_args(*args)
-        return self
-
-    def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self:
-        """Validate arguments using matcher predicates."""
-        self.expectation.with_matching_args(*matchers)
-        return self
-
-    def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self:
-        """Expect the given stdin ``data`` or matcher."""
-        self.expectation.with_stdin(data)
-        return self
-
-    def with_env(self, mapping: dict[str, str]) -> Self:
-        """Expect the provided environment mapping."""
-        self.expectation.with_env(mapping)
-        return self
-
-    def times(self, count: int) -> Self:
-        """Require the command be invoked exactly ``count`` times."""
-        self.expectation.times(count)
-        return self
-
-    def times_called(self, count: int) -> Self:
-        """Verify the spy was called ``count`` times."""
-        self.expectation.times_called(count)
-        return self
-
-    def in_order(self) -> Self:
-        """Mark this expectation as ordered."""
-        self.expectation.in_order()
-        self._ensure_in_order()
-        return self
-
-    def any_order(self) -> Self:
-        """Mark this expectation as unordered."""
-        self.expectation.any_order()
-        self._ensure_any_order()
-        return self
-
-    def passthrough(self) -> Self:
-        """Execute the real command while recording invocations."""
-        if self.kind != "spy":
-            msg = "passthrough() is only valid for spies"
-            raise ValueError(msg)
-        self.passthrough_mode = True
-        return self
-
-    # ------------------------------------------------------------------
-    # Matching helpers
-    # ------------------------------------------------------------------
-    def matches(self, invocation: Invocation) -> bool:
-        """Return ``True`` if *invocation* satisfies the expectation."""
-        return self.expectation.matches(invocation)
-
-    @property
-    def is_expected(self) -> bool:
-        """Return ``True`` only for mocks."""
-        return self.kind == "mock"
-
-    @property
-    def is_recording(self) -> bool:
-        """Return ``True`` for mocks and spies."""
-        return self.kind in ("mock", "spy")
-
-    @property
-    def call_count(self) -> int:
-        """Return the number of recorded invocations."""
-        return len(self.invocations)
-
-    # ------------------------------------------------------------------
-    # Spy assertions
-    # ------------------------------------------------------------------
-    def assert_called(self) -> None:
-        """Raise ``AssertionError`` if this spy was never invoked."""
-        self._validate_spy_usage("assert_called")
-        if not self.invocations:
-            msg = (
-                f"Expected {self.name!r} to be called at least once but it was"
-                " never called"
-            )
-            raise AssertionError(msg)
-
-    def assert_not_called(self) -> None:
-        """Raise ``AssertionError`` if this spy was invoked."""
-        self._validate_spy_usage("assert_not_called")
-        if self.invocations:
-            last = self.invocations[-1]
-            msg = (
-                f"Expected {self.name!r} to be uncalled but it was called"
-                f" {len(self.invocations)} time(s); "
-                f"last args={last.args!r}, stdin={last.stdin!r}, env={last.env!r}"
-            )
-            raise AssertionError(msg)
-
-    def assert_called_with(
-        self,
-        *args: str,
-        stdin: str | None = None,
-        env: dict[str, str] | None = None,
-    ) -> None:
-        """Assert the most recent call used the given arguments and context."""
-        self._validate_spy_usage("assert_called_with")
-        invocation = self._get_last_invocation()
-        self._validate_arguments(invocation, args)
-        self._validate_stdin(invocation, stdin)
-        self._validate_environment(invocation, env)
-
-    # ------------------------------------------------------------------
-    # Spy assertion helpers
-    # ------------------------------------------------------------------
-    def _validate_spy_usage(self, method_name: str) -> None:
-        if self.kind != "spy":  # pragma: no cover - defensive guard
-            msg = f"{method_name}() is only valid for spies"
-            raise AssertionError(msg)
-
-    def _get_last_invocation(self) -> Invocation:
-        if not self.invocations:
-            msg = f"Expected {self.name!r} to be called but it was never called"
-            raise AssertionError(msg)
-        return self.invocations[-1]
-
-    def _assert_equal(self, label: str, actual: T, expected: T) -> None:
-        """Raise ``AssertionError`` if *actual* != *expected*.
-
-        The *label* provides contextual information for the error message,
-        yielding a consistent formatting across different validations.
-        """
-        if actual != expected:
-            msg = f"{self.name!r} called with {label} {actual!r}, expected {expected!r}"
-            raise AssertionError(msg)
-
-    def _validate_arguments(
-        self, invocation: Invocation, expected_args: tuple[str, ...]
-    ) -> None:
-        self._assert_equal("args", tuple(invocation.args), expected_args)
-
-    def _validate_stdin(
-        self, invocation: Invocation, expected_stdin: str | None
-    ) -> None:
-        if expected_stdin is not None:
-            self._assert_equal("stdin", invocation.stdin, expected_stdin)
-
-    def _validate_environment(
-        self, invocation: Invocation, expected_env: dict[str, str] | None
-    ) -> None:
-        if expected_env is not None:
-            self._assert_equal("env", invocation.env, expected_env)
-
-    def __repr__(self) -> str:
-        """Return debugging representation with name, kind, and response."""
-        return (
-            f"CommandDouble(name={self.name!r}, "
-            f"kind={self.kind!r}, "
-            f"response={self.response!r})"
-        )
-
-    __str__ = __repr__
-
-
-# Backwards compatibility aliases
-StubCommand = CommandDouble
-MockCommand = CommandDouble
-SpyCommand = CommandDouble
 
 
 class Phase(enum.Enum):
@@ -391,12 +57,11 @@ class CmdMox:
         self.environment = (
             environment if environment is not None else EnvironmentManager()
         )
-        self._server: _CallbackIPCServer | None = None
+        self._server: CallbackIPCServer | None = None
         self._runner = CommandRunner(self.environment)
         self._entered = False
         self._phase = Phase.RECORD
-        self._pending_passthrough: dict[str, tuple[CommandDouble, Invocation]] = {}
-        self._passthrough_lock = threading.Lock()
+        self._passthrough_coordinator = PassthroughCoordinator()
 
         if max_journal_entries is not None and max_journal_entries <= 0:
             msg = "max_journal_entries must be positive"
@@ -618,49 +283,16 @@ class CmdMox:
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
         """Record passthrough intent and return instructions for the shim."""
-        invocation_id = invocation.invocation_id or uuid.uuid4().hex
-        invocation.invocation_id = invocation_id
-        stored_invocation = Invocation(
-            command=invocation.command,
-            args=list(invocation.args),
-            stdin=invocation.stdin,
-            env=dict(invocation.env),
-            stdout="",
-            stderr="",
-            exit_code=0,
-            invocation_id=invocation_id,
-        )
-        with self._passthrough_lock:
-            self._pending_passthrough[invocation_id] = (double, stored_invocation)
-
-        env = double.expectation.env
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
-        passthrough = PassthroughRequest(
-            invocation_id=invocation_id,
-            lookup_path=lookup_path,
-            extra_env=dict(env),
-            timeout=self._runner.timeout,
+        return self._passthrough_coordinator.prepare_request(
+            double, invocation, lookup_path, self._runner.timeout
         )
-        return Response(env=dict(env), passthrough=passthrough)
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:
         """Finalize a passthrough invocation once the shim reports results."""
-        with self._passthrough_lock:
-            entry = self._pending_passthrough.pop(result.invocation_id, None)
-        if entry is None:
-            msg = f"Unexpected passthrough result for {result.invocation_id}"
-            raise RuntimeError(msg)
-
-        double, invocation = entry
-        resp = Response(
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.exit_code,
-            env=dict(double.expectation.env),
-        )
-        invocation.apply(resp)
+        double, invocation, resp = self._passthrough_coordinator.finalize_result(result)
         if double.is_recording:
             double.invocations.append(invocation)
         self.journal.append(invocation)
@@ -702,7 +334,7 @@ class CmdMox:
         self.journal.clear()
         self._commands = self._registered_commands() | self._commands
         create_shim_symlinks(self.environment.shim_dir, self._commands)
-        self._server = _CallbackIPCServer(
+        self._server = CallbackIPCServer(
             self.environment.socket_path,
             self._handle_invocation,
             self._handle_passthrough_result,

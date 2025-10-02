@@ -10,7 +10,7 @@ import importlib
 import typing as t
 
 from .comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
-from .controller import CmdMox, CommandDouble, MockCommand, SpyCommand
+from .controller import CmdMox
 from .environment import EnvironmentManager, temporary_env
 from .errors import (
     CmdMoxError,
@@ -29,6 +29,7 @@ from .platform import (
     unsupported_reason,
 )
 from .shimgen import SHIM_PATH, create_shim_symlinks
+from .test_doubles import CommandDouble, MockCommand, SpyCommand, StubCommand
 
 if t.TYPE_CHECKING:
     from types import ModuleType as _ModuleType
@@ -90,6 +91,7 @@ __all__ = [
     "Predicate",
     "Regex",
     "Response",
+    "StubCommand",
     "SpyCommand",
     "StartsWith",
     "UnexpectedCommandError",
