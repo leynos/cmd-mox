@@ -109,6 +109,7 @@ def test_fallback_to_system_path(
     assert captured_path == os.environ["PATH"]
 
 
+# Error conditions for resolving commands via shutil.which
 @pytest.mark.parametrize(
     "scenario",
     [
@@ -170,77 +171,77 @@ def test_run_error_conditions(
     assert response.stderr == scenario.stderr
 
 
-def test_execute_command_handles_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """execute_command should translate TimeoutExpired into a Response."""
-    invocation = Invocation(command="sleepy", args=[], stdin="", env={})
+@dataclass(frozen=True)
+class ExecuteErrorScenario:
+    """Mapping of subprocess exceptions to ``execute_command`` responses."""
 
-    def fake_run(*args: object, **kwargs: object) -> DummyResult:
-        raise subprocess.TimeoutExpired(cmd=["sleepy"], timeout=30)
-
-    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
-
-    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
-    assert response.exit_code == 124
-    assert response.stderr == "sleepy: timeout after 30 seconds"
+    name: str
+    command: str
+    exception_factory: t.Callable[[str], BaseException]
+    exit_code: int
+    stderr: str
 
 
-def test_execute_command_handles_file_not_found(
-    monkeypatch: pytest.MonkeyPatch,
+def _timeout_exception(command: str, *, duration: int) -> BaseException:
+    """Return a deterministic ``TimeoutExpired`` for execute_command tests."""
+    return subprocess.TimeoutExpired(cmd=[command], timeout=duration)
+
+
+EXECUTE_ERROR_SCENARIOS: tuple[ExecuteErrorScenario, ...] = (
+    ExecuteErrorScenario(
+        name="timeout",
+        command="sleepy",
+        exception_factory=lambda cmd: _timeout_exception(cmd, duration=30),
+        exit_code=124,
+        stderr="sleepy: timeout after 30 seconds",
+    ),
+    ExecuteErrorScenario(
+        name="not-found",
+        command="missing",
+        exception_factory=lambda _cmd: FileNotFoundError(),
+        exit_code=127,
+        stderr="missing: not found",
+    ),
+    ExecuteErrorScenario(
+        name="permission",
+        command="restricted",
+        exception_factory=lambda _cmd: PermissionError("denied"),
+        exit_code=126,
+        stderr="restricted: denied",
+    ),
+    ExecuteErrorScenario(
+        name="os-error",
+        command="broken",
+        exception_factory=lambda _cmd: OSError("oops"),
+        exit_code=126,
+        stderr="broken: execution failed: oops",
+    ),
+    ExecuteErrorScenario(
+        name="unexpected",
+        command="weird",
+        exception_factory=lambda _cmd: RuntimeError("boom"),
+        exit_code=126,
+        stderr="weird: unexpected error: boom",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    EXECUTE_ERROR_SCENARIOS,
+    ids=lambda scenario: scenario.name,
+)
+def test_execute_command_error_mappings(
+    monkeypatch: pytest.MonkeyPatch, scenario: ExecuteErrorScenario
 ) -> None:
-    """FileNotFoundError should map to a 127 exit code."""
-    invocation = Invocation(command="missing", args=[], stdin="", env={})
+    """Each common subprocess failure should map to a predictable response."""
+    invocation = Invocation(command=scenario.command, args=[], stdin="", env={})
 
     def fake_run(*args: object, **kwargs: object) -> DummyResult:
-        raise FileNotFoundError
+        raise scenario.exception_factory(scenario.command)
 
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
 
     response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
-    assert response.exit_code == 127
-    assert response.stderr == "missing: not found"
-
-
-def test_execute_command_handles_permission_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """PermissionError should propagate the original message."""
-    invocation = Invocation(command="restricted", args=[], stdin="", env={})
-
-    def fake_run(*args: object, **kwargs: object) -> DummyResult:
-        raise PermissionError("denied")
-
-    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
-
-    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
-    assert response.exit_code == 126
-    assert response.stderr == "restricted: denied"
-
-
-def test_execute_command_handles_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Generic OSError should be reported as an execution failure."""
-    invocation = Invocation(command="broken", args=[], stdin="", env={})
-
-    def fake_run(*args: object, **kwargs: object) -> DummyResult:
-        raise OSError("oops")
-
-    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
-
-    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
-    assert response.exit_code == 126
-    assert response.stderr == "broken: execution failed: oops"
-
-
-def test_execute_command_handles_unexpected_exception(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Other exceptions are surfaced as unexpected errors."""
-    invocation = Invocation(command="weird", args=[], stdin="", env={})
-
-    def fake_run(*args: object, **kwargs: object) -> DummyResult:
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
-
-    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
-    assert response.exit_code == 126
-    assert response.stderr == "weird: unexpected error: boom"
+    assert response.exit_code == scenario.exit_code
+    assert response.stderr == scenario.stderr

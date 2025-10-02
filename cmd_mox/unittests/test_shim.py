@@ -10,11 +10,17 @@ from pathlib import Path
 import pytest
 
 import cmd_mox.shim as shim
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
+from cmd_mox.environment import (
+    CMOX_IPC_SOCKET_ENV,
+    CMOX_IPC_TIMEOUT_ENV,
+    CMOX_REAL_COMMAND_ENV_PREFIX,
+)
 from cmd_mox.ipc import Invocation, PassthroughRequest, Response
 from cmd_mox.shim import (
     _create_invocation,
     _execute_invocation,
+    _merge_passthrough_path,
+    _resolve_passthrough_target,
     _validate_environment,
     _validate_override_path,
     _write_response,
@@ -274,3 +280,77 @@ def test_validate_override_path_accepts_relative_executable(
     assert isinstance(result, Path)
     assert result == script
     assert result.is_absolute()
+
+
+def test_merge_passthrough_path_filters_shim_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shim directory should be removed when constructing lookup paths."""
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    socket_path = shim_dir / "ipc.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(socket_path))
+
+    env_path = os.pathsep.join([os.fspath(shim_dir), "/usr/bin", "/opt/tools"])
+    lookup_path = os.pathsep.join(["/custom/bin", "/usr/bin"])
+
+    merged = _merge_passthrough_path(env_path, lookup_path)
+
+    assert merged.split(os.pathsep) == ["/usr/bin", "/opt/tools", "/custom/bin"]
+
+
+def test_resolve_passthrough_target_prefers_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Environment overrides should bypass PATH resolution entirely."""
+    script = tmp_path / "real"
+    script.write_text("#!/bin/sh\necho real\n")
+    script.chmod(0o755)
+
+    monkeypatch.setenv(f"{CMOX_REAL_COMMAND_ENV_PREFIX}echo", os.fspath(script))
+
+    directive = PassthroughRequest(
+        invocation_id="abc",
+        lookup_path="/bin",
+        extra_env={},
+        timeout=30,
+    )
+    invocation = Invocation(command="echo", args=[], stdin="", env={})
+    env = {"PATH": "/usr/bin"}
+
+    resolved = _resolve_passthrough_target(invocation, directive, env)
+
+    assert resolved == script
+
+
+def test_resolve_passthrough_target_merges_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PATH resolution should exclude the shim directory and de-duplicate entries."""
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    socket_path = shim_dir / "ipc.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(socket_path))
+
+    invocation = Invocation(command="echo", args=[], stdin="", env={})
+    directive = PassthroughRequest(
+        invocation_id="abc",
+        lookup_path=os.pathsep.join(["/custom/bin", "/usr/bin"]),
+        extra_env={},
+        timeout=30,
+    )
+    env = {"PATH": os.pathsep.join([os.fspath(shim_dir), "/usr/bin"])}
+
+    captured_path: str | None = None
+
+    def fake_resolve(command: str, path: str) -> Path:
+        nonlocal captured_path
+        captured_path = path
+        return Path("/usr/bin/echo")
+
+    monkeypatch.setattr(shim, "resolve_command_path", fake_resolve)
+
+    resolved = _resolve_passthrough_target(invocation, directive, env)
+
+    assert isinstance(resolved, Path)
+    assert captured_path == "/usr/bin" + os.pathsep + "/custom/bin"

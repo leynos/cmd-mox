@@ -48,7 +48,7 @@ def _create_expectation_proxy() -> type:
         return _ExpectationProxy
 
     class _ExpectationProxy:  # pragma: no cover - runtime placeholder
-        def __getattr__(self, name: str) -> t.Callable[..., t.Any]:
+        def __getattr__(self, name: str) -> t.Callable[..., t.NoReturn]:
             """Raise NotImplementedError for any method access."""
 
             def _method(*args: object, **kwargs: object) -> t.NoReturn:

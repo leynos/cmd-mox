@@ -133,6 +133,49 @@ def _validate_override_path(command: str, override: str) -> Path | Response:
     return resolved
 
 
+def _shim_directory_from_env() -> Path | None:
+    """Return the shim directory recorded in the IPC socket variable, if any."""
+    socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
+    return Path(socket_path).parent if socket_path else None
+
+
+def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
+    """Combine PATH values while filtering the shim directory and duplicates."""
+    shim_dir = _shim_directory_from_env()
+    entries: list[str] = []
+    seen: set[str] = set()
+
+    def _add_entry(raw: str) -> None:
+        entry = raw.strip()
+        if not entry or entry in seen:
+            return
+        seen.add(entry)
+        entries.append(entry)
+
+    if env_path:
+        for candidate in env_path.split(os.pathsep):
+            if shim_dir and Path(candidate) == shim_dir:
+                continue
+            _add_entry(candidate)
+
+    for candidate in lookup_path.split(os.pathsep):
+        _add_entry(candidate)
+
+    return os.pathsep.join(entries)
+
+
+def _resolve_passthrough_target(
+    invocation: Invocation, directive: PassthroughRequest, env: dict[str, str]
+) -> Path | Response:
+    """Determine the executable path to use for passthrough execution."""
+    override = os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}")
+    if override:
+        return _validate_override_path(invocation.command, override)
+
+    search_path = _merge_passthrough_path(env.get("PATH"), directive.lookup_path)
+    return resolve_command_path(invocation.command, search_path)
+
+
 def _run_real_command(
     invocation: Invocation, directive: PassthroughRequest
 ) -> Response:
@@ -140,30 +183,7 @@ def _run_real_command(
     env = prepare_environment(
         directive.lookup_path, directive.extra_env, invocation.env
     )
-
-    override = os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}")
-    resolved: Path | Response
-    if override:
-        resolved = _validate_override_path(invocation.command, override)
-    else:
-        merged_path = env.get("PATH")
-        socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
-        shim_dir = Path(socket_path).parent if socket_path else None
-        path_parts: list[str] = []
-        if merged_path:
-            for entry in merged_path.split(os.pathsep):
-                if not entry:
-                    continue
-                if shim_dir and Path(entry) == shim_dir:
-                    continue
-                path_parts.append(entry)
-
-        for entry in directive.lookup_path.split(os.pathsep):
-            if entry and entry not in path_parts:
-                path_parts.append(entry)
-
-        search_path = os.pathsep.join(path_parts)
-        resolved = resolve_command_path(invocation.command, search_path)
+    resolved = _resolve_passthrough_target(invocation, directive, env)
 
     if isinstance(resolved, Response):
         return resolved

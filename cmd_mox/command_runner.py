@@ -104,7 +104,7 @@ def execute_command(
 ) -> Response:
     """Execute *resolved_path* using *invocation* parameters."""
     try:
-        result = subprocess.run(  # noqa: S603 - shell=False prevents injection
+        result = subprocess.run(  # noqa: S603 - sanitized absolute path + shell=False
             [str(resolved_path), *invocation.args],
             input=invocation.stdin,
             capture_output=True,
