@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import dataclasses as dc
 import enum
+import os
+import threading
 import types  # noqa: TC003
 import typing as t
+import uuid
 from collections import deque
 from pathlib import Path
 
@@ -15,7 +18,13 @@ from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError
 from .expectations import Expectation
-from .ipc import Invocation, IPCServer, Response
+from .ipc import (
+    Invocation,
+    IPCServer,
+    PassthroughRequest,
+    PassthroughResult,
+    Response,
+)
 from .shimgen import create_shim_symlinks
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
@@ -86,18 +95,27 @@ _ExpectationProxy = _create_expectation_proxy()
 
 
 class _CallbackIPCServer(IPCServer):
-    """IPCServer variant that delegates to a callback."""
+    """IPCServer variant that delegates to callbacks."""
 
     def __init__(
-        self, socket_path: Path, handler: t.Callable[[Invocation], Response]
+        self,
+        socket_path: Path,
+        handler: t.Callable[[Invocation], Response],
+        passthrough_handler: t.Callable[[PassthroughResult], Response],
     ) -> None:
         super().__init__(socket_path)
         self._handler = handler
+        self._passthrough_handler = passthrough_handler
 
     def handle_invocation(
         self, invocation: Invocation
     ) -> Response:  # pragma: no cover - wrapper
         return self._handler(invocation)
+
+    def handle_passthrough_result(
+        self, result: PassthroughResult
+    ) -> Response:  # pragma: no cover - wrapper
+        return self._passthrough_handler(result)
 
 
 class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; satisfies typing-only protocol
@@ -377,6 +395,8 @@ class CmdMox:
         self._runner = CommandRunner(self.environment)
         self._entered = False
         self._phase = Phase.RECORD
+        self._pending_passthrough: dict[str, tuple[CommandDouble, Invocation]] = {}
+        self._passthrough_lock = threading.Lock()
 
         if max_journal_entries is not None and max_journal_entries <= 0:
             msg = "max_journal_entries must be positive"
@@ -560,9 +580,7 @@ class CmdMox:
     ) -> Response:
         """Run ``double``'s handler within its expectation environment."""
         env = double.expectation.env
-        if double.passthrough_mode:
-            resp = self._runner.run(invocation, env)
-        elif double.handler is None:
+        if double.handler is None:
             base = double.response
             # Clone to avoid mutating the shared static response instance
             resp = dc.replace(base, env=dict(base.env))
@@ -580,15 +598,71 @@ class CmdMox:
         if double is None:
             resp = Response(stdout=invocation.command)
         else:
-            resp = self._invoke_handler(double, invocation)
-            if double.is_recording:
-                double.invocations.append(invocation)
+            if double.passthrough_mode:
+                resp = self._prepare_passthrough(double, invocation)
+            else:
+                resp = self._invoke_handler(double, invocation)
+                if double.is_recording:
+                    double.invocations.append(invocation)
         invocation.apply(resp)
         return resp
 
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response."""
         resp = self._make_response(invocation)
+        if resp.passthrough is None:
+            self.journal.append(invocation)
+        return resp
+
+    def _prepare_passthrough(
+        self, double: CommandDouble, invocation: Invocation
+    ) -> Response:
+        """Record passthrough intent and return instructions for the shim."""
+        invocation_id = invocation.invocation_id or uuid.uuid4().hex
+        invocation.invocation_id = invocation_id
+        stored_invocation = Invocation(
+            command=invocation.command,
+            args=list(invocation.args),
+            stdin=invocation.stdin,
+            env=dict(invocation.env),
+            stdout="",
+            stderr="",
+            exit_code=0,
+            invocation_id=invocation_id,
+        )
+        with self._passthrough_lock:
+            self._pending_passthrough[invocation_id] = (double, stored_invocation)
+
+        env = double.expectation.env
+        lookup_path = self.environment.original_environment.get(
+            "PATH", os.environ.get("PATH", "")
+        )
+        passthrough = PassthroughRequest(
+            invocation_id=invocation_id,
+            lookup_path=lookup_path,
+            extra_env=dict(env),
+            timeout=self._runner.timeout,
+        )
+        return Response(env=dict(env), passthrough=passthrough)
+
+    def _handle_passthrough_result(self, result: PassthroughResult) -> Response:
+        """Finalize a passthrough invocation once the shim reports results."""
+        with self._passthrough_lock:
+            entry = self._pending_passthrough.pop(result.invocation_id, None)
+        if entry is None:
+            msg = f"Unexpected passthrough result for {result.invocation_id}"
+            raise RuntimeError(msg)
+
+        double, invocation = entry
+        resp = Response(
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.exit_code,
+            env=dict(double.expectation.env),
+        )
+        invocation.apply(resp)
+        if double.is_recording:
+            double.invocations.append(invocation)
         self.journal.append(invocation)
         return resp
 
@@ -629,7 +703,9 @@ class CmdMox:
         self._commands = self._registered_commands() | self._commands
         create_shim_symlinks(self.environment.shim_dir, self._commands)
         self._server = _CallbackIPCServer(
-            self.environment.socket_path, self._handle_invocation
+            self.environment.socket_path,
+            self._handle_invocation,
+            self._handle_passthrough_result,
         )
         self._server.start()
 

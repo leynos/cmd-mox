@@ -16,7 +16,7 @@ from cmd_mox.errors import (
     MissingEnvironmentError,
     UnexpectedCommandError,
 )
-from cmd_mox.ipc import Invocation, Response
+from cmd_mox.ipc import Invocation, PassthroughResult, Response
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
@@ -542,3 +542,52 @@ def test_invoke_handler_applies_env() -> None:
     assert resp.stdout == "VAL"
     assert key not in os.environ
     assert resp.env == {key: "VAL"}
+
+
+def test_prepare_passthrough_registers_pending_invocation() -> None:
+    """_prepare_passthrough stores directives for the shim."""
+    mox = CmdMox()
+    spy = mox.spy("echo").passthrough()
+    mox.__enter__()
+    try:
+        invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
+        response = mox._prepare_passthrough(spy, invocation)
+
+        assert response.passthrough is not None
+        directive = response.passthrough
+        assert invocation.invocation_id == directive.invocation_id
+        assert directive.lookup_path == mox.environment.original_environment.get(
+            "PATH", os.environ.get("PATH", "")
+        )
+        assert mox._pending_passthrough[directive.invocation_id][1].command == "echo"
+    finally:
+        mox.__exit__(None, None, None)
+
+
+def test_handle_passthrough_result_finalises_invocation() -> None:
+    """_handle_passthrough_result records journal entries and clears state."""
+    mox = CmdMox()
+    spy = mox.spy("echo").passthrough()
+    mox.__enter__()
+    try:
+        invocation = Invocation(command="echo", args=["hello"], stdin="", env={})
+        response = mox._prepare_passthrough(spy, invocation)
+        directive = response.passthrough
+        assert directive is not None
+
+        result = PassthroughResult(
+            invocation_id=directive.invocation_id,
+            stdout="out",
+            stderr="",
+            exit_code=7,
+        )
+        final = mox._handle_passthrough_result(result)
+
+        assert final.stdout == "out"
+        assert spy.invocations[0].stdout == "out"
+        assert len(mox.journal) == 1
+        recorded = mox.journal[0]
+        assert recorded.exit_code == 7
+        assert directive.invocation_id not in mox._pending_passthrough
+    finally:
+        mox.__exit__(None, None, None)

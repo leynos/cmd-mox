@@ -20,6 +20,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
 CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
 CMOX_IPC_TIMEOUT_ENV = "CMOX_IPC_TIMEOUT"  # server/shim communication timeout
+CMOX_REAL_COMMAND_ENV_PREFIX = "CMOX_REAL_COMMAND_"
 
 
 def _restore_env(orig_env: dict[str, str]) -> None:

@@ -79,10 +79,11 @@ class Invocation:
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
+    invocation_id: str | None = None
 
     def to_dict(self) -> dict[str, t.Any]:
         """Return a JSON-serializable mapping of this invocation."""
-        return {
+        payload: dict[str, t.Any] = {
             "command": self.command,
             "args": list(self.args),
             "stdin": self.stdin,
@@ -91,6 +92,9 @@ class Invocation:
             "stderr": self.stderr,
             "exit_code": self.exit_code,
         }
+        if self.invocation_id is not None:
+            payload["invocation_id"] = self.invocation_id
+        return payload
 
     def apply(self, resp: Response) -> None:
         """Copy stdout/stderr/exit_code from resp (env is not copied)."""
@@ -127,6 +131,26 @@ class Invocation:
 
 
 @dc.dataclass(slots=True)
+class PassthroughRequest:
+    """Instruction for a shim to execute the real command."""
+
+    invocation_id: str
+    lookup_path: str
+    extra_env: dict[str, str] = dc.field(default_factory=dict)
+    timeout: float = 30.0
+
+
+@dc.dataclass(slots=True)
+class PassthroughResult:
+    """Result payload returned by a shim after a passthrough execution."""
+
+    invocation_id: str
+    stdout: str
+    stderr: str
+    exit_code: int
+
+
+@dc.dataclass(slots=True)
 class Response:
     """Response from the IPC server back to a shim."""
 
@@ -134,6 +158,39 @@ class Response:
     stderr: str = ""
     exit_code: int = 0
     env: dict[str, str] = dc.field(default_factory=dict)
+    passthrough: PassthroughRequest | None = None
+
+    def to_dict(self) -> dict[str, t.Any]:
+        """Return a JSON-serializable mapping of this response."""
+        data: dict[str, t.Any] = {
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "exit_code": self.exit_code,
+            "env": dict(self.env),
+        }
+        if self.passthrough is not None:
+            data["passthrough"] = dc.asdict(self.passthrough)
+        return data
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, t.Any]) -> Response:
+        """Construct a :class:`Response` from a JSON payload."""
+        passthrough_payload = payload.get("passthrough")
+        passthrough: PassthroughRequest | None = None
+        if isinstance(passthrough_payload, dict):
+            passthrough = _build_passthrough_request(passthrough_payload)
+        payload = payload.copy()
+        payload.pop("passthrough", None)
+        env = payload.get("env")
+        if not isinstance(env, dict):
+            payload["env"] = {}
+        try:
+            response = cls(**payload)
+        except TypeError as exc:
+            msg = "Invalid response payload from IPC server"
+            raise RuntimeError(msg) from exc
+        response.passthrough = passthrough
+        return response
 
 
 def _read_all(sock: socket.socket) -> bytes:
@@ -162,6 +219,46 @@ def _validate_invocation_payload(payload: dict[str, t.Any]) -> Invocation | None
     except TypeError:
         logger.exception("IPC payload missing required fields: %r", payload)
         return None
+
+
+def _validate_passthrough_payload(
+    payload: dict[str, t.Any],
+) -> PassthroughResult | None:
+    """Return a :class:`PassthroughResult` for passthrough result payloads."""
+    try:
+        return PassthroughResult(**payload)  # type: ignore[arg-type]
+    except TypeError:
+        logger.exception("IPC passthrough payload missing required fields: %r", payload)
+        return None
+
+
+def _build_passthrough_request(payload: dict[str, t.Any]) -> PassthroughRequest | None:
+    """Convert *payload* into a :class:`PassthroughRequest` when possible."""
+    try:
+        invocation_id = str(payload["invocation_id"])
+        lookup_path = str(payload["lookup_path"])
+    except KeyError:
+        logger.exception("Passthrough directive missing required fields: %r", payload)
+        return None
+
+    extra_env_raw = payload.get("extra_env", {})
+    extra_env: dict[str, str] = {}
+    if isinstance(extra_env_raw, dict):
+        extra_env = {str(key): str(value) for key, value in extra_env_raw.items()}
+
+    timeout_raw = payload.get("timeout", 30.0)
+    try:
+        timeout = float(timeout_raw)
+    except (TypeError, ValueError):
+        logger.debug("Invalid passthrough timeout %r; using default", timeout_raw)
+        timeout = 30.0
+
+    return PassthroughRequest(
+        invocation_id=invocation_id,
+        lookup_path=lookup_path,
+        extra_env=extra_env,
+        timeout=timeout,
+    )
 
 
 def _get_validated_socket_path() -> Path:
@@ -330,13 +427,32 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             else:
                 logger.error("IPC payload not a dict: %r", obj)
             return
-        invocation = _validate_invocation_payload(payload)
-        if invocation is None:
-            return
-        response = self.server.outer.handle_invocation(  # type: ignore[attr-defined]
-            invocation
-        )
-        self.wfile.write(json.dumps(dc.asdict(response)).encode("utf-8"))
+
+        kind = payload.get("kind", "invocation")
+        match kind:
+            case "invocation":
+                payload = payload.copy()
+                payload.pop("kind", None)
+                invocation = _validate_invocation_payload(payload)
+                if invocation is None:
+                    return
+                response = self.server.outer.handle_invocation(  # type: ignore[attr-defined]
+                    invocation
+                )
+            case "passthrough-result":
+                payload = payload.copy()
+                payload.pop("kind", None)
+                result = _validate_passthrough_payload(payload)
+                if result is None:
+                    return
+                response = self.server.outer.handle_passthrough_result(  # type: ignore[attr-defined]
+                    result
+                )
+            case _:
+                logger.error("Unknown IPC payload kind: %r", kind)
+                return
+
+        self.wfile.write(json.dumps(response.to_dict()).encode("utf-8"))
         self.wfile.flush()
 
 
@@ -436,6 +552,11 @@ class IPCServer:
         """Echo the command name by default."""
         return Response(stdout=invocation.command)
 
+    def handle_passthrough_result(self, result: PassthroughResult) -> Response:
+        """Handle passthrough results (default: raise)."""
+        msg = f"Unhandled passthrough result for {result.invocation_id}"
+        raise RuntimeError(msg)
+
 
 def invoke_server(
     invocation: Invocation,
@@ -462,7 +583,9 @@ def invoke_server(
     retry_config = retry_config or RetryConfig()
     sock_path = _get_validated_socket_path()
     with _connect_with_retries(sock_path, timeout, retry_config) as client:
-        payload_bytes = json.dumps(dc.asdict(invocation)).encode("utf-8")
+        payload = invocation.to_dict()
+        payload["kind"] = "invocation"
+        payload_bytes = json.dumps(payload).encode("utf-8")
         client.sendall(payload_bytes)
         client.shutdown(socket.SHUT_WR)
         raw = _read_all(client)
@@ -471,12 +594,26 @@ def invoke_server(
     if payload is None:
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg)
-    try:
-        # Normalize env to a dict if the server returned a malformed value.
-        env = payload.get("env")
-        if not isinstance(env, dict):
-            payload["env"] = {}
-        return Response(**payload)
-    except TypeError as exc:
-        msg = "Invalid response payload from IPC server"
-        raise RuntimeError(msg) from exc
+    return Response.from_payload(payload)
+
+
+def report_passthrough_result(
+    result: PassthroughResult,
+    timeout: float,
+    retry_config: RetryConfig | None = None,
+) -> Response:
+    """Send passthrough execution results back to the IPC server."""
+    retry_config = retry_config or RetryConfig()
+    sock_path = _get_validated_socket_path()
+    payload = dc.asdict(result)
+    payload["kind"] = "passthrough-result"
+    with _connect_with_retries(sock_path, timeout, retry_config) as client:
+        client.sendall(json.dumps(payload).encode("utf-8"))
+        client.shutdown(socket.SHUT_WR)
+        raw = _read_all(client)
+
+    payload_dict = _parse_json_safely(raw)
+    if payload_dict is None:
+        msg = "Invalid JSON from IPC server"
+        raise RuntimeError(msg)
+    return Response.from_payload(payload_dict)

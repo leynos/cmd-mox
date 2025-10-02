@@ -16,6 +16,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.controller import CmdMox
+from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX
 from cmd_mox.errors import (
     UnexpectedCommandError,
     UnfulfilledExpectationError,
@@ -268,29 +269,39 @@ def non_executable_command(
     monkeypatch: pytest.MonkeyPatch,
     cmd: str,
 ) -> None:
-    """Patch ``shutil.which`` so *cmd* resolves to a non-executable file."""
-    dummy = tmp_path / cmd
-    dummy.write_text("echo hi")
+    """Place a non-executable *cmd* earlier in ``PATH`` for passthrough tests."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    dummy = bin_dir / cmd
+    dummy.write_text("#!/bin/sh\necho hi\n")
     dummy.chmod(0o644)
 
-    monkeypatch.setattr(
-        "cmd_mox.command_runner.shutil.which",
-        lambda name, path=None: str(dummy) if name == cmd else None,
-    )
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{original_path}")
+    monkeypatch.setenv(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{cmd}", str(dummy))
 
 
 @given(parsers.cfparse('the command "{cmd}" will timeout'))
-def command_will_timeout(monkeypatch: pytest.MonkeyPatch, cmd: str) -> None:
-    """Make ``subprocess.run`` raise ``TimeoutExpired`` for *cmd*."""
-    orig_run = subprocess.run
+def command_will_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cmd: str,
+) -> None:
+    """Return a deterministic timeout-like response for *cmd*."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    script = bin_dir / cmd
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "sys.stderr.write('timeout after 30 seconds\\n')\n"
+        "sys.exit(124)\n"
+    )
+    script.chmod(0o755)
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        if os.path.sep in argv[0] and "cmdmox-" not in Path(argv[0]).parent.name:
-            raise subprocess.TimeoutExpired(cmd=argv, timeout=30)
-        result = orig_run(argv, **kwargs)
-        return t.cast("subprocess.CompletedProcess[str]", result)
-
-    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{original_path}")
+    monkeypatch.setenv(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{cmd}", str(script))
 
 
 @when("I replay the controller", target_fixture="mox_stack")

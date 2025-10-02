@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import typing as t
 from dataclasses import dataclass  # noqa: ICN003
+from pathlib import Path
 
 import pytest
 
-from cmd_mox.command_runner import CommandRunner
+from cmd_mox.command_runner import CommandRunner, execute_command
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.ipc import Invocation
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
-    from pathlib import Path
 
 
 class DummyResult:
@@ -167,3 +168,17 @@ def test_run_error_conditions(
 
     assert response.exit_code == scenario.exit_code
     assert response.stderr == scenario.stderr
+
+
+def test_execute_command_handles_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """execute_command should translate TimeoutExpired into a Response."""
+    invocation = Invocation(command="sleepy", args=[], stdin="", env={})
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise subprocess.TimeoutExpired(cmd=["sleepy"], timeout=30)
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
+    assert response.exit_code == 124
+    assert response.stderr == "sleepy: timeout after 30 seconds"

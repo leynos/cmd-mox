@@ -143,11 +143,11 @@
 
   - [x] Apply returned behaviour: print `stdout`, `stderr`, exit with code
 
-- [ ] **Passthrough Spies**
+- [x] **Passthrough Spies**
 
-  - [ ] IPC protocol for server to direct shim to run "real" command
+  - [x] IPC protocol for server to direct shim to run "real" command
 
-  - [ ] Shim locates real command in original `PATH`, executes, sends result
+  - [x] Shim locates real command in original `PATH`, executes, sends result
 
 ## **VII. Advanced Features & Edge Cases**
 
