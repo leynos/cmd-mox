@@ -171,77 +171,61 @@ def test_run_error_conditions(
     assert response.stderr == scenario.stderr
 
 
-@dataclass(frozen=True)
-class ExecuteErrorScenario:
-    """Mapping of subprocess exceptions to ``execute_command`` responses."""
-
-    name: str
-    command: str
-    exception_factory: t.Callable[[str], BaseException]
-    exit_code: int
-    stderr: str
-
-
-def _timeout_exception(command: str, *, duration: int) -> BaseException:
-    """Return a deterministic ``TimeoutExpired`` for execute_command tests."""
-    return subprocess.TimeoutExpired(cmd=[command], timeout=duration)
-
-
-EXECUTE_ERROR_SCENARIOS: tuple[ExecuteErrorScenario, ...] = (
-    ExecuteErrorScenario(
-        name="timeout",
-        command="sleepy",
-        exception_factory=lambda cmd: _timeout_exception(cmd, duration=30),
-        exit_code=124,
-        stderr="sleepy: timeout after 30 seconds",
-    ),
-    ExecuteErrorScenario(
-        name="not-found",
-        command="missing",
-        exception_factory=lambda _cmd: FileNotFoundError(),
-        exit_code=127,
-        stderr="missing: not found",
-    ),
-    ExecuteErrorScenario(
-        name="permission",
-        command="restricted",
-        exception_factory=lambda _cmd: PermissionError("denied"),
-        exit_code=126,
-        stderr="restricted: denied",
-    ),
-    ExecuteErrorScenario(
-        name="os-error",
-        command="broken",
-        exception_factory=lambda _cmd: OSError("oops"),
-        exit_code=126,
-        stderr="broken: execution failed: oops",
-    ),
-    ExecuteErrorScenario(
-        name="unexpected",
-        command="weird",
-        exception_factory=lambda _cmd: RuntimeError("boom"),
-        exit_code=126,
-        stderr="weird: unexpected error: boom",
-    ),
-)
-
-
 @pytest.mark.parametrize(
-    "scenario",
-    EXECUTE_ERROR_SCENARIOS,
-    ids=lambda scenario: scenario.name,
+    ("exception_factory", "command", "expected_exit_code", "expected_stderr"),
+    [
+        pytest.param(
+            lambda: subprocess.TimeoutExpired(cmd=["sleepy"], timeout=30),
+            "sleepy",
+            124,
+            "sleepy: timeout after 30 seconds",
+            id="timeout",
+        ),
+        pytest.param(
+            lambda: FileNotFoundError(),
+            "missing",
+            127,
+            "missing: not found",
+            id="file_not_found",
+        ),
+        pytest.param(
+            lambda: PermissionError("denied"),
+            "restricted",
+            126,
+            "restricted: denied",
+            id="permission_error",
+        ),
+        pytest.param(
+            lambda: OSError("oops"),
+            "broken",
+            126,
+            "broken: execution failed: oops",
+            id="os_error",
+        ),
+        pytest.param(
+            lambda: RuntimeError("boom"),
+            "weird",
+            126,
+            "weird: unexpected error: boom",
+            id="unexpected_exception",
+        ),
+    ],
 )
-def test_execute_command_error_mappings(
-    monkeypatch: pytest.MonkeyPatch, scenario: ExecuteErrorScenario
+def test_execute_command_handles_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    exception_factory: t.Callable[[], Exception],
+    command: str,
+    expected_exit_code: int,
+    expected_stderr: str,
 ) -> None:
-    """Each common subprocess failure should map to a predictable response."""
-    invocation = Invocation(command=scenario.command, args=[], stdin="", env={})
+    """execute_command should translate exceptions into appropriate Responses."""
+    invocation = Invocation(command=command, args=[], stdin="", env={})
 
     def fake_run(*args: object, **kwargs: object) -> DummyResult:
-        raise scenario.exception_factory(scenario.command)
+        raise exception_factory()
 
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
 
     response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
-    assert response.exit_code == scenario.exit_code
-    assert response.stderr == scenario.stderr
+    assert response.exit_code == expected_exit_code
+    assert response.stderr == expected_stderr
