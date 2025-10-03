@@ -7,9 +7,7 @@ import json
 import math
 import os
 import sys
-import typing as t
 import uuid
-from itertools import chain
 from pathlib import Path
 
 from cmd_mox.command_runner import (
@@ -34,12 +32,12 @@ from cmd_mox.ipc import (
 
 def _validate_environment() -> tuple[str, float]:
     """Validate required environment variables and return (socket_path, timeout)."""
-    socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
-    if socket_path is None:
+    socket_env = os.environ.get(CMOX_IPC_SOCKET_ENV)
+    if socket_env is None:
         print("IPC socket not specified", file=sys.stderr)
-        sys.exit(1)
+        raise SystemExit(1)
 
-    socket_path = t.cast("str", socket_path)
+    socket_path = socket_env
 
     timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     try:
@@ -146,39 +144,41 @@ def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
     return _build_search_path(env_path, lookup_path, shim_dir)
 
 
-def _iter_path_entries(raw: str | None, shim_dir: Path | None) -> t.Iterator[str]:
-    """Yield sanitized PATH entries, skipping blanks and the shim directory."""
-    if not raw:
-        return
-
-    for entry in raw.split(os.pathsep):
-        normalized = entry.strip()
-        if not normalized:
-            continue
-        if shim_dir and Path(normalized) == shim_dir:
-            continue
-        yield normalized
-
-
 def _build_search_path(
     merged_path: str | None,
     lookup_path: str,
     shim_dir: Path | None,
 ) -> str:
     """Build a search PATH excluding the shim directory."""
-    parts: list[str] = []
+    path_parts: list[str] = []
     seen: set[str] = set()
 
-    for entry in chain(
-        _iter_path_entries(merged_path, shim_dir),
-        _iter_path_entries(lookup_path, shim_dir),
-    ):
+    # Add non-shim entries from merged environment PATH
+    if merged_path:
+        for raw_entry in merged_path.split(os.pathsep):
+            entry = raw_entry.strip()
+            if not entry:
+                continue
+            if shim_dir and Path(entry) == shim_dir:
+                continue
+            if entry in seen:
+                continue
+            path_parts.append(entry)
+            seen.add(entry)
+
+    # Add unique entries from directive lookup_path
+    for raw_entry in lookup_path.split(os.pathsep):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        if shim_dir and Path(entry) == shim_dir:
+            continue
         if entry in seen:
             continue
-        parts.append(entry)
+        path_parts.append(entry)
         seen.add(entry)
 
-    return os.pathsep.join(parts)
+    return os.pathsep.join(path_parts)
 
 
 def _resolve_passthrough_target(
