@@ -171,61 +171,78 @@ def test_run_error_conditions(
     assert response.stderr == scenario.stderr
 
 
+@dataclass(frozen=True)
+class ExecuteExceptionScenario:
+    """Bundle execute_command exception expectations for parametrized tests."""
+
+    factory: t.Callable[[], Exception]
+    command: str
+    exit_code: int
+    stderr: str
+
+
 @pytest.mark.parametrize(
-    ("exception_factory", "command", "expected_exit_code", "expected_stderr"),
+    "scenario",
     [
         pytest.param(
-            lambda: subprocess.TimeoutExpired(cmd=["sleepy"], timeout=30),
-            "sleepy",
-            124,
-            "sleepy: timeout after 30 seconds",
+            ExecuteExceptionScenario(
+                factory=lambda: subprocess.TimeoutExpired(cmd=["sleepy"], timeout=30),
+                command="sleepy",
+                exit_code=124,
+                stderr="sleepy: timeout after 30 seconds",
+            ),
             id="timeout",
         ),
         pytest.param(
-            lambda: FileNotFoundError(),
-            "missing",
-            127,
-            "missing: not found",
+            ExecuteExceptionScenario(
+                factory=lambda: FileNotFoundError(),
+                command="missing",
+                exit_code=127,
+                stderr="missing: not found",
+            ),
             id="file_not_found",
         ),
         pytest.param(
-            lambda: PermissionError("denied"),
-            "restricted",
-            126,
-            "restricted: denied",
+            ExecuteExceptionScenario(
+                factory=lambda: PermissionError("denied"),
+                command="restricted",
+                exit_code=126,
+                stderr="restricted: denied",
+            ),
             id="permission_error",
         ),
         pytest.param(
-            lambda: OSError("oops"),
-            "broken",
-            126,
-            "broken: execution failed: oops",
+            ExecuteExceptionScenario(
+                factory=lambda: OSError("oops"),
+                command="broken",
+                exit_code=126,
+                stderr="broken: execution failed: oops",
+            ),
             id="os_error",
         ),
         pytest.param(
-            lambda: RuntimeError("boom"),
-            "weird",
-            126,
-            "weird: unexpected error: boom",
+            ExecuteExceptionScenario(
+                factory=lambda: RuntimeError("boom"),
+                command="weird",
+                exit_code=126,
+                stderr="weird: unexpected error: boom",
+            ),
             id="unexpected_exception",
         ),
     ],
 )
 def test_execute_command_handles_exceptions(
     monkeypatch: pytest.MonkeyPatch,
-    exception_factory: t.Callable[[], Exception],
-    command: str,
-    expected_exit_code: int,
-    expected_stderr: str,
+    scenario: ExecuteExceptionScenario,
 ) -> None:
     """execute_command should translate exceptions into appropriate Responses."""
-    invocation = Invocation(command=command, args=[], stdin="", env={})
+    invocation = Invocation(command=scenario.command, args=[], stdin="", env={})
 
     def fake_run(*args: object, **kwargs: object) -> DummyResult:
-        raise exception_factory()
+        raise scenario.factory()
 
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
 
     response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
-    assert response.exit_code == expected_exit_code
-    assert response.stderr == expected_stderr
+    assert response.exit_code == scenario.exit_code
+    assert response.stderr == scenario.stderr

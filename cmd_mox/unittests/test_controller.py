@@ -579,6 +579,7 @@ def test_handle_passthrough_result_rejects_unknown_invocation() -> None:
         )
         with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
             mox._handle_passthrough_result(result)
+        assert mox._passthrough_coordinator._pending == {}
     finally:
         mox.__exit__(None, None, None)
 

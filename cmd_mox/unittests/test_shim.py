@@ -236,6 +236,11 @@ def test_write_response_updates_environment_and_streams(
             126,
             "invalid executable path",
         ),
+        (
+            lambda tmp_path: _make_directory_symlink(tmp_path),
+            126,
+            "invalid executable path",
+        ),
     ],
 )
 def test_validate_override_path_reports_missing_or_invalid_targets(
@@ -251,6 +256,20 @@ def test_validate_override_path_reports_missing_or_invalid_targets(
     assert isinstance(result, Response)
     assert result.exit_code == expected_exit
     assert expected_message in result.stderr
+
+
+def _make_directory_symlink(tmp_path: Path) -> Path:
+    """Return a symlink to a directory for override validation tests."""
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    symlink = tmp_path / "dir-link"
+    if not hasattr(os, "symlink"):
+        pytest.skip("Platform does not support symlinks")
+    try:
+        symlink.symlink_to(target_dir, target_is_directory=True)
+    except OSError as exc:  # pragma: no cover - windows without admin rights
+        pytest.skip(f"Symlinks unavailable: {exc}")
+    return symlink
 
 
 def test_validate_override_path_rejects_non_executable_file(tmp_path: Path) -> None:

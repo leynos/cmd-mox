@@ -150,31 +150,33 @@ def _build_search_path(
     lookup_path: str,
     shim_dir: Path | None,
 ) -> str:
-    """Build a search PATH excluding the shim directory.
+    """Build a search PATH excluding the shim directory."""
 
-    Merges the environment PATH with the directive lookup_path,
-    filtering out empty entries and the shim directory itself.
-    """
-    path_parts: list[str] = []
+    def iter_entries(raw: str | None) -> t.Iterator[str]:
+        if not raw:
+            return
+        for entry in raw.split(os.pathsep):
+            normalized = entry.strip()
+            if normalized:
+                yield normalized
 
-    # Add non-shim entries from merged environment PATH
-    if merged_path:
-        for raw_entry in merged_path.split(os.pathsep):
-            entry = raw_entry.strip()
-            if not entry:
-                continue
-            if shim_dir and Path(entry) == shim_dir:
-                continue
-            if entry not in path_parts:
-                path_parts.append(entry)
+    def should_include(entry: str) -> bool:
+        return not shim_dir or Path(entry) != shim_dir
 
-    # Add unique entries from directive lookup_path
-    for raw_entry in lookup_path.split(os.pathsep):
-        entry = raw_entry.strip()
-        if entry and entry not in path_parts:
-            path_parts.append(entry)
+    parts: list[str] = []
+    seen: set[str] = set()
 
-    return os.pathsep.join(path_parts)
+    for entry in iter_entries(merged_path):
+        if should_include(entry) and entry not in seen:
+            parts.append(entry)
+            seen.add(entry)
+
+    for entry in iter_entries(lookup_path):
+        if entry not in seen:
+            parts.append(entry)
+            seen.add(entry)
+
+    return os.pathsep.join(parts)
 
 
 def _resolve_passthrough_target(
@@ -196,6 +198,7 @@ def _run_real_command(
     env = prepare_environment(
         directive.lookup_path, directive.extra_env, invocation.env
     )
+    env["PATH"] = _merge_passthrough_path(env.get("PATH"), directive.lookup_path)
     resolved = _resolve_passthrough_target(invocation, directive, env)
 
     if isinstance(resolved, Response):
