@@ -50,18 +50,18 @@ def _assert_exit_code(exc: pytest.ExceptionInfo[BaseException], expected: int) -
     assert err.code == expected
 
 
-def test_validate_environment_returns_socket_and_timeout(
+def test_validate_environment_returns_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Valid environment variables should produce socket path and timeout."""
+    """Valid environment variables should produce a timeout value."""
     sock_path = tmp_path / "cmd-mox.sock"
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(sock_path))
     monkeypatch.delenv(CMOX_IPC_TIMEOUT_ENV, raising=False)
 
-    socket_path, timeout = _validate_environment()
+    timeout = _validate_environment()
 
-    assert socket_path == os.fspath(sock_path)
     assert timeout == pytest.approx(5.0)
+    assert os.environ[CMOX_IPC_SOCKET_ENV] == os.fspath(sock_path)
 
 
 def test_validate_environment_requires_socket(
@@ -358,7 +358,12 @@ def test_resolve_passthrough_target_merges_paths(
         extra_env={},
         timeout=30,
     )
-    env = {"PATH": os.pathsep.join([os.fspath(shim_dir), "/usr/bin"])}
+    env = {
+        "PATH": _merge_passthrough_path(
+            os.pathsep.join([os.fspath(shim_dir), "/usr/bin"]),
+            directive.lookup_path,
+        )
+    }
 
     captured_path: str | None = None
 
@@ -372,4 +377,4 @@ def test_resolve_passthrough_target_merges_paths(
     resolved = _resolve_passthrough_target(invocation, directive, env)
 
     assert isinstance(resolved, Path)
-    assert captured_path == "/usr/bin" + os.pathsep + "/custom/bin"
+    assert captured_path == env["PATH"]

@@ -12,7 +12,7 @@ import pytest
 
 from cmd_mox.command_runner import CommandRunner, execute_command, resolve_command_path
 from cmd_mox.environment import EnvironmentManager
-from cmd_mox.ipc import Invocation
+from cmd_mox.ipc import Invocation, Response
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
@@ -177,6 +177,21 @@ def test_resolve_command_path_accepts_relative(
 
     resolved = resolve_command_path("rel", str(tmp_path))
     assert resolved == script
+
+
+def test_resolve_command_path_rejects_invalid_relative(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Relative paths must still resolve to executable files."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which",
+        lambda command, path=None: "./missing" if command == "missing" else None,
+    )
+
+    result = resolve_command_path("missing", str(tmp_path))
+    assert isinstance(result, Response)
+    assert result.exit_code == 127
 
 
 @dataclass(frozen=True)

@@ -31,12 +31,11 @@ from cmd_mox.ipc import (
 )
 
 
-def _validate_environment() -> tuple[str, float]:
-    """Validate required environment variables and return (socket_path, timeout)."""
-    socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
-    if socket_path is None:
+def _validate_environment() -> float:
+    """Validate required environment variables and return timeout."""
+    if os.environ.get(CMOX_IPC_SOCKET_ENV) is None:
         print("IPC socket not specified", file=sys.stderr)
-        raise SystemExit(1)
+        sys.exit(1)
 
     timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     try:
@@ -47,7 +46,7 @@ def _validate_environment() -> tuple[str, float]:
         print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
         sys.exit(1)
 
-    return socket_path, timeout
+    return timeout
 
 
 def _create_invocation(cmd_name: str) -> Invocation:
@@ -93,7 +92,7 @@ def _write_response(response: Response) -> None:
 def main() -> None:
     """Connect to the IPC server and execute the command behaviour."""
     cmd_name = Path(sys.argv[0]).name
-    _, timeout = _validate_environment()
+    timeout = _validate_environment()
     invocation = _create_invocation(cmd_name)
     response = _execute_invocation(invocation, timeout)
     _write_response(response)
@@ -189,7 +188,7 @@ def _resolve_passthrough_target(
     if override:
         return _validate_override_path(invocation.command, override)
 
-    search_path = _merge_passthrough_path(env.get("PATH"), directive.lookup_path)
+    search_path = env.get("PATH", directive.lookup_path)
     return resolve_command_path(invocation.command, search_path)
 
 

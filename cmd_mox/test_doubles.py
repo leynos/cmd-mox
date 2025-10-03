@@ -9,7 +9,7 @@ from typing_extensions import Self
 from .expectations import Expectation
 from .ipc import Invocation, Response
 
-if t.TYPE_CHECKING:
+if t.TYPE_CHECKING:  # pragma: no cover - typing-only import
     from .controller import CmdMox
 
 T = t.TypeVar("T")
@@ -62,6 +62,9 @@ def _create_expectation_proxy() -> type:
 _ExpectationProxy = _create_expectation_proxy()
 
 
+T_Kind: t.TypeAlias = t.Literal["stub", "mock", "spy"]
+
+
 class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
 
@@ -76,12 +79,10 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
         "response",
     )
 
-    T_Kind = t.Literal["stub", "mock", "spy"]
-
     def __init__(self, name: str, controller: CmdMox, kind: T_Kind) -> None:
         self.name = name
         self.kind = kind
-        self.controller = controller
+        self.controller = controller  # CmdMox instance
         self.response = Response()
         self.handler: t.Callable[[Invocation], Response] | None = None
         self.invocations: list[Invocation] = []

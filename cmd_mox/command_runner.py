@@ -78,6 +78,8 @@ def resolve_command_path(command: str, path: str) -> Path | Response:
         return Response(stderr=f"{command}: not found", exit_code=127)
 
     resolved = Path(real).resolve()
+    if not resolved.exists():
+        return Response(stderr=f"{command}: not found", exit_code=127)
     if not resolved.is_file() or not os.access(resolved, os.X_OK):
         return Response(stderr=f"{command}: not executable", exit_code=126)
 
