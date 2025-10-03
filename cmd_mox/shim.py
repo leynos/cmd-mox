@@ -142,26 +142,39 @@ def _shim_directory_from_env() -> Path | None:
 def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
     """Combine PATH values while filtering the shim directory and duplicates."""
     shim_dir = _shim_directory_from_env()
-    entries: list[str] = []
-    seen: set[str] = set()
+    return _build_search_path(env_path, lookup_path, shim_dir)
 
-    def _add_entry(raw: str) -> None:
-        entry = raw.strip()
-        if not entry or entry in seen:
-            return
-        seen.add(entry)
-        entries.append(entry)
 
-    if env_path:
-        for candidate in env_path.split(os.pathsep):
-            if shim_dir and Path(candidate) == shim_dir:
+def _build_search_path(
+    merged_path: str | None,
+    lookup_path: str,
+    shim_dir: Path | None,
+) -> str:
+    """Build a search PATH excluding the shim directory.
+
+    Merges the environment PATH with the directive lookup_path,
+    filtering out empty entries and the shim directory itself.
+    """
+    path_parts: list[str] = []
+
+    # Add non-shim entries from merged environment PATH
+    if merged_path:
+        for raw_entry in merged_path.split(os.pathsep):
+            entry = raw_entry.strip()
+            if not entry:
                 continue
-            _add_entry(candidate)
+            if shim_dir and Path(entry) == shim_dir:
+                continue
+            if entry not in path_parts:
+                path_parts.append(entry)
 
-    for candidate in lookup_path.split(os.pathsep):
-        _add_entry(candidate)
+    # Add unique entries from directive lookup_path
+    for raw_entry in lookup_path.split(os.pathsep):
+        entry = raw_entry.strip()
+        if entry and entry not in path_parts:
+            path_parts.append(entry)
 
-    return os.pathsep.join(entries)
+    return os.pathsep.join(path_parts)
 
 
 def _resolve_passthrough_target(
