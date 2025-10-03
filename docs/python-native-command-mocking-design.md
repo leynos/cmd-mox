@@ -941,22 +941,107 @@ implementation leverages the IPC architecture in a unique way:
    usual.
 
 2. The IPC server identifies the spy is in passthrough mode. Instead of
-   returning a canned response, it instructs the shim to execute the *real*
-   command. To do this, the server provides the shim with the path to the real
-   executable, which it finds by searching the original `PATH` (which was saved
-   by the Environment Manager).
+   returning a canned response, it sends a `PassthroughRequest` back to the
+   shim containing the original `PATH`, any expectation-specific environment
+   overrides, and a unique invocation identifier.
 
-3. The shim process uses `subprocess.run` or a similar mechanism to execute the
-   real `aws` command with the original arguments and `stdin`. It captures the
-   real command's `stdout`, `stderr`, and `exit_code`.
+3. The shim resolves the real executable by searching the supplied `PATH`. If
+   the lookup fails or the binary is not executable, the shim keeps the error
+   as the passthrough result.
 
-4. The shim then sends a second message to the IPC server containing this
-   captured output.
+4. When the executable is found, the shim runs it with the recorded arguments
+   and `stdin`, merging the expectation environment with the original
+   invocation environment so nested commands continue to route through CmdMox.
 
-5. The server combines the initial invocation data (what went in) with the
-   captured results (what came out) into a complete `Invocation` object and
-   stores it in the spy's history. It also sends the captured results back to
-   the shim, which then reproduces them as its own output.
+5. The shim sends a follow-up `PassthroughResult` message containing the real
+   command's `stdout`, `stderr`, and `exit_code` to the server.
+
+6. The server combines the invocation details with the passthrough result,
+   records the invocation in the spy history and journal, and relays the final
+   `Response` back to the shim so the calling process observes the real
+   behaviour.
+
+The core message types and their relationships are illustrated below:
+
+```mermaid
+erDiagram
+    Invocation {
+        string command
+        list args
+        string stdin
+        dict env
+        string stdout
+        string stderr
+        int exit_code
+        string invocation_id
+    }
+    PassthroughRequest {
+        string invocation_id
+        string lookup_path
+        dict extra_env
+        float timeout
+    }
+    PassthroughResult {
+        string invocation_id
+        string stdout
+        string stderr
+        int exit_code
+    }
+    Response {
+        string stdout
+        string stderr
+        int exit_code
+        dict env
+        PassthroughRequest passthrough
+    }
+    Invocation ||--o{ PassthroughRequest : "uses"
+    PassthroughRequest ||--o{ PassthroughResult : "results in"
+    Response ||--o| PassthroughRequest : "may contain"
+    PassthroughResult ||--o| Response : "reported as"
+```
+
+The interaction between the shim, controller, and passthrough coordinator is
+shown below. It captures both the passthrough and non-passthrough branches so
+test authors can understand how control flows through the IPC pipeline:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Caller as Calling process
+  participant Shim
+  participant Server
+  participant Controller
+  participant Passthrough as PassthroughCoordinator
+  participant Runner as RealCommand
+
+  Caller->>Shim: invoke mocked command
+  Shim->>Server: send Invocation (kind=invocation, invocation_id)
+  Server->>Controller: handle invocation
+  alt controller selects passthrough
+    Controller->>Passthrough: prepare_request(double, invocation, lookup_path, timeout)
+    Passthrough-->>Controller: Response(passthrough=PassthroughRequest)
+    Controller-->>Server: Response with passthrough
+    Server-->>Shim: Response with PassthroughRequest
+    Shim->>Runner: resolve real command (override or PATH) and run (env, timeout)
+    Runner-->>Shim: stdout, stderr, exit_code
+    Shim->>Server: kind=passthrough-result (PassthroughResult)
+    Server->>Controller: handle_passthrough_result
+    Controller->>Passthrough: finalize_result(PassthroughResult)
+    Passthrough-->>Controller: (double, invocation, Response)
+    Controller-->>Server: Final Response
+    Server-->>Shim: Final Response
+  else no passthrough
+    Controller-->>Server: Response (normal)
+    Server-->>Shim: Response (normal)
+  end
+  Shim-->>Caller: emit stdout/stderr and exit with code
+```
+
+To support deterministic behavioural tests, the shim honours
+``CMOX_REAL_COMMAND_<NAME>`` environment variables. When present, they override
+the executable path resolved in step 3, allowing tests to point a passthrough
+spy at a controlled binary on disk. The override is intentionally opt-in and
+namespaced so production usage continues to rely on the original `PATH`.
 
 The immediate benefit is that a test can run against a real system while
 `CmdMox` transparently records every interaction. The long-term implication is
@@ -1332,14 +1417,15 @@ localising error handling and environment cleanup details.
 ### 8.6 Design Decisions for `SpyCommand`
 
 Spies now support a `passthrough()` mode that executes the real command instead
-of a canned response. When a passthrough spy is invoked, the controller locates
-the real executable using the original `PATH` preserved by the
-`EnvironmentManager`. The manager exposes this via a new `original_environment`
-property. A small `CommandRunner` helper encapsulates the lookup and
-`subprocess.run` call. It runs the command with the recorded environment (minus
-the shim directory) and captures its output and exit status. The results are
-stored alongside the invocation and returned to the shim so the calling process
-sees the real behaviour.
+of a canned response. When a passthrough spy is invoked the controller
+constructs a `PassthroughRequest` containing the original `PATH`, expectation
+environment overrides, and a unique invocation identifier. The shim resolves
+and executes the real command using helper utilities shared with the
+`CommandRunner`, then reports the captured result via a `PassthroughResult`
+message. The controller merges this outcome into the invocation journal and spy
+history before replying to the shim. This split keeps the server thread
+lightweight while ensuring passthrough invocations faithfully reproduce the
+real command's behaviour.
 
 To simplify post-replay assertions, spies expose `assert_called`,
 `assert_not_called`, and `assert_called_with` methods modelled after

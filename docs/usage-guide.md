@@ -169,7 +169,19 @@ mox.spy("aws").passthrough()
 ```
 
 This "record mode" is helpful for capturing real interactions and later turning
-them into mocks.
+them into mocks. During passthrough, the IPC server sends the shim a
+`PassthroughRequest` containing the original `PATH` and any
+expectation-specific environment overrides. The shim resolves and runs the real
+command, then reports the captured `stdout`, `stderr`, and `exit_code` back to
+the server before the call returns. The calling process therefore observes the
+genuine behaviour while CmdMox records the interaction for later assertions.
+
+For integration tests that need deterministic control over which executable a
+passthrough spy invokes, set ``CMOX_REAL_COMMAND_<NAME>`` in the shim
+environment. When present, the shim bypasses the PATH lookup and executes the
+absolute path specified by the variable. This override is intended solely for
+tests—production scenarios should allow the shim to resolve commands from the
+original ``PATH`` to avoid masking misconfigurations.
 
 Spies provide assertion helpers inspired by `unittest.mock` that can be called
 in the test body or after verification:
