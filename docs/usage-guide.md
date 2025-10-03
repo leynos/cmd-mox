@@ -274,6 +274,27 @@ few common ones are:
 Refer to the [design document](./python-native-command-mocking-design.md) for
 the full table of methods and examples.
 
+## Using the IPC server directly
+
+Most projects interact with the IPC server through `CmdMox`, but advanced
+scenarios can instantiate `cmd_mox.ipc.IPCServer` themselves. The server
+accepts optional callbacks so you can customise invocation handling without
+subclassing:
+
+```python
+from cmd_mox.ipc import IPCServer, Response
+
+def handle(invocation):
+    return Response(stdout="custom output")
+
+with IPCServer(socket_path, handler=handle):
+    ...
+```
+
+Provide `passthrough_handler=` to intercept passthrough completions in the same
+fashion. When no callbacks are supplied the server keeps its default echo
+behaviour, so existing code continues to work unchanged.
+
 ## Environment variables
 
 CmdMox exposes two environment variables to coordinate shims with the IPC

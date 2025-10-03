@@ -517,19 +517,28 @@ class IPCServer:
         socket_path: Path,
         timeout: float = 5.0,
         accept_timeout: float | None = None,
+        *,
+        handler: t.Callable[[Invocation], Response] | None = None,
+        passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None,
     ) -> None:
         """Create a server listening at *socket_path*.
 
         ``timeout`` controls startup and shutdown waits. ``accept_timeout``
         determines how often the server checks for shutdown requests while
         waiting for incoming connections. If not provided, it defaults to one
-        tenth of ``timeout`` capped at 0.1 seconds.
+        tenth of ``timeout`` capped at 0.1 seconds. ``handler`` and
+        ``passthrough_handler`` allow callers to provide custom logic without
+        subclassing :class:`IPCServer`. When omitted the server echoes the
+        command name and raises for passthrough results, matching previous
+        behaviour.
         """
         self.socket_path = Path(socket_path)
         self.timeout = timeout
         self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
         self._server: _InnerServer | None = None
         self._thread: threading.Thread | None = None
+        self._handler = handler
+        self._passthrough_handler = passthrough_handler
 
     # ------------------------------------------------------------------
     # Context manager protocol
@@ -583,11 +592,15 @@ class IPCServer:
     # Request processing
     # ------------------------------------------------------------------
     def handle_invocation(self, invocation: Invocation) -> Response:
-        """Echo the command name by default."""
+        """Process invocations using the configured handler when available."""
+        if self._handler is not None:
+            return self._handler(invocation)
         return Response(stdout=invocation.command)
 
     def handle_passthrough_result(self, result: PassthroughResult) -> Response:
-        """Handle passthrough results (default: raise)."""
+        """Handle passthrough results via the configured callback when provided."""
+        if self._passthrough_handler is not None:
+            return self._passthrough_handler(result)
         msg = f"Unhandled passthrough result for {result.invocation_id}"
         raise RuntimeError(msg)
 
@@ -601,21 +614,14 @@ class CallbackIPCServer(IPCServer):
         handler: t.Callable[[Invocation], Response],
         passthrough_handler: t.Callable[[PassthroughResult], Response],
     ) -> None:
-        super().__init__(socket_path)
-        self._handler = handler
-        self._passthrough_handler = passthrough_handler
-
-    def handle_invocation(
-        self, invocation: Invocation
-    ) -> Response:  # pragma: no cover - wrapper
-        """Delegate *invocation* processing to the configured handler."""
-        return self._handler(invocation)
-
-    def handle_passthrough_result(
-        self, result: PassthroughResult
-    ) -> Response:  # pragma: no cover - wrapper
-        """Forward passthrough completion to the configured handler."""
-        return self._passthrough_handler(result)
+        super().__init__(
+            socket_path,
+            handler=handler,
+            passthrough_handler=passthrough_handler,
+        )
+        # The base class now stores the callbacks and the inherited
+        # ``handle_*`` methods perform the delegation.  We keep this subclass
+        # for backwards compatibility with existing imports.
 
 
 def _send_request(
