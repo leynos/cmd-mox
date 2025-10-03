@@ -156,6 +156,19 @@ def _iter_path_entries(raw_path: str | None, shim_dir: Path | None) -> t.Iterato
         yield entry
 
 
+def _add_unique_entries(
+    entries: t.Iterable[str],
+    path_parts: list[str],
+    seen: set[str],
+) -> None:
+    """Add unique entries to path_parts, tracking them in *seen*."""
+    for entry in entries:
+        if entry in seen:
+            continue
+        path_parts.append(entry)
+        seen.add(entry)
+
+
 def _build_search_path(
     merged_path: str | None,
     lookup_path: str,
@@ -165,17 +178,8 @@ def _build_search_path(
     path_parts: list[str] = []
     seen: set[str] = set()
 
-    for entry in _iter_path_entries(merged_path, shim_dir):
-        if entry in seen:
-            continue
-        path_parts.append(entry)
-        seen.add(entry)
-
-    for entry in _iter_path_entries(lookup_path, shim_dir):
-        if entry in seen:
-            continue
-        path_parts.append(entry)
-        seen.add(entry)
+    _add_unique_entries(_iter_path_entries(merged_path, shim_dir), path_parts, seen)
+    _add_unique_entries(_iter_path_entries(lookup_path, shim_dir), path_parts, seen)
 
     return os.pathsep.join(path_parts)
 
