@@ -9,6 +9,7 @@ import os
 import sys
 import typing as t
 import uuid
+from itertools import chain
 from pathlib import Path
 
 from cmd_mox.command_runner import (
@@ -145,36 +146,37 @@ def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
     return _build_search_path(env_path, lookup_path, shim_dir)
 
 
+def _iter_path_entries(raw: str | None, shim_dir: Path | None) -> t.Iterator[str]:
+    """Yield sanitized PATH entries, skipping blanks and the shim directory."""
+    if not raw:
+        return
+
+    for entry in raw.split(os.pathsep):
+        normalized = entry.strip()
+        if not normalized:
+            continue
+        if shim_dir and Path(normalized) == shim_dir:
+            continue
+        yield normalized
+
+
 def _build_search_path(
     merged_path: str | None,
     lookup_path: str,
     shim_dir: Path | None,
 ) -> str:
     """Build a search PATH excluding the shim directory."""
-
-    def iter_entries(raw: str | None) -> t.Iterator[str]:
-        if not raw:
-            return
-        for entry in raw.split(os.pathsep):
-            normalized = entry.strip()
-            if normalized:
-                yield normalized
-
-    def should_include(entry: str) -> bool:
-        return not shim_dir or Path(entry) != shim_dir
-
     parts: list[str] = []
     seen: set[str] = set()
 
-    for entry in iter_entries(merged_path):
-        if should_include(entry) and entry not in seen:
-            parts.append(entry)
-            seen.add(entry)
-
-    for entry in iter_entries(lookup_path):
-        if entry not in seen:
-            parts.append(entry)
-            seen.add(entry)
+    for entry in chain(
+        _iter_path_entries(merged_path, shim_dir),
+        _iter_path_entries(lookup_path, shim_dir),
+    ):
+        if entry in seen:
+            continue
+        parts.append(entry)
+        seen.add(entry)
 
     return os.pathsep.join(parts)
 

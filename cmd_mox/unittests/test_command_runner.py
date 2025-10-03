@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from cmd_mox.command_runner import CommandRunner, execute_command
+from cmd_mox.command_runner import CommandRunner, execute_command, resolve_command_path
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.ipc import Invocation
 
@@ -125,16 +125,6 @@ def test_fallback_to_system_path(
         ),
         pytest.param(
             CommandTestScenario(
-                command="rel",
-                which_result="./rel",
-                create_file=False,
-                exit_code=126,
-                stderr="rel: invalid executable path",
-            ),
-            id="relative",
-        ),
-        pytest.param(
-            CommandTestScenario(
                 command="dummy",
                 which_result="dummy",
                 create_file=True,
@@ -169,6 +159,24 @@ def test_run_error_conditions(
 
     assert response.exit_code == scenario.exit_code
     assert response.stderr == scenario.stderr
+
+
+def test_resolve_command_path_accepts_relative(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Relative results from ``shutil.which`` should be resolved successfully."""
+    script = tmp_path / "rel"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which",
+        lambda command, path=None: "./rel" if command == "rel" else None,
+    )
+
+    resolved = resolve_command_path("rel", str(tmp_path))
+    assert resolved == script
 
 
 @dataclass(frozen=True)
