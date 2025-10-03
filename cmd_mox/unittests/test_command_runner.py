@@ -10,8 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from cmd_mox.command_runner import CommandRunner, execute_command, resolve_command_path
-from cmd_mox.environment import EnvironmentManager
+from cmd_mox.command_runner import (
+    CommandRunner,
+    execute_command,
+    resolve_command_path,
+    resolve_command_with_override,
+)
+from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX, EnvironmentManager
 from cmd_mox.ipc import Invocation, Response
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -179,6 +184,25 @@ def test_resolve_command_path_accepts_relative(
     assert resolved == script
 
 
+def test_resolve_command_path_accepts_absolute(tmp_path: Path) -> None:
+    """Absolute command paths should be validated directly."""
+    script = tmp_path / "absolute"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+
+    resolved = resolve_command_path(str(script), "/usr/bin")
+    assert resolved == script.resolve()
+
+
+def test_resolve_command_path_rejects_missing_absolute(tmp_path: Path) -> None:
+    """Missing absolute paths should surface a 127 exit code."""
+    missing = tmp_path / "missing"
+
+    result = resolve_command_path(str(missing), "/usr/bin")
+    assert isinstance(result, Response)
+    assert result.exit_code == 127
+
+
 def test_resolve_command_path_rejects_invalid_relative(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -190,6 +214,25 @@ def test_resolve_command_path_rejects_invalid_relative(
     )
 
     result = resolve_command_path("missing", str(tmp_path))
+    assert isinstance(result, Response)
+    assert result.exit_code == 127
+
+
+def test_resolve_command_with_override_uses_override(tmp_path: Path) -> None:
+    """Overrides should bypass PATH lookups entirely."""
+    script = tmp_path / "real"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+
+    resolved = resolve_command_with_override("tool", "/usr/bin", str(script))
+    assert resolved == script.resolve()
+
+
+def test_resolve_command_with_override_reports_errors(tmp_path: Path) -> None:
+    """Invalid overrides should return error responses."""
+    missing = tmp_path / "nope"
+
+    result = resolve_command_with_override("tool", "/usr/bin", str(missing))
     assert isinstance(result, Response)
     assert result.exit_code == 127
 
@@ -269,3 +312,30 @@ def test_execute_command_handles_exceptions(
     response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
     assert response.exit_code == scenario.exit_code
     assert response.stderr == scenario.stderr
+
+
+def test_command_runner_honours_override_environment(
+    runner: CommandRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Overrides from ``CMOX_REAL_COMMAND_*`` should dictate execution path."""
+    script = tmp_path / "echo"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+    monkeypatch.setenv(f"{CMOX_REAL_COMMAND_ENV_PREFIX}echo", str(script))
+
+    captured: list[str] = []
+
+    def fake_run(
+        argv: list[str], *, env: dict[str, str], **kwargs: object
+    ) -> DummyResult:
+        captured.extend(argv)
+        return DummyResult(env)
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    invocation = Invocation(command="echo", args=["hello"], stdin="", env={})
+    runner.run(invocation, {})
+
+    assert captured[0] == str(script)

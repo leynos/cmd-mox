@@ -367,12 +367,13 @@ def test_resolve_passthrough_target_merges_paths(
 
     captured_path: str | None = None
 
-    def fake_resolve(command: str, path: str) -> Path:
+    def fake_resolve(command: str, path: str, override: str | None = None) -> Path:
         nonlocal captured_path
         captured_path = path
+        assert override is None
         return Path("/usr/bin/echo")
 
-    monkeypatch.setattr(shim, "resolve_command_path", fake_resolve)
+    monkeypatch.setattr(shim, "resolve_command_with_override", fake_resolve)
 
     resolved = _resolve_passthrough_target(invocation, directive, env)
 

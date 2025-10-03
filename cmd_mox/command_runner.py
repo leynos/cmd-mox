@@ -8,6 +8,7 @@ import subprocess
 import typing as t
 from pathlib import Path
 
+from .environment import CMOX_REAL_COMMAND_ENV_PREFIX
 from .ipc import Invocation, Response
 
 if t.TYPE_CHECKING:  # pragma: no cover - used for type hints
@@ -46,7 +47,10 @@ class CommandRunner:
             self._env_mgr.original_environment.get("PATH", os.environ.get("PATH", "")),
         )
 
-        resolved = resolve_command_path(invocation.command, merged_path)
+        override = os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}")
+        resolved = resolve_command_with_override(
+            invocation.command, merged_path, override
+        )
         if isinstance(resolved, Response):
             return resolved
 
@@ -59,9 +63,9 @@ class CommandRunner:
         self, extra_env: dict[str, str], invocation_env: dict[str, str]
     ) -> dict[str, str]:
         """Merge the original PATH with any supplied environment variables."""
-        path = self._env_mgr.original_environment.get("PATH")
-        if not path:
-            path = os.environ.get("PATH", "")
+        path = self._env_mgr.original_environment.get("PATH") or os.environ.get(
+            "PATH", ""
+        )
         return prepare_environment(path, extra_env, invocation_env)
 
     def _execute_command(
@@ -71,19 +75,40 @@ class CommandRunner:
         return execute_command(resolved_path, invocation, env, timeout=self._timeout)
 
 
+def validate_override_path(command: str, override: str) -> Path | Response:
+    """Validate an override path ensuring it points to an executable file."""
+    resolved = Path(override)
+    if not resolved.is_absolute():
+        resolved = resolved.resolve()
+    if not resolved.exists():
+        return Response(stderr=f"{command}: not found", exit_code=127)
+    if not resolved.is_file():
+        return Response(stderr=f"{command}: invalid executable path", exit_code=126)
+    if not os.access(resolved, os.X_OK):
+        return Response(stderr=f"{command}: not executable", exit_code=126)
+    return resolved
+
+
 def resolve_command_path(command: str, path: str) -> Path | Response:
     """Locate *command* within *path* returning a :class:`Path` or error response."""
+    command_path = Path(command)
+    if command_path.is_absolute():
+        return validate_override_path(command, str(command_path))
+
     real = shutil.which(command, path=path)
     if real is None:
         return Response(stderr=f"{command}: not found", exit_code=127)
 
-    resolved = Path(real).resolve()
-    if not resolved.exists():
-        return Response(stderr=f"{command}: not found", exit_code=127)
-    if not resolved.is_file() or not os.access(resolved, os.X_OK):
-        return Response(stderr=f"{command}: not executable", exit_code=126)
+    return validate_override_path(command, real)
 
-    return resolved
+
+def resolve_command_with_override(
+    command: str, path: str, override: str | None
+) -> Path | Response:
+    """Resolve *command* honouring shim override environment variables."""
+    if override:
+        return validate_override_path(command, override)
+    return resolve_command_path(command, path)
 
 
 def prepare_environment(

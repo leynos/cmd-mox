@@ -1423,9 +1423,9 @@ environment overrides, and a unique invocation identifier. The shim resolves
 and executes the real command using helper utilities shared with the
 `CommandRunner`, then reports the captured result via a `PassthroughResult`
 message. The controller merges this outcome into the invocation journal and spy
-history before replying to the shim. This split keeps the server thread light
-weight while ensuring passthrough invocations faithfully reproduce the real
-command's behaviour.
+history before replying to the shim. This split keeps the server thread
+lightweight while ensuring passthrough invocations faithfully reproduce the
+real command's behaviour.
 
 To simplify post-replay assertions, spies expose `assert_called`,
 `assert_not_called`, and `assert_called_with` methods modelled after

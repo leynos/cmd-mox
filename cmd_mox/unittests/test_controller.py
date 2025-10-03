@@ -547,10 +547,8 @@ def test_invoke_handler_applies_env() -> None:
 
 def test_prepare_passthrough_registers_pending_invocation() -> None:
     """_prepare_passthrough stores directives for the shim."""
-    mox = CmdMox()
-    spy = mox.spy("echo").passthrough()
-    mox.__enter__()
-    try:
+    with CmdMox() as mox:
+        spy = mox.spy("echo").passthrough()
         invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
         response = mox._prepare_passthrough(spy, invocation)
 
@@ -560,28 +558,12 @@ def test_prepare_passthrough_registers_pending_invocation() -> None:
         assert directive.lookup_path == mox.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
-
-        passthrough_result = PassthroughResult(
-            invocation_id=directive.invocation_id,
-            stdout="out",
-            stderr="err",
-            exit_code=5,
-        )
-        double, stored_invocation, stored_response = (
-            mox._passthrough_coordinator.finalize_result(passthrough_result)
-        )
-        assert double is spy
-        assert stored_invocation.command == "echo"
-        assert stored_response.exit_code == 5
-    finally:
-        mox.__exit__(None, None, None)
+        assert mox._passthrough_coordinator.has_pending(directive.invocation_id)
 
 
 def test_handle_passthrough_result_rejects_unknown_invocation() -> None:
     """Unexpected passthrough results should raise a clear RuntimeError."""
-    mox = CmdMox()
-    mox.__enter__()
-    try:
+    with CmdMox() as mox:
         result = PassthroughResult(
             invocation_id="missing",
             stdout="",
@@ -595,16 +577,15 @@ def test_handle_passthrough_result_rejects_unknown_invocation() -> None:
         invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
         prepared = mox._prepare_passthrough(spy, invocation)
         assert prepared.passthrough is not None
-    finally:
-        mox.__exit__(None, None, None)
+        assert mox._passthrough_coordinator.has_pending(
+            prepared.passthrough.invocation_id
+        )
 
 
 def test_handle_passthrough_result_finalises_invocation() -> None:
     """_handle_passthrough_result records journal entries and clears state."""
-    mox = CmdMox()
-    spy = mox.spy("echo").passthrough()
-    mox.__enter__()
-    try:
+    with CmdMox() as mox:
+        spy = mox.spy("echo").passthrough()
         invocation = Invocation(command="echo", args=["hello"], stdin="", env={})
         response = mox._prepare_passthrough(spy, invocation)
         directive = response.passthrough
@@ -623,7 +604,6 @@ def test_handle_passthrough_result_finalises_invocation() -> None:
         assert len(mox.journal) == 1
         recorded = mox.journal[0]
         assert recorded.exit_code == 7
+        assert not mox._passthrough_coordinator.has_pending(directive.invocation_id)
         with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
             mox._handle_passthrough_result(result)
-    finally:
-        mox.__exit__(None, None, None)

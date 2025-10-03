@@ -14,7 +14,8 @@ from pathlib import Path
 from cmd_mox.command_runner import (
     execute_command,
     prepare_environment,
-    resolve_command_path,
+    resolve_command_with_override,
+    validate_override_path,
 )
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
@@ -29,6 +30,9 @@ from cmd_mox.ipc import (
     invoke_server,
     report_passthrough_result,
 )
+
+# Backwards compatibility alias retained for tests exercising shim helpers.
+_validate_override_path = validate_override_path
 
 
 def _validate_environment() -> float:
@@ -116,20 +120,6 @@ def _handle_passthrough(
     return report_passthrough_result(passthrough_result, timeout=timeout)
 
 
-def _validate_override_path(command: str, override: str) -> Path | Response:
-    """Validate and resolve an override command path from environment variable."""
-    resolved = Path(override)
-    if not resolved.is_absolute():
-        resolved = resolved.resolve()
-    if not resolved.exists():
-        return Response(stderr=f"{command}: not found", exit_code=127)
-    if not resolved.is_file():
-        return Response(stderr=f"{command}: invalid executable path", exit_code=126)
-    if not os.access(resolved, os.X_OK):
-        return Response(stderr=f"{command}: not executable", exit_code=126)
-    return resolved
-
-
 def _shim_directory_from_env() -> Path | None:
     """Return the shim directory recorded in the IPC socket variable, if any."""
     socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
@@ -188,12 +178,12 @@ def _resolve_passthrough_target(
     invocation: Invocation, directive: PassthroughRequest, env: dict[str, str]
 ) -> Path | Response:
     """Determine the executable path to use for passthrough execution."""
-    override = os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}")
-    if override:
-        return _validate_override_path(invocation.command, override)
-
     search_path = env.get("PATH", directive.lookup_path)
-    return resolve_command_path(invocation.command, search_path)
+    return resolve_command_with_override(
+        invocation.command,
+        search_path,
+        override=os.environ.get(f"{CMOX_REAL_COMMAND_ENV_PREFIX}{invocation.command}"),
+    )
 
 
 def _run_real_command(
