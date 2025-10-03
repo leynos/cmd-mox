@@ -1000,6 +1000,43 @@ erDiagram
     PassthroughResult ||--o| Response : "reported as"
 ```
 
+The interaction between the shim, controller, and passthrough coordinator is
+shown below. It captures both the passthrough and non-passthrough branches so
+test authors can understand how control flows through the IPC pipeline:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Caller as Calling process
+  participant Shim
+  participant Server
+  participant Controller
+  participant Passthrough as PassthroughCoordinator
+  participant Runner as RealCommand
+
+  Caller->>Shim: invoke mocked command
+  Shim->>Server: send Invocation (kind=invocation, invocation_id)
+  Server->>Controller: handle invocation
+  alt controller selects passthrough
+    Controller->>Passthrough: prepare_request(double, invocation, lookup_path, timeout)
+    Passthrough-->>Controller: Response(passthrough=PassthroughRequest)
+    Controller-->>Server: Response with passthrough
+    Server-->>Shim: Response with PassthroughRequest
+    Shim->>Runner: resolve real command (override or PATH) and run (env, timeout)
+    Runner-->>Shim: stdout, stderr, exit_code
+    Shim->>Server: kind=passthrough-result (PassthroughResult)
+    Server->>Controller: handle_passthrough_result
+    Controller->>Passthrough: finalize_result(PassthroughResult)
+    Passthrough-->>Controller: (double, invocation, Response)
+    Controller-->>Server: Final Response
+    Server-->>Shim: Final Response
+  else no passthrough
+    Controller-->>Server: Response (normal)
+    Server-->>Shim: Response (normal)
+  end
+  Shim-->>Caller: emit stdout/stderr and exit with code
+```
+
 To support deterministic behavioural tests, the shim honours
 ``CMOX_REAL_COMMAND_<NAME>`` environment variables. When present, they override
 the executable path resolved in step 3, allowing tests to point a passthrough
