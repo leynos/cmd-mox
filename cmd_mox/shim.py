@@ -7,6 +7,7 @@ import json
 import math
 import os
 import sys
+import typing as t
 import uuid
 from pathlib import Path
 
@@ -32,12 +33,10 @@ from cmd_mox.ipc import (
 
 def _validate_environment() -> tuple[str, float]:
     """Validate required environment variables and return (socket_path, timeout)."""
-    socket_env = os.environ.get(CMOX_IPC_SOCKET_ENV)
-    if socket_env is None:
+    socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
+    if socket_path is None:
         print("IPC socket not specified", file=sys.stderr)
         raise SystemExit(1)
-
-    socket_path = socket_env
 
     timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     try:
@@ -144,6 +143,20 @@ def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
     return _build_search_path(env_path, lookup_path, shim_dir)
 
 
+def _iter_path_entries(raw_path: str | None, shim_dir: Path | None) -> t.Iterator[str]:
+    """Yield normalized path entries excluding the shim directory."""
+    if not raw_path:
+        return
+
+    for raw_entry in raw_path.split(os.pathsep):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        if shim_dir and Path(entry) == shim_dir:
+            continue
+        yield entry
+
+
 def _build_search_path(
     merged_path: str | None,
     lookup_path: str,
@@ -153,26 +166,13 @@ def _build_search_path(
     path_parts: list[str] = []
     seen: set[str] = set()
 
-    # Add non-shim entries from merged environment PATH
-    if merged_path:
-        for raw_entry in merged_path.split(os.pathsep):
-            entry = raw_entry.strip()
-            if not entry:
-                continue
-            if shim_dir and Path(entry) == shim_dir:
-                continue
-            if entry in seen:
-                continue
-            path_parts.append(entry)
-            seen.add(entry)
+    for entry in _iter_path_entries(merged_path, shim_dir):
+        if entry in seen:
+            continue
+        path_parts.append(entry)
+        seen.add(entry)
 
-    # Add unique entries from directive lookup_path
-    for raw_entry in lookup_path.split(os.pathsep):
-        entry = raw_entry.strip()
-        if not entry:
-            continue
-        if shim_dir and Path(entry) == shim_dir:
-            continue
+    for entry in _iter_path_entries(lookup_path, shim_dir):
         if entry in seen:
             continue
         path_parts.append(entry)

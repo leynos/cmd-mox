@@ -961,6 +961,45 @@ implementation leverages the IPC architecture in a unique way:
    `Response` back to the shim so the calling process observes the real
    behaviour.
 
+The core message types and their relationships are illustrated below:
+
+```mermaid
+erDiagram
+    Invocation {
+        string command
+        list args
+        string stdin
+        dict env
+        string stdout
+        string stderr
+        int exit_code
+        string invocation_id
+    }
+    PassthroughRequest {
+        string invocation_id
+        string lookup_path
+        dict extra_env
+        float timeout
+    }
+    PassthroughResult {
+        string invocation_id
+        string stdout
+        string stderr
+        int exit_code
+    }
+    Response {
+        string stdout
+        string stderr
+        int exit_code
+        dict env
+        PassthroughRequest passthrough
+    }
+    Invocation ||--o{ PassthroughRequest : "uses"
+    PassthroughRequest ||--o{ PassthroughResult : "results in"
+    Response ||--o| PassthroughRequest : "may contain"
+    PassthroughResult ||--o| Response : "reported as"
+```
+
 To support deterministic behavioural tests, the shim honours
 ``CMOX_REAL_COMMAND_<NAME>`` environment variables. When present, they override
 the executable path resolved in step 3, allowing tests to point a passthrough
