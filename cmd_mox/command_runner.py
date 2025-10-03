@@ -40,28 +40,28 @@ class CommandRunner:
           (e.g., permission denied)
         * ``124`` - execution timed out
         """
-        resolved = self._resolve_and_validate_command(invocation.command)
+        env = self._prepare_environment(extra_env, invocation.env)
+        merged_path = env.get(
+            "PATH",
+            self._env_mgr.original_environment.get("PATH", os.environ.get("PATH", "")),
+        )
+
+        resolved = resolve_command_path(invocation.command, merged_path)
         if isinstance(resolved, Response):
             return resolved
 
-        env = self._prepare_environment(extra_env, invocation.env)
         return self._execute_command(resolved, invocation, env)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _resolve_and_validate_command(self, command: str) -> Path | Response:
-        """Locate *command* in PATH and ensure it is safe to execute."""
-        path = self._env_mgr.original_environment.get(
-            "PATH", os.environ.get("PATH", "")
-        )
-        return resolve_command_path(command, path)
-
     def _prepare_environment(
         self, extra_env: dict[str, str], invocation_env: dict[str, str]
     ) -> dict[str, str]:
         """Merge the original PATH with any supplied environment variables."""
-        path = self._env_mgr.original_environment.get("PATH", "")
+        path = self._env_mgr.original_environment.get("PATH")
+        if not path:
+            path = os.environ.get("PATH", "")
         return prepare_environment(path, extra_env, invocation_env)
 
     def _execute_command(
