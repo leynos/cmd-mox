@@ -15,6 +15,7 @@ import pytest
 import cmd_mox.environment as envmod
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
+    CMOX_IPC_TIMEOUT_ENV,
     CleanupError,
     EnvironmentManager,
     RobustRmtreeError,
@@ -38,6 +39,21 @@ def test_environment_manager_modifies_and_restores() -> None:
     assert os.environ == original_env
     assert env.shim_dir is not None
     assert not env.shim_dir.exists()
+
+
+def test_export_ipc_environment_sets_timeout() -> None:
+    """export_ipc_environment exposes timeout overrides when provided."""
+    with EnvironmentManager() as env:
+        env.export_ipc_environment(timeout=2.5)
+        assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "2.5"
+        assert env.ipc_timeout == 2.5
+
+
+def test_export_ipc_environment_rejects_inactive_manager() -> None:
+    """Calling export_ipc_environment before entering raises."""
+    mgr = EnvironmentManager()
+    with pytest.raises(RuntimeError, match="Cannot export IPC settings"):
+        mgr.export_ipc_environment(timeout=1.0)
 
 
 def test_environment_restores_modified_vars() -> None:
