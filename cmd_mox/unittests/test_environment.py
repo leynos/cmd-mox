@@ -295,58 +295,51 @@ def test_environment_manager_cleanup_error_handling(
     _test_environment_cleanup_error(test_case)
 
 
-@pytest.mark.parametrize(
-    ("scenario", "expect_cleanup"),
-    [
-        ("none", False),
-        ("missing", False),
-        ("replaced", False),
-        ("present", True),
-    ],
-)
-def test_cleanup_temporary_directory_skip_logic(
-    tmp_path: Path, scenario: str, expect_cleanup: bool
-) -> None:
-    """Verify directory cleanup is skipped or executed for each scenario."""
+@pytest.mark.parametrize("scenario", ["none", "missing", "replaced", "present"])
+def test_cleanup_temporary_directory_skip_logic(tmp_path: Path, scenario: str) -> None:
+    """Verify directory cleanup removes the expected paths."""
     mgr = EnvironmentManager()
-    expected_target: Path | None = None
+    created: Path | None = None
+    replacement: Path | None = None
 
     if scenario == "missing":
-        path = tmp_path / "missing"
-        path.mkdir()
-        mgr._created_dir = path
-        mgr.shim_dir = path
-        path.rmdir()
+        created = tmp_path / "missing"
+        created.mkdir()
+        mgr._created_dir = created
+        mgr.shim_dir = created
+        created.rmdir()
     elif scenario == "replaced":
-        original = tmp_path / "original"
+        created = tmp_path / "original"
         replacement = tmp_path / "replacement"
-        original.mkdir()
+        created.mkdir()
         replacement.mkdir()
-        mgr._created_dir = original
+        mgr._created_dir = created
         mgr.shim_dir = replacement
     elif scenario == "present":
-        path = tmp_path / "dir"
-        path.mkdir()
-        mgr._created_dir = path
-        mgr.shim_dir = path
-        expected_target = path
+        created = tmp_path / "dir"
+        created.mkdir()
+        mgr._created_dir = created
+        mgr.shim_dir = created
 
-    with patch("cmd_mox.environment._robust_rmtree") as rm:
-        cleanup_errors: list[envmod.CleanupError] = []
-        EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
+    cleanup_errors: list[envmod.CleanupError] = []
+    EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
 
-    if expect_cleanup:
-        assert expected_target is not None
-        rm.assert_called_once_with(expected_target)
-        assert expected_target.exists()
-    else:
-        rm.assert_not_called()
-
+    assert cleanup_errors == []
     assert mgr._created_dir is None
 
-    if scenario == "replaced":
-        assert original.exists()
+    if scenario == "present":
+        assert created is not None
+        assert not created.exists()
+    elif scenario == "replaced":
+        assert created is not None
+        assert replacement is not None
+        assert created.exists()
         assert replacement.exists()
+    elif scenario == "missing":
+        assert created is not None
+        assert not created.exists()
+    else:
+        assert created is None
 
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
