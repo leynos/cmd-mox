@@ -21,6 +21,23 @@ if t.TYPE_CHECKING:
 
 
 @pytest.mark.usefixtures("tmp_path")
+def test_ipcserver_default_invocation_behaviour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """IPCServer should retain the legacy echo behaviour without a handler."""
+    socket_path = tmp_path / "ipc.sock"
+
+    with IPCServer(socket_path):
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        invocation = Invocation(command="cmd", args=["--flag"], stdin="", env={})
+        response = invoke_server(invocation, timeout=1.0)
+
+    assert response.stdout == "cmd"
+    assert response.stderr == ""
+    assert response.exit_code == 0
+
+
+@pytest.mark.usefixtures("tmp_path")
 def test_ipcserver_invocation_handler(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -43,6 +60,25 @@ def test_ipcserver_invocation_handler(
     assert response.stdout == "handled"
     assert response.stderr == "err"
     assert response.exit_code == 2
+
+
+@pytest.mark.usefixtures("tmp_path")
+def test_ipcserver_default_passthrough_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Passthroughs should raise when no handler is configured."""
+    socket_path = tmp_path / "ipc.sock"
+
+    with IPCServer(socket_path):
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        result = PassthroughResult(
+            invocation_id="123",
+            stdout="out",
+            stderr="err",
+            exit_code=0,
+        )
+        with pytest.raises(RuntimeError, match="Invalid JSON from IPC server"):
+            report_passthrough_result(result, timeout=1.0)
 
 
 @pytest.mark.usefixtures("tmp_path")
@@ -80,3 +116,74 @@ def test_ipcserver_passthrough_handler(
     assert seen[0].invocation_id == "123"
     assert response.stdout == "passthrough"
     assert response.exit_code == 5
+
+
+def test_handle_invocation_default(tmp_path: Path) -> None:
+    """Direct invocation handling should echo when no handler is set."""
+    server = IPCServer(tmp_path / "ipc.sock")
+    invocation = Invocation(command="cmd", args=["--flag"], stdin="", env={})
+
+    response = server.handle_invocation(invocation)
+
+    assert response.stdout == "cmd"
+    assert response.stderr == ""
+    assert response.exit_code == 0
+
+
+def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
+    """Direct invocation handling should delegate to the configured handler."""
+    seen: list[Invocation] = []
+
+    def handler(invocation: Invocation) -> Response:
+        seen.append(invocation)
+        return Response(stdout="handled", stderr="err", exit_code=3)
+
+    server = IPCServer(tmp_path / "ipc.sock", handler=handler)
+    invocation = Invocation(command="cmd", args=["--flag"], stdin="", env={})
+
+    response = server.handle_invocation(invocation)
+
+    assert [item.command for item in seen] == ["cmd"]
+    assert response.stdout == "handled"
+    assert response.stderr == "err"
+    assert response.exit_code == 3
+
+
+def test_handle_passthrough_default(tmp_path: Path) -> None:
+    """Direct passthrough handling should raise when no handler is set."""
+    server = IPCServer(tmp_path / "ipc.sock")
+    result = PassthroughResult(
+        invocation_id="123",
+        stdout="out",
+        stderr="err",
+        exit_code=0,
+    )
+
+    with pytest.raises(RuntimeError, match="Unhandled passthrough result"):
+        server.handle_passthrough_result(result)
+
+
+def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
+    """Passthrough handler exceptions should be wrapped for callers."""
+
+    def failing_handler(_result: PassthroughResult) -> Response:
+        raise ValueError("boom")
+
+    server = IPCServer(
+        tmp_path / "ipc.sock",
+        passthrough_handler=failing_handler,
+    )
+    result = PassthroughResult(
+        invocation_id="123",
+        stdout="out",
+        stderr="err",
+        exit_code=0,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Exception in passthrough handler for 123: boom",
+    ) as excinfo:
+        server.handle_passthrough_result(result)
+
+    assert isinstance(excinfo.value.__cause__, ValueError)

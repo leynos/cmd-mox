@@ -600,7 +600,14 @@ class IPCServer:
     def handle_passthrough_result(self, result: PassthroughResult) -> Response:
         """Handle passthrough results via the configured callback when provided."""
         if self._passthrough_handler is not None:
-            return self._passthrough_handler(result)
+            try:
+                return self._passthrough_handler(result)
+            except Exception as exc:
+                msg = (
+                    "Exception in passthrough handler for "
+                    f"{result.invocation_id}: {exc}"
+                )
+                raise RuntimeError(msg) from exc
         msg = f"Unhandled passthrough result for {result.invocation_id}"
         raise RuntimeError(msg)
 
