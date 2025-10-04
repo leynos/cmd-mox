@@ -499,6 +499,14 @@ class _InnerServer(socketserver.ThreadingUnixStreamServer):
         self.daemon_threads = True
 
 
+@dc.dataclass(slots=True)
+class IPCHandlers:
+    """Optional callbacks customising :class:`IPCServer` behaviour."""
+
+    handler: t.Callable[[Invocation], Response] | None = None
+    passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None
+
+
 class IPCServer:
     """Run a Unix domain socket server for shims.
 
@@ -518,27 +526,27 @@ class IPCServer:
         timeout: float = 5.0,
         accept_timeout: float | None = None,
         *,
-        handler: t.Callable[[Invocation], Response] | None = None,
-        passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None,
+        handlers: IPCHandlers | None = None,
     ) -> None:
         """Create a server listening at *socket_path*.
 
         ``timeout`` controls startup and shutdown waits. ``accept_timeout``
         determines how often the server checks for shutdown requests while
         waiting for incoming connections. If not provided, it defaults to one
-        tenth of ``timeout`` capped at 0.1 seconds. ``handler`` and
-        ``passthrough_handler`` allow callers to provide custom logic without
-        subclassing :class:`IPCServer`. When omitted the server echoes the
-        command name and raises for passthrough results, matching previous
-        behaviour.
+        tenth of ``timeout`` capped at 0.1 seconds. ``handlers`` groups optional
+        callbacks that let callers provide custom invocation and passthrough
+        logic without subclassing :class:`IPCServer`. When omitted the server
+        echoes the command name and raises for passthrough results, matching
+        previous behaviour.
         """
         self.socket_path = Path(socket_path)
         self.timeout = timeout
         self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
         self._server: _InnerServer | None = None
         self._thread: threading.Thread | None = None
-        self._handler = handler
-        self._passthrough_handler = passthrough_handler
+        handlers = handlers or IPCHandlers()
+        self._handler = handlers.handler
+        self._passthrough_handler = handlers.passthrough_handler
 
     # ------------------------------------------------------------------
     # Context manager protocol
@@ -623,8 +631,10 @@ class CallbackIPCServer(IPCServer):
     ) -> None:
         super().__init__(
             socket_path,
-            handler=handler,
-            passthrough_handler=passthrough_handler,
+            handlers=IPCHandlers(
+                handler=handler,
+                passthrough_handler=passthrough_handler,
+            ),
         )
         # The base class now stores the callbacks and the inherited
         # ``handle_*`` methods perform the delegation.  We keep this subclass

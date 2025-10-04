@@ -9,6 +9,7 @@ import pytest
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc import (
     Invocation,
+    IPCHandlers,
     IPCServer,
     PassthroughResult,
     Response,
@@ -50,7 +51,7 @@ def test_ipcserver_invocation_handler(
         seen.append(invocation)
         return Response(stdout="handled", stderr="err", exit_code=2)
 
-    with IPCServer(socket_path, handler=handler):
+    with IPCServer(socket_path, handlers=IPCHandlers(handler=handler)):
         monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
         invocation = Invocation(command="cmd", args=["--flag"], stdin="", env={})
         response = invoke_server(invocation, timeout=1.0)
@@ -100,8 +101,10 @@ def test_ipcserver_passthrough_handler(
 
     with IPCServer(
         socket_path,
-        handler=handler,
-        passthrough_handler=passthrough_handler,
+        handlers=IPCHandlers(
+            handler=handler,
+            passthrough_handler=passthrough_handler,
+        ),
     ):
         monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
         result = PassthroughResult(
@@ -138,7 +141,10 @@ def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
         seen.append(invocation)
         return Response(stdout="handled", stderr="err", exit_code=3)
 
-    server = IPCServer(tmp_path / "ipc.sock", handler=handler)
+    server = IPCServer(
+        tmp_path / "ipc.sock",
+        handlers=IPCHandlers(handler=handler),
+    )
     invocation = Invocation(command="cmd", args=["--flag"], stdin="", env={})
 
     response = server.handle_invocation(invocation)
@@ -171,7 +177,7 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
 
     server = IPCServer(
         tmp_path / "ipc.sock",
-        passthrough_handler=failing_handler,
+        handlers=IPCHandlers(passthrough_handler=failing_handler),
     )
     result = PassthroughResult(
         invocation_id="123",
