@@ -15,6 +15,7 @@ import pytest
 import cmd_mox.environment as envmod
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
+    CMOX_IPC_TIMEOUT_ENV,
     EnvironmentManager,
     RobustRmtreeError,
     _robust_rmtree,
@@ -37,6 +38,53 @@ def test_environment_manager_modifies_and_restores() -> None:
     assert os.environ == original_env
     assert env.shim_dir is not None
     assert not env.shim_dir.exists()
+
+
+def test_export_ipc_environment_sets_timeout() -> None:
+    """export_ipc_environment exposes timeout overrides when provided."""
+    with EnvironmentManager() as env:
+        env.export_ipc_environment(timeout=2.5)
+        assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "2.5"
+        assert env.ipc_timeout == 2.5
+
+
+@pytest.mark.parametrize(
+    "invalid", [0, -1, -0.1, float("nan"), float("inf"), True, "five"]
+)
+def test_export_ipc_environment_rejects_invalid_timeout(invalid: object) -> None:
+    """Invalid timeout overrides should raise ValueError."""
+    with EnvironmentManager() as env:
+        msg = "IPC timeout must be a positive number"
+        with pytest.raises(ValueError, match=msg):
+            env.export_ipc_environment(timeout=t.cast("float", invalid))
+
+
+def test_export_ipc_environment_reuses_previous_timeout() -> None:
+    """Subsequent exports reuse the last valid timeout override."""
+    with EnvironmentManager() as env:
+        env.export_ipc_environment(timeout=3.25)
+        env.export_ipc_environment()
+        assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "3.25"
+        assert env.ipc_timeout == 3.25
+
+
+def test_export_ipc_environment_clears_missing_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """export_ipc_environment removes stale timeout variables."""
+    monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "9.0")
+
+    with EnvironmentManager() as env:
+        # __enter__ calls export_ipc_environment() without a timeout override.
+        assert CMOX_IPC_TIMEOUT_ENV not in os.environ
+        assert env.ipc_timeout is None
+
+
+def test_export_ipc_environment_rejects_inactive_manager() -> None:
+    """Calling export_ipc_environment before entering raises."""
+    mgr = EnvironmentManager()
+    with pytest.raises(RuntimeError, match="Cannot export IPC settings"):
+        mgr.export_ipc_environment(timeout=1.0)
 
 
 def test_environment_restores_modified_vars() -> None:

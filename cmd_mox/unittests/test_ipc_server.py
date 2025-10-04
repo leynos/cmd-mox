@@ -1,5 +1,6 @@
 """Unit tests for the IPC server component."""
 
+import os
 import socket
 import threading
 import typing as t
@@ -8,7 +9,11 @@ from unittest.mock import patch
 
 import pytest
 
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
+from cmd_mox.environment import (
+    CMOX_IPC_SOCKET_ENV,
+    CMOX_IPC_TIMEOUT_ENV,
+    EnvironmentManager,
+)
 from cmd_mox.ipc import (
     DEFAULT_CONNECT_JITTER,
     Invocation,
@@ -38,6 +43,21 @@ def test_ipc_server_restart(tmp_path: Path) -> None:
     server.start()
     assert socket_path.exists()
     server.stop()
+
+
+def test_ipc_server_exports_environment() -> None:
+    """Starting IPCServer under EnvironmentManager publishes env vars."""
+    original_socket = os.environ.get(CMOX_IPC_SOCKET_ENV)
+    original_timeout = os.environ.get(CMOX_IPC_TIMEOUT_ENV)
+
+    with EnvironmentManager() as env:
+        assert env.socket_path is not None
+        with IPCServer(env.socket_path, timeout=1.25):
+            assert os.environ[CMOX_IPC_SOCKET_ENV] == str(env.socket_path)
+            assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "1.25"
+
+    assert os.environ.get(CMOX_IPC_SOCKET_ENV) == original_socket
+    assert os.environ.get(CMOX_IPC_TIMEOUT_ENV) == original_timeout
 
 
 def test_ipc_server_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
