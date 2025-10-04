@@ -243,6 +243,15 @@ class EnvironmentManager:
     def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
         """Remove the temporary directory created by ``__enter__``."""
         if self._should_skip_directory_removal():
+            created = self._created_dir
+            shim = self.shim_dir
+            if created is not None and shim is not None and shim != created:
+                logger.warning(
+                    "Skipping cleanup for original temporary directory %s because "
+                    "shim_dir now points to %s; leftover directories may remain.",
+                    created,
+                    shim,
+                )
             self._created_dir = None
             return
 
