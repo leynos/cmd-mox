@@ -280,9 +280,9 @@ CmdMox exposes two environment variables to coordinate shims with the IPC
 server.
 
 - `CMOX_IPC_SOCKET` – path to the Unix domain socket used by shims. Entering an
-  `EnvironmentManager` sets this automatically and `IPCServer.start()` refreshes
-  it, so manual overrides are rarely needed. Shims exit with an error if the
-  variable is missing.
+  `EnvironmentManager` sets this automatically and `IPCServer.start()`
+  refreshes it, so manual overrides are rarely needed. Shims exit with an error
+  if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
   exported automatically (default `5.0`). Override this to tune connection

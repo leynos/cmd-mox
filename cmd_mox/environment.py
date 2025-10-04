@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
+import math
+import numbers
 import os
 import shutil
 import tempfile
@@ -278,6 +280,12 @@ class EnvironmentManager:
         os.environ[CMOX_IPC_SOCKET_ENV] = str(self.socket_path)
 
         if timeout is not None:
+            if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
+                msg = "IPC timeout must be a positive number"
+                raise ValueError(msg)
+            if timeout <= 0 or not math.isfinite(timeout):
+                msg = "IPC timeout must be a positive number"
+                raise ValueError(msg)
             self.ipc_timeout = timeout
         elif self.ipc_timeout is not None:
             timeout = self.ipc_timeout

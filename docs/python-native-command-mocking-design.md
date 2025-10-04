@@ -563,8 +563,8 @@ configurable via :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 When `IPCServer.start()` executes inside an active
 :class:`~cmd_mox.environment.EnvironmentManager`, the manager exports both the
 socket and timeout environment variables automatically. This keeps tests and
-shim workflows from having to patch :mod:`os.environ` manually when they rely on
-the higher-level context manager.
+shim workflows from having to patch :mod:`os.environ` manually when they rely
+on the higher-level context manager.
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
