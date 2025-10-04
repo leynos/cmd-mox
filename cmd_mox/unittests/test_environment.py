@@ -339,7 +339,11 @@ def test_cleanup_temporary_directory_skips_when_no_directory() -> None:
     mgr = EnvironmentManager()
     cleanup_errors: list[envmod.CleanupError] = []
     with patch("cmd_mox.environment._robust_rmtree") as rm:
-        mgr._cleanup_temporary_directory(cleanup_errors)
+        cleanup_dir = t.cast(
+            "t.Callable[[list[envmod.CleanupError]], None]",
+            mgr._cleanup_temporary_directory,
+        )
+        cleanup_dir(cleanup_errors)
         assert cleanup_errors == []
     rm.assert_not_called()
     assert mgr._created_dir is None
@@ -357,7 +361,11 @@ def test_cleanup_temporary_directory_skips_when_shim_dir_missing(
     path.rmdir()
     cleanup_errors: list[envmod.CleanupError] = []
     with patch("cmd_mox.environment._robust_rmtree") as rm:
-        mgr._cleanup_temporary_directory(cleanup_errors)
+        cleanup_dir = t.cast(
+            "t.Callable[[list[envmod.CleanupError]], None]",
+            mgr._cleanup_temporary_directory,
+        )
+        cleanup_dir(cleanup_errors)
         assert cleanup_errors == []
     rm.assert_not_called()
     assert mgr._created_dir is None
@@ -376,7 +384,12 @@ def test_cleanup_temporary_directory_skips_when_shim_dir_replaced(
     mgr.shim_dir = replacement
     with patch("cmd_mox.environment._robust_rmtree") as rm:
         cleanup_errors: list[envmod.CleanupError] = []
-        EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
+        cleanup_dir = t.cast(
+            "t.Callable[[list[envmod.CleanupError]], None]",
+            mgr._cleanup_temporary_directory,
+        )
+        cleanup_dir(cleanup_errors)
+        assert cleanup_errors == []
     rm.assert_not_called()
     assert mgr._created_dir is None
     assert original.exists()
