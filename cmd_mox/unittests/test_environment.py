@@ -401,7 +401,7 @@ def test_cleanup_temporary_directory_skips_when_no_directory() -> None:
     with patch("cmd_mox.environment._robust_rmtree") as rm:
         cleanup = t.cast("CleanupCallable", mgr._cleanup_temporary_directory)
         cleanup(cleanup_errors)
-        assert cleanup_errors == []
+        assert not cleanup_errors
     rm.assert_not_called()
     assert mgr._created_dir is None
 
@@ -420,7 +420,7 @@ def test_cleanup_temporary_directory_skips_when_shim_dir_missing(
     with patch("cmd_mox.environment._robust_rmtree") as rm:
         cleanup = t.cast("CleanupCallable", mgr._cleanup_temporary_directory)
         cleanup(cleanup_errors)
-        assert cleanup_errors == []
+        assert not cleanup_errors
     rm.assert_not_called()
     assert mgr._created_dir is None
 
@@ -437,18 +437,23 @@ def test_cleanup_temporary_directory_skips_when_shim_dir_replaced(
     mgr._created_dir = original
     mgr.shim_dir = replacement
     cleanup_errors: list[CleanupError] = []
-    with caplog.at_level(logging.WARNING), patch(
-        "cmd_mox.environment._robust_rmtree"
-    ) as rm:
+    with (
+        caplog.at_level(logging.WARNING),
+        patch("cmd_mox.environment._robust_rmtree") as rm,
+    ):
         cleanup = t.cast("CleanupCallable", mgr._cleanup_temporary_directory)
         cleanup(cleanup_errors)
-        assert cleanup_errors == []
+        assert not cleanup_errors
     rm.assert_not_called()
     assert mgr._created_dir is None
+    assert mgr.shim_dir is None
     assert original.exists()
     assert replacement.exists()
     assert any(
-        record.message.startswith("Skipping cleanup for original temporary directory")
+        record.levelno == logging.WARNING
+        and record.message.startswith(
+            "Skipping cleanup for original temporary directory"
+        )
         for record in caplog.records
     ), caplog.text
 

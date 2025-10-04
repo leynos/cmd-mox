@@ -252,6 +252,11 @@ class EnvironmentManager:
                     created,
                     shim,
                 )
+                # Once ownership of the shim directory diverges from the original
+                # temporary directory, the manager no longer tracks the replacement.
+                # Resetting ``shim_dir`` avoids stale references to directories we did
+                # not create and therefore should not manage.
+                self.shim_dir = None
             self._created_dir = None
             return
 
