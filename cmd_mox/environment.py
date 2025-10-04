@@ -180,6 +180,7 @@ class EnvironmentManager:
         self._orig_env: dict[str, str] | None = None
         self.shim_dir: Path | None = None
         self.socket_path: Path | None = None
+        self.ipc_timeout: float | None = None
         self._created_dir: Path | None = None
         self._prefix = prefix
 
@@ -197,7 +198,7 @@ class EnvironmentManager:
             [str(self.shim_dir), self._orig_env.get("PATH", "")]
         )
         self.socket_path = self.shim_dir / "ipc.sock"
-        os.environ[CMOX_IPC_SOCKET_ENV] = str(self.socket_path)
+        self.export_ipc_environment()
         return self
 
     def __exit__(
@@ -213,6 +214,7 @@ class EnvironmentManager:
         self._reset_global_state()
         self._cleanup_temporary_directory(cleanup_errors)
         self._handle_cleanup_errors(cleanup_errors, exc_type)
+        self.ipc_timeout = None
 
     @_collect_os_error("Environment restoration failed")
     def _restore_original_environment(
@@ -266,6 +268,17 @@ class EnvironmentManager:
     def original_environment(self) -> dict[str, str]:
         """Return the unmodified environment prior to ``__enter__``."""
         return self._orig_env or {}
+
+    def export_ipc_environment(self, *, timeout: float | None = None) -> None:
+        """Expose IPC configuration variables for active shims."""
+        if self.socket_path is None:
+            msg = "Cannot export IPC settings before entering the environment"
+            raise RuntimeError(msg)
+
+        os.environ[CMOX_IPC_SOCKET_ENV] = str(self.socket_path)
+        if timeout is not None:
+            self.ipc_timeout = timeout
+            os.environ[CMOX_IPC_TIMEOUT_ENV] = str(timeout)
 
 
 @contextlib.contextmanager

@@ -17,7 +17,7 @@ import time
 import typing as t
 from pathlib import Path
 
-from .environment import CMOX_IPC_SOCKET_ENV
+from .environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
 from .expectations import SENSITIVE_ENV_KEY_TOKENS
 
 # Pre-normalize tokens once for case-insensitive checks
@@ -558,6 +558,10 @@ class IPCServer:
             raise RuntimeError(msg)
 
         _cleanup_stale_socket(self.socket_path)
+
+        env_mgr = EnvironmentManager.get_active_manager()
+        if env_mgr is not None:
+            env_mgr.export_ipc_environment(timeout=self.timeout)
 
         self._server = _InnerServer(self.socket_path, self)
         self._server.timeout = self.accept_timeout

@@ -20,7 +20,8 @@ def test_shim_invokes_via_ipc() -> None:
         with IPCServer(socket_path):
             create_shim_symlinks(env.shim_dir, commands)
 
-            os.environ[CMOX_IPC_SOCKET_ENV] = str(socket_path)
+            assert os.environ[CMOX_IPC_SOCKET_ENV] == str(socket_path)
+            assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "5.0"
             result = subprocess.run(  # noqa: S603
                 [str(_shim_cmd_path(env, "foo"))],
                 capture_output=True,
