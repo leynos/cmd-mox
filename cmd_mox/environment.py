@@ -276,9 +276,16 @@ class EnvironmentManager:
             raise RuntimeError(msg)
 
         os.environ[CMOX_IPC_SOCKET_ENV] = str(self.socket_path)
+
         if timeout is not None:
             self.ipc_timeout = timeout
-            os.environ[CMOX_IPC_TIMEOUT_ENV] = str(timeout)
+        elif self.ipc_timeout is not None:
+            timeout = self.ipc_timeout
+        else:
+            os.environ.pop(CMOX_IPC_TIMEOUT_ENV, None)
+            return
+
+        os.environ[CMOX_IPC_TIMEOUT_ENV] = str(timeout)
 
 
 @contextlib.contextmanager

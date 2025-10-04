@@ -49,6 +49,18 @@ def test_export_ipc_environment_sets_timeout() -> None:
         assert env.ipc_timeout == 2.5
 
 
+def test_export_ipc_environment_clears_missing_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """export_ipc_environment removes stale timeout variables."""
+    monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "9.0")
+
+    with EnvironmentManager() as env:
+        # __enter__ calls export_ipc_environment() without a timeout override.
+        assert CMOX_IPC_TIMEOUT_ENV not in os.environ
+        assert env.ipc_timeout is None
+
+
 def test_export_ipc_environment_rejects_inactive_manager() -> None:
     """Calling export_ipc_environment before entering raises."""
     mgr = EnvironmentManager()
