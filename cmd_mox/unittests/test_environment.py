@@ -355,25 +355,14 @@ def test_environment_manager_cleanup_error_handling(
     _test_environment_cleanup_error(test_case)
 
 
-@pytest.mark.parametrize(
-    ("scenario", "expect_cleanup"),
-    [
-        ("none", False),
-        ("missing", False),
-        ("replaced", False),
-        ("present", True),
-    ],
-)
+@pytest.mark.parametrize("scenario", ["none", "missing", "replaced", "present"])
 def test_cleanup_temporary_directory_skip_logic(
     tmp_path: Path,
     scenario: str,
-    expect_cleanup: bool,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify cleanup skips or removes directories for each scenario."""
     mgr = EnvironmentManager()
-    cleanup_errors: list[CleanupError] = []
-
     created_dir: Path | None = None
     replacement_dir: Path | None = None
 
@@ -401,31 +390,28 @@ def test_cleanup_temporary_directory_skip_logic(
     else:  # pragma: no cover - defensive guard
         raise AssertionError(f"Unknown scenario: {scenario}")
 
+    cleanup_errors: list[CleanupError] = []
     caplog.clear()
-    with patch("cmd_mox.environment._robust_rmtree") as rm:
-        cleanup = t.cast("CleanupCallable", mgr._cleanup_temporary_directory)
-
-        if scenario == "replaced":
-            with caplog.at_level(logging.WARNING):
-                cleanup(cleanup_errors)
-        else:
-            cleanup(cleanup_errors)
-
-        assert cleanup_errors == []
-
-        if expect_cleanup:
-            assert created_dir is not None
-            rm.assert_called_once_with(created_dir)
-            assert created_dir.exists()
-        else:
-            rm.assert_not_called()
-
-    assert mgr._created_dir is None
 
     if scenario == "replaced":
-        assert mgr.shim_dir is None
+        with caplog.at_level(logging.WARNING):
+            mgr._cleanup_temporary_directory(cleanup_errors)
+    else:
+        mgr._cleanup_temporary_directory(cleanup_errors)
+
+    assert cleanup_errors == []
+    assert mgr._created_dir is None
+
+    if scenario == "present":
+        assert created_dir is not None
+        assert not created_dir.exists()
+    elif scenario == "missing":
+        assert created_dir is not None
+        assert not created_dir.exists()
+    elif scenario == "replaced":
         assert created_dir is not None and created_dir.exists()
         assert replacement_dir is not None and replacement_dir.exists()
+        assert mgr.shim_dir is None
         assert any(
             record.levelno == logging.WARNING
             and record.message.startswith(
@@ -433,16 +419,12 @@ def test_cleanup_temporary_directory_skip_logic(
             )
             for record in caplog.records
         ), caplog.text
-    elif scenario == "missing":
-        assert created_dir is not None
-        assert not created_dir.exists()
-    elif scenario == "present":
-        assert created_dir is not None
-        assert created_dir.exists()
     else:
         # "none" scenario should never create directories.
         assert created_dir is None
         assert replacement_dir is None
+        assert mgr.shim_dir is None
+
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     """Test that cleanup handles read-only files appropriately."""
