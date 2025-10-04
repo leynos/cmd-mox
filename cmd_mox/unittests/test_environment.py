@@ -49,6 +49,26 @@ def test_export_ipc_environment_sets_timeout() -> None:
         assert env.ipc_timeout == 2.5
 
 
+@pytest.mark.parametrize(
+    "invalid", [0, -1, -0.1, float("nan"), float("inf"), True, "five"]
+)
+def test_export_ipc_environment_rejects_invalid_timeout(invalid: object) -> None:
+    """Invalid timeout overrides should raise ValueError."""
+    with EnvironmentManager() as env:
+        msg = "IPC timeout must be a positive number"
+        with pytest.raises(ValueError, match=msg):
+            env.export_ipc_environment(timeout=t.cast("float", invalid))
+
+
+def test_export_ipc_environment_reuses_previous_timeout() -> None:
+    """Subsequent exports reuse the last valid timeout override."""
+    with EnvironmentManager() as env:
+        env.export_ipc_environment(timeout=3.25)
+        env.export_ipc_environment()
+        assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "3.25"
+        assert env.ipc_timeout == 3.25
+
+
 def test_export_ipc_environment_clears_missing_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
