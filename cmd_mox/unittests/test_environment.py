@@ -355,45 +355,70 @@ def test_environment_manager_cleanup_error_handling(
     _test_environment_cleanup_error(test_case)
 
 
-@pytest.mark.parametrize("scenario", ["none", "missing", "replaced", "present"])
+@dataclass(frozen=True)
+class CleanupScenario:
+    """Describe a temporary-directory cleanup scenario."""
+
+    name: str
+
+
+def _prepare_cleanup_scenario(
+    scenario: CleanupScenario, tmp_path: Path, mgr: EnvironmentManager
+) -> tuple[Path | None, Path | None]:
+    """Configure *mgr* to emulate *scenario* and return relevant paths."""
+    match scenario.name:
+        case "uninitialized":
+            mgr._created_dir = None
+            mgr.shim_dir = None
+            return None, None
+        case "missing":
+            created = tmp_path / "missing"
+            created.mkdir()
+            mgr._created_dir = created
+            mgr.shim_dir = created
+            created.rmdir()
+            return created, None
+        case "replaced":
+            created = tmp_path / "original"
+            replacement = tmp_path / "replacement"
+            created.mkdir()
+            replacement.mkdir()
+            mgr._created_dir = created
+            mgr.shim_dir = replacement
+            return created, replacement
+        case "present":
+            created = tmp_path / "dir"
+            created.mkdir()
+            mgr._created_dir = created
+            mgr.shim_dir = created
+            return created, None
+        case _:
+            raise AssertionError(f"Unknown scenario: {scenario.name}")
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        CleanupScenario("uninitialized"),
+        CleanupScenario("missing"),
+        CleanupScenario("replaced"),
+        CleanupScenario("present"),
+    ],
+    ids=lambda scenario: scenario.name,
+)
 def test_cleanup_temporary_directory_skip_logic(
     tmp_path: Path,
-    scenario: str,
+    scenario: CleanupScenario,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify cleanup skips or removes directories for each scenario."""
     mgr = EnvironmentManager()
-    created_dir: Path | None = None
-    replacement_dir: Path | None = None
-
-    if scenario == "none":
-        mgr._created_dir = None
-        mgr.shim_dir = None
-    elif scenario == "missing":
-        created_dir = tmp_path / "missing"
-        created_dir.mkdir()
-        mgr._created_dir = created_dir
-        mgr.shim_dir = created_dir
-        created_dir.rmdir()
-    elif scenario == "replaced":
-        created_dir = tmp_path / "original"
-        replacement_dir = tmp_path / "replacement"
-        created_dir.mkdir()
-        replacement_dir.mkdir()
-        mgr._created_dir = created_dir
-        mgr.shim_dir = replacement_dir
-    elif scenario == "present":
-        created_dir = tmp_path / "dir"
-        created_dir.mkdir()
-        mgr._created_dir = created_dir
-        mgr.shim_dir = created_dir
-    else:  # pragma: no cover - defensive guard
-        raise AssertionError(f"Unknown scenario: {scenario}")
+    created, replacement = _prepare_cleanup_scenario(scenario, tmp_path, mgr)
 
     cleanup_errors: list[CleanupError] = []
     caplog.clear()
 
-    if scenario == "replaced":
+    if scenario.name == "replaced":
         with caplog.at_level(logging.WARNING):
             mgr._cleanup_temporary_directory(cleanup_errors)
     else:
@@ -402,29 +427,30 @@ def test_cleanup_temporary_directory_skip_logic(
     assert cleanup_errors == []
     assert mgr._created_dir is None
 
-    if scenario == "present":
-        assert created_dir is not None
-        assert not created_dir.exists()
-    elif scenario == "missing":
-        assert created_dir is not None
-        assert not created_dir.exists()
-    elif scenario == "replaced":
-        assert created_dir is not None and created_dir.exists()
-        assert replacement_dir is not None and replacement_dir.exists()
-        assert mgr.shim_dir is None
-        assert any(
-            record.levelno == logging.WARNING
-            and record.message.startswith(
-                "Skipping cleanup for original temporary directory"
-            )
-            for record in caplog.records
-        ), caplog.text
-    else:
-        # "none" scenario should never create directories.
-        assert created_dir is None
-        assert replacement_dir is None
-        assert mgr.shim_dir is None
-
+    match scenario.name:
+        case "present":
+            assert created is not None
+            assert not created.exists()
+        case "missing":
+            assert created is not None
+            assert not created.exists()
+        case "replaced":
+            assert created is not None and created.exists()
+            assert replacement is not None and replacement.exists()
+            assert mgr.shim_dir is None
+            assert any(
+                record.levelno == logging.WARNING
+                and record.message.startswith(
+                    "Skipping cleanup for original temporary directory"
+                )
+                for record in caplog.records
+            ), caplog.text
+        case "uninitialized":
+            assert created is None
+            assert replacement is None
+            assert mgr.shim_dir is None
+        case _:
+            raise AssertionError(f"Unhandled scenario: {scenario.name}")
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     """Test that cleanup handles read-only files appropriately."""
