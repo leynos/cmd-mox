@@ -418,40 +418,51 @@ def test_cleanup_temporary_directory_skip_logic(
     cleanup_errors: list[CleanupError] = []
     caplog.clear()
 
-    if scenario.name == "replaced":
-        with caplog.at_level(logging.WARNING):
-            mgr._cleanup_temporary_directory(cleanup_errors)
-    else:
-        mgr._cleanup_temporary_directory(cleanup_errors)
+    real_rmtree = envmod._robust_rmtree
+    with patch("cmd_mox.environment._robust_rmtree") as rm:
+        rm.side_effect = real_rmtree
 
-    assert cleanup_errors == []
-    assert mgr._created_dir is None
-
-    match scenario.name:
-        case "present":
-            assert created is not None
-            # A matching shim directory should be removed by cleanup.
-            assert not created.exists()
-        case "missing":
-            assert created is not None
-            assert not created.exists()
-        case "replaced":
-            assert created is not None and created.exists()
-            assert replacement is not None and replacement.exists()
-            assert mgr.shim_dir is None
-            assert any(
-                record.levelno == logging.WARNING
-                and record.message.startswith(
-                    "Skipping cleanup for original temporary directory"
+        if scenario.name == "replaced":
+            with caplog.at_level(logging.WARNING):
+                EnvironmentManager._cleanup_temporary_directory(
+                    mgr, cleanup_errors
                 )
-                for record in caplog.records
-            ), caplog.text
-        case "uninitialized":
-            assert created is None
-            assert replacement is None
-            assert mgr.shim_dir is None
-        case _:
-            raise AssertionError(f"Unhandled scenario: {scenario.name}")
+        else:
+            EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
+
+        assert cleanup_errors == []
+        assert mgr._created_dir is None
+
+        match scenario.name:
+            case "present":
+                assert created is not None
+                rm.assert_called_once_with(created)
+                # A matching shim directory should be removed by cleanup.
+                assert not created.exists()
+            case "missing":
+                rm.assert_not_called()
+                assert created is not None
+                assert not created.exists()
+            case "replaced":
+                rm.assert_not_called()
+                assert created is not None and created.exists()
+                assert replacement is not None and replacement.exists()
+                assert mgr.shim_dir is None
+                assert any(
+                    record.levelno == logging.WARNING
+                    and record.message.startswith(
+                        "Skipping cleanup for original temporary directory"
+                    )
+                    for record in caplog.records
+                ), caplog.text
+            case "uninitialized":
+                rm.assert_not_called()
+                assert created is None
+                assert replacement is None
+                assert mgr.shim_dir is None
+            case _:
+                raise AssertionError(f"Unhandled scenario: {scenario.name}")
+
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     """Test that cleanup handles read-only files appropriately."""
