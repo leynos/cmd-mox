@@ -430,6 +430,7 @@ def test_cleanup_temporary_directory_skip_logic(
     match scenario.name:
         case "present":
             assert created is not None
+            # A matching shim directory should be removed by cleanup.
             assert not created.exists()
         case "missing":
             assert created is not None
