@@ -123,12 +123,20 @@ def _handle_final_failure(
 
 CleanupError = tuple[str, BaseException]
 
+P = t.ParamSpec("P")
+R = t.TypeVar("R")
+
 
 def _collect_os_error(
     message: str,
 ) -> t.Callable[
-    [t.Callable[[EnvironmentManager, list[CleanupError]], t.Any]],
-    t.Callable[[EnvironmentManager, list[CleanupError]], None],
+    [
+        t.Callable[
+            t.Concatenate[EnvironmentManager, list[CleanupError], P],
+            R,
+        ]
+    ],
+    t.Callable[t.Concatenate[EnvironmentManager, list[CleanupError], P], None],
 ]:
     """Return a decorator that records ``OSError``s in ``cleanup_errors``.
 
@@ -138,14 +146,17 @@ def _collect_os_error(
     """
 
     def decorator(
-        func: t.Callable[[EnvironmentManager, list[CleanupError]], t.Any],
-    ) -> t.Callable[[EnvironmentManager, list[CleanupError]], None]:
+        func: t.Callable[t.Concatenate[EnvironmentManager, list[CleanupError], P], R],
+    ) -> t.Callable[t.Concatenate[EnvironmentManager, list[CleanupError], P], None]:
         @functools.wraps(func)
         def wrapper(
-            self: EnvironmentManager, cleanup_errors: list[CleanupError]
+            self: EnvironmentManager,
+            cleanup_errors: list[CleanupError],
+            *args: P.args,
+            **kwargs: P.kwargs,
         ) -> None:
             try:
-                func(self, cleanup_errors)
+                func(self, cleanup_errors, *args, **kwargs)
             except OSError as e:  # pragma: no cover - exercised via tests
                 cleanup_errors.append((f"{message}: {e}", e))
 
@@ -239,10 +250,28 @@ class EnvironmentManager:
         created = self._created_dir
         return created is None or shim is None or shim != created or not shim.exists()
 
+    def _has_mismatched_directories(self) -> bool:
+        """Check if the created directory differs from the current shim directory."""
+        created = self._created_dir
+        shim = self.shim_dir
+        return created is not None and shim is not None and shim != created
+
     @_collect_os_error("Directory cleanup failed")
     def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
         """Remove the temporary directory created by ``__enter__``."""
         if self._should_skip_directory_removal():
+            if self._has_mismatched_directories():
+                logger.warning(
+                    "Skipping cleanup for original temporary directory %s because "
+                    "shim_dir now points to %s; leftover directories may remain.",
+                    self._created_dir,
+                    self.shim_dir,
+                )
+                # Once ownership of the shim directory diverges from the original
+                # temporary directory, the manager no longer tracks the replacement.
+                # Resetting ``shim_dir`` avoids stale references to directories we did
+                # not create and therefore should not manage.
+                self.shim_dir = None
             self._created_dir = None
             return
 

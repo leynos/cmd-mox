@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 import threading
@@ -22,6 +23,8 @@ from cmd_mox.environment import (
     _robust_rmtree,
     temporary_env,
 )
+
+CleanupCallable = t.Callable[[list[envmod.CleanupError]], None]
 
 if t.TYPE_CHECKING:  # pragma: no cover - imported for type hints
     from pathlib import Path
@@ -396,11 +399,8 @@ def test_cleanup_temporary_directory_skips_when_no_directory() -> None:
     mgr = EnvironmentManager()
     cleanup_errors: list[CleanupError] = []
     with patch("cmd_mox.environment._robust_rmtree") as rm:
-        cleanup_dir = t.cast(
-            "t.Callable[[list[CleanupError]], None]",
-            mgr._cleanup_temporary_directory,
-        )
-        cleanup_dir(cleanup_errors)
+        cleanup = t.cast("CleanupCallable", mgr._cleanup_temporary_directory)
+        cleanup(cleanup_errors)
         assert not cleanup_errors
     rm.assert_not_called()
     assert mgr._created_dir is None
@@ -418,18 +418,15 @@ def test_cleanup_temporary_directory_skips_when_shim_dir_missing(
     path.rmdir()
     cleanup_errors: list[CleanupError] = []
     with patch("cmd_mox.environment._robust_rmtree") as rm:
-        cleanup_dir = t.cast(
-            "t.Callable[[list[CleanupError]], None]",
-            mgr._cleanup_temporary_directory,
-        )
-        cleanup_dir(cleanup_errors)
+        cleanup = t.cast("CleanupCallable", mgr._cleanup_temporary_directory)
+        cleanup(cleanup_errors)
         assert not cleanup_errors
     rm.assert_not_called()
     assert mgr._created_dir is None
 
 
 def test_cleanup_temporary_directory_skips_when_shim_dir_replaced(
-    tmp_path: Path,
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Skip directory removal when ``shim_dir`` differs from ``_created_dir``."""
     mgr = EnvironmentManager()
@@ -440,17 +437,25 @@ def test_cleanup_temporary_directory_skips_when_shim_dir_replaced(
     mgr._created_dir = original
     mgr.shim_dir = replacement
     cleanup_errors: list[CleanupError] = []
-    with patch("cmd_mox.environment._robust_rmtree") as rm:
-        cleanup_dir = t.cast(
-            "t.Callable[[list[CleanupError]], None]",
-            mgr._cleanup_temporary_directory,
-        )
-        cleanup_dir(cleanup_errors)
+    with (
+        caplog.at_level(logging.WARNING),
+        patch("cmd_mox.environment._robust_rmtree") as rm,
+    ):
+        cleanup = t.cast("CleanupCallable", mgr._cleanup_temporary_directory)
+        cleanup(cleanup_errors)
         assert not cleanup_errors
     rm.assert_not_called()
     assert mgr._created_dir is None
+    assert mgr.shim_dir is None
     assert original.exists()
     assert replacement.exists()
+    assert any(
+        record.levelno == logging.WARNING
+        and record.message.startswith(
+            "Skipping cleanup for original temporary directory"
+        )
+        for record in caplog.records
+    ), caplog.text
 
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
