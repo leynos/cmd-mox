@@ -628,9 +628,14 @@ class CallbackIPCServer(IPCServer):
         socket_path: Path,
         handler: t.Callable[[Invocation], Response],
         passthrough_handler: t.Callable[[PassthroughResult], Response],
+        *,
+        timeout: float = 5.0,
+        accept_timeout: float | None = None,
     ) -> None:
         super().__init__(
             socket_path,
+            timeout=timeout,
+            accept_timeout=accept_timeout,
             handlers=IPCHandlers(
                 handler=handler,
                 passthrough_handler=passthrough_handler,
