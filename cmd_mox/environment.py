@@ -280,6 +280,25 @@ class EnvironmentManager:
         """
         validate_positive_finite_timeout(timeout)
 
+    def _resolve_effective_timeout(self, timeout: float | object) -> float | None:
+        """Return the timeout value that should be exported.
+
+        The helper isolates the branching necessary to honour explicit
+        overrides, fall back to the previously configured value, and surface
+        invalid types consistently with other validation paths.
+        """
+        if timeout is _UNSET_TIMEOUT:
+            return self.ipc_timeout
+
+        if timeout is None:
+            msg = "timeout must be a real number"
+            raise TypeError(msg)
+
+        override = t.cast("float", timeout)
+        self._validate_timeout(override)
+        self.ipc_timeout = override
+        return override
+
     def export_ipc_environment(
         self, *, timeout: float | object = _UNSET_TIMEOUT
     ) -> None:
@@ -290,20 +309,10 @@ class EnvironmentManager:
 
         os.environ[CMOX_IPC_SOCKET_ENV] = str(self.socket_path)
 
-        if timeout is _UNSET_TIMEOUT:
-            if self.ipc_timeout is None:
-                os.environ.pop(CMOX_IPC_TIMEOUT_ENV, None)
-                return
-            effective_timeout = self.ipc_timeout
-        else:
-            if timeout is None:
-                msg = "timeout must be a real number"
-                raise TypeError(msg)
-
-            override = t.cast("float", timeout)
-            self._validate_timeout(override)
-            self.ipc_timeout = override
-            effective_timeout = override
+        effective_timeout = self._resolve_effective_timeout(timeout)
+        if effective_timeout is None:
+            os.environ.pop(CMOX_IPC_TIMEOUT_ENV, None)
+            return
 
         os.environ[CMOX_IPC_TIMEOUT_ENV] = str(effective_timeout)
 
