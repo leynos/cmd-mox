@@ -360,6 +360,7 @@ class CleanupScenario:
     """Describe a temporary-directory cleanup scenario."""
 
     name: str
+    should_remove: bool
 
 
 def _prepare_cleanup_scenario(
@@ -400,10 +401,10 @@ def _prepare_cleanup_scenario(
 @pytest.mark.parametrize(
     "scenario",
     [
-        CleanupScenario("uninitialized"),
-        CleanupScenario("missing"),
-        CleanupScenario("replaced"),
-        CleanupScenario("present"),
+        CleanupScenario("uninitialized", should_remove=False),
+        CleanupScenario("missing", should_remove=False),
+        CleanupScenario("replaced", should_remove=False),
+        CleanupScenario("present", should_remove=True),
     ],
     ids=lambda scenario: scenario.name,
 )
@@ -434,18 +435,21 @@ def test_cleanup_temporary_directory_skip_logic(
         assert cleanup_errors == []
         assert mgr._created_dir is None
 
+        if scenario.should_remove:
+            assert created is not None
+            rm.assert_called_once_with(created)
+        else:
+            rm.assert_not_called()
+
         match scenario.name:
             case "present":
                 assert created is not None
-                rm.assert_called_once_with(created)
                 # A matching shim directory should be removed by cleanup.
                 assert not created.exists()
             case "missing":
-                rm.assert_not_called()
                 assert created is not None
                 assert not created.exists()
             case "replaced":
-                rm.assert_not_called()
                 assert created is not None and created.exists()
                 assert replacement is not None and replacement.exists()
                 assert mgr.shim_dir is None
@@ -457,12 +461,12 @@ def test_cleanup_temporary_directory_skip_logic(
                     for record in caplog.records
                 ), caplog.text
             case "uninitialized":
-                rm.assert_not_called()
                 assert created is None
                 assert replacement is None
                 assert mgr.shim_dir is None
             case _:
                 raise AssertionError(f"Unhandled scenario: {scenario.name}")
+
 
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
