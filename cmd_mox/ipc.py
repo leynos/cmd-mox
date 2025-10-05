@@ -462,23 +462,54 @@ def _wait_for_socket(socket_path: Path, timeout: float) -> None:
 class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
-    def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
-        raw = self.rfile.read()
+    def _parse_and_validate_request(
+        self, raw: bytes
+    ) -> tuple[dict[str, t.Any], str] | None:
+        """Return a payload and kind when *raw* contains a valid request."""
         payload = _parse_json_safely(raw)
         if payload is None:
             try:
                 obj = json.loads(raw.decode("utf-8"))
             except json.JSONDecodeError:
                 logger.exception("IPC received malformed JSON")
-            else:
-                logger.error("IPC payload not a dict: %r", obj)
-            return
+                return None
+            logger.error("IPC payload not a dict: %r", obj)
+            return None
 
-        payload = payload.copy()
-        kind = payload.pop("kind", "invocation")
+        copied_payload = payload.copy()
+        kind = str(copied_payload.pop("kind", "invocation"))
+        return copied_payload, kind
+
+    def _lookup_handler(
+        self, kind: str
+    ) -> tuple[_RequestValidator, _RequestProcessor] | None:
+        """Return the registered handler for *kind* if available."""
         handler_entry = _REQUEST_HANDLERS.get(kind)
         if handler_entry is None:
             logger.error("Unknown IPC payload kind: %r", kind)
+            return None
+        return handler_entry
+
+    def _process_request(self, processor: _RequestProcessor, obj: object) -> Response:
+        """Execute *processor* and wrap unexpected failures."""
+        try:
+            return processor(self.server.outer, obj)  # type: ignore[attr-defined]
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("IPC handler raised an exception")
+            message = str(exc) or exc.__class__.__name__
+            return Response(stderr=message, exit_code=1)
+
+    def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
+        raw = self.rfile.read()
+        parsed = self._parse_and_validate_request(raw)
+        if parsed is None:
+            return
+
+        payload, kind = parsed
+        handler_entry = self._lookup_handler(kind)
+        if handler_entry is None:
             return
 
         validator, processor = handler_entry
@@ -486,14 +517,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         if obj is None:
             return
 
-        try:
-            response = processor(self.server.outer, obj)  # type: ignore[attr-defined]
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except Exception as exc:
-            logger.exception("IPC handler raised an exception")
-            message = str(exc) or exc.__class__.__name__
-            response = Response(stderr=message, exit_code=1)
+        response = self._process_request(processor, obj)
         self.wfile.write(json.dumps(response.to_dict()).encode("utf-8"))
         self.wfile.flush()
 
