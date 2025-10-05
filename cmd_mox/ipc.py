@@ -335,7 +335,7 @@ def _validate_retries(retries: int) -> None:
         raise ValueError(msg)
 
 
-def _validate_timeout(timeout: float) -> None:
+def _validate_connection_timeout(timeout: float) -> None:
     """Validate overall timeout value."""
     if not (timeout > 0 and math.isfinite(timeout)):
         msg = "timeout must be > 0 and finite"
@@ -359,7 +359,7 @@ def _validate_jitter(jitter: float) -> None:
 def _validate_connection_params(timeout: float, retry_config: RetryConfig) -> None:
     """Ensure connection retry parameters are sensible."""
     _validate_retries(retry_config.retries)
-    _validate_timeout(timeout)
+    _validate_connection_timeout(timeout)
     _validate_backoff(retry_config.backoff)
     _validate_jitter(retry_config.jitter)
 
@@ -515,6 +515,19 @@ class IPCHandlers:
     passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None
 
 
+def _validate_timeout(timeout: float, param_name: str = "timeout") -> None:
+    """Validate that a timeout value is positive and finite."""
+    if not (timeout > 0 and math.isfinite(timeout)):
+        msg = f"{param_name} must be positive and finite, got {timeout!r}"
+        raise ValueError(msg)
+
+
+def _validate_accept_timeout(accept_timeout: float | None) -> None:
+    """Validate that accept_timeout is positive and finite when provided."""
+    if accept_timeout is not None:
+        _validate_timeout(accept_timeout, "accept_timeout")
+
+
 @dc.dataclass(slots=True)
 class TimeoutConfig:
     """Timeout configuration forwarded by :class:`CallbackIPCServer`."""
@@ -524,17 +537,8 @@ class TimeoutConfig:
 
     def __post_init__(self) -> None:
         """Validate timeout values to catch misconfiguration early."""
-        if not (self.timeout > 0 and math.isfinite(self.timeout)):
-            msg = f"timeout must be positive and finite, got {self.timeout!r}"
-            raise ValueError(msg)
-        if self.accept_timeout is not None and not (
-            self.accept_timeout > 0 and math.isfinite(self.accept_timeout)
-        ):
-            msg = (
-                "accept_timeout must be positive and finite, got "
-                f"{self.accept_timeout!r}"
-            )
-            raise ValueError(msg)
+        _validate_timeout(self.timeout)
+        _validate_accept_timeout(self.accept_timeout)
 
 
 class IPCServer:
