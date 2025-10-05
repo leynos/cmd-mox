@@ -271,6 +271,18 @@ class EnvironmentManager:
         """Return the unmodified environment prior to ``__enter__``."""
         return self._orig_env or {}
 
+    def _validate_timeout(self, timeout: float) -> None:
+        """Validate that *timeout* is a positive finite number.
+
+        Raise ``ValueError`` if the provided value is not positive and finite.
+        """
+        if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
+            msg = "IPC timeout must be a positive number"
+            raise ValueError(msg)  # noqa: TRY004 - align with public API expectations
+        if timeout <= 0 or not math.isfinite(timeout):
+            msg = "IPC timeout must be a positive number"
+            raise ValueError(msg)
+
     def export_ipc_environment(self, *, timeout: float | None = None) -> None:
         """Expose IPC configuration variables for active shims."""
         if self.socket_path is None:
@@ -279,21 +291,17 @@ class EnvironmentManager:
 
         os.environ[CMOX_IPC_SOCKET_ENV] = str(self.socket_path)
 
+        effective_timeout = timeout
         if timeout is not None:
-            if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
-                msg = "IPC timeout must be a positive number"
-                raise ValueError(msg)
-            if timeout <= 0 or not math.isfinite(timeout):
-                msg = "IPC timeout must be a positive number"
-                raise ValueError(msg)
+            self._validate_timeout(timeout)
             self.ipc_timeout = timeout
         elif self.ipc_timeout is not None:
-            timeout = self.ipc_timeout
+            effective_timeout = self.ipc_timeout
         else:
             os.environ.pop(CMOX_IPC_TIMEOUT_ENV, None)
             return
 
-        os.environ[CMOX_IPC_TIMEOUT_ENV] = str(timeout)
+        os.environ[CMOX_IPC_TIMEOUT_ENV] = str(effective_timeout)
 
 
 @contextlib.contextmanager
