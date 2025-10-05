@@ -24,6 +24,8 @@ CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
 CMOX_IPC_TIMEOUT_ENV = "CMOX_IPC_TIMEOUT"  # server/shim communication timeout
 CMOX_REAL_COMMAND_ENV_PREFIX = "CMOX_REAL_COMMAND_"
 
+_UNSET_TIMEOUT = object()
+
 
 def _restore_env(orig_env: dict[str, str]) -> None:
     """Reset ``os.environ`` to the snapshot stored in ``orig_env``."""
@@ -278,7 +280,9 @@ class EnvironmentManager:
         """
         validate_positive_finite_timeout(timeout)
 
-    def export_ipc_environment(self, *, timeout: float | None = None) -> None:
+    def export_ipc_environment(
+        self, *, timeout: float | object = _UNSET_TIMEOUT
+    ) -> None:
         """Expose IPC configuration variables for active shims."""
         if self.socket_path is None:
             msg = "Cannot export IPC settings before entering the environment"
@@ -286,15 +290,20 @@ class EnvironmentManager:
 
         os.environ[CMOX_IPC_SOCKET_ENV] = str(self.socket_path)
 
-        effective_timeout = timeout
-        if timeout is not None:
-            self._validate_timeout(timeout)
-            self.ipc_timeout = timeout
-        elif self.ipc_timeout is not None:
+        if timeout is _UNSET_TIMEOUT:
+            if self.ipc_timeout is None:
+                os.environ.pop(CMOX_IPC_TIMEOUT_ENV, None)
+                return
             effective_timeout = self.ipc_timeout
         else:
-            os.environ.pop(CMOX_IPC_TIMEOUT_ENV, None)
-            return
+            if timeout is None:
+                msg = "timeout must be a real number"
+                raise TypeError(msg)
+
+            override = t.cast("float", timeout)
+            self._validate_timeout(override)
+            self.ipc_timeout = override
+            effective_timeout = override
 
         os.environ[CMOX_IPC_TIMEOUT_ENV] = str(effective_timeout)
 

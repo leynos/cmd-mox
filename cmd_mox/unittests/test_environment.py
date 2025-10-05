@@ -58,10 +58,14 @@ def test_export_ipc_environment_rejects_invalid_timeout(invalid: float) -> None:
             env.export_ipc_environment(timeout=invalid)
 
 
-def test_export_ipc_environment_invalid_timeout_type() -> None:
+@pytest.mark.parametrize(
+    "invalid_type",
+    [None, True, [], {}, "five", complex(1, 1)],
+)
+def test_export_ipc_environment_invalid_timeout_type(invalid_type: object) -> None:
     """Invalid timeout types should propagate TypeError."""
     with EnvironmentManager() as env, pytest.raises(TypeError):
-        env.export_ipc_environment(timeout=t.cast("float", "five"))
+        env.export_ipc_environment(timeout=t.cast("float", invalid_type))
 
 
 def test_export_ipc_environment_reuses_previous_timeout() -> None:
