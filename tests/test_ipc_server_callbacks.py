@@ -239,39 +239,41 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
     assert isinstance(excinfo.value.__cause__, ValueError)
 
 
+@pytest.mark.parametrize(
+    ("timeouts_arg", "expected_timeout", "expected_accept_timeout"),
+    [
+        pytest.param(
+            TimeoutConfig(timeout=1.25, accept_timeout=0.2),
+            1.25,
+            0.2,
+            id="custom_timeouts",
+        ),
+        pytest.param(
+            None,
+            TimeoutConfig().timeout,
+            min(0.1, TimeoutConfig().timeout / 10),
+            id="default_timeouts",
+        ),
+    ],
+)
 def test_callback_ipcserver_timeout_config(
     tmp_path: Path,
     echo_handler: t.Callable[[Invocation], Response],
     passthrough_handler: t.Callable[[PassthroughResult], Response],
+    timeouts_arg: TimeoutConfig | None,
+    expected_timeout: float,
+    expected_accept_timeout: float,
 ) -> None:
-    """CallbackIPCServer should respect timeout overrides via TimeoutConfig."""
+    """CallbackIPCServer should handle TimeoutConfig correctly."""
     server = CallbackIPCServer(
         tmp_path / "ipc.sock",
         echo_handler,
         passthrough_handler,
-        timeouts=TimeoutConfig(timeout=1.25, accept_timeout=0.2),
+        timeouts=timeouts_arg,
     )
 
-    assert server.timeout == 1.25
-    assert server.accept_timeout == 0.2
-
-
-def test_callback_ipcserver_timeout_config_defaults(
-    tmp_path: Path,
-    echo_handler: t.Callable[[Invocation], Response],
-    passthrough_handler: t.Callable[[PassthroughResult], Response],
-) -> None:
-    """CallbackIPCServer should apply default TimeoutConfig values."""
-    server = CallbackIPCServer(
-        tmp_path / "ipc.sock",
-        echo_handler,
-        passthrough_handler,
-    )
-
-    defaults = TimeoutConfig()
-    assert server.timeout == defaults.timeout
-    # With default timeout=5.0, accept_timeout should be min(0.1, 0.5) = 0.1
-    assert server.accept_timeout == 0.1
+    assert server.timeout == expected_timeout
+    assert server.accept_timeout == expected_accept_timeout
 
 
 def test_timeout_config_validation() -> None:
