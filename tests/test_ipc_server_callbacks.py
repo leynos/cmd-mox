@@ -23,6 +23,26 @@ if t.TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture
+def echo_handler() -> t.Callable[[Invocation], Response]:
+    """Return a handler that echoes the command name."""
+
+    def handler(invocation: Invocation) -> Response:
+        return Response(stdout=invocation.command)
+
+    return handler
+
+
+@pytest.fixture
+def passthrough_handler() -> t.Callable[[PassthroughResult], Response]:
+    """Return a handler that returns a fixed passthrough response."""
+
+    def handler(_result: PassthroughResult) -> Response:
+        return Response(stdout="passthrough")
+
+    return handler
+
+
 @pytest.mark.usefixtures("tmp_path")
 def test_ipcserver_default_invocation_behaviour(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -221,18 +241,15 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
     assert isinstance(excinfo.value.__cause__, ValueError)
 
 
-def test_callback_ipcserver_timeout_config(tmp_path: Path) -> None:
+def test_callback_ipcserver_timeout_config(
+    tmp_path: Path,
+    echo_handler: t.Callable[[Invocation], Response],
+    passthrough_handler: t.Callable[[PassthroughResult], Response],
+) -> None:
     """CallbackIPCServer should respect timeout overrides via TimeoutConfig."""
-
-    def handler(invocation: Invocation) -> Response:
-        return Response(stdout=invocation.command)
-
-    def passthrough_handler(_result: PassthroughResult) -> Response:
-        return Response(stdout="passthrough")
-
     server = CallbackIPCServer(
         tmp_path / "ipc.sock",
-        handler,
+        echo_handler,
         passthrough_handler,
         timeouts=TimeoutConfig(timeout=1.25, accept_timeout=0.2),
     )
@@ -241,18 +258,15 @@ def test_callback_ipcserver_timeout_config(tmp_path: Path) -> None:
     assert server.accept_timeout == 0.2
 
 
-def test_callback_ipcserver_timeout_config_defaults(tmp_path: Path) -> None:
+def test_callback_ipcserver_timeout_config_defaults(
+    tmp_path: Path,
+    echo_handler: t.Callable[[Invocation], Response],
+    passthrough_handler: t.Callable[[PassthroughResult], Response],
+) -> None:
     """CallbackIPCServer should apply default TimeoutConfig values."""
-
-    def handler(invocation: Invocation) -> Response:
-        return Response(stdout=invocation.command)
-
-    def passthrough_handler(_result: PassthroughResult) -> Response:
-        return Response(stdout="passthrough")
-
     server = CallbackIPCServer(
         tmp_path / "ipc.sock",
-        handler,
+        echo_handler,
         passthrough_handler,
     )
 
