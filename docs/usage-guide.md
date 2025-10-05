@@ -297,6 +297,20 @@ Pass `passthrough_handler=` to `IPCHandlers` to intercept passthrough
 completions in the same fashion. When no callbacks are supplied the server
 keeps its default echo behaviour, so existing code continues to work unchanged.
 
+Projects that rely on :class:`CallbackIPCServer` can still customise startup
+and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
+
+```python
+from cmd_mox.ipc import CallbackIPCServer, IPCHandlers, TimeoutConfig
+
+server = CallbackIPCServer(
+    socket_path,
+    handler=handle,
+    passthrough_handler=handle_passthrough,
+    timeouts=TimeoutConfig(timeout=1.5, accept_timeout=0.05),
+)
+```
+
 ## Environment variables
 
 CmdMox exposes two environment variables to coordinate shims with the IPC

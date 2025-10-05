@@ -8,11 +8,13 @@ import pytest
 
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc import (
+    CallbackIPCServer,
     Invocation,
     IPCHandlers,
     IPCServer,
     PassthroughResult,
     Response,
+    TimeoutConfig,
     invoke_server,
     report_passthrough_result,
 )
@@ -193,3 +195,23 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
         server.handle_passthrough_result(result)
 
     assert isinstance(excinfo.value.__cause__, ValueError)
+
+
+def test_callback_ipcserver_timeout_config(tmp_path: Path) -> None:
+    """CallbackIPCServer should respect timeout overrides via TimeoutConfig."""
+
+    def handler(invocation: Invocation) -> Response:
+        return Response(stdout=invocation.command)
+
+    def passthrough_handler(_result: PassthroughResult) -> Response:
+        return Response(stdout="passthrough")
+
+    server = CallbackIPCServer(
+        tmp_path / "ipc.sock",
+        handler,
+        passthrough_handler,
+        timeouts=TimeoutConfig(timeout=1.25, accept_timeout=0.2),
+    )
+
+    assert server.timeout == 1.25
+    assert server.accept_timeout == 0.2

@@ -507,6 +507,14 @@ class IPCHandlers:
     passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None
 
 
+@dc.dataclass(slots=True)
+class TimeoutConfig:
+    """Timeout configuration forwarded by :class:`CallbackIPCServer`."""
+
+    timeout: float = 5.0
+    accept_timeout: float | None = None
+
+
 class IPCServer:
     """Run a Unix domain socket server for shims.
 
@@ -629,13 +637,19 @@ class CallbackIPCServer(IPCServer):
         handler: t.Callable[[Invocation], Response],
         passthrough_handler: t.Callable[[PassthroughResult], Response],
         *,
-        timeout: float = 5.0,
-        accept_timeout: float | None = None,
+        timeouts: TimeoutConfig | None = None,
     ) -> None:
+        """Initialise a callback-driven IPC server.
+
+        ``timeouts`` groups the startup and accept timeout configuration so the
+        legacy subclass stays within the four argument limit while remaining
+        backwards compatible with previous keyword arguments.
+        """
+        timeouts = timeouts or TimeoutConfig()
         super().__init__(
             socket_path,
-            timeout=timeout,
-            accept_timeout=accept_timeout,
+            timeout=timeouts.timeout,
+            accept_timeout=timeouts.accept_timeout,
             handlers=IPCHandlers(
                 handler=handler,
                 passthrough_handler=passthrough_handler,
