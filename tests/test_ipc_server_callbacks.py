@@ -130,15 +130,13 @@ def test_ipcserver_default_passthrough_error(
 
 @pytest.mark.usefixtures("tmp_path")
 def test_ipcserver_passthrough_handler(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    echo_handler: t.Callable[[Invocation], Response],
 ) -> None:
     """IPCServer should delegate passthrough results when a handler is provided."""
     socket_path = tmp_path / "ipc.sock"
     seen: list[PassthroughResult] = []
-
-    def handler(invocation: Invocation) -> Response:
-        """Return a simple echo to keep the invocation path exercised."""
-        return Response(stdout=invocation.command)
 
     def passthrough_handler(result: PassthroughResult) -> Response:
         """Capture passthrough results and return a custom response."""
@@ -148,7 +146,7 @@ def test_ipcserver_passthrough_handler(
     with IPCServer(
         socket_path,
         handlers=IPCHandlers(
-            handler=handler,
+            handler=echo_handler,
             passthrough_handler=passthrough_handler,
         ),
     ):
@@ -272,7 +270,8 @@ def test_callback_ipcserver_timeout_config_defaults(
 
     defaults = TimeoutConfig()
     assert server.timeout == defaults.timeout
-    assert server.accept_timeout == min(0.1, defaults.timeout / 10)
+    # With default timeout=5.0, accept_timeout should be min(0.1, 0.5) = 0.1
+    assert server.accept_timeout == 0.1
 
 
 def test_timeout_config_validation() -> None:
