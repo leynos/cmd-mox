@@ -66,6 +66,27 @@ def test_ipcserver_invocation_handler(
 
 
 @pytest.mark.usefixtures("tmp_path")
+def test_ipcserver_handler_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """IPCServer should surface handler exceptions via error responses."""
+    socket_path = tmp_path / "ipc.sock"
+
+    def handler(_invocation: Invocation) -> Response:
+        msg = "handler failed"
+        raise RuntimeError(msg)
+
+    with IPCServer(socket_path, handlers=IPCHandlers(handler=handler)):
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        invocation = Invocation(command="cmd", args=[], stdin="", env={})
+        response = invoke_server(invocation, timeout=1.0)
+
+    assert response.exit_code == 1
+    assert "handler failed" in response.stderr
+    assert response.stdout == ""
+
+
+@pytest.mark.usefixtures("tmp_path")
 def test_ipcserver_default_passthrough_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -80,8 +101,11 @@ def test_ipcserver_default_passthrough_error(
             stderr="err",
             exit_code=0,
         )
-        with pytest.raises(RuntimeError, match="Invalid JSON from IPC server"):
-            report_passthrough_result(result, timeout=1.0)
+        response = report_passthrough_result(result, timeout=1.0)
+
+    assert response.exit_code == 1
+    assert "Unhandled passthrough result for 123" in response.stderr
+    assert response.stdout == ""
 
 
 @pytest.mark.usefixtures("tmp_path")
@@ -215,3 +239,32 @@ def test_callback_ipcserver_timeout_config(tmp_path: Path) -> None:
 
     assert server.timeout == 1.25
     assert server.accept_timeout == 0.2
+
+
+def test_callback_ipcserver_timeout_config_defaults(tmp_path: Path) -> None:
+    """CallbackIPCServer should apply default TimeoutConfig values."""
+
+    def handler(invocation: Invocation) -> Response:
+        return Response(stdout=invocation.command)
+
+    def passthrough_handler(_result: PassthroughResult) -> Response:
+        return Response(stdout="passthrough")
+
+    server = CallbackIPCServer(
+        tmp_path / "ipc.sock",
+        handler,
+        passthrough_handler,
+    )
+
+    defaults = TimeoutConfig()
+    assert server.timeout == defaults.timeout
+    assert server.accept_timeout == min(0.1, defaults.timeout / 10)
+
+
+def test_timeout_config_validation() -> None:
+    """TimeoutConfig should reject non-positive timeout values."""
+    with pytest.raises(ValueError, match="timeout must be positive and finite"):
+        TimeoutConfig(timeout=0.0)
+
+    with pytest.raises(ValueError, match="accept_timeout must be positive and finite"):
+        TimeoutConfig(accept_timeout=0.0)

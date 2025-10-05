@@ -278,7 +278,7 @@ the full table of methods and examples.
 
 Most projects interact with the IPC server through `CmdMox`, but advanced
 scenarios can instantiate `cmd_mox.ipc.IPCServer` themselves. The server
-accepts optional callbacks so you can customise invocation handling without
+accepts optional callbacks so invocation handling can be customised without
 subclassing:
 
 ```python
@@ -293,7 +293,7 @@ with IPCServer(socket_path, handlers=handlers):
     ...
 ```
 
-Pass `passthrough_handler=` to `IPCHandlers` to intercept passthrough
+Providing `passthrough_handler=` to `IPCHandlers` intercepts passthrough
 completions in the same fashion. When no callbacks are supplied the server
 keeps its default echo behaviour, so existing code continues to work unchanged.
 
