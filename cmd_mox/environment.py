@@ -5,8 +5,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-import math
-import numbers
 import os
 import shutil
 import tempfile
@@ -14,6 +12,8 @@ import threading
 import time
 import typing as t
 from pathlib import Path
+
+from ._validators import validate_positive_finite_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,8 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
 CMOX_IPC_TIMEOUT_ENV = "CMOX_IPC_TIMEOUT"  # server/shim communication timeout
 CMOX_REAL_COMMAND_ENV_PREFIX = "CMOX_REAL_COMMAND_"
+
+_UNSET_TIMEOUT = object()
 
 
 def _restore_env(orig_env: dict[str, str]) -> None:
@@ -276,14 +278,30 @@ class EnvironmentManager:
 
         Raise ``ValueError`` if the provided value is not positive and finite.
         """
-        if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
-            msg = "IPC timeout must be a positive number"
-            raise ValueError(msg)  # noqa: TRY004 - align with public API expectations
-        if timeout <= 0 or not math.isfinite(timeout):
-            msg = "IPC timeout must be a positive number"
-            raise ValueError(msg)
+        validate_positive_finite_timeout(timeout)
 
-    def export_ipc_environment(self, *, timeout: float | None = None) -> None:
+    def _resolve_effective_timeout(self, timeout: float | object) -> float | None:
+        """Return the timeout value that should be exported.
+
+        The helper isolates the branching necessary to honour explicit
+        overrides, fall back to the previously configured value, and surface
+        invalid types consistently with other validation paths.
+        """
+        if timeout is _UNSET_TIMEOUT:
+            return self.ipc_timeout
+
+        if timeout is None:
+            msg = "timeout must be a real number"
+            raise TypeError(msg)
+
+        override = t.cast("float", timeout)
+        self._validate_timeout(override)
+        self.ipc_timeout = override
+        return override
+
+    def export_ipc_environment(
+        self, *, timeout: float | object = _UNSET_TIMEOUT
+    ) -> None:
         """Expose IPC configuration variables for active shims."""
         if self.socket_path is None:
             msg = "Cannot export IPC settings before entering the environment"
@@ -291,13 +309,8 @@ class EnvironmentManager:
 
         os.environ[CMOX_IPC_SOCKET_ENV] = str(self.socket_path)
 
-        effective_timeout = timeout
-        if timeout is not None:
-            self._validate_timeout(timeout)
-            self.ipc_timeout = timeout
-        elif self.ipc_timeout is not None:
-            effective_timeout = self.ipc_timeout
-        else:
+        effective_timeout = self._resolve_effective_timeout(timeout)
+        if effective_timeout is None:
             os.environ.pop(CMOX_IPC_TIMEOUT_ENV, None)
             return
 

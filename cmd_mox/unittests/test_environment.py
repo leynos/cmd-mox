@@ -49,15 +49,23 @@ def test_export_ipc_environment_sets_timeout() -> None:
         assert env.ipc_timeout == 2.5
 
 
-@pytest.mark.parametrize(
-    "invalid", [0, -1, -0.1, float("nan"), float("inf"), True, "five"]
-)
-def test_export_ipc_environment_rejects_invalid_timeout(invalid: object) -> None:
+@pytest.mark.parametrize("invalid", [0, -1, -0.1, float("nan"), float("inf")])
+def test_export_ipc_environment_rejects_invalid_timeout(invalid: float) -> None:
     """Invalid timeout overrides should raise ValueError."""
     with EnvironmentManager() as env:
-        msg = "IPC timeout must be a positive number"
+        msg = "timeout must be > 0 and finite"
         with pytest.raises(ValueError, match=msg):
-            env.export_ipc_environment(timeout=t.cast("float", invalid))
+            env.export_ipc_environment(timeout=invalid)
+
+
+@pytest.mark.parametrize(
+    "invalid_type",
+    [None, True, [], {}, "five", complex(1, 1)],
+)
+def test_export_ipc_environment_invalid_timeout_type(invalid_type: object) -> None:
+    """Invalid timeout types should propagate TypeError."""
+    with EnvironmentManager() as env, pytest.raises(TypeError):
+        env.export_ipc_environment(timeout=t.cast("float", invalid_type))
 
 
 def test_export_ipc_environment_reuses_previous_timeout() -> None:
