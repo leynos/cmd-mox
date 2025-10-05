@@ -17,6 +17,7 @@ import time
 import typing as t
 from pathlib import Path
 
+from ._validators import validate_positive_finite_timeout
 from .environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
 from .expectations import SENSITIVE_ENV_KEY_TOKENS
 
@@ -336,9 +337,7 @@ def _validate_retries(retries: int) -> None:
 
 def _validate_timeout(timeout: float) -> None:
     """Validate overall timeout value."""
-    if not (timeout > 0 and math.isfinite(timeout)):
-        msg = "timeout must be > 0 and finite"
-        raise ValueError(msg)
+    validate_positive_finite_timeout(timeout)
 
 
 def _validate_backoff(backoff: float) -> None:

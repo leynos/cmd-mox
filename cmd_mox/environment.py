@@ -5,8 +5,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-import math
-import numbers
 import os
 import shutil
 import tempfile
@@ -14,6 +12,8 @@ import threading
 import time
 import typing as t
 from pathlib import Path
+
+from ._validators import validate_positive_finite_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -276,12 +276,7 @@ class EnvironmentManager:
 
         Raise ``ValueError`` if the provided value is not positive and finite.
         """
-        if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
-            msg = "IPC timeout must be a positive number"
-            raise ValueError(msg)  # noqa: TRY004 - align with public API expectations
-        if timeout <= 0 or not math.isfinite(timeout):
-            msg = "IPC timeout must be a positive number"
-            raise ValueError(msg)
+        validate_positive_finite_timeout(timeout)
 
     def export_ipc_environment(self, *, timeout: float | None = None) -> None:
         """Expose IPC configuration variables for active shims."""
