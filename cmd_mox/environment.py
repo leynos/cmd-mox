@@ -239,18 +239,22 @@ class EnvironmentManager:
         created = self._created_dir
         return created is None or shim is None or shim != created or not shim.exists()
 
+    def _has_mismatched_directories(self) -> bool:
+        """Check if the created directory differs from the current shim directory."""
+        created = self._created_dir
+        shim = self.shim_dir
+        return created is not None and shim is not None and shim != created
+
     @_collect_os_error("Directory cleanup failed")
     def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:
         """Remove the temporary directory created by ``__enter__``."""
         if self._should_skip_directory_removal():
-            created = self._created_dir
-            shim = self.shim_dir
-            if created is not None and shim is not None and shim != created:
+            if self._has_mismatched_directories():
                 logger.warning(
                     "Skipping cleanup for original temporary directory %s because "
                     "shim_dir now points to %s; leftover directories may remain.",
-                    created,
-                    shim,
+                    self._created_dir,
+                    self.shim_dir,
                 )
                 # Once ownership of the shim directory diverges from the original
                 # temporary directory, the manager no longer tracks the replacement.
