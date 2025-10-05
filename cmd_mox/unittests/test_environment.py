@@ -355,7 +355,7 @@ def test_environment_manager_cleanup_error_handling(
     _test_environment_cleanup_error(test_case)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CleanupScenario:
     """Describe a temporary-directory cleanup scenario."""
 
@@ -393,7 +393,8 @@ def _prepare_cleanup_scenario(
             mgr.shim_dir = created
             return created, None
         case _:
-            raise AssertionError(f"Unknown scenario: {scenario.name}")
+            msg = f"Unknown scenario: {scenario.name}"
+            raise AssertionError(msg)
 
 
 @pytest.mark.parametrize(
