@@ -9,7 +9,11 @@ import typing as t
 
 import pytest
 
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
+from cmd_mox.environment import (
+    CMOX_IPC_SOCKET_ENV,
+    CMOX_IPC_TIMEOUT_ENV,
+    EnvironmentManager,
+)
 from cmd_mox.ipc import IPCServer
 from cmd_mox.shimgen import (
     SHIM_PATH,
@@ -32,7 +36,8 @@ def test_create_shim_symlinks_and_execution(
         with IPCServer(env.socket_path):
             mapping = create_shim_symlinks(env.shim_dir, commands)
             assert set(mapping) == set(commands)
-            os.environ[CMOX_IPC_SOCKET_ENV] = str(env.socket_path)
+            assert os.environ[CMOX_IPC_SOCKET_ENV] == str(env.socket_path)
+            assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "5.0"
             for cmd in commands:
                 link = mapping[cmd]
                 assert link.is_symlink()

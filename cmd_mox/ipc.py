@@ -17,7 +17,8 @@ import time
 import typing as t
 from pathlib import Path
 
-from .environment import CMOX_IPC_SOCKET_ENV
+from ._validators import validate_positive_finite_timeout
+from .environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
 from .expectations import SENSITIVE_ENV_KEY_TOKENS
 
 # Pre-normalize tokens once for case-insensitive checks
@@ -336,9 +337,7 @@ def _validate_retries(retries: int) -> None:
 
 def _validate_timeout(timeout: float) -> None:
     """Validate overall timeout value."""
-    if not (timeout > 0 and math.isfinite(timeout)):
-        msg = "timeout must be > 0 and finite"
-        raise ValueError(msg)
+    validate_positive_finite_timeout(timeout)
 
 
 def _validate_backoff(backoff: float) -> None:
@@ -558,6 +557,10 @@ class IPCServer:
             raise RuntimeError(msg)
 
         _cleanup_stale_socket(self.socket_path)
+
+        env_mgr = EnvironmentManager.get_active_manager()
+        if env_mgr is not None:
+            env_mgr.export_ipc_environment(timeout=self.timeout)
 
         self._server = _InnerServer(self.socket_path, self)
         self._server.timeout = self.accept_timeout
