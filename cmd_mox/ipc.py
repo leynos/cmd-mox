@@ -284,6 +284,7 @@ _RequestValidator = t.Callable[[dict[str, t.Any]], t.Any | None]
 # First argument is the active IPCServer instance; typed as Any to avoid
 # forward reference issues when the class is defined later in the module.
 _RequestProcessor = t.Callable[[t.Any, t.Any], Response]
+_DispatchArg = t.TypeVar("_DispatchArg", Invocation, PassthroughResult)
 
 
 def _process_invocation(server: IPCServer, invocation: Invocation) -> Response:
@@ -335,7 +336,7 @@ def _validate_retries(retries: int) -> None:
         raise ValueError(msg)
 
 
-def _validate_timeout(timeout: float) -> None:
+def _validate_connection_timeout(timeout: float) -> None:
     """Validate overall timeout value."""
     validate_positive_finite_timeout(timeout)
 
@@ -357,7 +358,7 @@ def _validate_jitter(jitter: float) -> None:
 def _validate_connection_params(timeout: float, retry_config: RetryConfig) -> None:
     """Ensure connection retry parameters are sensible."""
     _validate_retries(retry_config.retries)
-    _validate_timeout(timeout)
+    _validate_connection_timeout(timeout)
     _validate_backoff(retry_config.backoff)
     _validate_jitter(retry_config.jitter)
 
@@ -460,23 +461,54 @@ def _wait_for_socket(socket_path: Path, timeout: float) -> None:
 class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
-    def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
-        raw = self.rfile.read()
+    def _parse_and_validate_request(
+        self, raw: bytes
+    ) -> tuple[dict[str, t.Any], str] | None:
+        """Return a payload and kind when *raw* contains a valid request."""
         payload = _parse_json_safely(raw)
         if payload is None:
             try:
                 obj = json.loads(raw.decode("utf-8"))
             except json.JSONDecodeError:
                 logger.exception("IPC received malformed JSON")
-            else:
-                logger.error("IPC payload not a dict: %r", obj)
-            return
+                return None
+            logger.error("IPC payload not a dict: %r", obj)
+            return None
 
-        payload = payload.copy()
-        kind = payload.pop("kind", "invocation")
+        copied_payload = payload.copy()
+        kind = str(copied_payload.pop("kind", "invocation"))
+        return copied_payload, kind
+
+    def _lookup_handler(
+        self, kind: str
+    ) -> tuple[_RequestValidator, _RequestProcessor] | None:
+        """Return the registered handler for *kind* if available."""
         handler_entry = _REQUEST_HANDLERS.get(kind)
         if handler_entry is None:
             logger.error("Unknown IPC payload kind: %r", kind)
+            return None
+        return handler_entry
+
+    def _process_request(self, processor: _RequestProcessor, obj: object) -> Response:
+        """Execute *processor* and wrap unexpected failures."""
+        try:
+            return processor(self.server.outer, obj)  # type: ignore[attr-defined]
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("IPC handler raised an exception")
+            message = str(exc) or exc.__class__.__name__
+            return Response(stderr=message, exit_code=1)
+
+    def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
+        raw = self.rfile.read()
+        parsed = self._parse_and_validate_request(raw)
+        if parsed is None:
+            return
+
+        payload, kind = parsed
+        handler_entry = self._lookup_handler(kind)
+        if handler_entry is None:
             return
 
         validator, processor = handler_entry
@@ -484,7 +516,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         if obj is None:
             return
 
-        response = processor(self.server.outer, obj)  # type: ignore[attr-defined]
+        response = self._process_request(processor, obj)
         self.wfile.write(json.dumps(response.to_dict()).encode("utf-8"))
         self.wfile.flush()
 
@@ -496,6 +528,40 @@ class _InnerServer(socketserver.ThreadingUnixStreamServer):
         self.outer = outer
         super().__init__(str(socket_path), _IPCHandler)
         self.daemon_threads = True
+
+
+@dc.dataclass(slots=True)
+class IPCHandlers:
+    """Optional callbacks customising :class:`IPCServer` behaviour."""
+
+    handler: t.Callable[[Invocation], Response] | None = None
+    passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None
+
+
+def _validate_timeout(timeout: float, param_name: str = "timeout") -> None:
+    """Validate that a timeout value is positive and finite."""
+    if not (timeout > 0 and math.isfinite(timeout)):
+        msg = f"{param_name} must be positive and finite, got {timeout!r}"
+        raise ValueError(msg)
+
+
+def _validate_accept_timeout(accept_timeout: float | None) -> None:
+    """Validate that accept_timeout is positive and finite when provided."""
+    if accept_timeout is not None:
+        _validate_timeout(accept_timeout, "accept_timeout")
+
+
+@dc.dataclass(slots=True)
+class TimeoutConfig:
+    """Timeout configuration forwarded by :class:`CallbackIPCServer`."""
+
+    timeout: float = 5.0
+    accept_timeout: float | None = None
+
+    def __post_init__(self) -> None:
+        """Validate timeout values to catch misconfiguration early."""
+        _validate_timeout(self.timeout)
+        _validate_accept_timeout(self.accept_timeout)
 
 
 class IPCServer:
@@ -516,19 +582,68 @@ class IPCServer:
         socket_path: Path,
         timeout: float = 5.0,
         accept_timeout: float | None = None,
+        *,
+        handlers: IPCHandlers | None = None,
     ) -> None:
         """Create a server listening at *socket_path*.
 
         ``timeout`` controls startup and shutdown waits. ``accept_timeout``
         determines how often the server checks for shutdown requests while
         waiting for incoming connections. If not provided, it defaults to one
-        tenth of ``timeout`` capped at 0.1 seconds.
+        tenth of ``timeout`` capped at 0.1 seconds. ``handlers`` groups optional
+        callbacks that let callers provide custom invocation and passthrough
+        logic without subclassing :class:`IPCServer`. When omitted the server
+        echoes the command name and raises for passthrough results, matching
+        previous behaviour.
         """
         self.socket_path = Path(socket_path)
         self.timeout = timeout
         self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
         self._server: _InnerServer | None = None
         self._thread: threading.Thread | None = None
+        handlers = handlers or IPCHandlers()
+        self._handler = handlers.handler
+        self._passthrough_handler = handlers.passthrough_handler
+
+    def _dispatch(
+        self,
+        handler: t.Callable[[_DispatchArg], Response] | None,
+        argument: _DispatchArg,
+        *,
+        default: t.Callable[[_DispatchArg], Response],
+        error_builder: t.Callable[[_DispatchArg, Exception], RuntimeError]
+        | None = None,
+    ) -> Response:
+        """Invoke *handler* when provided, otherwise fall back to *default*."""
+        if handler is None:
+            return default(argument)
+        if error_builder is None:
+            return handler(argument)
+        try:
+            return handler(argument)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise error_builder(argument, exc) from exc
+
+    @staticmethod
+    def _default_invocation_response(invocation: Invocation) -> Response:
+        """Echo the command name when no handler overrides the behaviour."""
+        return Response(stdout=invocation.command)
+
+    @staticmethod
+    def _raise_unhandled_passthrough(result: PassthroughResult) -> Response:
+        """Raise when passthrough results lack a configured handler."""
+        msg = f"Unhandled passthrough result for {result.invocation_id}"
+        raise RuntimeError(msg)
+
+    @staticmethod
+    def _build_passthrough_error(
+        result: PassthroughResult, exc: Exception
+    ) -> RuntimeError:
+        """Create the wrapped passthrough error surfaced to callers."""
+        msg = f"Exception in passthrough handler for {result.invocation_id}: {exc}"
+        return RuntimeError(msg)
 
     # ------------------------------------------------------------------
     # Context manager protocol
@@ -586,13 +701,21 @@ class IPCServer:
     # Request processing
     # ------------------------------------------------------------------
     def handle_invocation(self, invocation: Invocation) -> Response:
-        """Echo the command name by default."""
-        return Response(stdout=invocation.command)
+        """Process invocations using the configured handler when available."""
+        return self._dispatch(
+            self._handler,
+            invocation,
+            default=self._default_invocation_response,
+        )
 
     def handle_passthrough_result(self, result: PassthroughResult) -> Response:
-        """Handle passthrough results (default: raise)."""
-        msg = f"Unhandled passthrough result for {result.invocation_id}"
-        raise RuntimeError(msg)
+        """Handle passthrough results via the configured callback when provided."""
+        return self._dispatch(
+            self._passthrough_handler,
+            result,
+            default=self._raise_unhandled_passthrough,
+            error_builder=self._build_passthrough_error,
+        )
 
 
 class CallbackIPCServer(IPCServer):
@@ -603,22 +726,28 @@ class CallbackIPCServer(IPCServer):
         socket_path: Path,
         handler: t.Callable[[Invocation], Response],
         passthrough_handler: t.Callable[[PassthroughResult], Response],
+        *,
+        timeouts: TimeoutConfig | None = None,
     ) -> None:
-        super().__init__(socket_path)
-        self._handler = handler
-        self._passthrough_handler = passthrough_handler
+        """Initialise a callback-driven IPC server.
 
-    def handle_invocation(
-        self, invocation: Invocation
-    ) -> Response:  # pragma: no cover - wrapper
-        """Delegate *invocation* processing to the configured handler."""
-        return self._handler(invocation)
-
-    def handle_passthrough_result(
-        self, result: PassthroughResult
-    ) -> Response:  # pragma: no cover - wrapper
-        """Forward passthrough completion to the configured handler."""
-        return self._passthrough_handler(result)
+        ``timeouts`` groups the startup and accept timeout configuration so the
+        legacy subclass stays within the four argument limit while remaining
+        backwards compatible with previous keyword arguments.
+        """
+        timeouts = timeouts or TimeoutConfig()
+        super().__init__(
+            socket_path,
+            timeout=timeouts.timeout,
+            accept_timeout=timeouts.accept_timeout,
+            handlers=IPCHandlers(
+                handler=handler,
+                passthrough_handler=passthrough_handler,
+            ),
+        )
+        # The base class now stores the callbacks and the inherited
+        # ``handle_*`` methods perform the delegation.  We keep this subclass
+        # for backwards compatibility with existing imports.
 
 
 def _send_request(

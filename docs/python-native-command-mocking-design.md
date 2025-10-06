@@ -554,7 +554,12 @@ The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
 socket path provided by the `EnvironmentManager`. Incoming JSON messages are
 parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts (default: 5.0s). The server attaches the corresponding
+reasonable timeouts (default: 5.0s). Callers can pass an `IPCHandlers`
+dataclass to provide invocation and passthrough callbacks when constructing the
+server, removing the need to subclass for custom behaviour. The
+`CallbackIPCServer` compatibility wrapper forwards a `TimeoutConfig` dataclass
+so callers can continue to customise startup and accept timeouts without
+exceeding the four-argument limit. The server attaches the corresponding
 response data (`stdout`, `stderr`, `exit_code`) to the `Invocation` before
 appending it to the journal. The server cleans up the socket on shutdown to
 prevent stale sockets from interfering with subsequent tests. The timeout is
