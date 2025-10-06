@@ -426,9 +426,7 @@ def test_cleanup_temporary_directory_skip_logic(
 
         if scenario.name == "replaced":
             with caplog.at_level(logging.WARNING):
-                EnvironmentManager._cleanup_temporary_directory(
-                    mgr, cleanup_errors
-                )
+                EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
         else:
             EnvironmentManager._cleanup_temporary_directory(mgr, cleanup_errors)
 
@@ -450,8 +448,10 @@ def test_cleanup_temporary_directory_skip_logic(
                 assert created is not None
                 assert not created.exists()
             case "replaced":
-                assert created is not None and created.exists()
-                assert replacement is not None and replacement.exists()
+                assert created is not None
+                assert created.exists()
+                assert replacement is not None
+                assert replacement.exists()
                 assert mgr.shim_dir is None
                 assert any(
                     record.levelno == logging.WARNING
@@ -465,8 +465,8 @@ def test_cleanup_temporary_directory_skip_logic(
                 assert replacement is None
                 assert mgr.shim_dir is None
             case _:
-                raise AssertionError(f"Unhandled scenario: {scenario.name}")
-
+                msg = f"Unhandled scenario: {scenario.name}"
+                raise AssertionError(msg)
 
 
 def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
