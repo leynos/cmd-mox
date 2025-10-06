@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typing as t
+from dataclasses import dataclass  # noqa: ICN003
 
 import pytest
 
@@ -21,6 +22,15 @@ from cmd_mox.ipc import (
 
 if t.TYPE_CHECKING:
     from pathlib import Path
+
+
+@dataclass
+class TimeoutTestCase:
+    """Test case configuration for timeout validation."""
+
+    timeouts_arg: TimeoutConfig | None
+    expected_timeout: float
+    expected_accept_timeout: float
 
 
 @pytest.fixture
@@ -240,18 +250,22 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("timeouts_arg", "expected_timeout", "expected_accept_timeout"),
+    "test_case",
     [
         pytest.param(
-            TimeoutConfig(timeout=1.25, accept_timeout=0.2),
-            1.25,
-            0.2,
+            TimeoutTestCase(
+                timeouts_arg=TimeoutConfig(timeout=1.25, accept_timeout=0.2),
+                expected_timeout=1.25,
+                expected_accept_timeout=0.2,
+            ),
             id="custom_timeouts",
         ),
         pytest.param(
-            None,
-            TimeoutConfig().timeout,
-            min(0.1, TimeoutConfig().timeout / 10),
+            TimeoutTestCase(
+                timeouts_arg=None,
+                expected_timeout=TimeoutConfig().timeout,
+                expected_accept_timeout=min(0.1, TimeoutConfig().timeout / 10),
+            ),
             id="default_timeouts",
         ),
     ],
@@ -260,20 +274,18 @@ def test_callback_ipcserver_timeout_config(
     tmp_path: Path,
     echo_handler: t.Callable[[Invocation], Response],
     passthrough_handler: t.Callable[[PassthroughResult], Response],
-    timeouts_arg: TimeoutConfig | None,
-    expected_timeout: float,
-    expected_accept_timeout: float,
+    test_case: TimeoutTestCase,
 ) -> None:
     """CallbackIPCServer should handle TimeoutConfig correctly."""
     server = CallbackIPCServer(
         tmp_path / "ipc.sock",
         echo_handler,
         passthrough_handler,
-        timeouts=timeouts_arg,
+        timeouts=test_case.timeouts_arg,
     )
 
-    assert server.timeout == expected_timeout
-    assert server.accept_timeout == expected_accept_timeout
+    assert server.timeout == test_case.expected_timeout
+    assert server.accept_timeout == test_case.expected_accept_timeout
 
 
 def test_timeout_config_validation() -> None:
