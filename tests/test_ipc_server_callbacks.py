@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import typing as t
 from dataclasses import dataclass  # noqa: ICN003
 
@@ -209,6 +210,22 @@ def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
     assert response.exit_code == 3
 
 
+def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
+    """Stopping the server concurrently should not raise race conditions."""
+    server = IPCServer(tmp_path / "ipc.sock")
+    server.start()
+
+    try:
+        threads = [threading.Thread(target=server.stop) for _ in range(3)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        # Additional stop should be a no-op when the server is already stopped.
+        server.stop()
+
+
 def test_handle_passthrough_default(tmp_path: Path) -> None:
     """Direct passthrough handling should raise when no handler is set."""
     server = IPCServer(tmp_path / "ipc.sock")
@@ -290,8 +307,8 @@ def test_callback_ipcserver_timeout_config(
 
 def test_timeout_config_validation() -> None:
     """TimeoutConfig should reject non-positive timeout values."""
-    with pytest.raises(ValueError, match="timeout must be positive and finite"):
+    with pytest.raises(ValueError, match="timeout must be > 0 and finite"):
         TimeoutConfig(timeout=0.0)
 
-    with pytest.raises(ValueError, match="accept_timeout must be positive and finite"):
+    with pytest.raises(ValueError, match="accept_timeout must be > 0 and finite"):
         TimeoutConfig(accept_timeout=0.0)

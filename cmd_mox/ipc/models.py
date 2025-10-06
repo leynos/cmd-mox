@@ -23,9 +23,7 @@ _SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
 def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:
     if limit <= 0:
         return ""
-    if len(text) <= limit:
-        return text
-    return f"{text[: limit - 1]}…"
+    return text if len(text) <= limit else f"{text[: limit - 1]}…"
 
 
 @dc.dataclass(slots=True)
@@ -185,7 +183,12 @@ class Response:
         payload = payload.copy()
         payload.pop("passthrough", None)
         env = payload.get("env")
-        if not isinstance(env, dict):
+        if env is not None and not isinstance(env, dict):
+            logger.warning(
+                "Payload 'env' is not a dict: %r (type: %s)",
+                env,
+                type(env).__name__,
+            )
             payload["env"] = {}
         try:
             response = cls(**payload)

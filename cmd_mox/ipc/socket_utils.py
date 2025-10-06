@@ -17,15 +17,16 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
     if not socket_path.exists():
         return
     try:
-        with contextlib.closing(
-            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        ) as probe:
-            try:
-                probe.connect(str(socket_path))
-                msg = f"Socket {socket_path} is still in use"
-                raise RuntimeError(msg)
-            except (ConnectionRefusedError, OSError):
-                pass
+        suppress_errors = contextlib.suppress(ConnectionRefusedError, OSError)
+        with (
+            contextlib.closing(
+                socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            ) as probe,
+            suppress_errors,
+        ):
+            probe.connect(str(socket_path))
+            msg = f"Socket {socket_path} is still in use"
+            raise RuntimeError(msg)
         socket_path.unlink()
     except OSError as exc:  # pragma: no cover - unlikely race
         logger.warning("Could not unlink stale socket %s: %s", socket_path, exc)

@@ -6,14 +6,18 @@ import contextlib
 import dataclasses as dc
 import json
 import logging
-import math
 import socketserver
 import threading
 import typing as t
 from pathlib import Path
 
+from cmd_mox._validators import (
+    validate_optional_timeout,
+    validate_positive_finite_timeout,
+)
 from cmd_mox.environment import EnvironmentManager
 
+from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import (
     parse_json_safely,
     validate_invocation_payload,
@@ -51,19 +55,6 @@ class IPCHandlers:
     passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None
 
 
-def _validate_timeout(timeout: float, param_name: str = "timeout") -> None:
-    """Validate that a timeout value is positive and finite."""
-    if not (timeout > 0 and math.isfinite(timeout)):
-        msg = f"{param_name} must be positive and finite, got {timeout!r}"
-        raise ValueError(msg)
-
-
-def _validate_accept_timeout(accept_timeout: float | None) -> None:
-    """Validate that accept_timeout is positive and finite when provided."""
-    if accept_timeout is not None:
-        _validate_timeout(accept_timeout, "accept_timeout")
-
-
 @dc.dataclass(slots=True)
 class TimeoutConfig:
     """Timeout configuration forwarded by :class:`CallbackIPCServer`."""
@@ -73,8 +64,8 @@ class TimeoutConfig:
 
     def __post_init__(self) -> None:
         """Validate timeout values to catch misconfiguration early."""
-        _validate_timeout(self.timeout)
-        _validate_accept_timeout(self.accept_timeout)
+        validate_positive_finite_timeout(self.timeout)
+        validate_optional_timeout(self.accept_timeout, name="accept_timeout")
 
 
 class IPCServer:
@@ -100,10 +91,13 @@ class IPCServer:
     ) -> None:
         """Create a server listening at *socket_path*."""
         self.socket_path = Path(socket_path)
+        validate_positive_finite_timeout(timeout)
+        validate_optional_timeout(accept_timeout, name="accept_timeout")
         self.timeout = timeout
         self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
         self._server: _InnerServer | None = None
         self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
         handlers = handlers or IPCHandlers()
         self._handler = handlers.handler
         self._passthrough_handler = handlers.passthrough_handler
@@ -164,32 +158,41 @@ class IPCServer:
 
     def start(self) -> None:
         """Start the background server thread."""
-        if self._thread:
-            msg = "IPC server already started"
-            raise RuntimeError(msg)
+        with self._lock:
+            if self._thread:
+                msg = "IPC server already started"
+                raise RuntimeError(msg)
 
-        cleanup_stale_socket(self.socket_path)
+            cleanup_stale_socket(self.socket_path)
 
-        env_mgr = EnvironmentManager.get_active_manager()
-        if env_mgr is not None:
-            env_mgr.export_ipc_environment(timeout=self.timeout)
+            env_mgr = EnvironmentManager.get_active_manager()
+            if env_mgr is not None:
+                env_mgr.export_ipc_environment(timeout=self.timeout)
 
-        self._server = _InnerServer(self.socket_path, self)
-        self._server.timeout = self.accept_timeout
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
+            server = _InnerServer(self.socket_path, self)
+            server.timeout = self.accept_timeout
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+
+            self._server = server
+            self._thread = thread
+
+        thread.start()
 
         wait_for_socket(self.socket_path, self.timeout)
 
     def stop(self) -> None:
         """Stop the server and clean up the socket."""
-        if self._server:
-            self._server.shutdown()
-            self._server.server_close()
-        if self._thread:
-            self._thread.join(self.timeout)
+        with self._lock:
+            server = self._server
+            thread = self._thread
+            self._server = None
             self._thread = None
-        self._server = None
+
+        if server:
+            server.shutdown()
+            server.server_close()
+        if thread:
+            thread.join(self.timeout)
         if self.socket_path.exists():
             with contextlib.suppress(OSError):
                 self.socket_path.unlink()
@@ -239,8 +242,8 @@ class CallbackIPCServer(IPCServer):
 _RequestProcessor = t.Callable[[IPCServer, t.Any], Response]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
-    "invocation": (validate_invocation_payload, _process_invocation),
-    "passthrough-result": (
+    KIND_INVOCATION: (validate_invocation_payload, _process_invocation),
+    KIND_PASSTHROUGH_RESULT: (
         validate_passthrough_payload,
         _process_passthrough_result,
     ),
@@ -265,7 +268,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             return None
 
         copied_payload = payload.copy()
-        kind = str(copied_payload.pop("kind", "invocation"))
+        kind = str(copied_payload.pop("kind", KIND_INVOCATION))
         return copied_payload, kind
 
     def _lookup_handler(

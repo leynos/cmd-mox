@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses as dc
 import json
 import logging
-import math
 import os
 import random
 import socket
@@ -13,9 +12,15 @@ import time
 import typing as t
 from pathlib import Path
 
-from cmd_mox._validators import validate_positive_finite_timeout
+from cmd_mox._validators import (
+    validate_positive_finite_timeout,
+    validate_retry_attempts,
+    validate_retry_backoff,
+    validate_retry_jitter,
+)
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 
+from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
 
@@ -37,43 +42,14 @@ class RetryConfig:
 
     def __post_init__(self) -> None:
         """Validate retry configuration values."""
-        _validate_retries(self.retries)
-        _validate_backoff(self.backoff)
-        _validate_jitter(self.jitter)
+        validate_retry_attempts(self.retries)
+        validate_retry_backoff(self.backoff)
+        validate_retry_jitter(self.jitter)
 
-
-def _validate_retries(retries: int) -> None:
-    """Validate retry attempt count."""
-    if retries < 1:
-        msg = "retries must be >= 1"
-        raise ValueError(msg)
-
-
-def _validate_connection_timeout(timeout: float) -> None:
-    """Validate overall timeout value."""
-    validate_positive_finite_timeout(timeout)
-
-
-def _validate_backoff(backoff: float) -> None:
-    """Validate linear backoff value."""
-    if not (backoff >= 0 and math.isfinite(backoff)):
-        msg = "backoff must be >= 0 and finite"
-        raise ValueError(msg)
-
-
-def _validate_jitter(jitter: float) -> None:
-    """Validate jitter fraction."""
-    if not (0.0 <= jitter <= 1.0 and math.isfinite(jitter)):
-        msg = "jitter must be between 0 and 1 and finite"
-        raise ValueError(msg)
-
-
-def _validate_connection_params(timeout: float, retry_config: RetryConfig) -> None:
-    """Ensure connection retry parameters are sensible."""
-    _validate_retries(retry_config.retries)
-    _validate_connection_timeout(timeout)
-    _validate_backoff(retry_config.backoff)
-    _validate_jitter(retry_config.jitter)
+    def validate(self, timeout: float) -> None:
+        """Re-validate retry configuration alongside the connection timeout."""
+        validate_positive_finite_timeout(timeout)
+        self.__post_init__()
 
 
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
@@ -89,32 +65,20 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     return max(delay, MIN_RETRY_SLEEP)
 
 
-def _create_unix_socket(timeout: float) -> socket.socket:
-    """Create a Unix stream socket with *timeout* applied."""
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    return sock
-
-
-def _attempt_connection(sock: socket.socket, address: str) -> None:
-    """Connect *sock* to *address* or raise on failure."""
-    sock.connect(address)
-
-
 def _connect_with_retries(
     sock_path: Path,
     timeout: float,
     retry_config: RetryConfig,
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`."""
-    _validate_connection_params(timeout, retry_config)
+    retry_config.validate(timeout)
     address = str(sock_path)
     for attempt in range(retry_config.retries):
-        sock = _create_unix_socket(timeout)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
         try:
-            _attempt_connection(sock, address)
+            sock.connect(address)
         except OSError as exc:
-            sock.close()
             logger.debug(
                 "IPC connect attempt %d/%d to %s failed: %s",
                 attempt + 1,
@@ -122,6 +86,7 @@ def _connect_with_retries(
                 address,
                 exc,
             )
+            sock.close()
             if attempt < retry_config.retries - 1:
                 delay = calculate_retry_delay(
                     attempt, retry_config.backoff, retry_config.jitter
@@ -187,7 +152,7 @@ def invoke_server(
     retry_config: RetryConfig | None = None,
 ) -> Response:
     """Send *invocation* to the IPC server and return its response."""
-    return _send_request("invocation", invocation.to_dict(), timeout, retry_config)
+    return _send_request(KIND_INVOCATION, invocation.to_dict(), timeout, retry_config)
 
 
 def report_passthrough_result(
@@ -196,7 +161,12 @@ def report_passthrough_result(
     retry_config: RetryConfig | None = None,
 ) -> Response:
     """Send passthrough execution results back to the IPC server."""
-    return _send_request("passthrough-result", result.to_dict(), timeout, retry_config)
+    return _send_request(
+        KIND_PASSTHROUGH_RESULT,
+        result.to_dict(),
+        timeout,
+        retry_config,
+    )
 
 
 __all__ = [

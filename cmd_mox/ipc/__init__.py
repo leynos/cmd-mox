@@ -11,6 +11,11 @@ from .client import (
     invoke_server,
     report_passthrough_result,
 )
+from .constants import (
+    KIND_INVOCATION,
+    KIND_PASSTHROUGH_RESULT,
+    MESSAGE_KINDS,
+)
 from .models import Invocation, PassthroughRequest, PassthroughResult, Response
 from .server import CallbackIPCServer, IPCHandlers, IPCServer, TimeoutConfig
 
@@ -20,6 +25,9 @@ __all__ = [
     "DEFAULT_CONNECT_BACKOFF",
     "DEFAULT_CONNECT_JITTER",
     "DEFAULT_CONNECT_RETRIES",
+    "KIND_INVOCATION",
+    "KIND_PASSTHROUGH_RESULT",
+    "MESSAGE_KINDS",
     "MIN_RETRY_SLEEP",
     "CallbackIPCServer",
     "IPCHandlers",
