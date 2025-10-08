@@ -15,7 +15,7 @@ def parse_json_safely(data: bytes) -> dict[str, t.Any] | None:
     """Return a JSON object parsed from *data* or ``None`` on failure."""
     try:
         payload = json.loads(data.decode("utf-8"))
-    except json.JSONDecodeError:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
         return None

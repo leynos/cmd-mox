@@ -23,9 +23,12 @@ def validate_optional_timeout(timeout: float | None, *, name: str) -> None:
 
     try:
         validate_positive_finite_timeout(timeout)
-    except (TypeError, ValueError) as exc:
+    except TypeError as exc:
+        msg = f"{name} must be a real number"
+        raise TypeError(msg) from exc
+    except ValueError as exc:
         msg = f"{name} must be > 0 and finite"
-        raise exc.__class__(msg) from exc
+        raise ValueError(msg) from exc
 
 
 def validate_retry_attempts(retries: int) -> None:
