@@ -28,6 +28,12 @@ def test_parse_json_safely_rejects_non_objects() -> None:
     assert parse_json_safely(b"123") is None
 
 
+def test_parse_json_safely_handles_invalid_utf8() -> None:
+    """Non-UTF-8 payloads should be treated as parse failures."""
+    # ``b"\x80"`` is not valid UTF-8 and previously raised ``UnicodeDecodeError``.
+    assert parse_json_safely(b"\x80") is None
+
+
 def test_validate_invocation_payload_returns_model() -> None:
     """validate_invocation_payload should build Invocation instances."""
     payload = {
