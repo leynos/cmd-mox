@@ -313,14 +313,19 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
     return stack
 
 
+def _require_replay_shim_dir(mox: CmdMox) -> Path:
+    """Return the shim directory when replay is active, asserting availability."""
+    env = mox.environment
+    if env is None or env.shim_dir is None:
+        msg = "Replay environment is unavailable"
+        raise AssertionError(msg)
+    return Path(env.shim_dir)
+
+
 @when(parsers.cfparse('the shim for "{cmd}" is broken'))
 def break_shim_symlink(mox: CmdMox, cmd: str) -> None:
     """Replace the shim with a dangling symlink to simulate corruption."""
-    env = mox.environment
-    if env is None or env.shim_dir is None:  # pragma: no cover - defensive guard
-        msg = "Replay environment is unavailable"
-        raise AssertionError(msg)
-    shim_dir = Path(env.shim_dir)
+    shim_dir = _require_replay_shim_dir(mox)
     shim_path = shim_dir / cmd
     missing_target = shim_path.with_name(f"{cmd}-missing-target")
     shim_path.unlink(missing_ok=True)
@@ -332,6 +337,7 @@ def break_shim_symlink(mox: CmdMox, cmd: str) -> None:
 @when(parsers.cfparse('I register the command "{cmd}" during replay'))
 def register_command_during_replay(mox: CmdMox, cmd: str) -> None:
     """Re-register *cmd* so CmdMox can repair its shim."""
+    _require_replay_shim_dir(mox)
     mox.register_command(cmd)
 
 

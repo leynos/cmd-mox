@@ -221,6 +221,50 @@ def test_ensure_shim_during_replay_repairs_broken_symlink(
     assert shim_symlink_spy.calls == [(tmp_path, ("late",))]
 
 
+def test_ensure_shim_during_replay_repairs_multiple_broken_symlinks(
+    tmp_path: Path, shim_symlink_spy: _ShimSymlinkSpy
+) -> None:
+    """Each broken shim triggers an individual repair."""
+    mox = CmdMox()
+    mox._phase = Phase.REPLAY
+    env = mox.environment
+    env.shim_dir = tmp_path
+
+    broken = {
+        "first": tmp_path / "first-missing",
+        "second": tmp_path / "second-missing",
+    }
+    for name, target in broken.items():
+        shim_path = tmp_path / name
+        shim_path.symlink_to(target)
+        assert shim_path.is_symlink()
+        assert not shim_path.exists()
+
+    for name in broken:
+        mox._ensure_shim_during_replay(name)
+
+    assert shim_symlink_spy.calls == [
+        (tmp_path, ("first",)),
+        (tmp_path, ("second",)),
+    ]
+
+
+def test_ensure_shim_during_replay_rejects_non_symlink_collisions(
+    tmp_path: Path,
+) -> None:
+    """A pre-existing file blocks shim repair to avoid data loss."""
+    mox = CmdMox()
+    mox._phase = Phase.REPLAY
+    env = mox.environment
+    env.shim_dir = tmp_path
+
+    collision = tmp_path / "late"
+    collision.write_text("collision")
+
+    with pytest.raises(FileExistsError, match="already exists and is not a symlink"):
+        mox._ensure_shim_during_replay("late")
+
+
 def test_register_command_fails_when_path_exists() -> None:
     """register_command refuses to overwrite existing non-symlink files."""
     mox = CmdMox(verify_on_exit=False)

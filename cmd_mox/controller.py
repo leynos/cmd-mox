@@ -199,13 +199,17 @@ class CmdMox:
             return
         shim_dir = Path(env.shim_dir)
         shim_path = shim_dir / name
-        # Healthy symlinks can be reused; broken ones must be re-created.
-        if shim_path.is_symlink() and shim_path.exists():
+        if shim_path.is_symlink() and not self._is_broken_symlink(shim_path):
             return
         if shim_path.exists() and not shim_path.is_symlink():
             msg = f"{shim_path} already exists and is not a symlink"
             raise FileExistsError(msg)
         create_shim_symlinks(shim_dir, [name])
+
+    @staticmethod
+    def _is_broken_symlink(path: Path) -> bool:
+        """Return ``True`` when *path* is a symlink whose target is missing."""
+        return path.is_symlink() and not path.exists()
 
     def _get_double(self, command_name: str, kind: DoubleKind) -> CommandDouble:
         dbl = self._doubles.get(command_name)
