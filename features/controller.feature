@@ -33,6 +33,17 @@ Feature: CmdMox basic functionality
     And the journal should contain 1 invocation of "propagateshim"
     And the journal should contain 1 invocation of "inspectshim"
 
+  Scenario: register command repairs broken shims during replay
+    Given a CmdMox controller
+    And the command "repair" is stubbed to return "fixed"
+    When I replay the controller
+    And the shim for "repair" is broken
+    And I register the command "repair" during replay
+    And I run the command "repair"
+    Then the output should be "fixed"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "repair"
+
   Scenario: mocked command execution
     Given a CmdMox controller
     And the command "hi" is mocked to return "hello"

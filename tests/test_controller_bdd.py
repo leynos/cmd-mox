@@ -313,6 +313,28 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
     return stack
 
 
+@when(parsers.cfparse('the shim for "{cmd}" is broken'))
+def break_shim_symlink(mox: CmdMox, cmd: str) -> None:
+    """Replace the shim with a dangling symlink to simulate corruption."""
+    env = mox.environment
+    if env is None or env.shim_dir is None:  # pragma: no cover - defensive guard
+        msg = "Replay environment is unavailable"
+        raise AssertionError(msg)
+    shim_dir = Path(env.shim_dir)
+    shim_path = shim_dir / cmd
+    missing_target = shim_path.with_name(f"{cmd}-missing-target")
+    shim_path.unlink(missing_ok=True)
+    shim_path.symlink_to(missing_target)
+    assert shim_path.is_symlink()
+    assert not shim_path.exists()
+
+
+@when(parsers.cfparse('I register the command "{cmd}" during replay'))
+def register_command_during_replay(mox: CmdMox, cmd: str) -> None:
+    """Re-register *cmd* so CmdMox can repair its shim."""
+    mox.register_command(cmd)
+
+
 @when(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
 def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     """Invoke the stubbed command."""
@@ -560,6 +582,15 @@ def test_shim_forwards_streams() -> None:
 )
 def test_shim_merges_env_overrides() -> None:
     """Shim persists environment overrides between invocations."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "register command repairs broken shims during replay",
+)
+def test_register_command_repairs_broken_shims() -> None:
+    """register_command recreates broken symlinks while replaying."""
     pass
 
 

@@ -202,6 +202,25 @@ def test_ensure_shim_during_replay_behaviour(
         mox.__exit__(None, None, None)
 
 
+def test_ensure_shim_during_replay_repairs_broken_symlink(
+    tmp_path: Path, shim_symlink_spy: _ShimSymlinkSpy
+) -> None:
+    """Broken symlinks are recreated when replay is active."""
+    mox = CmdMox()
+    mox._phase = Phase.REPLAY
+    env = mox.environment
+    env.shim_dir = tmp_path
+
+    shim_path = tmp_path / "late"
+    shim_path.symlink_to(tmp_path / "missing")
+    assert shim_path.is_symlink()
+    assert not shim_path.exists()
+
+    mox._ensure_shim_during_replay("late")
+
+    assert shim_symlink_spy.calls == [(tmp_path, ("late",))]
+
+
 def test_register_command_fails_when_path_exists() -> None:
     """register_command refuses to overwrite existing non-symlink files."""
     mox = CmdMox(verify_on_exit=False)

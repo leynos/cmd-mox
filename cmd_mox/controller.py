@@ -183,9 +183,9 @@ class CmdMox:
         controller is already in :class:`Phase.REPLAY` and the environment has
         been entered (``env.shim_dir`` is populated), the shim symlink is
         created immediately so late-registered doubles work without restarting
-        the IPC server. Existing symlinks are left untouched, and subsequent
-        :meth:`_start_ipc_server` calls re-sync every shim so repeated
-        registrations remain idempotent.
+        the IPC server. Healthy symlinks are left untouched, while broken links
+        are recreated to repair them. Subsequent :meth:`_start_ipc_server` calls
+        re-sync every shim so repeated registrations remain idempotent.
         """
         self._commands.add(name)
         self._ensure_shim_during_replay(name)
@@ -199,9 +199,10 @@ class CmdMox:
             return
         shim_dir = Path(env.shim_dir)
         shim_path = shim_dir / name
-        if shim_path.is_symlink():
+        # Healthy symlinks can be reused; broken ones must be re-created.
+        if shim_path.is_symlink() and shim_path.exists():
             return
-        if shim_path.exists():
+        if shim_path.exists() and not shim_path.is_symlink():
             msg = f"{shim_path} already exists and is not a symlink"
             raise FileExistsError(msg)
         create_shim_symlinks(shim_dir, [name])
