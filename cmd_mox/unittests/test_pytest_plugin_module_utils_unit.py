@@ -77,7 +77,7 @@ def test_generate_module_overrides_replay_body_when_failures_expected() -> None:
 
 def test_generate_module_forces_auto_fail_body_without_helpers() -> None:
     """Pure auto-fail modules should omit shim helpers and include failure body."""
-    _assert_auto_fail_module_properties("auto_fail", expect_auto_fail=False)
+    _assert_auto_fail_module_properties("AUTO_FAIL", expect_auto_fail=False)
 
 
 def test_generate_module_includes_decorators_with_trailing_newline() -> None:
