@@ -207,7 +207,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 ini_setting="cmd_mox_auto_lifecycle = false",
                 cli_args=(),
                 test_decorator="@pytest.mark.cmd_mox(auto_lifecycle=True)",
-                expected_phase="auto_fail",
+                expected_phase="AUTO_FAIL",
                 expect_auto_fail=True,
             ),
             id="marker-overrides-ini",

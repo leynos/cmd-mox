@@ -5,7 +5,7 @@ from __future__ import annotations
 import textwrap
 import typing as t
 
-PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "auto_fail"]
+PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "AUTO_FAIL"]
 
 _UNKNOWN_PHASE_ERR = "Unknown phase: {phase}"
 
@@ -24,7 +24,7 @@ _TEST_BODIES: dict[PhaseLiteral, str] = {
         res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
         assert res.stdout.strip() == "ok"
     """,
-    "auto_fail": """
+    "AUTO_FAIL": """
         assert cmd_mox.phase is Phase.REPLAY
         cmd_mox.mock("never-called").returns(stdout="nope")
     """,
@@ -82,19 +82,19 @@ def generate_lifecycle_test_module(
     ``True`` swaps the REPLAY test body for the auto-fail variant and omits the
     subprocess shim helpers; this mirrors how the plugin behaves when a
     lifecycle override expects failure. Passing ``expected_phase`` as
-    ``"auto_fail"`` has the same effect regardless of ``expect_auto_fail``,
+    ``"AUTO_FAIL"`` has the same effect regardless of ``expect_auto_fail``,
     allowing callers to assert the pure auto-fail module layout.
     """
-    if expected_phase not in ("RECORD", "REPLAY", "auto_fail"):
+    if expected_phase not in ("RECORD", "REPLAY", "AUTO_FAIL"):
         raise ValueError(_UNKNOWN_PHASE_ERR.format(phase=expected_phase))
 
     body_key: PhaseLiteral = (
-        "auto_fail"
+        "AUTO_FAIL"
         if expected_phase == "REPLAY" and expect_auto_fail
         else expected_phase
     )
 
-    uses_subprocess_helper = body_key != "auto_fail"
+    uses_subprocess_helper = body_key != "AUTO_FAIL"
     module = _build_module_prefix(include_subprocess_helper=uses_subprocess_helper)
 
     decorator_block = _format_block(decorator) if decorator else ""
