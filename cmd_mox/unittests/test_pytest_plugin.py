@@ -12,7 +12,7 @@ from cmd_mox.controller import Phase
 from cmd_mox.unittests import pytest_plugin_module_utils as plugin_utils
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
-PhaseLiteral = plugin_utils.PhaseLiteral
+LifecyclePhase = plugin_utils.LifecyclePhase
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
@@ -28,7 +28,7 @@ class AutoLifecycleTestCase:
     ini_setting: str | None
     cli_args: tuple[str, ...]
     test_decorator: str
-    expected_phase: PhaseLiteral
+    expected_phase: LifecyclePhase
     expect_auto_fail: bool = False
 
 
@@ -185,7 +185,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 ini_setting="cmd_mox_auto_lifecycle = false",
                 cli_args=(),
                 test_decorator="",
-                expected_phase="RECORD",
+                expected_phase=LifecyclePhase.RECORD,
                 expect_auto_fail=False,
             ),
             id="ini-disables",
@@ -196,7 +196,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 ini_setting=None,
                 cli_args=("--no-cmd-mox-auto-lifecycle",),
                 test_decorator="",
-                expected_phase="RECORD",
+                expected_phase=LifecyclePhase.RECORD,
                 expect_auto_fail=False,
             ),
             id="cli-disables",
@@ -207,7 +207,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 ini_setting="cmd_mox_auto_lifecycle = false",
                 cli_args=(),
                 test_decorator="@pytest.mark.cmd_mox(auto_lifecycle=True)",
-                expected_phase="AUTO_FAIL",
+                expected_phase=LifecyclePhase.AUTO_FAIL,
                 expect_auto_fail=True,
             ),
             id="marker-overrides-ini",
@@ -218,7 +218,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 ini_setting=None,
                 cli_args=("--no-cmd-mox-auto-lifecycle",),
                 test_decorator="@pytest.mark.cmd_mox(auto_lifecycle=True)",
-                expected_phase="REPLAY",
+                expected_phase=LifecyclePhase.REPLAY,
                 expect_auto_fail=False,
             ),
             id="marker-overrides-cli",
@@ -231,7 +231,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 test_decorator=(
                     '@pytest.mark.parametrize("cmd_mox", [False], indirect=True)'
                 ),
-                expected_phase="RECORD",
+                expected_phase=LifecyclePhase.RECORD,
                 expect_auto_fail=False,
             ),
             id="fixture-param-bool",
@@ -248,7 +248,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                         ")",
                     ]
                 ),
-                expected_phase="REPLAY",
+                expected_phase=LifecyclePhase.REPLAY,
                 expect_auto_fail=False,
             ),
             id="fixture-param-dict",
@@ -259,7 +259,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 ini_setting="cmd_mox_auto_lifecycle = false",
                 cli_args=("--cmd-mox-auto-lifecycle",),
                 test_decorator="",
-                expected_phase="REPLAY",
+                expected_phase=LifecyclePhase.REPLAY,
                 expect_auto_fail=False,
             ),
             id="cli-overrides-ini",

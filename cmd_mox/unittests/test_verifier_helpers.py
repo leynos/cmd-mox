@@ -7,6 +7,7 @@ import types
 import cmd_mox.verifiers as v
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
+from cmd_mox.test_doubles import DoubleKind
 
 
 def test_mask_env_value_redacts_sensitive_keys() -> None:
@@ -96,9 +97,9 @@ def test_format_sections_omits_empty_sections() -> None:
 def test_list_expected_commands_excludes_stubs() -> None:
     """Helper lists only commands that can raise unexpected-invocation errors."""
     doubles = {
-        "alpha": types.SimpleNamespace(kind="mock"),
-        "beta": types.SimpleNamespace(kind="stub"),
-        "gamma": types.SimpleNamespace(kind="spy"),
+        "alpha": types.SimpleNamespace(kind=DoubleKind.MOCK),
+        "beta": types.SimpleNamespace(kind=DoubleKind.STUB),
+        "gamma": types.SimpleNamespace(kind=DoubleKind.SPY),
     }
 
     assert v._list_expected_commands(doubles) == "'alpha', 'gamma'"
@@ -107,7 +108,7 @@ def test_list_expected_commands_excludes_stubs() -> None:
 def test_list_expected_commands_reports_when_only_stubs() -> None:
     """When only stubs are registered, the helper documents the omission."""
     doubles = {
-        "alpha": types.SimpleNamespace(kind="stub"),
+        "alpha": types.SimpleNamespace(kind=DoubleKind.STUB),
     }
 
     assert (

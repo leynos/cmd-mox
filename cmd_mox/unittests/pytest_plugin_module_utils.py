@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import enum
 import textwrap
-import typing as t
 
-PhaseLiteral: t.TypeAlias = t.Literal["RECORD", "REPLAY", "AUTO_FAIL"]
+
+class LifecyclePhase(enum.StrEnum):
+    """Lifecycle phase markers for generated pytest modules."""
+
+    RECORD = "RECORD"
+    REPLAY = "REPLAY"
+    AUTO_FAIL = "AUTO_FAIL"
+
 
 _UNKNOWN_PHASE_ERR = "Unknown phase: {phase}"
 
-_TEST_BODIES: dict[PhaseLiteral, str] = {
-    "RECORD": """
+_TEST_BODIES: dict[LifecyclePhase, str] = {
+    LifecyclePhase.RECORD: """
         assert cmd_mox.phase is Phase.RECORD
         cmd_mox.stub("tool").returns(stdout="ok")
         cmd_mox.replay()
@@ -18,13 +25,13 @@ _TEST_BODIES: dict[PhaseLiteral, str] = {
         assert res.stdout.strip() == "ok"
         cmd_mox.verify()
     """,
-    "REPLAY": """
+    LifecyclePhase.REPLAY: """
         assert cmd_mox.phase is Phase.REPLAY
         cmd_mox.stub("tool").returns(stdout="ok")
         res = run_subprocess([str(_shim_cmd_path(cmd_mox, "tool"))])
         assert res.stdout.strip() == "ok"
     """,
-    "AUTO_FAIL": """
+    LifecyclePhase.AUTO_FAIL: """
         assert cmd_mox.phase is Phase.REPLAY
         cmd_mox.mock("never-called").returns(stdout="nope")
     """,
@@ -70,7 +77,7 @@ def _build_module_prefix(*, include_subprocess_helper: bool) -> str:
 
 def generate_lifecycle_test_module(
     decorator: str,
-    expected_phase: PhaseLiteral,
+    expected_phase: LifecyclePhase | str,
     *,
     expect_auto_fail: bool,
 ) -> str:
@@ -82,19 +89,22 @@ def generate_lifecycle_test_module(
     ``True`` swaps the REPLAY test body for the auto-fail variant and omits the
     subprocess shim helpers; this mirrors how the plugin behaves when a
     lifecycle override expects failure. Passing ``expected_phase`` as
-    ``"AUTO_FAIL"`` has the same effect regardless of ``expect_auto_fail``,
+    :class:`LifecyclePhase.AUTO_FAIL` has the same effect regardless of
+    ``expect_auto_fail``,
     allowing callers to assert the pure auto-fail module layout.
     """
-    if expected_phase not in ("RECORD", "REPLAY", "AUTO_FAIL"):
-        raise ValueError(_UNKNOWN_PHASE_ERR.format(phase=expected_phase))
+    try:
+        normalized_phase = LifecyclePhase(expected_phase)
+    except ValueError as exc:
+        raise ValueError(_UNKNOWN_PHASE_ERR.format(phase=expected_phase)) from exc
 
-    body_key: PhaseLiteral = (
-        "AUTO_FAIL"
-        if expected_phase == "REPLAY" and expect_auto_fail
-        else expected_phase
+    body_key = (
+        LifecyclePhase.AUTO_FAIL
+        if normalized_phase is LifecyclePhase.REPLAY and expect_auto_fail
+        else normalized_phase
     )
 
-    uses_subprocess_helper = body_key != "AUTO_FAIL"
+    uses_subprocess_helper = body_key is not LifecyclePhase.AUTO_FAIL
     module = _build_module_prefix(include_subprocess_helper=uses_subprocess_helper)
 
     decorator_block = _format_block(decorator) if decorator else ""
@@ -106,4 +116,4 @@ def generate_lifecycle_test_module(
     return module
 
 
-__all__ = ["PhaseLiteral", "generate_lifecycle_test_module"]
+__all__ = ["LifecyclePhase", "generate_lifecycle_test_module"]

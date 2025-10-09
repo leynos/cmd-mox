@@ -107,7 +107,7 @@ class Expectation:
             try:
                 if not matcher(arg):
                     return False
-            except Exception:  # noqa: BLE001, PERF203
+            except Exception:  # noqa: BLE001
                 return False
         return True
 

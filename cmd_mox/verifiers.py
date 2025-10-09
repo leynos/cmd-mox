@@ -8,6 +8,7 @@ from textwrap import indent
 
 from .errors import UnexpectedCommandError, UnfulfilledExpectationError
 from .expectations import SENSITIVE_ENV_KEY_TOKENS
+from .test_doubles import DoubleKind
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .controller import CommandDouble
@@ -141,7 +142,9 @@ def _list_expected_commands(doubles: t.Mapping[str, CommandDouble]) -> str:
     Commands registered as stubs are omitted because they are not validated as
     part of unexpected-invocation checks.
     """
-    names = sorted(name for name, dbl in doubles.items() if dbl.kind != "stub")
+    names = sorted(
+        name for name, dbl in doubles.items() if dbl.kind is not DoubleKind.STUB
+    )
     return (
         "(none: stubs are excluded from expected commands)"
         if not names
@@ -173,7 +176,7 @@ class UnexpectedCommandVerifier:
             self._raise_unregistered_command_error(inv, doubles)
             return
 
-        if dbl.kind == "stub":
+        if dbl.kind is DoubleKind.STUB:
             return
 
         self._validate_expectation_match(inv, dbl, mock_counts)
@@ -189,7 +192,7 @@ class UnexpectedCommandVerifier:
             self._raise_expectation_mismatch_error(exp, inv)
             return
 
-        if dbl.kind == "mock":
+        if dbl.kind is DoubleKind.MOCK:
             self._check_mock_call_count(dbl, exp, inv, mock_counts)
 
     def _check_mock_call_count(

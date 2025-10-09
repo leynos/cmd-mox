@@ -3,7 +3,7 @@ name = "cmd-mox"
 version = "0.1.0"
 description = "cmd-mox package"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "ISC" }
 authors = [{ name = "Payton McIntosh", email = "pmcintosh@df12.net" }]
 dependencies = []
@@ -20,7 +20,7 @@ dev = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
