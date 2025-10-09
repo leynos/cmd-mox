@@ -16,19 +16,19 @@ from .errors import LifecycleError, MissingEnvironmentError
 from .ipc import CallbackIPCServer, Invocation, PassthroughResult, Response
 from .passthrough import PassthroughCoordinator
 from .shimgen import create_shim_symlinks
-from .test_doubles import CommandDouble
+from .test_doubles import CommandDouble, DoubleKind
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
 if t.TYPE_CHECKING:
     from .expectations import Expectation
 
 
-class Phase(enum.Enum):
+class Phase(enum.StrEnum):
     """Lifecycle phases for :class:`CmdMox`."""
 
-    RECORD = enum.auto()
-    REPLAY = enum.auto()
-    VERIFY = enum.auto()
+    RECORD = "RECORD"
+    REPLAY = "REPLAY"
+    VERIFY = "VERIFY"
 
 
 class CmdMox:
@@ -83,17 +83,29 @@ class CmdMox:
     @property
     def stubs(self) -> dict[str, CommandDouble]:
         """Return all stub doubles."""
-        return {n: d for n, d in self._doubles.items() if d.kind == "stub"}
+        return {
+            name: dbl
+            for name, dbl in self._doubles.items()
+            if dbl.kind is DoubleKind.STUB
+        }
 
     @property
     def mocks(self) -> dict[str, CommandDouble]:
         """Return all mock doubles."""
-        return {n: d for n, d in self._doubles.items() if d.kind == "mock"}
+        return {
+            name: dbl
+            for name, dbl in self._doubles.items()
+            if dbl.kind is DoubleKind.MOCK
+        }
 
     @property
     def spies(self) -> dict[str, CommandDouble]:
         """Return all spy doubles."""
-        return {n: d for n, d in self._doubles.items() if d.kind == "spy"}
+        return {
+            name: dbl
+            for name, dbl in self._doubles.items()
+            if dbl.kind is DoubleKind.SPY
+        }
 
     # ------------------------------------------------------------------
     # Lifecycle state
@@ -194,15 +206,13 @@ class CmdMox:
             raise FileExistsError(msg)
         create_shim_symlinks(shim_dir, [name])
 
-    def _get_double(
-        self, command_name: str, kind: CommandDouble.T_Kind
-    ) -> CommandDouble:
+    def _get_double(self, command_name: str, kind: DoubleKind) -> CommandDouble:
         dbl = self._doubles.get(command_name)
         if dbl is None:
             dbl = CommandDouble(command_name, self, kind)
             self._doubles[command_name] = dbl
             self.register_command(command_name)
-        elif dbl.kind != kind:
+        elif dbl.kind is not kind:
             msg = (
                 f"{command_name!r} already registered as {dbl.kind}; "
                 f"cannot register as {kind}"
@@ -212,15 +222,15 @@ class CmdMox:
 
     def stub(self, command_name: str) -> CommandDouble:
         """Create or retrieve a stub for *command_name*."""
-        return self._get_double(command_name, "stub")
+        return self._get_double(command_name, DoubleKind.STUB)
 
     def mock(self, command_name: str) -> CommandDouble:
         """Create or retrieve a mock for *command_name*."""
-        return self._get_double(command_name, "mock")
+        return self._get_double(command_name, DoubleKind.MOCK)
 
     def spy(self, command_name: str) -> CommandDouble:
         """Create or retrieve a spy for *command_name*."""
-        return self._get_double(command_name, "spy")
+        return self._get_double(command_name, DoubleKind.SPY)
 
     def replay(self) -> None:
         """Transition to replay mode and start the IPC server."""

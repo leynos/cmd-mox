@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import enum
 import typing as t
-
-from typing_extensions import Self
 
 from .expectations import Expectation
 from .ipc import Invocation, Response
+
+Self = t.Self
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing-only import
     from .controller import CmdMox
@@ -62,11 +63,18 @@ def _create_expectation_proxy() -> type:
 _ExpectationProxy = _create_expectation_proxy()
 
 
-T_Kind: t.TypeAlias = t.Literal["stub", "mock", "spy"]
+class DoubleKind(enum.StrEnum):
+    """Kinds of command doubles supported by :class:`CommandDouble`."""
+
+    STUB = "stub"
+    MOCK = "mock"
+    SPY = "spy"
 
 
 class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
+
+    T_Kind = DoubleKind
 
     __slots__ = (
         "controller",
@@ -79,9 +87,9 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
         "response",
     )
 
-    def __init__(self, name: str, controller: CmdMox, kind: T_Kind) -> None:
+    def __init__(self, name: str, controller: CmdMox, kind: DoubleKind) -> None:
         self.name = name
-        self.kind = kind
+        self.kind: DoubleKind = kind
         self.controller = controller  # CmdMox instance
         self.response = Response()
         self.handler: t.Callable[[Invocation], Response] | None = None
@@ -175,7 +183,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
 
     def passthrough(self) -> Self:
         """Execute the real command while recording invocations."""
-        if self.kind != "spy":
+        if self.kind is not DoubleKind.SPY:
             msg = "passthrough() is only valid for spies"
             raise ValueError(msg)
         self.passthrough_mode = True
@@ -191,12 +199,12 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
     @property
     def is_expected(self) -> bool:
         """Return ``True`` only for mocks."""
-        return self.kind == "mock"
+        return self.kind is DoubleKind.MOCK
 
     @property
     def is_recording(self) -> bool:
         """Return ``True`` for mocks and spies."""
-        return self.kind in ("mock", "spy")
+        return self.kind in (DoubleKind.MOCK, DoubleKind.SPY)
 
     @property
     def call_count(self) -> int:
@@ -245,7 +253,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
     # Spy assertion helpers
     # ------------------------------------------------------------------
     def _validate_spy_usage(self, method_name: str) -> None:
-        if self.kind != "spy":  # pragma: no cover - defensive guard
+        if self.kind is not DoubleKind.SPY:  # pragma: no cover - defensive guard
             msg = f"{method_name}() is only valid for spies"
             raise AssertionError(msg)
 

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import textwrap
-import typing as t
 
 import pytest
 
 from cmd_mox.unittests import pytest_plugin_module_utils as plugin_utils
 
-CaseType = tuple[plugin_utils.PhaseLiteral, bool, tuple[str, ...]]
+CaseType = tuple[plugin_utils.LifecyclePhase, bool, tuple[str, ...]]
 
 
 @pytest.mark.parametrize(
@@ -17,7 +16,7 @@ CaseType = tuple[plugin_utils.PhaseLiteral, bool, tuple[str, ...]]
     [
         pytest.param(
             (
-                "RECORD",
+                plugin_utils.LifecyclePhase.RECORD,
                 False,
                 (
                     "from cmd_mox.unittests.conftest import run_subprocess",
@@ -30,7 +29,7 @@ CaseType = tuple[plugin_utils.PhaseLiteral, bool, tuple[str, ...]]
         ),
         pytest.param(
             (
-                "REPLAY",
+                plugin_utils.LifecyclePhase.REPLAY,
                 False,
                 (
                     "from cmd_mox.unittests.conftest import run_subprocess",
@@ -57,7 +56,7 @@ def test_generate_module_includes_expected_snippets(case: CaseType) -> None:
 
 
 def _assert_auto_fail_module_properties(
-    expected_phase: plugin_utils.PhaseLiteral, *, expect_auto_fail: bool
+    expected_phase: plugin_utils.LifecyclePhase | str, *, expect_auto_fail: bool
 ) -> None:
     module_text = plugin_utils.generate_lifecycle_test_module(
         decorator="",
@@ -72,12 +71,16 @@ def _assert_auto_fail_module_properties(
 
 def test_generate_module_overrides_replay_body_when_failures_expected() -> None:
     """REPLAY scenarios expecting failure should use the auto-fail body."""
-    _assert_auto_fail_module_properties("REPLAY", expect_auto_fail=True)
+    _assert_auto_fail_module_properties(
+        plugin_utils.LifecyclePhase.REPLAY, expect_auto_fail=True
+    )
 
 
 def test_generate_module_forces_auto_fail_body_without_helpers() -> None:
     """Pure auto-fail modules should omit shim helpers and include failure body."""
-    _assert_auto_fail_module_properties("AUTO_FAIL", expect_auto_fail=False)
+    _assert_auto_fail_module_properties(
+        plugin_utils.LifecyclePhase.AUTO_FAIL, expect_auto_fail=False
+    )
 
 
 def test_generate_module_includes_decorators_with_trailing_newline() -> None:
@@ -152,6 +155,6 @@ def test_generate_module_rejects_unknown_phases() -> None:
     with pytest.raises(ValueError, match=r"Unknown phase: INVALID"):
         plugin_utils.generate_lifecycle_test_module(
             decorator="",
-            expected_phase=t.cast("plugin_utils.PhaseLiteral", "INVALID"),
+            expected_phase="INVALID",
             expect_auto_fail=False,
         )
