@@ -9,6 +9,8 @@ import pytest
 import cmd_mox.shim as shim
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 
 @pytest.mark.parametrize(
     "value",

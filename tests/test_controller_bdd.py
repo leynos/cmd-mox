@@ -30,6 +30,8 @@ from tests.helpers.controller import (
     verify_journal_entry_details,
 )
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.ipc import Invocation
 
@@ -313,6 +315,34 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
     return stack
 
 
+def _require_replay_shim_dir(mox: CmdMox) -> Path:
+    """Return the shim directory when replay is active, asserting availability."""
+    env = mox.environment
+    if env is None or env.shim_dir is None:
+        msg = "Replay environment is unavailable"
+        raise AssertionError(msg)
+    return Path(env.shim_dir)
+
+
+@when(parsers.cfparse('the shim for "{cmd}" is broken'))
+def break_shim_symlink(mox: CmdMox, cmd: str) -> None:
+    """Replace the shim with a dangling symlink to simulate corruption."""
+    shim_dir = _require_replay_shim_dir(mox)
+    shim_path = shim_dir / cmd
+    missing_target = shim_path.with_name(f"{cmd}-missing-target")
+    shim_path.unlink(missing_ok=True)
+    shim_path.symlink_to(missing_target)
+    assert shim_path.is_symlink()
+    assert not shim_path.exists()
+
+
+@when(parsers.cfparse('I register the command "{cmd}" during replay'))
+def register_command_during_replay(mox: CmdMox, cmd: str) -> None:
+    """Re-register *cmd* so CmdMox can repair its shim."""
+    _require_replay_shim_dir(mox)
+    mox.register_command(cmd)
+
+
 @when(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
 def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     """Invoke the stubbed command."""
@@ -560,6 +590,15 @@ def test_shim_forwards_streams() -> None:
 )
 def test_shim_merges_env_overrides() -> None:
     """Shim persists environment overrides between invocations."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "register command repairs broken shims during replay",
+)
+def test_register_command_repairs_broken_shims() -> None:
+    """register_command recreates broken symlinks while replaying."""
     pass
 
 

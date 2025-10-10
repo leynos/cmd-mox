@@ -25,6 +25,9 @@ if t.TYPE_CHECKING:
     from pathlib import Path
 
 
+pytestmark = pytest.mark.requires_unix_sockets
+
+
 @dataclass
 class TimeoutTestCase:
     """Test case configuration for timeout validation."""

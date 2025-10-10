@@ -19,10 +19,12 @@ from cmd_mox import (
     UnfulfilledExpectationError,
 )
 from cmd_mox.expectations import Expectation
+from cmd_mox.ipc import Invocation, Response
+
+pytestmark = pytest.mark.requires_unix_sockets
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
-from cmd_mox.ipc import Invocation, Response
 
 
 def test_mock_with_args_and_order(

@@ -11,6 +11,8 @@ import pytest
 
 from cmd_mox.ipc.socket_utils import cleanup_stale_socket, wait_for_socket
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 
 def test_cleanup_stale_socket_removes_unbound_file(tmp_path: pathlib.Path) -> None:
     """cleanup_stale_socket should unlink orphaned socket files."""

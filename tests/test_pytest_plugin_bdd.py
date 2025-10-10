@@ -6,12 +6,15 @@ import textwrap
 import typing as t
 from pathlib import Path
 
+import pytest
 from pytest_bdd import given, scenario, then, when
 
 if t.TYPE_CHECKING:  # pragma: no cover - used for type checking only
     from _pytest.pytester import Pytester, RunResult
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
+
+pytestmark = pytest.mark.requires_unix_sockets
 
 
 @scenario(str(FEATURES_DIR / "pytest_plugin.feature"), "cmd_mox fixture basic usage")

@@ -300,7 +300,7 @@ def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
     ],
 )
 def test_enter_cmd_mox_auto_lifecycle_overrides(
-    monkeypatch: pytest.MonkeyPatch, request_kwargs: dict[str, object]
+    monkeypatch: pytest.MonkeyPatch, request_kwargs: dict[str, t.Any]
 ) -> None:
     """Marker and fixture parameter overrides disable automatic replay."""
     request = _StubRequest(config=_StubConfig(), **request_kwargs)

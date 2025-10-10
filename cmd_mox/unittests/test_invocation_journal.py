@@ -25,6 +25,8 @@ from tests.helpers.controller import (
     verify_journal_entry_details,
 )
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 
 class StubReturns(t.TypedDict, total=False):
     """Optional stub return values."""
