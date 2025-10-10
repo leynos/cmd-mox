@@ -610,6 +610,34 @@ def test_invoke_handler_applies_env() -> None:
     assert resp.env == {key: "VAL"}
 
 
+def test_invoke_handler_applies_env_for_canned_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Static responses also execute within the temporary environment."""
+    key = "STATIC_ENV"
+    original_replace = controller.dc.replace
+    observed: str | None = None
+
+    def _capture_env(*args: object, **kwargs: object) -> Response:
+        nonlocal observed
+        observed = os.environ.get(key)
+        return original_replace(*args, **kwargs)
+
+    monkeypatch.setattr(controller.dc, "replace", _capture_env)
+
+    mox = CmdMox()
+    dbl = mox.stub("demo").with_env({key: "VAL"}).returns(stdout="ok")
+    inv = Invocation(command="demo", args=[], stdin="", env={})
+
+    assert os.environ.get(key) is None
+    resp = mox._invoke_handler(dbl, inv)
+
+    assert observed == "VAL"
+    assert os.environ.get(key) is None
+    assert resp.stdout == "ok"
+    assert resp.env == {key: "VAL"}
+
+
 def test_prepare_passthrough_registers_pending_invocation() -> None:
     """_prepare_passthrough stores directives for the shim."""
     with CmdMox() as mox:

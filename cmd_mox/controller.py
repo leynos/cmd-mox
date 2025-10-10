@@ -277,16 +277,22 @@ class CmdMox:
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
         """Run ``double``'s handler within its expectation environment."""
+
+        def _call_handler() -> Response:
+            if double.handler is None:
+                base = double.response
+                # Clone to avoid mutating the shared static response instance
+                return dc.replace(base, env=dict(base.env))
+
+            return double.handler(invocation)
+
         env = double.expectation.env
-        if double.handler is None:
-            base = double.response
-            # Clone to avoid mutating the shared static response instance
-            resp = dc.replace(base, env=dict(base.env))
-        elif env:
+        if env:
             with temporary_env(env):
-                resp = double.handler(invocation)
+                resp = _call_handler()
         else:
-            resp = double.handler(invocation)
+            resp = _call_handler()
+
         if env:
             resp.env.update(env)
         return resp

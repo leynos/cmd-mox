@@ -1392,7 +1392,9 @@ held by each `CommandDouble`. Builder methods such as `with_args()` and
 `with_stdin()` delegate to this object. During replay the IPC handler
 temporarily applies any `with_env()` variables using `temporary_env` so the
 mock's handler executes with the expected environment yet leaves the process
-state untouched.
+state untouched. Static responses created via `.returns()` run through the same
+path so the canned response is prepared while the environment overrides are
+active and the shim receives the merged environment payload.
 
 Verification is split into focused components. `UnexpectedCommandVerifier`
 checks that every journal entry matches a registered expectation.
