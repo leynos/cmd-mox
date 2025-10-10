@@ -13,6 +13,8 @@ import pytest
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.ipc import Invocation, Response
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 if t.TYPE_CHECKING:  # pragma: no cover - import used only for typing
     from pathlib import Path
 

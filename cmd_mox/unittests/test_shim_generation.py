@@ -24,6 +24,8 @@ from cmd_mox.shimgen import (
     create_shim_symlinks,
 )
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 
 def test_create_shim_symlinks_and_execution(
     run: t.Callable[..., subprocess.CompletedProcess[str]],

@@ -23,6 +23,8 @@ from cmd_mox.ipc import (
     invoke_server,
 )
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 
 def test_ipc_server_start_stop(tmp_path: Path) -> None:
     """Server creates and removes the socket path."""
@@ -158,16 +160,18 @@ def test_invoke_server_validates_params(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     timeout = t.cast("float", kwargs.get("timeout", 1.0))
-    retry_kwargs = {
-        "retries": t.cast("int", kwargs.get("retries", 1)),
-        "backoff": t.cast("float", kwargs.get("backoff", 0.0)),
-        "jitter": t.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER)),
-    }
+    retries = t.cast("int", kwargs.get("retries", 1))
+    backoff = t.cast("float", kwargs.get("backoff", 0.0))
+    jitter = t.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER))
     with pytest.raises(ValueError, match=match):
         invoke_server(
             invocation,
             timeout=timeout,
-            retry_config=RetryConfig(**retry_kwargs),
+            retry_config=RetryConfig(
+                retries=retries,
+                backoff=backoff,
+                jitter=jitter,
+            ),
         )
 
 

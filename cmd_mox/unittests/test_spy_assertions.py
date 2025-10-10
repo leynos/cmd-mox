@@ -11,6 +11,8 @@ import pytest
 from cmd_mox.controller import CmdMox, CommandDouble
 from cmd_mox.ipc import Invocation
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 
 @dc.dataclass
 class SpyCommandConfig:

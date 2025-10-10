@@ -13,6 +13,8 @@ import pytest
 import cmd_mox.controller as controller
 from cmd_mox import CmdMox
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 
 def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure environment is restored when replay setup fails."""

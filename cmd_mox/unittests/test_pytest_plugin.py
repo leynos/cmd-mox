@@ -12,6 +12,8 @@ from cmd_mox.controller import Phase
 from cmd_mox.unittests import pytest_plugin_module_utils as plugin_utils
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 LifecyclePhase = plugin_utils.LifecyclePhase
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing

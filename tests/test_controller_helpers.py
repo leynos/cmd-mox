@@ -19,6 +19,8 @@ from tests.helpers.controller import (
     _verify_journal_entry_with_expectation,
 )
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 
 def test_execute_and_verify_helpers() -> None:
     """Ensure helper functions execute and verify invocations."""

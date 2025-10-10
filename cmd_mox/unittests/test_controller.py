@@ -19,6 +19,8 @@ from cmd_mox.errors import (
 from cmd_mox.ipc import Invocation, PassthroughResult, Response
 from cmd_mox.test_doubles import MockCommand, SpyCommand, StubCommand
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 

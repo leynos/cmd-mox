@@ -13,10 +13,10 @@ from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 if t.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from pathlib import Path
-
-    import pytest
 
 
 def _run_shim(

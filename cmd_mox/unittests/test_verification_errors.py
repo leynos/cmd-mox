@@ -10,6 +10,8 @@ import pytest
 from cmd_mox.controller import CmdMox
 from cmd_mox.errors import UnexpectedCommandError, UnfulfilledExpectationError
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 

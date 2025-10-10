@@ -50,6 +50,11 @@ boolean instead. Advanced tests can override the detected platform by setting
 the `CMD_MOX_PLATFORM_OVERRIDE` environment variable, which is primarily useful
 for simulating Windows behaviour inside CI pipelines.
 
+The cmd-mox test suite also uses the
+`pytest.mark.requires_unix_sockets` marker for scenarios that need to bind a
+Unix domain socket. Marking these tests keeps them green on platforms (or CI
+sandboxes) that disallow Unix sockets entirely.
+
 ## Basic workflow
 
 CmdMox follows a strict record → replay → verify lifecycle. First declare

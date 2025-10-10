@@ -21,6 +21,7 @@ from cmd_mox.comparators import (
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
+from cmd_mox.test_doubles import CommandDouble, DoubleKind
 from cmd_mox.verifiers import UnexpectedCommandVerifier
 
 
@@ -56,6 +57,18 @@ def test_is_a_repr_with_custom_type() -> None:
     """User-defined classes show their fully-qualified name in repr."""
     expected = f"IsA(typ=<class '{CustomType.__module__}.{CustomType.__qualname__}'>)"
     assert repr(IsA(CustomType)) == expected
+
+
+def _mock_double(expectation: Expectation) -> CommandDouble:
+    """Return a typed mock CommandDouble stub exposing the provided expectation."""
+    return t.cast(
+        "CommandDouble",
+        SimpleNamespace(
+            expectation=expectation,
+            kind=DoubleKind.MOCK,
+            name=expectation.name,
+        ),
+    )
 
 
 def test_regex_matches_and_repr() -> None:
@@ -167,7 +180,7 @@ def test_expectation_with_matchers_failure_message() -> None:
     exp = Expectation("cmd").with_matching_args(IsA(int))
     inv = Invocation(command="cmd", args=["oops"], stdin="", env={})
     verifier = UnexpectedCommandVerifier()
-    dbl = SimpleNamespace(expectation=exp, kind="mock")
+    dbl = _mock_double(exp)
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
     assert "arg[0]='oops' failed IsA(typ=<class 'int'>)" in str(excinfo.value)
@@ -193,7 +206,7 @@ def test_expectation_matcher_exception_message() -> None:
     exp = Expectation("cmd").with_matching_args(Predicate(boom))
     inv = Invocation(command="cmd", args=["x"], stdin="", env={})
     verifier = UnexpectedCommandVerifier()
-    dbl = SimpleNamespace(expectation=exp, kind="mock")
+    dbl = _mock_double(exp)
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
     msg = str(excinfo.value)
@@ -206,7 +219,7 @@ def test_expectation_stdin_predicate_failure_message() -> None:
     exp = Expectation("cmd").with_stdin(lambda s: s == "ok")
     inv = Invocation(command="cmd", args=[], stdin="nope", env={})
     verifier = UnexpectedCommandVerifier()
-    dbl = SimpleNamespace(expectation=exp, kind="mock")
+    dbl = _mock_double(exp)
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
     assert "stdin 'nope' failed" in str(excinfo.value)
@@ -217,7 +230,7 @@ def test_expectation_env_mismatch_message() -> None:
     exp = Expectation("cmd").with_env({"FOO": "bar"})
     inv = Invocation(command="cmd", args=[], stdin="", env={"FOO": "baz"})
     verifier = UnexpectedCommandVerifier()
-    dbl = SimpleNamespace(expectation=exp, kind="mock")
+    dbl = _mock_double(exp)
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
     assert "env['FOO']='baz' != 'bar'" in str(excinfo.value)

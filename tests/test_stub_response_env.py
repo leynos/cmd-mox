@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cmd_mox.controller import CmdMox
 from tests.helpers.controller import CommandExecution, _execute_command_with_params
+
+pytestmark = pytest.mark.requires_unix_sockets
 
 
 def test_stub_response_env_is_isolated() -> None:

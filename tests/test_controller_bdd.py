@@ -30,6 +30,8 @@ from tests.helpers.controller import (
     verify_journal_entry_details,
 )
 
+pytestmark = pytest.mark.requires_unix_sockets
+
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.ipc import Invocation
 
