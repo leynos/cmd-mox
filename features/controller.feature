@@ -144,6 +144,17 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal should contain 1 invocation of "envcmd"
 
+  Scenario: expectation env applies to canned responses
+    Given a CmdMox controller
+    And the command "seedstatic" is stubbed to return "seeded" with env var "ALPHA"="one"
+    And the command "checkstatic" records shim env var "ALPHA"="one"
+    When I replay the controller
+    And I run the shim sequence "seedstatic checkstatic"
+    Then the output should be "one"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "seedstatic"
+    And the journal should contain 1 invocation of "checkstatic"
+
   Scenario: passthrough spy executes real command
     Given a CmdMox controller
     And the command "echo" is spied to passthrough

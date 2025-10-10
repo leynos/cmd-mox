@@ -151,9 +151,9 @@
 
 ## **VII. Advanced Features & Edge Cases**
 
-- [ ] **Environment Variable Injection**
+- [x] **Environment Variable Injection**
 
-  - [ ] `.with_env()` applies mock-specific env before executing the handler or
+  - [x] `.with_env()` applies mock-specific env before executing the handler or
     canned response
 
 - [ ] **Concurrency Support**

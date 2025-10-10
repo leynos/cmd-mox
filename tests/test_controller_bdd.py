@@ -188,6 +188,16 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     mox.stub(cmd).with_env({var: val}).runs(handler)
 
 
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is stubbed to return "{text}" with env var "{var}"="{val}"'
+    )
+)
+def stub_returns_with_env(mox: CmdMox, cmd: str, text: str, var: str, val: str) -> None:
+    """Stub command returning static output while seeding shim environment."""
+    mox.stub(cmd).with_env({var: val}).returns(stdout=text)
+
+
 @given(parsers.cfparse('the command "{cmd}" seeds shim env var "{var}"="{val}"'))
 def stub_seeds_shim_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     """Stub command that injects an environment override for future shims."""
@@ -217,6 +227,20 @@ def stub_expect_and_seed_env(
             )
             raise AssertionError(msg)
         return Response(env={var: val})
+
+    mox.stub(cmd).runs(handler)
+
+
+@given(parsers.cfparse('the command "{cmd}" records shim env var "{var}"="{val}"'))
+def stub_records_single_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
+    """Stub that asserts a single shim environment value."""
+
+    def handler(invocation: Invocation) -> tuple[str, str, int]:
+        actual = invocation.env.get(var)
+        if actual != val:
+            msg = f"expected shim env {var!r} to equal {val!r} but got {actual!r}"
+            raise AssertionError(msg)
+        return (actual or "", "", 0)
 
     mox.stub(cmd).runs(handler)
 
