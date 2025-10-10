@@ -71,14 +71,16 @@ When implementing changes, adhere to the following testing procedures:
   - For Python files:
 
     - **Testing:** Passes all relevant unit and behavioral tests according to
-      the guidelines above.
+      the guidelines above (`make test`).
     - **Linting:** Passes lint checks (`make lint`).
-    - **Formatting:** Adheres to formatting standards (`make fmt`).
+    - **Formatting:** Adheres to formatting standards (`make check-fmt`,
+      formatting can be applied by running `make fmt`). 
     - **Typechecking:** Passes type checking (`make typecheck`).
 
   - For Markdown files (`.md` only):
 
-    - **Linting:** Passes lint checks (`make markdownlint`).
+    - **Linting:** Passes lint checks (`make markdownlint`, formatting can be
+      applied by running `make fmt`).
     - **Mermaid diagrams:** Passes validation using nixie (`make nixie`)
 
 - **Committing:**
