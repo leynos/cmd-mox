@@ -194,17 +194,32 @@ class CmdMox:
         """Create a shim symlink when replay is active and shims are writable."""
         if self._phase is not Phase.REPLAY:
             return
-        env = self.environment
-        if env is None or env.shim_dir is None:
+        shim_path = self._get_replay_shim_path(name)
+        if shim_path is None:
             return
-        shim_dir = Path(env.shim_dir)
-        shim_path = shim_dir / name
-        if shim_path.is_symlink() and not self._is_broken_symlink(shim_path):
+        if self._should_skip_shim_creation(shim_path):
             return
-        if shim_path.exists() and not shim_path.is_symlink():
+        if self._has_non_symlink_collision(shim_path):
             msg = f"{shim_path} already exists and is not a symlink"
             raise FileExistsError(msg)
-        create_shim_symlinks(shim_dir, [name])
+        create_shim_symlinks(shim_path.parent, [name])
+
+    def _get_replay_shim_path(self, name: str) -> Path | None:
+        """Return the target shim path when replay shims are writable."""
+        env = self.environment
+        if env is None or env.shim_dir is None:
+            return None
+        return Path(env.shim_dir) / name
+
+    def _should_skip_shim_creation(self, shim_path: Path) -> bool:
+        """Return ``True`` when the shim already points to a valid target."""
+        if not shim_path.is_symlink():
+            return False
+        return not self._is_broken_symlink(shim_path)
+
+    def _has_non_symlink_collision(self, shim_path: Path) -> bool:
+        """Return ``True`` when a non-symlink file blocks shim creation."""
+        return shim_path.exists() and not shim_path.is_symlink()
 
     @staticmethod
     def _is_broken_symlink(path: Path) -> bool:
