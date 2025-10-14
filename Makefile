@@ -1,8 +1,9 @@
-MDLINT ?= $(shell which markdownlint)
+MDLINT ?= $(shell which markdownlint-cli2)
 NIXIE ?= $(shell which nixie)
 MDFORMAT_ALL ?= $(shell which mdformat-all)
 TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) $(NIXIE) uv
 VENV_TOOLS = pytest
+UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
         markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
@@ -12,10 +13,10 @@ VENV_TOOLS = pytest
 all: build check-fmt test typecheck
 
 .venv: pyproject.toml
-	UV_CACHE_DIR=.uv-cache uv venv --clear
+	$(UV_ENV) uv venv --clear
 
 build: uv .venv ## Build virtual-env and install deps
-	UV_CACHE_DIR=.uv-cache uv sync --group dev
+	$(UV_ENV) uv sync --group dev
 
 build-release: ## Build artefacts (sdist & wheel)
 	python -m build --sdist --wheel
@@ -34,7 +35,7 @@ define ensure_tool
 endef
 
 define ensure_tool_venv
-	UV_CACHE_DIR=.uv-cache @uv run which $(1) >/dev/null 2>&1 || { \
+	$(UV_ENV) @uv run which $(1) >/dev/null 2>&1 || { \
 	  printf "Error: '%s' is required in the virtualenv, but is not installed\n" "$(1)" >&2; \
 	  exit 1; \
 	}
@@ -69,15 +70,13 @@ typecheck: build ty ## Run typechecking
 	ty check
 
 markdownlint: $(MDLINT) ## Lint Markdown files
-	find . -type f -name '*.md' \
-	  -not -path './.venv/*' -print0 | xargs -0 $(MDLINT)
+	$(MDLINT) '**/*.md'
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
-	find . -type f -name '*.md' \
-	  -not -path './.venv/*' -print0 | xargs -0 $(NIXIE)
+	$(NIXIE) --no-sandbox
 
 test: build uv $(VENV_TOOLS) ## Run tests
-	UV_CACHE_DIR=.uv-cache uv run pytest -v -n auto
+	$(UV_ENV) run pytest -v -n auto
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
