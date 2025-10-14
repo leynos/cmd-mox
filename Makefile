@@ -50,7 +50,7 @@ endif
 ifneq ($(strip $(VENV_TOOLS)),)
 .PHONY: $(VENV_TOOLS)
 $(VENV_TOOLS): ## Verify required CLI tools in venv
-        $(call ensure_tool_venv,$@)
+	$(call ensure_tool_venv,$@)
 endif
 
 fmt: ruff $(MDFORMAT_ALL) ## Format sources
