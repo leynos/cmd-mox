@@ -144,6 +144,15 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal should contain 1 invocation of "envcmd"
 
+  Scenario: canned responses inherit injected environment
+    Given a CmdMox controller
+    And the command "envmock" is mocked with env var "HELLO"="WORLD" returning "done"
+    When I replay the controller
+    And I run the command "envmock"
+    Then the output should be "done"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "envmock"
+
   Scenario: passthrough spy executes real command
     Given a CmdMox controller
     And the command "echo" is spied to passthrough
@@ -235,11 +244,11 @@ Feature: CmdMox basic functionality
 
   Scenario: verification redacts sensitive environment values
     Given a CmdMox controller
-    And the command "deploy" is mocked to return "ok"
-    And the command "deploy" requires env var "API_KEY"="expected"
+    And the command "deploy" is mocked with args "--expected" returning "ok"
+    And the command "deploy" requires env var "API_KEY"="leaked-secret"
     When I replay the controller
     And I set environment variable "API_KEY" to "leaked-secret"
-    And I run the command "deploy"
+    And I run the command "deploy" with arguments "--actual"
     When I verify the controller expecting an UnexpectedCommandError
     Then the verification error message should contain "env={'API_KEY': '***'}"
 

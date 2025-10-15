@@ -273,20 +273,33 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _apply_expectation_env(
+        self, double: CommandDouble, invocation: Invocation
+    ) -> dict[str, str]:
+        """Merge the expectation environment into ``invocation.env``."""
+        env = double.expectation.env
+        if env:
+            invocation.env.update(env)
+        return env
+
     def _invoke_handler(
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
         """Run ``double``'s handler within its expectation environment."""
-        env = double.expectation.env
-        if double.handler is None:
-            base = double.response
-            # Clone to avoid mutating the shared static response instance
-            resp = dc.replace(base, env=dict(base.env))
-        elif env:
+        env = self._apply_expectation_env(double, invocation)
+
+        def _execute() -> Response:
+            if double.handler is None:
+                base = double.response
+                # Clone to avoid mutating the shared static response instance
+                return dc.replace(base, env=dict(base.env))
+            return double.handler(invocation)
+
+        if env:
             with temporary_env(env):
-                resp = double.handler(invocation)
+                resp = _execute()
         else:
-            resp = double.handler(invocation)
+            resp = _execute()
         if env:
             resp.env.update(env)
         return resp
@@ -322,11 +335,16 @@ class CmdMox:
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
         """Record passthrough intent and return instructions for the shim."""
+        env_overrides = self._apply_expectation_env(double, invocation)
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
         return self._passthrough_coordinator.prepare_request(
-            double, invocation, lookup_path, self._runner.timeout
+            double,
+            invocation,
+            lookup_path,
+            self._runner.timeout,
+            extra_env=env_overrides,
         )
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:

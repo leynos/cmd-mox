@@ -43,6 +43,8 @@ class PassthroughCoordinator:
         invocation: Invocation,
         lookup_path: str,
         timeout: float,
+        *,
+        extra_env: dict[str, str] | None = None,
     ) -> Response:
         """Record passthrough intent and return instructions for shim."""
         invocation_id = invocation.invocation_id or uuid.uuid4().hex
@@ -67,7 +69,7 @@ class PassthroughCoordinator:
                 self._expiry_deadline(timeout),
             )
 
-        env = double.expectation.env
+        env = double.expectation.env if extra_env is None else extra_env
         passthrough = PassthroughRequest(
             invocation_id=invocation_id,
             lookup_path=lookup_path,

@@ -1029,7 +1029,7 @@ sequenceDiagram
   Shim->>Server: send Invocation (kind=invocation, invocation_id)
   Server->>Controller: handle invocation
   alt controller selects passthrough
-    Controller->>Passthrough: prepare_request(double, invocation, lookup_path, timeout)
+    Controller->>Passthrough: prepare_request(double, invocation, lookup_path, timeout, extra_env)
     Passthrough-->>Controller: Response(passthrough=PassthroughRequest)
     Controller-->>Server: Response with passthrough
     Server-->>Shim: Response with PassthroughRequest
@@ -1389,10 +1389,14 @@ fixture falls back to `main` so the prefix becomes `cmdmox-main-{pid}-`.
 
 Expectation configuration now lives in a dedicated :class:`Expectation` object
 held by each `CommandDouble`. Builder methods such as `with_args()` and
-`with_stdin()` delegate to this object. During replay the IPC handler
-temporarily applies any `with_env()` variables using `temporary_env` so the
-mock's handler executes with the expected environment yet leaves the process
-state untouched.
+`with_stdin()` delegate to this object. During replay the IPC handler merges
+any `with_env()` variables into the recorded :class:`Invocation` before
+executing the double. The overrides are applied using `temporary_env` so the
+mock's handler or canned response executes with the expected environment yet
+leaves the process state untouched. Because the overrides are copied onto the
+`Invocation`, verification sees the same environment that the handler observed,
+which allows expectation matching without requiring the caller to set those
+variables explicitly.
 
 Verification is split into focused components. `UnexpectedCommandVerifier`
 checks that every journal entry matches a registered expectation.

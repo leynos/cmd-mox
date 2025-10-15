@@ -178,6 +178,16 @@ def mock_with_args_any_order(mox: CmdMox, cmd: str, args: str, text: str) -> Non
     mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text).any_order()
 
 
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked with args "{args}" returning "{text}"'
+    )
+)
+def mock_with_args_default_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
+    """Configure an unordered mock with arguments and default ordering."""
+    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text)
+
+
 @given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))
 def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     """Stub command that outputs an injected env variable."""
@@ -186,6 +196,16 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
         return (os.environ.get(var, ""), "", 0)
 
     mox.stub(cmd).with_env({var: val}).runs(handler)
+
+
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked with env var "{var}"="{val}" returning "{text}"'
+    )
+)
+def mock_with_env_returns(mox: CmdMox, cmd: str, var: str, val: str, text: str) -> None:
+    """Mock command returning a canned response with injected environment."""
+    mox.mock(cmd).with_env({var: val}).returns(stdout=text)
 
 
 @given(parsers.cfparse('the command "{cmd}" seeds shim env var "{var}"="{val}"'))

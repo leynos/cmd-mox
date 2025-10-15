@@ -72,6 +72,23 @@ def test_cmdmox_stub_records_invocation(
     assert os.environ["PATH"] == original_path
 
 
+def test_mock_with_env_static_response(
+    run: t.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Mocks with env overrides should verify when caller omits variables."""
+    key = "EXPECT_ENV"
+    with CmdMox() as mox:
+        mox.mock("envcmd").with_env({key: "VALUE"}).returns(stdout="ok")
+        mox.replay()
+
+        cmd_path = Path(mox.environment.shim_dir) / "envcmd"
+        result = run([str(cmd_path)])
+
+        assert result.stdout.strip() == "ok"
+
+        mox.verify()
+
+
 def test_cmdmox_replay_verify_out_of_order(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -608,6 +625,22 @@ def test_invoke_handler_applies_env() -> None:
     assert resp.stdout == "VAL"
     assert key not in os.environ
     assert resp.env == {key: "VAL"}
+    assert inv.env[key] == "VAL"
+
+
+def test_invoke_handler_applies_env_to_static_response() -> None:
+    """Environment overrides apply when returning a canned response."""
+    key = "STATIC_VAR"
+    mox = CmdMox()
+    dbl = mox.stub("demo").with_env({key: "VAL"}).returns(stdout="ok")
+    inv = Invocation(command="demo", args=[], stdin="", env={})
+
+    assert key not in os.environ
+    resp = mox._invoke_handler(dbl, inv)
+    assert resp.stdout == "ok"
+    assert resp.env == {key: "VAL"}
+    assert key not in os.environ
+    assert inv.env[key] == "VAL"
 
 
 def test_prepare_passthrough_registers_pending_invocation() -> None:
