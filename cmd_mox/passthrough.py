@@ -44,7 +44,7 @@ class PassthroughCoordinator:
         lookup_path: str,
         timeout: float,
         *,
-        extra_env: dict[str, str] | None = None,
+        extra_env: t.Mapping[str, str] | None = None,
     ) -> Response:
         """Record passthrough intent and return instructions for shim."""
         invocation_id = invocation.invocation_id or uuid.uuid4().hex
@@ -97,7 +97,7 @@ class PassthroughCoordinator:
             stdout=result.stdout,
             stderr=result.stderr,
             exit_code=result.exit_code,
-            env=dict(double.expectation.env),
+            env=dict(invocation.env),
         )
         invocation.apply(resp)
         return double, invocation, resp

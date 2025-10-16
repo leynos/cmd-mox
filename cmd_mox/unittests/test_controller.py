@@ -125,6 +125,7 @@ def test_invoke_handler_rejects_conflicting_env() -> None:
     with pytest.raises(UnexpectedCommandError, match="conflicting environment"):
         mox._invoke_handler(double, invocation)
 
+
 def test_cmdmox_replay_verify_out_of_order(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:

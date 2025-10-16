@@ -261,6 +261,7 @@ Feature: CmdMox basic functionality
     And I run the command "deploy" with arguments "--actual"
     When I verify the controller expecting an UnexpectedCommandError
     Then the verification error message should contain "env={'API_KEY': '***'}"
+    And the verification error message should not contain "leaked-secret"
 
   Scenario: verification reports missing invocations
     Given a CmdMox controller

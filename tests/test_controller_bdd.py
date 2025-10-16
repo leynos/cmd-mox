@@ -516,6 +516,14 @@ def verification_error_contains(
     assert text in str(verification_error)
 
 
+@then(parsers.cfparse('the verification error message should not contain "{text}"'))
+def verification_error_excludes(
+    verification_error: VerificationError, text: str
+) -> None:
+    """Assert the captured verification error omits *text*."""
+    assert text not in str(verification_error)
+
+
 @then(parsers.cfparse('the stderr should contain "{text}"'))
 def check_stderr(result: subprocess.CompletedProcess[str], text: str) -> None:
     """Ensure standard error output contains *text*."""

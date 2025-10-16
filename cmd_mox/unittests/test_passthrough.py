@@ -88,6 +88,7 @@ def test_finalize_result_returns_response_and_clears(
     coordinator = PassthroughCoordinator()
     double = t.cast("CommandDouble", _FakeDouble({"EXTRA": "1"}))
     invocation = _make_invocation("tool")
+    invocation.env.update({"EXTRA": "1"})
     response = coordinator.prepare_request(double, invocation, "/opt/bin", timeout=1.0)
     directive = response.passthrough
     assert directive is not None
@@ -106,6 +107,8 @@ def test_finalize_result_returns_response_and_clears(
     assert resolved_double is double
     assert stored_invocation.command == "tool"
     assert final_response.exit_code == 3
+    assert final_response.env == {"EXTRA": "1"}
+    assert stored_invocation.env == {"EXTRA": "1"}
     assert not coordinator.has_pending(directive.invocation_id)
 
 
