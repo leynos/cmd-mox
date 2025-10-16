@@ -50,9 +50,10 @@ boolean instead. Advanced tests can override the detected platform by setting
 the `CMD_MOX_PLATFORM_OVERRIDE` environment variable, which is primarily useful
 for simulating Windows behaviour inside CI pipelines.
 
-The cmd-mox test suite also uses the `pytest.mark.requires_unix_sockets` marker
-for scenarios that need to bind a Unix domain socket. Marking these tests keeps
-them green on platforms (or CI sandboxes) that disallow Unix sockets entirely.
+The cmd-mox test suite also uses the `pytest.mark.requires_unix_sockets`
+marker for scenarios that need to bind a Unix domain socket. Marking these
+tests keeps them green on platforms (or CI sandboxes) that disallow Unix
+sockets entirely.
 
 ## Basic workflow
 
@@ -246,8 +247,8 @@ few common ones are:
 - `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
   validate it with a predicate `Callable[[str], bool]`.
 - `with_env(mapping)` – inject additional environment variables into the
-  invocation. The mapping is merged into the recorded `Invocation.env` and the
-  variables are applied when custom handlers or canned responses run.
+  invocation. The mapping is merged into the recorded `Invocation.env`
+  and applied when custom handlers or canned responses run.
 - `returns(stdout="", stderr="", exit_code=0)` – static response using text
   values; CmdMox operates in text mode—pass `str` (bytes are not supported).
   Note: For binary payloads, prefer `passthrough()` or encode/decode at the

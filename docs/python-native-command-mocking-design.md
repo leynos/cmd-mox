@@ -1387,16 +1387,23 @@ fixture falls back to `main` so the prefix becomes `cmdmox-main-{pid}-`.
 
 ### 8.5 Design Decisions for `MockCommand` Expectations
 
-Expectation configuration now lives in a dedicated :class:`Expectation` object
-held by each `CommandDouble`. Builder methods such as `with_args()` and
-`with_stdin()` delegate to this object. During replay the IPC handler merges
-any `with_env()` variables into the recorded :class:`Invocation` before
+Expectation configuration now lives in a dedicated
+:class:`Expectation` object held by each `CommandDouble`. Builder methods such
+as `with_args()` and `with_stdin()` delegate to this object. During replay the
+IPC handler merges any `with_env()` variables into the recorded
+:class:`Invocation` before
 executing the double. The overrides are applied using `temporary_env` so the
 mock's handler or canned response executes with the expected environment yet
 leaves the process state untouched. Because the overrides are copied onto the
 `Invocation`, verification sees the same environment that the handler observed,
 which allows expectation matching without requiring the caller to set those
-variables explicitly.
+variables explicitly. When the caller supplies conflicting values the handler
+now raises ``UnexpectedCommandError`` so mismatched expectations fail
+immediately instead of silently replacing the provided values.
+
+`Expectation.with_env()` also validates that keys and values are non-empty
+strings. This catches typos and accidental `None` values during test
+configuration rather than deep within the replay loop.
 
 Verification is split into focused components. `UnexpectedCommandVerifier`
 checks that every journal entry matches a registered expectation.

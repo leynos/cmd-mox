@@ -153,6 +153,16 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal should contain 1 invocation of "envmock"
 
+  Scenario: passthrough spy merges expectation environment
+    Given a CmdMox controller
+    And the command "echo" is spied to passthrough
+    And the command "echo" requires env var "EXPECT_ENV"="VALUE"
+    When I replay the controller
+    And I run the command "echo" with arguments "<empty>" using stdin "<empty>" and env var "EXTRA"="provided"
+    When I verify the controller
+    Then the journal entry for "echo" should record arguments "<empty>" stdin "<empty>" env var "EXPECT_ENV"="VALUE"
+    And the journal entry for "echo" should record arguments "<empty>" stdin "<empty>" env var "EXTRA"="provided"
+
   Scenario: passthrough spy executes real command
     Given a CmdMox controller
     And the command "echo" is spied to passthrough

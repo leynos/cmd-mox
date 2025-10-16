@@ -89,6 +89,42 @@ def test_mock_with_env_static_response(
         mox.verify()
 
 
+def test_mock_with_env_rejects_non_string_key() -> None:
+    """with_env() should reject non-string keys when used via the DSL."""
+    mox = CmdMox()
+
+    with pytest.raises(TypeError, match="Environment variable name must be str"):
+        mox.mock("envcmd").with_env({42: "value"})  # type: ignore[arg-type]
+
+
+def test_invoke_handler_preserves_handler_env_override() -> None:
+    """Handler-provided env entries should not be clobbered by expectation env."""
+
+    def handler(inv: Invocation) -> Response:
+        response = Response(stdout="ok")
+        response.env["EXPECT_ENV"] = "handler"
+        return response
+
+    mox = CmdMox()
+    double = mox.stub("envcmd").with_env({"EXPECT_ENV": "expected"}).runs(handler)
+    invocation = Invocation(command="envcmd", args=[], stdin="", env={})
+
+    resp = mox._invoke_handler(double, invocation)
+
+    assert invocation.env["EXPECT_ENV"] == "expected"
+    assert resp.env["EXPECT_ENV"] == "handler"
+
+
+def test_invoke_handler_rejects_conflicting_env() -> None:
+    """Invocations providing conflicting env should raise an error."""
+    key = "EXPECT_ENV"
+    mox = CmdMox()
+    double = mox.mock("envcmd").with_env({key: "EXPECTED"}).returns(stdout="ok")
+    invocation = Invocation(command="envcmd", args=[], stdin="", env={key: "DIFF"})
+
+    with pytest.raises(UnexpectedCommandError, match="conflicting environment"):
+        mox._invoke_handler(double, invocation)
+
 def test_cmdmox_replay_verify_out_of_order(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -657,6 +693,17 @@ def test_prepare_passthrough_registers_pending_invocation() -> None:
             "PATH", os.environ.get("PATH", "")
         )
         assert mox._passthrough_coordinator.has_pending(directive.invocation_id)
+
+
+def test_prepare_passthrough_rejects_conflicting_env() -> None:
+    """Passthrough invocations with conflicting env should raise."""
+    key = "EXPECT_ENV"
+    with CmdMox() as mox:
+        spy = mox.spy("echo").with_env({key: "EXPECTED"}).passthrough()
+        invocation = Invocation(command="echo", args=[], stdin="", env={key: "DIFF"})
+
+        with pytest.raises(UnexpectedCommandError, match="conflicting environment"):
+            mox._prepare_passthrough(spy, invocation)
 
 
 def test_handle_passthrough_result_rejects_unknown_invocation() -> None:

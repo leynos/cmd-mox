@@ -56,6 +56,19 @@ class Expectation:
 
     def with_env(self, mapping: dict[str, str]) -> Expectation:
         """Require environment variables in ``mapping``."""
+        for key, value in mapping.items():
+            if not isinstance(key, str):
+                msg = f"Environment variable name must be str, got {type(key).__name__}"
+                raise TypeError(msg)
+            if key == "":
+                msg = "Environment variable name cannot be empty"
+                raise ValueError(msg)
+            if not isinstance(value, str):
+                msg = (
+                    "Environment variable value must be str, "
+                    f"got {type(value).__name__} for {key!r}"
+                )
+                raise TypeError(msg)
         self.env = mapping.copy()
         return self
 

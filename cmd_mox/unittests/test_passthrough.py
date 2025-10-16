@@ -38,7 +38,47 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.passthrough is not None
     assert response.passthrough.lookup_path == "/usr/bin"
     assert response.passthrough.timeout == 2.0
+    assert response.passthrough.extra_env == {"PATH": "/usr/bin"}
+    assert response.env == {"PATH": "/usr/bin"}
     assert coordinator.has_pending(invocation.invocation_id or "")
+
+
+def test_prepare_request_merges_extra_env() -> None:
+    """Extra env should extend the expectation mapping without replacing it."""
+    coordinator = PassthroughCoordinator()
+    double = t.cast("CommandDouble", _FakeDouble({"ALPHA": "1"}))
+    invocation = _make_invocation()
+
+    response = coordinator.prepare_request(
+        double,
+        invocation,
+        "/bin",
+        timeout=1.0,
+        extra_env={"BETA": "2"},
+    )
+
+    assert response.passthrough is not None
+    assert response.passthrough.extra_env == {"ALPHA": "1", "BETA": "2"}
+    assert response.env == {"ALPHA": "1", "BETA": "2"}
+
+
+def test_prepare_request_extra_env_overrides_keys() -> None:
+    """Extra env should override expectation values when keys overlap."""
+    coordinator = PassthroughCoordinator()
+    double = t.cast("CommandDouble", _FakeDouble({"SHARED": "expected"}))
+    invocation = _make_invocation()
+
+    response = coordinator.prepare_request(
+        double,
+        invocation,
+        "/bin",
+        timeout=1.0,
+        extra_env={"SHARED": "override"},
+    )
+
+    assert response.passthrough is not None
+    assert response.passthrough.extra_env == {"SHARED": "override"}
+    assert response.env == {"SHARED": "override"}
 
 
 def test_finalize_result_returns_response_and_clears(

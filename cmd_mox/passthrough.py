@@ -69,7 +69,9 @@ class PassthroughCoordinator:
                 self._expiry_deadline(timeout),
             )
 
-        env = double.expectation.env if extra_env is None else extra_env
+        env = dict(double.expectation.env)
+        if extra_env:
+            env.update(extra_env)
         passthrough = PassthroughRequest(
             invocation_id=invocation_id,
             lookup_path=lookup_path,

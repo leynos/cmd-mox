@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
-from .errors import LifecycleError, MissingEnvironmentError
+from .errors import LifecycleError, MissingEnvironmentError, UnexpectedCommandError
 from .ipc import CallbackIPCServer, Invocation, PassthroughResult, Response
 from .passthrough import PassthroughCoordinator
 from .shimgen import create_shim_symlinks
@@ -273,35 +273,42 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _apply_expectation_env(
-        self, double: CommandDouble, invocation: Invocation
-    ) -> dict[str, str]:
-        """Merge the expectation environment into ``invocation.env``."""
-        env = double.expectation.env
-        if env:
-            invocation.env.update(env)
-        return env
-
     def _invoke_handler(
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
         """Run ``double``'s handler within its expectation environment."""
-        env = self._apply_expectation_env(double, invocation)
+        expectation_env = double.expectation.env or {}
+        overrides = dict(expectation_env)
+        if overrides:
+            conflicts = {
+                key: invocation.env[key]
+                for key, value in overrides.items()
+                if key in invocation.env and invocation.env[key] != value
+            }
+            if conflicts:
+                conflict_list = ", ".join(f"{k}={v!r}" for k, v in conflicts.items())
+                msg = (
+                    f"Invocation for {invocation.command!r} provided conflicting "
+                    f"environment values: {conflict_list}"
+                )
+                raise UnexpectedCommandError(msg)
+            invocation.env.update(overrides)
 
-        def _execute() -> Response:
-            if double.handler is None:
-                base = double.response
-                # Clone to avoid mutating the shared static response instance
-                return dc.replace(base, env=dict(base.env))
-            return double.handler(invocation)
-
-        if env:
-            with temporary_env(env):
-                resp = _execute()
+        if double.handler is None:
+            base = double.response
+            resp = dc.replace(base, env=dict(base.env))
+        elif overrides:
+            with temporary_env(overrides):
+                resp = double.handler(invocation)
         else:
-            resp = _execute()
-        if env:
-            resp.env.update(env)
+            resp = double.handler(invocation)
+
+        if overrides:
+            # Ensure the shim observes the injected variables even when the handler
+            # returns a cached Response instance, without clobbering handler-set
+            # overrides.
+            for key, value in overrides.items():
+                resp.env.setdefault(key, value)
         return resp
 
     def _make_response(self, invocation: Invocation) -> Response:
@@ -335,7 +342,22 @@ class CmdMox:
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
         """Record passthrough intent and return instructions for the shim."""
-        env_overrides = self._apply_expectation_env(double, invocation)
+        expectation_env = double.expectation.env or {}
+        overrides = dict(expectation_env)
+        if overrides:
+            conflicts = {
+                key: invocation.env[key]
+                for key, value in overrides.items()
+                if key in invocation.env and invocation.env[key] != value
+            }
+            if conflicts:
+                conflict_list = ", ".join(f"{k}={v!r}" for k, v in conflicts.items())
+                msg = (
+                    f"Invocation for {invocation.command!r} provided conflicting "
+                    f"environment values: {conflict_list}"
+                )
+                raise UnexpectedCommandError(msg)
+            invocation.env.update(overrides)
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
@@ -344,7 +366,7 @@ class CmdMox:
             invocation,
             lookup_path,
             self._runner.timeout,
-            extra_env=env_overrides,
+            extra_env=overrides or None,
         )
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:

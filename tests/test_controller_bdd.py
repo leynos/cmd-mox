@@ -681,6 +681,15 @@ def test_environment_injection() -> None:
 
 
 @scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "passthrough spy merges expectation environment",
+)
+def test_passthrough_spy_merges_expectation_env() -> None:
+    """Passthrough spies merge expectation and invocation environments."""
+    pass
+
+
+@scenario(
     str(FEATURES_DIR / "controller.feature"), "passthrough spy executes real command"
 )
 def test_passthrough_spy() -> None:
@@ -735,7 +744,15 @@ def run_command_args_stdin_env(
     val: str,
 ) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
     """Run *cmd* with arguments, stdin, and an environment variable."""
-    params = CommandExecution(cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val)
+    resolved_args = "" if args == "<empty>" else args
+    resolved_stdin = "" if stdin == "<empty>" else stdin
+    params = CommandExecution(
+        cmd=cmd,
+        args=resolved_args,
+        stdin=resolved_stdin,
+        env_var=var,
+        env_val=val,
+    )
     return execute_command_with_details(mox, params)
 
 
@@ -761,7 +778,15 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
     val: str,
 ) -> None:
     """Validate journal entry records invocation details."""
-    expectation = JournalEntryExpectation(cmd, args, stdin, var, val)
+    resolved_args = "" if args == "<empty>" else args
+    resolved_stdin = "" if stdin == "<empty>" else stdin
+    expectation = JournalEntryExpectation(
+        cmd,
+        resolved_args,
+        resolved_stdin,
+        var,
+        val,
+    )
     _validate_journal_entry_details(mox, expectation)
 
 
