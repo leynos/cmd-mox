@@ -963,6 +963,8 @@ implementation leverages the IPC architecture in a unique way:
 4. When the executable is found, the shim runs it with the recorded arguments
    and `stdin`, merging the expectation environment with the original
    invocation environment so nested commands continue to route through CmdMox.
+   Expectation variables win on key conflicts to ensure overrides apply even
+   when the caller already defines the same environment variable.
 
 5. The shim sends a follow-up `PassthroughResult` message containing the real
    command's `stdout`, `stderr`, and `exit_code` to the server.

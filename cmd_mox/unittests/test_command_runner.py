@@ -59,10 +59,10 @@ def runner() -> cabc.Iterator[CommandRunner]:
     env_mgr.__exit__(None, None, None)
 
 
-def test_invocation_env_overrides_expectation_env(
+def test_extra_env_overrides_invocation_env(
     runner: CommandRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Invocation environment should take precedence over expectation env."""
+    """Extra environment variables should override invocation values."""
     captured: dict[str, str] = {}
 
     def fake_run(
@@ -76,7 +76,7 @@ def test_invocation_env_overrides_expectation_env(
 
     invocation = Invocation(command="echo", args=[], stdin="", env={"VAR": "inv"})
     runner.run(invocation, {"VAR": "expect"})
-    assert captured["VAR"] == "inv"
+    assert captured["VAR"] == "expect"
 
 
 def test_fallback_to_system_path(

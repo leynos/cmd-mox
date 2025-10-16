@@ -248,7 +248,8 @@ few common ones are:
 - `with_env(mapping)` – inject additional environment variables into the
   invocation. The mapping is merged into the recorded `Invocation.env`, applied
   when custom handlers or canned responses run, and does not mutate the test
-  process's `os.environ`.
+  process's `os.environ`. Conflicting keys override the caller-provided
+  environment so passthrough commands honour the injected values.
 - `returns(stdout="", stderr="", exit_code=0)` – static response using text
   values; CmdMox operates in text mode—pass `str` (bytes are not supported).
   Note: For binary payloads, prefer `passthrough()` or encode/decode at the

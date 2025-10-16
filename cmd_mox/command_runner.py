@@ -30,8 +30,8 @@ class CommandRunner:
     def run(self, invocation: Invocation, extra_env: dict[str, str]) -> Response:
         """Execute ``invocation`` with environment overrides.
 
-        ``extra_env`` values override the runner's original environment, while
-        any keys in ``invocation.env`` take precedence over both. The returned
+        ``extra_env`` values override both the runner's original environment and
+        any conflicting keys supplied by ``invocation.env``. The returned
         :class:`Response` includes the applied overrides in ``Response.env``.
 
         Common failures follow POSIX-like shell conventions:
@@ -114,8 +114,8 @@ def resolve_command_with_override(
 def prepare_environment(
     original_path: str, extra_env: dict[str, str], invocation_env: dict[str, str]
 ) -> dict[str, str]:
-    """Merge original PATH, extra env overrides, and invocation env."""
-    return {"PATH": original_path} | extra_env | invocation_env
+    """Merge original PATH, invocation env, and extra env overrides."""
+    return {"PATH": original_path} | invocation_env | extra_env
 
 
 def execute_command(
