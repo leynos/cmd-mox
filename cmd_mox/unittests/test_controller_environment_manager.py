@@ -29,14 +29,20 @@ def test_cmdmox_replay_fails_when_attr_missing(
     mox.__exit__(None, None, None)
 
 
-def test_require_env_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_require_env_attrs reports missing EnvironmentManager attributes."""
+def test_cmdmox_replay_reports_all_missing_attrs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replay surfaces every missing EnvironmentManager attribute."""
     mox = CmdMox()
+    mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
+
     monkeypatch.setattr(mox.environment, "shim_dir", None)
     monkeypatch.setattr(mox.environment, "socket_path", None)
     with pytest.raises(MissingEnvironmentError, match="shim_dir, socket_path"):
-        mox._require_env_attrs("shim_dir", "socket_path")
+        mox.replay()
+
+    # Use the public context-manager API to restore PATH and other state.
     mox.__exit__(None, None, None)
 
 
@@ -46,9 +52,10 @@ def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
         verify_on_exit=False
     )  # Disable auto-verify (normally called by __exit__) to avoid double error
     mox.stub("foo").returns(stdout="bar")
-    mox.__enter__()
+    mox.__enter__()  # Manual context entry keeps the cleanup path explicit.
     mox.replay()
 
+    # Monkeypatch after entering the context but before verify() runs.
     monkeypatch.setattr(mox.environment, "shim_dir", None)
     monkeypatch.setattr(mox.environment, "socket_path", None)
     with pytest.raises(MissingEnvironmentError, match=r"shim_dir.*socket_path"):
