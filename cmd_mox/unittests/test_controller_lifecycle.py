@@ -19,7 +19,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
 def test_cmdmox_replay_verify_out_of_order(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
-    """Calling replay() or verify() out of order should raise RuntimeError."""
+    """Calling replay() or verify() out of order should raise LifecycleError."""
     mox = CmdMox()
     with pytest.raises(LifecycleError):
         mox.verify()

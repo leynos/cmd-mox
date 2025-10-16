@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from cmd_mox.controller import CmdMox
@@ -13,20 +10,17 @@ from cmd_mox.errors import MissingEnvironmentError
 pytestmark = pytest.mark.requires_unix_sockets
 
 
-def test_cmdmox_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replay fails when environment attributes are missing."""
+@pytest.mark.parametrize("attr_name", ["shim_dir", "socket_path"])
+def test_cmdmox_replay_fails_when_attr_missing(
+    monkeypatch: pytest.MonkeyPatch, attr_name: str
+) -> None:
+    """Replay fails when the specified environment attribute is missing."""
     mox = CmdMox()
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
 
-    monkeypatch.setattr(mox.environment, "shim_dir", None)
-    with pytest.raises(MissingEnvironmentError, match="shim_dir"):
-        mox.replay()
-
-    # Restore shim_dir and remove socket_path
-    monkeypatch.setattr(mox.environment, "shim_dir", Path(tempfile.gettempdir()))
-    monkeypatch.setattr(mox.environment, "socket_path", None)
-    with pytest.raises(MissingEnvironmentError, match="socket_path"):
+    monkeypatch.setattr(mox.environment, attr_name, None)
+    with pytest.raises(MissingEnvironmentError, match=attr_name):
         mox.replay()
 
     # Use the public context-manager API to restore PATH and other state.
@@ -48,7 +42,9 @@ def test_require_env_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     """verify() fails when environment attributes are missing."""
-    mox = CmdMox(verify_on_exit=False)  # Disable auto-verify to avoid double error
+    mox = CmdMox(
+        verify_on_exit=False
+    )  # Disable auto-verify (normally called by __exit__) to avoid double error
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
     mox.replay()
