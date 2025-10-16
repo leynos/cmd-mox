@@ -273,10 +273,14 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _invoke_handler(
+    def _apply_expectation_env(
         self, double: CommandDouble, invocation: Invocation
-    ) -> Response:
-        """Run ``double``'s handler within its expectation environment."""
+    ) -> dict[str, str]:
+        """Validate and apply expectation environment to invocation.
+
+        Returns the environment overrides that were applied. Raises
+        UnexpectedCommandError if conflicts are detected.
+        """
         expectation_env = double.expectation.env or {}
         overrides = dict(expectation_env)
         if overrides:
@@ -293,22 +297,40 @@ class CmdMox:
                 )
                 raise UnexpectedCommandError(msg)
             invocation.env.update(overrides)
+        return overrides
 
+    def _execute_handler(
+        self,
+        double: CommandDouble,
+        invocation: Invocation,
+        overrides: dict[str, str],
+    ) -> Response:
+        """Execute the handler with the appropriate environment context."""
         if double.handler is None:
             base = double.response
-            resp = dc.replace(base, env=dict(base.env))
-        elif overrides:
-            with temporary_env(overrides):
-                resp = double.handler(invocation)
-        else:
-            resp = double.handler(invocation)
-
+            return dc.replace(base, env=dict(base.env))
         if overrides:
-            # Ensure the shim observes the injected variables even when the handler
-            # returns a cached Response instance, without clobbering handler-set
-            # overrides.
-            for key, value in overrides.items():
-                resp.env.setdefault(key, value)
+            with temporary_env(overrides):
+                return double.handler(invocation)
+        return double.handler(invocation)
+
+    def _finalize_response_env(self, resp: Response, overrides: dict[str, str]) -> None:
+        """Ensure response environment includes all expectation overrides."""
+        if not overrides:
+            return
+        # Ensure the shim observes the injected variables even when the handler
+        # returns a cached Response instance, without clobbering handler-set
+        # overrides.
+        for key, value in overrides.items():
+            resp.env.setdefault(key, value)
+
+    def _invoke_handler(
+        self, double: CommandDouble, invocation: Invocation
+    ) -> Response:
+        """Run ``double``'s handler within its expectation environment."""
+        overrides = self._apply_expectation_env(double, invocation)
+        resp = self._execute_handler(double, invocation, overrides)
+        self._finalize_response_env(resp, overrides)
         return resp
 
     def _make_response(self, invocation: Invocation) -> Response:
