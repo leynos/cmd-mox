@@ -43,10 +43,31 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
     assert coordinator.has_pending(invocation.invocation_id or "")
 
 
-def test_prepare_request_merges_extra_env() -> None:
-    """Extra env should extend the expectation mapping without replacing it."""
+@pytest.mark.parametrize(
+    "initial_env,extra_env,expected_merged",
+    [
+        pytest.param(
+            {"ALPHA": "1"},
+            {"BETA": "2"},
+            {"ALPHA": "1", "BETA": "2"},
+            id="merges_extra_env",
+        ),
+        pytest.param(
+            {"SHARED": "expected"},
+            {"SHARED": "override"},
+            {"SHARED": "override"},
+            id="extra_env_overrides_keys",
+        ),
+    ],
+)
+def test_prepare_request_extra_env_behavior(
+    initial_env: dict[str, str],
+    extra_env: dict[str, str],
+    expected_merged: dict[str, str],
+) -> None:
+    """Extra env should extend and override expectation env as needed."""
     coordinator = PassthroughCoordinator()
-    double = t.cast("CommandDouble", _FakeDouble({"ALPHA": "1"}))
+    double = t.cast("CommandDouble", _FakeDouble(initial_env))
     invocation = _make_invocation()
 
     response = coordinator.prepare_request(
@@ -54,31 +75,12 @@ def test_prepare_request_merges_extra_env() -> None:
         invocation,
         "/bin",
         timeout=1.0,
-        extra_env={"BETA": "2"},
+        extra_env=extra_env,
     )
 
     assert response.passthrough is not None
-    assert response.passthrough.extra_env == {"ALPHA": "1", "BETA": "2"}
-    assert response.env == {"ALPHA": "1", "BETA": "2"}
-
-
-def test_prepare_request_extra_env_overrides_keys() -> None:
-    """Extra env should override expectation values when keys overlap."""
-    coordinator = PassthroughCoordinator()
-    double = t.cast("CommandDouble", _FakeDouble({"SHARED": "expected"}))
-    invocation = _make_invocation()
-
-    response = coordinator.prepare_request(
-        double,
-        invocation,
-        "/bin",
-        timeout=1.0,
-        extra_env={"SHARED": "override"},
-    )
-
-    assert response.passthrough is not None
-    assert response.passthrough.extra_env == {"SHARED": "override"}
-    assert response.env == {"SHARED": "override"}
+    assert response.passthrough.extra_env == expected_merged
+    assert response.env == expected_merged
 
 
 def test_finalize_result_returns_response_and_clears(
