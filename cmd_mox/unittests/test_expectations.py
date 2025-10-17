@@ -103,6 +103,27 @@ def test_with_env_injection(
     assert result.stdout.strip() == "WORLD"
 
 
+def test_with_env_rejects_non_string_keys() -> None:
+    """with_env() should reject non-string keys and values."""
+    expectation = Expectation("cmd")
+    with pytest.raises(TypeError, match="name must be str"):
+        expectation.with_env({42: "value"})  # type: ignore[arg-type]
+
+
+def test_with_env_rejects_empty_key() -> None:
+    """with_env() should reject empty environment variable names."""
+    expectation = Expectation("cmd")
+    with pytest.raises(ValueError, match="cannot be empty"):
+        expectation.with_env({"": "value"})
+
+
+def test_with_env_rejects_non_string_values() -> None:
+    """with_env() should reject non-string values."""
+    expectation = Expectation("cmd")
+    with pytest.raises(TypeError, match="value must be str"):
+        expectation.with_env({"VAR": 7})  # type: ignore[arg-type]
+
+
 def test_any_order_expectations_allow_flexible_sequence(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:

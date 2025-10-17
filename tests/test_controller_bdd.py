@@ -178,6 +178,16 @@ def mock_with_args_any_order(mox: CmdMox, cmd: str, args: str, text: str) -> Non
     mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text).any_order()
 
 
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked with args "{args}" returning "{text}"'
+    )
+)
+def mock_with_args_default_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
+    """Configure a mock with arguments using default ordering."""
+    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text)
+
+
 @given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))
 def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     """Stub command that outputs an injected env variable."""
@@ -186,6 +196,16 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
         return (os.environ.get(var, ""), "", 0)
 
     mox.stub(cmd).with_env({var: val}).runs(handler)
+
+
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked with env var "{var}"="{val}" returning "{text}"'
+    )
+)
+def mock_with_env_returns(mox: CmdMox, cmd: str, var: str, val: str, text: str) -> None:
+    """Mock command returning a canned response with injected environment."""
+    mox.mock(cmd).with_env({var: val}).returns(stdout=text)
 
 
 @given(parsers.cfparse('the command "{cmd}" seeds shim env var "{var}"="{val}"'))
@@ -496,6 +516,14 @@ def verification_error_contains(
     assert text in str(verification_error)
 
 
+@then(parsers.cfparse('the verification error message should not contain "{text}"'))
+def verification_error_excludes(
+    verification_error: VerificationError, text: str
+) -> None:
+    """Assert the captured verification error omits *text*."""
+    assert text not in str(verification_error)
+
+
 @then(parsers.cfparse('the stderr should contain "{text}"'))
 def check_stderr(result: subprocess.CompletedProcess[str], text: str) -> None:
     """Ensure standard error output contains *text*."""
@@ -661,6 +689,15 @@ def test_environment_injection() -> None:
 
 
 @scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "passthrough spy merges expectation environment",
+)
+def test_passthrough_spy_merges_expectation_env() -> None:
+    """Passthrough spies merge expectation and invocation environments."""
+    pass
+
+
+@scenario(
     str(FEATURES_DIR / "controller.feature"), "passthrough spy executes real command"
 )
 def test_passthrough_spy() -> None:
@@ -699,6 +736,11 @@ def test_mock_matches_arguments_with_comparators() -> None:
     pass
 
 
+def _resolve_empty_placeholder(value: str) -> str:
+    """Resolve the special '<empty>' placeholder to an empty string."""
+    return "" if value == "<empty>" else value
+
+
 @when(
     parsers.cfparse(
         'I run the command "{cmd}" with arguments "{args}" '
@@ -715,7 +757,15 @@ def run_command_args_stdin_env(
     val: str,
 ) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
     """Run *cmd* with arguments, stdin, and an environment variable."""
-    params = CommandExecution(cmd=cmd, args=args, stdin=stdin, env_var=var, env_val=val)
+    resolved_args = _resolve_empty_placeholder(args)
+    resolved_stdin = _resolve_empty_placeholder(stdin)
+    params = CommandExecution(
+        cmd=cmd,
+        args=resolved_args,
+        stdin=resolved_stdin,
+        env_var=var,
+        env_val=val,
+    )
     return execute_command_with_details(mox, params)
 
 
@@ -741,7 +791,15 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
     val: str,
 ) -> None:
     """Validate journal entry records invocation details."""
-    expectation = JournalEntryExpectation(cmd, args, stdin, var, val)
+    resolved_args = _resolve_empty_placeholder(args)
+    resolved_stdin = _resolve_empty_placeholder(stdin)
+    expectation = JournalEntryExpectation(
+        cmd,
+        resolved_args,
+        resolved_stdin,
+        var,
+        val,
+    )
     _validate_journal_entry_details(mox, expectation)
 
 

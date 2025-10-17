@@ -963,6 +963,8 @@ implementation leverages the IPC architecture in a unique way:
 4. When the executable is found, the shim runs it with the recorded arguments
    and `stdin`, merging the expectation environment with the original
    invocation environment so nested commands continue to route through CmdMox.
+   Expectation variables win on key conflicts to ensure overrides apply even
+   when the caller already defines the same environment variable.
 
 5. The shim sends a follow-up `PassthroughResult` message containing the real
    command's `stdout`, `stderr`, and `exit_code` to the server.
@@ -1029,7 +1031,7 @@ sequenceDiagram
   Shim->>Server: send Invocation (kind=invocation, invocation_id)
   Server->>Controller: handle invocation
   alt controller selects passthrough
-    Controller->>Passthrough: prepare_request(double, invocation, lookup_path, timeout)
+    Controller->>Passthrough: prepare_request(double, invocation, PassthroughConfig)
     Passthrough-->>Controller: Response(passthrough=PassthroughRequest)
     Controller-->>Server: Response with passthrough
     Server-->>Shim: Response with PassthroughRequest
@@ -1389,10 +1391,19 @@ fixture falls back to `main` so the prefix becomes `cmdmox-main-{pid}-`.
 
 Expectation configuration now lives in a dedicated :class:`Expectation` object
 held by each `CommandDouble`. Builder methods such as `with_args()` and
-`with_stdin()` delegate to this object. During replay the IPC handler
-temporarily applies any `with_env()` variables using `temporary_env` so the
-mock's handler executes with the expected environment yet leaves the process
-state untouched.
+`with_stdin()` delegate to this object. During replay, the IPC handler merges
+any `with_env()` variables into the recorded :class:`Invocation` before
+executing the double. The overrides are applied with `temporary_env` so the
+handler or canned response sees them without mutating the process environment.
+Because these overrides are also copied onto `Invocation.env`, verification
+matches against the same environment observed at execution time. When the
+caller supplies conflicting values the handler now raises
+``UnexpectedCommandError`` so mismatched expectations fail immediately instead
+of silently replacing the provided values.
+
+`Expectation.with_env()` also validates that keys and values are non-empty
+strings. This catches typos and accidental `None` values during test
+configuration rather than deep within the replay loop.
 
 Verification is split into focused components. `UnexpectedCommandVerifier`
 checks that every journal entry matches a registered expectation.
