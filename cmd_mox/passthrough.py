@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import threading
 import time
 import typing as t
@@ -11,6 +12,15 @@ from .ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 
 if t.TYPE_CHECKING:
     from .test_doubles import CommandDouble
+
+
+@dc.dataclass
+class PassthroughConfig:
+    """Configuration for passthrough request preparation."""
+
+    lookup_path: str
+    timeout: float
+    extra_env: dict[str, str] | None = None
 
 
 class PassthroughCoordinator:
@@ -41,10 +51,7 @@ class PassthroughCoordinator:
         self,
         double: CommandDouble,
         invocation: Invocation,
-        lookup_path: str,
-        timeout: float,
-        *,
-        extra_env: t.Mapping[str, str] | None = None,
+        config: PassthroughConfig,
     ) -> Response:
         """Record passthrough intent and return instructions for shim."""
         invocation_id = invocation.invocation_id or uuid.uuid4().hex
@@ -66,17 +73,17 @@ class PassthroughCoordinator:
             self._pending[invocation_id] = (
                 double,
                 stored_invocation,
-                self._expiry_deadline(timeout),
+                self._expiry_deadline(config.timeout),
             )
 
         env = dict(double.expectation.env)
-        if extra_env:
-            env.update(extra_env)
+        if config.extra_env:
+            env.update(config.extra_env)
         passthrough = PassthroughRequest(
             invocation_id=invocation_id,
-            lookup_path=lookup_path,
+            lookup_path=config.lookup_path,
             extra_env=dict(env),
-            timeout=timeout,
+            timeout=config.timeout,
         )
         return Response(env=dict(env), passthrough=passthrough)
 

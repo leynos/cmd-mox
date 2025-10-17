@@ -7,7 +7,7 @@ import typing as t
 import pytest
 
 from cmd_mox.ipc import Invocation, PassthroughResult
-from cmd_mox.passthrough import PassthroughCoordinator
+from cmd_mox.passthrough import PassthroughConfig, PassthroughCoordinator
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.test_doubles import CommandDouble
@@ -33,7 +33,8 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
     double = t.cast("CommandDouble", _FakeDouble({"PATH": "/usr/bin"}))
     invocation = _make_invocation()
 
-    response = coordinator.prepare_request(double, invocation, "/usr/bin", timeout=2.0)
+    config = PassthroughConfig(lookup_path="/usr/bin", timeout=2.0)
+    response = coordinator.prepare_request(double, invocation, config)
 
     assert response.passthrough is not None
     assert response.passthrough.lookup_path == "/usr/bin"
@@ -70,13 +71,12 @@ def test_prepare_request_extra_env_behavior(
     double = t.cast("CommandDouble", _FakeDouble(initial_env))
     invocation = _make_invocation()
 
-    response = coordinator.prepare_request(
-        double,
-        invocation,
-        "/bin",
+    config = PassthroughConfig(
+        lookup_path="/bin",
         timeout=1.0,
         extra_env=extra_env,
     )
+    response = coordinator.prepare_request(double, invocation, config)
 
     assert response.passthrough is not None
     assert response.passthrough.extra_env == expected_merged
@@ -89,7 +89,8 @@ def test_finalize_result_returns_response_and_clears() -> None:
     double = t.cast("CommandDouble", _FakeDouble({"EXTRA": "1"}))
     invocation = _make_invocation("tool")
     invocation.env.update({"EXTRA": "1"})
-    response = coordinator.prepare_request(double, invocation, "/opt/bin", timeout=1.0)
+    config = PassthroughConfig(lookup_path="/opt/bin", timeout=1.0)
+    response = coordinator.prepare_request(double, invocation, config)
     directive = response.passthrough
     assert directive is not None
 
@@ -139,7 +140,8 @@ def test_expired_requests_are_pruned(monkeypatch: pytest.MonkeyPatch) -> None:
     coordinator = PassthroughCoordinator(cleanup_ttl=5.0)
     double = t.cast("CommandDouble", _FakeDouble({}))
     invocation = _make_invocation("slow")
-    directive = coordinator.prepare_request(double, invocation, "/bin", timeout=1.0)
+    config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
+    directive = coordinator.prepare_request(double, invocation, config)
     assert directive.passthrough is not None
     pending_id = directive.passthrough.invocation_id
     assert coordinator.has_pending(pending_id)

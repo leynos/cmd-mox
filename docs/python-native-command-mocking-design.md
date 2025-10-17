@@ -1031,7 +1031,7 @@ sequenceDiagram
   Shim->>Server: send Invocation (kind=invocation, invocation_id)
   Server->>Controller: handle invocation
   alt controller selects passthrough
-    Controller->>Passthrough: prepare_request(double, invocation, lookup_path, timeout, extra_env)
+    Controller->>Passthrough: prepare_request(double, invocation, PassthroughConfig)
     Passthrough-->>Controller: Response(passthrough=PassthroughRequest)
     Controller-->>Server: Response with passthrough
     Server-->>Shim: Response with PassthroughRequest

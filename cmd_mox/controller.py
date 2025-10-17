@@ -14,7 +14,7 @@ from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError, UnexpectedCommandError
 from .ipc import CallbackIPCServer, Invocation, PassthroughResult, Response
-from .passthrough import PassthroughCoordinator
+from .passthrough import PassthroughConfig, PassthroughCoordinator
 from .shimgen import create_shim_symlinks
 from .test_doubles import CommandDouble, DoubleKind
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
@@ -380,12 +380,15 @@ class CmdMox:
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
+        config = PassthroughConfig(
+            lookup_path=lookup_path,
+            timeout=self._runner.timeout,
+            extra_env=overrides or None,
+        )
         return self._passthrough_coordinator.prepare_request(
             double,
             invocation,
-            lookup_path,
-            self._runner.timeout,
-            extra_env=overrides or None,
+            config,
         )
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:
