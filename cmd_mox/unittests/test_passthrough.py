@@ -44,7 +44,7 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.parametrize(
-    "initial_env,extra_env,expected_merged",
+    ("initial_env", "extra_env", "expected_merged"),
     [
         pytest.param(
             {"ALPHA": "1"},
