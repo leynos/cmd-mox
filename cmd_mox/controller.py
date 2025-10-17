@@ -310,7 +310,7 @@ class CmdMox:
     def _apply_expectation_env(
         self, double: CommandDouble, invocation: Invocation
     ) -> dict[str, str]:
-        """Apply expectation environment to invocation and return overrides.
+        """Validate and apply expectation environment to invocation.
 
         Returns
         -------
