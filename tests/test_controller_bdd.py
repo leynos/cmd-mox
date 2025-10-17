@@ -184,7 +184,7 @@ def mock_with_args_any_order(mox: CmdMox, cmd: str, args: str, text: str) -> Non
     )
 )
 def mock_with_args_default_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
-    """Configure an unordered mock with arguments and default ordering."""
+    """Configure a mock with arguments using default ordering."""
     mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text)
 
 
