@@ -156,9 +156,9 @@
   - [x] `.with_env()` applies mock-specific env before executing the handler or
     canned response
 
-- [ ] **Concurrency Support**
+- [x] **Concurrency Support**
 
-  - [ ] Safe parallel use: unique per-test temp dirs, socket names, no shared
+  - [x] Safe parallel use: unique per-test temp dirs, socket names, no shared
     files
 
 - [ ] **Robust Cleanup**

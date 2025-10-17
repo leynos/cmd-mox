@@ -26,9 +26,6 @@ from cmd_mox.environment import (
 
 CleanupCallable = t.Callable[[list[envmod.CleanupError]], None]
 
-if t.TYPE_CHECKING:  # pragma: no cover - imported for type hints
-    from pathlib import Path
-
 
 def test_environment_manager_modifies_and_restores() -> None:
     """Path and env variables should be modified and later restored."""
@@ -42,6 +39,24 @@ def test_environment_manager_modifies_and_restores() -> None:
     assert os.environ == original_env
     assert env.shim_dir is not None
     assert not env.shim_dir.exists()
+
+
+def test_environment_manager_uses_unique_resources() -> None:
+    """Each EnvironmentManager instance should use its own directory and socket."""
+    with EnvironmentManager() as first:
+        first_dir = Path(first.shim_dir)
+        first_socket = Path(first.socket_path)
+        assert first_socket.parent == first_dir
+
+    with EnvironmentManager() as second:
+        second_dir = Path(second.shim_dir)
+        second_socket = Path(second.socket_path)
+        assert second_socket.parent == second_dir
+
+    assert first_dir != second_dir
+    assert first_socket != second_socket
+    assert not first_dir.exists()
+    assert not second_dir.exists()
 
 
 def test_export_ipc_environment_sets_timeout() -> None:

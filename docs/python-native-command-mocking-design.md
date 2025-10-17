@@ -1156,6 +1156,14 @@ workers. Each test runs in a completely isolated `CmdMox` environment,
 eliminating the possibility of cross-test interference and ensuring correctness
 and reliability in parallel test runs.
 
+The implementation now enforces this isolation with automated tests. Unit tests
+exercise the `EnvironmentManager` to confirm every context manager invocation
+produces a distinct shim directory and socket path. Behavioural tests execute a
+generated suite under ``pytest -n2`` to prove that separate workers never reuse
+paths and that cleanup removes the temporary directories after each test. These
+checks provide confidence that parallel execution cannot leak shims or socket
+files across worker boundaries.
+
 <!-- markdownlint-disable MD013 -->
 
 #### Table 2: Fluent API Method Reference
