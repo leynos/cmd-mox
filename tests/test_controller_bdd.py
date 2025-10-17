@@ -736,6 +736,11 @@ def test_mock_matches_arguments_with_comparators() -> None:
     pass
 
 
+def _resolve_empty_placeholder(value: str) -> str:
+    """Resolve the special '<empty>' placeholder to an empty string."""
+    return "" if value == "<empty>" else value
+
+
 @when(
     parsers.cfparse(
         'I run the command "{cmd}" with arguments "{args}" '
@@ -752,8 +757,8 @@ def run_command_args_stdin_env(
     val: str,
 ) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
     """Run *cmd* with arguments, stdin, and an environment variable."""
-    resolved_args = "" if args == "<empty>" else args
-    resolved_stdin = "" if stdin == "<empty>" else stdin
+    resolved_args = _resolve_empty_placeholder(args)
+    resolved_stdin = _resolve_empty_placeholder(stdin)
     params = CommandExecution(
         cmd=cmd,
         args=resolved_args,
@@ -786,8 +791,8 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
     val: str,
 ) -> None:
     """Validate journal entry records invocation details."""
-    resolved_args = "" if args == "<empty>" else args
-    resolved_stdin = "" if stdin == "<empty>" else stdin
+    resolved_args = _resolve_empty_placeholder(args)
+    resolved_stdin = _resolve_empty_placeholder(stdin)
     expectation = JournalEntryExpectation(
         cmd,
         resolved_args,
