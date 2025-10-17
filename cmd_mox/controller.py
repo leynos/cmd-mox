@@ -320,8 +320,7 @@ class CmdMox:
         Raises
         ------
         UnexpectedCommandError
-            When the expectation environment conflicts with invocation
-            environment.
+            When the expectation environment conflicts with invocation environment.
         """
         expectation_env = double.expectation.env or {}
         overrides = dict(expectation_env)
