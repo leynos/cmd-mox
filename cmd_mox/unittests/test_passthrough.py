@@ -83,9 +83,7 @@ def test_prepare_request_extra_env_behavior(
     assert response.env == expected_merged
 
 
-def test_finalize_result_returns_response_and_clears(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_finalize_result_returns_response_and_clears() -> None:
     """Finalisation should return stored data and clear pending state."""
     coordinator = PassthroughCoordinator()
     double = t.cast("CommandDouble", _FakeDouble({"EXTRA": "1"}))
