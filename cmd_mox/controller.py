@@ -273,32 +273,6 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _apply_expectation_env(
-        self, double: CommandDouble, invocation: Invocation
-    ) -> dict[str, str]:
-        """Validate and apply expectation environment to invocation.
-
-        Returns the environment overrides that were applied. Raises
-        UnexpectedCommandError if conflicts are detected.
-        """
-        expectation_env = double.expectation.env or {}
-        overrides = dict(expectation_env)
-        if overrides:
-            conflicts = {
-                key: invocation.env[key]
-                for key, value in overrides.items()
-                if key in invocation.env and invocation.env[key] != value
-            }
-            if conflicts:
-                conflict_list = ", ".join(f"{k}={v!r}" for k, v in conflicts.items())
-                msg = (
-                    f"Invocation for {invocation.command!r} provided conflicting "
-                    f"environment values: {conflict_list}"
-                )
-                raise UnexpectedCommandError(msg)
-            invocation.env.update(overrides)
-        return overrides
-
     def _execute_handler(
         self,
         double: CommandDouble,
@@ -333,6 +307,45 @@ class CmdMox:
         self._finalize_response_env(resp, overrides)
         return resp
 
+    def _apply_expectation_env(
+        self, double: CommandDouble, invocation: Invocation
+    ) -> dict[str, str]:
+        """Apply expectation environment to invocation and return overrides.
+
+        Returns
+        -------
+        dict[str, str]
+            The environment overrides that were applied.
+
+        Raises
+        ------
+        UnexpectedCommandError
+            When the expectation environment conflicts with invocation
+            environment.
+        """
+        expectation_env = double.expectation.env or {}
+        overrides = dict(expectation_env)
+
+        if not overrides:
+            return overrides
+
+        conflicts = {
+            key: invocation.env[key]
+            for key, value in overrides.items()
+            if key in invocation.env and invocation.env[key] != value
+        }
+
+        if conflicts:
+            conflict_list = ", ".join(f"{k}={v!r}" for k, v in conflicts.items())
+            msg = (
+                f"Invocation for {invocation.command!r} provided conflicting "
+                f"environment values: {conflict_list}"
+            )
+            raise UnexpectedCommandError(msg)
+
+        invocation.env.update(overrides)
+        return overrides
+
     def _make_response(self, invocation: Invocation) -> Response:
         double = self._doubles.get(invocation.command)
         if double is None:
@@ -364,22 +377,7 @@ class CmdMox:
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
         """Record passthrough intent and return instructions for the shim."""
-        expectation_env = double.expectation.env or {}
-        overrides = dict(expectation_env)
-        if overrides:
-            conflicts = {
-                key: invocation.env[key]
-                for key, value in overrides.items()
-                if key in invocation.env and invocation.env[key] != value
-            }
-            if conflicts:
-                conflict_list = ", ".join(f"{k}={v!r}" for k, v in conflicts.items())
-                msg = (
-                    f"Invocation for {invocation.command!r} provided conflicting "
-                    f"environment values: {conflict_list}"
-                )
-                raise UnexpectedCommandError(msg)
-            invocation.env.update(overrides)
+        overrides = self._apply_expectation_env(double, invocation)
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
