@@ -11,6 +11,7 @@ import pytest
 from cmd_mox.controller import Phase
 from cmd_mox.unittests import pytest_plugin_module_utils as plugin_utils
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
+from tests.helpers.pytest_plugin import load_parallel_suite, read_parallel_records
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -18,6 +19,7 @@ LifecyclePhase = plugin_utils.LifecyclePhase
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
+    from pathlib import Path
 
     from cmd_mox.controller import CmdMox
 
@@ -105,6 +107,34 @@ def _run_prefix_scenario(
     pytester.makepyfile(test_module)
     result = pytester.runpytest("-s")
     result.assert_outcomes(passed=1)
+
+
+def test_parallel_workers_use_isolated_directories(
+    pytester: pytest.Pytester, parallel_artifact_dir: Path
+) -> None:
+    """Parallel workers should each receive isolated shim directories and sockets."""
+    pytest.importorskip("xdist")
+
+    pytester.makepyfile(load_parallel_suite())
+    result = pytester.runpytest("-n2", "-s")
+    result.assert_outcomes(passed=2)
+
+    records = read_parallel_records(parallel_artifact_dir)
+    assert len(records) == 2
+    assert {record.label for record in records} == {"alpha", "beta"}
+
+    shim_dirs = {record.shim_dir for record in records}
+    sockets = {record.socket for record in records}
+    workers = {record.worker for record in records}
+
+    assert len(shim_dirs) == len(records)
+    assert len(sockets) == len(records)
+    assert len(workers) == len(records)
+
+    for record in records:
+        assert record.socket.parent == record.shim_dir
+        assert not record.shim_dir.exists()
+        assert not record.socket.exists()
 
 
 def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> None:

@@ -70,3 +70,14 @@ def reset_environment_manager_state() -> t.Generator[None, None, None]:
     cmd_mox.environment.EnvironmentManager.reset_active_manager()
     yield
     cmd_mox.environment.EnvironmentManager.reset_active_manager()
+
+
+PARALLEL_ARTIFACT_ENV = "CMD_MOX_PARALLEL_ARTIFACT_DIR"
+
+
+@pytest.fixture
+def parallel_artifact_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Provide a temporary directory for recording parallel test metadata."""
+    artifact_dir = tmp_path / "parallel-artifacts"
+    monkeypatch.setenv(PARALLEL_ARTIFACT_ENV, str(artifact_dir))
+    return artifact_dir
