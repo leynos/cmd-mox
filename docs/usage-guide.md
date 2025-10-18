@@ -162,8 +162,8 @@ workers never clash on shared filesystems. When the fixture tears down the
 environment manager removes the directory, ensuring sockets and shims do not
 leak between tests.
 
-To verify your suite behaves correctly in parallel, run pytest with multiple
-workers:
+To verify that the test suite behaves correctly in parallel, run pytest with
+multiple workers:
 
 ```bash
 pytest -n auto
@@ -171,9 +171,10 @@ pytest -n auto
 
 Each test continues to receive an independent ``cmd_mox`` fixture; the
 environmental changes are scoped to the worker process, so tests cannot observe
-one another's shims or sockets. When constructing controllers manually outside
-pytest, follow the same pattern—instantiate a new ``cmd_mox.CmdMox`` per test
-case so that every run receives its own environment manager.
+one another's shims or sockets. When controllers are constructed manually
+outside pytest, the same pattern should be followed—instantiate a new
+``cmd_mox.CmdMox`` per test case so that every run receives its own environment
+manager.
 
 ## Spies and passthrough mode
 

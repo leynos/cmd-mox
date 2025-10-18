@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses as dc
-import shutil
 import textwrap
 import typing as t
 
@@ -12,7 +11,7 @@ import pytest
 from cmd_mox.controller import Phase
 from cmd_mox.unittests import pytest_plugin_module_utils as plugin_utils
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
-from tests.helpers.pytest_plugin import PARALLEL_SUITE, read_parallel_records
+from tests.helpers.pytest_plugin import load_parallel_suite, read_parallel_records
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -20,6 +19,7 @@ LifecyclePhase = plugin_utils.LifecyclePhase
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
+    from pathlib import Path
 
     from cmd_mox.controller import CmdMox
 
@@ -109,18 +109,17 @@ def _run_prefix_scenario(
     result.assert_outcomes(passed=1)
 
 
-def test_parallel_workers_use_isolated_directories(pytester: pytest.Pytester) -> None:
+def test_parallel_workers_use_isolated_directories(
+    pytester: pytest.Pytester, parallel_artifact_dir: Path
+) -> None:
     """Parallel workers should each receive isolated shim directories and sockets."""
     pytest.importorskip("xdist")
-    artifact_dir = pytester.path / "artifacts"
-    if artifact_dir.exists():
-        shutil.rmtree(artifact_dir)
 
-    pytester.makepyfile(PARALLEL_SUITE)
+    pytester.makepyfile(load_parallel_suite())
     result = pytester.runpytest("-n2", "-s")
     result.assert_outcomes(passed=2)
 
-    records = read_parallel_records(artifact_dir)
+    records = read_parallel_records(parallel_artifact_dir)
     assert len(records) == 2
     assert {record.label for record in records} == {"alpha", "beta"}
 
@@ -136,8 +135,6 @@ def test_parallel_workers_use_isolated_directories(pytester: pytest.Pytester) ->
         assert record.socket.parent == record.shim_dir
         assert not record.shim_dir.exists()
         assert not record.socket.exists()
-
-    shutil.rmtree(artifact_dir)
 
 
 def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> None:

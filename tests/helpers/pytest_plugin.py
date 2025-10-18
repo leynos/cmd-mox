@@ -4,52 +4,14 @@ from __future__ import annotations
 
 import dataclasses as dc
 import json
-import textwrap
 from pathlib import Path
 
-PARALLEL_SUITE = textwrap.dedent(
-    """
-    import json
-    import os
-    import subprocess
-    from pathlib import Path
+PARALLEL_SUITE_PATH = Path(__file__).with_name("data") / "parallel_suite.py"
 
-    from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
-    pytest_plugins = ("cmd_mox.pytest_plugin",)
-
-    ARTIFACT_DIR = Path(__file__).with_name("artifacts")
-
-    def _record(cmd_mox, label: str) -> None:
-        ARTIFACT_DIR.mkdir(exist_ok=True)
-        shim_dir = Path(cmd_mox.environment.shim_dir)
-        socket_path = Path(cmd_mox.environment.socket_path)
-        payload = {
-            "label": label,
-            "shim_dir": str(shim_dir),
-            "socket": str(socket_path),
-            "worker": os.getenv("PYTEST_XDIST_WORKER", "main"),
-        }
-        artifact = ARTIFACT_DIR / f"{label}-{os.getpid()}-{payload['worker']}.json"
-        artifact.write_text(json.dumps(payload))
-        cmd_path = _shim_cmd_path(cmd_mox, label)
-        result = subprocess.run(
-            [str(cmd_path)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert result.stdout.strip() == label
-
-    def test_alpha(cmd_mox):
-        cmd_mox.stub("alpha").returns(stdout="alpha")
-        _record(cmd_mox, "alpha")
-
-    def test_beta(cmd_mox):
-        cmd_mox.stub("beta").returns(stdout="beta")
-        _record(cmd_mox, "beta")
-    """
-)
+def load_parallel_suite() -> str:
+    """Return the source for the parallel isolation pytest suite."""
+    return PARALLEL_SUITE_PATH.read_text()
 
 
 @dc.dataclass(slots=True)
@@ -78,4 +40,4 @@ def read_parallel_records(artifact_dir: Path) -> list[ParallelRecord]:
     return records
 
 
-__all__ = ["PARALLEL_SUITE", "ParallelRecord", "read_parallel_records"]
+__all__ = ["ParallelRecord", "load_parallel_suite", "read_parallel_records"]
