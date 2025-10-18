@@ -16,7 +16,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.controller import CmdMox
-from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX
+from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX, EnvironmentManager
 from cmd_mox.errors import (
     UnexpectedCommandError,
     UnfulfilledExpectationError,
@@ -43,6 +43,14 @@ _ERROR_TYPES: dict[str, type[VerificationError]] = {
     "UnfulfilledExpectationError": UnfulfilledExpectationError,
     "VerificationError": VerificationError,
 }
+
+
+class ReplayInterruptionState(t.TypedDict):
+    """Capture cleanup details after replay fails to start."""
+
+    shim_dir: Path
+    socket_path: Path
+    manager_active: EnvironmentManager | None
 
 
 @given("a CmdMox controller", target_fixture="mox")
@@ -73,6 +81,16 @@ def create_controller_with_limit_fails(size: int) -> None:
 def stub_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a stubbed command."""
     mox.stub(cmd).returns(stdout=text)
+
+
+@given("replay startup is interrupted by KeyboardInterrupt")
+def interrupt_replay_startup(monkeypatch: pytest.MonkeyPatch, mox: CmdMox) -> None:
+    """Simulate Ctrl+C during replay startup by raising ``KeyboardInterrupt``."""
+
+    def raise_interrupt() -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(mox, "_start_ipc_server", raise_interrupt)
 
 
 @given(
@@ -335,6 +353,32 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
     return stack
 
 
+@when(
+    "I replay the controller expecting an interrupt",
+    target_fixture="replay_interruption_state",
+)
+def replay_controller_interrupt(mox: CmdMox) -> ReplayInterruptionState:
+    """Run replay() and capture cleanup details when startup aborts."""
+    env = mox.environment
+    assert env is not None, "Replay environment was not initialised"
+
+    mox.__enter__()
+    assert env.shim_dir is not None, "Replay environment was not initialised"
+    assert env.socket_path is not None, "Replay environment was not initialised"
+    shim_dir = Path(env.shim_dir)
+    socket_path = Path(env.socket_path)
+    assert shim_dir.exists()
+
+    with pytest.raises(KeyboardInterrupt):
+        mox.replay()
+
+    return ReplayInterruptionState(
+        shim_dir=shim_dir,
+        socket_path=socket_path,
+        manager_active=EnvironmentManager.get_active_manager(),
+    )
+
+
 def _require_replay_shim_dir(mox: CmdMox) -> Path:
     """Return the shim directory when replay is active, asserting availability."""
     env = mox.environment
@@ -502,6 +546,19 @@ def check_output(result: subprocess.CompletedProcess[str], text: str) -> None:
     assert result.stdout.strip() == text
 
 
+@then("the shim directory should be cleaned up after interruption")
+def check_shim_dir_cleaned(replay_interruption_state: ReplayInterruptionState) -> None:
+    """Assert the temporary shim directory no longer exists."""
+    assert not replay_interruption_state["shim_dir"].exists()
+    assert replay_interruption_state["manager_active"] is None
+
+
+@then("the IPC socket should be cleaned up after interruption")
+def check_socket_cleaned(replay_interruption_state: ReplayInterruptionState) -> None:
+    """Assert the IPC socket path no longer exists."""
+    assert not replay_interruption_state["socket_path"].exists()
+
+
 @then(parsers.cfparse("the exit code should be {code:d}"))
 def check_exit_code(result: subprocess.CompletedProcess[str], code: int) -> None:
     """Assert the process exit code equals *code*."""
@@ -665,6 +722,12 @@ def test_times_alias_maps_to_times_called() -> None:
 @scenario(str(FEATURES_DIR / "controller.feature"), "context manager usage")
 def test_context_manager_usage() -> None:
     """CmdMox works within a ``with`` block."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "replay cleanup handles interrupts")
+def test_replay_cleanup_handles_interrupts() -> None:
+    """Replay interruption should tear down the environment."""
     pass
 
 

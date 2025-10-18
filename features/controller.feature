@@ -106,6 +106,13 @@ Feature: CmdMox basic functionality
     Then the output should be "hello"
     Then the journal should contain 1 invocation of "hi"
 
+  Scenario: replay cleanup handles interrupts
+    Given a CmdMox controller
+    And replay startup is interrupted by KeyboardInterrupt
+    When I replay the controller expecting an interrupt
+    Then the shim directory should be cleaned up after interruption
+    And the IPC socket should be cleaned up after interruption
+
   Scenario: stub runs dynamic handler
     Given a CmdMox controller
     And the command "dyn" is stubbed to run a handler

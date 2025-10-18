@@ -257,10 +257,13 @@ class CmdMox:
         self._check_replay_preconditions()
         try:
             self._start_ipc_server()
-            self._phase = Phase.REPLAY
-        except Exception:  # pragma: no cover - cleanup only
+        except BaseException:
+            # ``KeyboardInterrupt`` and friends should not leak shims or PATH
+            # mutations. Clean up before re-raising so the caller sees the
+            # original failure.
             self._cleanup_after_replay_error()
             raise
+        self._phase = Phase.REPLAY
 
     def verify(self) -> None:
         """Stop the server and finalise the verification phase."""
