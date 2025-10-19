@@ -151,6 +151,12 @@ with CmdMox() as mox:
     subprocess.run(["ls"], check=True)
 ```
 
+If replay aborts—whether because your code raised an exception or you hit
+Ctrl+C—`CmdMox` still tears down the environment before surfacing the original
+error. The controller catches interruptions during replay startup, stops the
+IPC server, removes the shim directory (and its socket), and restores `PATH`
+before re-raising so you never leak temporary artefacts between tests.
+
 ## Parallel execution and isolation
 
 CmdMox test runs are isolated even when executed in parallel with

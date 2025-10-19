@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from cmd_mox.controller import CmdMox, Phase
+from cmd_mox.environment import EnvironmentManager
 from cmd_mox.errors import LifecycleError
 
 pytestmark = pytest.mark.requires_unix_sockets
@@ -68,3 +69,32 @@ def test_context_manager_auto_verify(
 
     with pytest.raises(LifecycleError):
         mox.verify()
+
+
+def test_replay_cleans_up_on_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cleanup must run even when replay is interrupted by BaseException."""
+    mox = CmdMox()
+    env = mox.environment
+    assert env is not None
+
+    mox.__enter__()
+    assert env.shim_dir is not None
+    assert env.socket_path is not None
+    shim_dir = Path(env.shim_dir)
+    socket_path = Path(env.socket_path)
+    assert shim_dir.exists()
+
+    def raise_interrupt() -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(mox, "_start_ipc_server", raise_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        mox.replay()
+
+    assert EnvironmentManager.get_active_manager() is None
+    assert not shim_dir.exists()
+    assert not socket_path.exists()
+    assert not mox._entered

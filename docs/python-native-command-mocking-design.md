@@ -680,6 +680,15 @@ This rigorous management ensures that each test runs in a perfectly isolated
 environment and leaves no artifacts behind, a critical requirement for a
 reliable testing framework.
 
+`CmdMox` enforces this guarantee even when replay aborts unexpectedly. The
+controller treats any failure while starting the IPC server—including
+``KeyboardInterrupt`` and ``SystemExit``—as a signal to immediately invoke the
+environment manager's teardown routine before re-raising the error. Capturing
+``BaseException`` in :meth:`CmdMox.replay` ensures that shim directories,
+socket files, and `PATH` mutations are reversed deterministically so users
+never have to remember to manually call :meth:`CmdMox.__exit__` after an
+interrupt.
+
 ### 3.4 The Invocation Journal
 
 The Invocation Journal is a simple but crucial in-memory data structure within

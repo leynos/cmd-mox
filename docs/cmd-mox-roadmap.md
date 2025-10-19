@@ -161,9 +161,9 @@
   - [x] Safe parallel use: unique per-test temp dirs, socket names, no shared
     files
 
-- [ ] **Robust Cleanup**
+- [x] **Robust Cleanup**
 
-  - [ ] Always restore env and remove temp dirs/sockets, even on error/interrupt
+  - [x] Always restore env and remove temp dirs/sockets, even on error/interrupt
 
 ## **VIII. Documentation, Examples & Usability**
 
