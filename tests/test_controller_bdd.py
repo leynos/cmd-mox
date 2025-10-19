@@ -16,7 +16,11 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.controller import CmdMox
-from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX, EnvironmentManager
+from cmd_mox.environment import (
+    CMOX_IPC_SOCKET_ENV,
+    CMOX_REAL_COMMAND_ENV_PREFIX,
+    EnvironmentManager,
+)
 from cmd_mox.errors import (
     UnexpectedCommandError,
     UnfulfilledExpectationError,
@@ -51,6 +55,7 @@ class ReplayInterruptionState(t.TypedDict):
     shim_dir: Path
     socket_path: Path
     manager_active: EnvironmentManager | None
+    original_env: dict[str, str]
 
 
 @given("a CmdMox controller", target_fixture="mox")
@@ -362,6 +367,7 @@ def replay_controller_interrupt(mox: CmdMox) -> ReplayInterruptionState:
     env = mox.environment
     assert env is not None, "Replay environment was not initialised"
 
+    pre_env = os.environ.copy()
     mox.__enter__()
     assert env.shim_dir is not None, "Replay environment was not initialised"
     assert env.socket_path is not None, "Replay environment was not initialised"
@@ -376,6 +382,7 @@ def replay_controller_interrupt(mox: CmdMox) -> ReplayInterruptionState:
         shim_dir=shim_dir,
         socket_path=socket_path,
         manager_active=EnvironmentManager.get_active_manager(),
+        original_env=pre_env,
     )
 
 
@@ -557,6 +564,15 @@ def check_shim_dir_cleaned(replay_interruption_state: ReplayInterruptionState) -
 def check_socket_cleaned(replay_interruption_state: ReplayInterruptionState) -> None:
     """Assert the IPC socket path no longer exists."""
     assert not replay_interruption_state["socket_path"].exists()
+
+
+@then("the environment should be restored after interruption")
+def check_environment_restored(
+    replay_interruption_state: ReplayInterruptionState,
+) -> None:
+    """Assert process environment is restored after replay interruption."""
+    assert os.environ == replay_interruption_state["original_env"]
+    assert CMOX_IPC_SOCKET_ENV not in os.environ
 
 
 @then(parsers.cfparse("the exit code should be {code:d}"))

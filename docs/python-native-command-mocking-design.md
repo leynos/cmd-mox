@@ -676,6 +676,16 @@ only those variables that changed and removes any that were added. This
 approach avoids disrupting other threads that might rely on the environment
 remaining mostly stable.
 
+Even the setup path defends against leaks. If anything inside `__enter__`
+fails after the shim directory is created—be it an unexpected `OSError`, a
+`KeyboardInterrupt`, or an invalid timeout override—the manager now treats the
+partial setup the same way as a regular teardown. It restores the original
+environment snapshot, clears the active-manager thread-local, deletes the
+temporary directory (and socket) it created, and logs any cleanup issues
+without obscuring the original exception. This guarantees we never leave a
+mutated `PATH` or orphaned shim directory behind, regardless of how the
+context is exited.
+
 This rigorous management ensures that each test runs in a perfectly isolated
 environment and leaves no artifacts behind, a critical requirement for a
 reliable testing framework.

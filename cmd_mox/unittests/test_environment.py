@@ -142,6 +142,33 @@ def test_environment_manager_restores_on_exception() -> None:
     assert not holder["path"].exists()
 
 
+def test_environment_manager_cleans_up_when_enter_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Partial __enter__ failures restore the environment and delete shims."""
+    env = EnvironmentManager()
+    original_env = os.environ.copy()
+
+    class EnterBoomError(RuntimeError):
+        """Sentinel error raised to simulate a failing __enter__."""
+
+    def boom(*_args: object, **_kwargs: object) -> t.NoReturn:
+        raise EnterBoomError
+
+    monkeypatch.setattr(env, "export_ipc_environment", boom)
+
+    with pytest.raises(EnterBoomError):
+        env.__enter__()
+
+    assert os.environ == original_env
+    assert EnvironmentManager.get_active_manager() is None
+    assert env.original_environment == {}
+
+    assert env.shim_dir is not None
+    assert not Path(env.shim_dir).exists()
+    assert env.socket_path is not None
+
+
 def test_environment_manager_nested_raises() -> None:
     """Nesting EnvironmentManager should raise RuntimeError."""
     original_env = os.environ.copy()
