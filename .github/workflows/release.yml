@@ -46,7 +46,7 @@ jobs:
       - name: Upload wheels to release
         run: |
           set -eu
-          find dist/wheels-* -type f -name "*.whl" -print0 | \
+          find dist -type f -name "*.whl" -print0 | \
             xargs -0 -r gh release upload "${{ github.ref_name }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
