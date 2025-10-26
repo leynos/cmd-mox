@@ -30,10 +30,11 @@ settings for a single pytest run.
 
 ## Platform support
 
-CmdMox targets POSIX systems today. Windows remains unsupported, and attempting
-to use the fixture there will now skip the test automatically with a clear
-message. You can therefore declare the plug-in unconditionally in
-`pytest_plugins` without wrapping it in platform checks.
+CmdMox supports Linux, macOS and Windows. Shims are generated as POSIX symlinks
+on Unix-like systems and as `.cmd` launchers on Windows so that `CreateProcess`
+resolves them via `PATHEXT`. The batch launchers embed the active Python
+interpreter and forward all arguments to the shared `shim.py`, so no additional
+wrappers or entry points are required.
 
 When you need to make an explicit decision in a test module (for instance when
 using the context manager API), import the helper re-exported from the package:
@@ -48,7 +49,8 @@ skip_if_unsupported()
 only need to gate a code path, `cmd_mox.is_supported_platform()` returns a
 boolean instead. Advanced tests can override the detected platform by setting
 the `CMD_MOX_PLATFORM_OVERRIDE` environment variable, which is primarily useful
-for simulating Windows behaviour inside CI pipelines.
+for simulating alternative environments inside CI pipelines (for example to
+exercise Windows-specific shims from a Linux runner).
 
 The cmd-mox test suite also uses the `pytest.mark.requires_unix_sockets` marker
 for scenarios that need to bind a Unix domain socket. Marking these tests keeps

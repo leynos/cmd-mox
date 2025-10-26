@@ -61,6 +61,18 @@ def create_controller() -> CmdMox:
     return CmdMox()
 
 
+@given("windows shim launchers are enabled")
+def enable_windows_shims(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force shim generation to emit Windows batch launchers."""
+    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+
+
+@given(parsers.cfparse('the platform override is "{platform}"'))
+def set_platform_override(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
+    """Simulate running on an alternate platform such as Windows."""
+    monkeypatch.setenv("CMD_MOX_PLATFORM_OVERRIDE", platform)
+
+
 @given(
     parsers.cfparse("a CmdMox controller with max journal size {size:d}"),
     target_fixture="mox",
@@ -584,6 +596,15 @@ def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess
         )
     assert os.environ == original_env
     return result
+
+
+@then(parsers.cfparse('the shim for "{cmd}" should end with "{suffix}"'))
+def check_shim_suffix(mox: CmdMox, cmd: str, suffix: str) -> None:
+    """Ensure the generated shim filename ends with *suffix*."""
+    shim_dir = _require_replay_shim_dir(mox)
+    matches = sorted(shim_dir.glob(f"{cmd}*"))
+    assert matches, f"no shim generated for {cmd}"
+    assert matches[0].name.endswith(suffix)
 
 
 @then(parsers.cfparse('the output should be "{text}"'))

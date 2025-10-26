@@ -19,9 +19,7 @@ PLATFORM_OVERRIDE_ENV: t.Final[str] = "CMD_MOX_PLATFORM_OVERRIDE"
 # Each entry pairs the prefix (as reported by ``sys.platform``) with the
 # human-readable skip reason to surface to pytest users. Prefixes should match
 # the start of ``sys.platform`` (e.g. ``"win"`` for ``"win32"``).
-_UNSUPPORTED_PLATFORMS: t.Final[tuple[tuple[str, str], ...]] = (
-    ("win", "cmd-mox does not support Windows"),
-)
+_UNSUPPORTED_PLATFORMS: t.Final[tuple[tuple[str, str], ...]] = ()
 
 _PYTEST_REQUIRED_MESSAGE: t.Final[str] = (
     "pytest is required to automatically skip unsupported platforms. "
