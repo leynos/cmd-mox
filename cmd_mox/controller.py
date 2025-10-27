@@ -437,9 +437,16 @@ class CmdMox:
         """Prepare shims and launch the IPC server."""
         self.journal.clear()
         self._commands = self._registered_commands() | self._commands
-        create_shim_symlinks(self.environment.shim_dir, self._commands)
+        env = self.environment
+        if env is None or env.shim_dir is None or env.socket_path is None:
+            # ``_check_replay_preconditions`` should prevent this from
+            # happening, but guard explicitly so the type-checker understands
+            # that both attributes are always populated here.
+            raise MissingEnvironmentError("Replay environment is not ready")
+
+        create_shim_symlinks(env.shim_dir, self._commands)
         self._server = CallbackIPCServer(
-            self.environment.socket_path,
+            env.socket_path,
             self._handle_invocation,
             self._handle_passthrough_result,
         )
