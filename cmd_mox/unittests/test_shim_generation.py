@@ -42,6 +42,17 @@ def _assert_is_shim(path: pathlib.Path) -> None:
         assert os.access(path, os.X_OK)
 
 
+def test_format_windows_launcher_escapes_quotes(tmp_path: pathlib.Path) -> None:
+    """Batch launchers should double quotes in Python and shim paths."""
+    python_exe = tmp_path / 'python "with" quotes.exe'
+    shim_script = tmp_path / 'shim "quoted".py'
+    python_text = str(python_exe)
+    shim_text = os.fspath(shim_script)
+    content = shimgen._format_windows_launcher(python_text, shim_script)
+    assert f'"{python_text.replace("\"", "\"\"")}"' in content
+    assert f'"{shim_text.replace("\"", "\"\"")}"' in content
+
+
 @pytest.mark.requires_unix_sockets
 @pytest.mark.skipif(shimgen.IS_WINDOWS, reason="POSIX symlink execution only")
 def test_create_shim_symlinks_and_execution(
@@ -82,12 +93,66 @@ def test_create_windows_launchers(
     assert os.fspath(shimgen.SHIM_PATH) in content
 
 
+def test_create_windows_shim_retries_locked_file(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Launcher creation retries when Windows reports transient locks."""
+    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    launcher.write_text("old")
+
+    original_unlink = pathlib.Path.unlink
+    attempts: list[int] = [0]
+
+    def flaky_unlink(self: pathlib.Path) -> None:
+        if self == launcher and attempts[0] < 2:
+            attempts[0] += 1
+            raise PermissionError("locked")
+        attempts[0] += 1
+        original_unlink(self)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", flaky_unlink)
+    sleeps: list[float] = []
+    monkeypatch.setattr("cmd_mox.shimgen.time.sleep", sleeps.append)
+
+    mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
+    assert mapping["git"].exists()
+    assert attempts[0] == 3
+    assert sleeps == [0.5, 0.5]
+
+
+def test_create_windows_shim_raises_after_retries(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exhausting retries surfaces a clear ``FileExistsError``."""
+    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    launcher.write_text("old")
+
+    def locked_unlink(self: pathlib.Path) -> None:
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(pathlib.Path, "unlink", locked_unlink)
+    monkeypatch.setattr("cmd_mox.shimgen.time.sleep", lambda _duration: None)
+
+    with pytest.raises(FileExistsError, match="Failed to remove existing launcher"):
+        shimgen.create_shim_symlinks(tmp_path, ["git"])
+
+
 def test_create_shim_symlinks_missing_target_dir() -> None:
     """Error raised when directory does not exist."""
     with tempfile.TemporaryDirectory() as tmpdir:
         missing = pathlib.Path(tmpdir) / "absent"
         with pytest.raises(FileNotFoundError):
             shimgen.create_shim_symlinks(missing, ["ls"])
+
+
+def test_create_shim_symlinks_rejects_non_directory(tmp_path: pathlib.Path) -> None:
+    """Non-directory shim paths raise ``FileNotFoundError`` with context."""
+    file_path = tmp_path / "not-a-dir"
+    file_path.write_text("content")
+    with pytest.raises(FileNotFoundError, match="not a directory"):
+        shimgen.create_shim_symlinks(file_path, ["ls"])
 
 
 def test_create_shim_symlinks_existing_non_symlink_file() -> None:
@@ -119,6 +184,17 @@ def test_create_shim_symlinks_missing_or_non_executable_shim(
         mapping = shimgen.create_shim_symlinks(tempdir, ["ls"])
         _assert_is_shim(mapping["ls"])
         assert os.access(shim_path, os.X_OK)
+
+
+@pytest.mark.skipif(shimgen.IS_WINDOWS, reason="Symlink replacement is POSIX-only")
+def test_create_posix_symlink_replaces_existing(tmp_path: pathlib.Path) -> None:
+    """POSIX shim generation replaces stale symlinks safely."""
+    link = tmp_path / "ls"
+    link.symlink_to(tmp_path / "missing")
+    assert link.is_symlink()
+
+    mapping = shimgen.create_shim_symlinks(tmp_path, ["ls"])
+    assert mapping["ls"].resolve() == shimgen.SHIM_PATH
 
 
 @pytest.mark.parametrize(

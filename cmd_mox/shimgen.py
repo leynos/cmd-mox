@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import typing as t
 from pathlib import Path
 
@@ -71,7 +72,22 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
         if not launcher.is_file():
             msg = f"{launcher} already exists and is not a file"
             raise FileExistsError(msg)
-        launcher.unlink()
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                launcher.unlink()
+            except (PermissionError, OSError) as exc:
+                if attempt == max_retries - 1:
+                    msg = (
+                        f"Failed to remove existing launcher {launcher!r}: {exc}\n"
+                        "The file may be in use or locked. Please close any "
+                        "processes using it and try again."
+                    )
+                    raise FileExistsError(msg) from exc
+                time.sleep(0.5)
+            else:
+                break
 
     launcher.write_text(
         _format_windows_launcher(sys.executable, SHIM_PATH),
@@ -103,8 +119,11 @@ def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str
     commands:
         Command names (e.g. "git", "curl") for which to create shims.
     """
+    if not directory.exists():
+        msg = f"Shim directory does not exist: {directory}"
+        raise FileNotFoundError(msg)
     if not directory.is_dir():
-        msg = f"{directory} is not a directory"
+        msg = f"Shim directory is not a directory: {directory}"
         raise FileNotFoundError(msg)
 
     if not SHIM_PATH.exists():

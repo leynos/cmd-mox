@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import pathlib
 import socket
 import time
-
-IS_WINDOWS = os.name == "nt"
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +35,8 @@ def wait_for_socket(socket_path: pathlib.Path, timeout: float) -> None:
     socket_path = pathlib.Path(socket_path)
     deadline = time.monotonic() + timeout
     wait_time = 0.001
-
-    if not IS_WINDOWS:
-        while time.monotonic() < deadline:
-            if socket_path.exists():
-                return
-            time.sleep(wait_time)
-            wait_time = min(wait_time * 1.5, 0.1)
-        msg = f"Socket file {socket_path} not created within timeout"
-        raise RuntimeError(msg)
-
     address = str(socket_path)
+
     while time.monotonic() < deadline:
         with contextlib.closing(
             socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -56,7 +44,7 @@ def wait_for_socket(socket_path: pathlib.Path, timeout: float) -> None:
             try:
                 probe.settimeout(wait_time)
                 probe.connect(address)
-            except OSError:
+            except (FileNotFoundError, ConnectionRefusedError, OSError):
                 time.sleep(wait_time)
                 wait_time = min(wait_time * 1.5, 0.1)
                 continue

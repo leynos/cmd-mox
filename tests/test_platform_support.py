@@ -35,6 +35,16 @@ def test_override_env_forces_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     assert platform.unsupported_reason() == "forced block"
 
 
+def test_override_env_handles_unknown_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unknown overrides should fall back to the default platform logic."""
+    monkeypatch.delenv(platform.PLATFORM_OVERRIDE_ENV, raising=False)
+    unknown_platform = "unknown-os"
+    monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, unknown_platform)
+
+    assert platform.is_supported() is True
+    assert platform.unsupported_reason() is None
+
+
 def test_override_env_forces_supported_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

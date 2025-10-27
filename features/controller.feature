@@ -14,7 +14,9 @@ Feature: CmdMox basic functionality
     And the platform override is "win32"
     And the command "winshim" is stubbed to return "windows"
     When I replay the controller
-    Then the shim for "winshim" should end with ".cmd"
+    And I run the command "winshim"
+    Then the output should be "windows"
+    And the shim for "winshim" should end with ".cmd"
 
   Scenario: shim forwards stdout stderr and exit code
     Given a CmdMox controller
