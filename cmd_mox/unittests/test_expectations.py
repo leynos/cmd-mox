@@ -298,3 +298,15 @@ def test_expectation_failures(
     _test_expectation_failure_helper(
         run, mock_configurator, execution_strategy, expected_exception
     )
+
+
+def test_validate_matchers_returns_false_when_missing() -> None:
+    """_validate_matchers fails safely when matchers list is absent."""
+    expectation = Expectation("cmd")
+    assert not expectation._validate_matchers(["arg"])
+
+
+def test_validate_matchers_rejects_length_mismatch() -> None:
+    """_validate_matchers enforces one-to-one matcher/argument counts."""
+    expectation = Expectation("cmd").with_matching_args(lambda _: True)
+    assert not expectation._validate_matchers(["one", "two"])

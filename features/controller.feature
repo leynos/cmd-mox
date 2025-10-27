@@ -113,6 +113,12 @@ Feature: CmdMox basic functionality
     Then the shim directory should be cleaned up after interruption
     And the IPC socket should be cleaned up after interruption
 
+  Scenario: replay fails when environment disappears during startup
+    Given a CmdMox controller
+    And the replay environment is invalidated during startup
+    When I replay the controller expecting a missing environment error
+    Then the replay error message should contain "Replay environment is not ready"
+
   Scenario: stub runs dynamic handler
     Given a CmdMox controller
     And the command "dyn" is stubbed to run a handler
@@ -220,6 +226,23 @@ Feature: CmdMox basic functionality
     Then the output should be "ok"
     When I verify the controller
     Then the journal should contain 1 invocation of "flex"
+
+  Scenario: comparator argument count mismatch is reported
+    Given a CmdMox controller
+    And the command "flexfail" is mocked to return "ok" with comparator args
+    When I replay the controller
+    And I run the command "flexfail" with arguments "alpha beta"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "expected 6 args but got 2"
+
+  Scenario: comparator matchers missing results in mismatch
+    Given a CmdMox controller
+    And the command "flexmissing" is mocked to return "ok" with comparator args
+    And the matcher list for "flexmissing" disappears during matching
+    When I replay the controller
+    And I run the command "flexmissing" with arguments "anything 123 foo7 barbar bazooka HELLO"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "args, stdin, or env mismatch"
 
   Scenario: journal captures invocation details
     Given a CmdMox controller

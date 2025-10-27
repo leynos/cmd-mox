@@ -18,10 +18,12 @@ from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.controller import CmdMox
 from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX, EnvironmentManager
 from cmd_mox.errors import (
+    MissingEnvironmentError,
     UnexpectedCommandError,
     UnfulfilledExpectationError,
     VerificationError,
 )
+from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Response
 from tests.helpers.controller import (
     CommandExecution,
@@ -93,6 +95,21 @@ def interrupt_replay_startup(monkeypatch: pytest.MonkeyPatch, mox: CmdMox) -> No
     monkeypatch.setattr(mox, "_start_ipc_server", raise_interrupt)
 
 
+@given("the replay environment is invalidated during startup")
+def invalidate_environment(monkeypatch: pytest.MonkeyPatch, mox: CmdMox) -> None:
+    """Cause environment attributes to disappear after preflight checks."""
+    original = mox._check_replay_preconditions
+
+    def tampered() -> None:
+        original()
+        env = mox.environment
+        assert env is not None, "Environment manager should exist"
+        env.shim_dir = None
+        env.socket_path = None
+
+    monkeypatch.setattr(mox, "_check_replay_preconditions", tampered)
+
+
 @given(
     parsers.cfparse(
         'the command "{cmd}" is stubbed to return stdout "{stdout}" '
@@ -127,6 +144,22 @@ def mock_with_comparator_args(mox: CmdMox, cmd: str, text: str) -> None:
         StartsWith("baz"),
         Predicate(str.isupper),
     ).returns(stdout=text)
+
+
+@given(parsers.cfparse('the matcher list for "{cmd}" disappears during matching'))
+def matcher_list_disappears(
+    monkeypatch: pytest.MonkeyPatch, mox: CmdMox, cmd: str
+) -> None:
+    """Simulate matchers being cleared mid-validation."""
+    expectation = mox.mocks[cmd].expectation
+    original_validate = Expectation._validate_matchers
+
+    def tampered(self: Expectation, args: list[str]) -> bool:
+        if self is expectation:
+            self.match_args = None
+        return original_validate(self, args)
+
+    monkeypatch.setattr(Expectation, "_validate_matchers", tampered)
 
 
 @given(
@@ -354,6 +387,19 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
 
 
 @when(
+    "I replay the controller expecting a missing environment error",
+    target_fixture="replay_error",
+)
+def replay_controller_missing_env(mox: CmdMox) -> MissingEnvironmentError:
+    """Attempt replay expecting :class:`MissingEnvironmentError`."""
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mox)
+        with pytest.raises(MissingEnvironmentError) as excinfo:
+            mox.replay()
+    return t.cast(MissingEnvironmentError, excinfo.value)
+
+
+@when(
     "I replay the controller expecting an interrupt",
     target_fixture="replay_interruption_state",
 )
@@ -571,6 +617,12 @@ def verification_error_contains(
 ) -> None:
     """Assert the captured verification error contains *text*."""
     assert text in str(verification_error)
+
+
+@then(parsers.cfparse('the replay error message should contain "{text}"'))
+def replay_error_contains(replay_error: MissingEnvironmentError, text: str) -> None:
+    """Assert the captured replay error contains *text*."""
+    assert text in str(replay_error)
 
 
 @then(parsers.cfparse('the verification error message should not contain "{text}"'))
@@ -796,6 +848,33 @@ def test_passthrough_spy_timeout() -> None:
 )
 def test_mock_matches_arguments_with_comparators() -> None:
     """Mocks can use comparator objects for flexible argument matching."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "replay fails when environment disappears during startup",
+)
+def test_replay_fails_when_environment_disappears() -> None:
+    """Replay reports missing environment state when it vanishes mid-startup."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "comparator argument count mismatch is reported",
+)
+def test_comparator_argument_count_mismatch() -> None:
+    """Mismatch counts are surfaced when comparator expectations differ."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "comparator matchers missing results in mismatch",
+)
+def test_comparator_matchers_missing_results_in_mismatch() -> None:
+    """Missing matcher lists cause verification to fail gracefully."""
     pass
 
 

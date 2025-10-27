@@ -442,7 +442,8 @@ class CmdMox:
             # ``_check_replay_preconditions`` should prevent this from
             # happening, but guard explicitly so the type-checker understands
             # that both attributes are always populated here.
-            raise MissingEnvironmentError("Replay environment is not ready")
+            msg = "Replay environment is not ready"
+            raise MissingEnvironmentError(msg)
 
         create_shim_symlinks(env.shim_dir, self._commands)
         self._server = CallbackIPCServer(
