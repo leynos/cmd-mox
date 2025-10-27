@@ -117,7 +117,7 @@ Feature: CmdMox basic functionality
     Given a CmdMox controller
     And the replay environment is invalidated during startup
     When I replay the controller expecting a missing environment error
-    Then the replay error message should contain "Replay environment is not ready"
+    Then the replay error message should contain "Replay shim directory is missing"
 
   Scenario: stub runs dynamic handler
     Given a CmdMox controller

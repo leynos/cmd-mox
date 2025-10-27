@@ -433,21 +433,39 @@ class CmdMox:
             raise LifecycleError(msg)
         self._require_env_attrs("shim_dir", "socket_path")
 
+    def _validate_replay_environment(self) -> tuple[Path, Path]:
+        """Ensure the replay environment is fully prepared.
+
+        Returns
+        -------
+        tuple[Path, Path]
+            A tuple containing the shim directory and socket path.
+
+        Raises
+        ------
+        MissingEnvironmentError
+            If the environment manager or required paths are missing.
+        """
+        env = self.environment
+        if env is None:
+            msg = "Replay environment manager is missing"
+            raise MissingEnvironmentError(msg)
+        if env.shim_dir is None:
+            msg = "Replay shim directory is missing"
+            raise MissingEnvironmentError(msg)
+        if env.socket_path is None:
+            msg = "Replay socket path is missing"
+            raise MissingEnvironmentError(msg)
+        return Path(env.shim_dir), Path(env.socket_path)
+
     def _start_ipc_server(self) -> None:
         """Prepare shims and launch the IPC server."""
         self.journal.clear()
         self._commands = self._registered_commands() | self._commands
-        env = self.environment
-        if env is None or env.shim_dir is None or env.socket_path is None:
-            # ``_check_replay_preconditions`` should prevent this from
-            # happening, but guard explicitly so the type-checker understands
-            # that both attributes are always populated here.
-            msg = "Replay environment is not ready"
-            raise MissingEnvironmentError(msg)
-
-        create_shim_symlinks(env.shim_dir, self._commands)
+        shim_dir, socket_path = self._validate_replay_environment()
+        create_shim_symlinks(shim_dir, self._commands)
         self._server = CallbackIPCServer(
-            env.socket_path,
+            socket_path,
             self._handle_invocation,
             self._handle_passthrough_result,
         )

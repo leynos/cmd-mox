@@ -396,7 +396,7 @@ def replay_controller_missing_env(mox: CmdMox) -> MissingEnvironmentError:
         stack.enter_context(mox)
         with pytest.raises(MissingEnvironmentError) as excinfo:
             mox.replay()
-    return t.cast(MissingEnvironmentError, excinfo.value)
+    return t.cast("MissingEnvironmentError", excinfo.value)
 
 
 @when(

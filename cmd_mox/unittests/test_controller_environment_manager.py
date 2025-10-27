@@ -79,7 +79,9 @@ def test_replay_detects_environment_loss(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(mox, "_check_replay_preconditions", tampered)
 
     with (
-        pytest.raises(MissingEnvironmentError, match="Replay environment is not ready"),
+        pytest.raises(
+            MissingEnvironmentError, match="Replay shim directory is missing"
+        ),
         mox,
     ):
         mox.replay()
