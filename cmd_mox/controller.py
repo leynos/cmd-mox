@@ -448,8 +448,7 @@ class CmdMox:
         """
         env = self.environment
         if env is None:
-            msg = "Replay environment manager is missing"
-            raise MissingEnvironmentError(msg)
+            raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
         if env.shim_dir is None:
             msg = "Replay shim directory is missing"
             raise MissingEnvironmentError(msg)
