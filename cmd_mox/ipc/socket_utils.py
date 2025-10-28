@@ -37,10 +37,8 @@ def wait_for_socket(socket_path: pathlib.Path, timeout: float) -> None:
     wait_time = 0.001
     address = str(socket_path)
 
-    while time.monotonic() < deadline:
-        with contextlib.closing(
-            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        ) as probe:
+    with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
+        while time.monotonic() < deadline:
             try:
                 probe.settimeout(wait_time)
                 probe.connect(address)
@@ -48,7 +46,7 @@ def wait_for_socket(socket_path: pathlib.Path, timeout: float) -> None:
                 time.sleep(wait_time)
                 wait_time = min(wait_time * 1.5, 0.1)
                 continue
-        return
+            return
 
     msg = f"Socket {socket_path} not accepting connections within timeout"
     raise RuntimeError(msg)

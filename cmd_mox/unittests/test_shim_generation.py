@@ -49,8 +49,10 @@ def test_format_windows_launcher_escapes_quotes(tmp_path: pathlib.Path) -> None:
     python_text = str(python_exe)
     shim_text = os.fspath(shim_script)
     content = shimgen._format_windows_launcher(python_text, shim_script)
-    assert f'"{python_text.replace("\"", "\"\"")}"' in content
-    assert f'"{shim_text.replace("\"", "\"\"")}"' in content
+    python_escaped = python_text.replace('"', '""')
+    shim_escaped = shim_text.replace('"', '""')
+    assert f'"{python_escaped}"' in content
+    assert f'"{shim_escaped}"' in content
 
 
 @pytest.mark.requires_unix_sockets
