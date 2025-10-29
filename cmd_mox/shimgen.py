@@ -65,30 +65,39 @@ def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
     )
 
 
+def _validate_launcher_path(launcher: Path) -> None:
+    """Validate that *launcher* path can be used for a new .cmd file."""
+    if launcher.exists() and not launcher.is_file():
+        msg = f"{launcher} already exists and is not a file"
+        raise FileExistsError(msg)
+
+
+def _remove_with_retry(launcher: Path, max_retries: int = 3) -> None:
+    """Remove *launcher* with retry logic for locked files on Windows."""
+    if not launcher.exists():
+        return
+
+    for attempt in range(max_retries):
+        try:
+            launcher.unlink()
+        except (PermissionError, OSError) as exc:
+            if attempt == max_retries - 1:
+                msg = (
+                    f"Failed to remove existing launcher {launcher!r}: {exc}\n"
+                    "The file may be in use or locked. Please close any "
+                    "processes using it and try again."
+                )
+                raise FileExistsError(msg) from exc
+            time.sleep(0.5)
+        else:
+            return
+
+
 def _create_windows_shim(directory: Path, name: str) -> Path:
     """Create a ``.cmd`` launcher for *name* that reuses :mod:`cmd_mox.shim`."""
     launcher = directory / f"{name}.cmd"
-    if launcher.exists():
-        if not launcher.is_file():
-            msg = f"{launcher} already exists and is not a file"
-            raise FileExistsError(msg)
-
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                launcher.unlink()
-            except (PermissionError, OSError) as exc:
-                if attempt == max_retries - 1:
-                    msg = (
-                        f"Failed to remove existing launcher {launcher!r}: {exc}\n"
-                        "The file may be in use or locked. Please close any "
-                        "processes using it and try again."
-                    )
-                    raise FileExistsError(msg) from exc
-                time.sleep(0.5)
-            else:
-                break
-
+    _validate_launcher_path(launcher)
+    _remove_with_retry(launcher)
     launcher.write_text(
         _format_windows_launcher(sys.executable, SHIM_PATH),
         encoding="utf-8",
