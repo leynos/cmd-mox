@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import pathlib
 import socket
 import time
+
+IS_WINDOWS = os.name == "nt"
 
 logger = logging.getLogger(__name__)
 
@@ -30,26 +33,56 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
             logger.warning("Could not unlink stale socket %s: %s", socket_path, exc)
 
 
-def wait_for_socket(socket_path: pathlib.Path, timeout: float) -> None:
-    """Poll for *socket_path* readiness within *timeout* seconds."""
-    socket_path = pathlib.Path(socket_path)
+def _try_socket_connection(address: str, timeout: float) -> bool:
+    """Attempt to connect to *address* within *timeout* seconds."""
+    with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
+        probe.settimeout(timeout)
+        try:
+            probe.connect(address)
+        except (FileNotFoundError, ConnectionRefusedError, OSError):
+            return False
+    return True
+
+
+def _wait_for_socket_posix(socket_path: pathlib.Path, timeout: float) -> None:
+    """Poll a Unix domain socket on POSIX systems until it accepts connections."""
     deadline = time.monotonic() + timeout
     wait_time = 0.001
     address = str(socket_path)
 
-    with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
-        while time.monotonic() < deadline:
-            try:
-                probe.settimeout(wait_time)
-                probe.connect(address)
-            except (FileNotFoundError, ConnectionRefusedError, OSError):
-                time.sleep(wait_time)
-                wait_time = min(wait_time * 1.5, 0.1)
-                continue
+    while time.monotonic() < deadline:
+        if _try_socket_connection(address, wait_time):
             return
+        time.sleep(wait_time)
+        wait_time = min(wait_time * 1.5, 0.1)
 
     msg = f"Socket {socket_path} not accepting connections within timeout"
     raise RuntimeError(msg)
+
+
+def _wait_for_socket_windows(socket_path: pathlib.Path, timeout: float) -> None:
+    """Poll a Unix domain socket on Windows systems until it accepts connections."""
+    deadline = time.monotonic() + timeout
+    wait_time = 0.001
+    address = str(socket_path)
+
+    while time.monotonic() < deadline:
+        if _try_socket_connection(address, wait_time):
+            return
+        time.sleep(wait_time)
+        wait_time = min(wait_time * 1.5, 0.1)
+
+    msg = f"Socket {socket_path} not accepting connections within timeout"
+    raise RuntimeError(msg)
+
+
+def wait_for_socket(socket_path: pathlib.Path, timeout: float) -> None:
+    """Poll for *socket_path* readiness within *timeout* seconds."""
+    socket_path = pathlib.Path(socket_path)
+    if IS_WINDOWS:
+        _wait_for_socket_windows(socket_path, timeout)
+    else:
+        _wait_for_socket_posix(socket_path, timeout)
 
 
 __all__ = ["cleanup_stale_socket", "wait_for_socket"]

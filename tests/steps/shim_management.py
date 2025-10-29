@@ -61,5 +61,3 @@ def check_socket_cleaned(
     """Assert the IPC socket path no longer exists."""
     socket_path = t.cast("Path", replay_interruption_state["socket_path"])
     assert not socket_path.exists()
-
-
