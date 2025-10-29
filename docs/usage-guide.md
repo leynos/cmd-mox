@@ -155,7 +155,9 @@ If replay aborts—whether because your code raised an exception or you hit
 Ctrl+C—`CmdMox` still tears down the environment before surfacing the original
 error. The controller catches interruptions during replay startup, stops the
 IPC server, removes the shim directory (and its socket), and restores `PATH`
-before re-raising so you never leak temporary artefacts between tests.
+before re-raising so you never leak temporary artefacts between tests. The same
+cleanup path also runs if the environment fails to enter successfully, so even
+partial setup never leaves `CMOX_IPC_SOCKET` or shim directories behind.
 
 ## Parallel execution and isolation
 

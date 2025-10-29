@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import typing as t
+from pathlib import Path
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from types import TracebackType
@@ -12,6 +13,7 @@ import pytest
 
 import cmd_mox.controller as controller
 from cmd_mox import CmdMox
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, EnvironmentManager
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -49,6 +51,40 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mox._server is None
     assert not mox._entered
     assert os.environ == pre_env
+
+
+def test_replay_cleanup_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KeyboardInterrupt during replay startup should restore the environment."""
+    mox = CmdMox()
+    pre_env = os.environ.copy()
+    mox.__enter__()
+
+    assert isinstance(mox.environment, EnvironmentManager)
+    env = mox.environment
+    assert env.shim_dir is not None
+    assert env.socket_path is not None
+    shim_dir = Path(env.shim_dir)
+    socket_path = Path(env.socket_path)
+    assert shim_dir.exists()
+
+    def raise_interrupt() -> t.NoReturn:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(mox, "_start_ipc_server", raise_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        mox.replay()
+
+    assert os.environ == pre_env
+    assert EnvironmentManager.get_active_manager() is None
+    assert mox._server is None
+    assert not mox._entered
+    assert not shim_dir.exists()
+    assert not socket_path.exists()
+    if CMOX_IPC_SOCKET_ENV in pre_env:
+        assert os.environ[CMOX_IPC_SOCKET_ENV] == pre_env[CMOX_IPC_SOCKET_ENV]
+    else:
+        assert CMOX_IPC_SOCKET_ENV not in os.environ
 
 
 def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:

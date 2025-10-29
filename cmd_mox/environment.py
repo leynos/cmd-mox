@@ -207,13 +207,17 @@ class EnvironmentManager:
             raise RuntimeError(msg)
         cls._set_active_manager(self)
         self._orig_env = os.environ.copy()
-        self.shim_dir = Path(tempfile.mkdtemp(prefix=self._prefix))
-        self._created_dir = self.shim_dir
-        os.environ["PATH"] = os.pathsep.join(
-            [str(self.shim_dir), self._orig_env.get("PATH", "")]
-        )
-        self.socket_path = self.shim_dir / "ipc.sock"
-        self.export_ipc_environment()
+        try:
+            self.shim_dir = Path(tempfile.mkdtemp(prefix=self._prefix))
+            self._created_dir = self.shim_dir
+            os.environ["PATH"] = os.pathsep.join(
+                [str(self.shim_dir), self._orig_env.get("PATH", "")]
+            )
+            self.socket_path = self.shim_dir / "ipc.sock"
+            self.export_ipc_environment()
+        except BaseException as exc:
+            self._cleanup_after_enter_error(exc)
+            raise
         return self
 
     def __exit__(
@@ -296,6 +300,17 @@ class EnvironmentManager:
                 primary_exc = cleanup_errors[0][1]
                 msg = f"Cleanup failed: {error_msg}"
                 raise RuntimeError(msg) from primary_exc
+
+    def _cleanup_after_enter_error(self, exc: BaseException) -> None:
+        """Undo partial setup when :meth:`__enter__` fails."""
+        cleanup_errors: list[CleanupError] = []
+        try:
+            self._restore_original_environment(cleanup_errors)
+            self._reset_global_state()
+            self._cleanup_temporary_directory(cleanup_errors)
+        finally:
+            self.ipc_timeout = None
+        self._handle_cleanup_errors(cleanup_errors, type(exc))
 
     @property
     def original_environment(self) -> dict[str, str]:

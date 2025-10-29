@@ -112,6 +112,7 @@ Feature: CmdMox basic functionality
     When I replay the controller expecting an interrupt
     Then the shim directory should be cleaned up after interruption
     And the IPC socket should be cleaned up after interruption
+    And the environment should be restored after interruption
 
   Scenario: stub runs dynamic handler
     Given a CmdMox controller
