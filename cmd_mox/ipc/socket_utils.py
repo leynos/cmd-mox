@@ -18,13 +18,14 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
     """Remove a pre-existing socket when no server is listening."""
     socket_path = pathlib.Path(socket_path)
     address = str(socket_path)
-    with (
-        contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe,
-        contextlib.suppress(ConnectionRefusedError, OSError),
-    ):
-        probe.connect(address)
-        msg = f"Socket {socket_path} is still in use"
-        raise RuntimeError(msg)
+    with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
+        try:
+            probe.connect(address)
+        except (ConnectionRefusedError, OSError):
+            pass
+        else:
+            msg = f"Socket {socket_path} is still in use"
+            raise RuntimeError(msg)
 
     if socket_path.exists():
         try:
