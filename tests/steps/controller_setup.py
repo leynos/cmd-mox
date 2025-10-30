@@ -126,8 +126,10 @@ def replay_controller_interrupt(mox: CmdMox) -> dict[str, object]:
 @when("I verify the controller")
 def verify_controller(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
     """Invoke verification and close context."""
-    mox.verify()
-    mox_stack.close()
+    try:
+        mox.verify()
+    finally:
+        mox_stack.close()
 
 
 @when(

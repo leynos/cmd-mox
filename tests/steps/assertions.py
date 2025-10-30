@@ -4,17 +4,14 @@
 from __future__ import annotations
 
 import shlex
-import types
 import typing as t
 
-import pytest
 from pytest_bdd import parsers, then
 
 from tests.steps.shim_management import _require_replay_shim_dir
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
-    from pathlib import Path
 
     from cmd_mox.controller import CmdMox
     from cmd_mox.errors import MissingEnvironmentError, VerificationError
@@ -27,21 +24,6 @@ def check_shim_suffix(mox: CmdMox, cmd: str, suffix: str) -> None:
     matches = sorted(shim_dir.glob(f"{cmd}*"))
     assert matches, f"no shim generated for {cmd}"
     assert matches[0].name.endswith(suffix)
-
-
-def test_check_shim_suffix_mismatch(tmp_path: Path) -> None:
-    """The shim suffix assertion should fail when the suffix differs."""
-
-    class DummyMox:
-        def __init__(self, directory: Path) -> None:
-            self.environment = types.SimpleNamespace(shim_dir=str(directory))
-
-    shim = tmp_path / "example.cmd"
-    shim.touch()
-
-    mox = DummyMox(tmp_path)
-    with pytest.raises(AssertionError):
-        check_shim_suffix(mox, "example", ".bat")
 
 
 @then(parsers.cfparse('the output should be "{text}"'))

@@ -38,13 +38,23 @@ impl<'guard> ThreadState<'guard> {
         }
     }
 
-    pub fn acquire_outermost_lock(&mut self) {
+    pub fn acquire_outermost_lock(
+        &mut self,
+    ) -> Result<(), std::sync::PoisonError<MutexGuard<'guard, ()>>> {
         if self.guard.is_none() {
-            self.guard = self.mutex.lock().ok();
+            self.mutex.lock().map(|guard| {
+                self.guard = Some(guard);
+            })?;
         }
+        Ok(())
     }
 
-    pub fn release_outermost_lock(&mut self) {
+    /// Release the outermost lock if it is currently held.
+    ///
+    /// Returns `Ok(())` when the guard was present and has been dropped.  When
+    /// the guard is missing in release builds, returns an error so callers can
+    /// handle the unexpected state explicitly.
+    pub fn release_outermost_lock(&mut self) -> Result<(), &'static str> {
         debug_assert!(
             self.scope_depth == 0,
             "outermost lock can only be released when the scope stack is empty",
@@ -54,6 +64,7 @@ impl<'guard> ThreadState<'guard> {
             guard.is_some(),
             "release_outermost_lock expects an acquired guard",
         );
+        guard.map(|_| ()).ok_or("outermost lock was not held")
     }
 }
 
@@ -65,8 +76,8 @@ mod tests {
     fn release_does_not_panic_in_release_builds() {
         let mutex = Mutex::new(());
         let mut state = ThreadState::new(&mutex);
-        state.acquire_outermost_lock();
-        state.release_outermost_lock();
+        state.acquire_outermost_lock().unwrap();
+        state.release_outermost_lock().unwrap();
     }
 
     #[test]
