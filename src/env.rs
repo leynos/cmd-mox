@@ -8,6 +8,11 @@
 
 use std::sync::{Mutex, MutexGuard};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadStateError {
+    MissingScope,
+}
+
 #[derive(Debug)]
 pub struct ThreadState<'guard> {
     mutex: &'guard Mutex<()>,
@@ -28,13 +33,13 @@ impl<'guard> ThreadState<'guard> {
         self.scope_depth = self.scope_depth.saturating_add(1);
     }
 
-    pub fn exit_scope(&mut self) -> Result<(), &'static str> {
+    pub fn exit_scope(&mut self) -> Result<(), ThreadStateError> {
         debug_assert!(
             self.scope_depth > 0,
             "exit_scope called without a matching enter_scope",
         );
         if self.scope_depth == 0 {
-            return Err("exit_scope called without a matching enter_scope");
+            return Err(ThreadStateError::MissingScope);
         }
         self.scope_depth -= 1;
         Ok(())
@@ -91,6 +96,6 @@ mod tests {
         assert_eq!(state.scope_depth, 0);
 
         let underflow = state.exit_scope();
-        assert!(underflow.is_err());
+        assert_eq!(underflow, Err(ThreadStateError::MissingScope));
     }
 }
