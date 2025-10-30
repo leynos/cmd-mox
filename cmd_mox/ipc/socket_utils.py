@@ -48,10 +48,20 @@ def _poll_socket_until_ready(socket_path: pathlib.Path, timeout: float) -> None:
     wait_time = 0.001
     address = str(socket_path)
 
-    while time.monotonic() < deadline:
-        if _try_socket_connection(address, wait_time):
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        attempt = min(wait_time, remaining)
+        if _try_socket_connection(address, attempt):
             return
-        time.sleep(wait_time)
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        time.sleep(min(wait_time, remaining))
         wait_time = min(wait_time * 1.5, 0.1)
 
     msg = f"Socket {socket_path} not accepting connections within timeout"
