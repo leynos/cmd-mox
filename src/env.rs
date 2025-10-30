@@ -28,14 +28,16 @@ impl<'guard> ThreadState<'guard> {
         self.scope_depth = self.scope_depth.saturating_add(1);
     }
 
-    pub fn exit_scope(&mut self) {
+    pub fn exit_scope(&mut self) -> Result<(), &'static str> {
         debug_assert!(
             self.scope_depth > 0,
             "exit_scope called without a matching enter_scope",
         );
-        if self.scope_depth > 0 {
-            self.scope_depth -= 1;
+        if self.scope_depth == 0 {
+            return Err("exit_scope called without a matching enter_scope");
         }
+        self.scope_depth -= 1;
+        Ok(())
     }
 
     pub fn acquire_outermost_lock(
@@ -81,10 +83,14 @@ mod tests {
     }
 
     #[test]
-    fn exit_scope_saturates_depth() {
+    fn exit_scope_decrements_depth_and_errors_on_underflow() {
         let mutex = Mutex::new(());
         let mut state = ThreadState::new(&mutex);
-        state.exit_scope();
+        state.enter_scope();
+        state.exit_scope().unwrap();
         assert_eq!(state.scope_depth, 0);
+
+        let underflow = state.exit_scope();
+        assert!(underflow.is_err());
     }
 }
