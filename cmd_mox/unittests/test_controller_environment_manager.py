@@ -61,3 +61,27 @@ def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(MissingEnvironmentError, match=r"shim_dir.*socket_path"):
         mox.verify()
     mox.__exit__(None, None, None)
+
+
+def test_replay_detects_environment_loss(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replay raises MissingEnvironmentError if shims vanish mid-start."""
+    mox = CmdMox()
+    env = mox.environment
+    assert env is not None
+
+    original_check = mox._check_replay_preconditions
+
+    def tampered() -> None:
+        original_check()
+        env.shim_dir = None
+        env.socket_path = None
+
+    monkeypatch.setattr(mox, "_check_replay_preconditions", tampered)
+
+    with (
+        pytest.raises(
+            MissingEnvironmentError, match="Replay shim directory is missing"
+        ),
+        mox,
+    ):
+        mox.replay()

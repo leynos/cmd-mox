@@ -14,6 +14,8 @@ class LifecycleError(CmdMoxError):
 class MissingEnvironmentError(CmdMoxError):
     """Required environment attribute is missing."""
 
+    DEFAULT_MESSAGE = "Replay environment is not ready"
+
 
 class VerificationError(CmdMoxError):
     """Base class for verification-related errors."""

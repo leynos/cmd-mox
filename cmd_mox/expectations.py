@@ -114,9 +114,15 @@ class Expectation:
 
     def _validate_matchers(self, args: list[str]) -> bool:
         """Return ``True`` if ``args`` satisfy ``match_args`` validators."""
-        if len(args) != len(self.match_args):
+        matchers = self.match_args
+        if matchers is None:
+            # Defensive fallback: callers ensure ``match_args`` is set before
+            # invoking this helper, but default to ``False`` rather than
+            # raising so verification produces a clean mismatch message.
             return False
-        for arg, matcher in zip(args, self.match_args):  # noqa: B905
+        if len(args) != len(matchers):
+            return False
+        for arg, matcher in zip(args, matchers):  # noqa: B905
             try:
                 if not matcher(arg):
                     return False
