@@ -23,7 +23,9 @@ def check_shim_suffix(mox: CmdMox, cmd: str, suffix: str) -> None:
     shim_dir = _require_replay_shim_dir(mox)
     matches = sorted(shim_dir.glob(f"{cmd}*"))
     assert matches, f"no shim generated for {cmd}"
-    assert matches[0].name.endswith(suffix)
+    assert matches[0].name.endswith(suffix), (
+        f"shim {matches[0].name} does not end with {suffix}"
+    )
 
 
 @then(parsers.cfparse('the output should be "{text}"'))

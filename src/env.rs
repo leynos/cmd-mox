@@ -5,12 +5,34 @@
 //! regression tests.  The reviewer requested that invariant checks avoid
 //! crashing release builds, so the guards rely on `debug_assert!` instead of
 //! `assert!`/`panic!`.
+//!
+//! # Usage Pattern
+//!
+//! 1. Call [`ThreadState::acquire_outermost_lock`] to grab the shared mutex.
+//! 2. Use [`ThreadState::enter_scope`] / [`ThreadState::exit_scope`] to track
+//!    logical scopes while the lock is held.
+//! 3. Invoke [`ThreadState::release_outermost_lock`] once all scopes are closed
+//!    (i.e. the scope depth is zero) to relinquish the guard.
 
 use std::sync::{Mutex, MutexGuard};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadStateError {
     MissingScope,
+}
+
+impl<'guard> Drop for ThreadState<'guard> {
+    fn drop(&mut self) {
+        debug_assert!(
+            self.scope_depth == 0,
+            "ThreadState dropped with non-zero scope depth: {}",
+            self.scope_depth
+        );
+        debug_assert!(
+            self.guard.is_none(),
+            "ThreadState dropped while still holding the lock"
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -29,6 +51,12 @@ impl<'guard> ThreadState<'guard> {
         }
     }
 
+    /// Increment the tracked scope depth.
+    ///
+    /// Saturates at `usize::MAX` in release builds to avoid overflow-induced
+    /// panics; overflowing indicates a logic error and should be caught by
+    /// the accompanying `debug_assert!` checks when `debug_assertions` are
+    /// enabled.
     pub fn enter_scope(&mut self) {
         self.scope_depth = self.scope_depth.saturating_add(1);
     }
@@ -78,6 +106,7 @@ impl<'guard> ThreadState<'guard> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn release_does_not_panic_in_release_builds() {
@@ -85,6 +114,32 @@ mod tests {
         let mut state = ThreadState::new(&mutex);
         state.acquire_outermost_lock().unwrap();
         state.release_outermost_lock().unwrap();
+    }
+
+    #[test]
+    fn acquire_is_idempotent() {
+        let mutex = Mutex::new(());
+        let mut state = ThreadState::new(&mutex);
+        state.acquire_outermost_lock().unwrap();
+        state.acquire_outermost_lock().unwrap();
+        state.release_outermost_lock().unwrap();
+    }
+
+    #[test]
+    fn acquire_propagates_poison_error() {
+        let mutex = Arc::new(Mutex::new(()));
+        {
+            let mutex_clone = Arc::clone(&mutex);
+            let _ = std::thread::spawn(move || {
+                let _guard = mutex_clone.lock().unwrap();
+                panic!("poison");
+            })
+            .join();
+        }
+
+        let mut state = ThreadState::new(Arc::as_ref(&mutex));
+        let err = state.acquire_outermost_lock();
+        assert!(err.is_err());
     }
 
     #[test]
@@ -97,5 +152,24 @@ mod tests {
 
         let underflow = state.exit_scope();
         assert_eq!(underflow, Err(ThreadStateError::MissingScope));
+    }
+
+    #[test]
+    fn full_lifecycle_with_nested_scopes() {
+        let mutex = Mutex::new(());
+        let mut state = ThreadState::new(&mutex);
+        state.acquire_outermost_lock().unwrap();
+        state.enter_scope();
+        state.enter_scope();
+        state.exit_scope().unwrap();
+        state.exit_scope().unwrap();
+        state.release_outermost_lock().unwrap();
+    }
+
+    #[test]
+    fn release_without_acquire_returns_error() {
+        let mutex = Mutex::new(());
+        let mut state = ThreadState::new(&mutex);
+        assert!(state.release_outermost_lock().is_err());
     }
 }
