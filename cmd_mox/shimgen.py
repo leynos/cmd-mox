@@ -118,6 +118,39 @@ def _create_posix_symlink(directory: Path, name: str) -> Path:
     return link
 
 
+def _validate_shim_directory(directory: Path) -> None:
+    """Validate that *directory* exists and is a directory."""
+    if not directory.exists():
+        msg = f"Shim directory does not exist: {directory}"
+        raise FileNotFoundError(msg)
+    if not directory.is_dir():
+        msg = f"Shim directory is not a directory: {directory}"
+        raise FileNotFoundError(msg)
+
+
+def _ensure_shim_template_ready(shim_path: Path) -> None:
+    """Validate *shim_path* exists and is executable."""
+    if not shim_path.exists():
+        msg = f"Shim template not found: {shim_path}"
+        raise FileNotFoundError(msg)
+
+    if not os.access(shim_path, os.X_OK):
+        try:
+            mode = shim_path.stat().st_mode | 0o111
+            shim_path.chmod(mode)
+        except OSError as exc:  # pragma: no cover - OS specific
+            msg = f"Cannot make shim executable: {shim_path}"
+            raise PermissionError(msg) from exc
+
+
+def _create_shim_for_command(directory: Path, name: str) -> Path:
+    """Create a platform-appropriate shim for *name* in *directory*."""
+    _validate_command_name(name)
+    if IS_WINDOWS:
+        return _create_windows_shim(directory, name)
+    return _create_posix_symlink(directory, name)
+
+
 def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
     """Create shims for the given commands in *directory*.
 
@@ -128,30 +161,9 @@ def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str
     commands:
         Command names (e.g. "git", "curl") for which to create shims.
     """
-    if not directory.exists():
-        msg = f"Shim directory does not exist: {directory}"
-        raise FileNotFoundError(msg)
-    if not directory.is_dir():
-        msg = f"Shim directory is not a directory: {directory}"
-        raise FileNotFoundError(msg)
-
-    if not SHIM_PATH.exists():
-        msg = f"Shim template not found: {SHIM_PATH}"
-        raise FileNotFoundError(msg)
-
-    if not os.access(SHIM_PATH, os.X_OK):
-        try:
-            mode = SHIM_PATH.stat().st_mode | 0o111
-            SHIM_PATH.chmod(mode)
-        except OSError as exc:  # pragma: no cover - OS specific
-            msg = f"Cannot make shim executable: {SHIM_PATH}"
-            raise PermissionError(msg) from exc
+    _validate_shim_directory(directory)
+    _ensure_shim_template_ready(SHIM_PATH)
     mapping: dict[str, Path] = {}
     for name in commands:
-        _validate_command_name(name)
-        if IS_WINDOWS:
-            link = _create_windows_shim(directory, name)
-        else:
-            link = _create_posix_symlink(directory, name)
-        mapping[name] = link
+        mapping[name] = _create_shim_for_command(directory, name)
     return mapping
