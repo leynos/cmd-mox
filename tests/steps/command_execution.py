@@ -13,6 +13,7 @@ import typing as t
 from pytest_bdd import parsers, when
 
 from tests.helpers.controller import CommandExecution, execute_command_with_details
+from tests.helpers.parameters import CommandInputs, EnvVar
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
@@ -56,6 +57,23 @@ def _resolve_empty_placeholder(value: str) -> str:
     return "" if value == "<empty>" else value
 
 
+def _run_command_args_stdin_env_impl(
+    mox: CmdMox,
+    cmd: str,
+    inputs: CommandInputs,
+    env: EnvVar,
+) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* using aggregated command inputs and environment."""
+    params = CommandExecution(
+        cmd=cmd,
+        args=inputs.args,
+        stdin=inputs.stdin,
+        env_var=env.name,
+        env_val=env.value,
+    )
+    return execute_command_with_details(mox, params)
+
+
 @when(
     parsers.cfparse(
         'I run the command "{cmd}" with arguments "{args}" '
@@ -74,14 +92,9 @@ def run_command_args_stdin_env(
     """Run *cmd* with arguments, stdin, and an environment variable."""
     resolved_args = _resolve_empty_placeholder(args)
     resolved_stdin = _resolve_empty_placeholder(stdin)
-    params = CommandExecution(
-        cmd=cmd,
-        args=resolved_args,
-        stdin=resolved_stdin,
-        env_var=var,
-        env_val=val,
-    )
-    return execute_command_with_details(mox, params)
+    inputs = CommandInputs(args=resolved_args, stdin=resolved_stdin)
+    env = EnvVar(name=var, value=val)
+    return _run_command_args_stdin_env_impl(mox, cmd, inputs, env)
 
 
 @when(

@@ -11,6 +11,7 @@ from tests.helpers.controller import (
     JournalEntryExpectation,
     verify_journal_entry_details,
 )
+from tests.helpers.parameters import CommandInputs, CommandOutput, EnvVar
 from tests.steps.command_execution import _resolve_empty_placeholder
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
@@ -44,6 +45,23 @@ def _validate_journal_entry_details(
     verify_journal_entry_details(mox, expectation)
 
 
+def _check_journal_entry_details_impl(
+    mox: CmdMox,
+    cmd: str,
+    inputs: CommandInputs,
+    env: EnvVar,
+) -> None:
+    """Validate journal entry records invocation details."""
+    expectation = JournalEntryExpectation(
+        cmd,
+        inputs.args,
+        inputs.stdin,
+        env.name,
+        env.value,
+    )
+    _validate_journal_entry_details(mox, expectation)
+
+
 @then(
     parsers.cfparse(
         'the journal entry for "{cmd}" should record arguments "{args}" '
@@ -61,14 +79,21 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
     """Validate journal entry records invocation details."""
     resolved_args = _resolve_empty_placeholder(args)
     resolved_stdin = _resolve_empty_placeholder(stdin)
+    inputs = CommandInputs(args=resolved_args, stdin=resolved_stdin)
+    env = EnvVar(name=var, value=val)
+    _check_journal_entry_details_impl(mox, cmd, inputs, env)
+
+
+def _check_journal_entry_result_impl(
+    mox: CmdMox,
+    cmd: str,
+    output: CommandOutput,
+) -> None:
+    """Validate journal entry records command results."""
     expectation = JournalEntryExpectation(
-        cmd,
-        resolved_args,
-        resolved_stdin,
-        var,
-        val,
+        cmd=cmd, stdout=output.stdout, stderr=output.stderr, exit_code=output.exit_code
     )
-    _validate_journal_entry_details(mox, expectation)
+    verify_journal_entry_details(mox, expectation)
 
 
 @then(
@@ -85,7 +110,5 @@ def check_journal_entry_result(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapp
     code: str,
 ) -> None:
     """Validate journal entry records command results."""
-    expectation = JournalEntryExpectation(
-        cmd=cmd, stdout=stdout, stderr=stderr, exit_code=int(code)
-    )
-    verify_journal_entry_details(mox, expectation)
+    output = CommandOutput(stdout=stdout, stderr=stderr, exit_code=int(code))
+    _check_journal_entry_result_impl(mox, cmd, output)
