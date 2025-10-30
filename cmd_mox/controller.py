@@ -468,6 +468,9 @@ class CmdMox:
         """Prepare shims and launch the IPC server."""
         self.journal.clear()
         self._commands = self._registered_commands() | self._commands
+        if not self._entered and not self._is_environment_initialized():
+            msg = "Environment manager not initialised"
+            raise MissingEnvironmentError(msg)
         shim_dir, socket_path = self._validate_replay_environment()
         create_shim_symlinks(shim_dir, self._commands)
         self._server = CallbackIPCServer(

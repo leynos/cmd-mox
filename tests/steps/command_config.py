@@ -7,7 +7,6 @@ import os
 import shlex
 import typing as t
 
-import pytest
 from pytest_bdd import given, parsers
 
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
@@ -16,6 +15,8 @@ from cmd_mox.ipc import Response
 from tests.helpers.parameters import CommandOutput, EnvVar
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
+    import pytest
+
     from cmd_mox.controller import CmdMox
     from cmd_mox.ipc import Invocation
 

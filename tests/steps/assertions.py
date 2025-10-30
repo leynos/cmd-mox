@@ -71,9 +71,7 @@ def verification_error_contains(
 
 
 @then(parsers.cfparse('the replay error message should contain "{text}"'))
-def replay_error_contains(
-    replay_error: MissingEnvironmentError, text: str
-) -> None:
+def replay_error_contains(replay_error: MissingEnvironmentError, text: str) -> None:
     """Assert the captured replay error contains *text*."""
     assert text in str(replay_error)
 
