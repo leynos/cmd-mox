@@ -10,6 +10,6 @@ from .shim_management import *  # noqa: F403
 
 # Re-export all imported step definitions so ``from tests.steps import *``
 # makes them available to scenario modules during collection.
-__all__ = [
+__all__: list[str] = [
     name for name in globals() if not name.startswith("_") and name != "annotations"
 ]

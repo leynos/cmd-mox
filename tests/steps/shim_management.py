@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import typing as t
 from pathlib import Path
 
@@ -27,8 +28,20 @@ def _require_replay_shim_dir(mox: CmdMox) -> Path:
 
 @when(parsers.cfparse('the shim for "{cmd}" is broken'))
 def break_shim_symlink(mox: CmdMox, cmd: str) -> None:
-    """Replace the shim with a dangling symlink to simulate corruption."""
+    """Simulate a broken shim cross-platform for corruption scenarios."""
     shim_dir = _require_replay_shim_dir(mox)
+    if os.name == "nt":
+        removed = False
+        for ext in (".cmd", ".bat", ".exe"):
+            candidate = shim_dir / f"{cmd}{ext}"
+            if candidate.exists():
+                candidate.unlink()
+                removed = True
+        assert removed, f"No shim for {cmd!r} found under {shim_dir}"
+        for ext in (".cmd", ".bat", ".exe"):
+            assert not (shim_dir / f"{cmd}{ext}").exists()
+        return
+
     shim_path = shim_dir / cmd
     missing_target = shim_path.with_name(f"{cmd}-missing-target")
     shim_path.unlink(missing_ok=True)
