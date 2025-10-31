@@ -15,6 +15,8 @@ from pathlib import Path
 
 from ._validators import validate_positive_finite_timeout
 
+IS_WINDOWS = os.name == "nt"
+
 logger = logging.getLogger(__name__)
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -86,7 +88,7 @@ def _attempt_single_removal(path: Path, *, raise_on_error: bool) -> bool:
 
 def _fix_windows_permissions(path: Path) -> None:
     """Ensure all files under *path* are writable on Windows."""
-    if os.name != "nt":
+    if not IS_WINDOWS:
         return
     for root, dirs, files in os.walk(path):
         for name in files:
@@ -97,6 +99,23 @@ def _fix_windows_permissions(path: Path) -> None:
             p = Path(root) / name
             if p.exists() and not p.is_symlink():
                 p.chmod(0o777)
+
+
+def _ensure_windows_pathext(original: dict[str, str]) -> None:
+    """Guarantee that ``.CMD`` entries are available in ``PATHEXT`` on Windows."""
+    if not IS_WINDOWS:
+        return
+
+    pathext = original.get("PATHEXT", "")
+    if not pathext:
+        os.environ["PATHEXT"] = os.pathsep.join([".COM", ".EXE", ".BAT", ".CMD"])
+        return
+
+    parts = [part.strip() for part in pathext.split(os.pathsep) if part.strip()]
+    seen = {part.upper() for part in parts}
+    if ".CMD" not in seen:
+        parts.append(".CMD")
+    os.environ["PATHEXT"] = os.pathsep.join(parts)
 
 
 def _log_retry_attempt(attempt: int, path: Path, delay: float) -> None:
@@ -212,6 +231,7 @@ class EnvironmentManager:
         os.environ["PATH"] = os.pathsep.join(
             [str(self.shim_dir), self._orig_env.get("PATH", "")]
         )
+        _ensure_windows_pathext(self._orig_env)
         self.socket_path = self.shim_dir / "ipc.sock"
         self.export_ipc_environment()
         return self

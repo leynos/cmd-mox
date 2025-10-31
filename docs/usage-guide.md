@@ -36,6 +36,11 @@ resolves them via `PATHEXT`. The batch launchers embed the active Python
 interpreter and forward all arguments to the shared `shim.py`, so no additional
 wrappers or entry points are required.
 
+When CmdMox enters replay mode on Windows it ensures `.CMD` is present in the
+effective `PATHEXT` value, even if developers customised their shell to omit
+the extension. The generated launchers use CRLF line endings so the Windows
+command processor parses them consistently with native batch scripts.
+
 When you need to make an explicit decision in a test module (for instance when
 using the context manager API), import the helper re-exported from the package:
 
@@ -176,6 +181,17 @@ multiple workers:
 ```bash
 pytest -n auto
 ```
+
+On Windows you can run the dedicated smoke workflow that powers CI via the
+Makefile:
+
+```bash
+make windows-smoke
+```
+
+The target captures IPC debug output in `windows-ipc.log`, making it easy to
+attach shim diagnostics to CI artefacts or reproduce Windows-specific issues
+locally.
 
 Each test continues to receive an independent ``cmd_mox`` fixture; the
 environmental changes are scoped to the worker process, so tests cannot observe
