@@ -6,8 +6,19 @@ on:
   pull_request:
 
 jobs:
-  lint-test:
-    runs-on: ubuntu-latest
+  quality:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux QA
+            run-windows-smoke: false
+          - os: windows-latest
+            label: Windows smoke
+            run-windows-smoke: true
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
     env:
       CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
       CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 }}
@@ -21,29 +32,41 @@ jobs:
           python-version: '3.13'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
 
       - name: Install CLI tools
+        if: matrix.run-windows-smoke == false
         run: |
           for tool in mbake ty ruff; do uv tool install ${tool}; done
           npm install -g markdownlint-cli2
 
+      - name: Install make
+        if: matrix.run-windows-smoke
+        shell: pwsh
+        run: choco install make --no-progress -y
+
       - name: Validate Makefile
+        if: matrix.run-windows-smoke == false
         run: mbake validate Makefile
 
       - name: Install code
+        if: matrix.run-windows-smoke == false
         run: make build
 
       - name: Check formatting
+        if: matrix.run-windows-smoke == false
         run: make check-fmt
 
       - name: Run ruff
+        if: matrix.run-windows-smoke == false
         run: make lint
 
       - name: Run typechecker
+        if: matrix.run-windows-smoke == false
         run: make typecheck
 
       - name: Run tests with coverage
+        if: matrix.run-windows-smoke == false
         run: |
           uv pip install slipcover pytest-forked
           uv run python -m slipcover \
@@ -54,13 +77,14 @@ jobs:
             -m pytest --forked -v cmd_mox/unittests
 
       - name: Upload coverage artifact
+        if: matrix.run-windows-smoke == false
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage.xml
 
       - name: Install CodeScene Coverage CLI
-        if: env.CS_ACCESS_TOKEN != ''
+        if: matrix.run-windows-smoke == false && env.CS_ACCESS_TOKEN != ''
         run: |
           curl -fsSL https://downloads.codescene.io/enterprise/cli/install-cs-coverage-tool.sh | bash -s -- -y
           if [ -n "${CODESCENE_CLI_SHA256:-}" ]; then
@@ -68,7 +92,7 @@ jobs:
           fi
 
       - name: Upload coverage to CodeScene
-        if: env.CS_ACCESS_TOKEN != ''
+        if: matrix.run-windows-smoke == false && env.CS_ACCESS_TOKEN != ''
         run: |
           if [ ! -f coverage.xml ]; then
             echo "coverage.xml not found!"
@@ -79,32 +103,13 @@ jobs:
             --metric "line-coverage" \
             coverage.xml
 
-  windows-smoke:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-
-      - name: Install make
-        shell: pwsh
-        run: choco install make --no-progress -y
-
       - name: Run Windows smoke tests
+        if: matrix.run-windows-smoke
+        shell: pwsh
         run: make windows-smoke
 
       - name: Upload IPC logs
-        if: always()
+        if: matrix.run-windows-smoke && always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-ipc-logs

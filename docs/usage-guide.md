@@ -182,16 +182,16 @@ multiple workers:
 pytest -n auto
 ```
 
-On Windows you can run the dedicated smoke workflow that powers CI via the
+On Windows the dedicated smoke workflow that powers CI can be run via the
 Makefile:
 
 ```bash
 make windows-smoke
 ```
 
-The target captures IPC debug output in `windows-ipc.log`, making it easy to
-attach shim diagnostics to CI artefacts or reproduce Windows-specific issues
-locally.
+The target captures IPC debug output in `windows-ipc.log`, facilitating
+attachment of shim diagnostics to CI artefacts or reproduction of
+Windows-specific issues locally.
 
 Each test continues to receive an independent ``cmd_mox`` fixture; the
 environmental changes are scoped to the worker process, so tests cannot observe

@@ -258,6 +258,12 @@ class EnvironmentManager:
         """Return the process environment to its original state."""
         if self._orig_env is not None:
             _restore_env(self._orig_env)
+            if IS_WINDOWS:
+                original = self._orig_env.get("PATHEXT")
+                restored = os.environ.get("PATHEXT")
+                if restored != original:
+                    msg = "PATHEXT was not restored after environment teardown"
+                    raise AssertionError(msg)
             self._orig_env = None
 
     def _reset_global_state(self) -> None:
