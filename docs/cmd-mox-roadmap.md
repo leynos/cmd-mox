@@ -212,7 +212,7 @@
         quoting/escaping rules with spaces and carets, max path handling,
         case-insensitive filesystem behaviour).
 
-  - [ ] Extend CI and automated testing to exercise core workflows on Windows
+  - [x] Extend CI and automated testing to exercise core workflows on Windows
         (`windows-latest` matrix job; minimal smoke: create shims, run mocked
         command, run passthrough spy; artefacts include IPC logs for debugging).
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import typing as t
 
-from pytest_bdd import given, parsers, when
+from pytest_bdd import given, parsers, then, when
 
 from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX
 
@@ -32,6 +32,27 @@ def set_platform_override(monkeypatch: pytest.MonkeyPatch, platform: str) -> Non
 def set_env_var(monkeypatch: pytest.MonkeyPatch, var: str, val: str) -> None:
     """Adjust environment variable to new value (scoped to the test)."""
     monkeypatch.setenv(var, val)
+
+
+@then(parsers.cfparse('PATHEXT should include "{extension}"'))
+def pathext_should_include(extension: str) -> None:
+    """Assert that PATHEXT contains *extension* (case-insensitive)."""
+    pathext = os.environ.get("PATHEXT", "")
+    entries = {
+        item.strip().upper() for item in pathext.split(os.pathsep) if item.strip()
+    }
+    if extension.upper() not in entries:
+        msg = f"PATHEXT {pathext!r} missing {extension}"
+        raise AssertionError(msg)
+
+
+@then(parsers.cfparse('PATHEXT should equal "{expected}"'))
+def pathext_should_equal(expected: str) -> None:
+    """Assert PATHEXT exactly matches *expected*."""
+    value = os.environ.get("PATHEXT")
+    if value != expected:
+        msg = f"PATHEXT {value!r} != {expected!r}"
+        raise AssertionError(msg)
 
 
 @given(parsers.cfparse('the command "{cmd}" resolves to a non-executable file'))
