@@ -457,10 +457,20 @@ class CmdMox:
             raise MissingEnvironmentError(msg)
         return Path(env.shim_dir), Path(env.socket_path)
 
+    def _is_environment_initialized(self) -> bool:
+        """Check if environment manager is properly initialized."""
+        env = self.environment
+        return (
+            env is not None and env.shim_dir is not None and env.socket_path is not None
+        )
+
     def _start_ipc_server(self) -> None:
         """Prepare shims and launch the IPC server."""
         self.journal.clear()
         self._commands = self._registered_commands() | self._commands
+        if not self._entered and not self._is_environment_initialized():
+            msg = "Environment manager not initialised"
+            raise MissingEnvironmentError(msg)
         shim_dir, socket_path = self._validate_replay_environment()
         create_shim_symlinks(shim_dir, self._commands)
         self._server = CallbackIPCServer(

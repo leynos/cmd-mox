@@ -202,7 +202,7 @@
 
 - [ ] **Windows Platform Enablement**
 
-  - [ ] Establish cross-platform IPC and shim abstractions that include Windows
+  - [x] Establish cross-platform IPC and shim abstractions that include Windows
         implementations (acceptance: end-to-end pytest suite passes on
         `windows-latest` GH runner with IPC + shims enabled).
 

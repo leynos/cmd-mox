@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import os
+import sys
+import time
 import typing as t
 from pathlib import Path
+
+IS_WINDOWS = os.name == "nt"
 
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 
@@ -50,40 +54,116 @@ def _validate_command_name(name: str) -> None:
         validator(name, error_msg)
 
 
+def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
+    """Return the batch script contents to invoke ``shim.py`` on Windows."""
+    escaped_python = python_executable.replace('"', '""')
+    escaped_shim = os.fspath(shim_path).replace('"', '""')
+    return (
+        "@echo off\r\n"
+        "setlocal ENABLEDELAYEDEXPANSION\r\n"
+        f'"{escaped_python}" "{escaped_shim}" %*\r\n'
+    )
+
+
+def _validate_launcher_path(launcher: Path) -> None:
+    """Validate that *launcher* path can be used for a new .cmd file."""
+    if launcher.exists() and not launcher.is_file():
+        msg = f"{launcher} already exists and is not a file"
+        raise FileExistsError(msg)
+
+
+def _remove_with_retry(launcher: Path, max_retries: int = 3) -> None:
+    """Remove *launcher* with retry logic for locked files on Windows."""
+    if not launcher.exists():
+        return
+
+    for attempt in range(max_retries):
+        try:
+            launcher.unlink()
+        except (PermissionError, OSError) as exc:
+            if attempt == max_retries - 1:
+                msg = (
+                    f"Failed to remove existing launcher {launcher!r}: {exc}\n"
+                    "The file may be in use or locked. Please close any "
+                    "processes using it and try again."
+                )
+                raise FileExistsError(msg) from exc
+            time.sleep(0.5)
+        else:
+            return
+
+
+def _create_windows_shim(directory: Path, name: str) -> Path:
+    """Create a ``.cmd`` launcher for *name* that reuses :mod:`cmd_mox.shim`."""
+    launcher = directory / f"{name}.cmd"
+    _validate_launcher_path(launcher)
+    _remove_with_retry(launcher)
+    launcher.write_text(
+        _format_windows_launcher(sys.executable, SHIM_PATH),
+        encoding="utf-8",
+        newline="\r\n",
+    )
+    return launcher
+
+
+def _create_posix_symlink(directory: Path, name: str) -> Path:
+    """Create a POSIX symlink for *name* pointing at :data:`SHIM_PATH`."""
+    link = directory / name
+    if os.path.lexists(link):
+        if not link.is_symlink():
+            msg = f"{link} already exists and is not a symlink"
+            raise FileExistsError(msg)
+        link.unlink()
+    link.symlink_to(SHIM_PATH)
+    return link
+
+
+def _validate_shim_directory(directory: Path) -> None:
+    """Validate that *directory* exists and is a directory."""
+    if not directory.exists():
+        msg = f"Shim directory does not exist: {directory}"
+        raise FileNotFoundError(msg)
+    if not directory.is_dir():
+        msg = f"Shim directory is not a directory: {directory}"
+        raise FileNotFoundError(msg)
+
+
+def _ensure_shim_template_ready(shim_path: Path) -> None:
+    """Validate *shim_path* exists and is executable."""
+    if not shim_path.exists():
+        msg = f"Shim template not found: {shim_path}"
+        raise FileNotFoundError(msg)
+
+    if not os.access(shim_path, os.X_OK):
+        try:
+            mode = shim_path.stat().st_mode | 0o111
+            shim_path.chmod(mode)
+        except OSError as exc:  # pragma: no cover - OS specific
+            msg = f"Cannot make shim executable: {shim_path}"
+            raise PermissionError(msg) from exc
+
+
+def _create_shim_for_command(directory: Path, name: str) -> Path:
+    """Create a platform-appropriate shim for *name* in *directory*."""
+    _validate_command_name(name)
+    if IS_WINDOWS:
+        return _create_windows_shim(directory, name)
+    return _create_posix_symlink(directory, name)
+
+
 def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
-    """Create symlinks for the given commands in *directory*.
+    """Create shims for the given commands in *directory*.
 
     Parameters
     ----------
     directory:
-        Directory where symlinks will be created. It must already exist.
+        Directory where shims will be created. It must already exist.
     commands:
         Command names (e.g. "git", "curl") for which to create shims.
     """
-    if not directory.is_dir():
-        msg = f"{directory} is not a directory"
-        raise FileNotFoundError(msg)
-
-    if not SHIM_PATH.exists():
-        msg = f"Shim template not found: {SHIM_PATH}"
-        raise FileNotFoundError(msg)
-
-    if not os.access(SHIM_PATH, os.X_OK):
-        try:
-            mode = SHIM_PATH.stat().st_mode | 0o111
-            SHIM_PATH.chmod(mode)
-        except OSError as exc:  # pragma: no cover - OS specific
-            msg = f"Cannot make shim executable: {SHIM_PATH}"
-            raise PermissionError(msg) from exc
+    _validate_shim_directory(directory)
+    _ensure_shim_template_ready(SHIM_PATH)
     mapping: dict[str, Path] = {}
     for name in commands:
-        _validate_command_name(name)
-        link = directory / name
-        if os.path.lexists(link):
-            if not link.is_symlink():
-                msg = f"{link} already exists and is not a symlink"
-                raise FileExistsError(msg)
-            link.unlink()
-        link.symlink_to(SHIM_PATH)
-        mapping[name] = link
+        mapping[name] = _create_shim_for_command(directory, name)
     return mapping

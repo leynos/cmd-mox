@@ -8,6 +8,16 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal should contain 1 invocation of "hi"
 
+  Scenario: windows shim launchers are generated
+    Given a CmdMox controller
+    And windows shim launchers are enabled
+    And the platform override is "win32"
+    And the command "winshim" is stubbed to return "windows"
+    When I replay the controller
+    And I run the command "winshim"
+    Then the output should be "windows"
+    And the shim for "winshim" should end with ".cmd"
+
   Scenario: shim forwards stdout stderr and exit code
     Given a CmdMox controller
     And the command "shimcmd" is stubbed to return stdout "shim says" stderr "warn" exit code 3

@@ -10,6 +10,13 @@ from cmd_mox.errors import MissingEnvironmentError
 pytestmark = pytest.mark.requires_unix_sockets
 
 
+def test_start_ipc_server_requires_environment() -> None:
+    """Starting the IPC server without an environment raises an error."""
+    mox = CmdMox()
+    with pytest.raises(MissingEnvironmentError, match="not initialised"):
+        mox._start_ipc_server()
+
+
 @pytest.mark.parametrize("attr_name", ["shim_dir", "socket_path"])
 def test_cmdmox_replay_fails_when_attr_missing(
     monkeypatch: pytest.MonkeyPatch, attr_name: str
