@@ -16,39 +16,30 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing-only import
 T = t.TypeVar("T")
 
 
-def _create_expectation_proxy() -> type:
-    """Return a proxy type for expectation delegation.
+if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    from pathlib import Path  # noqa: F401
 
-    Static type checking requires a protocol so ``CommandDouble`` exposes the
-    full expectation interface.  At runtime we return a minimal placeholder
-    whose methods raise ``NotImplementedError`` if accessed directly, making
-    this typing-only pattern explicit.
-    """
-    if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-        from pathlib import Path  # noqa: F401
+    class _ExpectationProtocol(t.Protocol):
+        def with_args(self, *args: str) -> Self: ...
 
-        class _ExpectationProxy(t.Protocol):
-            def with_args(self, *args: str) -> Self: ...
+        def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self: ...
 
-            def with_matching_args(
-                self, *matchers: t.Callable[[str], bool]
-            ) -> Self: ...
+        def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
 
-            def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
+        def with_env(self, mapping: dict[str, str]) -> Self: ...
 
-            def with_env(self, mapping: dict[str, str]) -> Self: ...
+        def times(self, count: int) -> Self: ...
 
-            def times(self, count: int) -> Self: ...
+        def times_called(self, count: int) -> Self: ...
 
-            def times_called(self, count: int) -> Self: ...
+        def in_order(self) -> Self: ...
 
-            def in_order(self) -> Self: ...
+        def any_order(self) -> Self: ...
 
-            def any_order(self) -> Self: ...
+    _ExpectationType = _ExpectationProtocol
+else:
 
-        return _ExpectationProxy
-
-    class _ExpectationProxy:  # pragma: no cover - runtime placeholder
+    class _ExpectationType:  # pragma: no cover - runtime placeholder
         def __getattr__(self, name: str) -> t.Callable[..., t.NoReturn]:
             """Raise NotImplementedError for any method access."""
 
@@ -57,7 +48,14 @@ def _create_expectation_proxy() -> type:
 
             return _method
 
-    return _ExpectationProxy
+
+def _create_expectation_proxy() -> type:
+    """Return the active expectation proxy type.
+
+    Typing builds see a :class:`typing.Protocol`; runtime receives a lightweight
+    class that raises when accessed directly.
+    """
+    return _ExpectationType
 
 
 _ExpectationProxy = _create_expectation_proxy()
