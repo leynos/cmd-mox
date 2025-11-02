@@ -27,7 +27,26 @@ from .models import Invocation, PassthroughResult, Response
 from .socket_utils import cleanup_stale_socket, wait_for_socket
 
 if t.TYPE_CHECKING:
+    from socketserver import ThreadingUnixStreamServer as _BaseUnixServer
     from types import TracebackType
+else:
+    _BaseUnixServer: type[socketserver.BaseServer]
+    if hasattr(socketserver, "ThreadingUnixStreamServer"):
+        _BaseUnixServer = socketserver.ThreadingUnixStreamServer
+    elif hasattr(socketserver, "UnixStreamServer"):
+
+        class _ThreadingUnixStreamServerCompat(
+            socketserver.ThreadingMixIn,  # type: ignore[misc]
+            socketserver.UnixStreamServer,  # type: ignore[attr-defined]
+        ):
+            """Compatibility shim for platforms lacking ThreadingUnixStreamServer."""
+
+            pass
+
+        _BaseUnixServer = _ThreadingUnixStreamServerCompat
+    else:  # pragma: no cover - exercised on unsupported platforms only
+        msg = "Unix domain socket servers are not supported on this platform"
+        raise RuntimeError(msg)
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +332,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         self.wfile.flush()
 
 
-class _InnerServer(socketserver.ThreadingUnixStreamServer):
+class _InnerServer(_BaseUnixServer):
     """Threaded Unix stream server passing requests to :class:`IPCServer`."""
 
     def __init__(self, socket_path: Path, outer: IPCServer) -> None:
