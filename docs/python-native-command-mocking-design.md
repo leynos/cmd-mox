@@ -457,7 +457,9 @@ regardless of platform. On Windows the generator writes lightweight `.cmd`
 launchers that shell out to `shim.py`. The launchers use CRLF delimiters for
 native compatibility and CmdMox amends `PATHEXT` during replay so the command
 processor will resolve the batch wrappers even on hosts where the extension was
-removed from the user environment.
+removed from the user environment. See :class:`EnvironmentManager` in
+:mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management
+logic.
 ```mermaid
 sequenceDiagram
     actor User
@@ -1232,10 +1234,10 @@ Darwin environments, several avenues for future expansion exist.
   and inheriting the test process environment. Environment management reuses
   the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`, and
   restores the original environment on teardown. A dedicated Windows smoke job
-  now runs in CI via `make windows-smoke`, exercising mocked invocations and
-  passthrough spies while publishing `windows-ipc.log` for diagnostics. Future
-  work will focus on a "record mode" utility that captures passthrough sessions
-  for later reuse.
+  now runs in CI via the `windows-smoke` Makefile target, exercising mocked
+  invocations and passthrough spies while publishing `windows-ipc.log` for
+  diagnostics. Future work will focus on a "record mode" utility that captures
+  passthrough sessions for later reuse.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.
