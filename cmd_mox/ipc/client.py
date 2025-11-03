@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import importlib
 import json
 import logging
 import os
@@ -18,11 +19,28 @@ from cmd_mox._validators import (
     validate_retry_backoff,
     validate_retry_jitter,
 )
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, IS_WINDOWS
 
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
+
+if IS_WINDOWS:
+    try:  # pragma: no cover - executed only on Windows
+        pywintypes = importlib.import_module("pywintypes")  # type: ignore[assignment]
+        win32file = importlib.import_module("win32file")  # type: ignore[assignment]
+        win32pipe = importlib.import_module("win32pipe")  # type: ignore[assignment]
+        winerror = importlib.import_module("winerror")  # type: ignore[assignment]
+    except ModuleNotFoundError:  # pragma: no cover - runtime guard only
+        pywintypes = None  # type: ignore[assignment]
+        win32file = None  # type: ignore[assignment]
+        win32pipe = None  # type: ignore[assignment]
+        winerror = None  # type: ignore[assignment]
+else:  # pragma: no cover - exercised on non-Windows platforms
+    pywintypes = None  # type: ignore[assignment]
+    win32file = None  # type: ignore[assignment]
+    win32pipe = None  # type: ignore[assignment]
+    winerror = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +122,111 @@ def _connect_with_retries(
     raise RuntimeError(msg)  # pragma: no cover
 
 
+def _open_pipe_handle(pipe_name: str, timeout: float) -> t.Any:  # noqa: ANN401
+    """Return a handle to *pipe_name* honouring *timeout* in milliseconds."""
+    file_mod = t.cast("t.Any", win32file)
+    pywintypes_mod = t.cast("t.Any", pywintypes)
+    pipe_mod = t.cast("t.Any", win32pipe)
+    winerror_mod = t.cast("t.Any", winerror)
+    try:
+        return file_mod.CreateFile(
+            pipe_name,
+            file_mod.GENERIC_READ | file_mod.GENERIC_WRITE,
+            0,
+            None,
+            file_mod.OPEN_EXISTING,
+            0,
+            None,
+        )
+    except pywintypes_mod.error as exc:
+        if exc.winerror in {
+            winerror_mod.ERROR_PIPE_BUSY,
+            winerror_mod.ERROR_FILE_NOT_FOUND,
+        }:
+            wait_ms = max(1, int(timeout * 1000))
+            try:
+                pipe_mod.WaitNamedPipe(pipe_name, wait_ms)
+            except pywintypes_mod.error:
+                logger.debug("WaitNamedPipe(%s) failed", pipe_name, exc_info=True)
+        raise
+
+
+def _read_pipe_response(handle: t.Any) -> bytes:  # noqa: ANN401
+    """Read the complete response from *handle*."""
+    file_mod = t.cast("t.Any", win32file)
+    pywintypes_mod = t.cast("t.Any", pywintypes)
+    pipe_mod = t.cast("t.Any", win32pipe)
+    winerror_mod = t.cast("t.Any", winerror)
+
+    chunks = bytearray()
+    while True:
+        try:
+            status, chunk = file_mod.ReadFile(handle, 65536)
+        except pywintypes_mod.error as exc:
+            if exc.winerror == winerror_mod.ERROR_BROKEN_PIPE:
+                break
+            raise
+        chunks.extend(chunk)
+        if status == 0:
+            break
+        if status != pipe_mod.ERROR_MORE_DATA:
+            break
+    return bytes(chunks)
+
+
+def _send_named_pipe_request(
+    pipe_path: Path,
+    payload: bytes,
+    timeout: float,
+    retry_config: RetryConfig,
+) -> bytes:
+    """Send *payload* to the named pipe at *pipe_path*."""
+    if any(mod is None for mod in (win32pipe, win32file, pywintypes, winerror)):
+        msg = "pywin32 is required for named pipe IPC"
+        raise RuntimeError(msg)
+
+    retry_config.validate(timeout)
+    pipe_name = str(pipe_path)
+    file_mod = t.cast("t.Any", win32file)
+    pywintypes_mod = t.cast("t.Any", pywintypes)
+    winerror_mod = t.cast("t.Any", winerror)
+
+    for attempt in range(retry_config.retries):
+        try:
+            handle = _open_pipe_handle(pipe_name, timeout)
+        except pywintypes_mod.error as exc:  # type: ignore[union-attr]
+            logger.debug(
+                "IPC pipe connect attempt %d/%d to %s failed: %s",
+                attempt + 1,
+                retry_config.retries,
+                pipe_name,
+                exc,
+            )
+            if attempt < retry_config.retries - 1 and exc.winerror in {
+                winerror_mod.ERROR_PIPE_BUSY,
+                winerror_mod.ERROR_FILE_NOT_FOUND,
+            }:
+                delay = calculate_retry_delay(
+                    attempt, retry_config.backoff, retry_config.jitter
+                )
+                time.sleep(delay)
+                continue
+            raise
+        else:
+            try:
+                file_mod.WriteFile(handle, payload)
+                file_mod.FlushFileBuffers(handle)
+                return _read_pipe_response(handle)
+            finally:
+                file_mod.CloseHandle(handle)
+
+    msg = (
+        "Unreachable code reached in pipe connection loop: all retry attempts "
+        "exhausted and no handle returned."
+    )
+    raise RuntimeError(msg)
+
+
 def _get_validated_socket_path() -> Path:
     """Fetch the IPC socket path from the environment."""
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
@@ -134,10 +257,13 @@ def _send_request(
     payload["kind"] = kind
     payload_bytes = json.dumps(payload).encode("utf-8")
 
-    with _connect_with_retries(sock_path, timeout, retry) as client:
-        client.sendall(payload_bytes)
-        client.shutdown(socket.SHUT_WR)
-        raw = _read_all(client)
+    if IS_WINDOWS:
+        raw = _send_named_pipe_request(sock_path, payload_bytes, timeout, retry)
+    else:
+        with _connect_with_retries(sock_path, timeout, retry) as client:
+            client.sendall(payload_bytes)
+            client.shutdown(socket.SHUT_WR)
+            raw = _read_all(client)
 
     parsed = parse_json_safely(raw)
     if parsed is None:

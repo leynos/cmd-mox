@@ -200,7 +200,7 @@
 
 ## **Future/Epic XI. Windows Platform Support & Record Mode**
 
-- [ ] **Windows Platform Enablement**
+- [x] **Windows Platform Enablement**
 
   - [x] Establish cross-platform IPC and shim abstractions that include Windows
         implementations (acceptance: end-to-end pytest suite passes on

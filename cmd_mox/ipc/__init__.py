@@ -17,7 +17,13 @@ from .constants import (
     MESSAGE_KINDS,
 )
 from .models import Invocation, PassthroughRequest, PassthroughResult, Response
-from .server import CallbackIPCServer, IPCHandlers, IPCServer, TimeoutConfig
+from .server import (
+    CallbackIPCServer,
+    IPCHandlers,
+    IPCServer,
+    NamedPipeServer,
+    TimeoutConfig,
+)
 
 random = _client.random
 
@@ -33,6 +39,7 @@ __all__ = [
     "IPCHandlers",
     "IPCServer",
     "Invocation",
+    "NamedPipeServer",
     "PassthroughRequest",
     "PassthroughResult",
     "Response",

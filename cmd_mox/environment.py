@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import typing as t
+import uuid
 from pathlib import Path
 
 from ._validators import validate_positive_finite_timeout
@@ -232,7 +233,12 @@ class EnvironmentManager:
             [str(self.shim_dir), self._orig_env.get("PATH", "")]
         )
         _ensure_windows_pathext(self._orig_env)
-        self.socket_path = self.shim_dir / "ipc.sock"
+        if IS_WINDOWS:
+            pipe_id = uuid.uuid4().hex
+            pipe_name = f"\\\\.\\pipe\\{self._prefix.rstrip('-')}-{pipe_id}"
+            self.socket_path = Path(pipe_name)
+        else:
+            self.socket_path = self.shim_dir / "ipc.sock"
         self.export_ipc_environment()
         return self
 

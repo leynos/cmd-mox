@@ -458,8 +458,7 @@ launchers that shell out to `shim.py`. The launchers use CRLF delimiters for
 native compatibility and CmdMox amends `PATHEXT` during replay so the command
 processor will resolve the batch wrappers even on hosts where the extension was
 removed from the user environment. See :class:`EnvironmentManager` in
-:mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management
-logic.
+:mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management logic.
 ```mermaid
 sequenceDiagram
     actor User
@@ -571,6 +570,19 @@ response data (`stdout`, `stderr`, `exit_code`) to the `Invocation` before
 appending it to the journal. The server cleans up the socket on shutdown to
 prevent stale sockets from interfering with subsequent tests. The timeout is
 configurable via :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
+
+Windows environments reuse the same handler infrastructure through the
+`NamedPipeServer` backend. Rather than Unix domain sockets, the server creates
+a threaded named pipe listener via `pywin32` (`win32pipe`/`win32file`). Each
+pipe instance accepts a single client, dispatches the JSON payload using the
+shared `_handle_raw_request` routine, and responds with encoded `Response`
+objects. Connections are coordinated with lightweight events to ensure graceful
+shutdown—`NamedPipeServer.stop()` signals a synthetic client connection to
+break out of `ConnectNamedPipe`, joins outstanding worker threads, and avoids
+leaving anonymous pipe handles behind. The client helpers follow suit by
+calling `CreateFile`/`WaitNamedPipe` with configurable retry backoff, mirroring
+the Unix socket retry semantics so test code can tune timeouts uniformly across
+platforms.
 
 When `IPCServer.start()` executes inside an active
 :class:`~cmd_mox.environment.EnvironmentManager`, the manager exports both the
@@ -1232,9 +1244,9 @@ Darwin environments, several avenues for future expansion exist.
   socket appears. Shim generation emits `.cmd` launchers that shell out to the
   active Python interpreter and invoke `shim.py`, preserving argument quoting
   and inheriting the test process environment. Environment management reuses
-  the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`, and
-  restores the original environment on teardown. A dedicated Windows smoke job
-  now runs in CI via the `windows-smoke` Makefile target, exercising mocked
+  the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`,
+  and restores the original environment on teardown. A dedicated Windows smoke
+  job now runs in CI via the `windows-smoke` Makefile target, exercising mocked
   invocations and passthrough spies while publishing `windows-ipc.log` for
   diagnostics. Future work will focus on a "record mode" utility that captures
   passthrough sessions for later reuse.

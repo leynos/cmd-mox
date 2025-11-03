@@ -338,7 +338,7 @@ accepts optional callbacks so invocation handling can be customised without
 subclassing:
 
 ```python
-from cmd_mox.ipc import IPCHandlers, IPCServer, Response
+from cmd_mox.ipc import IPCHandlers, IPCServer, NamedPipeServer, Response
 
 def handle(invocation):
     return Response(stdout="custom output")
@@ -348,6 +348,13 @@ handlers = IPCHandlers(handler=handle)
 with IPCServer(socket_path, handlers=handlers):
     ...
 ```
+
+On Windows, use :class:`NamedPipeServer` directly when you need explicit
+control over the backend; :class:`CallbackIPCServer` automatically selects it
+when the platform override or runtime environment reports Windows. The
+invocation and passthrough callback APIs are identical to the Unix
+implementation, so the only behavioural difference is the transport mechanism
+(`win32pipe` named pipes instead of Unix domain sockets).
 
 Providing `passthrough_handler=` to `IPCHandlers` intercepts passthrough
 completions in the same fashion. When no callbacks are supplied the server
@@ -372,10 +379,10 @@ server = CallbackIPCServer(
 CmdMox exposes two environment variables to coordinate shims with the IPC
 server.
 
-- `CMOX_IPC_SOCKET` – path to the Unix domain socket used by shims. Entering an
-  `EnvironmentManager` sets this automatically and `IPCServer.start()`
-  refreshes it, so manual overrides are rarely needed. Shims exit with an error
-  if the variable is missing.
+- `CMOX_IPC_SOCKET` – path to the Unix domain socket (or Windows named pipe)
+  used by shims. Entering an `EnvironmentManager` sets this automatically and
+  the IPC server refreshes it when started manually, so manual overrides are
+  rarely needed. Shims exit with an error if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
   exported automatically (default `5.0`). Override this to tune connection

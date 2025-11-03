@@ -46,12 +46,18 @@ def test_environment_manager_uses_unique_resources() -> None:
     with EnvironmentManager() as first:
         first_dir = Path(first.shim_dir)
         first_socket = Path(first.socket_path)
-        assert first_socket.parent == first_dir
+        if envmod.IS_WINDOWS:
+            assert str(first_socket).startswith("\\\\.\\pipe\\")
+        else:
+            assert first_socket.parent == first_dir
 
     with EnvironmentManager() as second:
         second_dir = Path(second.shim_dir)
         second_socket = Path(second.socket_path)
-        assert second_socket.parent == second_dir
+        if envmod.IS_WINDOWS:
+            assert str(second_socket).startswith("\\\\.\\pipe\\")
+        else:
+            assert second_socket.parent == second_dir
 
     assert first_dir != second_dir
     assert first_socket != second_socket
@@ -160,6 +166,14 @@ def test_environment_restores_deleted_vars() -> None:
         del os.environ["DEL_VAR"]
     assert os.environ["DEL_VAR"] == "before"
     del os.environ["DEL_VAR"]
+
+
+def test_environment_windows_pipe_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows environments should expose named pipe IPC paths."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    with EnvironmentManager() as env:
+        assert env.socket_path is not None
+        assert str(env.socket_path).startswith("\\\\.\\pipe\\cmdmox")
 
 
 def test_temporary_env_restores_environment() -> None:
