@@ -174,6 +174,31 @@ def _read_pipe_response(handle: t.Any) -> bytes:  # noqa: ANN401
     return bytes(chunks)
 
 
+def _should_retry_pipe_connection(
+    attempt: int,
+    max_retries: int,
+    exc: t.Any,  # noqa: ANN401
+    winerror_mod: t.Any,  # noqa: ANN401
+) -> bool:
+    """Return whether a pipe connection error warrants a retry."""
+    retryable_errors = {
+        winerror_mod.ERROR_PIPE_BUSY,
+        winerror_mod.ERROR_FILE_NOT_FOUND,
+    }
+    return attempt < max_retries - 1 and exc.winerror in retryable_errors
+
+
+def _write_and_read_pipe(handle: t.Any, payload: bytes) -> bytes:  # noqa: ANN401
+    """Write *payload* to *handle* and return the IPC response."""
+    file_mod = t.cast("t.Any", win32file)
+    try:
+        file_mod.WriteFile(handle, payload)
+        file_mod.FlushFileBuffers(handle)
+        return _read_pipe_response(handle)
+    finally:
+        file_mod.CloseHandle(handle)
+
+
 def _send_named_pipe_request(
     pipe_path: Path,
     payload: bytes,
@@ -187,7 +212,6 @@ def _send_named_pipe_request(
 
     retry_config.validate(timeout)
     pipe_name = str(pipe_path)
-    file_mod = t.cast("t.Any", win32file)
     pywintypes_mod = t.cast("t.Any", pywintypes)
     winerror_mod = t.cast("t.Any", winerror)
 
@@ -202,23 +226,19 @@ def _send_named_pipe_request(
                 pipe_name,
                 exc,
             )
-            if attempt < retry_config.retries - 1 and exc.winerror in {
-                winerror_mod.ERROR_PIPE_BUSY,
-                winerror_mod.ERROR_FILE_NOT_FOUND,
-            }:
+            if _should_retry_pipe_connection(
+                attempt,
+                retry_config.retries,
+                exc,
+                winerror_mod,
+            ):
                 delay = calculate_retry_delay(
                     attempt, retry_config.backoff, retry_config.jitter
                 )
                 time.sleep(delay)
                 continue
             raise
-        else:
-            try:
-                file_mod.WriteFile(handle, payload)
-                file_mod.FlushFileBuffers(handle)
-                return _read_pipe_response(handle)
-            finally:
-                file_mod.CloseHandle(handle)
+        return _write_and_read_pipe(handle, payload)
 
     msg = (
         "Unreachable code reached in pipe connection loop: all retry attempts "
