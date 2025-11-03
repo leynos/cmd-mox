@@ -9,6 +9,7 @@ import json
 import logging
 import socketserver
 import threading
+import typing
 import typing as t
 from pathlib import Path
 
@@ -486,18 +487,36 @@ class NamedPipeServer(IPCServer):
         except pywintypes_mod.error:  # pragma: no cover - best-effort configuration
             logger.debug("Failed to adjust named pipe read mode", exc_info=True)
 
+    def _validate_win32_modules(self) -> bool:
+        return all(
+            module is not None
+            for module in (
+                self._win32file,
+                self._pywintypes,
+                self._win32pipe,
+                self._winerror,
+            )
+        )
+
+    def _should_continue_reading(self, status: int) -> bool:
+        pipe_mod: t.Any = self._win32pipe
+        if pipe_mod is None:
+            return False
+        if status == 0:
+            return False
+        return status == pipe_mod.ERROR_MORE_DATA
+
     def _read_from_pipe(self, handle: object) -> bytes:
+        if not self._validate_win32_modules():
+            return b""
+
         file_mod = self._win32file
         pywintypes_mod = self._pywintypes
-        pipe_mod = self._win32pipe
         winerror_mod = self._winerror
-        if (
-            file_mod is None
-            or pywintypes_mod is None
-            or pipe_mod is None
-            or winerror_mod is None
-        ):
-            return b""
+
+        file_mod = t.cast("typing.Any", file_mod)
+        pywintypes_mod = t.cast("typing.Any", pywintypes_mod)
+        winerror_mod = t.cast("typing.Any", winerror_mod)
 
         chunks = bytearray()
         while True:
@@ -508,9 +527,7 @@ class NamedPipeServer(IPCServer):
                     break
                 raise
             chunks.extend(chunk)
-            if status == 0:
-                break
-            if status != pipe_mod.ERROR_MORE_DATA:
+            if not self._should_continue_reading(status):
                 break
         return bytes(chunks)
 
