@@ -453,6 +453,13 @@ the following steps:
 
 This symlink-based approach is highly efficient and ensures that any updates or
 bug fixes to the shim logic only need to be applied to one central template
+regardless of platform. On Windows the generator writes lightweight `.cmd`
+launchers that shell out to `shim.py`. The launchers use CRLF delimiters for
+native compatibility and CmdMox amends `PATHEXT` during replay so the command
+processor will resolve the batch wrappers even on hosts where the extension was
+removed from the user environment. See :class:`EnvironmentManager` in
+:mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management
+logic.
 ```mermaid
 sequenceDiagram
     actor User
@@ -1225,10 +1232,12 @@ Darwin environments, several avenues for future expansion exist.
   socket appears. Shim generation emits `.cmd` launchers that shell out to the
   active Python interpreter and invoke `shim.py`, preserving argument quoting
   and inheriting the test process environment. Environment management reuses
-  the existing `PATH`-based interception so callers do not need to special-case
-  platform differences. Future work will focus on a "record mode" utility and a
-  dedicated Windows CI lane to exercise passthrough, spies, and environment
-  restoration end-to-end.
+  the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`, and
+  restores the original environment on teardown. A dedicated Windows smoke job
+  now runs in CI via the `windows-smoke` Makefile target, exercising mocked
+  invocations and passthrough spies while publishing `windows-ipc.log` for
+  diagnostics. Future work will focus on a "record mode" utility that captures
+  passthrough sessions for later reuse.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.

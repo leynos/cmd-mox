@@ -78,6 +78,14 @@ nixie: $(NIXIE) ## Validate Mermaid diagrams
 test: build uv $(VENV_TOOLS) ## Run tests
 	$(UV_ENV) uv run pytest -v -n auto
 
+windows-smoke: build uv $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
+	$(UV_ENV) uv run pytest -v \
+	tests/test_windows_environment.py \
+	tests/test_windows_support_bdd.py \
+	--log-file=windows-ipc.log \
+	--log-file-level=DEBUG \
+	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
 	awk 'BEGIN {FS=":"; printf "Available targets:\n"} {printf "  %-20s %s\n", $$1, $$2}'
