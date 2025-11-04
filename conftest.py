@@ -16,6 +16,8 @@ _UNIX_SOCKETS_SUPPORTED: bool | None = None
 
 def _can_bind_unix_socket() -> bool:
     """Return ``True`` when the platform allows binding Unix domain sockets."""
+    if not hasattr(socket, "AF_UNIX"):
+        return False
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
             sock_path = Path(tmp_dir) / "probe.sock"
