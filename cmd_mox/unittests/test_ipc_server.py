@@ -207,3 +207,23 @@ def test_calculate_retry_delay() -> None:
         delay = calculate_retry_delay(0, 1.0, 0.5)
         assert delay == pytest.approx(1.25)
         mock_uniform.assert_called_once_with(0.5, 1.5)
+
+
+def test_ipc_server_start_requires_unix_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Starting IPCServer should fail gracefully when Unix sockets are absent."""
+    import cmd_mox.ipc.server as server_module
+
+    socket_path = tmp_path / "ipc.sock"
+    monkeypatch.setattr(server_module, "_UNIX_SOCKET_SERVER_SUPPORTED", False)
+
+    class _SentinelInner:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pytest.fail("Inner server should not be constructed when unsupported")
+
+    monkeypatch.setattr(server_module, "_InnerServer", _SentinelInner)
+    server = server_module.IPCServer(socket_path)
+
+    with pytest.raises(RuntimeError, match="Unix domain socket servers"):
+        server.start()

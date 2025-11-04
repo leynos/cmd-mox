@@ -29,10 +29,12 @@ from .models import Invocation, PassthroughResult, Response
 from .socket_utils import cleanup_stale_socket, wait_for_socket
 
 if t.TYPE_CHECKING:
-    from socketserver import ThreadingUnixStreamServer as _BaseUnixServer
+    from socketserver import ThreadingUnixStreamServer as _TypingUnixServer
     from types import TracebackType
+
+    _BaseUnixServer = _TypingUnixServer
 else:
-    _BaseUnixServer: type[socketserver.BaseServer]
+    _BaseUnixServer: type[socketserver.BaseServer] | None
     if hasattr(socketserver, "ThreadingUnixStreamServer"):
         _BaseUnixServer = socketserver.ThreadingUnixStreamServer
     elif hasattr(socketserver, "UnixStreamServer"):
@@ -47,8 +49,20 @@ else:
 
         _BaseUnixServer = _ThreadingUnixStreamServerCompat
     else:  # pragma: no cover - exercised on unsupported platforms only
-        msg = "Unix domain socket servers are not supported on this platform"
-        raise RuntimeError(msg)
+        _BaseUnixServer = None
+
+_UNSUPPORTED_UNIX_SOCKET_MESSAGE = (
+    "Unix domain socket servers are not supported on this platform"
+)
+
+_UNIX_SOCKET_SERVER_SUPPORTED = _BaseUnixServer is not None
+
+
+def _ensure_unix_socket_support() -> None:
+    """Raise a descriptive error when Unix-domain sockets are unavailable."""
+    if not _UNIX_SOCKET_SERVER_SUPPORTED:  # pragma: no cover - platform guard
+        raise RuntimeError(_UNSUPPORTED_UNIX_SOCKET_MESSAGE)
+
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +210,7 @@ class IPCServer:
 
     def start(self) -> None:
         """Start the background server thread."""
+        _ensure_unix_socket_support()
         with self._lock:
             if self._thread:
                 msg = "IPC server already started"
@@ -631,13 +646,23 @@ else:
         pass
 
 
-class _InnerServer(_BaseUnixServer):
-    """Threaded Unix stream server passing requests to :class:`IPCServer`."""
+if _UNIX_SOCKET_SERVER_SUPPORTED:
 
-    def __init__(self, socket_path: Path, outer: IPCServer) -> None:
-        self.outer = outer
-        super().__init__(str(socket_path), _IPCHandler)
-        self.daemon_threads = True
+    class _InnerServer(_BaseUnixServer):  # type: ignore[misc]
+        """Threaded Unix stream server passing requests to :class:`IPCServer`."""
+
+        def __init__(self, socket_path: Path, outer: IPCServer) -> None:
+            self.outer = outer
+            super().__init__(str(socket_path), _IPCHandler)
+            self.daemon_threads = True
+
+else:  # pragma: no cover - exercised only on platforms without Unix sockets
+
+    class _InnerServer:  # type: ignore[too-many-ancestors]
+        """Placeholder that raises when Unix sockets are unsupported."""
+
+        def __init__(self, *_: object, **__: object) -> None:
+            _ensure_unix_socket_support()
 
 
 __all__ = [
