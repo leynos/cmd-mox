@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import types
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 
 import cmd_mox.ipc.client as client
 import cmd_mox.ipc.server as server
+import cmd_mox.ipc.win32 as win32ipc
 from cmd_mox.ipc import IPCHandlers, NamedPipeServer, Response
 
 
@@ -103,28 +105,61 @@ def fake_winerror() -> types.SimpleNamespace:
         ERROR_PIPE_BUSY=231,
         ERROR_FILE_NOT_FOUND=2,
         ERROR_BROKEN_PIPE=109,
+        ERROR_PIPE_CONNECTED=535,
     )
+
+
+class FakeClientPipeAPI:
+    """Standalone pipe helper for exercising client retry logic."""
+
+    def __init__(self, fake_winerror: types.SimpleNamespace) -> None:
+        self.winerror = fake_winerror
+        self.win32pipe = types.SimpleNamespace(ERROR_PIPE_CONNECTED=535)
+        self.pywintypes = types.SimpleNamespace(error=FakeError)
+        self.open_calls = 0
+        self.fail_codes: list[int] = []
+        self.written: list[bytes] = []
+        self.closed = False
+        self.response = b"{}"
+
+    def open_client_handle(self, _pipe_name: str, _timeout: float) -> object:
+        """Return a dummy handle or raise the next configured failure."""
+        self.open_calls += 1
+        if self.fail_codes:
+            code = self.fail_codes.pop(0)
+            raise FakeError(code)
+        return object()
+
+    def write_to_pipe(self, _handle: object, payload: bytes) -> None:
+        """Record payload bytes destined for the fake pipe."""
+        self.written.append(payload)
+
+    def read_from_pipe(self, _handle: object) -> bytes:
+        """Return the preconfigured response payload."""
+        return self.response
+
+    def close_handle(self, _handle: object) -> None:
+        """Flag that the fake handle has been closed."""
+        self.closed = True
+
+    def is_retryable_client_error(self, exc: Exception) -> bool:
+        """Indicate whether *exc* should trigger client retries."""
+        return getattr(exc, "winerror", None) in {
+            self.winerror.ERROR_PIPE_BUSY,
+            self.winerror.ERROR_FILE_NOT_FOUND,
+        }
 
 
 def test_send_named_pipe_request_writes_payload(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fake_winerror: types.SimpleNamespace
 ) -> None:
     """The client helper should write payloads and close handles."""
-    fake_file = FakeWin32File()
-    fake_pipe = types.SimpleNamespace()
-    fake_pywin = types.SimpleNamespace(error=FakeError)
-    fake_winerr = types.SimpleNamespace(
-        ERROR_PIPE_BUSY=231,
-        ERROR_FILE_NOT_FOUND=2,
-        ERROR_BROKEN_PIPE=109,
+    fake_api = FakeClientPipeAPI(fake_winerror)
+    monkeypatch.setattr(
+        client.win32ipc,
+        "require_named_pipe_api",
+        lambda _context: fake_api,
     )
-
-    monkeypatch.setattr(client, "win32file", fake_file)
-    monkeypatch.setattr(client, "win32pipe", fake_pipe)
-    monkeypatch.setattr(client, "pywintypes", fake_pywin)
-    monkeypatch.setattr(client, "winerror", fake_winerr)
-    monkeypatch.setattr(client, "_open_pipe_handle", lambda *_: object())
-    monkeypatch.setattr(client, "_read_pipe_response", lambda _: b"{}")
 
     retry = client.RetryConfig(retries=1)
     payload = b"payload"
@@ -132,9 +167,35 @@ def test_send_named_pipe_request_writes_payload(
         Path("\\\\.\\pipe\\cmdmox-test"), payload, 1.0, retry
     )
 
-    assert fake_file.written == payload
-    assert fake_file.closed is True
+    assert fake_api.written == [payload]
+    assert fake_api.closed is True
     assert result == b"{}"
+
+
+def test_send_named_pipe_request_error_handling(
+    monkeypatch: pytest.MonkeyPatch, fake_winerror: types.SimpleNamespace
+) -> None:
+    """The pipe helper should retry on busy pipes then surface terminal errors."""
+    fake_api = FakeClientPipeAPI(fake_winerror)
+    fake_api.fail_codes = [
+        fake_winerror.ERROR_PIPE_BUSY,
+        fake_winerror.ERROR_FILE_NOT_FOUND,
+    ]
+    monkeypatch.setattr(
+        client.win32ipc,
+        "require_named_pipe_api",
+        lambda _context: fake_api,
+    )
+
+    retry = client.RetryConfig(retries=2)
+    with pytest.raises(FakeError) as excinfo:
+        client._send_named_pipe_request(
+            Path("\\\\.\\pipe\\cmdmox-test"), b"payload", 1.0, retry
+        )
+
+    assert fake_api.open_calls == 2
+    assert isinstance(excinfo.value, FakeError)
+    assert excinfo.value.winerror == fake_winerror.ERROR_FILE_NOT_FOUND
 
 
 def test_named_pipe_server_handles_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -156,6 +217,7 @@ def test_named_pipe_server_handles_request(monkeypatch: pytest.MonkeyPatch) -> N
         ERROR_PIPE_BUSY=231,
         ERROR_FILE_NOT_FOUND=2,
         ERROR_BROKEN_PIPE=109,
+        ERROR_PIPE_CONNECTED=535,
     )
 
     def handler(_invocation: server.Invocation) -> Response:
@@ -164,10 +226,12 @@ def test_named_pipe_server_handles_request(monkeypatch: pytest.MonkeyPatch) -> N
     named_pipe = NamedPipeServer(
         Path("\\\\.\\pipe\\cmdmox-test"), handlers=IPCHandlers(handler=handler)
     )
-    named_pipe._win32pipe = fake_pipe
-    named_pipe._win32file = fake_file
-    named_pipe._pywintypes = fake_pywin
-    named_pipe._winerror = fake_winerr
+    named_pipe._pipe_api = win32ipc.NamedPipeAPI(
+        pywintypes=fake_pywin,
+        win32file=fake_file,
+        win32pipe=fake_pipe,
+        winerror=fake_winerr,
+    )
 
     named_pipe._handle_connection(fake_handle)
 
@@ -176,3 +240,44 @@ def test_named_pipe_server_handles_request(monkeypatch: pytest.MonkeyPatch) -> N
     assert response_payload["stdout"] == "handled"
     assert fake_pipe.disconnected == [fake_handle]
     assert fake_file.closed is True
+
+
+def test_named_pipe_server_handles_malformed_payload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Malformed payloads should be ignored without writing responses."""
+    payload = b"{not valid json"
+    fake_handle = FakeNamedPipeHandle(payload)
+    fake_pipe = FakeWin32Pipe()
+    fake_file = FakeWin32FileForServer(payload)
+    fake_pywin = types.SimpleNamespace(error=FakeError)
+    fake_winerr = types.SimpleNamespace(
+        ERROR_PIPE_BUSY=231,
+        ERROR_FILE_NOT_FOUND=2,
+        ERROR_BROKEN_PIPE=109,
+        ERROR_PIPE_CONNECTED=535,
+    )
+
+    handler_called = False
+
+    def handler(_invocation: server.Invocation) -> Response:
+        nonlocal handler_called
+        handler_called = True
+        return Response(stdout="handled")
+
+    named_pipe = NamedPipeServer(
+        Path("\\\\.\\pipe\\cmdmox-test"), handlers=IPCHandlers(handler=handler)
+    )
+    named_pipe._pipe_api = win32ipc.NamedPipeAPI(
+        pywintypes=fake_pywin,
+        win32file=fake_file,
+        win32pipe=fake_pipe,
+        winerror=fake_winerr,
+    )
+
+    caplog.set_level(logging.ERROR, logger="cmd_mox.ipc.server")
+    named_pipe._handle_connection(fake_handle)
+
+    assert handler_called is False
+    assert not fake_handle.responses
+    assert any("malformed" in record.message for record in caplog.records)

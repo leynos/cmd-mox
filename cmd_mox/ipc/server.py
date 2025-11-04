@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses as dc
-import importlib
 import json
 import logging
 import socketserver
 import threading
-import typing
 import typing as t
 from pathlib import Path
 
@@ -19,6 +17,7 @@ from cmd_mox._validators import (
 )
 from cmd_mox.environment import IS_WINDOWS, EnvironmentManager
 
+from . import win32 as win32ipc
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import (
     parse_json_safely,
@@ -65,23 +64,6 @@ def _ensure_unix_socket_support() -> None:
 
 
 logger = logging.getLogger(__name__)
-
-if IS_WINDOWS:
-    try:  # pragma: no cover - executed only on Windows
-        pywintypes = importlib.import_module("pywintypes")  # type: ignore[assignment]
-        win32file = importlib.import_module("win32file")  # type: ignore[assignment]
-        win32pipe = importlib.import_module("win32pipe")  # type: ignore[assignment]
-        winerror = importlib.import_module("winerror")  # type: ignore[assignment]
-    except ModuleNotFoundError:  # pragma: no cover - runtime guard only
-        pywintypes = None  # type: ignore[assignment]
-        win32file = None  # type: ignore[assignment]
-        win32pipe = None  # type: ignore[assignment]
-        winerror = None  # type: ignore[assignment]
-else:  # pragma: no cover - exercised when Windows code imported on POSIX
-    pywintypes = None  # type: ignore[assignment]
-    win32file = None  # type: ignore[assignment]
-    win32pipe = None  # type: ignore[assignment]
-    winerror = None  # type: ignore[assignment]
 
 _RequestValidator = t.Callable[[dict[str, t.Any]], t.Any | None]
 _DispatchArg = t.TypeVar("_DispatchArg", Invocation, PassthroughResult)
@@ -346,24 +328,11 @@ class NamedPipeServer(IPCServer):
         super().__init__(socket_path, timeout=timeout, handlers=handlers)
         self._stop_event: threading.Event | None = None
         self._client_threads: set[threading.Thread] = set()
-        self._win32pipe: t.Any | None = None
-        self._win32file: t.Any | None = None
-        self._pywintypes: t.Any | None = None
-        self._winerror: t.Any | None = None
-
-    def _require_win32_modules(self) -> tuple[t.Any, t.Any, t.Any, t.Any]:
-        modules = (win32pipe, win32file, pywintypes, winerror)
-        if any(mod is None for mod in modules):  # pragma: no cover - Windows only
-            msg = (
-                "pywin32 is required for NamedPipeServer; install 'pywin32' on "
-                "Windows to enable IPC."
-            )
-            raise RuntimeError(msg)
-        return modules  # type: ignore[return-value]
+        self._pipe_api: win32ipc.NamedPipeAPI | None = None
 
     def start(self) -> None:
         """Start listening for named pipe connections."""
-        pipe_mod, file_mod, pywintypes_mod, winerror_mod = self._require_win32_modules()
+        api = win32ipc.require_named_pipe_api("NamedPipeServer")
         with self._lock:
             if self._thread:
                 msg = "IPC server already started"
@@ -382,10 +351,7 @@ class NamedPipeServer(IPCServer):
 
             self._thread = thread
             self._stop_event = stop_event
-            self._win32pipe = pipe_mod
-            self._win32file = file_mod
-            self._pywintypes = pywintypes_mod
-            self._winerror = winerror_mod
+            self._pipe_api = api
 
         thread.start()
 
@@ -409,6 +375,8 @@ class NamedPipeServer(IPCServer):
         for worker in client_threads:
             worker.join(self.timeout)
 
+        self._pipe_api = None
+
     def _serve_forever(self, stop_event: threading.Event) -> None:
         while not stop_event.is_set():
             handle = self._create_pipe_instance()
@@ -431,36 +399,19 @@ class NamedPipeServer(IPCServer):
             worker.start()
 
     def _create_pipe_instance(self) -> object | None:
-        pipe_mod = self._win32pipe
-        pywintypes_mod = self._pywintypes
-        if pipe_mod is None or pywintypes_mod is None:
+        api = self._pipe_api
+        if api is None:
             return None
-        try:
-            return pipe_mod.CreateNamedPipe(
-                str(self.socket_path),
-                pipe_mod.PIPE_ACCESS_DUPLEX,
-                pipe_mod.PIPE_TYPE_MESSAGE
-                | pipe_mod.PIPE_READMODE_MESSAGE
-                | pipe_mod.PIPE_WAIT,
-                pipe_mod.PIPE_UNLIMITED_INSTANCES,
-                65536,
-                65536,
-                int(self.timeout * 1000),
-                None,
-            )
-        except pywintypes_mod.error:  # pragma: no cover - defensive logging
-            logger.exception("Failed to create named pipe %s", self.socket_path)
-            return None
+        return api.create_named_pipe(str(self.socket_path), self.timeout)
 
     def _connect_client(self, handle: object, stop_event: threading.Event) -> bool:
-        pipe_mod = self._win32pipe
-        pywintypes_mod = self._pywintypes
-        if pipe_mod is None or pywintypes_mod is None:
+        api = self._pipe_api
+        if api is None:
             return False
         try:
-            pipe_mod.ConnectNamedPipe(handle, None)
-        except pywintypes_mod.error as exc:  # pragma: no cover - defensive logging
-            if exc.winerror == pipe_mod.ERROR_PIPE_CONNECTED:
+            api.connect_named_pipe(handle)
+        except api.pywintypes.error as exc:  # type: ignore[union-attr]
+            if exc.winerror == api.win32pipe.ERROR_PIPE_CONNECTED:
                 pass
             elif stop_event.is_set():
                 return False
@@ -488,102 +439,38 @@ class NamedPipeServer(IPCServer):
                 self._client_threads.discard(worker)
 
     def _configure_pipe(self, handle: object) -> None:
-        pipe_mod = self._win32pipe
-        pywintypes_mod = self._pywintypes
-        if pipe_mod is None or pywintypes_mod is None:
+        api = self._pipe_api
+        if api is None:
             return
         try:
-            pipe_mod.SetNamedPipeHandleState(
-                handle,
-                pipe_mod.PIPE_READMODE_MESSAGE,
-                None,
-                None,
-            )
-        except pywintypes_mod.error:  # pragma: no cover - best-effort configuration
+            api.set_message_mode(handle)
+        except api.pywintypes.error:  # type: ignore[union-attr]
             logger.debug("Failed to adjust named pipe read mode", exc_info=True)
 
-    def _validate_win32_modules(self) -> bool:
-        return all(
-            module is not None
-            for module in (
-                self._win32file,
-                self._pywintypes,
-                self._win32pipe,
-                self._winerror,
-            )
-        )
-
-    def _should_continue_reading(self, status: int) -> bool:
-        pipe_mod: t.Any = self._win32pipe
-        if pipe_mod is None:
-            return False
-        if status == 0:
-            return False
-        return status == pipe_mod.ERROR_MORE_DATA
-
     def _read_from_pipe(self, handle: object) -> bytes:
-        if not self._validate_win32_modules():
+        api = self._pipe_api
+        if api is None:
             return b""
-
-        file_mod = self._win32file
-        pywintypes_mod = self._pywintypes
-        winerror_mod = self._winerror
-
-        file_mod = t.cast("typing.Any", file_mod)
-        pywintypes_mod = t.cast("typing.Any", pywintypes_mod)
-        winerror_mod = t.cast("typing.Any", winerror_mod)
-
-        chunks = bytearray()
-        while True:
-            try:
-                status, chunk = file_mod.ReadFile(handle, 65536)
-            except pywintypes_mod.error as exc:
-                if exc.winerror == winerror_mod.ERROR_BROKEN_PIPE:
-                    break
-                raise
-            chunks.extend(chunk)
-            if not self._should_continue_reading(status):
-                break
-        return bytes(chunks)
+        return api.read_from_pipe(handle)
 
     def _write_to_pipe(self, handle: object, payload: bytes) -> None:
-        file_mod = self._win32file
-        if file_mod is None:
+        api = self._pipe_api
+        if api is None:
             return
-        file_mod.WriteFile(handle, payload)
-        file_mod.FlushFileBuffers(handle)
+        api.write_to_pipe(handle, payload)
 
     def _close_handle(self, handle: object) -> None:
-        pipe_mod = self._win32pipe
-        file_mod = self._win32file
-        if pipe_mod is not None:
-            try:
-                pipe_mod.DisconnectNamedPipe(handle)
-            except OSError:  # pragma: no cover - defensive cleanup
-                logger.debug("DisconnectNamedPipe failed", exc_info=True)
-        if file_mod is not None:
-            try:
-                file_mod.CloseHandle(handle)
-            except OSError:  # pragma: no cover - defensive cleanup
-                logger.debug("CloseHandle failed", exc_info=True)
+        api = self._pipe_api
+        if api is None:
+            return
+        api.disconnect_named_pipe(handle)
+        api.close_handle(handle)
 
     def _poke_pipe(self) -> None:
-        file_mod = self._win32file
-        if file_mod is None:
+        api = self._pipe_api
+        if api is None:
             return
-        try:
-            handle = file_mod.CreateFile(
-                str(self.socket_path),
-                file_mod.GENERIC_READ | file_mod.GENERIC_WRITE,
-                0,
-                None,
-                file_mod.OPEN_EXISTING,
-                0,
-                None,
-            )
-        except OSError:  # pragma: no cover - best-effort wake up
-            return
-        file_mod.CloseHandle(handle)
+        api.poke_server(str(self.socket_path))
 
 
 class _UnixCallbackIPCServer(IPCServer):
@@ -631,19 +518,7 @@ class _WindowsCallbackIPCServer(NamedPipeServer):
         )
 
 
-if IS_WINDOWS:
-
-    class CallbackIPCServer(_WindowsCallbackIPCServer):
-        """Platform-specific callback server selecting named pipes on Windows."""
-
-        pass
-
-else:
-
-    class CallbackIPCServer(_UnixCallbackIPCServer):
-        """Platform-specific callback server selecting Unix sockets."""
-
-        pass
+CallbackIPCServer = _WindowsCallbackIPCServer if IS_WINDOWS else _UnixCallbackIPCServer
 
 
 if _UNIX_SOCKET_SERVER_SUPPORTED:

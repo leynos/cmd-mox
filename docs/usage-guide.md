@@ -349,9 +349,9 @@ with IPCServer(socket_path, handlers=handlers):
     ...
 ```
 
-On Windows, use :class:`NamedPipeServer` directly when you need explicit
-control over the backend; :class:`CallbackIPCServer` automatically selects it
-when the platform override or runtime environment reports Windows. The
+On Windows, :class:`NamedPipeServer` provides explicit control over the backend;
+:class:`CallbackIPCServer` automatically selects it when the platform override
+or runtime environment reports Windows. The
 invocation and passthrough callback APIs are identical to the Unix
 implementation, so the only behavioural difference is the transport mechanism
 (`win32pipe` named pipes instead of Unix domain sockets).

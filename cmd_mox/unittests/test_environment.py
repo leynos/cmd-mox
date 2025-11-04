@@ -176,6 +176,26 @@ def test_environment_windows_pipe_generation(monkeypatch: pytest.MonkeyPatch) ->
         assert str(env.socket_path).startswith("\\\\.\\pipe\\cmdmox")
 
 
+def test_environment_windows_pipe_generation_sanitizes_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pipe prefixes should be sanitized to valid Windows characters."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    with EnvironmentManager(prefix="cmd//invalid***-") as env:
+        assert env.socket_path is not None
+        assert "cmd__invalid___" in str(env.socket_path)
+
+
+def test_environment_windows_flag_invalid_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-boolean IS_WINDOWS values should default to Unix socket paths."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", None)
+    with EnvironmentManager() as env:
+        assert env.shim_dir is not None
+        assert env.socket_path == env.shim_dir / "ipc.sock"
+
+
 def test_temporary_env_restores_environment() -> None:
     """temporary_env should fully restore the process environment."""
     original_env = os.environ.copy()
