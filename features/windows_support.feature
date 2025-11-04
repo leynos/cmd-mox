@@ -4,6 +4,7 @@ Feature: Windows platform smoke tests
   Scenario: Windows shims support mocks and passthrough spies
     Given windows shim launchers are enabled
     And the platform override is "win32"
+    And Windows IPC modules are simulated
     And I set environment variable "PATHEXT" to ".COM;.EXE"
     And a CmdMox controller
     And the command "cmd-mock" is mocked to return "windows mock"

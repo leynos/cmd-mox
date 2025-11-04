@@ -15,8 +15,9 @@ from cmd_mox._validators import (
     validate_optional_timeout,
     validate_positive_finite_timeout,
 )
-from cmd_mox.environment import EnvironmentManager
+from cmd_mox.environment import IS_WINDOWS, EnvironmentManager
 
+from . import win32 as win32ipc
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import (
     parse_json_safely,
@@ -27,10 +28,12 @@ from .models import Invocation, PassthroughResult, Response
 from .socket_utils import cleanup_stale_socket, wait_for_socket
 
 if t.TYPE_CHECKING:
-    from socketserver import ThreadingUnixStreamServer as _BaseUnixServer
+    from socketserver import ThreadingUnixStreamServer as _TypingUnixServer
     from types import TracebackType
+
+    _BaseUnixServer = _TypingUnixServer
 else:
-    _BaseUnixServer: type[socketserver.BaseServer]
+    _BaseUnixServer: type[socketserver.BaseServer] | None
     if hasattr(socketserver, "ThreadingUnixStreamServer"):
         _BaseUnixServer = socketserver.ThreadingUnixStreamServer
     elif hasattr(socketserver, "UnixStreamServer"):
@@ -45,8 +48,20 @@ else:
 
         _BaseUnixServer = _ThreadingUnixStreamServerCompat
     else:  # pragma: no cover - exercised on unsupported platforms only
-        msg = "Unix domain socket servers are not supported on this platform"
-        raise RuntimeError(msg)
+        _BaseUnixServer = None
+
+_UNSUPPORTED_UNIX_SOCKET_MESSAGE = (
+    "Unix domain socket servers are not supported on this platform"
+)
+
+_UNIX_SOCKET_SERVER_SUPPORTED = _BaseUnixServer is not None
+
+
+def _ensure_unix_socket_support() -> None:
+    """Raise a descriptive error when Unix-domain sockets are unavailable."""
+    if not _UNIX_SOCKET_SERVER_SUPPORTED:  # pragma: no cover - platform guard
+        raise RuntimeError(_UNSUPPORTED_UNIX_SOCKET_MESSAGE)
+
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +192,7 @@ class IPCServer:
 
     def start(self) -> None:
         """Start the background server thread."""
+        _ensure_unix_socket_support()
         with self._lock:
             if self._thread:
                 msg = "IPC server already started"
@@ -234,8 +250,231 @@ class IPCServer:
         )
 
 
-class CallbackIPCServer(IPCServer):
-    """IPCServer variant that delegates to callbacks."""
+_RequestProcessor = t.Callable[[IPCServer, t.Any], Response]
+
+_REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
+    KIND_INVOCATION: (validate_invocation_payload, _process_invocation),
+    KIND_PASSTHROUGH_RESULT: (
+        validate_passthrough_payload,
+        _process_passthrough_result,
+    ),
+}
+
+
+def _execute_request(
+    server: IPCServer, processor: _RequestProcessor, obj: object
+) -> Response:
+    """Execute *processor* and wrap unexpected failures."""
+    try:
+        return processor(server, obj)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        logger.exception("IPC handler raised an exception")
+        message = str(exc) or exc.__class__.__name__
+        return Response(stderr=message, exit_code=1)
+
+
+def _handle_raw_request(server: IPCServer, raw: bytes) -> bytes | None:
+    """Process a raw request payload and return the encoded response."""
+    payload = parse_json_safely(raw)
+    if payload is None:
+        try:
+            obj = json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError:
+            logger.exception("IPC received malformed JSON")
+            return None
+        logger.error("IPC payload not a dict: %r", obj)
+        return None
+
+    copied_payload = payload.copy()
+    kind = str(copied_payload.pop("kind", KIND_INVOCATION))
+    handler_entry = _REQUEST_HANDLERS.get(kind)
+    if handler_entry is None:
+        logger.error("Unknown IPC payload kind: %r", kind)
+        return None
+
+    validator, processor = handler_entry
+    obj = validator(copied_payload)
+    if obj is None:
+        return None
+
+    response = _execute_request(server, processor, obj)
+    return json.dumps(response.to_dict()).encode("utf-8")
+
+
+class _IPCHandler(socketserver.StreamRequestHandler):
+    """Handle a single shim connection."""
+
+    def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
+        raw = self.rfile.read()
+        response = _handle_raw_request(self.server.outer, raw)  # type: ignore[attr-defined]
+        if response is None:
+            return
+        self.wfile.write(response)
+        self.wfile.flush()
+
+
+class NamedPipeServer(IPCServer):
+    """Windows named pipe implementation mirroring :class:`IPCServer`."""
+
+    def __init__(
+        self,
+        socket_path: Path,
+        timeout: float = 5.0,
+        *,
+        handlers: IPCHandlers | None = None,
+    ) -> None:
+        super().__init__(socket_path, timeout=timeout, handlers=handlers)
+        self._stop_event: threading.Event | None = None
+        self._client_threads: set[threading.Thread] = set()
+        self._pipe_api: win32ipc.NamedPipeAPI | None = None
+
+    def start(self) -> None:
+        """Start listening for named pipe connections."""
+        api = win32ipc.require_named_pipe_api("NamedPipeServer")
+        with self._lock:
+            if self._thread:
+                msg = "IPC server already started"
+                raise RuntimeError(msg)
+
+            env_mgr = EnvironmentManager.get_active_manager()
+            if env_mgr is not None:
+                env_mgr.export_ipc_environment(timeout=self.timeout)
+
+            stop_event = threading.Event()
+            thread = threading.Thread(
+                target=self._serve_forever,
+                args=(stop_event,),
+                daemon=True,
+            )
+
+            self._thread = thread
+            self._stop_event = stop_event
+            self._pipe_api = api
+
+        thread.start()
+
+    def stop(self) -> None:
+        """Stop the server and join worker threads."""
+        with self._lock:
+            thread = self._thread
+            stop_event = self._stop_event
+            client_threads = list(self._client_threads)
+            self._thread = None
+            self._stop_event = None
+            self._client_threads.clear()
+
+        if stop_event is not None:
+            stop_event.set()
+            self._poke_pipe()
+
+        if thread is not None:
+            thread.join(self.timeout)
+
+        for worker in client_threads:
+            worker.join(self.timeout)
+
+        self._pipe_api = None
+
+    def _serve_forever(self, stop_event: threading.Event) -> None:
+        while not stop_event.is_set():
+            handle = self._create_pipe_instance()
+            if handle is None:
+                return
+            if not self._connect_client(handle, stop_event):
+                self._close_handle(handle)
+                continue
+            worker = threading.Thread(
+                target=self._handle_connection,
+                args=(handle,),
+                daemon=True,
+            )
+            with self._lock:
+                if self._stop_event is stop_event:
+                    self._client_threads.add(worker)
+                else:  # server stopped while waiting for lock
+                    self._close_handle(handle)
+                    return
+            worker.start()
+
+    def _create_pipe_instance(self) -> object | None:
+        api = self._pipe_api
+        if api is None:
+            return None
+        return api.create_named_pipe(str(self.socket_path), self.timeout)
+
+    def _connect_client(self, handle: object, stop_event: threading.Event) -> bool:
+        api = self._pipe_api
+        if api is None:
+            return False
+        try:
+            api.connect_named_pipe(handle)
+        except api.pywintypes.error as exc:  # type: ignore[union-attr]
+            if exc.winerror == api.win32pipe.ERROR_PIPE_CONNECTED:
+                pass
+            elif stop_event.is_set():
+                return False
+            else:
+                logger.debug("Named pipe connection failed: %s", exc)
+                return False
+        return not stop_event.is_set()
+
+    def _handle_connection(self, handle: object) -> None:
+        worker = threading.current_thread()
+        try:
+            if self._stop_event and self._stop_event.is_set():
+                return
+            self._configure_pipe(handle)
+            raw = self._read_from_pipe(handle)
+            if not raw:
+                return
+            response = _handle_raw_request(self, raw)
+            if response is None:
+                return
+            self._write_to_pipe(handle, response)
+        finally:
+            self._close_handle(handle)
+            with self._lock:
+                self._client_threads.discard(worker)
+
+    def _configure_pipe(self, handle: object) -> None:
+        api = self._pipe_api
+        if api is None:
+            return
+        try:
+            api.set_message_mode(handle)
+        except api.pywintypes.error:  # type: ignore[union-attr]
+            logger.debug("Failed to adjust named pipe read mode", exc_info=True)
+
+    def _read_from_pipe(self, handle: object) -> bytes:
+        api = self._pipe_api
+        if api is None:
+            return b""
+        return api.read_from_pipe(handle)
+
+    def _write_to_pipe(self, handle: object, payload: bytes) -> None:
+        api = self._pipe_api
+        if api is None:
+            return
+        api.write_to_pipe(handle, payload)
+
+    def _close_handle(self, handle: object) -> None:
+        api = self._pipe_api
+        if api is None:
+            return
+        api.disconnect_named_pipe(handle)
+        api.close_handle(handle)
+
+    def _poke_pipe(self) -> None:
+        api = self._pipe_api
+        if api is None:
+            return
+        api.poke_server(str(self.socket_path))
+
+
+class _UnixCallbackIPCServer(IPCServer):
+    """Unix-domain callback server implementation."""
 
     def __init__(
         self,
@@ -245,7 +484,6 @@ class CallbackIPCServer(IPCServer):
         *,
         timeouts: TimeoutConfig | None = None,
     ) -> None:
-        """Initialise a callback-driven IPC server."""
         timeouts = timeouts or TimeoutConfig()
         super().__init__(
             socket_path,
@@ -258,92 +496,54 @@ class CallbackIPCServer(IPCServer):
         )
 
 
-_RequestProcessor = t.Callable[[IPCServer, t.Any], Response]
+class _WindowsCallbackIPCServer(NamedPipeServer):
+    """Named pipe callback server implementation."""
 
-_REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
-    KIND_INVOCATION: (validate_invocation_payload, _process_invocation),
-    KIND_PASSTHROUGH_RESULT: (
-        validate_passthrough_payload,
-        _process_passthrough_result,
-    ),
-}
-
-
-class _IPCHandler(socketserver.StreamRequestHandler):
-    """Handle a single shim connection."""
-
-    def _parse_and_validate_request(
-        self, raw: bytes
-    ) -> tuple[dict[str, t.Any], str] | None:
-        """Return a payload and kind when *raw* contains a valid request."""
-        payload = parse_json_safely(raw)
-        if payload is None:
-            try:
-                obj = json.loads(raw.decode("utf-8"))
-            except json.JSONDecodeError:
-                logger.exception("IPC received malformed JSON")
-                return None
-            logger.error("IPC payload not a dict: %r", obj)
-            return None
-
-        copied_payload = payload.copy()
-        kind = str(copied_payload.pop("kind", KIND_INVOCATION))
-        return copied_payload, kind
-
-    def _lookup_handler(
-        self, kind: str
-    ) -> tuple[_RequestValidator, _RequestProcessor] | None:
-        """Return the registered handler for *kind* if available."""
-        handler_entry = _REQUEST_HANDLERS.get(kind)
-        if handler_entry is None:
-            logger.error("Unknown IPC payload kind: %r", kind)
-            return None
-        return handler_entry
-
-    def _process_request(self, processor: _RequestProcessor, obj: object) -> Response:
-        """Execute *processor* and wrap unexpected failures."""
-        try:
-            return processor(self.server.outer, obj)  # type: ignore[attr-defined]
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception("IPC handler raised an exception")
-            message = str(exc) or exc.__class__.__name__
-            return Response(stderr=message, exit_code=1)
-
-    def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
-        raw = self.rfile.read()
-        parsed = self._parse_and_validate_request(raw)
-        if parsed is None:
-            return
-
-        payload, kind = parsed
-        handler_entry = self._lookup_handler(kind)
-        if handler_entry is None:
-            return
-
-        validator, processor = handler_entry
-        obj = validator(payload)
-        if obj is None:
-            return
-
-        response = self._process_request(processor, obj)
-        self.wfile.write(json.dumps(response.to_dict()).encode("utf-8"))
-        self.wfile.flush()
+    def __init__(
+        self,
+        socket_path: Path,
+        handler: t.Callable[[Invocation], Response],
+        passthrough_handler: t.Callable[[PassthroughResult], Response],
+        *,
+        timeouts: TimeoutConfig | None = None,
+    ) -> None:
+        timeouts = timeouts or TimeoutConfig()
+        super().__init__(
+            socket_path,
+            timeout=timeouts.timeout,
+            handlers=IPCHandlers(
+                handler=handler,
+                passthrough_handler=passthrough_handler,
+            ),
+        )
 
 
-class _InnerServer(_BaseUnixServer):
-    """Threaded Unix stream server passing requests to :class:`IPCServer`."""
+CallbackIPCServer = _WindowsCallbackIPCServer if IS_WINDOWS else _UnixCallbackIPCServer
 
-    def __init__(self, socket_path: Path, outer: IPCServer) -> None:
-        self.outer = outer
-        super().__init__(str(socket_path), _IPCHandler)
-        self.daemon_threads = True
+
+if _UNIX_SOCKET_SERVER_SUPPORTED:
+
+    class _InnerServer(_BaseUnixServer):  # type: ignore[misc]
+        """Threaded Unix stream server passing requests to :class:`IPCServer`."""
+
+        def __init__(self, socket_path: Path, outer: IPCServer) -> None:
+            self.outer = outer
+            super().__init__(str(socket_path), _IPCHandler)
+            self.daemon_threads = True
+
+else:  # pragma: no cover - exercised only on platforms without Unix sockets
+
+    class _InnerServer:  # type: ignore[too-many-ancestors]
+        """Placeholder that raises when Unix sockets are unsupported."""
+
+        def __init__(self, *_: object, **__: object) -> None:
+            _ensure_unix_socket_support()
 
 
 __all__ = [
     "CallbackIPCServer",
     "IPCHandlers",
     "IPCServer",
+    "NamedPipeServer",
     "TimeoutConfig",
 ]

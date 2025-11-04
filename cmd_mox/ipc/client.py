@@ -18,8 +18,9 @@ from cmd_mox._validators import (
     validate_retry_backoff,
     validate_retry_jitter,
 )
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, IS_WINDOWS
 
+from . import win32 as win32ipc
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
@@ -104,6 +105,63 @@ def _connect_with_retries(
     raise RuntimeError(msg)  # pragma: no cover
 
 
+def _should_retry_pipe_connection(
+    api: win32ipc.NamedPipeAPI,
+    attempt: int,
+    max_retries: int,
+    exc: Exception,
+) -> bool:
+    """Return whether a pipe connection error warrants a retry."""
+    return attempt < max_retries - 1 and api.is_retryable_client_error(exc)
+
+
+def _send_named_pipe_request(
+    pipe_path: Path,
+    payload: bytes,
+    timeout: float,
+    retry_config: RetryConfig,
+) -> bytes:
+    """Send *payload* to the named pipe at *pipe_path*."""
+    retry_config.validate(timeout)
+    pipe_name = str(pipe_path)
+    api = win32ipc.require_named_pipe_api("named pipe IPC client")
+
+    for attempt in range(retry_config.retries):
+        try:
+            handle = api.open_client_handle(pipe_name, timeout)
+        except Exception as exc:
+            logger.debug(
+                "IPC pipe connect attempt %d/%d to %s failed: %s",
+                attempt + 1,
+                retry_config.retries,
+                pipe_name,
+                exc,
+            )
+            if _should_retry_pipe_connection(
+                api,
+                attempt,
+                retry_config.retries,
+                exc,
+            ):
+                delay = calculate_retry_delay(
+                    attempt, retry_config.backoff, retry_config.jitter
+                )
+                time.sleep(delay)
+                continue
+            raise
+        try:
+            api.write_to_pipe(handle, payload)
+            return api.read_from_pipe(handle)
+        finally:
+            api.close_handle(handle)
+
+    msg = (
+        "Unreachable code reached in pipe connection loop: all retry attempts "
+        "exhausted and no handle returned."
+    )
+    raise RuntimeError(msg)
+
+
 def _get_validated_socket_path() -> Path:
     """Fetch the IPC socket path from the environment."""
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
@@ -134,10 +192,13 @@ def _send_request(
     payload["kind"] = kind
     payload_bytes = json.dumps(payload).encode("utf-8")
 
-    with _connect_with_retries(sock_path, timeout, retry) as client:
-        client.sendall(payload_bytes)
-        client.shutdown(socket.SHUT_WR)
-        raw = _read_all(client)
+    if IS_WINDOWS:
+        raw = _send_named_pipe_request(sock_path, payload_bytes, timeout, retry)
+    else:
+        with _connect_with_retries(sock_path, timeout, retry) as client:
+            client.sendall(payload_bytes)
+            client.shutdown(socket.SHUT_WR)
+            raw = _read_all(client)
 
     parsed = parse_json_safely(raw)
     if parsed is None:

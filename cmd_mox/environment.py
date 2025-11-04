@@ -6,11 +6,13 @@ import contextlib
 import functools
 import logging
 import os
+import re
 import shutil
 import tempfile
 import threading
 import time
 import typing as t
+import uuid
 from pathlib import Path
 
 from ._validators import validate_positive_finite_timeout
@@ -232,7 +234,13 @@ class EnvironmentManager:
             [str(self.shim_dir), self._orig_env.get("PATH", "")]
         )
         _ensure_windows_pathext(self._orig_env)
-        self.socket_path = self.shim_dir / "ipc.sock"
+        if bool(IS_WINDOWS):
+            pipe_id = uuid.uuid4().hex
+            sanitized_prefix = _sanitize_windows_pipe_prefix(self._prefix)
+            pipe_name = f"\\\\.\\pipe\\{sanitized_prefix}-{pipe_id}"
+            self.socket_path = Path(pipe_name)
+        else:
+            self.socket_path = self.shim_dir / "ipc.sock"
         self.export_ipc_environment()
         return self
 
@@ -381,3 +389,14 @@ def temporary_env(mapping: dict[str, str]) -> t.Iterator[None]:
         yield
     finally:
         _restore_env(orig_env)
+
+
+_WINDOWS_PIPE_PREFIX_RE = re.compile(r"[^a-zA-Z0-9_-]")
+_DEFAULT_PIPE_PREFIX = "cmdmox"
+
+
+def _sanitize_windows_pipe_prefix(prefix: str) -> str:
+    """Return a Windows-safe pipe prefix derived from *prefix*."""
+    trimmed = prefix.rstrip("-") or _DEFAULT_PIPE_PREFIX
+    sanitized = _WINDOWS_PIPE_PREFIX_RE.sub("_", trimmed)
+    return sanitized or _DEFAULT_PIPE_PREFIX

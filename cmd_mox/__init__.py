@@ -21,7 +21,7 @@ from .errors import (
     VerificationError,
 )
 from .expectations import Expectation
-from .ipc import Invocation, IPCServer, Response
+from .ipc import Invocation, IPCServer, NamedPipeServer, Response
 from .platform import (
     PLATFORM_OVERRIDE_ENV,
     is_supported,
@@ -88,6 +88,7 @@ __all__ = [
     "LifecycleError",
     "MissingEnvironmentError",
     "MockCommand",
+    "NamedPipeServer",
     "Predicate",
     "Regex",
     "Response",

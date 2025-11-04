@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "ISC" }
 authors = [{ name = "Payton McIntosh", email = "pmcintosh@df12.net" }]
-dependencies = []
+dependencies = [
+    "pywin32>=306; sys_platform == 'win32'",
+]
 
 [dependency-groups]
 dev = [
