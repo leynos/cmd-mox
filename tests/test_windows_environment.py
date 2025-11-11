@@ -19,6 +19,13 @@ def _collect_pathext(value: str) -> set[str]:
     return {item.strip().upper() for item in value.split(os.pathsep) if item.strip()}
 
 
+def test_environment_manager_uses_named_pipe_socket() -> None:
+    """EnvironmentManager should expose a Windows named pipe socket path."""
+    with EnvironmentManager() as env:
+        assert env.socket_path is not None
+        assert str(env.socket_path).startswith(r"\\.\pipe\\")
+
+
 def test_environment_manager_injects_cmd_into_pathext(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

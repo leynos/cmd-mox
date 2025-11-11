@@ -572,6 +572,27 @@ appending it to the journal. The server cleans up the socket on shutdown to
 prevent stale sockets from interfering with subsequent tests. The timeout is
 configurable via :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 
+Windows support introduces a parallel `NamedPipeServer` implemented on top of
+`win32pipe`/`win32file` from `pywin32`. When `CallbackIPCServer` detects that
+`EnvironmentManager` exported a `CMOX_IPC_SOCKET` value prefixed with
+``\\.\pipe\``, it instantiates the named-pipe transport instead of the Unix
+socket variant. Each server spin-up creates a dedicated pipe instance (one per
+invocation) backed by a background listener thread. The listener repeatedly
+calls `CreateNamedPipe`/`ConnectNamedPipe`, spawns a worker thread to read the
+JSON payload, and writes responses back to the pipe before disconnecting. Pipe
+handles are joined during shutdown and a synthetic client connection is opened
+to unblock any pending `ConnectNamedPipe` calls, which keeps teardown semantics
+identical to the Unix server despite the different underlying primitives.
+
+The IPC client mirrors this behaviour. `invoke_server()` now inspects the
+socket path at runtime: on Windows it opens the exported named pipe using
+`CreateFile`, switches the handle into message mode, writes the JSON payload,
+and streams the response with repeated `ReadFile` calls until the server closes
+the pipe. On Unix-like systems the existing Unix domain socket flow remains
+unchanged. These additions keep the record/replay protocol identical across
+platforms while still relying on the most reliable native IPC primitive offered
+by each operating system.
+
 When `IPCServer.start()` executes inside an active
 :class:`~cmd_mox.environment.EnvironmentManager`, the manager exports both the
 socket and timeout environment variables automatically. This keeps tests and

@@ -10,6 +10,7 @@ Feature: Windows platform smoke tests
     And the command "whoami" is spied to passthrough
     When I replay the controller
     Then PATHEXT should include ".CMD"
+    And the IPC socket should be a Windows named pipe
     And I run the command "cmd-mock"
     Then the output should be "windows mock"
     And the shim for "cmd-mock" should end with ".cmd"

@@ -3,26 +3,50 @@
 
 from __future__ import annotations
 
-import json
-import math
 import os
 import sys
-import typing as t
-import uuid
 from pathlib import Path
 
-from cmd_mox.command_runner import (
+
+def _deduplicate_sys_path() -> None:
+    """Ensure stdlib search order is not shadowed by the shim directory."""
+    shim_dir = Path(__file__).resolve().parent
+    package_root = shim_dir.parent
+    cleaned: list[str] = []
+    for entry in sys.path:
+        try:
+            resolved = Path(entry).resolve()
+        except (OSError, RuntimeError, ValueError):
+            cleaned.append(entry)
+            continue
+        if resolved == shim_dir:
+            continue
+        cleaned.append(entry)
+    sys.path[:] = cleaned
+    root_str = str(package_root)
+    if root_str not in sys.path:
+        sys.path.insert(0, root_str)
+
+
+_deduplicate_sys_path()
+
+import json  # noqa: E402
+import math  # noqa: E402
+import typing as t  # noqa: E402
+import uuid  # noqa: E402
+
+from cmd_mox.command_runner import (  # noqa: E402
     execute_command,
     prepare_environment,
     resolve_command_with_override,
     validate_override_path,
 )
-from cmd_mox.environment import (
+from cmd_mox.environment import (  # noqa: E402
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
     CMOX_REAL_COMMAND_ENV_PREFIX,
 )
-from cmd_mox.ipc import (
+from cmd_mox.ipc import (  # noqa: E402
     Invocation,
     PassthroughRequest,
     PassthroughResult,

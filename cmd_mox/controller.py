@@ -13,7 +13,13 @@ from pathlib import Path
 from .command_runner import CommandRunner
 from .environment import EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError, UnexpectedCommandError
-from .ipc import CallbackIPCServer, Invocation, PassthroughResult, Response
+from .ipc import (
+    BaseIPCServer,
+    CallbackIPCServer,
+    Invocation,
+    PassthroughResult,
+    Response,
+)
 from .passthrough import PassthroughConfig, PassthroughCoordinator
 from .shimgen import create_shim_symlinks
 from .test_doubles import CommandDouble, DoubleKind
@@ -60,7 +66,7 @@ class CmdMox:
         self.environment = (
             environment if environment is not None else EnvironmentManager()
         )
-        self._server: CallbackIPCServer | None = None
+        self._server: BaseIPCServer | None = None
         self._runner = CommandRunner(self.environment)
         self._entered = False
         self._phase = Phase.RECORD

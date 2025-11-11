@@ -34,7 +34,9 @@ CmdMox supports Linux, macOS and Windows. Shims are generated as POSIX symlinks
 on Unix-like systems and as `.cmd` launchers on Windows so that `CreateProcess`
 resolves them via `PATHEXT`. The batch launchers embed the active Python
 interpreter and forward all arguments to the shared `shim.py`, so no additional
-wrappers or entry points are required.
+wrappers or entry points are required. On Windows the IPC layer depends on the
+`pywin32` package so the library can use `win32pipe`/`win32file` named pipes
+when Unix domain sockets are unavailable.
 
 When CmdMox enters replay mode on Windows it ensures `.CMD` is present in the
 effective `PATHEXT` value, even if developers customised their shell to omit
@@ -333,19 +335,24 @@ the full table of methods and examples.
 ## Using the IPC server directly
 
 Most projects interact with the IPC server through `CmdMox`, but advanced
-scenarios can instantiate `cmd_mox.ipc.IPCServer` themselves. The server
-accepts optional callbacks so invocation handling can be customised without
-subclassing:
+scenarios can instantiate `cmd_mox.ipc.IPCServer` directly. On Windows the
+parallel `NamedPipeServer` uses `win32pipe`/`win32file` yet exposes the same
+API, and :class:`CallbackIPCServer` automatically chooses between the two. The
+server accepts optional callbacks so invocation handling can be customised
+without subclassing:
 
 ```python
-from cmd_mox.ipc import IPCHandlers, IPCServer, Response
+import os
+
+from cmd_mox.ipc import IPCHandlers, IPCServer, NamedPipeServer, Response
 
 def handle(invocation):
     return Response(stdout="custom output")
 
 handlers = IPCHandlers(handler=handle)
+server_cls = NamedPipeServer if os.name == "nt" else IPCServer
 
-with IPCServer(socket_path, handlers=handlers):
+with server_cls(socket_path, handlers=handlers):
     ...
 ```
 
@@ -372,7 +379,9 @@ server = CallbackIPCServer(
 CmdMox exposes two environment variables to coordinate shims with the IPC
 server.
 
-- `CMOX_IPC_SOCKET` – path to the Unix domain socket used by shims. Entering an
+- `CMOX_IPC_SOCKET` – path to the IPC endpoint used by shims. On Unix-like
+  systems this is the filesystem path to a Unix domain socket. On Windows the
+  value is a ``\\.\pipe\cmdmox-…`` named pipe. Entering an
   `EnvironmentManager` sets this automatically and `IPCServer.start()`
   refreshes it, so manual overrides are rarely needed. Shims exit with an error
   if the variable is missing.

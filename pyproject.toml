@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "ISC" }
 authors = [{ name = "Payton McIntosh", email = "pmcintosh@df12.net" }]
-dependencies = []
+dependencies = [
+    "pywin32; platform_system == 'Windows'",
+]
 
 [dependency-groups]
 dev = [
@@ -108,4 +110,3 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 exclude = ["features"]
-

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses as dc
 import json
 import logging
@@ -30,6 +31,34 @@ DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
 DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
+IS_WINDOWS = os.name == "nt"
+
+try:  # pragma: no cover - pywin32 unavailable on non-Windows hosts
+    if IS_WINDOWS:
+        import pywintypes  # type: ignore[attr-defined]
+        import win32file  # type: ignore[attr-defined]
+        import win32pipe  # type: ignore[attr-defined]
+        import winerror  # type: ignore[attr-defined]
+    else:
+        pywintypes = None  # type: ignore[assignment]
+        win32file = None  # type: ignore[assignment]
+        win32pipe = None  # type: ignore[assignment]
+        winerror = None  # type: ignore[assignment]
+except ModuleNotFoundError:  # pragma: no cover - handled dynamically
+    pywintypes = None  # type: ignore[assignment]
+    win32file = None  # type: ignore[assignment]
+    win32pipe = None  # type: ignore[assignment]
+    winerror = None  # type: ignore[assignment]
+
+_HAS_WINDOWS_PIPES = (
+    pywintypes is not None and win32file is not None and win32pipe is not None
+)
+_PIPE_READ_SIZE: t.Final[int] = 64 * 1024
+
+if t.TYPE_CHECKING:  # pragma: no cover
+    PipeHandle = object
+else:  # pragma: no cover - runtime fallback only
+    PipeHandle = object
 
 
 @dc.dataclass(slots=True)
@@ -104,6 +133,88 @@ def _connect_with_retries(
     raise RuntimeError(msg)  # pragma: no cover
 
 
+def _connect_pipe_with_retries(
+    pipe_name: str,
+    timeout: float,
+    retry_config: RetryConfig,
+) -> PipeHandle:
+    """Connect to *pipe_name* retrying on transient Windows errors."""
+    if not _HAS_WINDOWS_PIPES:  # pragma: no cover - exercised on Windows only
+        msg = "pywin32 is required for Windows named pipe IPC"
+        raise RuntimeError(msg)
+
+    retry_config.validate(timeout)
+    if win32file is None or win32pipe is None or winerror is None:  # pragma: no cover
+        msg = "Named pipe support is unavailable on this platform"
+        raise RuntimeError(msg)
+
+    last_error: BaseException | None = None
+    for attempt in range(retry_config.retries):
+        try:
+            handle = win32file.CreateFile(
+                pipe_name,
+                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
+                0,
+                None,
+                win32file.OPEN_EXISTING,
+                0,
+                None,
+            )
+        except pywintypes.error as exc:  # type: ignore[union-attr]
+            last_error = exc
+            retriable = exc.winerror in (
+                winerror.ERROR_PIPE_BUSY,
+                winerror.ERROR_FILE_NOT_FOUND,
+            )
+            if attempt == retry_config.retries - 1 or not retriable:
+                raise
+            wait_ms = int(max(1.0, timeout * 1000))
+            with contextlib.suppress(pywintypes.error):  # type: ignore[union-attr]
+                win32pipe.WaitNamedPipe(pipe_name, wait_ms)
+            delay = calculate_retry_delay(
+                attempt,
+                retry_config.backoff,
+                retry_config.jitter,
+            )
+            time.sleep(delay)
+            continue
+        else:
+            win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
+                handle,
+                win32pipe.PIPE_READMODE_MESSAGE,
+                None,
+                None,
+            )
+            return handle
+
+    if last_error is not None:  # pragma: no cover - defensive
+        raise last_error
+    msg = "Named pipe connection attempts exhausted"
+    raise RuntimeError(msg)
+
+
+def _read_from_pipe(handle: PipeHandle) -> bytes:
+    """Read all data from a named pipe handle until EOF."""
+    if win32file is None or winerror is None:  # pragma: no cover - Windows only
+        msg = "Named pipe support is unavailable on this platform"
+        raise RuntimeError(msg)
+    chunks: list[bytes] = []
+    while True:
+        try:
+            hr, data = win32file.ReadFile(handle, _PIPE_READ_SIZE)
+        except pywintypes.error as exc:  # type: ignore[union-attr]
+            if exc.winerror in {winerror.ERROR_BROKEN_PIPE, winerror.ERROR_NO_DATA}:
+                break
+            raise
+        chunks.append(data)
+        if hr == 0:
+            break
+        if hr == winerror.ERROR_MORE_DATA:
+            continue
+        raise pywintypes.error(hr, "ReadFile", "Named pipe read failed")  # type: ignore[arg-type]
+    return b"".join(chunks)
+
+
 def _get_validated_socket_path() -> Path:
     """Fetch the IPC socket path from the environment."""
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
@@ -111,6 +222,11 @@ def _get_validated_socket_path() -> Path:
         msg = f"{CMOX_IPC_SOCKET_ENV} is not set"
         raise RuntimeError(msg)
     return Path(sock)
+
+
+def _is_windows_pipe_path(path: Path) -> bool:
+    """Return True when *path* refers to a Windows named pipe."""
+    return IS_WINDOWS and str(path).startswith("\\\\.\\pipe\\")
 
 
 def _read_all(sock: socket.socket) -> bytes:
@@ -133,17 +249,42 @@ def _send_request(
     payload = dict(data)
     payload["kind"] = kind
     payload_bytes = json.dumps(payload).encode("utf-8")
-
-    with _connect_with_retries(sock_path, timeout, retry) as client:
-        client.sendall(payload_bytes)
-        client.shutdown(socket.SHUT_WR)
-        raw = _read_all(client)
+    if _is_windows_pipe_path(sock_path):
+        raw = _send_pipe_request(sock_path, payload_bytes, timeout, retry)
+    else:
+        with _connect_with_retries(sock_path, timeout, retry) as client:
+            client.sendall(payload_bytes)
+            client.shutdown(socket.SHUT_WR)
+            raw = _read_all(client)
 
     parsed = parse_json_safely(raw)
     if parsed is None:
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg)
     return Response.from_payload(parsed)
+
+
+def _send_pipe_request(
+    sock_path: Path,
+    payload_bytes: bytes,
+    timeout: float,
+    retry: RetryConfig,
+) -> bytes:
+    """Send *payload_bytes* over a Windows named pipe."""
+    if not _HAS_WINDOWS_PIPES:  # pragma: no cover - exercised on Windows
+        msg = "pywin32 is required for Windows named pipe IPC"
+        raise RuntimeError(msg)
+
+    if win32file is None:  # pragma: no cover - Windows only
+        msg = "Named pipe support is unavailable on this platform"
+        raise RuntimeError(msg)
+    handle = _connect_pipe_with_retries(str(sock_path), timeout, retry)
+    try:
+        win32file.WriteFile(handle, payload_bytes)
+        win32file.FlushFileBuffers(handle)
+        return _read_from_pipe(handle)
+    finally:
+        win32file.CloseHandle(handle)
 
 
 def invoke_server(

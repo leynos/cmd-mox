@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import typing as t
+import uuid
 from pathlib import Path
 
 from ._validators import validate_positive_finite_timeout
@@ -27,6 +28,13 @@ CMOX_IPC_TIMEOUT_ENV = "CMOX_IPC_TIMEOUT"  # server/shim communication timeout
 CMOX_REAL_COMMAND_ENV_PREFIX = "CMOX_REAL_COMMAND_"
 
 _UNSET_TIMEOUT = object()
+
+
+def _generate_windows_pipe_path(prefix: str) -> Path:
+    """Return a unique named pipe path for Windows IPC sessions."""
+    safe_prefix = "".join(ch for ch in prefix if ch.isalnum()).lower() or "cmdmox"
+    name = f"cmdmox-{safe_prefix}-{uuid.uuid4().hex}"
+    return Path(rf"\\.\pipe\{name}")
 
 
 def _restore_env(orig_env: dict[str, str]) -> None:
@@ -232,7 +240,10 @@ class EnvironmentManager:
             [str(self.shim_dir), self._orig_env.get("PATH", "")]
         )
         _ensure_windows_pathext(self._orig_env)
-        self.socket_path = self.shim_dir / "ipc.sock"
+        if IS_WINDOWS:
+            self.socket_path = _generate_windows_pipe_path(self._prefix)
+        else:
+            self.socket_path = self.shim_dir / "ipc.sock"
         self.export_ipc_environment()
         return self
 

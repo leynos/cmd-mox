@@ -5,14 +5,13 @@ from __future__ import annotations
 import os
 import typing as t
 
+import pytest
 from pytest_bdd import given, parsers, then, when
 
-from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_REAL_COMMAND_ENV_PREFIX
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from pathlib import Path
-
-    import pytest
 
 
 @given("windows shim launchers are enabled")
@@ -52,6 +51,17 @@ def pathext_should_equal(expected: str) -> None:
     value = os.environ.get("PATHEXT")
     if value != expected:
         msg = f"PATHEXT {value!r} != {expected!r}"
+        raise AssertionError(msg)
+
+
+@then("the IPC socket should be a Windows named pipe")
+def ipc_socket_should_be_named_pipe() -> None:
+    """Ensure the exported IPC socket path uses the Windows named-pipe prefix."""
+    if os.name != "nt":  # pragma: no cover - scenario is skipped off Windows
+        pytest.skip("Named pipes are only available on Windows")
+    socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
+    if not socket_path or not socket_path.startswith(r"\\.\pipe\\"):
+        msg = f"IPC socket {socket_path!r} is not a Windows named pipe"
         raise AssertionError(msg)
 
 
