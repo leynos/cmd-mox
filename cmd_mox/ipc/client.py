@@ -173,16 +173,53 @@ def _attempt_pipe_connection(
     return handle
 
 
-def _is_retriable_pipe_error(exc: Exception) -> bool:
-    """Return True when *exc* represents a retriable pipe connection error."""
+def _is_pipe_error_with_code(exc: Exception, error_codes: set[int]) -> bool:
+    """Return True when *exc* is a pywin32 error with winerror in *error_codes*."""
     if pywintypes is None or winerror is None:
         return False
     if not isinstance(exc, pywintypes.error):  # type: ignore[attr-defined]
         return False
-    return exc.winerror in {  # type: ignore[attr-defined]
-        winerror.ERROR_PIPE_BUSY,
-        winerror.ERROR_FILE_NOT_FOUND,
-    }
+    return exc.winerror in error_codes  # type: ignore[attr-defined]
+
+
+def _is_retriable_pipe_error(exc: Exception) -> bool:
+    """Return True when *exc* represents a retriable pipe connection error."""
+    if winerror is None:
+        return False
+    return _is_pipe_error_with_code(
+        exc,
+        {winerror.ERROR_PIPE_BUSY, winerror.ERROR_FILE_NOT_FOUND},
+    )
+
+
+def _wait_and_delay_for_retry(  # noqa: PLR0913 - helper mirrors legacy signature
+    pipe_name: str,
+    timeout: float,
+    attempt: int,
+    retry_config: RetryConfig,
+    win32pipe_mod: t.Any,  # noqa: ANN401 - pywin32 module proxy
+    pywintypes_mod: t.Any,  # noqa: ANN401 - pywin32 module proxy
+) -> None:
+    """Wait for the named pipe and apply retry backoff delay."""
+    wait_ms = int(max(1.0, timeout * 1000))
+    with contextlib.suppress(pywintypes_mod.error):  # type: ignore[attr-defined]
+        win32pipe_mod.WaitNamedPipe(pipe_name, wait_ms)
+    delay = calculate_retry_delay(
+        attempt,
+        retry_config.backoff,
+        retry_config.jitter,
+    )
+    time.sleep(delay)
+
+
+def _should_retry_pipe_connection(
+    attempt: int,
+    max_retries: int,
+    exc: Exception,
+) -> bool:
+    """Return True if the pipe connection should be retried."""
+    is_last_attempt = attempt == max_retries - 1
+    return not is_last_attempt and _is_retriable_pipe_error(exc)
 
 
 def _connect_pipe_with_retries(
@@ -192,30 +229,24 @@ def _connect_pipe_with_retries(
 ) -> PipeHandle:
     """Connect to *pipe_name* retrying on transient Windows errors."""
     retry_config.validate(timeout)
-    pywintypes_mod, win32file_mod, win32pipe_mod, _ = (
-        _validate_pipe_platform_support()
-    )
+    pywintypes_mod, win32file_mod, win32pipe_mod, _ = _validate_pipe_platform_support()
 
     last_error: BaseException | None = None
     for attempt in range(retry_config.retries):
         try:
-            handle = _attempt_pipe_connection(pipe_name, win32file_mod, win32pipe_mod)
+            return _attempt_pipe_connection(pipe_name, win32file_mod, win32pipe_mod)
         except pywintypes_mod.error as exc:  # type: ignore[attr-defined]
             last_error = exc
-            if attempt == retry_config.retries - 1 or not _is_retriable_pipe_error(exc):
+            if not _should_retry_pipe_connection(attempt, retry_config.retries, exc):
                 raise
-            wait_ms = int(max(1.0, timeout * 1000))
-            with contextlib.suppress(pywintypes_mod.error):  # type: ignore[attr-defined]
-                win32pipe_mod.WaitNamedPipe(pipe_name, wait_ms)
-            delay = calculate_retry_delay(
+            _wait_and_delay_for_retry(
+                pipe_name,
+                timeout,
                 attempt,
-                retry_config.backoff,
-                retry_config.jitter,
+                retry_config,
+                win32pipe_mod,
+                pywintypes_mod,
             )
-            time.sleep(delay)
-            continue
-        else:
-            return handle
 
     if last_error is not None:  # pragma: no cover - defensive
         raise last_error
@@ -223,14 +254,19 @@ def _connect_pipe_with_retries(
     raise RuntimeError(msg)
 
 
+def _are_pipe_read_modules_available() -> bool:
+    """Check if all required modules for named pipe reading are available."""
+    return (
+        _HAS_WINDOWS_PIPES
+        and pywintypes is not None
+        and win32file is not None
+        and winerror is not None
+    )
+
+
 def _validate_pipe_read_platform_support() -> tuple[t.Any, t.Any, t.Any]:
     """Return the pywin32 modules required to read from named pipes."""
-    if (
-        not _HAS_WINDOWS_PIPES
-        or pywintypes is None
-        or win32file is None
-        or winerror is None
-    ):
+    if not _are_pipe_read_modules_available():
         msg = "Named pipe support is unavailable on this platform"
         raise RuntimeError(msg)
     return pywintypes, win32file, winerror
@@ -238,14 +274,12 @@ def _validate_pipe_read_platform_support() -> tuple[t.Any, t.Any, t.Any]:
 
 def _is_pipe_read_complete(exc: Exception) -> bool:
     """Return True when *exc* indicates the pipe client reached EOF."""
-    if pywintypes is None or winerror is None:
+    if winerror is None:
         return False
-    if not isinstance(exc, pywintypes.error):  # type: ignore[attr-defined]
-        return False
-    return exc.winerror in {  # type: ignore[attr-defined]
-        winerror.ERROR_BROKEN_PIPE,
-        winerror.ERROR_NO_DATA,
-    }
+    return _is_pipe_error_with_code(
+        exc,
+        {winerror.ERROR_BROKEN_PIPE, winerror.ERROR_NO_DATA},
+    )
 
 
 def _handle_pipe_read_result(hr: int, data: bytes, chunks: list[bytes]) -> bool:
