@@ -133,44 +133,80 @@ def _connect_with_retries(
     raise RuntimeError(msg)  # pragma: no cover
 
 
+def _validate_pipe_platform_support() -> tuple[t.Any, t.Any, t.Any, t.Any]:
+    """Return pywin32 modules required for named pipe connections."""
+    if not _HAS_WINDOWS_PIPES:  # pragma: no cover - exercised on Windows only
+        msg = "pywin32 is required for Windows named pipe IPC"
+        raise RuntimeError(msg)
+    if win32file is None or win32pipe is None or winerror is None:
+        msg = "Named pipe support is unavailable on this platform"
+        raise RuntimeError(msg)
+    return (
+        t.cast("t.Any", pywintypes),
+        t.cast("t.Any", win32file),
+        t.cast("t.Any", win32pipe),
+        t.cast("t.Any", winerror),
+    )
+
+
+def _attempt_pipe_connection(
+    pipe_name: str,
+    win32file_mod: t.Any,  # noqa: ANN401 - pywin32 module proxy
+    win32pipe_mod: t.Any,  # noqa: ANN401 - pywin32 module proxy
+) -> PipeHandle:
+    """Create and configure a named pipe handle."""
+    handle = win32file_mod.CreateFile(
+        pipe_name,
+        win32file_mod.GENERIC_READ | win32file_mod.GENERIC_WRITE,
+        0,
+        None,
+        win32file_mod.OPEN_EXISTING,
+        0,
+        None,
+    )
+    win32pipe_mod.SetNamedPipeHandleState(
+        handle,
+        win32pipe_mod.PIPE_READMODE_MESSAGE,
+        None,
+        None,
+    )
+    return handle
+
+
+def _is_retriable_pipe_error(exc: Exception) -> bool:
+    """Return True when *exc* represents a retriable pipe connection error."""
+    if pywintypes is None or winerror is None:
+        return False
+    if not isinstance(exc, pywintypes.error):  # type: ignore[attr-defined]
+        return False
+    return exc.winerror in {  # type: ignore[attr-defined]
+        winerror.ERROR_PIPE_BUSY,
+        winerror.ERROR_FILE_NOT_FOUND,
+    }
+
+
 def _connect_pipe_with_retries(
     pipe_name: str,
     timeout: float,
     retry_config: RetryConfig,
 ) -> PipeHandle:
     """Connect to *pipe_name* retrying on transient Windows errors."""
-    if not _HAS_WINDOWS_PIPES:  # pragma: no cover - exercised on Windows only
-        msg = "pywin32 is required for Windows named pipe IPC"
-        raise RuntimeError(msg)
-
     retry_config.validate(timeout)
-    if win32file is None or win32pipe is None or winerror is None:  # pragma: no cover
-        msg = "Named pipe support is unavailable on this platform"
-        raise RuntimeError(msg)
+    pywintypes_mod, win32file_mod, win32pipe_mod, _ = (
+        _validate_pipe_platform_support()
+    )
 
     last_error: BaseException | None = None
     for attempt in range(retry_config.retries):
         try:
-            handle = win32file.CreateFile(
-                pipe_name,
-                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
-                0,
-                None,
-                win32file.OPEN_EXISTING,
-                0,
-                None,
-            )
-        except pywintypes.error as exc:  # type: ignore[union-attr]
+            handle = _attempt_pipe_connection(pipe_name, win32file_mod, win32pipe_mod)
+        except pywintypes_mod.error as exc:  # type: ignore[attr-defined]
             last_error = exc
-            retriable = exc.winerror in (
-                winerror.ERROR_PIPE_BUSY,
-                winerror.ERROR_FILE_NOT_FOUND,
-            )
-            if attempt == retry_config.retries - 1 or not retriable:
+            if attempt == retry_config.retries - 1 or not _is_retriable_pipe_error(exc):
                 raise
             wait_ms = int(max(1.0, timeout * 1000))
-            with contextlib.suppress(pywintypes.error):  # type: ignore[union-attr]
-                win32pipe.WaitNamedPipe(pipe_name, wait_ms)
+            with contextlib.suppress(pywintypes_mod.error):  # type: ignore[attr-defined]
+                win32pipe_mod.WaitNamedPipe(pipe_name, wait_ms)
             delay = calculate_retry_delay(
                 attempt,
                 retry_config.backoff,
@@ -179,12 +215,6 @@ def _connect_pipe_with_retries(
             time.sleep(delay)
             continue
         else:
-            win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
-                handle,
-                win32pipe.PIPE_READMODE_MESSAGE,
-                None,
-                None,
-            )
             return handle
 
     if last_error is not None:  # pragma: no cover - defensive
@@ -193,25 +223,57 @@ def _connect_pipe_with_retries(
     raise RuntimeError(msg)
 
 
-def _read_from_pipe(handle: PipeHandle) -> bytes:
-    """Read all data from a named pipe handle until EOF."""
-    if win32file is None or winerror is None:  # pragma: no cover - Windows only
+def _validate_pipe_read_platform_support() -> tuple[t.Any, t.Any, t.Any]:
+    """Return the pywin32 modules required to read from named pipes."""
+    if (
+        not _HAS_WINDOWS_PIPES
+        or pywintypes is None
+        or win32file is None
+        or winerror is None
+    ):
         msg = "Named pipe support is unavailable on this platform"
         raise RuntimeError(msg)
+    return pywintypes, win32file, winerror
+
+
+def _is_pipe_read_complete(exc: Exception) -> bool:
+    """Return True when *exc* indicates the pipe client reached EOF."""
+    if pywintypes is None or winerror is None:
+        return False
+    if not isinstance(exc, pywintypes.error):  # type: ignore[attr-defined]
+        return False
+    return exc.winerror in {  # type: ignore[attr-defined]
+        winerror.ERROR_BROKEN_PIPE,
+        winerror.ERROR_NO_DATA,
+    }
+
+
+def _handle_pipe_read_result(hr: int, data: bytes, chunks: list[bytes]) -> bool:
+    """Append *data* to *chunks* and return True to continue reading."""
+    chunks.append(data)
+    if hr == 0:
+        return False
+    if winerror is not None and hr == winerror.ERROR_MORE_DATA:
+        return True
+    if pywintypes is None:
+        msg = "Named pipe support is unavailable on this platform"
+        raise RuntimeError(msg)
+    raise pywintypes.error(hr, "ReadFile", "Named pipe read failed")  # type: ignore[arg-type]
+
+
+def _read_from_pipe(handle: PipeHandle) -> bytes:
+    """Read all data from a named pipe handle until EOF."""
+    _, win32file_mod, _ = _validate_pipe_read_platform_support()
     chunks: list[bytes] = []
     while True:
         try:
-            hr, data = win32file.ReadFile(handle, _PIPE_READ_SIZE)
-        except pywintypes.error as exc:  # type: ignore[union-attr]
-            if exc.winerror in {winerror.ERROR_BROKEN_PIPE, winerror.ERROR_NO_DATA}:
+            hr, data = win32file_mod.ReadFile(handle, _PIPE_READ_SIZE)
+        except Exception as exc:  # pragma: no cover - exercised on Windows
+            if _is_pipe_read_complete(exc):
                 break
             raise
-        chunks.append(data)
-        if hr == 0:
+        if not _handle_pipe_read_result(hr, data, chunks):
             break
-        if hr == winerror.ERROR_MORE_DATA:
-            continue
-        raise pywintypes.error(hr, "ReadFile", "Named pipe read failed")  # type: ignore[arg-type]
     return b"".join(chunks)
 
 
