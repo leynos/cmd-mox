@@ -10,7 +10,7 @@ import sys
 import textwrap
 import typing as t
 
-from pytest_bdd import parsers, when
+from pytest_bdd import parsers, then, when
 
 from tests.helpers.controller import CommandExecution, execute_command_with_details
 from tests.helpers.parameters import CommandInputs, EnvVar
@@ -25,6 +25,14 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
         [cmd], capture_output=True, text=True, check=True, shell=False
     )
+
+
+@then(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
+def then_run_command(
+    mox: CmdMox, cmd: str
+) -> subprocess.CompletedProcess[str]:  # pragma: no cover - pytest-bdd glue
+    """Alias the 'When' step for scenarios that use Then/And."""
+    return run_command(mox, cmd)
 
 
 @when(
