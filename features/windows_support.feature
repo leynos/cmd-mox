@@ -9,6 +9,7 @@ Feature: Windows platform smoke tests
     And the command "cmd-mock" is mocked to return "windows mock"
     And the command "whoami" is spied to passthrough
     When I replay the controller
+    Then the controller should use the Windows named pipe server
     Then PATHEXT should include ".CMD"
     And I run the command "cmd-mock"
     Then the output should be "windows mock"

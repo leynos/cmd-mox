@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import importlib
 import json
 import logging
 import os
@@ -19,12 +20,35 @@ from cmd_mox._validators import (
     validate_retry_jitter,
 )
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
+from cmd_mox.ipc.windows import (
+    ERROR_BROKEN_PIPE,
+    ERROR_FILE_NOT_FOUND,
+    ERROR_MORE_DATA,
+    ERROR_PIPE_BUSY,
+    PIPE_CHUNK_SIZE,
+    derive_pipe_name,
+)
 
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
 
 logger = logging.getLogger(__name__)
+
+IS_WINDOWS = os.name == "nt"
+
+if IS_WINDOWS:  # pragma: win32-only
+    try:
+        pywintypes = importlib.import_module("pywintypes")
+        win32file = importlib.import_module("win32file")
+        win32pipe = importlib.import_module("win32pipe")
+    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
+        msg = "pywin32 is required for Windows named pipe support"
+        raise RuntimeError(msg) from exc
+else:  # pragma: no cover - satisfies type-checkers on non-Windows hosts
+    pywintypes = t.cast("t.Any", None)
+    win32file = t.cast("t.Any", None)
+    win32pipe = t.cast("t.Any", None)
 
 DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
@@ -65,7 +89,7 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     return max(delay, MIN_RETRY_SLEEP)
 
 
-def _connect_with_retries(
+def _connect_unix_with_retries(
     sock_path: Path,
     timeout: float,
     retry_config: RetryConfig,
@@ -121,6 +145,109 @@ def _read_all(sock: socket.socket) -> bytes:
     return b"".join(chunks)
 
 
+def _send_unix_request(
+    sock_path: Path,
+    payload: bytes,
+    timeout: float,
+    retry_config: RetryConfig,
+) -> bytes:
+    with _connect_unix_with_retries(sock_path, timeout, retry_config) as client:
+        client.sendall(payload)
+        client.shutdown(socket.SHUT_WR)
+        return _read_all(client)
+
+
+def _decode_response(raw: bytes) -> Response:
+    parsed = parse_json_safely(raw)
+    if parsed is None:
+        msg = "Invalid JSON from IPC server"
+        raise RuntimeError(msg)
+    return Response.from_payload(parsed)
+
+
+def _connect_pipe_with_retries(
+    pipe_name: str,
+    timeout: float,
+    retry_config: RetryConfig,
+) -> object:
+    retry_config.validate(timeout)
+    for attempt in range(retry_config.retries):
+        try:
+            handle = win32file.CreateFile(  # type: ignore[union-attr]
+                pipe_name,
+                win32file.GENERIC_READ | win32file.GENERIC_WRITE,  # type: ignore[union-attr]
+                0,
+                None,
+                win32file.OPEN_EXISTING,  # type: ignore[union-attr]
+                0,
+                None,
+            )
+        except pywintypes.error as exc:  # type: ignore[name-defined]
+            logger.debug(
+                "IPC pipe connect attempt %d/%d to %s failed: %s",
+                attempt + 1,
+                retry_config.retries,
+                pipe_name,
+                exc,
+            )
+            if exc.winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
+                raise
+            if attempt >= retry_config.retries - 1:
+                raise
+            delay = calculate_retry_delay(
+                attempt, retry_config.backoff, retry_config.jitter
+            )
+            wait_ms = max(1, int(delay * 1000))
+            try:
+                win32pipe.WaitNamedPipe(pipe_name, wait_ms)  # type: ignore[union-attr]
+            except pywintypes.error:  # type: ignore[name-defined]
+                time.sleep(delay)
+            continue
+        else:
+            win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
+                handle,
+                win32pipe.PIPE_READMODE_MESSAGE,  # type: ignore[union-attr]
+                None,
+                None,
+            )
+            return handle
+    msg = "Exhausted retries connecting to named pipe"
+    raise RuntimeError(msg)
+
+
+def _read_pipe_response(handle: object) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        try:
+            hr, data = win32file.ReadFile(handle, PIPE_CHUNK_SIZE)  # type: ignore[union-attr]
+        except pywintypes.error as exc:  # type: ignore[name-defined]
+            if exc.winerror == ERROR_BROKEN_PIPE:
+                break
+            raise
+        chunks.append(data)
+        if hr == 0:
+            break
+        if hr != ERROR_MORE_DATA:
+            break
+    return b"".join(chunks)
+
+
+def _send_pipe_request(
+    sock_path: Path,
+    payload: bytes,
+    timeout: float,
+    retry_config: RetryConfig,
+) -> bytes:
+    pipe_name = derive_pipe_name(sock_path)
+    handle = _connect_pipe_with_retries(pipe_name, timeout, retry_config)
+    try:
+        win32file.WriteFile(handle, payload)  # type: ignore[union-attr]
+        win32file.FlushFileBuffers(handle)  # type: ignore[union-attr]
+        return _read_pipe_response(handle)
+    finally:
+        win32file.CloseHandle(handle)  # type: ignore[union-attr]
+
+
 def _send_request(
     kind: str,
     data: dict[str, t.Any],
@@ -133,17 +260,11 @@ def _send_request(
     payload = dict(data)
     payload["kind"] = kind
     payload_bytes = json.dumps(payload).encode("utf-8")
-
-    with _connect_with_retries(sock_path, timeout, retry) as client:
-        client.sendall(payload_bytes)
-        client.shutdown(socket.SHUT_WR)
-        raw = _read_all(client)
-
-    parsed = parse_json_safely(raw)
-    if parsed is None:
-        msg = "Invalid JSON from IPC server"
-        raise RuntimeError(msg)
-    return Response.from_payload(parsed)
+    if IS_WINDOWS:
+        raw = _send_pipe_request(sock_path, payload_bytes, timeout, retry)
+    else:
+        raw = _send_unix_request(sock_path, payload_bytes, timeout, retry)
+    return _decode_response(raw)
 
 
 def invoke_server(

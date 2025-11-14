@@ -206,6 +206,10 @@
         implementations (acceptance: end-to-end pytest suite passes on
         `windows-latest` GH runner with IPC + shims enabled).
 
+  - [x] Implement Windows named-pipe IPC (win32pipe/win32file) and package the
+        pywin32 dependency so CmdMox can communicate with shims on Windows
+        hosts without relying on Unix domain sockets.
+
   - [ ] Validate environment management and filesystem helpers on Windows,
         addressing portability gaps discovered during testing (cover: `PATHEXT`
         lookup semantics, CRLF line endings for batch shims, argument

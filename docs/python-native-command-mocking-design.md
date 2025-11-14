@@ -458,8 +458,7 @@ launchers that shell out to `shim.py`. The launchers use CRLF delimiters for
 native compatibility and CmdMox amends `PATHEXT` during replay so the command
 processor will resolve the batch wrappers even on hosts where the extension was
 removed from the user environment. See :class:`EnvironmentManager` in
-:mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management
-logic.
+:mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management logic.
 ```mermaid
 sequenceDiagram
     actor User
@@ -489,7 +488,13 @@ modern, robust IPC bus.
 
 This IPC bus will be implemented using a Unix domain socket, which provides a
 fast and reliable stream-based communication channel between processes on the
-same host. The workflow is as follows:
+same host. On Windows hosts, where Unix sockets are not universally available,
+`CmdMox` falls back to a dedicated named pipe (`\\.\pipe\cmdmox-<hash>`) that
+is derived deterministically from the logical socket path. This allows the shim
+layer to keep exporting ``CMOX_IPC_SOCKET`` (so it can still discover the shim
+directory) while the IPC layer transparently maps that value to a Windows named
+pipe via ``win32pipe``/``win32file`` (provided by the ``pywin32`` dependency).
+The workflow is as follows:
 
 1. **Server Initialization:** When the `CmdMox` controller enters the replay
    phase, it starts a lightweight server thread. This thread creates a
@@ -540,6 +545,11 @@ features that are infeasible with file-based logging.
 - The shim infers the command name from ``argv[0]`` via :class:`pathlib.Path`
   so that the same script can impersonate any executable linked into the shim
   directory.
+- On Windows the shim still exports :data:`CMOX_IPC_SOCKET` pointing at the
+  temporary shim directory, but the IPC layer deterministically hashes that
+  value into a named pipe (``\\.\pipe\cmdmox-<hash>``). This keeps the PATH
+  filtering logic working unchanged while the transport communicates through
+  `win32pipe`/`win32file` provided by `pywin32`.
 - Standard input is eagerly read when the shim detects it is connected to a
   pipe. Guarding the read with ``sys.stdin.isatty()`` avoids blocking when a
   user invokes an interactive command during a test run, and the implementation
@@ -566,11 +576,18 @@ dataclass to provide invocation and passthrough callbacks when constructing the
 server, removing the need to subclass for custom behaviour. The
 `CallbackIPCServer` compatibility wrapper forwards a `TimeoutConfig` dataclass
 so callers can continue to customise startup and accept timeouts without
-exceeding the four-argument limit. The server attaches the corresponding
-response data (`stdout`, `stderr`, `exit_code`) to the `Invocation` before
-appending it to the journal. The server cleans up the socket on shutdown to
-prevent stale sockets from interfering with subsequent tests. The timeout is
-configurable via :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
+exceeding the four-argument limit. On Windows hosts the controller constructs a
+`NamedPipeServer`, which shares the same handler plumbing but uses
+`win32pipe`/`win32file` (via `pywin32`) to host a duplex named pipe that
+mirrors the Unix socket behaviour. The named pipe name is derived from the
+logical socket path, so shims can keep filtering the shim directory out of
+``PATH`` without needing Windows-specific logic. The server attaches the
+corresponding response data (`stdout`, `stderr`, `exit_code`) to the
+`Invocation` before appending it to the journal. On Unix systems the server
+cleans up the socket on shutdown to prevent stale sockets from interfering with
+subsequent tests, while the Windows transport simply closes the pipe handles.
+The timeout is configurable via
+:data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 
 When `IPCServer.start()` executes inside an active
 :class:`~cmd_mox.environment.EnvironmentManager`, the manager exports both the
@@ -583,11 +600,12 @@ existing socket is in use before unlinking it. After launching the background
 thread, the server polls for the socket path using an exponential backoff to
 ensure it appears before clients connect. On the client side, `invoke_server()`
 retries connection attempts with a linear backoff and small jitter to avoid
-retry storms. Retry behaviour is configured via the `RetryConfig` dataclass,
-which groups the retry count, backoff, and jitter parameters. The client then
-validates that the server's reply is valid JSON, raising a `RuntimeError` if
-decoding fails. These safeguards make the IPC bus robust on slower or heavily
-loaded systems.
+retry storms and transparently switches to a Windows named pipe when
+``os.name == 'nt'``. Retry behaviour is configured via the `RetryConfig`
+dataclass, which groups the retry count, backoff, and jitter parameters. The
+client then validates that the server's reply is valid JSON, raising a
+`RuntimeError` if decoding fails. These safeguards make the IPC bus robust on
+slower or heavily loaded systems.
 ```mermaid
 classDiagram
     class IPCServer {
@@ -1232,9 +1250,9 @@ Darwin environments, several avenues for future expansion exist.
   socket appears. Shim generation emits `.cmd` launchers that shell out to the
   active Python interpreter and invoke `shim.py`, preserving argument quoting
   and inheriting the test process environment. Environment management reuses
-  the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`, and
-  restores the original environment on teardown. A dedicated Windows smoke job
-  now runs in CI via the `windows-smoke` Makefile target, exercising mocked
+  the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`,
+  and restores the original environment on teardown. A dedicated Windows smoke
+  job now runs in CI via the `windows-smoke` Makefile target, exercising mocked
   invocations and passthrough spies while publishing `windows-ipc.log` for
   diagnostics. Future work will focus on a "record mode" utility that captures
   passthrough sessions for later reuse.

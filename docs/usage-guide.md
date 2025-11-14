@@ -11,6 +11,9 @@ Install the package and enable the pytest plugin:
 pip install cmd-mox
 ```
 
+On Windows the wheel also pulls in `pywin32`, which provides the `win32pipe`
+and `win32file` modules that power CmdMox's named-pipe IPC transport.
+
 In your `conftest.py`:
 
 ```python
@@ -352,14 +355,21 @@ with IPCServer(socket_path, handlers=handlers):
 Providing `passthrough_handler=` to `IPCHandlers` intercepts passthrough
 completions in the same fashion. When no callbacks are supplied the server
 keeps its default echo behaviour, so existing code continues to work unchanged.
+On Windows you can swap `IPCServer` for :class:`NamedPipeServer` if you need to
+force the named-pipe transport explicitly; `CmdMox` selects it automatically
+based on ``os.name``.
 
 Projects that rely on :class:`CallbackIPCServer` can still customise startup
 and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
 
 ```python
-from cmd_mox.ipc import CallbackIPCServer, IPCHandlers, TimeoutConfig
+import os
 
-server = CallbackIPCServer(
+from cmd_mox.ipc import CallbackIPCServer, CallbackNamedPipeServer, IPCHandlers, TimeoutConfig
+
+Server = CallbackNamedPipeServer if os.name == "nt" else CallbackIPCServer
+
+server = Server(
     socket_path,
     handler=handle,
     passthrough_handler=handle_passthrough,
@@ -372,10 +382,12 @@ server = CallbackIPCServer(
 CmdMox exposes two environment variables to coordinate shims with the IPC
 server.
 
-- `CMOX_IPC_SOCKET` – path to the Unix domain socket used by shims. Entering an
-  `EnvironmentManager` sets this automatically and `IPCServer.start()`
-  refreshes it, so manual overrides are rarely needed. Shims exit with an error
-  if the variable is missing.
+- `CMOX_IPC_SOCKET` – path to the Unix domain socket used by shims on POSIX
+  systems. Entering an `EnvironmentManager` sets this automatically and
+  `IPCServer.start()` refreshes it, so manual overrides are rarely needed. On
+  Windows the value still points at the shim directory, but the IPC layer
+  hashes it into a deterministic named pipe so existing PATH-filtering logic
+  keeps working. Shims exit with an error if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
   exported automatically (default `5.0`). Override this to tune connection

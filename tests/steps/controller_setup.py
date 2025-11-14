@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import typing as t
 from pathlib import Path
 
 import pytest
-from pytest_bdd import given, parsers, when
+from pytest_bdd import given, parsers, then, when
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.environment import EnvironmentManager
@@ -18,6 +19,7 @@ from cmd_mox.errors import (
     UnfulfilledExpectationError,
     VerificationError,
 )
+from cmd_mox.ipc import CallbackNamedPipeServer
 
 _ERROR_TYPES: dict[str, type[VerificationError]] = {
     "UnexpectedCommandError": UnexpectedCommandError,
@@ -150,3 +152,12 @@ def verify_controller_expect_error(
     finally:
         mox_stack.close()
     return t.cast("VerificationError", excinfo.value)
+
+
+@then("the controller should use the Windows named pipe server")
+def assert_windows_named_pipe_server(mox: CmdMox) -> None:
+    """Assert the controller swaps to the named pipe transport on Windows."""
+    if os.name != "nt":  # pragma: no cover - guarded by feature preconditions
+        pytest.skip("Named pipe assertions only apply on Windows")
+    server = mox._server
+    assert isinstance(server, CallbackNamedPipeServer), server

@@ -74,7 +74,7 @@ When implementing changes, adhere to the following testing procedures:
       the guidelines above (`make test`).
     - **Linting:** Passes lint checks (`make lint`).
     - **Formatting:** Adheres to formatting standards (`make check-fmt`,
-      formatting can be applied by running `make fmt`). 
+      formatting can be applied by running `make fmt`).
     - **Typechecking:** Passes type checking (`make typecheck`).
 
   - For Markdown files (`.md` only):
