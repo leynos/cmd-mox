@@ -165,6 +165,48 @@ def _decode_response(raw: bytes) -> Response:
     return Response.from_payload(parsed)
 
 
+def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> bool:
+    """Return True when *exc* represents a retryable pipe error."""
+    winerror = getattr(exc, "winerror", None)
+    if winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
+        return False
+    return attempt < max_retries - 1
+
+
+def _wait_for_pipe_availability(pipe_name: str, delay: float) -> None:
+    """Wait for *pipe_name* to become available, falling back to sleep."""
+    wait_ms = max(1, int(delay * 1000))
+    try:
+        win32pipe.WaitNamedPipe(pipe_name, wait_ms)  # type: ignore[union-attr]
+    except pywintypes.error:  # type: ignore[name-defined]
+        time.sleep(delay)
+
+
+def _configure_pipe_handle(handle: object) -> None:
+    """Configure *handle* to use message read mode."""
+    win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
+        handle,
+        win32pipe.PIPE_READMODE_MESSAGE,  # type: ignore[union-attr]
+        None,
+        None,
+    )
+
+
+def _create_pipe_handle(pipe_name: str) -> object:
+    """Create and configure a handle for *pipe_name*."""
+    handle = win32file.CreateFile(  # type: ignore[union-attr]
+        pipe_name,
+        win32file.GENERIC_READ | win32file.GENERIC_WRITE,  # type: ignore[union-attr]
+        0,
+        None,
+        win32file.OPEN_EXISTING,  # type: ignore[union-attr]
+        0,
+        None,
+    )
+    _configure_pipe_handle(handle)
+    return handle
+
+
 def _connect_pipe_with_retries(
     pipe_name: str,
     timeout: float,
@@ -173,15 +215,7 @@ def _connect_pipe_with_retries(
     retry_config.validate(timeout)
     for attempt in range(retry_config.retries):
         try:
-            handle = win32file.CreateFile(  # type: ignore[union-attr]
-                pipe_name,
-                win32file.GENERIC_READ | win32file.GENERIC_WRITE,  # type: ignore[union-attr]
-                0,
-                None,
-                win32file.OPEN_EXISTING,  # type: ignore[union-attr]
-                0,
-                None,
-            )
+            return _create_pipe_handle(pipe_name)
         except pywintypes.error as exc:  # type: ignore[name-defined]
             logger.debug(
                 "IPC pipe connect attempt %d/%d to %s failed: %s",
@@ -190,27 +224,13 @@ def _connect_pipe_with_retries(
                 pipe_name,
                 exc,
             )
-            if exc.winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
-                raise
-            if attempt >= retry_config.retries - 1:
+            if not _should_retry_pipe_error(exc, attempt, retry_config.retries):
                 raise
             delay = calculate_retry_delay(
                 attempt, retry_config.backoff, retry_config.jitter
             )
-            wait_ms = max(1, int(delay * 1000))
-            try:
-                win32pipe.WaitNamedPipe(pipe_name, wait_ms)  # type: ignore[union-attr]
-            except pywintypes.error:  # type: ignore[name-defined]
-                time.sleep(delay)
+            _wait_for_pipe_availability(pipe_name, delay)
             continue
-        else:
-            win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
-                handle,
-                win32pipe.PIPE_READMODE_MESSAGE,  # type: ignore[union-attr]
-                None,
-                None,
-            )
-            return handle
     msg = "Exhausted retries connecting to named pipe"
     raise RuntimeError(msg)
 

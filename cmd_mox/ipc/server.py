@@ -13,6 +13,7 @@ import threading
 import time
 import typing as t
 from pathlib import Path
+from types import TracebackType
 
 from cmd_mox._validators import (
     validate_optional_timeout,
@@ -40,14 +41,15 @@ from .json_utils import (
 from .models import Invocation, PassthroughResult, Response
 from .socket_utils import cleanup_stale_socket, wait_for_socket
 
-if t.TYPE_CHECKING:
-    from socketserver import ThreadingUnixStreamServer as _BaseUnixServer
-    from types import TracebackType
-else:
-    _BaseUnixServer: type[socketserver.BaseServer]
+IS_WINDOWS = os.name == "nt"
+
+
+def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
     if hasattr(socketserver, "ThreadingUnixStreamServer"):
-        _BaseUnixServer = socketserver.ThreadingUnixStreamServer
-    elif hasattr(socketserver, "UnixStreamServer"):
+        return t.cast(
+            type[socketserver.BaseServer], socketserver.ThreadingUnixStreamServer
+        )
+    if hasattr(socketserver, "UnixStreamServer"):
 
         class _ThreadingUnixStreamServerCompat(
             socketserver.ThreadingMixIn,  # type: ignore[misc]
@@ -57,12 +59,25 @@ else:
 
             pass
 
-        _BaseUnixServer = _ThreadingUnixStreamServerCompat
-    else:  # pragma: no cover - exercised on unsupported platforms only
-        msg = "Unix domain socket servers are not supported on this platform"
-        raise RuntimeError(msg)
+        return t.cast(
+            type[socketserver.BaseServer], _ThreadingUnixStreamServerCompat
+        )
+    if IS_WINDOWS:
 
-IS_WINDOWS = os.name == "nt"
+        class _UnsupportedUnixServer(socketserver.BaseServer):  # type: ignore[misc]
+            """Placeholder that raises when Unix sockets are requested on Windows."""
+
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                msg = "Unix domain socket servers are unavailable on Windows"
+                raise RuntimeError(msg)
+
+        return t.cast(type[socketserver.BaseServer], _UnsupportedUnixServer)
+    msg = "Unix domain socket servers are not supported on this platform"
+    raise RuntimeError(msg)
+if t.TYPE_CHECKING:
+    _BaseUnixServer = socketserver.ThreadingUnixStreamServer
+else:
+    _BaseUnixServer = _resolve_unix_server_base()
 
 if IS_WINDOWS:  # pragma: win32-only
     try:
