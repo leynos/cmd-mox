@@ -230,7 +230,6 @@ def _connect_pipe_with_retries(
                 attempt, retry_config.backoff, retry_config.jitter
             )
             _wait_for_pipe_availability(pipe_name, delay)
-            continue
     msg = "Exhausted retries connecting to named pipe"
     raise RuntimeError(msg)
 

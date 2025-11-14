@@ -13,7 +13,6 @@ import threading
 import time
 import typing as t
 from pathlib import Path
-from types import TracebackType
 
 from cmd_mox._validators import (
     validate_optional_timeout,
@@ -47,7 +46,8 @@ IS_WINDOWS = os.name == "nt"
 def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
     if hasattr(socketserver, "ThreadingUnixStreamServer"):
         return t.cast(
-            type[socketserver.BaseServer], socketserver.ThreadingUnixStreamServer
+            "type[socketserver.BaseServer]",
+            socketserver.ThreadingUnixStreamServer,
         )
     if hasattr(socketserver, "UnixStreamServer"):
 
@@ -60,7 +60,8 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
             pass
 
         return t.cast(
-            type[socketserver.BaseServer], _ThreadingUnixStreamServerCompat
+            "type[socketserver.BaseServer]",
+            _ThreadingUnixStreamServerCompat,
         )
     if IS_WINDOWS:
 
@@ -71,10 +72,17 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
                 msg = "Unix domain socket servers are unavailable on Windows"
                 raise RuntimeError(msg)
 
-        return t.cast(type[socketserver.BaseServer], _UnsupportedUnixServer)
+        return t.cast(
+            "type[socketserver.BaseServer]",
+            _UnsupportedUnixServer,
+        )
     msg = "Unix domain socket servers are not supported on this platform"
     raise RuntimeError(msg)
+
+
 if t.TYPE_CHECKING:
+    from types import TracebackType
+
     _BaseUnixServer = socketserver.ThreadingUnixStreamServer
 else:
     _BaseUnixServer = _resolve_unix_server_base()
@@ -510,6 +518,43 @@ class _NamedPipeState:
         self._client_threads: set[threading.Thread] = set()
         self._client_lock = threading.Lock()
 
+    def _try_connect_pipe(self, handle: object) -> tuple[bool, bool]:
+        """Attempt to connect *handle* to the named pipe."""
+        try:
+            win32pipe.ConnectNamedPipe(handle, None)  # type: ignore[union-attr]
+        except pywintypes.error as exc:  # type: ignore[name-defined]
+            return self._handle_connection_error(exc, handle)
+        return True, True
+
+    def _handle_connection_error(
+        self, exc: object, handle: object
+    ) -> tuple[bool, bool]:
+        """Return control-flow decisions for a failed connection attempt."""
+        winerror = getattr(exc, "winerror", None)
+        if winerror is None:
+            logger.exception("Named pipe connect failed")
+            win32file.CloseHandle(handle)  # type: ignore[union-attr]
+            return True, False
+        if winerror == ERROR_PIPE_CONNECTED:
+            return True, True
+        if winerror in (ERROR_OPERATION_ABORTED, ERROR_NO_DATA):
+            win32file.CloseHandle(handle)  # type: ignore[union-attr]
+            return False, False
+        logger.exception("Named pipe connect failed")
+        win32file.CloseHandle(handle)  # type: ignore[union-attr]
+        return True, False
+
+    def _spawn_handler_thread(self, handle: object) -> None:
+        """Create and track the per-client handler thread."""
+        thread = threading.Thread(
+            target=self._handle_client,
+            args=(handle,),
+            daemon=True,
+        )
+        with self._client_lock:
+            self._client_threads.add(thread)
+        thread.start()
+
     def serve_forever(self) -> None:
         if not IS_WINDOWS:  # pragma: no cover - defensive guard
             return
@@ -518,31 +563,17 @@ class _NamedPipeState:
             handle = self._create_pipe_instance()
             if not self.ready_event.is_set():
                 self.ready_event.set()
-            try:
-                win32pipe.ConnectNamedPipe(handle, None)  # type: ignore[union-attr]
-            except pywintypes.error as exc:  # type: ignore[name-defined]
-                if exc.winerror == ERROR_PIPE_CONNECTED:
-                    pass
-                elif exc.winerror in (ERROR_OPERATION_ABORTED, ERROR_NO_DATA):
-                    win32file.CloseHandle(handle)  # type: ignore[union-attr]
-                    break
-                else:
-                    logger.exception("Named pipe connect failed")
-                    win32file.CloseHandle(handle)  # type: ignore[union-attr]
-                    continue
+            should_continue, should_handle = self._try_connect_pipe(handle)
+            if not should_continue:
+                break
+            if not should_handle:
+                continue
 
             if self.stop_event.is_set():
                 win32file.CloseHandle(handle)  # type: ignore[union-attr]
                 break
 
-            thread = threading.Thread(
-                target=self._handle_client,
-                args=(handle,),
-                daemon=True,
-            )
-            with self._client_lock:
-                self._client_threads.add(thread)
-            thread.start()
+            self._spawn_handler_thread(handle)
 
     def stop(self) -> None:
         if self.stop_event.is_set():
