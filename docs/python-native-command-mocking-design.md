@@ -489,12 +489,13 @@ modern, robust IPC bus.
 This IPC bus will be implemented using a Unix domain socket, which provides a
 fast and reliable stream-based communication channel between processes on the
 same host. On Windows hosts, where Unix sockets are not universally available,
-`CmdMox` falls back to a dedicated named pipe (`\\.\pipe\cmdmox-<hash>`) that
-is derived deterministically from the logical socket path. This allows the shim
-layer to keep exporting ``CMOX_IPC_SOCKET`` (so it can still discover the shim
-directory) while the IPC layer transparently maps that value to a Windows named
-pipe via ``win32pipe``/``win32file`` (provided by the ``pywin32`` dependency).
-The workflow is as follows:
+`CmdMox` still exports ``CMOX_IPC_SOCKET`` with the logical socket path inside
+the shim directory, but the transport hashes that path into a dedicated named
+pipe (`\\.\pipe\cmdmox-<hash>`) via ``derive_pipe_name``. Shims therefore keep
+working with socket semantics (PATH filtering, env setup, etc.) while the IPC
+layer transparently maps that logical path to a Windows named pipe using
+``win32pipe``/``win32file`` (provided by the ``pywin32`` dependency). The
+workflow is as follows:
 
 1. **Server Initialization:** When the `CmdMox` controller enters the replay
    phase, it starts a lightweight server thread. This thread creates a

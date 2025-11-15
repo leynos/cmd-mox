@@ -59,10 +59,10 @@ def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
     escaped_python = python_executable.replace('"', '""')
     escaped_shim = os.fspath(shim_path).replace('"', '""')
     return (
-        "@echo off\n"
-        "setlocal ENABLEDELAYEDEXPANSION\n"
-        'set "CMOX_SHIM_COMMAND=%~n0"\n'
-        f'"{escaped_python}" "{escaped_shim}" %*\n'
+        "@echo off\r\n"
+        "setlocal ENABLEDELAYEDEXPANSION\r\n"
+        'set "CMOX_SHIM_COMMAND=%~n0"\r\n'
+        f'"{escaped_python}" "{escaped_shim}" %*\r\n'
     )
 
 

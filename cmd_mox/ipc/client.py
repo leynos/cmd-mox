@@ -182,17 +182,17 @@ def _wait_for_pipe_availability(pipe_name: str, delay: float) -> None:
         time.sleep(delay)
 
 
-def _configure_pipe_handle(handle: object) -> None:
+def _configure_pipe_handle(handle: object, timeout_ms: int) -> None:
     """Configure *handle* to use message read mode."""
     win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
         handle,
         win32pipe.PIPE_READMODE_MESSAGE,  # type: ignore[union-attr]
         None,
-        None,
+        timeout_ms,
     )
 
 
-def _create_pipe_handle(pipe_name: str) -> object:
+def _create_pipe_handle(pipe_name: str, timeout_ms: int) -> object:
     """Create and configure a handle for *pipe_name*."""
     handle = win32file.CreateFile(  # type: ignore[union-attr]
         pipe_name,
@@ -203,19 +203,21 @@ def _create_pipe_handle(pipe_name: str) -> object:
         0,
         None,
     )
-    _configure_pipe_handle(handle)
+    _configure_pipe_handle(handle, timeout_ms)
     return handle
 
 
 def _connect_pipe_with_retries(
-    pipe_name: str,
+    pipe_name: os.PathLike[str] | str,
     timeout: float,
     retry_config: RetryConfig,
 ) -> object:
     retry_config.validate(timeout)
+    pipe_name_str = os.fspath(pipe_name)
+    timeout_ms = max(1, int(timeout * 1000))
     for attempt in range(retry_config.retries):
         try:
-            return _create_pipe_handle(pipe_name)
+            return _create_pipe_handle(pipe_name_str, timeout_ms)
         except pywintypes.error as exc:  # type: ignore[name-defined]
             logger.debug(
                 "IPC pipe connect attempt %d/%d to %s failed: %s",
@@ -229,7 +231,7 @@ def _connect_pipe_with_retries(
             delay = calculate_retry_delay(
                 attempt, retry_config.backoff, retry_config.jitter
             )
-            _wait_for_pipe_availability(pipe_name, delay)
+            _wait_for_pipe_availability(pipe_name_str, delay)
     msg = "Exhausted retries connecting to named pipe"
     raise RuntimeError(msg)
 

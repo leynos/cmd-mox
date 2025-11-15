@@ -355,9 +355,9 @@ with IPCServer(socket_path, handlers=handlers):
 Providing `passthrough_handler=` to `IPCHandlers` intercepts passthrough
 completions in the same fashion. When no callbacks are supplied the server
 keeps its default echo behaviour, so existing code continues to work unchanged.
-On Windows you can swap `IPCServer` for :class:`NamedPipeServer` if you need to
-force the named-pipe transport explicitly; `CmdMox` selects it automatically
-based on ``os.name``.
+On Windows the transport can be forced explicitly by swapping `IPCServer` for
+:class:`NamedPipeServer`; `CmdMox` selects it automatically based on
+``os.name``.
 
 Projects that rely on :class:`CallbackIPCServer` can still customise startup
 and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
@@ -365,9 +365,18 @@ and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
 ```python
 import os
 
-from cmd_mox.ipc import CallbackIPCServer, CallbackNamedPipeServer, IPCHandlers, TimeoutConfig
+from cmd_mox.ipc import (
+    CallbackIPCServer,
+    CallbackNamedPipeServer,
+    IPCHandlers,
+    TimeoutConfig,
+    Response,
+)
 
 Server = CallbackNamedPipeServer if os.name == "nt" else CallbackIPCServer
+
+def handle_passthrough(result):
+    return Response(stdout=result.stdout, stderr=result.stderr, exit_code=result.exit_code)
 
 server = Server(
     socket_path,

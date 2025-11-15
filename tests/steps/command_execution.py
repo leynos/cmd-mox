@@ -22,13 +22,14 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
 
 def _resolve_command(cmd: str) -> str:
     """Return an executable path for *cmd*, respecting PATHEXT on Windows."""
-    resolved = shutil.which(cmd)
-    if resolved:
+    if resolved := shutil.which(cmd):
         return resolved
-    if os.name == "nt" and not cmd.lower().endswith(".cmd"):
-        alt = shutil.which(f"{cmd}.cmd")
-        if alt:
-            return alt
+    if (
+        os.name == "nt"
+        and not cmd.lower().endswith(".cmd")
+        and (alt := shutil.which(f"{cmd}.cmd"))
+    ):
+        return alt
     return cmd
 
 

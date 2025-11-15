@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import abc
 import contextlib
 import dataclasses as dc
 import importlib
@@ -44,6 +45,19 @@ IS_WINDOWS = os.name == "nt"
 
 
 def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
+    if IS_WINDOWS:
+
+        class _UnsupportedUnixServer(socketserver.BaseServer):  # type: ignore[misc]
+            """Placeholder that raises when Unix sockets are requested on Windows."""
+
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                msg = "Unix domain socket servers are unavailable on Windows"
+                raise RuntimeError(msg)
+
+        return t.cast(
+            "type[socketserver.BaseServer]",
+            _UnsupportedUnixServer,
+        )
     if hasattr(socketserver, "ThreadingUnixStreamServer"):
         return t.cast(
             "type[socketserver.BaseServer]",
@@ -62,19 +76,6 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
         return t.cast(
             "type[socketserver.BaseServer]",
             _ThreadingUnixStreamServerCompat,
-        )
-    if IS_WINDOWS:
-
-        class _UnsupportedUnixServer(socketserver.BaseServer):  # type: ignore[misc]
-            """Placeholder that raises when Unix sockets are requested on Windows."""
-
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                msg = "Unix domain socket servers are unavailable on Windows"
-                raise RuntimeError(msg)
-
-        return t.cast(
-            "type[socketserver.BaseServer]",
-            _UnsupportedUnixServer,
         )
     msg = "Unix domain socket servers are not supported on this platform"
     raise RuntimeError(msg)
@@ -104,23 +105,109 @@ logger = logging.getLogger(__name__)
 
 _RequestValidator = t.Callable[[dict[str, t.Any]], t.Any | None]
 _DispatchArg = t.TypeVar("_DispatchArg", Invocation, PassthroughResult)
+_BackendT = t.TypeVar("_BackendT")
 
 
-def _process_invocation(server: IPCServer, invocation: Invocation) -> Response:
+def _process_invocation(
+    server: _BaseIPCServer[t.Any], invocation: Invocation
+) -> Response:
     """Invoke :meth:`IPCServer.handle_invocation` for *invocation*."""
     return server.handle_invocation(invocation)
 
 
 def _process_passthrough_result(
-    server: IPCServer, result: PassthroughResult
+    server: _BaseIPCServer[t.Any], result: PassthroughResult
 ) -> Response:
     """Invoke :meth:`IPCServer.handle_passthrough_result` for *result*."""
     return server.handle_passthrough_result(result)
 
 
+class _ServerLifecycle(abc.ABC, t.Generic[_BackendT]):
+    """Shared lifecycle management for IPC transports."""
+
+    def __init__(
+        self,
+        socket_path: Path,
+        timeout: float,
+        accept_timeout: float | None,
+    ) -> None:
+        self.socket_path = Path(socket_path)
+        self.timeout = timeout
+        self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
+        self._server: _BackendT | None = None
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    def __enter__(self) -> _ServerLifecycle[_BackendT]:
+        self.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.stop()
+
+    def start(self) -> None:
+        """Start the backend transport."""
+        with self._lock:
+            if self._thread:
+                msg = "IPC server already started"
+                raise RuntimeError(msg)
+
+            self._prepare_backend_start()
+            self._export_environment()
+            server, thread = self._create_backend()
+            self._server = server
+            self._thread = thread
+
+        self._start_backend_thread(thread)
+        self._wait_until_ready()
+
+    def stop(self) -> None:
+        """Stop the backend transport."""
+        with self._lock:
+            server = self._server
+            thread = self._thread
+            self._server = None
+            self._thread = None
+
+        self._stop_backend(server)
+        self._join_backend_thread(thread)
+        self._post_stop_cleanup()
+
+    @abc.abstractmethod
+    def _create_backend(self) -> tuple[_BackendT, threading.Thread]: ...
+
+    def _prepare_backend_start(self) -> None:
+        return
+
+    def _export_environment(self) -> None:
+        return
+
+    def _start_backend_thread(self, thread: threading.Thread) -> None:
+        thread.start()
+
+    def _wait_until_ready(self) -> None:
+        return
+
+    def _stop_backend(self, server: _BackendT | None) -> None:
+        return
+
+    def _join_backend_thread(self, thread: threading.Thread | None) -> None:
+        if thread is None:
+            return
+        thread.join(self.timeout)
+
+    def _post_stop_cleanup(self) -> None:
+        return
+
+
 @dc.dataclass(slots=True)
 class IPCHandlers:
-    """Optional callbacks customising :class:`IPCServer` behaviour."""
+    """Optional callbacks customising :class:`BaseIPCServer` behaviour."""
 
     handler: t.Callable[[Invocation], Response] | None = None
     passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None
@@ -139,18 +226,8 @@ class TimeoutConfig:
         validate_optional_timeout(self.accept_timeout, name="accept_timeout")
 
 
-class IPCServer:
-    """Run a Unix domain socket server for shims.
-
-    The server listens on a Unix domain socket created by
-    :class:`~cmd_mox.environment.EnvironmentManager`. Clients connect via the
-    ``CMOX_IPC_SOCKET`` path and communicate using JSON messages. Connection
-    attempts default to a five second timeout, but this can be overridden by
-    setting :data:`~cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` in the
-    environment. See the ``IPC server`` section of the design document for
-    details on the rationale and configuration:
-    ``docs/python-native-command-mocking-design.md``.
-    """
+class _BaseIPCServer(_ServerLifecycle[_BackendT]):
+    """Shared handler wiring for IPC transports."""
 
     def __init__(
         self,
@@ -160,15 +237,9 @@ class IPCServer:
         *,
         handlers: IPCHandlers | None = None,
     ) -> None:
-        """Create a server listening at *socket_path*."""
-        self.socket_path = Path(socket_path)
         validate_positive_finite_timeout(timeout)
         validate_optional_timeout(accept_timeout, name="accept_timeout")
-        self.timeout = timeout
-        self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
-        self._server: object | None = None
-        self._thread: threading.Thread | None = None
-        self._lock = threading.Lock()
+        super().__init__(Path(socket_path), timeout, accept_timeout)
         handlers = handlers or IPCHandlers()
         self._handler = handlers.handler
         self._passthrough_handler = handlers.passthrough_handler
@@ -213,85 +284,10 @@ class IPCServer:
         msg = f"Exception in passthrough handler for {result.invocation_id}: {exc}"
         return RuntimeError(msg)
 
-    def __enter__(self) -> IPCServer:
-        """Start the server when entering a context."""
-        self.start()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        """Stop the server when leaving a context."""
-        self.stop()
-
-    def _prepare_backend_start(self) -> None:
-        cleanup_stale_socket(self.socket_path)
-
     def _export_environment(self) -> None:
         env_mgr = EnvironmentManager.get_active_manager()
         if env_mgr is not None:
             env_mgr.export_ipc_environment(timeout=self.timeout)
-
-    def _create_backend(self) -> tuple[object, threading.Thread]:
-        server = _InnerServer(self.socket_path, self)
-        server.timeout = self.accept_timeout
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        return server, thread
-
-    def _start_backend_thread(self, thread: threading.Thread) -> None:
-        thread.start()
-
-    def _wait_until_ready(self) -> None:
-        wait_for_socket(self.socket_path, self.timeout)
-
-    def _stop_backend(self, server: object | None) -> None:
-        if server is None:
-            return
-        unix_server = t.cast("_InnerServer", server)
-        unix_server.shutdown()
-        unix_server.server_close()
-
-    def _join_backend_thread(self, thread: threading.Thread | None) -> None:
-        if thread is None:
-            return
-        thread.join(self.timeout)
-
-    def _post_stop_cleanup(self) -> None:
-        if self.socket_path.exists():
-            with contextlib.suppress(OSError):
-                self.socket_path.unlink()
-
-    def start(self) -> None:
-        """Start the background server thread."""
-        with self._lock:
-            if self._thread:
-                msg = "IPC server already started"
-                raise RuntimeError(msg)
-
-            self._prepare_backend_start()
-            self._export_environment()
-
-            server, thread = self._create_backend()
-            self._server = server
-            self._thread = thread
-
-        self._start_backend_thread(thread)
-        self._wait_until_ready()
-
-    def stop(self) -> None:
-        """Stop the server and clean up the socket."""
-        with self._lock:
-            server = self._server
-            thread = self._thread
-            self._server = None
-            self._thread = None
-
-        self._stop_backend(server)
-        self._join_backend_thread(thread)
-        self._post_stop_cleanup()
 
     def handle_invocation(self, invocation: Invocation) -> Response:
         """Process invocations using the configured handler when available."""
@@ -309,6 +305,33 @@ class IPCServer:
             default=self._raise_unhandled_passthrough,
             error_builder=self._build_passthrough_error,
         )
+
+
+class IPCServer(_BaseIPCServer["_InnerServer"]):
+    """Run a Unix domain socket server for shims."""
+
+    def _prepare_backend_start(self) -> None:
+        cleanup_stale_socket(self.socket_path)
+
+    def _create_backend(self) -> tuple[_InnerServer, threading.Thread]:
+        server = _InnerServer(self.socket_path, self)
+        server.timeout = self.accept_timeout
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        return server, thread
+
+    def _wait_until_ready(self) -> None:
+        wait_for_socket(self.socket_path, self.timeout)
+
+    def _stop_backend(self, server: _InnerServer | None) -> None:
+        if server is None:
+            return
+        server.shutdown()
+        server.server_close()
+
+    def _post_stop_cleanup(self) -> None:
+        if self.socket_path.exists():
+            with contextlib.suppress(OSError):
+                self.socket_path.unlink()
 
 
 class CallbackIPCServer(IPCServer):
@@ -335,7 +358,7 @@ class CallbackIPCServer(IPCServer):
         )
 
 
-_RequestProcessor = t.Callable[[IPCServer, t.Any], Response]
+_RequestProcessor = t.Callable[[_BaseIPCServer, t.Any], Response]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
     KIND_INVOCATION: (validate_invocation_payload, _process_invocation),
@@ -370,7 +393,7 @@ def _lookup_handler(kind: str) -> tuple[_RequestValidator, _RequestProcessor] | 
     return handler_entry
 
 
-def _process_raw_request(server: IPCServer, raw: bytes) -> bytes | None:
+def _process_raw_request(server: _BaseIPCServer, raw: bytes) -> bytes | None:
     parsed = _parse_payload(raw)
     if parsed is None:
         return None
@@ -390,7 +413,7 @@ def _process_raw_request(server: IPCServer, raw: bytes) -> bytes | None:
 
 
 def _execute_request(
-    server: IPCServer, processor: _RequestProcessor, obj: object
+    server: _BaseIPCServer, processor: _RequestProcessor, obj: object
 ) -> Response:
     try:
         return processor(server, obj)
@@ -423,7 +446,7 @@ class _InnerServer(_BaseUnixServer):
         self.daemon_threads = True
 
 
-class NamedPipeServer(IPCServer):
+class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
     """Windows named pipe variant of :class:`IPCServer`."""
 
     def __init__(
@@ -449,7 +472,7 @@ class NamedPipeServer(IPCServer):
         # Named pipes do not leave filesystem artefacts that require cleanup.
         return
 
-    def _create_backend(self) -> tuple[object, threading.Thread]:  # type: ignore[override]
+    def _create_backend(self) -> tuple[_NamedPipeState, threading.Thread]:  # type: ignore[override]
         state = _NamedPipeState(
             pipe_name=self._pipe_name,
             outer=self,
@@ -459,7 +482,7 @@ class NamedPipeServer(IPCServer):
         return state, thread
 
     def _wait_until_ready(self) -> None:  # type: ignore[override]
-        state = t.cast("_NamedPipeState | None", self._server)
+        state = self._server
         if state is None:
             return
         if not state.ready_event.wait(self.timeout):
@@ -469,12 +492,11 @@ class NamedPipeServer(IPCServer):
             )
             raise RuntimeError(msg)
 
-    def _stop_backend(self, server: object | None) -> None:  # type: ignore[override]
+    def _stop_backend(self, server: _NamedPipeState | None) -> None:  # type: ignore[override]
         if server is None:
             return
-        state = t.cast("_NamedPipeState", server)
-        state.stop()
-        state.join_clients(self.timeout)
+        server.stop()
+        server.join_clients(self.timeout)
 
 
 class CallbackNamedPipeServer(NamedPipeServer):
@@ -507,7 +529,7 @@ class _NamedPipeState:
         self,
         *,
         pipe_name: str,
-        outer: IPCServer,
+        outer: _BaseIPCServer[_NamedPipeState],
         accept_timeout: float,
     ) -> None:
         self.pipe_name = pipe_name
@@ -533,16 +555,20 @@ class _NamedPipeState:
         winerror = getattr(exc, "winerror", None)
         if winerror is None:
             logger.exception("Named pipe connect failed")
-            win32file.CloseHandle(handle)  # type: ignore[union-attr]
+            self._close_handle(handle)
             return True, False
         if winerror == ERROR_PIPE_CONNECTED:
             return True, True
         if winerror in (ERROR_OPERATION_ABORTED, ERROR_NO_DATA):
-            win32file.CloseHandle(handle)  # type: ignore[union-attr]
+            self._close_handle(handle)
             return False, False
         logger.exception("Named pipe connect failed")
-        win32file.CloseHandle(handle)  # type: ignore[union-attr]
+        self._close_handle(handle)
         return True, False
+
+    @staticmethod
+    def _close_handle(handle: object) -> None:
+        win32file.CloseHandle(handle)  # type: ignore[union-attr]
 
     def _spawn_handler_thread(self, handle: object) -> None:
         """Create and track the per-client handler thread."""

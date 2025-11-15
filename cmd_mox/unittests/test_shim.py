@@ -27,6 +27,19 @@ from cmd_mox.shim import (
 )
 
 
+def test_resolve_command_name_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Environment variable should override argv-derived command name."""
+    monkeypatch.setenv("CMOX_SHIM_COMMAND", "shim-alias")
+    assert shim._resolve_command_name() == "shim-alias"
+
+
+def test_resolve_command_name_defaults_to_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fallback to ``sys.argv`` when no override is provided."""
+    monkeypatch.delenv("CMOX_SHIM_COMMAND", raising=False)
+    monkeypatch.setattr(sys, "argv", ["cmd-mock"])
+    assert shim._resolve_command_name() == "cmd-mock"
+
+
 class _DummyStdin:
     """Test double to simulate ``sys.stdin`` behaviour."""
 

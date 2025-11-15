@@ -37,8 +37,7 @@ CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
 
 
 def _resolve_command_name() -> str:
-    from_env = os.environ.pop(CMOX_SHIM_COMMAND_ENV, None)
-    if from_env:
+    if from_env := os.environ.get(CMOX_SHIM_COMMAND_ENV):
         return from_env
     return Path(sys.argv[0]).name
 
