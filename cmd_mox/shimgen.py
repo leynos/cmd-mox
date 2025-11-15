@@ -61,6 +61,7 @@ def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
     return (
         "@echo off\n"
         "setlocal ENABLEDELAYEDEXPANSION\n"
+        'set "CMOX_SHIM_COMMAND=%~n0"\n'
         f'"{escaped_python}" "{escaped_shim}" %*\n'
     )
 

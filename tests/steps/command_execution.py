@@ -32,9 +32,7 @@ def _resolve_command(cmd: str) -> str:
     return cmd
 
 
-def _run(
-    argv: list[str], *, check: bool
-) -> subprocess.CompletedProcess[str]:
+def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
         argv,
         capture_output=True,
