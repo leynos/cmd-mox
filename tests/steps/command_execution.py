@@ -20,16 +20,21 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
 
 
+def _try_resolve_windows_cmd(cmd: str) -> str | None:
+    """Try to resolve a .cmd variant on Windows if not already a .cmd file."""
+    if os.name != "nt":
+        return None
+    if cmd.lower().endswith(".cmd"):
+        return None
+    return shutil.which(f"{cmd}.cmd")
+
+
 def _resolve_command(cmd: str) -> str:
     """Return an executable path for *cmd*, respecting PATHEXT on Windows."""
     if resolved := shutil.which(cmd):
         return resolved
-    if (
-        os.name == "nt"
-        and not cmd.lower().endswith(".cmd")
-        and (alt := shutil.which(f"{cmd}.cmd"))
-    ):
-        return alt
+    if windows_cmd := _try_resolve_windows_cmd(cmd):
+        return windows_cmd
     return cmd
 
 

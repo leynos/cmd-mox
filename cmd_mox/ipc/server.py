@@ -44,39 +44,50 @@ from .socket_utils import cleanup_stale_socket, wait_for_socket
 IS_WINDOWS = os.name == "nt"
 
 
+def _import_windows_modules() -> tuple[t.Any, t.Any, t.Any]:
+    try:
+        pywintypes_mod = importlib.import_module("pywintypes")
+        win32file_mod = importlib.import_module("win32file")
+        win32pipe_mod = importlib.import_module("win32pipe")
+    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
+        msg = "pywin32 is required for Windows named pipe support"
+        raise RuntimeError(msg) from exc
+    return pywintypes_mod, win32file_mod, win32pipe_mod
+
+
+def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
+    class _UnsupportedUnixServer(socketserver.BaseServer):  # type: ignore[misc]
+        """Placeholder that raises when Unix sockets are requested on Windows."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            msg = "Unix domain socket servers are unavailable on Windows"
+            raise RuntimeError(msg)
+
+    return t.cast("type[socketserver.BaseServer]", _UnsupportedUnixServer)
+
+
+def _create_threading_unix_compat() -> type[socketserver.BaseServer]:
+    class _ThreadingUnixStreamServerCompat(
+        socketserver.ThreadingMixIn,  # type: ignore[misc]
+        socketserver.UnixStreamServer,  # type: ignore[attr-defined]
+    ):
+        """Compatibility shim for platforms lacking ThreadingUnixStreamServer."""
+
+        pass
+
+    return t.cast("type[socketserver.BaseServer]", _ThreadingUnixStreamServerCompat)
+
+
 def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
     if IS_WINDOWS:
-
-        class _UnsupportedUnixServer(socketserver.BaseServer):  # type: ignore[misc]
-            """Placeholder that raises when Unix sockets are requested on Windows."""
-
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                msg = "Unix domain socket servers are unavailable on Windows"
-                raise RuntimeError(msg)
-
-        return t.cast(
-            "type[socketserver.BaseServer]",
-            _UnsupportedUnixServer,
-        )
+        return _create_unsupported_unix_server()
     if hasattr(socketserver, "ThreadingUnixStreamServer"):
         return t.cast(
             "type[socketserver.BaseServer]",
             socketserver.ThreadingUnixStreamServer,
         )
     if hasattr(socketserver, "UnixStreamServer"):
-
-        class _ThreadingUnixStreamServerCompat(
-            socketserver.ThreadingMixIn,  # type: ignore[misc]
-            socketserver.UnixStreamServer,  # type: ignore[attr-defined]
-        ):
-            """Compatibility shim for platforms lacking ThreadingUnixStreamServer."""
-
-            pass
-
-        return t.cast(
-            "type[socketserver.BaseServer]",
-            _ThreadingUnixStreamServerCompat,
-        )
+        return _create_threading_unix_compat()
     msg = "Unix domain socket servers are not supported on this platform"
     raise RuntimeError(msg)
 
@@ -89,13 +100,7 @@ else:
     _BaseUnixServer = _resolve_unix_server_base()
 
 if IS_WINDOWS:  # pragma: win32-only
-    try:
-        pywintypes = importlib.import_module("pywintypes")
-        win32file = importlib.import_module("win32file")
-        win32pipe = importlib.import_module("win32pipe")
-    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
-        msg = "pywin32 is required for Windows named pipe support"
-        raise RuntimeError(msg) from exc
+    pywintypes, win32file, win32pipe = _import_windows_modules()
 else:  # pragma: no cover - non-Windows fallback for type-checkers
     pywintypes = t.cast("t.Any", None)
     win32file = t.cast("t.Any", None)
