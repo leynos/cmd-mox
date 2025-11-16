@@ -195,7 +195,7 @@ def _create_pipe_handle(pipe_name: str, timeout_ms: int) -> object:
     )
     win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
         handle,
-        getattr(win32pipe, "PIPE_READMODE_MESSAGE"),
+        t.cast("int", getattr(win32pipe, "PIPE_READMODE_MESSAGE", 2)),
         0,
         timeout_ms,
     )
