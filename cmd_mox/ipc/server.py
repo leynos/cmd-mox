@@ -616,6 +616,9 @@ class _NamedPipeState:
             if remaining <= 0:
                 break
             for thread in threads:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
                 thread.join(max(0.0, remaining))
 
     def _create_pipe_instance(self) -> object:
