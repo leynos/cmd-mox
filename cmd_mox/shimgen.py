@@ -102,7 +102,6 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
     launcher.write_text(
         _format_windows_launcher(sys.executable, SHIM_PATH),
         encoding="utf-8",
-        newline="\r\n",
     )
     return launcher
 

@@ -182,16 +182,6 @@ def _wait_for_pipe_availability(pipe_name: str, delay: float) -> None:
         time.sleep(delay)
 
 
-def _configure_pipe_handle(handle: object, timeout_ms: int) -> None:
-    """Configure *handle* to use message read mode."""
-    win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
-        handle,
-        win32pipe.PIPE_READMODE_MESSAGE,  # type: ignore[union-attr]
-        None,
-        timeout_ms,
-    )
-
-
 def _create_pipe_handle(pipe_name: str, timeout_ms: int) -> object:
     """Create and configure a handle for *pipe_name*."""
     handle = win32file.CreateFile(  # type: ignore[union-attr]
@@ -203,7 +193,12 @@ def _create_pipe_handle(pipe_name: str, timeout_ms: int) -> object:
         0,
         None,
     )
-    _configure_pipe_handle(handle, timeout_ms)
+    win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
+        handle,
+        getattr(win32pipe, "PIPE_READMODE_MESSAGE"),
+        0,
+        timeout_ms,
+    )
     return handle
 
 
