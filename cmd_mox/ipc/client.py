@@ -278,7 +278,7 @@ def _wait_for_pipe_availability(
         time.sleep(wait_duration)
 
 
-def _create_pipe_handle(pipe_name: str, timeout_ms: int) -> object:
+def _create_pipe_handle(pipe_name: str) -> object:
     """Create and configure a handle for *pipe_name*."""
     handle = win32file.CreateFile(  # type: ignore[union-attr]
         pipe_name,
@@ -309,10 +309,8 @@ def _connect_pipe_with_retries(
     pipe_name_str = os.fspath(pipe_name)
     connect_deadline = deadline or _compute_deadline(timeout)
     for attempt in range(retry_config.retries):
-        remaining = _remaining_time(connect_deadline)
-        timeout_ms = max(1, int(remaining * 1000))
         try:
-            return _create_pipe_handle(pipe_name_str, timeout_ms)
+            return _create_pipe_handle(pipe_name_str)
         except pywintypes.error as exc:  # type: ignore[name-defined]
             logger.debug(
                 "IPC pipe connect attempt %d/%d to %s failed: %s",
