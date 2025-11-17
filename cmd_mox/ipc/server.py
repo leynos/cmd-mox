@@ -179,19 +179,19 @@ class _ServerLifecycle(abc.ABC, t.Generic[_BackendT]):
     def _create_backend(self) -> tuple[_BackendT, threading.Thread]: ...
 
     def _prepare_backend_start(self) -> None:
-        return
+        """Perform any setup required before starting the backend server."""
 
     def _export_environment(self) -> None:
-        return
+        """Export environment variables for client processes."""
 
     def _start_backend_thread(self, thread: threading.Thread) -> None:
         thread.start()
 
     def _wait_until_ready(self) -> None:
-        return
+        """Wait for the backend server to be ready to accept connections."""
 
     def _stop_backend(self, server: _BackendT | None) -> None:
-        return
+        """Stop the backend server instance."""
 
     def _join_backend_thread(self, thread: threading.Thread | None) -> None:
         if thread is None:
@@ -199,7 +199,7 @@ class _ServerLifecycle(abc.ABC, t.Generic[_BackendT]):
         thread.join(self.timeout)
 
     def _post_stop_cleanup(self) -> None:
-        return
+        """Perform cleanup after the backend server has stopped."""
 
 
 @dc.dataclass(slots=True)
@@ -578,6 +578,34 @@ class _NamedPipeState:
             self._client_threads.add(thread)
         thread.start()
 
+    def _get_active_threads(self) -> list[threading.Thread]:
+        """Get a snapshot of active client threads."""
+        with self._client_lock:
+            return list(self._client_threads)
+
+    def _calculate_remaining_time(self, deadline: float) -> float | None:
+        """Calculate remaining time until deadline.
+
+        Returns None if deadline has passed, otherwise remaining seconds.
+        """
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        return remaining
+
+    def _join_thread_with_deadline(
+        self, thread: threading.Thread, deadline: float
+    ) -> bool:
+        """Join a thread respecting the deadline.
+
+        Returns True if join attempted, False if deadline expired before join.
+        """
+        remaining = self._calculate_remaining_time(deadline)
+        if remaining is None:
+            return False
+        thread.join(max(0.0, remaining))
+        return True
+
     def serve_forever(self) -> None:
         if not IS_WINDOWS:  # pragma: no cover - defensive guard
             return
@@ -608,18 +636,14 @@ class _NamedPipeState:
     def join_clients(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
         while True:
-            with self._client_lock:
-                threads = list(self._client_threads)
+            threads = self._get_active_threads()
             if not threads:
                 return
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
+            if self._calculate_remaining_time(deadline) is None:
+                return
             for thread in threads:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
+                if not self._join_thread_with_deadline(thread, deadline):
                     return
-                thread.join(max(0.0, remaining))
 
     def _create_pipe_instance(self) -> object:
         timeout_ms = max(1, int(self.accept_timeout * 1000))

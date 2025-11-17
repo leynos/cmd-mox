@@ -666,6 +666,43 @@ sequenceDiagram
     Shim->>Shim: Write stdout, stderr, exit code
 ```
 
+The following diagram expands on the transport differences when the
+controller boots an IPC server on Windows versus POSIX hosts.
+
+```mermaid
+sequenceDiagram
+    participant Controller
+    participant Server
+    participant Client
+    participant WindowsPipe as "Windows Named Pipe (Windows only)"
+    participant UnixSocket as "Unix Domain Socket (POSIX only)"
+    Controller->>Server: Start IPC server
+    alt Windows
+        Server->>WindowsPipe: Create named pipe (derive name from socket path)
+        WindowsPipe-->>Server: Ready event set
+        Client->>WindowsPipe: Connect to named pipe
+        WindowsPipe->>Server: Forward request
+        Server->>Client: Send response
+    else POSIX
+        Server->>UnixSocket: Create Unix domain socket
+        UnixSocket-->>Server: Socket ready
+        Client->>UnixSocket: Connect to socket
+        UnixSocket->>Server: Forward request
+        Server->>Client: Send response
+    end
+```
+
+The relationships between the Windows transport helpers are summarised below.
+
+```mermaid
+erDiagram
+    Path ||--o| NamedPipeServer : derives
+    NamedPipeServer ||--|{ _NamedPipeState : manages
+    Path ||--|{ derive_pipe_name : input
+    derive_pipe_name }|--|| WINDOWS_PIPE_PREFIX : uses
+    NamedPipeServer ||--|| derive_pipe_name : uses
+```
+
 ### 3.3 The Environment Manager
 
 This component will be implemented as a robust, exception-safe context manager
