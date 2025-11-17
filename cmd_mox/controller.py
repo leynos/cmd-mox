@@ -11,9 +11,15 @@ from collections import deque
 from pathlib import Path
 
 from .command_runner import CommandRunner
-from .environment import EnvironmentManager, temporary_env
+from .environment import IS_WINDOWS, EnvironmentManager, temporary_env
 from .errors import LifecycleError, MissingEnvironmentError, UnexpectedCommandError
-from .ipc import CallbackIPCServer, Invocation, PassthroughResult, Response
+from .ipc import (
+    CallbackIPCServer,
+    CallbackNamedPipeServer,
+    Invocation,
+    PassthroughResult,
+    Response,
+)
 from .passthrough import PassthroughConfig, PassthroughCoordinator
 from .shimgen import create_shim_symlinks
 from .test_doubles import CommandDouble, DoubleKind
@@ -60,7 +66,7 @@ class CmdMox:
         self.environment = (
             environment if environment is not None else EnvironmentManager()
         )
-        self._server: CallbackIPCServer | None = None
+        self._server: CallbackIPCServer | CallbackNamedPipeServer | None = None
         self._runner = CommandRunner(self.environment)
         self._entered = False
         self._phase = Phase.RECORD
@@ -473,7 +479,8 @@ class CmdMox:
             raise MissingEnvironmentError(msg)
         shim_dir, socket_path = self._validate_replay_environment()
         create_shim_symlinks(shim_dir, self._commands)
-        self._server = CallbackIPCServer(
+        server_factory = CallbackNamedPipeServer if IS_WINDOWS else CallbackIPCServer
+        self._server = server_factory(
             socket_path,
             self._handle_invocation,
             self._handle_passthrough_result,

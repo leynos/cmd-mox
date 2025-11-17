@@ -33,6 +33,13 @@ from cmd_mox.ipc import (
 
 # Backwards compatibility alias retained for tests exercising shim helpers.
 _validate_override_path = validate_override_path
+CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
+
+
+def _resolve_command_name() -> str:
+    if from_env := os.environ.get(CMOX_SHIM_COMMAND_ENV):
+        return from_env
+    return Path(sys.argv[0]).name
 
 
 def _validate_environment() -> float:
@@ -95,7 +102,7 @@ def _write_response(response: Response) -> None:
 
 def main() -> None:
     """Connect to the IPC server and execute the command behaviour."""
-    cmd_name = Path(sys.argv[0]).name
+    cmd_name = _resolve_command_name()
     timeout = _validate_environment()
     invocation = _create_invocation(cmd_name)
     response = _execute_invocation(invocation, timeout)

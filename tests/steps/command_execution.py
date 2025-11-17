@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
 import typing as t
 
-from pytest_bdd import parsers, when
+from pytest_bdd import parsers, then, when
 
 from tests.helpers.controller import CommandExecution, execute_command_with_details
 from tests.helpers.parameters import CommandInputs, EnvVar
@@ -19,12 +20,56 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
 
 
+def _try_resolve_windows_cmd(cmd: str) -> str | None:
+    """Try to resolve a .cmd variant on Windows if not already a .cmd file."""
+    if os.name != "nt":
+        return None
+    if cmd.lower().endswith(".cmd"):
+        return None
+    return shutil.which(f"{cmd}.cmd")
+
+
+def _resolve_command(cmd: str) -> str:
+    """Return an executable path for *cmd*, respecting PATHEXT on Windows."""
+    if resolved := shutil.which(cmd):
+        return resolved
+    if windows_cmd := _try_resolve_windows_cmd(cmd):
+        return windows_cmd
+    return cmd
+
+
+def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+    """Execute *argv* with consistent subprocess settings.
+
+    Parameters
+    ----------
+    argv : list[str]
+        Command invocation, including arguments.
+    check : bool
+        When True, raise :class:`CalledProcessError` for non-zero exits.
+    """
+    return subprocess.run(  # noqa: S603
+        argv,
+        capture_output=True,
+        text=True,
+        check=check,
+        shell=False,
+    )
+
+
 @when(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
 def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     """Invoke the stubbed command."""
-    return subprocess.run(  # noqa: S603
-        [cmd], capture_output=True, text=True, check=True, shell=False
-    )
+    resolved = _resolve_command(cmd)
+    return _run([resolved], check=True)
+
+
+@then(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
+def then_run_command(
+    mox: CmdMox, cmd: str
+) -> subprocess.CompletedProcess[str]:  # pragma: no cover - pytest-bdd glue
+    """Alias the 'When' step for scenarios that use Then/And."""
+    return run_command(mox, cmd)
 
 
 @when(
@@ -33,9 +78,7 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
 )
 def run_command_failure(cmd: str) -> subprocess.CompletedProcess[str]:
     """Run *cmd* expecting a non-zero exit status."""
-    return subprocess.run(  # noqa: S603
-        [cmd], capture_output=True, text=True, check=False, shell=False
-    )
+    return _run([_resolve_command(cmd)], check=False)
 
 
 @when(
@@ -48,8 +91,8 @@ def run_command_args(
     args: str,
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with additional arguments."""
-    argv = [cmd, *shlex.split(args)]
-    return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603
+    argv = [_resolve_command(cmd), *shlex.split(args)]
+    return _run(argv, check=True)
 
 
 def _resolve_empty_placeholder(value: str) -> str:
@@ -106,9 +149,7 @@ def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess
     original_env = os.environ.copy()
     with mox:
         mox.replay()
-        result = subprocess.run(  # noqa: S603
-            [cmd], capture_output=True, text=True, check=True, shell=False
-        )
+        result = _run([_resolve_command(cmd)], check=True)
     assert os.environ == original_env
     return result
 

@@ -109,4 +109,5 @@ def test_create_windows_shim_emits_batch_launcher() -> None:
         assert shim_path.exists()
         contents = shim_path.read_bytes()
         assert contents.startswith(b"@echo off\r\n")
+        assert b'set "CMOX_SHIM_COMMAND=%~n0"\r\n' in contents
         assert contents.endswith(b"%*\r\n")

@@ -17,6 +17,7 @@ from cmd_mox.environment import (
 )
 from cmd_mox.ipc import Invocation, PassthroughRequest, Response
 from cmd_mox.shim import (
+    CMOX_SHIM_COMMAND_ENV,
     _create_invocation,
     _execute_invocation,
     _merge_passthrough_path,
@@ -25,6 +26,19 @@ from cmd_mox.shim import (
     _validate_override_path,
     _write_response,
 )
+
+
+def test_resolve_command_name_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Environment variable should override argv-derived command name."""
+    monkeypatch.setenv(CMOX_SHIM_COMMAND_ENV, "shim-alias")
+    assert shim._resolve_command_name() == "shim-alias"
+
+
+def test_resolve_command_name_defaults_to_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fallback to ``sys.argv`` when no override is provided."""
+    monkeypatch.delenv(CMOX_SHIM_COMMAND_ENV, raising=False)
+    monkeypatch.setattr(sys, "argv", ["/usr/local/bin/cmd-mock"])
+    assert shim._resolve_command_name() == "cmd-mock"
 
 
 class _DummyStdin:
