@@ -225,6 +225,16 @@ variables are set up. By default `__exit__` invokes :meth:`verify`, stopping
 any running server and restoring the original environment. This behaviour can
 be disabled via `CmdMox(verify_on_exit=False)` when manual control is required.
 
+On Windows the manager also normalises the shim directory path before
+publishing it inside `PATH`. Extremely deep worktrees can exceed the historical
+`MAX_PATH` limit, so the manager requests the filesystem's short (8.3) alias
+whenever the expanded path approaches that threshold. Comparisons performed
+during teardown normalise casing via `ntpath.normcase`, ensuring that
+reassigning `environment.shim_dir` with a differently cased string still points
+at the same directory and allows `__exit__` to clean up after itself. PATH
+filtering and passthrough spies reuse the same normalisation routines so a
+single shim directory never appears twice just because its casing changed.
+
 ### 2.3 Creating Test Doubles: `mox.mock()`, `mox.stub()`, and `mox.spy()`
 
 The `CmdMox` controller instance provides three distinct factory methods for
@@ -459,6 +469,14 @@ native compatibility and CmdMox amends `PATHEXT` during replay so the command
 processor will resolve the batch wrappers even on hosts where the extension was
 removed from the user environment. See :class:`EnvironmentManager` in
 :mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management logic.
+
+The batch template also doubles percent signs and carets so Windows-specific
+metacharacters survive the hand-off to Python, even when user arguments contain
+spaces or escaping sequences. Case-insensitive hosts are handled by rejecting
+duplicate command names whose casing only differs, ensuring shim files cannot
+trample each other on NTFS. When shims are regenerated from Linux or macOS the
+launcher still uses CRLF delimiters so the resulting `.cmd` remains byte-for-
+byte identical to the Windows-generated variant.
 ```mermaid
 sequenceDiagram
     actor User
@@ -1289,7 +1307,11 @@ Darwin environments, several avenues for future expansion exist.
   active Python interpreter and invoke `shim.py`, preserving argument quoting
   and inheriting the test process environment. Environment management reuses
   the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`,
-  and restores the original environment on teardown. A dedicated Windows smoke
+  and restores the original environment on teardown. Long shim paths are
+  collapsed to their short (8.3) counterparts whenever the Windows `MAX_PATH`
+  limit is at risk, PATH filtering treats casing consistently, and duplicate
+  command names that differ only by case are rejected to avoid filesystem
+  collisions. A dedicated Windows smoke
   job now runs in CI via the `windows-smoke` Makefile target, exercising mocked
   invocations and passthrough spies while publishing `windows-ipc.log` for
   diagnostics. Future work will focus on a "record mode" utility that captures

@@ -12,7 +12,7 @@ from pytest_bdd import given, parsers
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Response
-from tests.helpers.parameters import CommandOutput, EnvVar
+from tests.helpers.parameters import CommandOutput, EnvVar, decode_placeholders
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     import pytest
@@ -143,7 +143,8 @@ def spy_passthrough(mox: CmdMox, cmd: str) -> None:
 )
 def mock_with_args_in_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
     """Configure an ordered mock with arguments."""
-    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text).in_order()
+    decoded = decode_placeholders(args)
+    mox.mock(cmd).with_args(*shlex.split(decoded)).returns(stdout=text).in_order()
 
 
 @given(
@@ -153,7 +154,8 @@ def mock_with_args_in_order(mox: CmdMox, cmd: str, args: str, text: str) -> None
 )
 def mock_with_args_any_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
     """Configure an unordered mock with arguments."""
-    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text).any_order()
+    decoded = decode_placeholders(args)
+    mox.mock(cmd).with_args(*shlex.split(decoded)).returns(stdout=text).any_order()
 
 
 @given(
@@ -163,7 +165,8 @@ def mock_with_args_any_order(mox: CmdMox, cmd: str, args: str, text: str) -> Non
 )
 def mock_with_args_default_order(mox: CmdMox, cmd: str, args: str, text: str) -> None:
     """Configure a mock with arguments using default ordering."""
-    mox.mock(cmd).with_args(*shlex.split(args)).returns(stdout=text)
+    decoded = decode_placeholders(args)
+    mox.mock(cmd).with_args(*shlex.split(decoded)).returns(stdout=text)
 
 
 @given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))

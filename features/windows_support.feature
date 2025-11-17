@@ -19,3 +19,14 @@ Feature: Windows platform smoke tests
     When I verify the controller
     Then the spy "whoami" call count should be 1
     And PATHEXT should equal ".COM;.EXE"
+
+  Scenario: Windows shims preserve arguments with spaces and carets
+    Given windows shim launchers are enabled
+    And the platform override is "win32"
+    And I set environment variable "PATHEXT" to ".COM;.EXE"
+    And a CmdMox controller
+    And the command "caret-mock" is mocked with args "<dq>spaced arg<dq> <dq>^caret^ literal<dq> caret^suffix" returning "ok"
+    When I replay the controller
+    And I run the command "caret-mock" with arguments "<dq>spaced arg<dq> <dq>^caret^ literal<dq> caret^suffix"
+    Then the journal entry for "caret-mock" should record arguments "<dq>spaced arg<dq> <dq>^caret^ literal<dq> caret^suffix"
+    When I verify the controller

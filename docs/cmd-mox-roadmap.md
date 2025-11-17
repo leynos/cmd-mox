@@ -210,7 +210,7 @@
         pywin32 dependency so CmdMox can communicate with shims on Windows
         hosts without relying on Unix domain sockets.
 
-  - [ ] Validate environment management and filesystem helpers on Windows,
+  - [x] Validate environment management and filesystem helpers on Windows,
         addressing portability gaps discovered during testing (cover: `PATHEXT`
         lookup semantics, CRLF line endings for batch shims, argument
         quoting/escaping rules with spaces and carets, max path handling,

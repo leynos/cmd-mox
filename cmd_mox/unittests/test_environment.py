@@ -513,3 +513,53 @@ def test_active_manager_is_thread_local() -> None:
         thread.join()
 
     assert results == [None]
+
+
+def test_maybe_shorten_windows_path_prefers_short_variant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long Windows paths should prefer the filesystem-provided short alias."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 1)
+    captured: list[Path] = []
+
+    def fake_get_short_path(path: Path) -> Path:
+        captured.append(path)
+        return Path("C:/SHORT~1")
+
+    monkeypatch.setattr(envmod, "_get_short_path", fake_get_short_path)
+    original = Path("C:/long-directory-name")
+    result = envmod._maybe_shorten_windows_path(original)
+    assert result == Path("C:/SHORT~1")
+    assert captured == [original]
+
+
+def test_maybe_shorten_windows_path_returns_original_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the filesystem declines to provide a short path the input is reused."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 1)
+    monkeypatch.setattr(envmod, "_get_short_path", lambda _path: None)
+    original = Path("C:/still-long")
+    result = envmod._maybe_shorten_windows_path(original)
+    assert result == original
+
+
+def test_maybe_shorten_windows_path_skips_short_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Short directories should avoid the Windows API call entirely."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 10_000)
+    called = False
+
+    def fake_get_short_path(path: Path) -> Path:
+        nonlocal called
+        called = True
+        return path
+
+    monkeypatch.setattr(envmod, "_get_short_path", fake_get_short_path)
+    original = Path("C:/short")
+    assert envmod._maybe_shorten_windows_path(original) == original
+    assert called is False

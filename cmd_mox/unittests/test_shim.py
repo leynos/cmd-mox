@@ -332,6 +332,25 @@ def test_merge_passthrough_path_filters_shim_directory(
     assert merged.split(os.pathsep) == ["/usr/bin", "/opt/tools", "/custom/bin"]
 
 
+def test_merge_passthrough_path_is_case_insensitive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Duplicate entries differing only in case should collapse on Windows."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", True)
+    shim_dir = tmp_path / "Shim"
+    shim_dir.mkdir()
+    socket_path = shim_dir / "ipc.sock"
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(socket_path))
+
+    separator = shim._path_separator()
+    env_path = separator.join([os.fspath(shim_dir), r"C:\Tools"])
+    lookup_path = separator.join([r"c:\tools", r"C:\Other"])
+
+    merged = shim._merge_passthrough_path(env_path, lookup_path)
+
+    assert merged.split(separator) == [r"C:\Tools", r"C:\Other"]
+
+
 def test_resolve_passthrough_target_prefers_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

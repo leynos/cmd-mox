@@ -35,3 +35,12 @@ def announce_windows_smoke() -> t.Iterator[None]:
 def test_windows_shim_smoke() -> None:
     """Exercise mocked commands and passthrough spies via Windows shims."""
     pass
+
+
+@scenario(
+    str(FEATURES_DIR / "windows_support.feature"),
+    "Windows shims preserve arguments with spaces and carets",
+)
+def test_windows_argument_preservation() -> None:
+    """Ensure Windows launchers forward tricky arguments untouched."""
+    pass

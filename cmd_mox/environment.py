@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
+import ntpath
 import os
 import shutil
 import tempfile
@@ -16,6 +17,7 @@ from pathlib import Path
 from ._validators import validate_positive_finite_timeout
 
 IS_WINDOWS = os.name == "nt"
+_MAX_PATH_THRESHOLD: t.Final[int] = 240
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,81 @@ CMOX_IPC_TIMEOUT_ENV = "CMOX_IPC_TIMEOUT"  # server/shim communication timeout
 CMOX_REAL_COMMAND_ENV_PREFIX = "CMOX_REAL_COMMAND_"
 
 _UNSET_TIMEOUT = object()
+
+
+def _normalise_path_string(path: str) -> str:
+    """Return a canonical representation for filesystem comparisons."""
+    module = ntpath if IS_WINDOWS else os.path
+    normalised = module.normpath(path)
+    if IS_WINDOWS:
+        normalised = module.normcase(normalised)
+    return normalised
+
+
+def _path_identity(path: Path | None) -> str | None:
+    """Return a comparable representation of *path*, or ``None`` if unset."""
+    if path is None:
+        return None
+    return _normalise_path_string(os.fspath(path))
+
+
+def _should_shorten_path(raw_path: Path) -> bool:
+    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""
+    if not IS_WINDOWS:
+        return False
+    return len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD
+
+
+def _get_short_path(path: Path) -> Path | None:
+    """Return the short (8.3) variant for *path*, or ``None`` if unavailable."""
+    if not IS_WINDOWS:
+        return None
+
+    # Importing ctypes lazily keeps non-Windows interpreters free of win32
+    # specifics and avoids attribute errors in environments without WinDLL.
+    import ctypes
+    from ctypes import wintypes
+
+    ctypes_module = t.cast("t.Any", ctypes)
+    kernel32 = ctypes_module.WinDLL("kernel32", use_last_error=True)
+    get_short_path_name = kernel32.GetShortPathNameW
+    get_short_path_name.argtypes = (  # type: ignore[attr-defined]
+        wintypes.LPCWSTR,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+    )
+    get_short_path_name.restype = wintypes.DWORD
+
+    raw = os.fspath(path)
+    # Provide an initial buffer large enough for typical conversions while
+    # still growing dynamically for pathological cases.
+    buffer_len = max(len(raw) + 1, 260)
+
+    while True:
+        buffer = ctypes.create_unicode_buffer(buffer_len)
+        result = get_short_path_name(raw, buffer, buffer_len)
+        if result == 0:
+            error = ctypes_module.get_last_error()
+            # Error codes of 0/2/3 imply the filesystem declined to provide a
+            # short path (either because it does not exist yet or the volume
+            # disabled 8.3 aliases). Falling back to the original path keeps
+            # CmdMox functional even without short-path support.
+            if error in (0, 2, 3):
+                return None
+            raise OSError(ctypes_module.FormatError(error))
+        if result >= buffer_len:
+            buffer_len = result + 1
+            continue
+        return Path(buffer.value)
+
+
+def _maybe_shorten_windows_path(path: Path) -> Path:
+    """Return a MAX_PATH-safe variant of *path* when running on Windows."""
+    if not IS_WINDOWS or not _should_shorten_path(path):
+        return path
+
+    short_path = _get_short_path(path)
+    return short_path if short_path is not None else path
 
 
 def _restore_env(orig_env: dict[str, str]) -> None:
@@ -226,7 +303,9 @@ class EnvironmentManager:
             raise RuntimeError(msg)
         cls._set_active_manager(self)
         self._orig_env = os.environ.copy()
-        self.shim_dir = Path(tempfile.mkdtemp(prefix=self._prefix))
+        shim_dir = Path(tempfile.mkdtemp(prefix=self._prefix))
+        shim_dir = _maybe_shorten_windows_path(shim_dir)
+        self.shim_dir = shim_dir
         self._created_dir = self.shim_dir
         os.environ["PATH"] = os.pathsep.join(
             [str(self.shim_dir), self._orig_env.get("PATH", "")]
@@ -274,13 +353,19 @@ class EnvironmentManager:
         """Return ``True`` if no matching temporary directory remains."""
         shim = self.shim_dir
         created = self._created_dir
-        return created is None or shim is None or shim != created or not shim.exists()
+        if created is None or shim is None:
+            return True
+        if _path_identity(created) != _path_identity(shim):
+            return True
+        return not shim.exists()
 
     def _has_mismatched_directories(self) -> bool:
         """Check if the created directory differs from the current shim directory."""
         created = self._created_dir
         shim = self.shim_dir
-        return created is not None and shim is not None and shim != created
+        if created is None or shim is None:
+            return False
+        return _path_identity(created) != _path_identity(shim)
 
     @_collect_os_error("Directory cleanup failed")
     def _cleanup_temporary_directory(self, _cleanup_errors: list[CleanupError]) -> None:

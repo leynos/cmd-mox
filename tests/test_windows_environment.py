@@ -111,3 +111,12 @@ def test_create_windows_shim_emits_batch_launcher() -> None:
         assert contents.startswith(b"@echo off\r\n")
         assert b'set "CMOX_SHIM_COMMAND=%~n0"\r\n' in contents
         assert contents.endswith(b"%*\r\n")
+
+
+def test_environment_manager_accepts_case_tweaked_shim_dir() -> None:
+    """Cleanup should work even if shim_dir casing changes mid-test."""
+    with EnvironmentManager() as env:
+        assert env.shim_dir is not None
+        original = Path(env.shim_dir)
+        env.shim_dir = Path(str(env.shim_dir).upper())
+    assert not original.exists()

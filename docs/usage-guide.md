@@ -41,8 +41,20 @@ wrappers or entry points are required.
 
 When CmdMox enters replay mode on Windows it ensures `.CMD` is present in the
 effective `PATHEXT` value, even if developers customised their shell to omit
-the extension. The generated launchers use CRLF line endings so the Windows
-command processor parses them consistently with native batch scripts.
+the extension. The generated launchers always emit CRLF line endings and escape
+carets/percent signs so the Windows command processor parses them consistently
+with native batch scripts, even when arguments or installation paths include
+spaces and other metacharacters. CmdMox also filters duplicate command names on
+case-insensitive filesystems so two mocks whose names only differ by casing
+cannot trample each other's shim files.
+
+Deeply nested workspaces can easily exceed the traditional `MAX_PATH` limit on
+Windows. The environment manager now asks the filesystem for a short (8.3)
+alias whenever the shim directory path would overflow the limit, ensuring
+shims remain invokable while still cleaning up the real directory afterwards.
+PATH filtering honours the underlying filesystem semantics too, so variations
+in casing no longer leave behind duplicate entries when passthrough spies merge
+their lookup paths.
 
 When you need to make an explicit decision in a test module (for instance when
 using the context manager API), import the helper re-exported from the package:

@@ -14,7 +14,7 @@ import typing as t
 from pytest_bdd import parsers, then, when
 
 from tests.helpers.controller import CommandExecution, execute_command_with_details
-from tests.helpers.parameters import CommandInputs, EnvVar
+from tests.helpers.parameters import CommandInputs, EnvVar, decode_placeholders
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
@@ -91,7 +91,8 @@ def run_command_args(
     args: str,
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with additional arguments."""
-    argv = [_resolve_command(cmd), *shlex.split(args)]
+    decoded = decode_placeholders(args)
+    argv = [_resolve_command(cmd), *shlex.split(decoded)]
     return _run(argv, check=True)
 
 
@@ -135,7 +136,8 @@ def run_command_args_stdin_env(
     """Run *cmd* with arguments, stdin, and an environment variable."""
     resolved_args = _resolve_empty_placeholder(args)
     resolved_stdin = _resolve_empty_placeholder(stdin)
-    inputs = CommandInputs(args=resolved_args, stdin=resolved_stdin)
+    decoded_args = decode_placeholders(resolved_args)
+    inputs = CommandInputs(args=decoded_args, stdin=resolved_stdin)
     env = EnvVar(name=var, value=val)
     return _run_command_args_stdin_env_impl(mox, cmd, inputs, env)
 

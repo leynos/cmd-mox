@@ -28,3 +28,21 @@ class CommandInputs:
 
     args: str = ""
     stdin: str = ""
+
+
+_PLACEHOLDER_TOKENS: dict[str, str] = {
+    "<space>": " ",
+    "<SPACE>": " ",
+    "<caret>": "^",
+    "<CARET>": "^",
+    "<dq>": '"',
+    "<DQ>": '"',
+}
+
+
+def decode_placeholders(value: str) -> str:
+    """Expand user-facing placeholder tokens embedded in feature files."""
+    result = value
+    for token, replacement in _PLACEHOLDER_TOKENS.items():
+        result = result.replace(token, replacement)
+    return result

@@ -9,6 +9,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
 from cmd_mox.verifiers import OrderVerifier
+from tests.helpers.parameters import decode_placeholders
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
@@ -46,7 +47,8 @@ def create_ordered_expectation(
     """Add an ordered expectation for *command* with parsed *args*."""
     expectation = Expectation(command)
     if args:
-        expectation.with_args(*shlex.split(args))
+        decoded = decode_placeholders(args)
+        expectation.with_args(*shlex.split(decoded))
     expectation.in_order()
     ordered_expectations.append(expectation)
 
@@ -62,7 +64,8 @@ def create_unordered_expectation(
     """Record an unordered expectation to mirror setup complexity."""
     expectation = Expectation(command)
     if args:
-        expectation.with_args(*shlex.split(args))
+        decoded = decode_placeholders(args)
+        expectation.with_args(*shlex.split(decoded))
     unordered_expectations.append(expectation)
 
 
@@ -71,9 +74,10 @@ def create_unordered_expectation(
 )
 def add_invocation(command: str, args: str, journal: list[Invocation]) -> None:
     """Append an invocation for *command* with parsed *args*."""
+    decoded = decode_placeholders(args)
     invocation = Invocation(
         command=command,
-        args=list(shlex.split(args)) if args else [],
+        args=list(shlex.split(decoded)) if args else [],
         stdin="",
         env={},
     )

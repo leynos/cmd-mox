@@ -13,6 +13,12 @@ IS_WINDOWS = os.name == "nt"
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 
 
+def _escape_batch_literal(value: str) -> str:
+    """Return *value* escaped for safe inclusion inside batch quotes."""
+    escaped = value.replace("^", "^^").replace("%", "%%")
+    return escaped.replace('"', '""')
+
+
 def _validate_not_empty(name: str, error_msg: str) -> None:
     """Raise ``ValueError`` if *name* is empty."""
     if not name:
@@ -54,13 +60,32 @@ def _validate_command_name(name: str) -> None:
         validator(name, error_msg)
 
 
+def _normalise_command_name(name: str) -> str:
+    """Return a filesystem-safe comparison key for *name*."""
+    return name.casefold() if IS_WINDOWS else name
+
+
+def _validate_command_uniqueness(commands: list[str]) -> None:
+    """Ensure *commands* do not collide when case-insensitive filesystems apply."""
+    seen: set[str] = set()
+    for name in commands:
+        key = _normalise_command_name(name)
+        if key in seen:
+            msg = (
+                "Duplicate command names detected on a case-insensitive filesystem: "
+                f"{name!r}"
+            )
+            raise ValueError(msg)
+        seen.add(key)
+
+
 def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
     """Return the batch script contents to invoke ``shim.py`` on Windows."""
-    escaped_python = python_executable.replace('"', '""')
-    escaped_shim = os.fspath(shim_path).replace('"', '""')
+    escaped_python = _escape_batch_literal(python_executable)
+    escaped_shim = _escape_batch_literal(os.fspath(shim_path))
     return (
         "@echo off\n"
-        "setlocal ENABLEDELAYEDEXPANSION\n"
+        "setlocal ENABLEEXTENSIONS DISABLEDELAYEDEXPANSION\n"
         'set "CMOX_SHIM_COMMAND=%~n0"\n'
         f'"{escaped_python}" "{escaped_shim}" %*\n'
     )
@@ -102,6 +127,7 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
     launcher.write_text(
         _format_windows_launcher(sys.executable, SHIM_PATH),
         encoding="utf-8",
+        newline="\r\n",
     )
     return launcher
 
@@ -163,7 +189,9 @@ def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str
     """
     _validate_shim_directory(directory)
     _ensure_shim_template_ready(SHIM_PATH)
+    command_list = list(commands)
+    _validate_command_uniqueness(command_list)
     mapping: dict[str, Path] = {}
-    for name in commands:
+    for name in command_list:
         mapping[name] = _create_shim_for_command(directory, name)
     return mapping

@@ -55,6 +55,22 @@ def test_format_windows_launcher_escapes_quotes(tmp_path: pathlib.Path) -> None:
     assert f'"{shim_escaped}"' in content
 
 
+def test_format_windows_launcher_escapes_carets_and_percents(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Carets and percent signs should be doubled for batch safety."""
+    python_exe = tmp_path / "py^%thon.exe"
+    shim_script = tmp_path / "shim^%script.py"
+    content = shimgen._format_windows_launcher(str(python_exe), shim_script)
+
+    def expected(path: pathlib.Path) -> str:
+        escaped = str(path).replace("^", "^^").replace("%", "%%").replace('"', '""')
+        return f'"{escaped}"'
+
+    assert expected(python_exe) in content
+    assert expected(shim_script) in content
+
+
 @pytest.mark.requires_unix_sockets
 @pytest.mark.skipif(shimgen.IS_WINDOWS, reason="POSIX symlink execution only")
 def test_create_shim_symlinks_and_execution(
@@ -93,6 +109,16 @@ def test_create_windows_launchers(
     content = launcher.read_text(encoding="utf-8")
     assert sys.executable in content
     assert os.fspath(shimgen.SHIM_PATH) in content
+
+
+def test_create_windows_launchers_use_crlf(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows launchers should always use CRLF delimiters."""
+    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
+    launcher = mapping["git"]
+    assert b"\r\n" in launcher.read_bytes()
 
 
 def test_create_windows_shim_retries_locked_file(
@@ -208,6 +234,15 @@ def test_create_shim_symlinks_invalid_command_name(name: str) -> None:
         assert env.shim_dir is not None
         with pytest.raises(ValueError, match="Invalid command name"):
             shimgen.create_shim_symlinks(env.shim_dir, [name])
+
+
+def test_create_shim_symlinks_detects_case_insensitive_duplicates(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Case-insensitive collisions should be rejected on Windows."""
+    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    with pytest.raises(ValueError, match="Duplicate command names"):
+        shimgen.create_shim_symlinks(tmp_path, ["git", "GIT"])
 
 
 @pytest.mark.parametrize(

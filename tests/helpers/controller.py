@@ -10,6 +10,8 @@ import shlex
 import subprocess
 import typing as t
 
+from tests.helpers.parameters import decode_placeholders
+
 RUN_TIMEOUT_SECONDS = 30
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -48,7 +50,8 @@ def _execute_command_with_params(
 ) -> subprocess.CompletedProcess[str]:
     """Execute a command described by *params*."""
     env = os.environ | {params.env_var: params.env_val}
-    argv = [params.cmd, *shlex.split(params.args)]
+    decoded_args = decode_placeholders(params.args)
+    argv = [params.cmd, *shlex.split(decoded_args)]
     return subprocess.run(  # noqa: S603
         argv,
         input=params.stdin,
@@ -75,7 +78,8 @@ def _find_matching_journal_entry(
     """Locate the journal entry matching *expectation*."""
     candidates = [inv for inv in mox.journal if inv.command == expectation.cmd]
     if expectation.args is not None:
-        wanted_args = shlex.split(expectation.args)
+        decoded = decode_placeholders(expectation.args)
+        wanted_args = shlex.split(decoded)
         candidates = [inv for inv in candidates if inv.args == wanted_args]
     inv = candidates[-1] if candidates else None
     if inv is None:
