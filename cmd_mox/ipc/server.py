@@ -606,6 +606,18 @@ class _NamedPipeState:
         thread.join(max(0.0, remaining))
         return True
 
+    def _join_all_threads_with_deadline(
+        self, threads: list[threading.Thread], deadline: float
+    ) -> bool:
+        """Join all threads respecting the deadline.
+
+        Returns True if all threads were processed, False if deadline expired.
+        """
+        for thread in threads:
+            if not self._join_thread_with_deadline(thread, deadline):
+                return False
+        return True
+
     def serve_forever(self) -> None:
         if not IS_WINDOWS:  # pragma: no cover - defensive guard
             return
@@ -641,9 +653,8 @@ class _NamedPipeState:
                 return
             if self._calculate_remaining_time(deadline) is None:
                 return
-            for thread in threads:
-                if not self._join_thread_with_deadline(thread, deadline):
-                    return
+            if not self._join_all_threads_with_deadline(threads, deadline):
+                return
 
     def _create_pipe_instance(self) -> object:
         timeout_ms = max(1, int(self.accept_timeout * 1000))

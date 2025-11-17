@@ -132,6 +132,43 @@ class _HandleCloser:
         return self._closed
 
 
+def _validate_initial_deadline(
+    deadline: float, cancel: t.Callable[[], None], thread: threading.Thread
+) -> float:
+    """Validate the deadline and return remaining time.
+
+    If already expired, cancel the operation and raise TimeoutError.
+    """
+    try:
+        return _remaining_time(deadline)
+    except TimeoutError:
+        cancel()
+        thread.join(IO_CANCEL_GRACE)
+        raise
+
+
+def _join_with_timeout_and_cancel(
+    thread: threading.Thread, remaining: float, cancel: t.Callable[[], None]
+) -> None:
+    """Join the thread with timeout; cancel and raise if still alive."""
+    thread.join(remaining)
+    if thread.is_alive():
+        cancel()
+        thread.join(IO_CANCEL_GRACE)
+        msg = "IPC client operation timed out"
+        raise TimeoutError(msg)
+
+
+def _extract_outcome(outcome: dict[str, t.Any]) -> object:
+    """Extract the result from the outcome dict, raising any stored error."""
+    if (error := outcome.get("error")) is not None:
+        raise t.cast("BaseException", error)
+    value = outcome.get("value", _SENTINEL)
+    if value is _SENTINEL:
+        value = None
+    return value
+
+
 def _run_blocking_io(
     func: t.Callable[[], _T],
     *,
@@ -154,27 +191,9 @@ def _run_blocking_io(
     )
     thread.start()
 
-    try:
-        remaining = _remaining_time(deadline)
-    except TimeoutError:
-        cancel()
-        thread.join(IO_CANCEL_GRACE)
-        raise
-
-    thread.join(remaining)
-    if thread.is_alive():
-        cancel()
-        thread.join(IO_CANCEL_GRACE)
-        msg = "IPC client operation timed out"
-        raise TimeoutError(msg)
-
-    if (error := outcome.get("error")) is not None:
-        raise t.cast("BaseException", error)
-
-    value = outcome.get("value", _SENTINEL)
-    if value is _SENTINEL:
-        value = None
-    return t.cast("_T", value)
+    remaining = _validate_initial_deadline(deadline, cancel, thread)
+    _join_with_timeout_and_cancel(thread, remaining, cancel)
+    return t.cast("_T", _extract_outcome(outcome))
 
 
 def _connect_unix_with_retries(
