@@ -394,12 +394,14 @@ server.
 - `CMOX_IPC_SOCKET` – path to the Unix domain socket used by shims on POSIX
   systems. Entering an `EnvironmentManager` sets this automatically and
   `IPCServer.start()` refreshes it, so manual overrides are rarely needed. On
-  Windows the value still points at the shim directory, but the IPC layer
-  hashes it into a deterministic named pipe so existing PATH-filtering logic
-  keeps working. Shims exit with an error if the variable is missing.
+  Windows `EnvironmentManager.export_ipc_environment` still exports a logical
+  socket path, and the IPC layer hashes that path into a deterministic named
+  pipe so existing PATH-filtering logic keeps working. Shims exit with an error
+  if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
-  exported automatically (default `5.0`). Override this to tune connection
-  waits.
+  exported automatically (default `5.0`). Override this to tune how long
+  clients wait for each connect/send/receive attempt before raising a
+  `TimeoutError`.
 
 Most tests should rely on the fixture to manage these variables.

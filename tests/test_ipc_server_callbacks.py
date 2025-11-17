@@ -213,6 +213,18 @@ def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
     assert response.exit_code == 3
 
 
+def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) -> None:
+    """Invalid UTF-8 payloads should log and return ``None`` instead of raising."""
+    import cmd_mox.ipc.server as server
+
+    caplog.set_level("ERROR", logger="cmd_mox.ipc.server")
+
+    result = server._parse_payload(b"\xff\xfe")
+
+    assert result is None
+    assert "malformed JSON" in caplog.text
+
+
 def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
     """Stopping the server concurrently should not raise race conditions."""
     server = IPCServer(tmp_path / "ipc.sock")

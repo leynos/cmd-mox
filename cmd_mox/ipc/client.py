@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses as dc
 import importlib
 import json
@@ -9,6 +10,7 @@ import logging
 import os
 import random
 import socket
+import threading
 import time
 import typing as t
 from pathlib import Path
@@ -54,6 +56,10 @@ DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
 DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
+IO_CANCEL_GRACE: t.Final[float] = 0.05
+
+_T = t.TypeVar("_T")
+_SENTINEL: t.Final[object] = object()
 
 
 @dc.dataclass(slots=True)
@@ -87,6 +93,88 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
         factor = random.uniform(1.0 - jitter, 1.0 + jitter)  # noqa: S311
         delay *= factor
     return max(delay, MIN_RETRY_SLEEP)
+
+
+def _compute_deadline(timeout: float) -> float:
+    """Return the absolute deadline for *timeout* seconds from now."""
+    return time.monotonic() + timeout
+
+
+def _remaining_time(deadline: float) -> float:
+    """Return the seconds remaining before *deadline* expires."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        msg = "IPC client operation timed out"
+        raise TimeoutError(msg)
+    return remaining
+
+
+class _HandleCloser:
+    """Best-effort guard that closes a Windows handle exactly once."""
+
+    __slots__ = ("_closed", "_handle")
+
+    def __init__(self, handle: object) -> None:
+        self._handle = handle
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        with contextlib.suppress(pywintypes.error):  # type: ignore[name-defined]
+            # Double-close or already aborted handles may report INVALID_HANDLE;
+            # callers only care that resources are reclaimed.
+            win32file.CloseHandle(self._handle)  # type: ignore[union-attr]
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+
+def _run_blocking_io(
+    func: t.Callable[[], _T],
+    *,
+    deadline: float,
+    cancel: t.Callable[[], None],
+) -> _T:
+    """Execute *func* on a worker thread until completion or timeout."""
+    outcome: dict[str, t.Any] = {"value": _SENTINEL}
+
+    def _target() -> None:
+        try:
+            outcome["value"] = func()
+        except BaseException as exc:  # noqa: BLE001 - propagate cross-thread errors
+            outcome["error"] = exc
+
+    thread = threading.Thread(
+        target=_target,
+        name="cmd-mox-ipc-io",
+        daemon=True,
+    )
+    thread.start()
+
+    try:
+        remaining = _remaining_time(deadline)
+    except TimeoutError:
+        cancel()
+        thread.join(IO_CANCEL_GRACE)
+        raise
+
+    thread.join(remaining)
+    if thread.is_alive():
+        cancel()
+        thread.join(IO_CANCEL_GRACE)
+        msg = "IPC client operation timed out"
+        raise TimeoutError(msg)
+
+    if (error := outcome.get("error")) is not None:
+        raise t.cast("BaseException", error)
+
+    value = outcome.get("value", _SENTINEL)
+    if value is _SENTINEL:
+        value = None
+    return t.cast("_T", value)
 
 
 def _connect_unix_with_retries(
@@ -173,13 +261,21 @@ def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> boo
     return attempt < max_retries - 1
 
 
-def _wait_for_pipe_availability(pipe_name: str, delay: float) -> None:
+def _wait_for_pipe_availability(
+    pipe_name: str,
+    delay: float,
+    *,
+    deadline: float | None = None,
+) -> None:
     """Wait for *pipe_name* to become available, falling back to sleep."""
-    wait_ms = max(1, int(delay * 1000))
+    wait_duration = delay
+    if deadline is not None:
+        wait_duration = min(delay, _remaining_time(deadline))
+    wait_ms = max(1, int(wait_duration * 1000))
     try:
         win32pipe.WaitNamedPipe(pipe_name, wait_ms)  # type: ignore[union-attr]
     except pywintypes.error:  # type: ignore[name-defined]
-        time.sleep(delay)
+        time.sleep(wait_duration)
 
 
 def _create_pipe_handle(pipe_name: str, timeout_ms: int) -> object:
@@ -206,11 +302,15 @@ def _connect_pipe_with_retries(
     pipe_name: os.PathLike[str] | str,
     timeout: float,
     retry_config: RetryConfig,
+    *,
+    deadline: float | None = None,
 ) -> object:
     retry_config.validate(timeout)
     pipe_name_str = os.fspath(pipe_name)
-    timeout_ms = max(1, int(timeout * 1000))
+    connect_deadline = deadline or _compute_deadline(timeout)
     for attempt in range(retry_config.retries):
+        remaining = _remaining_time(connect_deadline)
+        timeout_ms = max(1, int(remaining * 1000))
         try:
             return _create_pipe_handle(pipe_name_str, timeout_ms)
         except pywintypes.error as exc:  # type: ignore[name-defined]
@@ -226,7 +326,11 @@ def _connect_pipe_with_retries(
             delay = calculate_retry_delay(
                 attempt, retry_config.backoff, retry_config.jitter
             )
-            _wait_for_pipe_availability(pipe_name_str, delay)
+            _wait_for_pipe_availability(
+                pipe_name_str,
+                delay,
+                deadline=connect_deadline,
+            )
     msg = "Exhausted retries connecting to named pipe"
     raise RuntimeError(msg)
 
@@ -248,6 +352,11 @@ def _read_pipe_response(handle: object) -> bytes:
     return b"".join(chunks)
 
 
+def _write_pipe_payload(handle: object, payload: bytes) -> None:
+    win32file.WriteFile(handle, payload)  # type: ignore[union-attr]
+    win32file.FlushFileBuffers(handle)  # type: ignore[union-attr]
+
+
 def _send_pipe_request(
     sock_path: Path,
     payload: bytes,
@@ -255,13 +364,27 @@ def _send_pipe_request(
     retry_config: RetryConfig,
 ) -> bytes:
     pipe_name = derive_pipe_name(sock_path)
-    handle = _connect_pipe_with_retries(pipe_name, timeout, retry_config)
+    connect_deadline = _compute_deadline(timeout)
+    handle = _connect_pipe_with_retries(
+        pipe_name,
+        timeout,
+        retry_config,
+        deadline=connect_deadline,
+    )
+    closer = _HandleCloser(handle)
     try:
-        win32file.WriteFile(handle, payload)  # type: ignore[union-attr]
-        win32file.FlushFileBuffers(handle)  # type: ignore[union-attr]
-        return _read_pipe_response(handle)
+        _run_blocking_io(
+            lambda: _write_pipe_payload(handle, payload),
+            deadline=_compute_deadline(timeout),
+            cancel=closer.close,
+        )
+        return _run_blocking_io(
+            lambda: _read_pipe_response(handle),
+            deadline=_compute_deadline(timeout),
+            cancel=closer.close,
+        )
     finally:
-        win32file.CloseHandle(handle)  # type: ignore[union-attr]
+        closer.close()
 
 
 def _send_request(
@@ -288,7 +411,13 @@ def invoke_server(
     timeout: float,
     retry_config: RetryConfig | None = None,
 ) -> Response:
-    """Send *invocation* to the IPC server and return its response."""
+    """Send *invocation* to the IPC server and return its response.
+
+    The *timeout* applies to each blocking connect/send/receive operation.
+    Unix clients rely on ``socket.settimeout`` so the kernel enforces the
+    limit, while Windows clients cooperatively track the deadline and close
+    the named pipe if any step exceeds *timeout*, raising ``TimeoutError``.
+    """
     return _send_request(KIND_INVOCATION, invocation.to_dict(), timeout, retry_config)
 
 
@@ -297,7 +426,12 @@ def report_passthrough_result(
     timeout: float,
     retry_config: RetryConfig | None = None,
 ) -> Response:
-    """Send passthrough execution results back to the IPC server."""
+    """Send passthrough execution results back to the IPC server.
+
+    Timeout handling mirrors :func:`invoke_server`: Unix sockets enforce the
+    limit per system call, and Windows callers rely on cooperative deadlines
+    that cancel the named pipe when *timeout* expires.
+    """
     return _send_request(
         KIND_PASSTHROUGH_RESULT,
         result.to_dict(),

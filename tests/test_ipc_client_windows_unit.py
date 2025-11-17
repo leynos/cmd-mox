@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pathlib
+import threading
 import types
+import typing as t
 
 import pytest
 
@@ -19,7 +21,7 @@ def _patch_windows_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         client,
         "pywintypes",
-        types.SimpleNamespace(error=lambda winerror: _DummyPipeError(winerror)),
+        types.SimpleNamespace(error=_DummyPipeError),
     )
     monkeypatch.setattr(
         client,
@@ -51,14 +53,18 @@ def test_connect_pipe_with_retries_eventually_succeeds(
 
     attempts = {"count": 0}
 
-    def fake_create(_pipe_name: pathlib.Path) -> str:
+    def fake_create(_pipe_name: pathlib.Path, *_args: object) -> str:
         attempts["count"] += 1
         if attempts["count"] < 2:
             raise _DummyPipeError(windows.ERROR_PIPE_BUSY)
         return "HANDLE"
 
     monkeypatch.setattr(client, "_create_pipe_handle", fake_create)
-    monkeypatch.setattr(client, "_wait_for_pipe_availability", lambda *_: None)
+    monkeypatch.setattr(
+        client,
+        "_wait_for_pipe_availability",
+        lambda *_args, **_kwargs: None,
+    )
 
     handle = client._connect_pipe_with_retries(
         pathlib.Path("pipe"),
@@ -76,7 +82,7 @@ def test_connect_pipe_with_retries_raises_after_non_retryable_error(
     """Verify non-retryable errors bubble up immediately."""
     import cmd_mox.ipc.client as client
 
-    def fake_create(_pipe_name: pathlib.Path) -> str:
+    def fake_create(_pipe_name: pathlib.Path, *_args: object) -> str:
         raise _DummyPipeError(windows.ERROR_NO_DATA)
 
     monkeypatch.setattr(client, "_create_pipe_handle", fake_create)
@@ -129,3 +135,78 @@ def test_send_pipe_request_writes_and_reads(monkeypatch: pytest.MonkeyPatch) -> 
     assert response == b"{}"
     assert handle_log == ["{}"]
     assert fake_handle.closed is True
+
+
+def test_send_pipe_request_closes_handle_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_send_pipe_request`` should close handles when timeouts surface."""
+    import cmd_mox.ipc.client as client
+
+    class _FakeHandle:
+        def __init__(self) -> None:
+            self.closed = False
+
+    fake_handle = _FakeHandle()
+
+    def fake_close(handle: _FakeHandle) -> None:
+        handle.closed = True
+
+    monkeypatch.setattr(
+        client,
+        "_connect_pipe_with_retries",
+        lambda *_args, **_kwargs: fake_handle,
+    )
+    monkeypatch.setattr(
+        client,
+        "win32file",
+        types.SimpleNamespace(CloseHandle=fake_close),
+    )
+
+    call_count = {"value": 0}
+
+    def fake_run(
+        func: t.Callable[[], object], *, deadline: float, cancel: t.Callable[[], None]
+    ) -> object:
+        del func, deadline
+        call_count["value"] += 1
+        cancel()
+        raise TimeoutError("boom")
+
+    monkeypatch.setattr(client, "_run_blocking_io", fake_run)
+
+    with pytest.raises(TimeoutError):
+        client._send_pipe_request(
+            pathlib.Path("pipe"),
+            b"{}",
+            timeout=0.1,
+            retry_config=RetryConfig(),
+        )
+
+    assert call_count["value"] == 1
+    assert fake_handle.closed is True
+
+
+def test_run_blocking_io_times_out_and_invokes_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The helper should abort hung I/O and trigger the cancel callback."""
+    import cmd_mox.ipc.client as client
+
+    stop_event = threading.Event()
+
+    def long_running() -> None:
+        stop_event.wait()
+
+    cancel_calls: list[str] = []
+
+    def cancel() -> None:
+        cancel_calls.append("called")
+        stop_event.set()
+
+    monkeypatch.setattr(client, "_remaining_time", lambda _deadline: 0.0)
+
+    with pytest.raises(TimeoutError):
+        client._run_blocking_io(long_running, deadline=1.0, cancel=cancel)
+
+    assert cancel_calls == ["called"]

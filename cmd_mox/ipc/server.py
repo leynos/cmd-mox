@@ -371,7 +371,7 @@ def _parse_payload(raw: bytes) -> tuple[dict[str, t.Any], str] | None:
     if payload is None:
         try:
             obj = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError:
+        except (UnicodeDecodeError, json.JSONDecodeError):
             logger.exception("IPC received malformed JSON")
             return None
         logger.error("IPC payload not a dict: %r", obj)

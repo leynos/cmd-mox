@@ -39,6 +39,15 @@ def _resolve_command(cmd: str) -> str:
 
 
 def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+    """Execute *argv* with consistent subprocess settings.
+
+    Parameters
+    ----------
+    argv : list[str]
+        Command invocation, including arguments.
+    check : bool
+        When True, raise :class:`CalledProcessError` for non-zero exits.
+    """
     return subprocess.run(  # noqa: S603
         argv,
         capture_output=True,
