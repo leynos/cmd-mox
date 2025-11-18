@@ -38,6 +38,14 @@ def verification_context() -> dict[str, Exception | None]:
     return {}
 
 
+def _create_expectation_with_args(command: str, args: str) -> Expectation:
+    expectation = Expectation(command)
+    if args:
+        decoded = decode_placeholders(args)
+        expectation.with_args(*shlex.split(decoded))
+    return expectation
+
+
 @given(
     parsers.cfparse('an ordered expectation for command "{command}" with args "{args}"')
 )
@@ -45,10 +53,7 @@ def create_ordered_expectation(
     command: str, args: str, ordered_expectations: list[Expectation]
 ) -> None:
     """Add an ordered expectation for *command* with parsed *args*."""
-    expectation = Expectation(command)
-    if args:
-        decoded = decode_placeholders(args)
-        expectation.with_args(*shlex.split(decoded))
+    expectation = _create_expectation_with_args(command, args)
     expectation.in_order()
     ordered_expectations.append(expectation)
 
@@ -62,10 +67,7 @@ def create_unordered_expectation(
     command: str, args: str, unordered_expectations: list[Expectation]
 ) -> None:
     """Record an unordered expectation to mirror setup complexity."""
-    expectation = Expectation(command)
-    if args:
-        decoded = decode_placeholders(args)
-        expectation.with_args(*shlex.split(decoded))
+    expectation = _create_expectation_with_args(command, args)
     unordered_expectations.append(expectation)
 
 
