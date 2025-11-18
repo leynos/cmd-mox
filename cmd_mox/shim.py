@@ -53,6 +53,12 @@ def _path_separator() -> str:
     return ";" if IS_WINDOWS else os.pathsep
 
 
+def _normalize_windows_arg(arg: str) -> str:
+    if not IS_WINDOWS or "^^" not in arg:
+        return arg
+    return arg.replace("^^", "^")
+
+
 def _resolve_command_name() -> str:
     if from_env := os.environ.get(CMOX_SHIM_COMMAND_ENV):
         return from_env
@@ -81,9 +87,12 @@ def _create_invocation(cmd_name: str) -> Invocation:
     """Create an Invocation from command-line arguments and stdin."""
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
+    argv = sys.argv[1:]
+    if IS_WINDOWS:
+        argv = [_normalize_windows_arg(arg) for arg in argv]
     return Invocation(
         command=cmd_name,
-        args=sys.argv[1:],
+        args=argv,
         stdin=stdin_data,
         env=env,
         invocation_id=uuid.uuid4().hex,
