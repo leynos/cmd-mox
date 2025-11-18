@@ -62,9 +62,7 @@ def escape_windows_batch_args(argv: list[str]) -> list[str]:
     if not argv or not _should_escape_batch_args(argv[0]):
         return argv
     escaped = [argv[0]]
-    escaped.extend(
-        arg.replace("^", "^^") if "^" in arg else arg for arg in argv[1:]
-    )
+    escaped.extend(arg.replace("^", "^^") if "^" in arg else arg for arg in argv[1:])
     return escaped
 
 
