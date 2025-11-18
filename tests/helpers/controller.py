@@ -53,14 +53,20 @@ def _should_escape_batch_args(command_path: str) -> bool:
 
 
 def escape_windows_batch_args(argv: list[str]) -> list[str]:
-    """Return argv with carets escaped when invoking Windows batch files."""
+    """Return argv with carets quadrupled when invoking Windows batch files.
+
+    Carets must be escaped four times because cmd.exe processes arguments
+    twice: once during subprocess invocation and again during batch %* expansion.
+    """
     if not argv or not _should_escape_batch_args(argv[0]):
         return argv
     escaped = [argv[0]]
     for arg in argv[1:]:
         if "^" in arg:
             needs_quotes = not (arg.startswith('"') and arg.endswith('"'))
-            escaped_arg = arg.replace("^", "^^")
+            # Quadruple carets to survive two levels of cmd.exe processing:
+            # subprocess invocation + batch %* expansion
+            escaped_arg = arg.replace("^", "^^^^")
             if needs_quotes:
                 escaped_arg = f'"{escaped_arg}"'
             escaped.append(escaped_arg)
