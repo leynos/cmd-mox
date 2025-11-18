@@ -45,6 +45,22 @@ class JournalEntryExpectation:
     exit_code: int | None = None
 
 
+def _should_escape_batch_args(command_path: str) -> bool:
+    if os.name != "nt":
+        return False
+    lower = command_path.lower()
+    return lower.endswith(".cmd") or lower.endswith(".bat")
+
+
+def escape_windows_batch_args(argv: list[str]) -> list[str]:
+    """Return argv with carets escaped when invoking Windows batch files."""
+    if not argv or not _should_escape_batch_args(argv[0]):
+        return argv
+    escaped = [argv[0]]
+    escaped.extend(arg.replace("^", "^^") for arg in argv[1:])
+    return escaped
+
+
 def _execute_command_with_params(
     params: CommandExecution,
 ) -> subprocess.CompletedProcess[str]:
@@ -52,6 +68,7 @@ def _execute_command_with_params(
     env = os.environ | {params.env_var: params.env_val}
     decoded_args = decode_placeholders(params.args)
     argv = [params.cmd, *shlex.split(decoded_args)]
+    argv = escape_windows_batch_args(argv)
     return subprocess.run(  # noqa: S603
         argv,
         input=params.stdin,

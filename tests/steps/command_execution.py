@@ -13,7 +13,11 @@ import typing as t
 
 from pytest_bdd import parsers, then, when
 
-from tests.helpers.controller import CommandExecution, execute_command_with_details
+from tests.helpers.controller import (
+    CommandExecution,
+    escape_windows_batch_args,
+    execute_command_with_details,
+)
 from tests.helpers.parameters import CommandInputs, EnvVar, decode_placeholders
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
@@ -48,6 +52,7 @@ def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
     check : bool
         When True, raise :class:`CalledProcessError` for non-zero exits.
     """
+    argv = escape_windows_batch_args(argv)
     return subprocess.run(  # noqa: S603
         argv,
         capture_output=True,
