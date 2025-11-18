@@ -57,7 +57,15 @@ def escape_windows_batch_args(argv: list[str]) -> list[str]:
     if not argv or not _should_escape_batch_args(argv[0]):
         return argv
     escaped = [argv[0]]
-    escaped.extend(arg.replace("^", "^^") for arg in argv[1:])
+    for arg in argv[1:]:
+        if "^" in arg:
+            needs_quotes = not (arg.startswith('"') and arg.endswith('"'))
+            escaped_arg = arg.replace("^", "^^")
+            if needs_quotes:
+                escaped_arg = f'"{escaped_arg}"'
+            escaped.append(escaped_arg)
+        else:
+            escaped.append(arg)
     return escaped
 
 
