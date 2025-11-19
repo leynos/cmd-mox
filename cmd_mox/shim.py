@@ -56,7 +56,12 @@ def _path_separator() -> str:
 def _normalize_windows_arg(arg: str) -> str:
     if not IS_WINDOWS or "^^" not in arg:
         return arg
-    return arg.replace("^^", "^")
+
+    # Batch processing may introduce multiple layers of caret doubling. Reduce
+    # until no escape pairs remain so downstream code sees the intended text.
+    while "^^" in arg:
+        arg = arg.replace("^^", "^")
+    return arg
 
 
 def _resolve_command_name() -> str:

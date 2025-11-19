@@ -7,6 +7,7 @@ from __future__ import annotations
 import dataclasses as dc
 import os
 import shlex
+import shutil
 import subprocess
 import typing as t
 
@@ -46,10 +47,22 @@ class JournalEntryExpectation:
 
 
 def _should_escape_batch_args(command_path: str) -> bool:
+    """Return True when *command_path* resolves to a batch script.
+
+    On Windows the shell treats ``.cmd``/``.bat`` files specially and consumes
+    one layer of caret escaping before our shim sees the arguments. We need to
+    double carets whenever the resolved target is a batch file, even if the
+    caller omitted the extension and relies on ``PATHEXT`` to find the shim.
+    """
     if os.name != "nt":
         return False
+
     lower = command_path.lower()
-    return lower.endswith(".cmd") or lower.endswith(".bat")
+    if lower.endswith((".cmd", ".bat")):
+        return True
+
+    resolved = shutil.which(command_path)
+    return bool(resolved and resolved.lower().endswith((".cmd", ".bat")))
 
 
 def escape_windows_batch_args(argv: list[str]) -> list[str]:
@@ -58,11 +71,15 @@ def escape_windows_batch_args(argv: list[str]) -> list[str]:
     Carets are doubled because when subprocess.run invokes a .cmd file on
     Windows, cmd.exe consumes one layer of escaping. Argument quoting is handled
     by subprocess itself, so no manual quoting is required here.
+
+    Note: batch parsing happens twice for our shim flow (once when invoking the
+    launcher and again when the launcher expands ``%*``). To preserve a literal
+    caret in the final Python argv we must therefore quadruple it up-front.
     """
     if not argv or not _should_escape_batch_args(argv[0]):
         return argv
     escaped = [argv[0]]
-    escaped.extend(arg.replace("^", "^^") if "^" in arg else arg for arg in argv[1:])
+    escaped.extend(arg.replace("^", "^^^^") if "^" in arg else arg for arg in argv[1:])
     return escaped
 
 
