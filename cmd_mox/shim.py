@@ -168,7 +168,7 @@ def _iter_path_entries(
         return
 
     shim_identity = normalize_path_string(os.fspath(shim_dir)) if shim_dir else None
-    separator = os.pathsep
+    separator = ";" if IS_WINDOWS else os.pathsep
     for raw_entry in raw_path.split(separator):
         entry = raw_entry.strip()
         if not entry:
@@ -204,7 +204,8 @@ def _build_search_path(
     _add_unique_entries(_iter_path_entries(merged_path, shim_dir), path_parts, seen)
     _add_unique_entries(_iter_path_entries(lookup_path, shim_dir), path_parts, seen)
 
-    return os.pathsep.join(path_parts)
+    separator = ";" if IS_WINDOWS else os.pathsep
+    return separator.join(path_parts)
 
 
 def _resolve_passthrough_target(
