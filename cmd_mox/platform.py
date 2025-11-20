@@ -28,7 +28,7 @@ _PYTEST_REQUIRED_MESSAGE: t.Final[str] = (
 )
 
 
-def _normalise(platform: str) -> str:
+def _normalize_platform(platform: str) -> str:
     """Return a lowercase version of *platform* suitable for prefix checks."""
     return platform.strip().lower()
 
@@ -36,12 +36,12 @@ def _normalise(platform: str) -> str:
 def _current_platform(platform: str | None = None) -> str:
     """Return the effective platform name, honouring test overrides."""
     if platform:
-        return _normalise(platform)
+        return _normalize_platform(platform)
 
     if override := os.getenv(PLATFORM_OVERRIDE_ENV):
-        return _normalise(override)
+        return _normalize_platform(override)
 
-    return _normalise(sys.platform)
+    return _normalize_platform(sys.platform)
 
 
 def unsupported_reason(platform: str | None = None) -> str | None:

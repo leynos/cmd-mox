@@ -342,7 +342,7 @@ def test_merge_passthrough_path_is_case_insensitive(
     socket_path = shim_dir / "ipc.sock"
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(socket_path))
 
-    separator = shim._path_separator()
+    separator = ";" if shim.IS_WINDOWS else os.pathsep
     env_path = separator.join([os.fspath(shim_dir), r"C:\Tools"])
     lookup_path = separator.join([r"c:\tools", r"C:\Other"])
 

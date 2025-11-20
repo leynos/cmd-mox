@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-import ntpath
 import os
 import shutil
 import tempfile
@@ -14,6 +13,7 @@ import time
 import typing as t
 from pathlib import Path
 
+from ._path_utils import normalize_path
 from ._validators import validate_positive_finite_timeout
 
 IS_WINDOWS = os.name == "nt"
@@ -31,20 +31,11 @@ CMOX_REAL_COMMAND_ENV_PREFIX = "CMOX_REAL_COMMAND_"
 _UNSET_TIMEOUT = object()
 
 
-def _normalise_path_string(path: str) -> str:
-    """Return a canonical representation for filesystem comparisons."""
-    module = ntpath if IS_WINDOWS else os.path
-    normalised = module.normpath(path)
-    if IS_WINDOWS:
-        normalised = module.normcase(normalised)
-    return normalised
-
-
 def _path_identity(path: Path | None) -> str | None:
     """Return a comparable representation of *path*, or ``None`` if unset."""
     if path is None:
         return None
-    return _normalise_path_string(os.fspath(path))
+    return normalize_path(path)
 
 
 def _should_shorten_path(raw_path: Path) -> bool:

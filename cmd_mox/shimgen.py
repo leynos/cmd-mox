@@ -60,7 +60,7 @@ def _validate_command_name(name: str) -> None:
         validator(name, error_msg)
 
 
-def _normalise_command_name(name: str) -> str:
+def _normalize_command_name(name: str) -> str:
     """Return a filesystem-safe comparison key for *name*."""
     return name.casefold() if IS_WINDOWS else name
 
@@ -69,7 +69,7 @@ def _validate_command_uniqueness(commands: list[str]) -> None:
     """Ensure *commands* do not collide when case-insensitive filesystems apply."""
     seen: set[str] = set()
     for name in commands:
-        key = _normalise_command_name(name)
+        key = _normalize_command_name(name)
         if key in seen:
             msg = (
                 "Duplicate command names detected on a case-insensitive filesystem: "

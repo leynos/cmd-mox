@@ -3,54 +3,44 @@
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import json
 import math
-import ntpath
 import os
 import sys
 import typing as t
+import uuid
 from pathlib import Path
 
-_BOOTSTRAP_SPEC = importlib.util.spec_from_file_location(
-    "cmd_mox._shim_bootstrap", Path(__file__).resolve().with_name("_shim_bootstrap.py")
+from cmd_mox._path_utils import normalize_path_string
+from cmd_mox._shim_bootstrap import bootstrap_shim_path
+from cmd_mox.command_runner import (
+    execute_command,
+    prepare_environment,
+    resolve_command_with_override,
+    validate_override_path,
 )
-if _BOOTSTRAP_SPEC is None or _BOOTSTRAP_SPEC.loader is None:  # pragma: no cover
-    _bootstrap_error = "Unable to load cmd_mox._shim_bootstrap"
-    raise ImportError(_bootstrap_error)
-_bootstrap_module = importlib.util.module_from_spec(_BOOTSTRAP_SPEC)
-_BOOTSTRAP_SPEC.loader.exec_module(_bootstrap_module)
-bootstrap_shim_path = t.cast("t.Any", _bootstrap_module).bootstrap_shim_path
+from cmd_mox.environment import (
+    CMOX_IPC_SOCKET_ENV,
+    CMOX_IPC_TIMEOUT_ENV,
+    CMOX_REAL_COMMAND_ENV_PREFIX,
+)
+from cmd_mox.ipc import (
+    Invocation,
+    PassthroughRequest,
+    PassthroughResult,
+    Response,
+    invoke_server,
+    report_passthrough_result,
+)
+
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
 IS_WINDOWS = os.name == "nt"
 
 
 bootstrap_shim_path()
-uuid = importlib.import_module("uuid")
-_command_runner = importlib.import_module("cmd_mox.command_runner")
-execute_command = _command_runner.execute_command
-prepare_environment = _command_runner.prepare_environment
-resolve_command_with_override = _command_runner.resolve_command_with_override
-validate_override_path = _command_runner.validate_override_path
-_environment_mod = importlib.import_module("cmd_mox.environment")
-CMOX_IPC_SOCKET_ENV = _environment_mod.CMOX_IPC_SOCKET_ENV
-CMOX_IPC_TIMEOUT_ENV = _environment_mod.CMOX_IPC_TIMEOUT_ENV
-CMOX_REAL_COMMAND_ENV_PREFIX = _environment_mod.CMOX_REAL_COMMAND_ENV_PREFIX
-_ipc_mod = importlib.import_module("cmd_mox.ipc")
-Invocation = _ipc_mod.Invocation
-PassthroughRequest = _ipc_mod.PassthroughRequest
-PassthroughResult = _ipc_mod.PassthroughResult
-Response = _ipc_mod.Response
-invoke_server = _ipc_mod.invoke_server
-report_passthrough_result = _ipc_mod.report_passthrough_result
 
 # Backwards compatibility alias retained for tests exercising shim helpers.
 _validate_override_path = validate_override_path
-
-
-def _path_separator() -> str:
-    return ";" if IS_WINDOWS else os.pathsep
 
 
 def _normalize_windows_arg(arg: str) -> str:
@@ -164,15 +154,6 @@ def _shim_directory_from_env() -> Path | None:
     return Path(socket_path).parent if socket_path else None
 
 
-def _normalise_path_entry(entry: str) -> str:
-    """Return a platform-appropriate normalised path for comparisons."""
-    module = ntpath if IS_WINDOWS else os.path
-    normalised = module.normpath(entry)
-    if IS_WINDOWS:
-        normalised = module.normcase(normalised)
-    return normalised
-
-
 def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
     """Combine PATH values while filtering the shim directory and duplicates."""
     shim_dir = _shim_directory_from_env()
@@ -186,13 +167,13 @@ def _iter_path_entries(
     if not raw_path:
         return
 
-    shim_identity = _normalise_path_entry(os.fspath(shim_dir)) if shim_dir else None
-    separator = _path_separator()
+    shim_identity = normalize_path_string(os.fspath(shim_dir)) if shim_dir else None
+    separator = os.pathsep
     for raw_entry in raw_path.split(separator):
         entry = raw_entry.strip()
         if not entry:
             continue
-        identity = _normalise_path_entry(entry)
+        identity = normalize_path_string(entry)
         if shim_identity and identity == shim_identity:
             continue
         yield entry, identity
@@ -223,7 +204,7 @@ def _build_search_path(
     _add_unique_entries(_iter_path_entries(merged_path, shim_dir), path_parts, seen)
     _add_unique_entries(_iter_path_entries(lookup_path, shim_dir), path_parts, seen)
 
-    return _path_separator().join(path_parts)
+    return os.pathsep.join(path_parts)
 
 
 def _resolve_passthrough_target(
