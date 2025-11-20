@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import json
 import math
+import ntpath
 import os
 import sys
 import typing as t
 import uuid
 from pathlib import Path
 
-from cmd_mox._path_utils import normalize_path_string
 from cmd_mox._shim_bootstrap import bootstrap_shim_path
 from cmd_mox.command_runner import (
     execute_command,
@@ -160,6 +160,14 @@ def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
     return _build_search_path(env_path, lookup_path, shim_dir)
 
 
+def _normalize_path_entry(entry: str) -> str:
+    module = ntpath if IS_WINDOWS else os.path
+    normalized = module.normpath(entry)
+    if IS_WINDOWS:
+        normalized = module.normcase(normalized)
+    return normalized
+
+
 def _iter_path_entries(
     raw_path: str | None, shim_dir: Path | None
 ) -> t.Iterator[tuple[str, str]]:
@@ -167,13 +175,13 @@ def _iter_path_entries(
     if not raw_path:
         return
 
-    shim_identity = normalize_path_string(os.fspath(shim_dir)) if shim_dir else None
+    shim_identity = _normalize_path_entry(os.fspath(shim_dir)) if shim_dir else None
     separator = ";" if IS_WINDOWS else os.pathsep
     for raw_entry in raw_path.split(separator):
         entry = raw_entry.strip()
         if not entry:
             continue
-        identity = normalize_path_string(entry)
+        identity = _normalize_path_entry(entry)
         if shim_identity and identity == shim_identity:
             continue
         yield entry, identity
