@@ -61,9 +61,9 @@ their lookup paths.
 
 Importing :mod:`cmd_mox.shim` no longer mutates ``sys.path`` or
 ``sys.modules``. The bootstrap that prefers stdlib modules over editable
-installs runs only when the shim entrypoint executes. If you reuse shim helpers
-directly, call ``cmd_mox._shim_bootstrap.bootstrap_shim_path()`` in your setup
-first.
+installs runs only when the shim entrypoint executes. When shim helpers are
+reused directly, ``cmd_mox._shim_bootstrap.bootstrap_shim_path()`` should be
+called during setup first.
 
 When you need to make an explicit decision in a test module (for instance when
 using the context manager API), import the helper re-exported from the package:

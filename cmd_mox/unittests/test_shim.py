@@ -157,6 +157,39 @@ def test_normalize_windows_arg_is_noop_on_posix(
     assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^^^literal^^^^"
 
 
+def test_iter_path_entries_posix_uses_colon_pathsep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_iter_path_entries should honour ':' separators and preserve order."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", False)
+    monkeypatch.setattr(shim.os, "pathsep", ":")
+
+    raw_path = " :/usr/local/bin::/custom/bin: /another/bin :"
+
+    entries = list(shim._iter_path_entries(raw_path, shim_dir=None))
+
+    assert entries == [
+        ("/usr/local/bin", "/usr/local/bin"),
+        ("/custom/bin", "/custom/bin"),
+        ("/another/bin", "/another/bin"),
+    ]
+
+
+def test_build_search_path_posix_merges_with_colon_pathsep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_build_search_path should merge entries correctly on POSIX."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", False)
+    monkeypatch.setattr(shim.os, "pathsep", ":")
+
+    merged_path = " :/opt/bin::/custom/bin: "
+    lookup_path = " :/usr/local/bin::/usr/bin: "
+
+    result = shim._build_search_path(merged_path, lookup_path, shim_dir=None)
+
+    assert result == ":".join(["/opt/bin", "/custom/bin", "/usr/local/bin", "/usr/bin"])
+
+
 def test_execute_invocation_returns_response_without_passthrough(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -286,10 +319,30 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
 
     shim.main()
 
-    assert calls[0] == "bootstrap"
-    assert ("create", "shim") in calls
-    assert ("execute", invocation, 1.0) in calls
-    assert ("write", response) in calls
+    assert calls == [
+        "bootstrap",
+        "resolve",
+        "validate",
+        ("create", "shim"),
+        ("execute", invocation, 1.0),
+        ("write", response),
+    ]
+
+
+def test_bootstrap_shim_path_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calling bootstrap_shim_path repeatedly should be safe and stable."""
+    from cmd_mox import _shim_bootstrap
+
+    monkeypatch.setattr(_shim_bootstrap, "_BOOTSTRAP_DONE", False)
+    monkeypatch.setattr(sys, "path", ["__editable__dummy", "/usr/lib/python3.12"])
+
+    _shim_bootstrap.bootstrap_shim_path()
+    path_after_first = list(sys.path)
+
+    _shim_bootstrap.bootstrap_shim_path()
+
+    assert sys.path == path_after_first
+    assert sys.modules["platform"].__name__ == "platform"
 
 
 @pytest.mark.parametrize(
