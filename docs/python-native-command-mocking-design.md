@@ -599,6 +599,49 @@ features that are infeasible with file-based logging.
   normalisation, shim filtering, deduplication, and join semantics stay
   independently testable despite earlier proposals to inline the logic.
 
+```mermaid
+flowchart TD
+    A["Start with env_path and lookup_path"] --> B["Call _merge_passthrough_path(env_path, lookup_path)"]
+    B --> C["Compute merged_path from env_path and lookup_path"]
+    C --> D["Call _build_search_path(merged_path, lookup_path, shim_dir)"]
+
+    subgraph "PATH merge helpers"
+        D --> E["Initialize empty path_parts list and seen set"]
+        E --> F["_add_unique_entries(_iter_path_entries(merged_path, shim_dir), path_parts, seen)"]
+        F --> G["_add_unique_entries(_iter_path_entries(lookup_path, shim_dir), path_parts, seen)"]
+        G --> H["Return os.pathsep.join(path_parts) as merged PATH"]
+    end
+
+    subgraph "_iter_path_entries(raw_path, shim_dir)"
+        I["If raw_path is falsy, return"]
+        I --> J["Compute shim_identity = _normalize_path_entry(shim_dir) if shim_dir is set"]
+        J --> K["Split raw_path by os.pathsep into raw_entry components"]
+        K --> L["For each raw_entry: strip whitespace to entry"]
+        L --> M{Is entry empty?}
+        M -- "Yes" --> K
+        M -- "No" --> N{Does entry refer to shim_identity?}
+        N -- "Yes (skip shim directory itself)" --> K
+        N -- "No" --> O["Yield _normalize_path_entry(entry)"] --> K
+    end
+
+    subgraph "_normalize_path_entry(entry)"
+        P["If IS_WINDOWS is true, use ntpath; otherwise use os.path"] --> Q["normalized = selected_module.normpath(entry)"]
+        Q --> R{IS_WINDOWS?}
+        R -- "Yes" --> S["normalized = ntpath.normcase(normalized)"]
+        R -- "No" --> T["Keep normalized as-is for POSIX"]
+        S --> U["Return normalized"]
+        T --> U
+    end
+
+    subgraph "_add_unique_entries(entries, path_parts, seen)"
+        V["Iterate over normalized entries"] --> W{Is entry already in seen?}
+        W -- "Yes" --> V
+        W -- "No" --> X["Add entry to seen and append to path_parts"] --> V
+    end
+
+    H --> Z["Resulting PATH is cross-platform, deduplicated, shim-filtered, and normalized"]
+```
+
 The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
 socket path provided by the `EnvironmentManager`. Incoming JSON messages are
