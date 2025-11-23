@@ -476,7 +476,11 @@ spaces or escaping sequences. Case-insensitive hosts are handled by rejecting
 duplicate command names whose casing only differs, ensuring shim files cannot
 trample each other on NTFS. When shims are regenerated from Linux or macOS the
 launcher still uses CRLF delimiters so the resulting `.cmd` remains byte-for-
-byte identical to the Windows-generated variant.
+byte identical to the Windows-generated variant. At runtime the shared shim
+script further normalises Windows argv by repeatedly collapsing doubled carets
+(`^^`) into single carets. This intentionally lossy step counteracts the
+multi-layer escaping performed by `cmd.exe` so the IPC payload reflects the
+user's intended text instead of the intermediate batch form.
 ```mermaid
 sequenceDiagram
     actor User
@@ -564,6 +568,11 @@ features that are infeasible with file-based logging.
 - The shim infers the command name from ``argv[0]`` via :class:`pathlib.Path`
   so that the same script can impersonate any executable linked into the shim
   directory.
+- The shim defers :func:`cmd_mox._shim_bootstrap.bootstrap_shim_path` until the
+  entrypoint executes, avoiding import-time mutations of ``sys.path`` or
+  ``sys.modules`` for consumers that import :mod:`cmd_mox.shim` as a helper
+  module. Tests that reuse shim utilities should invoke the bootstrap
+  explicitly during setup.
 - On Windows the shim still exports :data:`CMOX_IPC_SOCKET` pointing at the
   temporary shim directory, but the IPC layer deterministically hashes that
   value into a named pipe (``\\.\pipe\cmdmox-<hash>``). This keeps the PATH
@@ -585,6 +594,10 @@ features that are infeasible with file-based logging.
 - The shim reads :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to determine
   its IPC timeout, defaulting to ``5.0`` seconds. Non-default overrides are
   validated to ensure they remain positive, finite floats before being applied.
+- PATH merging remains decomposed across `_normalize_path_entry`,
+  `_iter_path_entries`, `_add_unique_entries`, and `_build_search_path` so case
+  normalisation, shim filtering, deduplication, and join semantics stay
+  independently testable despite earlier proposals to inline the logic.
 
 The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
@@ -684,8 +697,8 @@ sequenceDiagram
     Shim->>Shim: Write stdout, stderr, exit code
 ```
 
-The following diagram expands on the transport differences when the
-controller boots an IPC server on Windows versus POSIX hosts.
+The following diagram expands on the transport differences when the controller
+boots an IPC server on Windows versus POSIX hosts.
 
 ```mermaid
 sequenceDiagram
@@ -1311,11 +1324,11 @@ Darwin environments, several avenues for future expansion exist.
   collapsed to their short (8.3) counterparts whenever the Windows `MAX_PATH`
   limit is at risk, PATH filtering treats casing consistently, and duplicate
   command names that differ only by case are rejected to avoid filesystem
-  collisions. A dedicated Windows smoke
-  job now runs in CI via the `windows-smoke` Makefile target, exercising mocked
-  invocations and passthrough spies while publishing `windows-ipc.log` for
-  diagnostics. Future work will focus on a "record mode" utility that captures
-  passthrough sessions for later reuse.
+  collisions. A dedicated Windows smoke job now runs in CI via the
+  `windows-smoke` Makefile target, exercising mocked invocations and
+  passthrough spies while publishing `windows-ipc.log` for diagnostics. Future
+  work will focus on a "record mode" utility that captures passthrough sessions
+  for later reuse.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.

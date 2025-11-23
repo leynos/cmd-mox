@@ -139,6 +139,24 @@ def test_create_invocation_reads_stdin_when_not_tty(
     assert dummy_stdin.read_calls == 1
 
 
+def test_normalize_windows_arg_collapses_repeated_carets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows argument normalisation should reduce escaped carets."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", True)
+
+    assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^literal^"
+
+
+def test_normalize_windows_arg_is_noop_on_posix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-Windows platforms should preserve carets untouched."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", False)
+
+    assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^^^literal^^^^"
+
+
 def test_execute_invocation_returns_response_without_passthrough(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -235,6 +253,43 @@ def test_write_response_updates_environment_and_streams(
     assert captured.out == "out"
     assert captured.err == "err"
     assert os.environ["NEW"] == "value"
+
+
+def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shim entrypoint should bootstrap and delegate in order."""
+    calls: list[object] = []
+
+    monkeypatch.setattr(shim, "bootstrap_shim_path", lambda: calls.append("bootstrap"))
+    monkeypatch.setattr(
+        shim, "_resolve_command_name", lambda: calls.append("resolve") or "shim"
+    )
+    monkeypatch.setattr(
+        shim, "_validate_environment", lambda: calls.append("validate") or 1.0
+    )
+
+    invocation = Invocation(command="shim", args=[], stdin="", env={})
+    monkeypatch.setattr(
+        shim,
+        "_create_invocation",
+        lambda name: calls.append(("create", name)) or invocation,
+    )
+
+    response = Response(stdout="ok", stderr="", exit_code=0)
+    monkeypatch.setattr(
+        shim,
+        "_execute_invocation",
+        lambda inv, timeout: calls.append(("execute", inv, timeout)) or response,
+    )
+    monkeypatch.setattr(
+        shim, "_write_response", lambda resp: calls.append(("write", resp))
+    )
+
+    shim.main()
+
+    assert calls[0] == "bootstrap"
+    assert ("create", "shim") in calls
+    assert ("execute", invocation, 1.0) in calls
+    assert ("write", response) in calls
 
 
 @pytest.mark.parametrize(
@@ -337,12 +392,13 @@ def test_merge_passthrough_path_is_case_insensitive(
 ) -> None:
     """Duplicate entries differing only in case should collapse on Windows."""
     monkeypatch.setattr(shim, "IS_WINDOWS", True)
+    monkeypatch.setattr(shim.os, "pathsep", ";")
     shim_dir = tmp_path / "Shim"
     shim_dir.mkdir()
     socket_path = shim_dir / "ipc.sock"
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(socket_path))
 
-    separator = ";" if shim.IS_WINDOWS else os.pathsep
+    separator = shim.os.pathsep
     env_path = separator.join([os.fspath(shim_dir), r"C:\Tools"])
     lookup_path = separator.join([r"c:\tools", r"C:\Other"])
 
