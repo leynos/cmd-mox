@@ -476,7 +476,11 @@ spaces or escaping sequences. Case-insensitive hosts are handled by rejecting
 duplicate command names whose casing only differs, ensuring shim files cannot
 trample each other on NTFS. When shims are regenerated from Linux or macOS the
 launcher still uses CRLF delimiters so the resulting `.cmd` remains byte-for-
-byte identical to the Windows-generated variant.
+byte identical to the Windows-generated variant. At runtime the shared shim
+script further normalises Windows argv by repeatedly collapsing doubled carets
+(`^^`) into single carets. This intentionally lossy step counteracts the
+multi-layer escaping performed by `cmd.exe` so the IPC payload reflects the
+user's intended text instead of the intermediate batch form.
 ```mermaid
 sequenceDiagram
     actor User
@@ -564,6 +568,11 @@ features that are infeasible with file-based logging.
 - The shim infers the command name from ``argv[0]`` via :class:`pathlib.Path`
   so that the same script can impersonate any executable linked into the shim
   directory.
+- The shim defers :func:`cmd_mox._shim_bootstrap.bootstrap_shim_path` until the
+  entrypoint executes, avoiding import-time mutations of ``sys.path`` or
+  ``sys.modules`` for consumers that import :mod:`cmd_mox.shim` as a helper
+  module. Tests that reuse shim utilities should invoke the bootstrap
+  explicitly during setup.
 - On Windows the shim still exports :data:`CMOX_IPC_SOCKET` pointing at the
   temporary shim directory, but the IPC layer deterministically hashes that
   value into a named pipe (``\\.\pipe\cmdmox-<hash>``). This keeps the PATH
@@ -585,6 +594,53 @@ features that are infeasible with file-based logging.
 - The shim reads :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to determine
   its IPC timeout, defaulting to ``5.0`` seconds. Non-default overrides are
   validated to ensure they remain positive, finite floats before being applied.
+- PATH merging remains decomposed across `_normalize_path_entry`,
+  `_iter_path_entries`, `_add_unique_entries`, and `_build_search_path` so case
+  normalisation, shim filtering, deduplication, and join semantics stay
+  independently testable despite earlier proposals to inline the logic.
+
+```mermaid
+flowchart TD
+    A["Start with env_path and lookup_path"] --> B["Call _merge_passthrough_path(env_path, lookup_path)"]
+    B --> C["Compute merged_path from env_path and lookup_path"]
+    C --> D["Call _build_search_path(merged_path, lookup_path, shim_dir)"]
+
+    subgraph "PATH merge helpers"
+        D --> E["Initialize empty path_parts list and seen set"]
+        E --> F["_add_unique_entries(_iter_path_entries(merged_path, shim_dir), path_parts, seen)"]
+        F --> G["_add_unique_entries(_iter_path_entries(lookup_path, shim_dir), path_parts, seen)"]
+        G --> H["Return os.pathsep.join(path_parts) as merged PATH"]
+    end
+
+    subgraph "_iter_path_entries(raw_path, shim_dir)"
+        I["If raw_path is falsy, return"]
+        I --> J["Compute shim_identity = _normalize_path_entry(shim_dir) if shim_dir is set"]
+        J --> K["Split raw_path by os.pathsep into raw_entry components"]
+        K --> L["For each raw_entry: strip whitespace to entry"]
+        L --> M{Is entry empty?}
+        M -- "Yes" --> K
+        M -- "No" --> N{Does entry refer to shim_identity?}
+        N -- "Yes (skip shim directory itself)" --> K
+        N -- "No" --> O["Yield _normalize_path_entry(entry)"] --> K
+    end
+
+    subgraph "_normalize_path_entry(entry)"
+        P["If IS_WINDOWS is true, use ntpath; otherwise use os.path"] --> Q["normalized = selected_module.normpath(entry)"]
+        Q --> R{IS_WINDOWS?}
+        R -- "Yes" --> S["normalized = ntpath.normcase(normalized)"]
+        R -- "No" --> T["Keep normalized as-is for POSIX"]
+        S --> U["Return normalized"]
+        T --> U
+    end
+
+    subgraph "_add_unique_entries(entries, path_parts, seen)"
+        V["Iterate over normalized entries"] --> W{Is entry already in seen?}
+        W -- "Yes" --> V
+        W -- "No" --> X["Add entry to seen and append to path_parts"] --> V
+    end
+
+    H --> Z["Resulting PATH is cross-platform, deduplicated, shim-filtered, and normalized"]
+```
 
 The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
@@ -684,8 +740,8 @@ sequenceDiagram
     Shim->>Shim: Write stdout, stderr, exit code
 ```
 
-The following diagram expands on the transport differences when the
-controller boots an IPC server on Windows versus POSIX hosts.
+The following diagram expands on the transport differences when the controller
+boots an IPC server on Windows versus POSIX hosts.
 
 ```mermaid
 sequenceDiagram
@@ -1311,11 +1367,11 @@ Darwin environments, several avenues for future expansion exist.
   collapsed to their short (8.3) counterparts whenever the Windows `MAX_PATH`
   limit is at risk, PATH filtering treats casing consistently, and duplicate
   command names that differ only by case are rejected to avoid filesystem
-  collisions. A dedicated Windows smoke
-  job now runs in CI via the `windows-smoke` Makefile target, exercising mocked
-  invocations and passthrough spies while publishing `windows-ipc.log` for
-  diagnostics. Future work will focus on a "record mode" utility that captures
-  passthrough sessions for later reuse.
+  collisions. A dedicated Windows smoke job now runs in CI via the
+  `windows-smoke` Makefile target, exercising mocked invocations and
+  passthrough spies while publishing `windows-ipc.log` for diagnostics. Future
+  work will focus on a "record mode" utility that captures passthrough sessions
+  for later reuse.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.

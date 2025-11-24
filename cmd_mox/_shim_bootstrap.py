@@ -7,6 +7,8 @@ import importlib
 import sys
 from pathlib import Path
 
+_BOOTSTRAP_DONE = False
+
 
 def _should_remove_path_entry(entry: str, package_dir: Path) -> bool:
     if entry.startswith("__editable__"):
@@ -19,6 +21,10 @@ def _should_remove_path_entry(entry: str, package_dir: Path) -> bool:
 
 def bootstrap_shim_path() -> None:
     """Ensure stdlib modules win over cmd_mox shims."""
+    global _BOOTSTRAP_DONE
+    if _BOOTSTRAP_DONE:
+        return
+
     package_dir = Path(__file__).resolve().parent
     removed: list[str] = []
     for entry in list(sys.path):
@@ -29,3 +35,4 @@ def bootstrap_shim_path() -> None:
     sys.modules["platform"] = std_platform
     for entry in reversed(removed):
         sys.path.insert(0, entry)
+    _BOOTSTRAP_DONE = True

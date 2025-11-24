@@ -139,6 +139,57 @@ def test_create_invocation_reads_stdin_when_not_tty(
     assert dummy_stdin.read_calls == 1
 
 
+def test_normalize_windows_arg_collapses_repeated_carets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows argument normalisation should reduce escaped carets."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", True)
+
+    assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^literal^"
+
+
+def test_normalize_windows_arg_is_noop_on_posix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-Windows platforms should preserve carets untouched."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", False)
+
+    assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^^^literal^^^^"
+
+
+def test_iter_path_entries_posix_uses_colon_pathsep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_iter_path_entries should honour ':' separators and preserve order."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", False)
+    monkeypatch.setattr(shim.os, "pathsep", ":")
+
+    raw_path = " :/usr/local/bin::/custom/bin: /another/bin :"
+
+    entries = list(shim._iter_path_entries(raw_path, shim_dir=None))
+
+    assert entries == [
+        ("/usr/local/bin", "/usr/local/bin"),
+        ("/custom/bin", "/custom/bin"),
+        ("/another/bin", "/another/bin"),
+    ]
+
+
+def test_build_search_path_posix_merges_with_colon_pathsep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_build_search_path should merge entries correctly on POSIX."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", False)
+    monkeypatch.setattr(shim.os, "pathsep", ":")
+
+    merged_path = " :/opt/bin::/custom/bin: "
+    lookup_path = " :/usr/local/bin::/usr/bin: "
+
+    result = shim._build_search_path(merged_path, lookup_path, shim_dir=None)
+
+    assert result == ":".join(["/opt/bin", "/custom/bin", "/usr/local/bin", "/usr/bin"])
+
+
 def test_execute_invocation_returns_response_without_passthrough(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -235,6 +286,63 @@ def test_write_response_updates_environment_and_streams(
     assert captured.out == "out"
     assert captured.err == "err"
     assert os.environ["NEW"] == "value"
+
+
+def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shim entrypoint should bootstrap and delegate in order."""
+    calls: list[object] = []
+
+    monkeypatch.setattr(shim, "bootstrap_shim_path", lambda: calls.append("bootstrap"))
+    monkeypatch.setattr(
+        shim, "_resolve_command_name", lambda: calls.append("resolve") or "shim"
+    )
+    monkeypatch.setattr(
+        shim, "_validate_environment", lambda: calls.append("validate") or 1.0
+    )
+
+    invocation = Invocation(command="shim", args=[], stdin="", env={})
+    monkeypatch.setattr(
+        shim,
+        "_create_invocation",
+        lambda name: calls.append(("create", name)) or invocation,
+    )
+
+    response = Response(stdout="ok", stderr="", exit_code=0)
+    monkeypatch.setattr(
+        shim,
+        "_execute_invocation",
+        lambda inv, timeout: calls.append(("execute", inv, timeout)) or response,
+    )
+    monkeypatch.setattr(
+        shim, "_write_response", lambda resp: calls.append(("write", resp))
+    )
+
+    shim.main()
+
+    assert calls == [
+        "bootstrap",
+        "resolve",
+        "validate",
+        ("create", "shim"),
+        ("execute", invocation, 1.0),
+        ("write", response),
+    ]
+
+
+def test_bootstrap_shim_path_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calling bootstrap_shim_path repeatedly should be safe and stable."""
+    from cmd_mox import _shim_bootstrap
+
+    monkeypatch.setattr(_shim_bootstrap, "_BOOTSTRAP_DONE", False)
+    monkeypatch.setattr(sys, "path", ["__editable__dummy", "/usr/lib/python3.12"])
+
+    _shim_bootstrap.bootstrap_shim_path()
+    path_after_first = list(sys.path)
+
+    _shim_bootstrap.bootstrap_shim_path()
+
+    assert sys.path == path_after_first
+    assert sys.modules["platform"].__name__ == "platform"
 
 
 @pytest.mark.parametrize(
@@ -337,12 +445,13 @@ def test_merge_passthrough_path_is_case_insensitive(
 ) -> None:
     """Duplicate entries differing only in case should collapse on Windows."""
     monkeypatch.setattr(shim, "IS_WINDOWS", True)
+    monkeypatch.setattr(shim.os, "pathsep", ";")
     shim_dir = tmp_path / "Shim"
     shim_dir.mkdir()
     socket_path = shim_dir / "ipc.sock"
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, os.fspath(socket_path))
 
-    separator = ";" if shim.IS_WINDOWS else os.pathsep
+    separator = shim.os.pathsep
     env_path = separator.join([os.fspath(shim_dir), r"C:\Tools"])
     lookup_path = separator.join([r"c:\tools", r"C:\Other"])
 

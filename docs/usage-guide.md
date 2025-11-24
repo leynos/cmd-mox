@@ -46,15 +46,24 @@ carets/percent signs so the Windows command processor parses them consistently
 with native batch scripts, even when arguments or installation paths include
 spaces and other metacharacters. CmdMox also filters duplicate command names on
 case-insensitive filesystems so two mocks whose names only differ by casing
-cannot trample each other's shim files.
+cannot trample each other's shim files. At runtime the shim collapses doubled
+carets (``^^``) in Windows arguments into single carets so multi-layer batch
+escaping does not leak into IPC payloads. Arguments that genuinely need
+repeated carets will therefore reach the server with a single literal caret.
 
 Deeply nested workspaces can easily exceed the traditional `MAX_PATH` limit on
 Windows. The environment manager now asks the filesystem for a short (8.3)
-alias whenever the shim directory path would overflow the limit, ensuring
-shims remain invokable while still cleaning up the real directory afterwards.
-PATH filtering honours the underlying filesystem semantics too, so variations
-in casing no longer leave behind duplicate entries when passthrough spies merge
+alias whenever the shim directory path would overflow the limit, ensuring shims
+remain invokable while still cleaning up the real directory afterwards. PATH
+filtering honours the underlying filesystem semantics too, so variations in
+casing no longer leave behind duplicate entries when passthrough spies merge
 their lookup paths.
+
+Importing :mod:`cmd_mox.shim` no longer mutates ``sys.path`` or
+``sys.modules``. The bootstrap that prefers stdlib modules over editable
+installs runs only when the shim entrypoint executes. When shim helpers are
+reused directly, ``cmd_mox._shim_bootstrap.bootstrap_shim_path()`` should be
+called during setup first.
 
 When you need to make an explicit decision in a test module (for instance when
 using the context manager API), import the helper re-exported from the package:

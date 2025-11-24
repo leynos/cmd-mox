@@ -3,14 +3,32 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 import ntpath
 import os
 import sys
 import typing as t
-import uuid
 from pathlib import Path
+
+if __name__ == "__main__":
+    # When executed as a script the working directory may shadow stdlib
+    # modules (e.g., `platform`), so bootstrap early before any heavy imports.
+    _bootstrap_spec = importlib.util.spec_from_file_location(
+        "cmd_mox._shim_bootstrap",
+        Path(__file__).resolve().with_name("_shim_bootstrap.py"),
+    )
+    if (
+        _bootstrap_spec is None or _bootstrap_spec.loader is None
+    ):  # pragma: no cover - import machinery guard
+        raise RuntimeError
+
+    _bootstrap_module = importlib.util.module_from_spec(_bootstrap_spec)
+    _bootstrap_spec.loader.exec_module(_bootstrap_module)
+    _bootstrap_module.bootstrap_shim_path()
+
+import uuid
 
 from cmd_mox._shim_bootstrap import bootstrap_shim_path
 from cmd_mox.command_runner import (
@@ -35,9 +53,6 @@ from cmd_mox.ipc import (
 
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
 IS_WINDOWS = os.name == "nt"
-
-
-bootstrap_shim_path()
 
 # Backwards compatibility alias retained for tests exercising shim helpers.
 _validate_override_path = validate_override_path
@@ -123,6 +138,7 @@ def _write_response(response: Response) -> None:
 
 def main() -> None:
     """Connect to the IPC server and execute the command behaviour."""
+    bootstrap_shim_path()
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
     invocation = _create_invocation(cmd_name)
@@ -161,10 +177,9 @@ def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
 
 
 def _normalize_path_entry(entry: str) -> str:
-    module = ntpath if IS_WINDOWS else os.path
-    normalized = module.normpath(entry)
+    normalized = (ntpath if IS_WINDOWS else os.path).normpath(entry)
     if IS_WINDOWS:
-        normalized = module.normcase(normalized)
+        normalized = ntpath.normcase(normalized)
     return normalized
 
 
@@ -176,8 +191,7 @@ def _iter_path_entries(
         return
 
     shim_identity = _normalize_path_entry(os.fspath(shim_dir)) if shim_dir else None
-    separator = ";" if IS_WINDOWS else os.pathsep
-    for raw_entry in raw_path.split(separator):
+    for raw_entry in raw_path.split(os.pathsep):
         entry = raw_entry.strip()
         if not entry:
             continue
@@ -212,8 +226,7 @@ def _build_search_path(
     _add_unique_entries(_iter_path_entries(merged_path, shim_dir), path_parts, seen)
     _add_unique_entries(_iter_path_entries(lookup_path, shim_dir), path_parts, seen)
 
-    separator = ";" if IS_WINDOWS else os.pathsep
-    return separator.join(path_parts)
+    return os.pathsep.join(path_parts)
 
 
 def _resolve_passthrough_target(
