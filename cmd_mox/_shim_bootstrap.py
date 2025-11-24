@@ -16,34 +16,44 @@ if t.TYPE_CHECKING:
 _BOOTSTRAP_DONE = False
 
 
+def _get_stdlib_path() -> str | None:
+    """Return the stdlib path, guarding against missing or invalid configs."""
+    try:
+        return sysconfig.get_path("stdlib")
+    except (KeyError, OSError, ValueError, TypeError):
+        return None
+
+def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | None:
+    """Load and return a module from *file_path*, or ``None`` on failure."""
+    try:
+        if not file_path.is_file():
+            return None
+        spec = importlib_util.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib_util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except (FileNotFoundError, OSError, ImportError):
+            return None
+        else:
+            return module
+    except (OSError, ValueError):
+        return None
+
+
 def _load_stdlib_platform() -> ModuleType:
     """Return the stdlib platform module, falling back to regular import."""
     importlib.invalidate_caches()
-    std_platform = None
-    stdlib_path: str | None
-    try:
-        stdlib_path = sysconfig.get_path("stdlib")
-    except (KeyError, OSError, ValueError, TypeError):
-        stdlib_path = None
+    stdlib_path = _get_stdlib_path()
 
     if stdlib_path:
-        try:
-            stdlib_platform = Path(stdlib_path) / "platform.py"
-            if stdlib_platform.is_file():
-                spec = importlib_util.spec_from_file_location(
-                    "platform", stdlib_platform
-                )
-                if spec is not None and spec.loader is not None:
-                    candidate_module = importlib_util.module_from_spec(spec)
-                    try:
-                        spec.loader.exec_module(candidate_module)
-                        std_platform = candidate_module
-                    except (FileNotFoundError, OSError, ImportError):
-                        std_platform = None
-        except (OSError, ValueError):
-            std_platform = None
+        platform_path = Path(stdlib_path) / "platform.py"
+        module = _create_module_from_file("platform", platform_path)
+        if module is not None:
+            return module
 
-    return t.cast("ModuleType", std_platform or importlib.import_module("platform"))
+    return importlib.import_module("platform")
 
 
 def _should_remove_path_entry(entry: str, package_dir: Path) -> bool:
