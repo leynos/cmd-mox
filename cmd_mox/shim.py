@@ -35,6 +35,10 @@ def _load_bootstrap_from_file() -> t.Callable[[], None]:
 
 if __name__ == "__main__":
     bootstrap_shim_path = _load_bootstrap_from_file()
+    # Intentionally bootstrap twice: once here for script execution before other
+    # imports, and again inside main(). bootstrap_shim_path is idempotent by
+    # contract, so the duplicate call keeps early-start behaviour without
+    # risking double mutation.
     bootstrap_shim_path()
 else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
