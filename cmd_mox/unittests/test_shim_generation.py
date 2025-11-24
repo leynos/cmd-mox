@@ -12,6 +12,7 @@ import typing as t
 import pytest
 
 import cmd_mox.shimgen as shimgen
+from cmd_mox import _path_utils as path_utils
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
@@ -34,7 +35,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing helpers only
 
 def _assert_is_shim(path: pathlib.Path) -> None:
     """Assert that *path* points to a usable shim implementation."""
-    if shimgen.IS_WINDOWS:
+    if path_utils.IS_WINDOWS:
         assert path.suffix == ".cmd"
         content = path.read_text(encoding="utf-8")
         assert sys.executable in content
@@ -96,16 +97,16 @@ def test_validate_command_uniqueness_respects_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Uniqueness checks should reflect filesystem case sensitivity."""
-    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", False)
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
     _validate_command_uniqueness(["git", "GIT"])
 
-    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
     with pytest.raises(ValueError, match="Duplicate command names"):
         _validate_command_uniqueness(["git", "GIT"])
 
 
 @pytest.mark.requires_unix_sockets
-@pytest.mark.skipif(shimgen.IS_WINDOWS, reason="POSIX symlink execution only")
+@pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink execution only")
 def test_create_shim_symlinks_and_execution(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -132,8 +133,8 @@ def test_create_windows_launchers(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Windows builds emit ``.cmd`` launchers wrapping ``shim.py``."""
-    if not shimgen.IS_WINDOWS:
-        monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    if not path_utils.IS_WINDOWS:
+        monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
 
     mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
     assert set(mapping) == {"git"}
@@ -148,7 +149,7 @@ def test_create_windows_launchers_use_crlf(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Windows launchers should always use CRLF delimiters."""
-    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
     mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
     launcher = mapping["git"]
     assert b"\r\n" in launcher.read_bytes()
@@ -158,7 +159,7 @@ def test_create_windows_shim_retries_locked_file(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Launcher creation retries when Windows reports transient locks."""
-    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
     launcher = tmp_path / "git.cmd"
     launcher.write_text("old")
 
@@ -186,7 +187,7 @@ def test_create_windows_shim_raises_after_retries(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Exhausting retries surfaces a clear ``FileExistsError``."""
-    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
     launcher = tmp_path / "git.cmd"
     launcher.write_text("old")
 
@@ -220,7 +221,7 @@ def test_create_shim_symlinks_existing_non_symlink_file() -> None:
     """Error raised when an existing file collides with the shim name."""
     with tempfile.TemporaryDirectory() as tmpdir:
         path = pathlib.Path(tmpdir)
-        file_name = "ls.cmd" if shimgen.IS_WINDOWS else "ls"
+        file_name = "ls.cmd" if path_utils.IS_WINDOWS else "ls"
         file_path = path / file_name
         file_path.write_text("not a shim")
         with pytest.raises(FileExistsError):
@@ -247,7 +248,7 @@ def test_create_shim_symlinks_missing_or_non_executable_shim(
         assert os.access(shim_path, os.X_OK)
 
 
-@pytest.mark.skipif(shimgen.IS_WINDOWS, reason="Symlink replacement is POSIX-only")
+@pytest.mark.skipif(path_utils.IS_WINDOWS, reason="Symlink replacement is POSIX-only")
 def test_create_posix_symlink_replaces_existing(tmp_path: pathlib.Path) -> None:
     """POSIX shim generation replaces stale symlinks safely."""
     link = tmp_path / "ls"
@@ -273,7 +274,7 @@ def test_create_shim_symlinks_detects_case_insensitive_duplicates(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Case-insensitive collisions should be rejected on Windows."""
-    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
     with pytest.raises(ValueError, match="Duplicate command names"):
         shimgen.create_shim_symlinks(tmp_path, ["git", "GIT"])
 

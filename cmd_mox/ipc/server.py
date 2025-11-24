@@ -8,13 +8,13 @@ import dataclasses as dc
 import importlib
 import json
 import logging
-import os
 import socketserver
 import threading
 import time
 import typing as t
 from pathlib import Path
 
+from cmd_mox import _path_utils as path_utils
 from cmd_mox._validators import (
     validate_optional_timeout,
     validate_positive_finite_timeout,
@@ -41,8 +41,6 @@ from .json_utils import (
 from .models import Invocation, PassthroughResult, Response
 from .socket_utils import cleanup_stale_socket, wait_for_socket
 
-IS_WINDOWS = os.name == "nt"
-
 
 def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
     class _UnsupportedUnixServer(socketserver.BaseServer):  # type: ignore[misc]
@@ -56,7 +54,7 @@ def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
 
 
 def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
-    if IS_WINDOWS:
+    if path_utils.IS_WINDOWS:
         return _create_unsupported_unix_server()
     threading_server = getattr(socketserver, "ThreadingUnixStreamServer", None)
     if threading_server is not None:

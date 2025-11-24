@@ -17,7 +17,7 @@ from cmd_mox.ipc.client import RetryConfig
 def _patch_windows_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     import cmd_mox.ipc.client as client
 
-    monkeypatch.setattr(client, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     monkeypatch.setattr(
         client,
         "pywintypes",

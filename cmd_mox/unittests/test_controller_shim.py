@@ -8,13 +8,15 @@ from pathlib import Path
 import pytest
 
 import cmd_mox.controller as controller
+from cmd_mox import _path_utils as path_utils
 from cmd_mox.controller import CmdMox, Phase
 from cmd_mox.errors import UnexpectedCommandError
-from cmd_mox.shimgen import IS_WINDOWS
 
 pytestmark = [
     pytest.mark.requires_unix_sockets,
-    pytest.mark.skipif(IS_WINDOWS, reason="Windows uses batch shim launchers"),
+    pytest.mark.skipif(
+        path_utils.IS_WINDOWS, reason="Windows uses batch shim launchers"
+    ),
 ]
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only

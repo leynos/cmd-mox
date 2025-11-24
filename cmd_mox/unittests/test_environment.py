@@ -519,7 +519,7 @@ def test_maybe_shorten_windows_path_prefers_short_variant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Long Windows paths should prefer the filesystem-provided short alias."""
-    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 1)
     captured: list[Path] = []
 
@@ -538,7 +538,7 @@ def test_maybe_shorten_windows_path_returns_original_when_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If the filesystem declines to provide a short path the input is reused."""
-    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 1)
     monkeypatch.setattr(envmod, "_get_short_path", lambda _path: None)
     original = Path("C:/still-long")
@@ -550,7 +550,7 @@ def test_maybe_shorten_windows_path_skips_short_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Short directories should avoid the Windows API call entirely."""
-    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 10_000)
     called = False
 
@@ -569,7 +569,6 @@ def test_path_identity_normalizes_case_and_segments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Path identity should normalise separators and casing on Windows."""
-    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     upper = Path(r"C:\Tools\..\BIN")
     lower = Path(r"c:\bin")
@@ -586,10 +585,10 @@ def test_should_shorten_path_respects_platform(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Only Windows paths exceeding the threshold should trigger shortening."""
-    monkeypatch.setattr(envmod, "IS_WINDOWS", False)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
     assert envmod._should_shorten_path(tmp_path / "short") is False
 
-    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 20)
     assert envmod._should_shorten_path(Path("short")) is False
     boundary_path = Path("x" * envmod._MAX_PATH_THRESHOLD)
@@ -601,7 +600,6 @@ def test_path_identity_guides_directory_comparisons(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Case-insensitive comparisons should treat matching paths as equal."""
-    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     shim_dir = tmp_path / "ShimDir"
     shim_dir.mkdir()
