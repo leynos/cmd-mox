@@ -40,7 +40,6 @@ from .json_utils import (
 )
 from .models import Invocation, PassthroughResult, Response
 from .socket_utils import cleanup_stale_socket, wait_for_socket
-from cmd_mox import _path_utils as path_utils
 
 
 def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:

@@ -16,6 +16,7 @@ from pathlib import Path
 from . import _path_utils as path_utils
 from ._validators import validate_positive_finite_timeout
 
+IS_WINDOWS = path_utils.IS_WINDOWS
 _MAX_PATH_THRESHOLD: t.Final[int] = 240
 
 logger = logging.getLogger(__name__)
