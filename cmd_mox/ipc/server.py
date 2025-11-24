@@ -40,6 +40,7 @@ from .json_utils import (
 )
 from .models import Invocation, PassthroughResult, Response
 from .socket_utils import cleanup_stale_socket, wait_for_socket
+from cmd_mox import _path_utils as path_utils
 
 
 def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
@@ -82,7 +83,7 @@ if t.TYPE_CHECKING:
 else:
     _BaseUnixServer = _resolve_unix_server_base()
 
-if IS_WINDOWS:  # pragma: win32-only
+if path_utils.IS_WINDOWS:  # pragma: win32-only
     try:
         pywintypes_mod = importlib.import_module("pywintypes")
         win32file = importlib.import_module("win32file")
@@ -452,7 +453,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         *,
         handlers: IPCHandlers | None = None,
     ) -> None:
-        if not IS_WINDOWS:
+        if not path_utils.IS_WINDOWS:
             msg = "NamedPipeServer is only available on Windows"
             raise RuntimeError(msg)
         super().__init__(
@@ -617,7 +618,7 @@ class _NamedPipeState:
         return True
 
     def serve_forever(self) -> None:
-        if not IS_WINDOWS:  # pragma: no cover - defensive guard
+        if not path_utils.IS_WINDOWS:  # pragma: no cover - defensive guard
             return
 
         while not self.stop_event.is_set():
