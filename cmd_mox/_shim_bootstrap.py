@@ -23,6 +23,7 @@ def _get_stdlib_path() -> str | None:
     except (KeyError, OSError, ValueError, TypeError):
         return None
 
+
 def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | None:
     """Load and return a module from *file_path*, or ``None`` on failure."""
     try:
