@@ -225,6 +225,16 @@ variables are set up. By default `__exit__` invokes :meth:`verify`, stopping
 any running server and restoring the original environment. This behaviour can
 be disabled via `CmdMox(verify_on_exit=False)` when manual control is required.
 
+On Windows the manager also normalises the shim directory path before
+publishing it inside `PATH`. Extremely deep worktrees can exceed the historical
+`MAX_PATH` limit, so the manager requests the filesystem's short (8.3) alias
+whenever the expanded path approaches that threshold. Comparisons performed
+during teardown normalise casing via `ntpath.normcase`, ensuring that
+reassigning `environment.shim_dir` with a differently cased string still points
+at the same directory and allows `__exit__` to clean up after itself. PATH
+filtering and passthrough spies reuse the same normalisation routines so a
+single shim directory never appears twice just because its casing changed.
+
 ### 2.3 Creating Test Doubles: `mox.mock()`, `mox.stub()`, and `mox.spy()`
 
 The `CmdMox` controller instance provides three distinct factory methods for
@@ -459,6 +469,18 @@ native compatibility and CmdMox amends `PATHEXT` during replay so the command
 processor will resolve the batch wrappers even on hosts where the extension was
 removed from the user environment. See :class:`EnvironmentManager` in
 :mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management logic.
+
+The batch template also doubles percent signs and carets so Windows-specific
+metacharacters survive the hand-off to Python, even when user arguments contain
+spaces or escape sequences. Case-insensitive hosts are handled by rejecting
+duplicate command names whose casing only differs, ensuring shim files cannot
+trample each other on NTFS. When shims are regenerated from Linux or macOS the
+launcher still uses CRLF delimiters so the resulting `.cmd` remains byte-for-
+byte identical to the Windows-generated variant. At runtime the shared shim
+script further normalises Windows argv by repeatedly collapsing doubled carets
+(`^^`) into single carets. This intentionally lossy step counteracts the
+multi-layer escaping performed by `cmd.exe` so the IPC payload reflects the
+user's intended text instead of the intermediate batch form.
 ```mermaid
 sequenceDiagram
     actor User
@@ -546,6 +568,11 @@ features that are infeasible with file-based logging.
 - The shim infers the command name from ``argv[0]`` via :class:`pathlib.Path`
   so that the same script can impersonate any executable linked into the shim
   directory.
+- The shim defers :func:`cmd_mox._shim_bootstrap.bootstrap_shim_path` until the
+  entrypoint executes, avoiding import-time mutations of ``sys.path`` or
+  ``sys.modules`` for consumers that import :mod:`cmd_mox.shim` as a helper
+  module. Tests that reuse shim utilities should invoke the bootstrap
+  explicitly during setup.
 - On Windows the shim still exports :data:`CMOX_IPC_SOCKET` pointing at the
   temporary shim directory, but the IPC layer deterministically hashes that
   value into a named pipe (``\\.\pipe\cmdmox-<hash>``). This keeps the PATH
@@ -567,6 +594,22 @@ features that are infeasible with file-based logging.
 - The shim reads :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to determine
   its IPC timeout, defaulting to ``5.0`` seconds. Non-default overrides are
   validated to ensure they remain positive, finite floats before being applied.
+- PATH merging uses a single `_build_search_path` helper that trims whitespace,
+  removes the active shim directory, and de-duplicates entries via the shared
+  ``normalize_path_string`` utility. Windows hosts therefore treat differently
+  cased paths as duplicates while POSIX hosts preserve casing.
+
+```mermaid
+flowchart TD
+    A["Start with env_path and lookup_path"] --> B["Collect raw entries in order (env_path then lookup_path)"]
+    B --> C["Strip whitespace; skip empty entries"]
+    C --> D["identity = normalize_path_string(entry)"]
+    D --> E{Is the identity the shim directory or already in the seen set?}
+    E -- "Yes" --> F["Skip entry"]
+    E -- "No" --> G["Add entry to path_parts and identity to seen"]
+    G --> H["Join path_parts with os.pathsep and return"]
+    H --> Z["Resulting PATH is cross-platform, deduplicated, shim-filtered, and normalized"]
+```
 
 The initial implementation ships with a lightweight `IPCServer` class. It uses
 Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
@@ -666,8 +709,8 @@ sequenceDiagram
     Shim->>Shim: Write stdout, stderr, exit code
 ```
 
-The following diagram expands on the transport differences when the
-controller boots an IPC server on Windows versus POSIX hosts.
+The following diagram expands on the transport differences when the controller
+boots an IPC server on Windows versus POSIX hosts.
 
 ```mermaid
 sequenceDiagram
@@ -1289,11 +1332,15 @@ Darwin environments, several avenues for future expansion exist.
   active Python interpreter and invoke `shim.py`, preserving argument quoting
   and inheriting the test process environment. Environment management reuses
   the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`,
-  and restores the original environment on teardown. A dedicated Windows smoke
-  job now runs in CI via the `windows-smoke` Makefile target, exercising mocked
-  invocations and passthrough spies while publishing `windows-ipc.log` for
-  diagnostics. Future work will focus on a "record mode" utility that captures
-  passthrough sessions for later reuse.
+  and restores the original environment on teardown. Long shim paths are
+  collapsed to their short (8.3) counterparts whenever the Windows `MAX_PATH`
+  limit is at risk, PATH filtering treats casing consistently, and duplicate
+  command names that differ only by case are rejected to avoid filesystem
+  collisions. A dedicated Windows smoke job now runs in CI via the
+  `windows-smoke` Makefile target, exercising mocked invocations and
+  passthrough spies while publishing `windows-ipc.log` for diagnostics. Future
+  work will focus on a "record mode" utility that captures passthrough sessions
+  for later reuse.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.

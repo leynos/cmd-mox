@@ -8,9 +8,15 @@ import time
 import typing as t
 from pathlib import Path
 
-IS_WINDOWS = os.name == "nt"
+from cmd_mox import _path_utils as path_utils
 
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
+
+
+def _escape_batch_literal(value: str) -> str:
+    """Return *value* escaped for safe inclusion inside batch quotes."""
+    escaped = value.replace("^", "^^").replace("%", "%%")
+    return escaped.replace('"', '""')
 
 
 def _validate_not_empty(name: str, error_msg: str) -> None:
@@ -54,13 +60,35 @@ def _validate_command_name(name: str) -> None:
         validator(name, error_msg)
 
 
+def _normalize_command_name(name: str) -> str:
+    """Return a filesystem-safe comparison key for *name*."""
+    return name.casefold() if path_utils.IS_WINDOWS else name
+
+
+def _validate_command_uniqueness(commands: list[str]) -> None:
+    """Ensure *commands* do not collide when case-insensitive filesystems apply."""
+    seen: set[str] = set()
+    for name in commands:
+        key = _normalize_command_name(name)
+        if key in seen:
+            msg = (
+                "Duplicate command names detected on a case-insensitive filesystem: "
+                f"{name!r}"
+            )
+            raise ValueError(msg)
+        seen.add(key)
+
+
 def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
     """Return the batch script contents to invoke ``shim.py`` on Windows."""
-    escaped_python = python_executable.replace('"', '""')
-    escaped_shim = os.fspath(shim_path).replace('"', '""')
+    escaped_python = _escape_batch_literal(python_executable)
+    escaped_shim = _escape_batch_literal(os.fspath(shim_path))
     return (
         "@echo off\n"
-        "setlocal ENABLEDELAYEDEXPANSION\n"
+        ":: Delayed expansion is disabled to preserve literal exclamation marks in\n"
+        ":: user arguments. Enabling it would consume carets during %* expansion,\n"
+        ":: changing the argv seen by Python when shims pass arguments through.\n"
+        "setlocal ENABLEEXTENSIONS DISABLEDELAYEDEXPANSION\n"
         'set "CMOX_SHIM_COMMAND=%~n0"\n'
         f'"{escaped_python}" "{escaped_shim}" %*\n'
     )
@@ -102,6 +130,7 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
     launcher.write_text(
         _format_windows_launcher(sys.executable, SHIM_PATH),
         encoding="utf-8",
+        newline="\r\n",
     )
     return launcher
 
@@ -146,7 +175,7 @@ def _ensure_shim_template_ready(shim_path: Path) -> None:
 def _create_shim_for_command(directory: Path, name: str) -> Path:
     """Create a platform-appropriate shim for *name* in *directory*."""
     _validate_command_name(name)
-    if IS_WINDOWS:
+    if path_utils.IS_WINDOWS:
         return _create_windows_shim(directory, name)
     return _create_posix_symlink(directory, name)
 
@@ -163,7 +192,9 @@ def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str
     """
     _validate_shim_directory(directory)
     _ensure_shim_template_ready(SHIM_PATH)
+    command_list = list(commands)
+    _validate_command_uniqueness(command_list)
     mapping: dict[str, Path] = {}
-    for name in commands:
+    for name in command_list:
         mapping[name] = _create_shim_for_command(directory, name)
     return mapping

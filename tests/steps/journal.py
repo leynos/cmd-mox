@@ -11,7 +11,12 @@ from tests.helpers.controller import (
     JournalEntryExpectation,
     verify_journal_entry_details,
 )
-from tests.helpers.parameters import CommandInputs, CommandOutput, EnvVar
+from tests.helpers.parameters import (
+    CommandInputs,
+    CommandOutput,
+    EnvVar,
+    decode_placeholders,
+)
 from tests.steps.command_execution import _resolve_empty_placeholder
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
@@ -43,6 +48,15 @@ def _validate_journal_entry_details(
 ) -> None:
     """Validate journal entry records invocation details."""
     verify_journal_entry_details(mox, expectation)
+
+
+@then(parsers.cfparse('the journal entry for "{cmd}" should record arguments "{args}"'))
+def check_journal_entry_arguments(mox: CmdMox, cmd: str, args: str) -> None:
+    """Assert that the journal stores the exact argument vector for *cmd*."""
+    resolved_args = _resolve_empty_placeholder(args)
+    decoded_args = decode_placeholders(resolved_args)
+    expectation = JournalEntryExpectation(cmd=cmd, args=decoded_args)
+    _validate_journal_entry_details(mox, expectation)
 
 
 def _check_journal_entry_details_impl(

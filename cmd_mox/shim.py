@@ -3,26 +3,59 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 import os
 import sys
 import typing as t
-import uuid
 from pathlib import Path
 
-from cmd_mox.command_runner import (
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+if str(_PACKAGE_ROOT) not in sys.path:
+    # Ensure the package is importable when executed via symlinks from a
+    # temporary shim directory or when the invoking interpreter lacks the
+    # project on sys.path (e.g., system python outside the venv).
+    sys.path.insert(0, str(_PACKAGE_ROOT))
+
+
+def _load_bootstrap_from_file() -> t.Callable[[], None]:
+    """Load bootstrap helper without importing the package ``__init__``."""
+    bootstrap_path = Path(__file__).resolve().with_name("_shim_bootstrap.py")
+    spec = importlib.util.spec_from_file_location(
+        "cmd_mox._shim_bootstrap", bootstrap_path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault(spec.name, module)
+    spec.loader.exec_module(module)
+    return module.bootstrap_shim_path
+
+
+if __name__ == "__main__":
+    bootstrap_shim_path = _load_bootstrap_from_file()
+    # Intentionally bootstrap twice: once here for script execution before other
+    # imports, and again inside main(). bootstrap_shim_path is idempotent by
+    # contract, so the duplicate call keeps early-start behaviour without
+    # risking double mutation.
+    bootstrap_shim_path()
+else:
+    from cmd_mox._shim_bootstrap import bootstrap_shim_path
+
+from cmd_mox import _path_utils as path_utils  # noqa: E402
+from cmd_mox.command_runner import (  # noqa: E402
     execute_command,
     prepare_environment,
     resolve_command_with_override,
     validate_override_path,
 )
-from cmd_mox.environment import (
+from cmd_mox.environment import (  # noqa: E402
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
     CMOX_REAL_COMMAND_ENV_PREFIX,
 )
-from cmd_mox.ipc import (
+from cmd_mox.ipc import (  # noqa: E402
     Invocation,
     PassthroughRequest,
     PassthroughResult,
@@ -31,9 +64,21 @@ from cmd_mox.ipc import (
     report_passthrough_result,
 )
 
+CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
+
 # Backwards compatibility alias retained for tests exercising shim helpers.
 _validate_override_path = validate_override_path
-CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
+
+
+def _normalize_windows_arg(arg: str) -> str:
+    if not path_utils.IS_WINDOWS or "^^" not in arg:
+        return arg
+
+    # Batch processing may introduce multiple layers of caret doubling. Reduce
+    # until no escape pairs remain so downstream code sees the intended text.
+    while "^^" in arg:
+        arg = arg.replace("^^", "^")
+    return arg
 
 
 def _resolve_command_name() -> str:
@@ -62,11 +107,16 @@ def _validate_environment() -> float:
 
 def _create_invocation(cmd_name: str) -> Invocation:
     """Create an Invocation from command-line arguments and stdin."""
+    import uuid
+
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
+    argv = sys.argv[1:]
+    if path_utils.IS_WINDOWS:
+        argv = [_normalize_windows_arg(arg) for arg in argv]
     return Invocation(
         command=cmd_name,
-        args=sys.argv[1:],
+        args=argv,
         stdin=stdin_data,
         env=env,
         invocation_id=uuid.uuid4().hex,
@@ -102,6 +152,7 @@ def _write_response(response: Response) -> None:
 
 def main() -> None:
     """Connect to the IPC server and execute the command behaviour."""
+    bootstrap_shim_path()
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
     invocation = _create_invocation(cmd_name)
@@ -139,44 +190,36 @@ def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
     return _build_search_path(env_path, lookup_path, shim_dir)
 
 
-def _iter_path_entries(raw_path: str | None, shim_dir: Path | None) -> t.Iterator[str]:
-    """Yield normalized path entries excluding the shim directory."""
-    if not raw_path:
-        return
-
-    for raw_entry in raw_path.split(os.pathsep):
-        entry = raw_entry.strip()
-        if not entry:
-            continue
-        if shim_dir and Path(entry) == shim_dir:
-            continue
-        yield entry
-
-
-def _add_unique_entries(
-    entries: t.Iterable[str],
-    path_parts: list[str],
-    seen: set[str],
-) -> None:
-    """Add unique entries to path_parts, tracking them in *seen*."""
-    for entry in entries:
-        if entry in seen:
-            continue
-        path_parts.append(entry)
-        seen.add(entry)
-
-
 def _build_search_path(
     merged_path: str | None,
     lookup_path: str,
     shim_dir: Path | None,
 ) -> str:
     """Build a search PATH excluding the shim directory."""
+    shim_identity = (
+        path_utils.normalize_path_string(os.fspath(shim_dir))
+        if shim_dir is not None
+        else None
+    )
+    raw_entries: list[str] = []
+    if merged_path:
+        raw_entries.extend(merged_path.split(os.pathsep))
+    raw_entries.extend(lookup_path.split(os.pathsep))
+
     path_parts: list[str] = []
     seen: set[str] = set()
 
-    _add_unique_entries(_iter_path_entries(merged_path, shim_dir), path_parts, seen)
-    _add_unique_entries(_iter_path_entries(lookup_path, shim_dir), path_parts, seen)
+    for raw_entry in raw_entries:
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        identity = path_utils.normalize_path_string(entry)
+        if shim_identity and identity == shim_identity:
+            continue
+        if identity in seen:
+            continue
+        seen.add(identity)
+        path_parts.append(entry)
 
     return os.pathsep.join(path_parts)
 

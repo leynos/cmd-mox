@@ -8,6 +8,7 @@ import typing as t
 
 from pytest_bdd import parsers, then
 
+from tests.helpers.parameters import decode_placeholders
 from tests.steps.shim_management import _require_replay_shim_dir
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
@@ -97,7 +98,8 @@ def spy_assert_called(mox: CmdMox, cmd: str) -> None:
 def spy_assert_called_with(mox: CmdMox, cmd: str, args: str) -> None:
     """Assert the spy's last call used the given arguments."""
     assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
-    mox.spies[cmd].assert_called_with(*shlex.split(args))
+    decoded = decode_placeholders(args)
+    mox.spies[cmd].assert_called_with(*shlex.split(decoded))
 
 
 @then(parsers.cfparse('the spy "{cmd}" should not have been called'))
