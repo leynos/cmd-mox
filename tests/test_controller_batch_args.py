@@ -48,6 +48,17 @@ def test_escape_batch_args_resolves_pathext(monkeypatch: pytest.MonkeyPatch) -> 
     assert escaped == ["builder", "^^^^caret"]
 
 
+def test_escape_batch_args_missing_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing PATH resolution should leave arguments unchanged."""
+    _set_windows(monkeypatch)
+    monkeypatch.setattr(controller.shutil, "which", lambda cmd: None)
+    argv = ["builder", "^caret"]
+
+    escaped = controller.escape_windows_batch_args(argv)
+
+    assert escaped == ["builder", "^caret"]
+
+
 def test_escape_batch_args_ignores_non_batch_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

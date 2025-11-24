@@ -604,7 +604,7 @@ flowchart TD
     A["Start with env_path and lookup_path"] --> B["Collect raw entries in order (env_path then lookup_path)"]
     B --> C["Strip whitespace; skip empty entries"]
     C --> D["identity = normalize_path_string(entry)"]
-    D --> E{Is identity shim dir or already in seen?}
+    D --> E{Is the identity the shim directory or already in the seen set?}
     E -- "Yes" --> F["Skip entry"]
     E -- "No" --> G["Add entry to path_parts and identity to seen"]
     G --> H["Join path_parts with os.pathsep and return"]

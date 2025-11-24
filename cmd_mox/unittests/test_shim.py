@@ -143,7 +143,7 @@ def test_normalize_windows_arg_collapses_repeated_carets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Windows argument normalisation should reduce escaped carets."""
-    monkeypatch.setattr(shim, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
 
     assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^literal^"
 
@@ -152,7 +152,7 @@ def test_normalize_windows_arg_is_noop_on_posix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-Windows platforms should preserve carets untouched."""
-    monkeypatch.setattr(shim, "IS_WINDOWS", False)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
 
     assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^^^literal^^^^"
 
@@ -161,7 +161,7 @@ def test_create_invocation_normalizes_windows_args(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Invocation creation should collapse doubled carets on Windows."""
-    monkeypatch.setattr(shim, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     monkeypatch.setattr(sys, "argv", ["shim", r"foo^^^bar", r"arg^^^^"])
     monkeypatch.setenv("EXTRA", "1")
     monkeypatch.setattr(sys, "stdin", _DummyStdin("ignored", is_tty=True))
@@ -175,7 +175,6 @@ def test_build_search_path_posix_merges_with_colon_pathsep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """_build_search_path should merge entries correctly on POSIX."""
-    monkeypatch.setattr(shim, "IS_WINDOWS", False)
     monkeypatch.setattr(shim.os, "pathsep", ":")
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
 
@@ -191,7 +190,6 @@ def test_build_search_path_trims_and_preserves_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Whitespace and empty entries should be removed without reordering."""
-    monkeypatch.setattr(shim, "IS_WINDOWS", False)
     monkeypatch.setattr(shim.os, "pathsep", ":")
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
 
@@ -204,6 +202,31 @@ def test_build_search_path_trims_and_preserves_order(
         "/custom/bin",
         "/another/bin",
     ]
+
+
+def test_build_search_path_filters_shim_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Entries matching shim_dir should be removed from the merged PATH."""
+    shim_dir = tmp_path / "shim"
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
+    merged_path = os.pathsep.join([os.fspath(shim_dir), "/usr/local/bin"])
+    lookup_path = os.pathsep.join(["/custom/bin", os.fspath(shim_dir)])
+
+    result = shim._build_search_path(merged_path, lookup_path, shim_dir=shim_dir)
+
+    assert result.split(os.pathsep) == ["/usr/local/bin", "/custom/bin"]
+
+
+def test_build_search_path_handles_missing_env_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """None or empty merged_path should fall back to lookup_path cleanly."""
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
+    lookup_path = os.pathsep.join(["/bin", "/usr/bin"])
+
+    assert shim._build_search_path(None, lookup_path, shim_dir=None) == lookup_path
+    assert shim._build_search_path("", lookup_path, shim_dir=None) == lookup_path
 
 
 def test_execute_invocation_returns_response_without_passthrough(
@@ -491,7 +514,6 @@ def test_merge_passthrough_path_is_case_insensitive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Duplicate entries differing only in case should collapse on Windows."""
-    monkeypatch.setattr(shim, "IS_WINDOWS", True)
     monkeypatch.setattr(shim.os, "pathsep", ";")
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     shim_dir = tmp_path / "Shim"

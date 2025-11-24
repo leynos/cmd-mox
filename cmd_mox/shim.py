@@ -43,7 +43,7 @@ if __name__ == "__main__":
 else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
 
-from cmd_mox._path_utils import normalize_path_string  # noqa: E402
+from cmd_mox import _path_utils as path_utils  # noqa: E402
 from cmd_mox.command_runner import (  # noqa: E402
     execute_command,
     prepare_environment,
@@ -65,14 +65,13 @@ from cmd_mox.ipc import (  # noqa: E402
 )
 
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
-IS_WINDOWS = os.name == "nt"
 
 # Backwards compatibility alias retained for tests exercising shim helpers.
 _validate_override_path = validate_override_path
 
 
 def _normalize_windows_arg(arg: str) -> str:
-    if not IS_WINDOWS or "^^" not in arg:
+    if not path_utils.IS_WINDOWS or "^^" not in arg:
         return arg
 
     # Batch processing may introduce multiple layers of caret doubling. Reduce
@@ -113,7 +112,7 @@ def _create_invocation(cmd_name: str) -> Invocation:
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
-    if IS_WINDOWS:
+    if path_utils.IS_WINDOWS:
         argv = [_normalize_windows_arg(arg) for arg in argv]
     return Invocation(
         command=cmd_name,
@@ -198,7 +197,9 @@ def _build_search_path(
 ) -> str:
     """Build a search PATH excluding the shim directory."""
     shim_identity = (
-        normalize_path_string(os.fspath(shim_dir)) if shim_dir is not None else None
+        path_utils.normalize_path_string(os.fspath(shim_dir))
+        if shim_dir is not None
+        else None
     )
     raw_entries: list[str] = []
     if merged_path:
@@ -212,7 +213,7 @@ def _build_search_path(
         entry = raw_entry.strip()
         if not entry:
             continue
-        identity = normalize_path_string(entry)
+        identity = path_utils.normalize_path_string(entry)
         if shim_identity and identity == shim_identity:
             continue
         if identity in seen:

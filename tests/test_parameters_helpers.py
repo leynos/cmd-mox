@@ -31,3 +31,9 @@ def test_decode_placeholders_handles_overlapping_tokens() -> None:
 def test_decode_placeholders_preserves_empty_string() -> None:
     """Decoding an empty string should return an empty string."""
     assert parameters.decode_placeholders("") == ""
+
+
+def test_decode_placeholders_leaves_unknown_tokens() -> None:
+    """Unknown placeholder tokens should remain untouched."""
+    raw = "foo<UNKNOWN>bar"
+    assert parameters.decode_placeholders(raw) == raw

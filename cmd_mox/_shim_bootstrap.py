@@ -5,12 +5,45 @@ from __future__ import annotations
 import contextlib
 import importlib
 import importlib.util as importlib_util
-import os
 import sys
 import sysconfig
+import typing as t
 from pathlib import Path
 
+if t.TYPE_CHECKING:
+    from types import ModuleType
+
 _BOOTSTRAP_DONE = False
+
+
+def _load_stdlib_platform() -> ModuleType:
+    """Return the stdlib platform module, falling back to regular import."""
+    importlib.invalidate_caches()
+    std_platform = None
+    stdlib_path: str | None
+    try:
+        stdlib_path = sysconfig.get_path("stdlib")
+    except (KeyError, OSError, ValueError, TypeError):
+        stdlib_path = None
+
+    if stdlib_path:
+        try:
+            stdlib_platform = Path(stdlib_path) / "platform.py"
+            if stdlib_platform.is_file():
+                spec = importlib_util.spec_from_file_location(
+                    "platform", stdlib_platform
+                )
+                if spec is not None and spec.loader is not None:
+                    candidate_module = importlib_util.module_from_spec(spec)
+                    try:
+                        spec.loader.exec_module(candidate_module)
+                        std_platform = candidate_module
+                    except (FileNotFoundError, OSError, ImportError):
+                        std_platform = None
+        except (OSError, ValueError):
+            std_platform = None
+
+    return t.cast("ModuleType", std_platform or importlib.import_module("platform"))
 
 
 def _should_remove_path_entry(entry: str, package_dir: Path) -> bool:
@@ -33,19 +66,9 @@ def bootstrap_shim_path() -> None:
     for entry in list(sys.path):
         if _should_remove_path_entry(entry, package_dir):
             sys.path.remove(entry)
-            sys.path_importer_cache.pop(entry, None)
-            resolved_entry = os.fspath(Path(entry).resolve())
-            sys.path_importer_cache.pop(resolved_entry, None)
             removed.append(entry)
     sys.path_importer_cache.clear()
-    importlib.invalidate_caches()
-    stdlib_platform = Path(sysconfig.get_path("stdlib")) / "platform.py"
-    spec = importlib_util.spec_from_file_location("platform", stdlib_platform)
-    if spec is None or spec.loader is None:
-        std_platform = importlib.import_module("platform")
-    else:
-        std_platform = importlib_util.module_from_spec(spec)
-        spec.loader.exec_module(std_platform)
+    std_platform = _load_stdlib_platform()
     sys.modules["platform"] = std_platform
     for entry in reversed(removed):
         sys.path.insert(0, entry)

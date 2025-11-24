@@ -592,6 +592,8 @@ def test_should_shorten_path_respects_platform(
     monkeypatch.setattr(envmod, "IS_WINDOWS", True)
     monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 20)
     assert envmod._should_shorten_path(Path("short")) is False
+    boundary_path = Path("x" * envmod._MAX_PATH_THRESHOLD)
+    assert envmod._should_shorten_path(boundary_path) is True
     assert envmod._should_shorten_path(Path("x" * 25)) is True
 
 
