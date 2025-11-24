@@ -8,7 +8,7 @@ import time
 import typing as t
 from pathlib import Path
 
-IS_WINDOWS = os.name == "nt"
+from cmd_mox import _path_utils as path_utils
 
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 
@@ -62,7 +62,7 @@ def _validate_command_name(name: str) -> None:
 
 def _normalize_command_name(name: str) -> str:
     """Return a filesystem-safe comparison key for *name*."""
-    return name.casefold() if IS_WINDOWS else name
+    return name.casefold() if path_utils.IS_WINDOWS else name
 
 
 def _validate_command_uniqueness(commands: list[str]) -> None:
@@ -85,6 +85,9 @@ def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
     escaped_shim = _escape_batch_literal(os.fspath(shim_path))
     return (
         "@echo off\n"
+        ":: Delayed expansion is disabled to preserve literal exclamation marks in\n"
+        ":: user arguments. Enabling it would consume carets during %* expansion,\n"
+        ":: changing the argv seen by Python when shims pass arguments through.\n"
         "setlocal ENABLEEXTENSIONS DISABLEDELAYEDEXPANSION\n"
         'set "CMOX_SHIM_COMMAND=%~n0"\n'
         f'"{escaped_python}" "{escaped_shim}" %*\n'
@@ -172,7 +175,7 @@ def _ensure_shim_template_ready(shim_path: Path) -> None:
 def _create_shim_for_command(directory: Path, name: str) -> Path:
     """Create a platform-appropriate shim for *name* in *directory*."""
     _validate_command_name(name)
-    if IS_WINDOWS:
+    if path_utils.IS_WINDOWS:
         return _create_windows_shim(directory, name)
     return _create_posix_symlink(directory, name)
 

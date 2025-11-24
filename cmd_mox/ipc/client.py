@@ -15,6 +15,7 @@ import time
 import typing as t
 from pathlib import Path
 
+from cmd_mox import _path_utils as path_utils
 from cmd_mox._validators import (
     validate_positive_finite_timeout,
     validate_retry_attempts,
@@ -37,9 +38,7 @@ from .models import Invocation, PassthroughResult, Response
 
 logger = logging.getLogger(__name__)
 
-IS_WINDOWS = os.name == "nt"
-
-if IS_WINDOWS:  # pragma: win32-only
+if path_utils.IS_WINDOWS:  # pragma: win32-only
     try:
         pywintypes = importlib.import_module("pywintypes")
         win32file = importlib.import_module("win32file")
@@ -416,7 +415,7 @@ def _send_request(
     payload = dict(data)
     payload["kind"] = kind
     payload_bytes = json.dumps(payload).encode("utf-8")
-    if IS_WINDOWS:
+    if path_utils.IS_WINDOWS:
         raw = _send_pipe_request(sock_path, payload_bytes, timeout, retry)
     else:
         raw = _send_unix_request(sock_path, payload_bytes, timeout, retry)

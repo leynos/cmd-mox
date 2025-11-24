@@ -18,7 +18,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
 @given("windows shim launchers are enabled")
 def enable_windows_shims(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force shim generation to emit Windows batch launchers."""
-    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
 
 
 @given(parsers.cfparse('the platform override is "{platform}"'))

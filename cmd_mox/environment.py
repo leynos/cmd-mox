@@ -13,10 +13,10 @@ import time
 import typing as t
 from pathlib import Path
 
-from ._path_utils import normalize_path
+from . import _path_utils as path_utils
 from ._validators import validate_positive_finite_timeout
 
-IS_WINDOWS = os.name == "nt"
+IS_WINDOWS = path_utils.IS_WINDOWS
 _MAX_PATH_THRESHOLD: t.Final[int] = 240
 
 logger = logging.getLogger(__name__)
@@ -33,21 +33,21 @@ _UNSET_TIMEOUT = object()
 
 def _path_identity(path: Path | None) -> str | None:
     """Return a comparable representation of *path*, or ``None`` if unset."""
-    if path is None:
-        return None
-    return normalize_path(path)
+    return None if path is None else path_utils.normalize_path(path)
 
 
 def _should_shorten_path(raw_path: Path) -> bool:
     """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""
-    if not IS_WINDOWS:
-        return False
-    return len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD
+    return (
+        len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD
+        if path_utils.IS_WINDOWS
+        else False
+    )
 
 
 def _get_short_path(path: Path) -> Path | None:
     """Return the short (8.3) variant for *path*, or ``None`` if unavailable."""
-    if not IS_WINDOWS:
+    if not path_utils.IS_WINDOWS:
         return None
 
     # Importing ctypes lazily keeps non-Windows interpreters free of win32
@@ -90,7 +90,7 @@ def _get_short_path(path: Path) -> Path | None:
 
 def _maybe_shorten_windows_path(path: Path) -> Path:
     """Return a MAX_PATH-safe variant of *path* when running on Windows."""
-    if not IS_WINDOWS or not _should_shorten_path(path):
+    if not path_utils.IS_WINDOWS or not _should_shorten_path(path):
         return path
 
     short_path = _get_short_path(path)
@@ -156,7 +156,7 @@ def _attempt_single_removal(path: Path, *, raise_on_error: bool) -> bool:
 
 def _fix_windows_permissions(path: Path) -> None:
     """Ensure all files under *path* are writable on Windows."""
-    if not IS_WINDOWS:
+    if not path_utils.IS_WINDOWS:
         return
     for root, dirs, files in os.walk(path):
         for name in files:
@@ -171,7 +171,7 @@ def _fix_windows_permissions(path: Path) -> None:
 
 def _ensure_windows_pathext(original: dict[str, str]) -> None:
     """Guarantee that ``.CMD`` entries are available in ``PATHEXT`` on Windows."""
-    if not IS_WINDOWS:
+    if not path_utils.IS_WINDOWS:
         return
 
     pathext = original.get("PATHEXT", "")
@@ -328,7 +328,7 @@ class EnvironmentManager:
         """Return the process environment to its original state."""
         if self._orig_env is not None:
             _restore_env(self._orig_env)
-            if IS_WINDOWS:
+            if path_utils.IS_WINDOWS:
                 original = self._orig_env.get("PATHEXT")
                 restored = os.environ.get("PATHEXT")
                 if restored != original:
