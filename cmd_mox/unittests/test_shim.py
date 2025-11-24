@@ -157,22 +157,18 @@ def test_normalize_windows_arg_is_noop_on_posix(
     assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^^^literal^^^^"
 
 
-def test_iter_path_entries_posix_uses_colon_pathsep(
+def test_create_invocation_normalizes_windows_args(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_iter_path_entries should honour ':' separators and preserve order."""
-    monkeypatch.setattr(shim, "IS_WINDOWS", False)
-    monkeypatch.setattr(shim.os, "pathsep", ":")
+    """Invocation creation should collapse doubled carets on Windows."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", True)
+    monkeypatch.setattr(sys, "argv", ["shim", r"foo^^^bar", r"arg^^^^"])
+    monkeypatch.setenv("EXTRA", "1")
+    monkeypatch.setattr(sys, "stdin", _DummyStdin("ignored", is_tty=True))
 
-    raw_path = " :/usr/local/bin::/custom/bin: /another/bin :"
+    invocation = shim._create_invocation("shim")
 
-    entries = list(shim._iter_path_entries(raw_path, shim_dir=None))
-
-    assert entries == [
-        ("/usr/local/bin", "/usr/local/bin"),
-        ("/custom/bin", "/custom/bin"),
-        ("/another/bin", "/another/bin"),
-    ]
+    assert invocation.args == [r"foo^bar", r"arg^"]
 
 
 def test_build_search_path_posix_merges_with_colon_pathsep(
@@ -181,6 +177,7 @@ def test_build_search_path_posix_merges_with_colon_pathsep(
     """_build_search_path should merge entries correctly on POSIX."""
     monkeypatch.setattr(shim, "IS_WINDOWS", False)
     monkeypatch.setattr(shim.os, "pathsep", ":")
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
 
     merged_path = " :/opt/bin::/custom/bin: "
     lookup_path = " :/usr/local/bin::/usr/bin: "
@@ -188,6 +185,25 @@ def test_build_search_path_posix_merges_with_colon_pathsep(
     result = shim._build_search_path(merged_path, lookup_path, shim_dir=None)
 
     assert result == ":".join(["/opt/bin", "/custom/bin", "/usr/local/bin", "/usr/bin"])
+
+
+def test_build_search_path_trims_and_preserves_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whitespace and empty entries should be removed without reordering."""
+    monkeypatch.setattr(shim, "IS_WINDOWS", False)
+    monkeypatch.setattr(shim.os, "pathsep", ":")
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
+
+    merged_path = " :/usr/local/bin::/custom/bin: /another/bin :"
+
+    result = shim._build_search_path(merged_path, "", shim_dir=None)
+
+    assert result.split(":") == [
+        "/usr/local/bin",
+        "/custom/bin",
+        "/another/bin",
+    ]
 
 
 def test_execute_invocation_returns_response_without_passthrough(
@@ -345,6 +361,37 @@ def test_bootstrap_shim_path_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> N
     assert sys.modules["platform"].__name__ == "platform"
 
 
+def test_bootstrap_shim_path_prefers_stdlib_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bootstrapping should discard editable paths when importing stdlib modules."""
+    import importlib
+
+    from cmd_mox import _shim_bootstrap
+
+    monkeypatch.chdir(tmp_path)
+    editable_dir = tmp_path / "__editable__site"
+    editable_dir.mkdir()
+    (editable_dir / "platform.py").write_text("MARKER = 'fake'\n")
+    monkeypatch.setattr(sys, "path", ["__editable__site", "/usr/lib/python3.12"])
+    monkeypatch.setattr(_shim_bootstrap, "_BOOTSTRAP_DONE", False)
+
+    original_platform = sys.modules.pop("platform", None)
+    fake_platform = t.cast("t.Any", importlib.import_module("platform"))
+    assert fake_platform.MARKER == "fake"
+
+    _shim_bootstrap.bootstrap_shim_path()
+
+    std_platform = sys.modules["platform"]
+    assert not hasattr(std_platform, "MARKER")
+    assert "__editable__site" in sys.path
+
+    if original_platform is not None:
+        sys.modules["platform"] = original_platform
+    else:
+        sys.modules.pop("platform", None)
+
+
 @pytest.mark.parametrize(
     ("factory", "expected_exit", "expected_message"),
     [
@@ -446,6 +493,7 @@ def test_merge_passthrough_path_is_case_insensitive(
     """Duplicate entries differing only in case should collapse on Windows."""
     monkeypatch.setattr(shim, "IS_WINDOWS", True)
     monkeypatch.setattr(shim.os, "pathsep", ";")
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     shim_dir = tmp_path / "Shim"
     shim_dir.mkdir()
     socket_path = shim_dir / "ipc.sock"

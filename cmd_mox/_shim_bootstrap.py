@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import importlib.util as importlib_util
+import os
 import sys
+import sysconfig
 from pathlib import Path
 
 _BOOTSTRAP_DONE = False
@@ -30,8 +33,19 @@ def bootstrap_shim_path() -> None:
     for entry in list(sys.path):
         if _should_remove_path_entry(entry, package_dir):
             sys.path.remove(entry)
+            sys.path_importer_cache.pop(entry, None)
+            resolved_entry = os.fspath(Path(entry).resolve())
+            sys.path_importer_cache.pop(resolved_entry, None)
             removed.append(entry)
-    std_platform = importlib.import_module("platform")
+    sys.path_importer_cache.clear()
+    importlib.invalidate_caches()
+    stdlib_platform = Path(sysconfig.get_path("stdlib")) / "platform.py"
+    spec = importlib_util.spec_from_file_location("platform", stdlib_platform)
+    if spec is None or spec.loader is None:
+        std_platform = importlib.import_module("platform")
+    else:
+        std_platform = importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(std_platform)
     sys.modules["platform"] = std_platform
     for entry in reversed(removed):
         sys.path.insert(0, entry)

@@ -33,16 +33,12 @@ _UNSET_TIMEOUT = object()
 
 def _path_identity(path: Path | None) -> str | None:
     """Return a comparable representation of *path*, or ``None`` if unset."""
-    if path is None:
-        return None
-    return normalize_path(path)
+    return None if path is None else normalize_path(path)
 
 
 def _should_shorten_path(raw_path: Path) -> bool:
     """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""
-    if not IS_WINDOWS:
-        return False
-    return len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD
+    return len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD if IS_WINDOWS else False
 
 
 def _get_short_path(path: Path) -> Path | None:

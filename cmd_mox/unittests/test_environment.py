@@ -562,4 +562,51 @@ def test_maybe_shorten_windows_path_skips_short_paths(
     monkeypatch.setattr(envmod, "_get_short_path", fake_get_short_path)
     original = Path("C:/short")
     assert envmod._maybe_shorten_windows_path(original) == original
-    assert called is False
+    assert not called
+
+
+def test_path_identity_normalizes_case_and_segments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Path identity should normalise separators and casing on Windows."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
+    upper = Path(r"C:\Tools\..\BIN")
+    lower = Path(r"c:\bin")
+
+    assert envmod._path_identity(upper) == envmod._path_identity(lower)
+
+
+def test_path_identity_handles_none() -> None:
+    """Unset paths should preserve a ``None`` identity."""
+    assert envmod._path_identity(None) is None
+
+
+def test_should_shorten_path_respects_platform(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Only Windows paths exceeding the threshold should trigger shortening."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", False)
+    assert envmod._should_shorten_path(tmp_path / "short") is False
+
+    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr(envmod, "_MAX_PATH_THRESHOLD", 20)
+    assert envmod._should_shorten_path(Path("short")) is False
+    assert envmod._should_shorten_path(Path("x" * 25)) is True
+
+
+def test_path_identity_guides_directory_comparisons(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Case-insensitive comparisons should treat matching paths as equal."""
+    monkeypatch.setattr(envmod, "IS_WINDOWS", True)
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
+    shim_dir = tmp_path / "ShimDir"
+    shim_dir.mkdir()
+
+    manager = envmod.EnvironmentManager()
+    manager.shim_dir = shim_dir
+    manager._created_dir = Path(str(shim_dir).lower())
+
+    assert manager._should_skip_directory_removal() is False
+    assert manager._has_mismatched_directories() is False

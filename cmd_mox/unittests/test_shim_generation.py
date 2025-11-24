@@ -19,6 +19,9 @@ from cmd_mox.environment import (
 )
 from cmd_mox.ipc import IPCServer
 from cmd_mox.shimgen import (
+    _escape_batch_literal,
+    _format_windows_launcher,
+    _validate_command_uniqueness,
     _validate_no_nul_bytes,
     _validate_no_path_separators,
     _validate_not_dot_directories,
@@ -69,6 +72,36 @@ def test_format_windows_launcher_escapes_carets_and_percents(
 
     assert expected(python_exe) in content
     assert expected(shim_script) in content
+
+
+def test_format_windows_launcher_includes_delayed_expansion_comment(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Launcher should document why delayed expansion is disabled."""
+    content = _format_windows_launcher(
+        str(tmp_path / "python.exe"), tmp_path / "shim.py"
+    )
+    assert "DISABLEDELAYEDEXPANSION" in content
+    assert "exclamation marks" in content
+
+
+def test_escape_batch_literal_escapes_metacharacters() -> None:
+    """Batch literals should escape carets, percents, and quotes."""
+    literal = '^%"path"'
+    escaped = _escape_batch_literal(literal)
+    assert escaped == '^^%%""path""'
+
+
+def test_validate_command_uniqueness_respects_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uniqueness checks should reflect filesystem case sensitivity."""
+    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", False)
+    _validate_command_uniqueness(["git", "GIT"])
+
+    monkeypatch.setattr("cmd_mox.shimgen.IS_WINDOWS", True)
+    with pytest.raises(ValueError, match="Duplicate command names"):
+        _validate_command_uniqueness(["git", "GIT"])
 
 
 @pytest.mark.requires_unix_sockets

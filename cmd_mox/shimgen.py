@@ -85,6 +85,9 @@ def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
     escaped_shim = _escape_batch_literal(os.fspath(shim_path))
     return (
         "@echo off\n"
+        ":: Delayed expansion is disabled to preserve literal exclamation marks in\n"
+        ":: user arguments. Enabling it would consume carets during %* expansion,\n"
+        ":: changing the argv seen by Python when shims pass arguments through.\n"
         "setlocal ENABLEEXTENSIONS DISABLEDELAYEDEXPANSION\n"
         'set "CMOX_SHIM_COMMAND=%~n0"\n'
         f'"{escaped_python}" "{escaped_shim}" %*\n'

@@ -472,7 +472,7 @@ removed from the user environment. See :class:`EnvironmentManager` in
 
 The batch template also doubles percent signs and carets so Windows-specific
 metacharacters survive the hand-off to Python, even when user arguments contain
-spaces or escaping sequences. Case-insensitive hosts are handled by rejecting
+spaces or escape sequences. Case-insensitive hosts are handled by rejecting
 duplicate command names whose casing only differs, ensuring shim files cannot
 trample each other on NTFS. When shims are regenerated from Linux or macOS the
 launcher still uses CRLF delimiters so the resulting `.cmd` remains byte-for-
@@ -594,51 +594,20 @@ features that are infeasible with file-based logging.
 - The shim reads :data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` to determine
   its IPC timeout, defaulting to ``5.0`` seconds. Non-default overrides are
   validated to ensure they remain positive, finite floats before being applied.
-- PATH merging remains decomposed across `_normalize_path_entry`,
-  `_iter_path_entries`, `_add_unique_entries`, and `_build_search_path` so case
-  normalisation, shim filtering, deduplication, and join semantics stay
-  independently testable despite earlier proposals to inline the logic.
+- PATH merging uses a single `_build_search_path` helper that trims whitespace,
+  removes the active shim directory, and de-duplicates entries via the shared
+  ``normalize_path_string`` utility. Windows hosts therefore treat differently
+  cased paths as duplicates while POSIX hosts preserve casing.
 
 ```mermaid
 flowchart TD
-    A["Start with env_path and lookup_path"] --> B["Call _merge_passthrough_path(env_path, lookup_path)"]
-    B --> C["Compute merged_path from env_path and lookup_path"]
-    C --> D["Call _build_search_path(merged_path, lookup_path, shim_dir)"]
-
-    subgraph "PATH merge helpers"
-        D --> E["Initialize empty path_parts list and seen set"]
-        E --> F["_add_unique_entries(_iter_path_entries(merged_path, shim_dir), path_parts, seen)"]
-        F --> G["_add_unique_entries(_iter_path_entries(lookup_path, shim_dir), path_parts, seen)"]
-        G --> H["Return os.pathsep.join(path_parts) as merged PATH"]
-    end
-
-    subgraph "_iter_path_entries(raw_path, shim_dir)"
-        I["If raw_path is falsy, return"]
-        I --> J["Compute shim_identity = _normalize_path_entry(shim_dir) if shim_dir is set"]
-        J --> K["Split raw_path by os.pathsep into raw_entry components"]
-        K --> L["For each raw_entry: strip whitespace to entry"]
-        L --> M{Is entry empty?}
-        M -- "Yes" --> K
-        M -- "No" --> N{Does entry refer to shim_identity?}
-        N -- "Yes (skip shim directory itself)" --> K
-        N -- "No" --> O["Yield _normalize_path_entry(entry)"] --> K
-    end
-
-    subgraph "_normalize_path_entry(entry)"
-        P["If IS_WINDOWS is true, use ntpath; otherwise use os.path"] --> Q["normalized = selected_module.normpath(entry)"]
-        Q --> R{IS_WINDOWS?}
-        R -- "Yes" --> S["normalized = ntpath.normcase(normalized)"]
-        R -- "No" --> T["Keep normalized as-is for POSIX"]
-        S --> U["Return normalized"]
-        T --> U
-    end
-
-    subgraph "_add_unique_entries(entries, path_parts, seen)"
-        V["Iterate over normalized entries"] --> W{Is entry already in seen?}
-        W -- "Yes" --> V
-        W -- "No" --> X["Add entry to seen and append to path_parts"] --> V
-    end
-
+    A["Start with env_path and lookup_path"] --> B["Collect raw entries in order (env_path then lookup_path)"]
+    B --> C["Strip whitespace; skip empty entries"]
+    C --> D["identity = normalize_path_string(entry)"]
+    D --> E{Is identity shim dir or already in seen?}
+    E -- "Yes" --> F["Skip entry"]
+    E -- "No" --> G["Add entry to path_parts and identity to seen"]
+    G --> H["Join path_parts with os.pathsep and return"]
     H --> Z["Resulting PATH is cross-platform, deduplicated, shim-filtered, and normalized"]
 ```
 
