@@ -24,14 +24,11 @@ from cmd_mox._validators import (
 )
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc.windows import (
-    ERROR_BROKEN_PIPE,
     ERROR_FILE_NOT_FOUND,
-    ERROR_MORE_DATA,
     ERROR_PIPE_BUSY,
-    PIPE_CHUNK_SIZE,
+    derive_pipe_name,
     read_pipe_message,
     write_pipe_message,
-    derive_pipe_name,
 )
 
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
@@ -375,7 +372,7 @@ def _send_pipe_request(
     closer = _HandleCloser(handle)
     try:
         _run_blocking_io(
-            lambda: _write_pipe_payload(handle, payload),
+            lambda: write_pipe_message(handle, payload),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
         )
