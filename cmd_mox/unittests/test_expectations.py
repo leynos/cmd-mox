@@ -27,6 +27,11 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 
 
+def _require_shim_dir(mox: CmdMox) -> Path:
+    assert mox.environment.shim_dir is not None
+    return mox.environment.shim_dir
+
+
 def test_mock_with_args_and_order(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -37,8 +42,9 @@ def test_mock_with_args_and_order(
     mox.__enter__()
     mox.replay()
 
-    path_first = Path(mox.environment.shim_dir) / "first"
-    path_second = Path(mox.environment.shim_dir) / "second"
+    shim_dir = _require_shim_dir(mox)
+    path_first = shim_dir / "first"
+    path_second = shim_dir / "second"
     run([str(path_first), "a"], shell=False)
     run([str(path_second), "b"], shell=False)
 
@@ -57,7 +63,7 @@ def test_mock_argument_mismatch(
     mox.__enter__()
     mox.replay()
 
-    path = Path(mox.environment.shim_dir) / "foo"
+    path = _require_shim_dir(mox) / "foo"
     run([str(path), "baz"], shell=False)
 
     with pytest.raises(UnexpectedCommandError):
@@ -73,7 +79,7 @@ def test_with_matching_args_and_stdin(
     mox.__enter__()
     mox.replay()
 
-    path = Path(mox.environment.shim_dir) / "grep"
+    path = _require_shim_dir(mox) / "grep"
     run(
         [str(path), "foo=123"],
         input="data",
@@ -96,7 +102,7 @@ def test_with_env_injection(
     mox.__enter__()
     mox.replay()
 
-    path = Path(mox.environment.shim_dir) / "env"
+    path = _require_shim_dir(mox) / "env"
     result = run([str(path)], shell=False)
     mox.verify()
 
@@ -134,8 +140,9 @@ def test_any_order_expectations_allow_flexible_sequence(
     mox.__enter__()
     mox.replay()
 
-    path_first = Path(mox.environment.shim_dir) / "first"
-    path_second = Path(mox.environment.shim_dir) / "second"
+    shim_dir = _require_shim_dir(mox)
+    path_first = shim_dir / "first"
+    path_second = shim_dir / "second"
 
     # Invoke the any_order expectation before the ordered one
     run([str(path_second)], shell=False)
@@ -154,9 +161,10 @@ def test_multiple_any_order_expectations_do_not_enforce_order(
         mox.mock("third").returns(stdout="3").any_order()
         mox.replay()
 
-        path_first = Path(mox.environment.shim_dir) / "first"
-        path_second = Path(mox.environment.shim_dir) / "second"
-        path_third = Path(mox.environment.shim_dir) / "third"
+        shim_dir = _require_shim_dir(mox)
+        path_first = shim_dir / "first"
+        path_second = shim_dir / "second"
+        path_third = shim_dir / "third"
 
         # Call expectations in a different order than defined
         run([str(path_third)], shell=False)
@@ -184,7 +192,8 @@ def _test_expectation_failure_helper(
     mox.__enter__()
     mox.replay()
 
-    paths = {name: Path(mox.environment.shim_dir) / name for name in mox.mocks}
+    shim_dir = _require_shim_dir(mox)
+    paths = {name: shim_dir / name for name in mox.mocks}
 
     execution_strategy(run, paths)
 
@@ -205,8 +214,9 @@ def test_expectation_times_alias(
     mox.__enter__()
     mox.replay()
 
-    path_first = Path(mox.environment.shim_dir) / "first"
-    path_second = Path(mox.environment.shim_dir) / "second"
+    shim_dir = _require_shim_dir(mox)
+    path_first = shim_dir / "first"
+    path_second = shim_dir / "second"
 
     run([str(path_first)], shell=False)
     run([str(path_first)], shell=False)

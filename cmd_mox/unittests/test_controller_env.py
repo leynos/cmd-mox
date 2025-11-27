@@ -27,6 +27,7 @@ def test_mock_with_env_static_response(
         mox.mock("envcmd").with_env({key: "VALUE"}).returns(stdout="ok")
         mox.replay()
 
+        assert mox.environment.shim_dir is not None
         cmd_path = Path(mox.environment.shim_dir) / "envcmd"
         result = run([str(cmd_path)])
 
@@ -150,6 +151,7 @@ def test_context_manager_restores_env_on_exception(
         with mox:
             mox.stub("boom").returns(stdout="oops")
             mox.replay()
+            assert mox.environment.shim_dir is not None
             cmd_path = Path(mox.environment.shim_dir) / "boom"
             run([str(cmd_path)])
             raise CustomError

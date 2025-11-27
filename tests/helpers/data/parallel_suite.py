@@ -33,6 +33,8 @@ def _artifact_dir() -> Path:
 def _record(cmd_mox: CmdMox, label: str) -> None:
     """Write shim/socket metadata for the given expectation and invoke it."""
     artifact_dir = _artifact_dir()
+    assert cmd_mox.environment.shim_dir is not None
+    assert cmd_mox.environment.socket_path is not None
     shim_dir = Path(cmd_mox.environment.shim_dir)
     socket_path = Path(cmd_mox.environment.socket_path)
     payload = {

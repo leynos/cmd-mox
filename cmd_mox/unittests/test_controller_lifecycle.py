@@ -29,6 +29,7 @@ def test_cmdmox_replay_verify_out_of_order(
     mox.replay()
     with pytest.raises(LifecycleError):
         mox.replay()
+    assert mox.environment.shim_dir is not None
     cmd_path = Path(mox.environment.shim_dir) / "foo"
     run([str(cmd_path)])
     mox.verify()
@@ -64,6 +65,7 @@ def test_context_manager_auto_verify(
     mox.stub("hi").returns(stdout="hello")
     with mox:
         mox.replay()
+        assert mox.environment.shim_dir is not None
         cmd_path = Path(mox.environment.shim_dir) / "hi"
         run([str(cmd_path)])
 

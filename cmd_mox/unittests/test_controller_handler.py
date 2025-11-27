@@ -45,6 +45,7 @@ def test_stub_runs_handler(
     mox.__enter__()
     mox.replay()
 
+    assert mox.environment.shim_dir is not None
     cmd_path = Path(mox.environment.shim_dir) / cmd
     result = run([str(cmd_path)])
 

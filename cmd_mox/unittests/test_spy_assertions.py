@@ -58,6 +58,7 @@ class TestSpyAssertions:
         mox.replay()
 
         full_env = dict(os.environ, **(config.env or {}))
+        assert mox.environment.shim_dir is not None
         cmd_path = Path(mox.environment.shim_dir) / config.cmd_name
         run(
             [str(cmd_path), *(config.cmd_args or [])],

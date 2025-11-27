@@ -25,6 +25,7 @@ def test_unexpected_invocation_message_includes_diff(
     mox.__enter__()
     mox.replay()
 
+    assert mox.environment.shim_dir is not None
     path = Path(mox.environment.shim_dir) / "git"
     run([str(path), "commit"], shell=False)
 
@@ -46,6 +47,7 @@ def test_unfulfilled_expectation_message_includes_counts(
     mox.__enter__()
     mox.replay()
 
+    assert mox.environment.shim_dir is not None
     path = Path(mox.environment.shim_dir) / "sync"
     run([str(path)], shell=False)
 
@@ -68,6 +70,7 @@ def test_order_violation_reports_first_mismatch(
     mox.__enter__()
     mox.replay()
 
+    assert mox.environment.shim_dir is not None
     shim_first = Path(mox.environment.shim_dir) / "first"
     shim_second = Path(mox.environment.shim_dir) / "second"
     run([str(shim_second), "b"], shell=False)
@@ -92,6 +95,7 @@ def test_extra_invocation_reports_count(
     mox.__enter__()
     mox.replay()
 
+    assert mox.environment.shim_dir is not None
     path = Path(mox.environment.shim_dir) / "echo"
     run([str(path)], shell=False)
     run([str(path)], shell=False)

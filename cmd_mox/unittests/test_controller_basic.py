@@ -27,7 +27,10 @@ def test_cmdmox_stub_records_invocation(
     mox.__enter__()
     mox.replay()
 
-    cmd_path = Path(mox.environment.shim_dir) / "hello"
+    assert mox.environment.shim_dir is not None
+    shim_dir = mox.environment.shim_dir
+
+    cmd_path = Path(shim_dir) / "hello"
     result = run([str(cmd_path)])
     mox.verify()
 
@@ -87,8 +90,11 @@ def test_mock_and_spy_invocations(
     mox.__enter__()
     mox.replay()
 
-    cmd_hello = Path(mox.environment.shim_dir) / "hello"
-    cmd_world = Path(mox.environment.shim_dir) / "world"
+    assert mox.environment.shim_dir is not None
+    shim_dir = mox.environment.shim_dir
+
+    cmd_hello = Path(shim_dir) / "hello"
+    cmd_world = Path(shim_dir) / "world"
     res1 = run([str(cmd_hello)])
     res2 = run([str(cmd_world)])
 
@@ -111,8 +117,11 @@ def test_invocation_order_multiple_calls(
     mox.__enter__()
     mox.replay()
 
-    cmd_hello = Path(mox.environment.shim_dir) / "hello"
-    cmd_world = Path(mox.environment.shim_dir) / "world"
+    assert mox.environment.shim_dir is not None
+    shim_dir = mox.environment.shim_dir
+
+    cmd_hello = Path(shim_dir) / "hello"
+    cmd_world = Path(shim_dir) / "world"
     run([str(cmd_hello)])
     run([str(cmd_world)])
     run([str(cmd_hello)])

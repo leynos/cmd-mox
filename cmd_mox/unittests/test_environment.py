@@ -44,11 +44,15 @@ def test_environment_manager_modifies_and_restores() -> None:
 def test_environment_manager_uses_unique_resources() -> None:
     """Each EnvironmentManager instance should use its own directory and socket."""
     with EnvironmentManager() as first:
+        assert first.shim_dir is not None
+        assert first.socket_path is not None
         first_dir = Path(first.shim_dir)
         first_socket = Path(first.socket_path)
         assert first_socket.parent == first_dir
 
     with EnvironmentManager() as second:
+        assert second.shim_dir is not None
+        assert second.socket_path is not None
         second_dir = Path(second.shim_dir)
         second_socket = Path(second.socket_path)
         assert second_socket.parent == second_dir

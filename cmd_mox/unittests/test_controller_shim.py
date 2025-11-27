@@ -59,6 +59,7 @@ def test_cmdmox_nonstubbed_command_behavior(
     mox.__enter__()
     mox.replay()
 
+    assert mox.environment.shim_dir is not None
     cmd_path = Path(mox.environment.shim_dir) / "not_stubbed"
     result = run([str(cmd_path)])
 
