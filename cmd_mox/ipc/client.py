@@ -29,6 +29,8 @@ from cmd_mox.ipc.windows import (
     ERROR_MORE_DATA,
     ERROR_PIPE_BUSY,
     PIPE_CHUNK_SIZE,
+    read_pipe_message,
+    write_pipe_message,
     derive_pipe_name,
 )
 
@@ -353,25 +355,7 @@ def _connect_pipe_with_retries(
 
 
 def _read_pipe_response(handle: object) -> bytes:
-    chunks: list[bytes] = []
-    while True:
-        try:
-            hr, data = win32file.ReadFile(handle, PIPE_CHUNK_SIZE)  # type: ignore[union-attr]
-        except pywintypes.error as exc:  # type: ignore[name-defined]
-            if exc.winerror == ERROR_BROKEN_PIPE:
-                break
-            raise
-        chunks.append(data)
-        if hr == 0:
-            break
-        if hr != ERROR_MORE_DATA:
-            break
-    return b"".join(chunks)
-
-
-def _write_pipe_payload(handle: object, payload: bytes) -> None:
-    win32file.WriteFile(handle, payload)  # type: ignore[union-attr]
-    win32file.FlushFileBuffers(handle)  # type: ignore[union-attr]
+    return read_pipe_message(handle)
 
 
 def _send_pipe_request(
