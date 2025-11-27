@@ -23,7 +23,6 @@ from cmd_mox.environment import EnvironmentManager
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
     ERROR_FILE_NOT_FOUND,
-    ERROR_MORE_DATA,
     ERROR_NO_DATA,
     ERROR_OPERATION_ABORTED,
     ERROR_PIPE_BUSY,
