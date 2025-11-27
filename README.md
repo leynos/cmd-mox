@@ -6,8 +6,8 @@
 
 Replace your flaky bats tests, your brittle log-parsing hacks, and that one
 Bash script that only works on Tuesdays. CmdMox intercepts external commands
-with Python shims, speaks fluent IPC over Unix domain sockets, and enforces
-your expectations like a disappointed parent.
+with Python shims, speaks fluent IPC over Unix domain sockets *and* Windows
+named pipes, and enforces your expectations like a disappointed parent.
 
 - Mocks? Verified.
 - Stubs? Quietly compliant.
@@ -19,6 +19,10 @@ harnesses and AIX cronjobs running `sccs`.
 If you've ever mocked `curl` with `cat`, this library is your penance.
 
 For detailed instructions, see [docs/usage-guide.md](docs/usage-guide.md).
+
+**Platform support:** Linux, macOS, and Windows. CmdMox emits POSIX symlink
+shims on Unix-like systems and `.cmd` launchers backed by named pipes on
+Windows, so the same tests and fixtures run across all three platforms.
 
 ## ✅ Requirements
 
@@ -67,9 +71,6 @@ Out of scope (for now, or forever):
 
 - 🧞 **Shell function mocking** – you want `eval`, you wait a year. Or just
   don’t.
-
-- 🪟 **Windows support** – maybe one day. Until then: enjoy your `.bat` files
-  and pray to `CreateProcess()`.
 
 - 🦕 **Legacy UNIX support** – AIX, Solaris, IRIX? Sorry boys, the boat sailed,
   caught fire, and sank in 2003.

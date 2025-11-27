@@ -1,7 +1,7 @@
 [project]
 name = "cmd-mox"
 version = "0.1.0"
-description = "cmd-mox package"
+description = "Python-native command mocking for pytest, replacing shell-based command tests with fast socket-backed shims"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "ISC" }
@@ -9,6 +9,10 @@ authors = [{ name = "Payton McIntosh", email = "pmcintosh@df12.net" }]
 dependencies = [
     "pywin32>=306; platform_system == 'Windows'",
 ]
+
+[project.urls]
+Homepage = "https://df12.studio/docs.html"
+Repository = "https://github.com/leynos/cmd-mox"
 
 [dependency-groups]
 dev = [
