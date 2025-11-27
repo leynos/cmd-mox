@@ -58,16 +58,17 @@ select = [
     "TRY",
     "D",
     "ANN",
-]
-extend-select = [
     "C90",     # Enforce cyclomatic complexity limits
     "PLR0913", # Restrict the number of function arguments
 ]
-ignore = ["D205"]
+extend-ignore = [
+    "D203",  # Conflicts with D211; prefer enforcing no blank line before class docstring.
+    "D213",  # Conflicts with D212; keep summary on the first line.
+]
 
 [tool.ruff.lint.per-file-ignores]
-"**/test_*.py" = ["S101", "PLR0913"]
-"tests/steps/*.py" = ["PLR0913"]
+"**/test_*.py" = ["S101", "PLR0913", "PLR2004"]
+"tests/steps/*.py" = ["S101", "PLR0913", "PLR2004"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 9

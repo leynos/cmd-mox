@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 """pytest-bdd steps that configure command doubles and behaviours."""
 
 from __future__ import annotations

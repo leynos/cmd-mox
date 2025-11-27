@@ -82,8 +82,9 @@ class RetryConfig:
 
 
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
-    """Return the sleep delay for a 0-based *attempt*; never shorter than
-    :data:`MIN_RETRY_SLEEP`.
+    """Return the sleep delay for a 0-based *attempt*.
+
+    Never shorter than :data:`MIN_RETRY_SLEEP`.
     """
     delay = backoff * (attempt + 1)
     if jitter:

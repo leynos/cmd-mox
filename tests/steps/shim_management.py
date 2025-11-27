@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 """pytest-bdd steps that manage shim lifecycle and cleanup."""
 
 from __future__ import annotations

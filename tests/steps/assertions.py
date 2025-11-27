@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 """pytest-bdd assertions that validate controller outcomes."""
 
 from __future__ import annotations

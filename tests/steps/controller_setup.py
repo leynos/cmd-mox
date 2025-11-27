@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 """pytest-bdd steps focused on controller lifecycle orchestration."""
 
 from __future__ import annotations
