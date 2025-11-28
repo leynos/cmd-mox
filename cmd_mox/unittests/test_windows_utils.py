@@ -8,7 +8,7 @@ import typing as t
 import pytest
 
 from cmd_mox.ipc import windows
-from cmd_mox.ipc.windows import derive_pipe_name
+from cmd_mox.ipc.windows import _PyWinError, _PyWinTypes, derive_pipe_name
 
 
 def test_derive_pipe_name_is_deterministic(tmp_path: pathlib.Path) -> None:
@@ -38,7 +38,7 @@ def test_windows_error_constants_are_positive() -> None:
     assert windows.ERROR_FILE_NOT_FOUND > 0
 
 
-class _FakeWinError(Exception):
+class _FakeWinError(_PyWinError):
     def __init__(self, winerror: int) -> None:
         super().__init__(f"fake winerror {winerror}")
         self.winerror = winerror
@@ -74,7 +74,7 @@ class _FakeWin32File:
         self.flush_calls += 1
 
 
-class _FakePyWinTypes:
+class _FakePyWinTypes(_PyWinTypes):
     error = _FakeWinError
 
 
@@ -90,7 +90,7 @@ def test_read_pipe_message_collects_chunks_until_complete() -> None:
     payload = windows.read_pipe_message(
         object(),
         win32file=win32file,
-        pywintypes=_FakePyWinTypes,
+        pywintypes=_FakePyWinTypes(),
     )
 
     assert payload == b"hello world"
@@ -109,7 +109,7 @@ def test_read_pipe_message_returns_partial_on_broken_pipe() -> None:
     payload = windows.read_pipe_message(
         object(),
         win32file=win32file,
-        pywintypes=_FakePyWinTypes,
+        pywintypes=_FakePyWinTypes(),
     )
 
     assert payload == b"partial"
@@ -123,7 +123,7 @@ def test_read_pipe_message_raises_unexpected_errors() -> None:
         windows.read_pipe_message(
             object(),
             win32file=win32file,
-            pywintypes=_FakePyWinTypes,
+            pywintypes=_FakePyWinTypes(),
         )
 
 

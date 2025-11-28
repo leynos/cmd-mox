@@ -33,6 +33,9 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
+if t.TYPE_CHECKING:
+    from cmd_mox.ipc.windows import _PyWinTypes, _Win32File
+
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import (
     parse_json_safely,
@@ -678,7 +681,11 @@ class _NamedPipeState:
                 return
             response_bytes = _process_raw_request(self.outer, raw)
             if response_bytes is not None:
-                write_pipe_payload(handle, response_bytes, win32file=win32file)
+                write_pipe_payload(
+                    handle,
+                    response_bytes,
+                    win32file=t.cast("_Win32File", win32file),
+                )
         except pywintypes.error as exc:  # type: ignore[name-defined]
             if exc.winerror not in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
                 logger.exception("Named pipe handler failed")
@@ -692,8 +699,8 @@ class _NamedPipeState:
     def _read_request(self, handle: object) -> bytes | None:
         return read_pipe_message(
             handle,
-            win32file=win32file,
-            pywintypes=pywintypes,
+            win32file=t.cast("_Win32File", win32file),
+            pywintypes=t.cast("_PyWinTypes", pywintypes),
             chunk_size=PIPE_CHUNK_SIZE,
         )
 

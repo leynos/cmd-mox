@@ -32,6 +32,9 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
+if t.TYPE_CHECKING:
+    from cmd_mox.ipc.windows import _PyWinTypes, _Win32File
+
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
@@ -369,15 +372,17 @@ def _send_pipe_request(
     closer = _HandleCloser(handle)
     try:
         _run_blocking_io(
-            lambda: write_pipe_payload(handle, payload, win32file=win32file),
+            lambda: write_pipe_payload(
+                handle, payload, win32file=t.cast("_Win32File", win32file)
+            ),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
         )
         return _run_blocking_io(
             lambda: read_pipe_message(
                 handle,
-                win32file=win32file,
-                pywintypes=pywintypes,
+                win32file=t.cast("_Win32File", win32file),
+                pywintypes=t.cast("_PyWinTypes", pywintypes),
                 chunk_size=PIPE_CHUNK_SIZE,
             ),
             deadline=_compute_deadline(timeout),
