@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import typing as t
-from pathlib import Path
 
 import pytest
 
 from cmd_mox.controller import CmdMox, Phase
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.errors import LifecycleError
+from cmd_mox.unittests._env_helpers import (
+    require_shim_dir,
+    require_socket_path,
+)
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -29,7 +32,7 @@ def test_cmdmox_replay_verify_out_of_order(
     mox.replay()
     with pytest.raises(LifecycleError):
         mox.replay()
-    cmd_path = Path(mox.environment.shim_dir) / "foo"
+    cmd_path = require_shim_dir(mox.environment) / "foo"
     run([str(cmd_path)])
     mox.verify()
     with pytest.raises(LifecycleError):
@@ -64,7 +67,7 @@ def test_context_manager_auto_verify(
     mox.stub("hi").returns(stdout="hello")
     with mox:
         mox.replay()
-        cmd_path = Path(mox.environment.shim_dir) / "hi"
+        cmd_path = require_shim_dir(mox.environment) / "hi"
         run([str(cmd_path)])
 
     with pytest.raises(LifecycleError):
@@ -82,8 +85,8 @@ def test_replay_cleans_up_on_keyboard_interrupt(
     mox.__enter__()
     assert env.shim_dir is not None
     assert env.socket_path is not None
-    shim_dir = Path(env.shim_dir)
-    socket_path = Path(env.socket_path)
+    shim_dir = require_shim_dir(env)
+    socket_path = require_socket_path(env)
     assert shim_dir.exists()
 
     def raise_interrupt() -> None:

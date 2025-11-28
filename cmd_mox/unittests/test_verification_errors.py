@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import typing as t
-from pathlib import Path
 
 import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.errors import UnexpectedCommandError, UnfulfilledExpectationError
+from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -25,7 +25,7 @@ def test_unexpected_invocation_message_includes_diff(
     mox.__enter__()
     mox.replay()
 
-    path = Path(mox.environment.shim_dir) / "git"
+    path = require_shim_dir(mox.environment) / "git"
     run([str(path), "commit"], shell=False)
 
     with pytest.raises(UnexpectedCommandError) as excinfo:
@@ -46,7 +46,7 @@ def test_unfulfilled_expectation_message_includes_counts(
     mox.__enter__()
     mox.replay()
 
-    path = Path(mox.environment.shim_dir) / "sync"
+    path = require_shim_dir(mox.environment) / "sync"
     run([str(path)], shell=False)
 
     with pytest.raises(UnfulfilledExpectationError) as excinfo:
@@ -68,8 +68,9 @@ def test_order_violation_reports_first_mismatch(
     mox.__enter__()
     mox.replay()
 
-    shim_first = Path(mox.environment.shim_dir) / "first"
-    shim_second = Path(mox.environment.shim_dir) / "second"
+    shim_dir = require_shim_dir(mox.environment)
+    shim_first = shim_dir / "first"
+    shim_second = shim_dir / "second"
     run([str(shim_second), "b"], shell=False)
     run([str(shim_first), "a"], shell=False)
 
@@ -92,7 +93,7 @@ def test_extra_invocation_reports_count(
     mox.__enter__()
     mox.replay()
 
-    path = Path(mox.environment.shim_dir) / "echo"
+    path = require_shim_dir(mox.environment) / "echo"
     run([str(path)], shell=False)
     run([str(path)], shell=False)
 

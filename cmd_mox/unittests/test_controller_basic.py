@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 import typing as t
-from pathlib import Path
 
 import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.test_doubles import MockCommand, SpyCommand, StubCommand
+from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -27,7 +27,7 @@ def test_cmdmox_stub_records_invocation(
     mox.__enter__()
     mox.replay()
 
-    cmd_path = Path(mox.environment.shim_dir) / "hello"
+    cmd_path = require_shim_dir(mox.environment) / "hello"
     result = run([str(cmd_path)])
     mox.verify()
 
@@ -87,8 +87,9 @@ def test_mock_and_spy_invocations(
     mox.__enter__()
     mox.replay()
 
-    cmd_hello = Path(mox.environment.shim_dir) / "hello"
-    cmd_world = Path(mox.environment.shim_dir) / "world"
+    shim_dir = require_shim_dir(mox.environment)
+    cmd_hello = shim_dir / "hello"
+    cmd_world = shim_dir / "world"
     res1 = run([str(cmd_hello)])
     res2 = run([str(cmd_world)])
 
@@ -111,8 +112,9 @@ def test_invocation_order_multiple_calls(
     mox.__enter__()
     mox.replay()
 
-    cmd_hello = Path(mox.environment.shim_dir) / "hello"
-    cmd_world = Path(mox.environment.shim_dir) / "world"
+    shim_dir = require_shim_dir(mox.environment)
+    cmd_hello = shim_dir / "hello"
+    cmd_world = shim_dir / "world"
     run([str(cmd_hello)])
     run([str(cmd_world)])
     run([str(cmd_hello)])

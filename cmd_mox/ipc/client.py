@@ -24,12 +24,12 @@ from cmd_mox._validators import (
 )
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc.windows import (
-    ERROR_BROKEN_PIPE,
     ERROR_FILE_NOT_FOUND,
-    ERROR_MORE_DATA,
     ERROR_PIPE_BUSY,
     PIPE_CHUNK_SIZE,
     derive_pipe_name,
+    read_pipe_message,
+    write_pipe_payload,
 )
 
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
@@ -352,28 +352,6 @@ def _connect_pipe_with_retries(
     raise RuntimeError(msg)
 
 
-def _read_pipe_response(handle: object) -> bytes:
-    chunks: list[bytes] = []
-    while True:
-        try:
-            hr, data = win32file.ReadFile(handle, PIPE_CHUNK_SIZE)  # type: ignore[union-attr]
-        except pywintypes.error as exc:  # type: ignore[name-defined]
-            if exc.winerror == ERROR_BROKEN_PIPE:
-                break
-            raise
-        chunks.append(data)
-        if hr == 0:
-            break
-        if hr != ERROR_MORE_DATA:
-            break
-    return b"".join(chunks)
-
-
-def _write_pipe_payload(handle: object, payload: bytes) -> None:
-    win32file.WriteFile(handle, payload)  # type: ignore[union-attr]
-    win32file.FlushFileBuffers(handle)  # type: ignore[union-attr]
-
-
 def _send_pipe_request(
     sock_path: Path,
     payload: bytes,
@@ -391,12 +369,17 @@ def _send_pipe_request(
     closer = _HandleCloser(handle)
     try:
         _run_blocking_io(
-            lambda: _write_pipe_payload(handle, payload),
+            lambda: write_pipe_payload(handle, payload, win32file=win32file),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
         )
         return _run_blocking_io(
-            lambda: _read_pipe_response(handle),
+            lambda: read_pipe_message(
+                handle,
+                win32file=win32file,
+                pywintypes=pywintypes,
+                chunk_size=PIPE_CHUNK_SIZE,
+            ),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
         )
