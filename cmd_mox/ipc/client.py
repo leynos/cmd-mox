@@ -27,13 +27,16 @@ from cmd_mox.ipc.windows import (
     ERROR_FILE_NOT_FOUND,
     ERROR_PIPE_BUSY,
     PIPE_CHUNK_SIZE,
+    PyWinTypesProtocol,
+    Win32FileProtocol,
     derive_pipe_name,
     read_pipe_message,
     write_pipe_payload,
 )
 
 if t.TYPE_CHECKING:
-    from cmd_mox.ipc.windows import _PyWinTypes, _Win32File
+    _Win32File = Win32FileProtocol
+    _PyWinTypes = PyWinTypesProtocol
 
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
@@ -373,7 +376,7 @@ def _send_pipe_request(
     try:
         _run_blocking_io(
             lambda: write_pipe_payload(
-                handle, payload, win32file=t.cast("_Win32File", win32file)
+                handle, payload, win32file=t.cast("Win32FileProtocol", win32file)
             ),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
@@ -381,8 +384,8 @@ def _send_pipe_request(
         return _run_blocking_io(
             lambda: read_pipe_message(
                 handle,
-                win32file=t.cast("_Win32File", win32file),
-                pywintypes=t.cast("_PyWinTypes", pywintypes),
+                win32file=t.cast("Win32FileProtocol", win32file),
+                pywintypes=t.cast("PyWinTypesProtocol", pywintypes),
                 chunk_size=PIPE_CHUNK_SIZE,
             ),
             deadline=_compute_deadline(timeout),

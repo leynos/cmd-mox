@@ -8,7 +8,12 @@ import typing as t
 import pytest
 
 from cmd_mox.ipc import windows
-from cmd_mox.ipc.windows import _PyWinError, _PyWinTypes, derive_pipe_name
+from cmd_mox.ipc.windows import (
+    PyWinErrorProtocol,
+    PyWinTypesProtocol,
+    Win32FileProtocol,
+    derive_pipe_name,
+)
 
 
 def test_derive_pipe_name_is_deterministic(tmp_path: pathlib.Path) -> None:
@@ -38,13 +43,13 @@ def test_windows_error_constants_are_positive() -> None:
     assert windows.ERROR_FILE_NOT_FOUND > 0
 
 
-class _FakeWinError(_PyWinError):
+class _FakeWinError(PyWinErrorProtocol):
     def __init__(self, winerror: int) -> None:
         super().__init__(f"fake winerror {winerror}")
         self.winerror = winerror
 
 
-class _FakeWin32File:
+class _FakeWin32File(Win32FileProtocol):
     def __init__(self, responses: list[t.Any]) -> None:
         self._responses = list(responses)
         self.read_sizes: list[int] = []
@@ -74,7 +79,7 @@ class _FakeWin32File:
         self.flush_calls += 1
 
 
-class _FakePyWinTypes(_PyWinTypes):
+class _FakePyWinTypes(PyWinTypesProtocol):
     error = _FakeWinError
 
 

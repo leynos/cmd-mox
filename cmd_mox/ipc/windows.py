@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import typing as t
 
@@ -15,6 +16,8 @@ ERROR_MORE_DATA: t.Final[int] = 234
 ERROR_PIPE_CONNECTED: t.Final[int] = 535
 ERROR_OPERATION_ABORTED: t.Final[int] = 995
 ERROR_FILE_NOT_FOUND: t.Final[int] = 2
+
+logger = logging.getLogger(__name__)
 
 
 class _PyWinError(Exception):
@@ -45,6 +48,11 @@ class _Win32File(t.Protocol):
     ) -> None: ...
 
 
+Win32FileProtocol = _Win32File
+PyWinTypesProtocol = _PyWinTypes
+PyWinErrorProtocol = _PyWinError
+
+
 def derive_pipe_name(identifier: os.PathLike[str] | str) -> str:
     """Return a deterministic named pipe name for *identifier*.
 
@@ -62,8 +70,8 @@ def derive_pipe_name(identifier: os.PathLike[str] | str) -> str:
 def read_pipe_message(
     handle: object,
     *,
-    win32file: _Win32File,
-    pywintypes: _PyWinTypes,
+    win32file: Win32FileProtocol,
+    pywintypes: PyWinTypesProtocol,
     chunk_size: int = PIPE_CHUNK_SIZE,
 ) -> bytes:
     """Read a complete message from a Windows named pipe *handle*.
@@ -84,30 +92,37 @@ def read_pipe_message(
         chunks.append(data)
         if hr == 0:
             break
-        if hr != ERROR_MORE_DATA:
-            break
+        if hr == ERROR_MORE_DATA:
+            continue
+        logger.warning("Unexpected ReadFile status: %s; returning partial data", hr)
+        break
     return b"".join(chunks)
 
 
 def write_pipe_payload(
-    handle: object, payload: bytes, *, win32file: _Win32File
+    handle: object, payload: bytes, *, win32file: Win32FileProtocol
 ) -> None:
     """Write *payload* to a named pipe *handle* and flush immediately."""
     win32file.WriteFile(handle, payload)
     win32file.FlushFileBuffers(handle)
 
 
-__all__ = [
-    "ERROR_BROKEN_PIPE",
-    "ERROR_FILE_NOT_FOUND",
-    "ERROR_MORE_DATA",
-    "ERROR_NO_DATA",
-    "ERROR_OPERATION_ABORTED",
-    "ERROR_PIPE_BUSY",
-    "ERROR_PIPE_CONNECTED",
-    "PIPE_CHUNK_SIZE",
-    "WINDOWS_PIPE_PREFIX",
-    "derive_pipe_name",
-    "read_pipe_message",
-    "write_pipe_payload",
-]
+__all__ = sorted(
+    [
+        "ERROR_BROKEN_PIPE",
+        "ERROR_FILE_NOT_FOUND",
+        "ERROR_MORE_DATA",
+        "ERROR_NO_DATA",
+        "ERROR_OPERATION_ABORTED",
+        "ERROR_PIPE_BUSY",
+        "ERROR_PIPE_CONNECTED",
+        "PIPE_CHUNK_SIZE",
+        "PyWinErrorProtocol",
+        "PyWinTypesProtocol",
+        "WINDOWS_PIPE_PREFIX",
+        "Win32FileProtocol",
+        "derive_pipe_name",
+        "read_pipe_message",
+        "write_pipe_payload",
+    ]
+)
