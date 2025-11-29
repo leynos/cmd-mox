@@ -23,14 +23,21 @@ from cmd_mox.environment import EnvironmentManager
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
     ERROR_FILE_NOT_FOUND,
-    ERROR_MORE_DATA,
     ERROR_NO_DATA,
     ERROR_OPERATION_ABORTED,
     ERROR_PIPE_BUSY,
     ERROR_PIPE_CONNECTED,
     PIPE_CHUNK_SIZE,
+    PyWinTypesProtocol,
+    Win32FileProtocol,
     derive_pipe_name,
+    read_pipe_message,
+    write_pipe_payload,
 )
+
+if t.TYPE_CHECKING:
+    _Win32File = Win32FileProtocol
+    _PyWinTypes = PyWinTypesProtocol
 
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import (
@@ -677,8 +684,11 @@ class _NamedPipeState:
                 return
             response_bytes = _process_raw_request(self.outer, raw)
             if response_bytes is not None:
-                win32file.WriteFile(handle, response_bytes)  # type: ignore[union-attr]
-                win32file.FlushFileBuffers(handle)  # type: ignore[union-attr]
+                write_pipe_payload(
+                    handle,
+                    response_bytes,
+                    win32file=t.cast("Win32FileProtocol", win32file),
+                )
         except pywintypes.error as exc:  # type: ignore[name-defined]
             if exc.winerror not in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
                 logger.exception("Named pipe handler failed")
@@ -690,20 +700,12 @@ class _NamedPipeState:
                 self._client_threads.discard(thread)
 
     def _read_request(self, handle: object) -> bytes | None:
-        chunks: list[bytes] = []
-        while True:
-            try:
-                hr, data = win32file.ReadFile(handle, PIPE_CHUNK_SIZE)  # type: ignore[union-attr]
-            except pywintypes.error as exc:  # type: ignore[name-defined]
-                if exc.winerror == ERROR_BROKEN_PIPE:
-                    break
-                raise
-            chunks.append(data)
-            if hr == 0:
-                break
-            if hr != ERROR_MORE_DATA:
-                break
-        return b"".join(chunks)
+        return read_pipe_message(
+            handle,
+            win32file=t.cast("Win32FileProtocol", win32file),
+            pywintypes=t.cast("PyWinTypesProtocol", pywintypes),
+            chunk_size=PIPE_CHUNK_SIZE,
+        )
 
     def _poke_pipe(self) -> None:
         try:

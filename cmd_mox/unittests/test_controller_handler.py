@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import typing as t
-from pathlib import Path
 
 import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation, Response
+from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -45,7 +45,7 @@ def test_stub_runs_handler(
     mox.__enter__()
     mox.replay()
 
-    cmd_path = Path(mox.environment.shim_dir) / cmd
+    cmd_path = require_shim_dir(mox.environment) / cmd
     result = run([str(cmd_path)])
 
     mox.verify()

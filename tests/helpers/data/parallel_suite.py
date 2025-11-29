@@ -8,6 +8,10 @@ import subprocess
 import typing as t
 from pathlib import Path
 
+from cmd_mox.unittests._env_helpers import (
+    require_shim_dir,
+    require_socket_path,
+)
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
 pytest_plugins = ("cmd_mox.pytest_plugin",)
@@ -33,8 +37,8 @@ def _artifact_dir() -> Path:
 def _record(cmd_mox: CmdMox, label: str) -> None:
     """Write shim/socket metadata for the given expectation and invoke it."""
     artifact_dir = _artifact_dir()
-    shim_dir = Path(cmd_mox.environment.shim_dir)
-    socket_path = Path(cmd_mox.environment.socket_path)
+    shim_dir = require_shim_dir(cmd_mox.environment)
+    socket_path = require_socket_path(cmd_mox.environment)
     payload = {
         "label": label,
         "shim_dir": str(shim_dir),

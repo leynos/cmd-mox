@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import typing as t
-from pathlib import Path
 
 import pytest
 
@@ -11,6 +10,7 @@ import cmd_mox.controller as controller
 from cmd_mox import _path_utils as path_utils
 from cmd_mox.controller import CmdMox, Phase
 from cmd_mox.errors import UnexpectedCommandError
+from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = [
     pytest.mark.requires_unix_sockets,
@@ -21,6 +21,7 @@ pytestmark = [
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
+    from pathlib import Path
 
 
 _SYMLINK_FAILURE_MESSAGE = "symlink failure"
@@ -59,7 +60,7 @@ def test_cmdmox_nonstubbed_command_behavior(
     mox.__enter__()
     mox.replay()
 
-    cmd_path = Path(mox.environment.shim_dir) / "not_stubbed"
+    cmd_path = require_shim_dir(mox.environment) / "not_stubbed"
     result = run([str(cmd_path)])
 
     assert result.stdout.strip() == "not_stubbed"

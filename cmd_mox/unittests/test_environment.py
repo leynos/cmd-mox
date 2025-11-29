@@ -23,6 +23,10 @@ from cmd_mox.environment import (
     _robust_rmtree,
     temporary_env,
 )
+from cmd_mox.unittests._env_helpers import (
+    require_shim_dir,
+    require_socket_path,
+)
 
 CleanupCallable = t.Callable[[list[envmod.CleanupError]], None]
 
@@ -44,13 +48,13 @@ def test_environment_manager_modifies_and_restores() -> None:
 def test_environment_manager_uses_unique_resources() -> None:
     """Each EnvironmentManager instance should use its own directory and socket."""
     with EnvironmentManager() as first:
-        first_dir = Path(first.shim_dir)
-        first_socket = Path(first.socket_path)
+        first_dir = require_shim_dir(first)
+        first_socket = require_socket_path(first)
         assert first_socket.parent == first_dir
 
     with EnvironmentManager() as second:
-        second_dir = Path(second.shim_dir)
-        second_socket = Path(second.socket_path)
+        second_dir = require_shim_dir(second)
+        second_socket = require_socket_path(second)
         assert second_socket.parent == second_dir
 
     assert first_dir != second_dir

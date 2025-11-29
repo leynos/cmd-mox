@@ -4,12 +4,12 @@ import dataclasses as dc
 import os
 import subprocess
 import typing as t
-from pathlib import Path
 
 import pytest
 
 from cmd_mox.controller import CmdMox, CommandDouble
 from cmd_mox.ipc import Invocation
+from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -58,7 +58,7 @@ class TestSpyAssertions:
         mox.replay()
 
         full_env = dict(os.environ, **(config.env or {}))
-        cmd_path = Path(mox.environment.shim_dir) / config.cmd_name
+        cmd_path = require_shim_dir(mox.environment) / config.cmd_name
         run(
             [str(cmd_path), *(config.cmd_args or [])],
             env=full_env,
