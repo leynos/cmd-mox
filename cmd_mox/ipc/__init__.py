@@ -7,9 +7,11 @@ from .client import (
     DEFAULT_CONNECT_RETRIES,
     MIN_RETRY_SLEEP,
     RetryConfig,
+    RetryStrategy,
     calculate_retry_delay,
     invoke_server,
     report_passthrough_result,
+    retry_with_backoff,
 )
 from .constants import (
     KIND_INVOCATION,
@@ -46,9 +48,11 @@ __all__ = [
     "PassthroughResult",
     "Response",
     "RetryConfig",
+    "RetryStrategy",
     "TimeoutConfig",
     "calculate_retry_delay",
     "invoke_server",
     "random",
     "report_passthrough_result",
+    "retry_with_backoff",
 ]

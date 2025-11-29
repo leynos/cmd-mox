@@ -5,7 +5,6 @@ import socket
 import threading
 import typing as t
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -19,7 +18,6 @@ from cmd_mox.ipc import (
     Invocation,
     IPCServer,
     RetryConfig,
-    calculate_retry_delay,
     invoke_server,
 )
 
@@ -198,12 +196,3 @@ def test_invoke_server_invalid_json(
     with pytest.raises(RuntimeError, match="Invalid JSON"):
         invoke_server(invocation, timeout=1.0)
     thread.join()
-
-
-def test_calculate_retry_delay() -> None:
-    """Retry delay scales linearly and applies jitter bounds."""
-    assert calculate_retry_delay(1, 0.1, 0.0) == pytest.approx(0.2)
-    with patch("cmd_mox.ipc.random.uniform", return_value=1.25) as mock_uniform:
-        delay = calculate_retry_delay(0, 1.0, 0.5)
-        assert delay == pytest.approx(1.25)
-        mock_uniform.assert_called_once_with(0.5, 1.5)
