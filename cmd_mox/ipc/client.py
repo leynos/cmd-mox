@@ -87,6 +87,15 @@ class RetryConfig:
         self.__post_init__()
 
 
+@dc.dataclass(slots=True)
+class RetryStrategy:
+    """Hooks for logging and gating retry behaviour."""
+
+    on_failure: t.Callable[[int, Exception], None] | None = None
+    should_retry: t.Callable[[Exception, int, int], bool] | None = None
+    sleep: t.Callable[[float], None] = time.sleep
+
+
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     """Return the sleep delay for a 0-based *attempt*.
 
@@ -101,13 +110,11 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     return max(delay, MIN_RETRY_SLEEP)
 
 
-def retry_with_backoff(  # noqa: PLR0913
+def retry_with_backoff(
     func: t.Callable[[int], _T],
     *,
     retry_config: RetryConfig,
-    on_failure: t.Callable[[int, Exception], None] | None = None,
-    should_retry: t.Callable[[Exception, int, int], bool] | None = None,
-    sleep: t.Callable[[float], None] = time.sleep,
+    strategy: RetryStrategy | None = None,
 ) -> _T:
     """Execute *func* until it succeeds or retries are exhausted.
 
@@ -117,7 +124,8 @@ def retry_with_backoff(  # noqa: PLR0913
     defaults to retrying every failure except the final attempt.
     """
     max_attempts = retry_config.retries
-    retry_decider = should_retry or (
+    strategy = strategy or RetryStrategy()
+    retry_decider = strategy.should_retry or (
         lambda _exc, attempt, maximum: attempt < maximum - 1
     )
 
@@ -125,8 +133,8 @@ def retry_with_backoff(  # noqa: PLR0913
         try:
             return func(attempt)
         except Exception as exc:
-            if on_failure is not None:
-                on_failure(attempt, exc)
+            if strategy.on_failure is not None:
+                strategy.on_failure(attempt, exc)
             if not retry_decider(exc, attempt, max_attempts):
                 raise
             delay = calculate_retry_delay(
@@ -134,7 +142,7 @@ def retry_with_backoff(  # noqa: PLR0913
                 retry_config.backoff,
                 retry_config.jitter,
             )
-            sleep(delay)
+            strategy.sleep(delay)
 
     msg = (
         "Unreachable code reached in retry helper: all attempts exhausted "
@@ -275,7 +283,7 @@ def _connect_unix_with_retries(
     return retry_with_backoff(
         attempt_connect,
         retry_config=retry_config,
-        on_failure=log_failure,
+        strategy=RetryStrategy(on_failure=log_failure),
     )
 
 
@@ -394,9 +402,11 @@ def _connect_pipe_with_retries(
     return retry_with_backoff(
         lambda _attempt: _create_pipe_handle(pipe_name_str),
         retry_config=retry_config,
-        on_failure=log_failure,
-        should_retry=should_retry,
-        sleep=sleep,
+        strategy=RetryStrategy(
+            on_failure=log_failure,
+            should_retry=should_retry,
+            sleep=sleep,
+        ),
     )
 
 
@@ -496,6 +506,7 @@ __all__ = [
     "DEFAULT_CONNECT_RETRIES",
     "MIN_RETRY_SLEEP",
     "RetryConfig",
+    "RetryStrategy",
     "calculate_retry_delay",
     "invoke_server",
     "report_passthrough_result",
