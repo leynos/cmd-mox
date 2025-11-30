@@ -6,12 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cmd_mox.ipc.client import (
-    RetryConfig,
-    RetryStrategy,
-    calculate_retry_delay,
-    retry_with_backoff,
-)
+from cmd_mox.ipc.client import RetryConfig, calculate_retry_delay, retry_with_backoff
 
 
 def test_calculate_retry_delay() -> None:
@@ -33,15 +28,11 @@ def test_retry_with_backoff_retries_then_succeeds() -> None:
             raise OSError("temporary")
         return "ok"
 
-    strategy = RetryStrategy(
-        log_failure=lambda attempt_idx, exc: failures.append((attempt_idx, exc)),
-        sleep=lambda delay: sleeps.append(delay),
-    )
-
     result = retry_with_backoff(
         attempt,
         retry_config=RetryConfig(retries=2, backoff=0.1, jitter=0.0),
-        strategy=strategy,
+        on_failure=lambda attempt_idx, exc: failures.append((attempt_idx, exc)),
+        sleep=lambda delay: sleeps.append(delay),
     )
 
     assert result == "ok"
@@ -58,18 +49,14 @@ def test_retry_with_backoff_respects_should_retry() -> None:
     def attempt(_attempt: int) -> str:
         raise RuntimeError("boom")
 
-    strategy = RetryStrategy(
-        log_failure=lambda attempt_idx, _exc: failures.append(attempt_idx),
-        should_retry=lambda _exc, _attempt, _max: False,
-        sleep=lambda delay: sleeps.append(delay),
-    )
-
     with pytest.raises(RuntimeError):
         retry_with_backoff(
             attempt,
             retry_config=RetryConfig(retries=3, backoff=0.1, jitter=0.0),
-            strategy=strategy,
+            on_failure=lambda attempt_idx, _exc: failures.append(attempt_idx),
+            should_retry=lambda _exc, _attempt, _max: False,
+            sleep=lambda delay: sleeps.append(delay),
         )
 
     assert failures == [0]
-    assert sleeps == []
+    assert not sleeps
