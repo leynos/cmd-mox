@@ -110,6 +110,33 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     return max(delay, MIN_RETRY_SLEEP)
 
 
+def _handle_retry_failure(  # noqa: PLR0913
+    exc: Exception,
+    attempt: int,
+    max_attempts: int,
+    retry_config: RetryConfig,
+    strategy: RetryStrategy,
+) -> float | None:
+    """Process a retryable failure and return the backoff delay.
+
+    Raises *exc* when no further retries should be attempted.
+    """
+    if strategy.on_failure is not None:
+        strategy.on_failure(attempt, exc)
+
+    retry_decider = strategy.should_retry or (
+        lambda _exc, att, maximum: att < maximum - 1
+    )
+    if not retry_decider(exc, attempt, max_attempts):
+        raise
+
+    return calculate_retry_delay(
+        attempt,
+        retry_config.backoff,
+        retry_config.jitter,
+    )
+
+
 def retry_with_backoff(
     func: t.Callable[[int], _T],
     *,
@@ -118,34 +145,29 @@ def retry_with_backoff(
 ) -> _T:
     """Execute *func* until it succeeds or retries are exhausted.
 
-    The callable receives the 0-based attempt index. When provided,
-    ``strategy.on_failure`` runs on every raised exception (e.g., for logging).
-    ``strategy.should_retry`` decides whether to try again, defaulting to
-    retrying until the configured maximum attempts. The delay between attempts
-    is calculated from ``retry_config.backoff`` and ``retry_config.jitter``
-    using :func:`calculate_retry_delay`, and the wait is performed via
-    ``strategy.sleep``.
+    The callable receives the 0-based attempt index. When provided, the
+    strategy's ``on_failure`` runs on every raised exception (e.g., for
+    logging). The strategy's ``should_retry`` decides whether to try again,
+    defaulting to retrying until the configured maximum attempts. The delay
+    between attempts is calculated from ``retry_config.backoff`` and
+    ``retry_config.jitter`` using :func:`calculate_retry_delay`, and the wait
+    is performed via ``strategy.sleep``.
     """
     max_attempts = retry_config.retries
-    strategy = strategy or RetryStrategy()
-    retry_decider = strategy.should_retry or (
-        lambda _exc, attempt, maximum: attempt < maximum - 1
-    )
+    strat = strategy if strategy is not None else RetryStrategy()
 
     for attempt in range(max_attempts):
         try:
             return func(attempt)
-        except Exception as exc:
-            if strategy.on_failure is not None:
-                strategy.on_failure(attempt, exc)
-            if not retry_decider(exc, attempt, max_attempts):
-                raise
-            delay = calculate_retry_delay(
+        except Exception as exc:  # noqa: BLE001 - broad catch to reuse helper
+            delay = _handle_retry_failure(
+                exc,
                 attempt,
-                retry_config.backoff,
-                retry_config.jitter,
+                max_attempts,
+                retry_config,
+                strat,
             )
-            strategy.sleep(delay)
+            strat.sleep(delay)
 
     msg = (
         "Unreachable code reached in retry helper: all attempts exhausted "
