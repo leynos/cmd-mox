@@ -118,10 +118,13 @@ def retry_with_backoff(
 ) -> _T:
     """Execute *func* until it succeeds or retries are exhausted.
 
-    The callable receives the 0-based attempt index. *log_failure* is invoked
-    for every raised exception to keep retry logging consistent across call
-    sites. *should_retry* gates whether another attempt should occur; it
-    defaults to retrying every failure except the final attempt.
+    The callable receives the 0-based attempt index. When provided,
+    ``strategy.on_failure`` runs on every raised exception (e.g., for logging).
+    ``strategy.should_retry`` decides whether to try again, defaulting to
+    retrying until the configured maximum attempts. The delay between attempts
+    is calculated from ``retry_config.backoff`` and ``retry_config.jitter``
+    using :func:`calculate_retry_delay`, and the wait is performed via
+    ``strategy.sleep``.
     """
     max_attempts = retry_config.retries
     strategy = strategy or RetryStrategy()
