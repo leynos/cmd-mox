@@ -110,30 +110,35 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     return max(delay, MIN_RETRY_SLEEP)
 
 
-def _handle_retry_failure(  # noqa: PLR0913
+@dc.dataclass(slots=True)
+class _RetryContext:
+    attempt: int
+    max_attempts: int
+    retry_config: RetryConfig
+    strategy: RetryStrategy
+
+
+def _handle_retry_failure(
     exc: Exception,
-    attempt: int,
-    max_attempts: int,
-    retry_config: RetryConfig,
-    strategy: RetryStrategy,
-) -> float | None:
+    context: _RetryContext,
+) -> float:
     """Process a retryable failure and return the backoff delay.
 
     Raises *exc* when no further retries should be attempted.
     """
-    if strategy.on_failure is not None:
-        strategy.on_failure(attempt, exc)
+    if context.strategy.on_failure is not None:
+        context.strategy.on_failure(context.attempt, exc)
 
-    retry_decider = strategy.should_retry or (
+    retry_decider = context.strategy.should_retry or (
         lambda _exc, att, maximum: att < maximum - 1
     )
-    if not retry_decider(exc, attempt, max_attempts):
+    if not retry_decider(exc, context.attempt, context.max_attempts):
         raise
 
     return calculate_retry_delay(
-        attempt,
-        retry_config.backoff,
-        retry_config.jitter,
+        context.attempt,
+        context.retry_config.backoff,
+        context.retry_config.jitter,
     )
 
 
@@ -160,13 +165,13 @@ def retry_with_backoff(
         try:
             return func(attempt)
         except Exception as exc:  # noqa: BLE001 - broad catch to reuse helper
-            delay = _handle_retry_failure(
-                exc,
-                attempt,
-                max_attempts,
-                retry_config,
-                strat,
+            context = _RetryContext(
+                attempt=attempt,
+                max_attempts=max_attempts,
+                retry_config=retry_config,
+                strategy=strat,
             )
+            delay = _handle_retry_failure(exc, context)
             strat.sleep(delay)
 
     msg = (
