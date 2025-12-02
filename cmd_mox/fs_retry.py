@@ -9,6 +9,7 @@ import shutil
 import time
 import typing as t
 from pathlib import Path
+from collections.abc import Iterable
 
 from . import _path_utils as path_utils
 
@@ -53,20 +54,30 @@ def _log_retry_attempt(
     )
 
 
+def _should_fix_permissions(candidate: Path) -> bool:
+    """Check if a path should have its permissions fixed."""
+    return candidate.exists() and not candidate.is_symlink()
+
+
+def _chmod_items(
+    root: Path, items: Iterable[str | os.PathLike[str]]
+) -> None:
+    """Apply chmod 0o777 to non-symlink items in a directory."""
+    for name in items:
+        candidate = root / name
+        if _should_fix_permissions(candidate):
+            candidate.chmod(0o777)
+
+
 def _fix_windows_permissions(path: Path) -> None:
     """Ensure all files under *path* are writable on Windows before deletion."""
     if not path_utils.IS_WINDOWS:
         return
 
     for root, dirs, files in os.walk(path):
-        for name in files:
-            candidate = Path(root) / name
-            if candidate.exists() and not candidate.is_symlink():
-                candidate.chmod(0o777)
-        for name in dirs:
-            candidate = Path(root) / name
-            if candidate.exists() and not candidate.is_symlink():
-                candidate.chmod(0o777)
+        root_path = Path(root)
+        _chmod_items(root_path, files)
+        _chmod_items(root_path, dirs)
 
 
 def _handle_unlink_failure(
@@ -102,6 +113,23 @@ def retry_unlink(
             time.sleep(config.retry_delay)
 
 
+def _handle_rmtree_final_failure(
+    path: Path, attempts: int, exc: Exception, logger: logging.Logger
+) -> t.NoReturn:
+    """Handle final rmtree failure by logging and raising appropriate exception."""
+    logger.warning(
+        "Failed to remove temporary directory %s after %d attempts",
+        path,
+        attempts,
+    )
+    raise RobustRmtreeError(path, attempts, exc) from exc
+
+
+def _log_rmtree_success(path: Path, logger: logging.Logger) -> None:
+    """Log successful directory removal."""
+    logger.debug("Successfully removed temporary directory: %s", path)
+
+
 def robust_rmtree(
     path: Path,
     *,
@@ -112,28 +140,16 @@ def robust_rmtree(
     if not path.exists():
         return
 
-    last_exception: Exception | None = None
+    log = logger or _logger
     for attempt in range(config.max_attempts):
         try:
             _fix_windows_permissions(path)
             shutil.rmtree(path)
         except OSError as exc:
-            last_exception = exc
             if attempt == config.max_attempts - 1:
-                (logger or _logger).warning(
-                    "Failed to remove temporary directory %s after %d attempts",
-                    path,
-                    config.max_attempts,
-                )
-                raise RobustRmtreeError(
-                    path, config.max_attempts, last_exception
-                ) from exc
-            _log_retry_attempt(logger, attempt, path, config.retry_delay)
+                _handle_rmtree_final_failure(path, config.max_attempts, exc, log)
+            _log_retry_attempt(log, attempt, path, config.retry_delay)
             time.sleep(config.retry_delay)
         else:
-            (logger or _logger).debug(
-                "Successfully removed temporary directory: %s", path
-            )
+            _log_rmtree_success(path, log)
             return
-
-    raise RobustRmtreeError(path, config.max_attempts, last_exception)
