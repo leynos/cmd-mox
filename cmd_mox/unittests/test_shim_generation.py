@@ -175,7 +175,7 @@ def test_create_windows_shim_retries_locked_file(
 
     monkeypatch.setattr(pathlib.Path, "unlink", flaky_unlink)
     sleeps: list[float] = []
-    monkeypatch.setattr("cmd_mox.shimgen.time.sleep", sleeps.append)
+    monkeypatch.setattr("cmd_mox.fs_retry.time.sleep", sleeps.append)
 
     mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
     assert mapping["git"].exists()
@@ -195,7 +195,7 @@ def test_create_windows_shim_raises_after_retries(
         raise PermissionError("locked")
 
     monkeypatch.setattr(pathlib.Path, "unlink", locked_unlink)
-    monkeypatch.setattr("cmd_mox.shimgen.time.sleep", lambda _duration: None)
+    monkeypatch.setattr("cmd_mox.fs_retry.time.sleep", lambda _duration: None)
 
     with pytest.raises(FileExistsError, match="Failed to remove existing launcher"):
         shimgen.create_shim_symlinks(tmp_path, ["git"])
