@@ -647,6 +647,9 @@ retries connection attempts with a linear backoff and small jitter to avoid
 retry storms and transparently switches to a Windows named pipe when
 ``os.name == 'nt'``. Retry behaviour is configured via the `RetryConfig`
 dataclass, which groups the retry count, backoff, and jitter parameters. The
+Unix socket and named pipe clients both delegate to a shared
+`retry_with_backoff` helper so jitter bounds, logging, and retry calculations are tuned
+in one place rather than duplicated across transports. The
 client then validates that the server's reply is valid JSON, raising a
 `RuntimeError` if decoding fails. These safeguards make the IPC bus robust on
 slower or heavily loaded systems.
