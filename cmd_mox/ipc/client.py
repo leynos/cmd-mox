@@ -291,7 +291,7 @@ def _connect_unix_with_retries(
     retry_config.validate(timeout)
     address = str(sock_path)
 
-    def attempt_connect(attempt: int) -> socket.socket:
+    def attempt_connect(_attempt: int) -> socket.socket:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         try:
