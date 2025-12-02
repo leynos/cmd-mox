@@ -69,6 +69,17 @@ def _fix_windows_permissions(path: Path) -> None:
                 candidate.chmod(0o777)
 
 
+def _handle_unlink_failure(
+    path: Path,
+    exc: Exception,
+    exc_factory: t.Callable[[Path, Exception], Exception] | None,
+) -> t.NoReturn:
+    """Handle final unlink failure by raising the appropriate exception."""
+    if exc_factory is not None:
+        raise exc_factory(path, exc) from exc
+    raise exc
+
+
 def retry_unlink(
     path: Path,
     *,
@@ -80,23 +91,15 @@ def retry_unlink(
     if not path.exists():
         return
 
-    last_exc: Exception | None = None
     for attempt in range(config.max_attempts):
         try:
             path.unlink()
+            return  # noqa: TRY300
         except (PermissionError, OSError) as exc:
-            last_exc = exc
             if attempt == config.max_attempts - 1:
-                if exc_factory is not None:
-                    raise exc_factory(path, exc) from exc
-                raise
+                _handle_unlink_failure(path, exc, exc_factory)
             _log_retry_attempt(logger, attempt, path, config.retry_delay)
             time.sleep(config.retry_delay)
-        else:
-            return
-
-    if last_exc is not None:
-        raise last_exc
 
 
 def robust_rmtree(
