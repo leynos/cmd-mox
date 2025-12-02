@@ -122,7 +122,7 @@ def _handle_retry_failure(
     exc: Exception,
     context: _RetryContext,
 ) -> float:
-    """Process a retryable failure and return the backoff delay.
+    """Process a failure from a retry attempt and return the backoff delay.
 
     Raises *exc* when no further retries should be attempted.
     """
@@ -156,7 +156,8 @@ def retry_with_backoff(
     defaulting to retrying until the configured maximum attempts. The delay
     between attempts is calculated from ``retry_config.backoff`` and
     ``retry_config.jitter`` using :func:`calculate_retry_delay`, and the wait
-    is performed via ``strategy.sleep``.
+    is performed via ``strategy.sleep`` (defaulting to :func:`time.sleep` when
+    *strategy* is ``None``).
     """
     max_attempts = retry_config.retries
     strat = strategy if strategy is not None else RetryStrategy()
