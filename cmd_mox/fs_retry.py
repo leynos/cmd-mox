@@ -8,8 +8,8 @@ import os
 import shutil
 import time
 import typing as t
-from pathlib import Path
 from collections.abc import Iterable
+from pathlib import Path
 
 from . import _path_utils as path_utils
 
@@ -59,9 +59,7 @@ def _should_fix_permissions(candidate: Path) -> bool:
     return candidate.exists() and not candidate.is_symlink()
 
 
-def _chmod_items(
-    root: Path, items: Iterable[str | os.PathLike[str]]
-) -> None:
+def _chmod_items(root: Path, items: Iterable[str | os.PathLike[str]]) -> None:
     """Apply chmod 0o777 to non-symlink items in a directory."""
     for name in items:
         candidate = root / name
