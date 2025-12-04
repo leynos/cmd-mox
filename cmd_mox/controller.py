@@ -430,22 +430,32 @@ class CmdMox:
 
         missing: list[str] = []
         for attr in attrs:
-            value = getattr(env, attr, None)
-            if attr == "shim_dir":
-                try:
-                    ensure_dir_exists(
-                        value,
-                        name="Replay shim directory",
-                        error_type=MissingEnvironmentError,
-                    )
-                except MissingEnvironmentError as exc:
-                    missing.append(str(exc))
-            elif value is None:
-                label = attr.replace("_", " ")
-                missing.append(f"Replay {label} is missing")
+            error = self._validate_env_attr(env, attr)
+            if error is not None:
+                missing.append(error)
 
         if missing:
             raise MissingEnvironmentError("; ".join(missing))
+
+    def _validate_env_attr(self, env: EnvironmentManager, attr: str) -> str | None:
+        """Return an error message when *attr* is invalid, otherwise ``None``."""
+        value = getattr(env, attr, None)
+        if attr == "shim_dir":
+            try:
+                ensure_dir_exists(
+                    value,
+                    name="Replay shim directory",
+                    error_type=MissingEnvironmentError,
+                )
+            except MissingEnvironmentError as exc:
+                return str(exc)
+            return None
+
+        if value is None:
+            label = attr.replace("_", " ")
+            return f"Replay {label} is missing"
+
+        return None
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""
