@@ -49,32 +49,6 @@ class RobustRmtreeError(OSError):
         self.last_exception = last_exception
 
 
-def _log_retry_attempt(
-    logger: logging.Logger | None, attempt: int, path: Path, delay: float
-) -> None:
-    """Log that a removal attempt failed and will retry."""
-    log = logger or _logger
-    log.debug(
-        "Attempt %d to remove %s failed. Retrying in %.1fs...",
-        attempt + 1,
-        path,
-        delay,
-    )
-
-
-def _should_fix_permissions(candidate: Path) -> bool:
-    """Check if a path should have its permissions fixed."""
-    return candidate.exists() and not candidate.is_symlink()
-
-
-def _chmod_items(root: Path, items: t.Iterable[str | os.PathLike[str]]) -> None:
-    """Apply chmod 0o777 to non-symlink items in a directory."""
-    for name in items:
-        candidate = root / name
-        if _should_fix_permissions(candidate):
-            candidate.chmod(0o777)
-
-
 def _fix_windows_permissions(path: Path) -> None:
     """Ensure all files under *path* are writable on Windows before deletion."""
     if not path_utils.IS_WINDOWS:
@@ -82,19 +56,10 @@ def _fix_windows_permissions(path: Path) -> None:
 
     for root, dirs, files in os.walk(path):
         root_path = Path(root)
-        _chmod_items(root_path, files)
-        _chmod_items(root_path, dirs)
-
-
-def _handle_unlink_failure(
-    path: Path,
-    exc: Exception,
-    exc_factory: t.Callable[[Path, Exception], Exception] | None,
-) -> t.NoReturn:
-    """Handle final unlink failure by raising the appropriate exception."""
-    if exc_factory is not None:
-        raise exc_factory(path, exc) from exc
-    raise exc
+        for name in (*files, *dirs):
+            candidate = root_path / name
+            if candidate.exists() and not candidate.is_symlink():
+                candidate.chmod(0o777)
 
 
 def retry_unlink(
@@ -117,26 +82,17 @@ def retry_unlink(
             return
         except (PermissionError, OSError) as exc:
             if attempt == config.max_attempts - 1:
-                _handle_unlink_failure(path, exc, exc_factory)
-            _log_retry_attempt(log, attempt, path, config.retry_delay)
+                if exc_factory is not None:
+                    raise exc_factory(path, exc) from exc
+                raise
+
+            log.debug(
+                "Attempt %d to remove %s failed. Retrying in %.1fs...",
+                attempt + 1,
+                path,
+                config.retry_delay,
+            )
             time.sleep(config.retry_delay)
-
-
-def _handle_rmtree_final_failure(
-    path: Path, attempts: int, exc: Exception, logger: logging.Logger
-) -> t.NoReturn:
-    """Handle final rmtree failure by logging and raising appropriate exception."""
-    logger.warning(
-        "Failed to remove temporary directory %s after %d attempts",
-        path,
-        attempts,
-    )
-    raise RobustRmtreeError(path, attempts, exc) from exc
-
-
-def _log_rmtree_success(path: Path, logger: logging.Logger) -> None:
-    """Log successful directory removal."""
-    logger.debug("Successfully removed temporary directory: %s", path)
 
 
 def robust_rmtree(
@@ -158,9 +114,20 @@ def robust_rmtree(
             if isinstance(exc, FileNotFoundError) or not path.exists():
                 return
             if attempt == config.max_attempts - 1:
-                _handle_rmtree_final_failure(path, config.max_attempts, exc, log)
-            _log_retry_attempt(log, attempt, path, config.retry_delay)
+                log.warning(
+                    "Failed to remove temporary directory %s after %d attempts",
+                    path,
+                    config.max_attempts,
+                )
+                raise RobustRmtreeError(path, config.max_attempts, exc) from exc
+
+            log.debug(
+                "Attempt %d to remove %s failed. Retrying in %.1fs...",
+                attempt + 1,
+                path,
+                config.retry_delay,
+            )
             time.sleep(config.retry_delay)
         else:
-            _log_rmtree_success(path, log)
+            log.debug("Successfully removed temporary directory: %s", path)
             return
