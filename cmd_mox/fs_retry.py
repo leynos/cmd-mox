@@ -136,6 +136,17 @@ def _log_rmtree_success(path: Path, logger: logging.Logger) -> None:
     logger.debug("Successfully removed temporary directory: %s", path)
 
 
+def _handle_unlink_failure(
+    path: Path,
+    exc: Exception,
+    exc_factory: t.Callable[[Path, Exception], Exception] | None,
+) -> t.NoReturn:
+    """Handle final unlink failure by raising the appropriate exception."""
+    if exc_factory is not None:
+        raise exc_factory(path, exc) from exc
+    raise
+
+
 def retry_unlink(
     path: Path,
     *,
@@ -182,9 +193,7 @@ def retry_unlink(
         except (PermissionError, OSError) as exc:
             is_last = attempt == config.max_attempts - 1
             if is_last:
-                if exc_factory is not None:
-                    raise exc_factory(path, exc) from exc
-                raise
+                _handle_unlink_failure(path, exc, exc_factory)
 
             _log_retry_attempt(log, attempt, path, config.retry_delay)
             time.sleep(config.retry_delay)
