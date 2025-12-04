@@ -19,7 +19,6 @@ from cmd_mox.environment import (
     EnvironmentManager,
 )
 from cmd_mox.ipc import IPCServer
-from cmd_mox.fs_retry import RetryConfig
 from cmd_mox.shimgen import (
     _escape_batch_literal,
     _format_windows_launcher,
@@ -32,6 +31,8 @@ from cmd_mox.shimgen import (
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing helpers only
     import subprocess
+
+    from cmd_mox.fs_retry import RetryConfig
 
 
 def _assert_is_shim(path: pathlib.Path) -> None:
