@@ -67,23 +67,6 @@ def _path_is_missing(path: Path, exc: OSError) -> bool:
     return isinstance(exc, FileNotFoundError) or not path.exists()
 
 
-def _handle_rmtree_final_failure(
-    path: Path, attempts: int, exc: OSError, logger: logging.Logger
-) -> t.NoReturn:
-    """Handle final rmtree failure by logging and raising RobustRmtreeError."""
-    logger.warning(
-        "Failed to remove temporary directory %s after %d attempts",
-        path,
-        attempts,
-    )
-    raise RobustRmtreeError(path, attempts, exc) from exc
-
-
-def _log_rmtree_success(path: Path, logger: logging.Logger) -> None:
-    """Log successful directory removal."""
-    logger.debug("Successfully removed temporary directory: %s", path)
-
-
 def _handle_unlink_failure(
     path: Path,
     exc: Exception,
@@ -147,7 +130,12 @@ def robust_rmtree(
                 return
             is_last = attempt == config.max_attempts - 1
             if is_last:
-                _handle_rmtree_final_failure(path, config.max_attempts, exc, log)
+                log.warning(
+                    "Failed to remove temporary directory %s after %d attempts",
+                    path,
+                    config.max_attempts,
+                )
+                raise RobustRmtreeError(path, config.max_attempts, exc) from exc
 
             log.debug(
                 "Attempt %d to remove %s failed. Retrying in %.1fs...",
@@ -157,5 +145,5 @@ def robust_rmtree(
             )
             time.sleep(config.retry_delay)
         else:
-            _log_rmtree_success(path, log)
+            log.debug("Successfully removed temporary directory: %s", path)
             return
