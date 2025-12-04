@@ -11,7 +11,12 @@ from collections import deque
 from pathlib import Path
 
 from .command_runner import CommandRunner
-from .environment import IS_WINDOWS, EnvironmentManager, temporary_env
+from .environment import (
+    IS_WINDOWS,
+    EnvironmentManager,
+    ensure_dir_exists,
+    temporary_env,
+)
 from .errors import LifecycleError, MissingEnvironmentError, UnexpectedCommandError
 from .ipc import (
     CallbackIPCServer,
@@ -421,12 +426,26 @@ class CmdMox:
         """Ensure all referenced ``EnvironmentManager`` attributes exist."""
         env = self.environment
         if env is None:  # pragma: no cover - defensive guard
-            raise MissingEnvironmentError
-        missing = [attr for attr in attrs if getattr(env, attr) is None]
+            raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
+
+        missing: list[str] = []
+        for attr in attrs:
+            value = getattr(env, attr, None)
+            if attr == "shim_dir":
+                try:
+                    ensure_dir_exists(
+                        value,
+                        name="Replay shim directory",
+                        error_type=MissingEnvironmentError,
+                    )
+                except MissingEnvironmentError as exc:
+                    missing.append(str(exc))
+            elif value is None:
+                label = attr.replace("_", " ")
+                missing.append(f"Replay {label} is missing")
+
         if missing:
-            missing_list = ", ".join(missing)
-            msg = f"Missing environment attributes: {missing_list}"
-            raise MissingEnvironmentError(msg)
+            raise MissingEnvironmentError("; ".join(missing))
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay."""
@@ -455,13 +474,16 @@ class CmdMox:
         env = self.environment
         if env is None:
             raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
-        if env.shim_dir is None:
-            msg = "Replay shim directory is missing"
-            raise MissingEnvironmentError(msg)
+
+        shim_dir = ensure_dir_exists(
+            env.shim_dir,
+            name="Replay shim directory",
+            error_type=MissingEnvironmentError,
+        )
         if env.socket_path is None:
             msg = "Replay socket path is missing"
             raise MissingEnvironmentError(msg)
-        return Path(env.shim_dir), Path(env.socket_path)
+        return shim_dir, Path(env.socket_path)
 
     def _is_environment_initialized(self) -> bool:
         """Check if environment manager is properly initialized."""

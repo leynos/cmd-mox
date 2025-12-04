@@ -27,7 +27,12 @@ def test_cmdmox_replay_fails_when_attr_missing(
     mox.__enter__()
 
     monkeypatch.setattr(mox.environment, attr_name, None)
-    with pytest.raises(MissingEnvironmentError, match=attr_name):
+    expected = {
+        "shim_dir": "Replay shim directory is missing",
+        "socket_path": "Replay socket path is missing",
+    }[attr_name]
+
+    with pytest.raises(MissingEnvironmentError, match=expected):
         mox.replay()
 
     # Use the public context-manager API to restore PATH and other state.
@@ -46,7 +51,10 @@ def test_cmdmox_replay_reports_all_missing_attrs(
 
     monkeypatch.setattr(mox.environment, "shim_dir", None)
     monkeypatch.setattr(mox.environment, "socket_path", None)
-    with pytest.raises(MissingEnvironmentError, match="shim_dir, socket_path"):
+    with pytest.raises(
+        MissingEnvironmentError,
+        match=r"Replay shim directory.*Replay socket path",
+    ):
         mox.replay()
 
     # Use the public context-manager API to restore PATH and other state.
@@ -65,7 +73,10 @@ def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) 
     # Monkeypatch after entering the context but before verify() runs.
     monkeypatch.setattr(mox.environment, "shim_dir", None)
     monkeypatch.setattr(mox.environment, "socket_path", None)
-    with pytest.raises(MissingEnvironmentError, match=r"shim_dir.*socket_path"):
+    with pytest.raises(
+        MissingEnvironmentError,
+        match=r"Replay shim directory.*Replay socket path",
+    ):
         mox.verify()
     mox.__exit__(None, None, None)
 

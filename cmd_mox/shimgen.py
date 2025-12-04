@@ -9,6 +9,7 @@ import typing as t
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
+from cmd_mox.environment import ensure_dir_exists
 from cmd_mox.fs_retry import DEFAULT_UNLINK_RETRY, retry_unlink
 
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
@@ -146,12 +147,7 @@ def _create_posix_symlink(directory: Path, name: str) -> Path:
 
 def _validate_shim_directory(directory: Path) -> None:
     """Validate that *directory* exists and is a directory."""
-    if not directory.exists():
-        msg = f"Shim directory does not exist: {directory}"
-        raise FileNotFoundError(msg)
-    if not directory.is_dir():
-        msg = f"Shim directory is not a directory: {directory}"
-        raise FileNotFoundError(msg)
+    ensure_dir_exists(directory, name="Shim directory")
 
 
 def _ensure_shim_template_ready(shim_path: Path) -> None:
