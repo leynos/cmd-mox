@@ -62,6 +62,39 @@ def _fix_windows_permissions(path: Path) -> None:
                 candidate.chmod(0o777)
 
 
+def _path_is_missing(path: Path, exc: OSError) -> bool:
+    """Check if the path is missing (either exception indicates or actual check)."""
+    return isinstance(exc, FileNotFoundError) or not path.exists()
+
+
+def _handle_rmtree_final_failure(
+    path: Path, attempts: int, exc: OSError, logger: logging.Logger
+) -> t.NoReturn:
+    """Handle final rmtree failure by logging and raising RobustRmtreeError."""
+    logger.warning(
+        "Failed to remove temporary directory %s after %d attempts",
+        path,
+        attempts,
+    )
+    raise RobustRmtreeError(path, attempts, exc) from exc
+
+
+def _log_rmtree_success(path: Path, logger: logging.Logger) -> None:
+    """Log successful directory removal."""
+    logger.debug("Successfully removed temporary directory: %s", path)
+
+
+def _handle_unlink_failure(
+    path: Path,
+    exc: Exception,
+    exc_factory: t.Callable[[Path, Exception], Exception] | None,
+) -> t.NoReturn:
+    """Handle final unlink failure by raising the appropriate exception."""
+    if exc_factory is not None:
+        raise exc_factory(path, exc) from exc
+    raise exc
+
+
 def retry_unlink(
     path: Path,
     *,
@@ -82,9 +115,7 @@ def retry_unlink(
             return
         except (PermissionError, OSError) as exc:
             if attempt == config.max_attempts - 1:
-                if exc_factory is not None:
-                    raise exc_factory(path, exc) from exc
-                raise
+                _handle_unlink_failure(path, exc, exc_factory)
 
             log.debug(
                 "Attempt %d to remove %s failed. Retrying in %.1fs...",
@@ -111,15 +142,10 @@ def robust_rmtree(
             _fix_windows_permissions(path)
             shutil.rmtree(path)
         except OSError as exc:
-            if isinstance(exc, FileNotFoundError) or not path.exists():
+            if _path_is_missing(path, exc):
                 return
             if attempt == config.max_attempts - 1:
-                log.warning(
-                    "Failed to remove temporary directory %s after %d attempts",
-                    path,
-                    config.max_attempts,
-                )
-                raise RobustRmtreeError(path, config.max_attempts, exc) from exc
+                _handle_rmtree_final_failure(path, config.max_attempts, exc, log)
 
             log.debug(
                 "Attempt %d to remove %s failed. Retrying in %.1fs...",
@@ -129,5 +155,5 @@ def robust_rmtree(
             )
             time.sleep(config.retry_delay)
         else:
-            log.debug("Successfully removed temporary directory: %s", path)
+            _log_rmtree_success(path, log)
             return
