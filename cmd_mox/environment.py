@@ -6,15 +6,14 @@ import contextlib
 import functools
 import logging
 import os
-import shutil
 import tempfile
 import threading
-import time
 import typing as t
 from pathlib import Path
 
 from . import _path_utils as path_utils
 from ._validators import validate_positive_finite_timeout
+from .fs_retry import robust_rmtree
 
 IS_WINDOWS = path_utils.IS_WINDOWS
 _MAX_PATH_THRESHOLD: t.Final[int] = 240
@@ -103,72 +102,6 @@ def _restore_env(orig_env: dict[str, str]) -> None:
     os.environ.update(orig_env)
 
 
-class RobustRmtreeError(OSError):
-    """Raised when :func:`_robust_rmtree` exhausts all removal attempts."""
-
-    def __init__(
-        self, path: Path, attempts: int, last_exception: Exception | None
-    ) -> None:
-        msg = f"Failed to remove {path} after {attempts} attempts"
-        super().__init__(msg)
-        self.path = path
-        self.attempts = attempts
-        self.last_exception = last_exception
-
-
-def _robust_rmtree(path: Path, max_attempts: int = 4, retry_delay: float = 0.1) -> None:
-    """Remove directory tree with retries and better error handling."""
-    if not path.exists():
-        return
-    _retry_removal(path, max_attempts, retry_delay)
-
-
-def _retry_removal(path: Path, attempts: int, retry_delay: float) -> None:
-    """Attempt to remove *path* up to ``attempts`` times."""
-    last_exception: Exception | None = None
-    for attempt in range(attempts):
-        try:
-            raise_on_error = attempt == attempts - 1
-            if _attempt_single_removal(path, raise_on_error=raise_on_error):
-                return
-        except OSError as exc:
-            last_exception = exc
-        if attempt < attempts - 1:
-            _log_retry_attempt(attempt, path, retry_delay)
-            time.sleep(retry_delay)
-        else:
-            _handle_final_failure(path, attempts, last_exception)
-
-
-def _attempt_single_removal(path: Path, *, raise_on_error: bool) -> bool:
-    """Try removing *path* once; return ``True`` on success."""
-    try:
-        _fix_windows_permissions(path)
-        shutil.rmtree(path)
-        logger.debug("Successfully removed temporary directory: %s", path)
-    except OSError:
-        if raise_on_error:
-            raise
-        return False
-    else:
-        return True
-
-
-def _fix_windows_permissions(path: Path) -> None:
-    """Ensure all files under *path* are writable on Windows."""
-    if not path_utils.IS_WINDOWS:
-        return
-    for root, dirs, files in os.walk(path):
-        for name in files:
-            p = Path(root) / name
-            if p.exists() and not p.is_symlink():
-                p.chmod(0o777)
-        for name in dirs:
-            p = Path(root) / name
-            if p.exists() and not p.is_symlink():
-                p.chmod(0o777)
-
-
 def _ensure_windows_pathext(original: dict[str, str]) -> None:
     """Guarantee that ``.CMD`` entries are available in ``PATHEXT`` on Windows."""
     if not path_utils.IS_WINDOWS:
@@ -184,28 +117,6 @@ def _ensure_windows_pathext(original: dict[str, str]) -> None:
     if ".CMD" not in seen:
         parts.append(".CMD")
     os.environ["PATHEXT"] = os.pathsep.join(parts)
-
-
-def _log_retry_attempt(attempt: int, path: Path, delay: float) -> None:
-    """Log that a removal attempt failed and will retry."""
-    logger.debug(
-        "Attempt %d to remove %s failed. Retrying in %.1fs...",
-        attempt + 1,
-        path,
-        delay,
-    )
-
-
-def _handle_final_failure(
-    path: Path, attempts: int, last_exception: Exception | None
-) -> None:
-    """Log and raise after exhausting all retries."""
-    logger.warning(
-        "Failed to remove temporary directory %s after %d attempts",
-        path,
-        attempts,
-    )
-    raise RobustRmtreeError(path, attempts, last_exception) from last_exception
 
 
 CleanupError = tuple[str, BaseException]
@@ -379,7 +290,7 @@ class EnvironmentManager:
 
         shim = t.cast("Path", self.shim_dir)  # helper ensures this is a Path
         try:
-            _robust_rmtree(shim)
+            robust_rmtree(shim, logger=logger)
         finally:
             self._created_dir = None
 

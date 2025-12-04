@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
-import time
 import typing as t
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
+from cmd_mox.fs_retry import DEFAULT_UNLINK_RETRY, retry_unlink
 
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
+LAUNCHER_RETRY = DEFAULT_UNLINK_RETRY
+logger = logging.getLogger(__name__)
 
 
 def _escape_batch_literal(value: str) -> str:
@@ -101,32 +104,26 @@ def _validate_launcher_path(launcher: Path) -> None:
         raise FileExistsError(msg)
 
 
-def _remove_with_retry(launcher: Path, max_retries: int = 3) -> None:
-    """Remove *launcher* with retry logic for locked files on Windows."""
-    if not launcher.exists():
-        return
-
-    for attempt in range(max_retries):
-        try:
-            launcher.unlink()
-        except (PermissionError, OSError) as exc:
-            if attempt == max_retries - 1:
-                msg = (
-                    f"Failed to remove existing launcher {launcher!r}: {exc}\n"
-                    "The file may be in use or locked. Please close any "
-                    "processes using it and try again."
-                )
-                raise FileExistsError(msg) from exc
-            time.sleep(0.5)
-        else:
-            return
+def _launcher_unlink_error(path: Path, exc: Exception) -> FileExistsError:
+    """Return a descriptive exception when launcher removal exhausts retries."""
+    msg = (
+        f"Failed to remove existing launcher {path!r}: {exc}\n"
+        "The file may be in use or locked. Please close any "
+        "processes using it and try again."
+    )
+    return FileExistsError(msg)
 
 
 def _create_windows_shim(directory: Path, name: str) -> Path:
     """Create a ``.cmd`` launcher for *name* that reuses :mod:`cmd_mox.shim`."""
     launcher = directory / f"{name}.cmd"
     _validate_launcher_path(launcher)
-    _remove_with_retry(launcher)
+    retry_unlink(
+        launcher,
+        config=LAUNCHER_RETRY,
+        logger=logger,
+        exc_factory=_launcher_unlink_error,
+    )
     launcher.write_text(
         _format_windows_launcher(sys.executable, SHIM_PATH),
         encoding="utf-8",

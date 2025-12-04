@@ -19,10 +19,9 @@ from cmd_mox.environment import (
     CMOX_IPC_TIMEOUT_ENV,
     CleanupError,
     EnvironmentManager,
-    RobustRmtreeError,
-    _robust_rmtree,
     temporary_env,
 )
+from cmd_mox.fs_retry import RetryConfig, RobustRmtreeError, robust_rmtree
 from cmd_mox.unittests._env_helpers import (
     require_shim_dir,
     require_socket_path,
@@ -212,47 +211,49 @@ def test_nested_temporary_env() -> None:
 
 
 def test_robust_rmtree_success(tmp_path: Path) -> None:
-    """Test that _robust_rmtree successfully removes a directory."""
+    """Test that robust_rmtree successfully removes a directory."""
     test_dir = tmp_path / "test_remove"
     test_dir.mkdir()
     (test_dir / "file.txt").write_text("test")
 
     assert test_dir.exists()
-    _robust_rmtree(test_dir)
+    robust_rmtree(test_dir)
     assert not test_dir.exists()
 
 
 def test_robust_rmtree_nonexistent_path(tmp_path: Path) -> None:
-    """Test that _robust_rmtree handles nonexistent paths gracefully."""
+    """Test that robust_rmtree handles nonexistent paths gracefully."""
     nonexistent = tmp_path / "does_not_exist"
     assert not nonexistent.exists()
-    _robust_rmtree(nonexistent)  # Should not raise
+    robust_rmtree(nonexistent)  # Should not raise
 
 
 def test_robust_rmtree_retry_on_failure(tmp_path: Path) -> None:
-    """Test that _robust_rmtree retries on failure."""
+    """Test that robust_rmtree retries on failure."""
     test_dir = tmp_path / "test_retry"
     test_dir.mkdir()
 
-    with patch("cmd_mox.environment.shutil.rmtree") as mock_rmtree:
+    with patch("cmd_mox.fs_retry.shutil.rmtree") as mock_rmtree:
         # Simulate transient failure followed by success
         mock_rmtree.side_effect = [OSError("Permission denied"), None]
 
-        _robust_rmtree(test_dir, max_attempts=3, retry_delay=0.01)
+        robust_rmtree(test_dir, config=RetryConfig(max_attempts=3, retry_delay=0.01))
 
         assert mock_rmtree.call_count == 2
 
 
 def test_robust_rmtree_max_attempts_exceeded(tmp_path: Path) -> None:
-    """Test that _robust_rmtree raises after max attempts exceeded."""
+    """Test that robust_rmtree raises after max attempts exceeded."""
     test_dir = tmp_path / "test_fail"
     test_dir.mkdir()
 
-    with patch("cmd_mox.environment.shutil.rmtree") as mock_rmtree:
+    with patch("cmd_mox.fs_retry.shutil.rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Persistent permission denied")
 
         with pytest.raises(RobustRmtreeError) as exc:
-            _robust_rmtree(test_dir, max_attempts=2, retry_delay=0.01)
+            robust_rmtree(
+                test_dir, config=RetryConfig(max_attempts=2, retry_delay=0.01)
+            )
 
         assert mock_rmtree.call_count == 2  # Initial + 1 retry
     assert isinstance(exc.value.__cause__, OSError)
@@ -277,7 +278,7 @@ def test_environment_manager_cleanup_error_basic() -> None:
     """Ensure EnvironmentManager handles generic cleanup errors."""
     original_env = os.environ.copy()
 
-    with patch("cmd_mox.environment._robust_rmtree") as mock_rmtree:
+    with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Cleanup failed")
 
         with pytest.raises(RuntimeError, match="Cleanup failed"), EnvironmentManager():
@@ -287,11 +288,25 @@ def test_environment_manager_cleanup_error_basic() -> None:
     assert os.environ == original_env
 
 
+def test_environment_manager_cleanup_robust_error() -> None:
+    """Cleanup should surface RobustRmtreeError via RuntimeError wrapper."""
+    original_env = os.environ.copy()
+    failure = RobustRmtreeError(Path("shim"), 3, OSError("locked"))
+
+    with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
+        mock_rmtree.side_effect = failure
+
+        with pytest.raises(RuntimeError, match="Cleanup failed"), EnvironmentManager():
+            pass
+
+    assert os.environ == original_env
+
+
 def test_environment_manager_cleanup_error_during_exception() -> None:
     """Test cleanup errors are logged but don't mask original exceptions."""
     original_env = os.environ.copy()
 
-    with patch("cmd_mox.environment._robust_rmtree") as mock_rmtree:
+    with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Cleanup failed")
 
         # Original exception should be preserved, cleanup error logged
@@ -360,7 +375,7 @@ def _test_environment_cleanup_error(
             CleanupErrorTestConfig(manual_restore=True),
         ),
         CleanupErrorTestCase(
-            "cmd_mox.environment._robust_rmtree",
+            "cmd_mox.environment.robust_rmtree",
             "rmtree failed",
             "Cleanup failed: Directory cleanup failed: rmtree failed",
             CleanupErrorTestConfig(check_cause=True),
@@ -439,8 +454,8 @@ def test_cleanup_temporary_directory_skip_logic(
     cleanup_errors: list[CleanupError] = []
     caplog.clear()
 
-    real_rmtree = envmod._robust_rmtree
-    with patch("cmd_mox.environment._robust_rmtree") as rm:
+    real_rmtree = envmod.robust_rmtree
+    with patch("cmd_mox.environment.robust_rmtree") as rm:
         rm.side_effect = real_rmtree
 
         if scenario.name == "replaced":
@@ -454,7 +469,7 @@ def test_cleanup_temporary_directory_skip_logic(
 
         if scenario.should_remove:
             assert created is not None
-            rm.assert_called_once_with(created)
+            rm.assert_called_once_with(created, logger=envmod.logger)
         else:
             rm.assert_not_called()
 
@@ -500,7 +515,7 @@ def test_environment_manager_readonly_file_cleanup(tmp_path: Path) -> None:
     readonly_file.chmod(stat.S_IREAD)
 
     # The robust cleanup should handle this
-    _robust_rmtree(test_dir)
+    robust_rmtree(test_dir)
     assert not test_dir.exists()
 
 
