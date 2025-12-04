@@ -288,6 +288,20 @@ def test_environment_manager_cleanup_error_basic() -> None:
     assert os.environ == original_env
 
 
+def test_environment_manager_cleanup_robust_error() -> None:
+    """Cleanup should surface RobustRmtreeError via RuntimeError wrapper."""
+    original_env = os.environ.copy()
+    failure = RobustRmtreeError(Path("shim"), 3, OSError("locked"))
+
+    with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
+        mock_rmtree.side_effect = failure
+
+        with pytest.raises(RuntimeError, match="Cleanup failed"), EnvironmentManager():
+            pass
+
+    assert os.environ == original_env
+
+
 def test_environment_manager_cleanup_error_during_exception() -> None:
     """Test cleanup errors are logged but don't mask original exceptions."""
     original_env = os.environ.copy()

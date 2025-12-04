@@ -9,10 +9,10 @@ import typing as t
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
-from cmd_mox.fs_retry import RetryConfig, retry_unlink
+from cmd_mox.fs_retry import DEFAULT_UNLINK_RETRY, retry_unlink
 
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
-LAUNCHER_RETRY = RetryConfig(max_attempts=3, retry_delay=0.5)
+LAUNCHER_RETRY = DEFAULT_UNLINK_RETRY
 logger = logging.getLogger(__name__)
 
 

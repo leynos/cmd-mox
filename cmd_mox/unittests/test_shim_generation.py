@@ -19,6 +19,7 @@ from cmd_mox.environment import (
     EnvironmentManager,
 )
 from cmd_mox.ipc import IPCServer
+from cmd_mox.fs_retry import RetryConfig
 from cmd_mox.shimgen import (
     _escape_batch_literal,
     _format_windows_launcher,
@@ -198,6 +199,53 @@ def test_create_windows_shim_raises_after_retries(
     monkeypatch.setattr("cmd_mox.fs_retry.time.sleep", lambda _duration: None)
 
     with pytest.raises(FileExistsError, match="Failed to remove existing launcher"):
+        shimgen.create_shim_symlinks(tmp_path, ["git"])
+
+
+def test_create_windows_shim_uses_shared_retry_config(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Launcher removal should use the shared unlink retry config."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    launcher.write_text("old")
+
+    calls: list[tuple[pathlib.Path, RetryConfig]] = []
+
+    def fake_retry_unlink(
+        path: pathlib.Path,
+        *,
+        config: RetryConfig,
+        logger: object | None = None,
+        exc_factory: object | None = None,
+    ) -> None:
+        calls.append((path, config))
+        launcher.unlink()  # succeed immediately
+
+    monkeypatch.setattr(shimgen, "retry_unlink", fake_retry_unlink)
+
+    shimgen.create_shim_symlinks(tmp_path, ["git"])
+
+    assert calls == [(launcher, shimgen.LAUNCHER_RETRY)]
+    assert shimgen.LAUNCHER_RETRY is shimgen.DEFAULT_UNLINK_RETRY
+
+
+def test_create_windows_shim_retry_failure_message(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failure after all retries should surface the configured message."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    launcher.write_text("old")
+
+    def locked_unlink(self: pathlib.Path) -> None:
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(pathlib.Path, "unlink", locked_unlink)
+    monkeypatch.setattr("cmd_mox.fs_retry.time.sleep", lambda _duration: None)
+
+    msg = "Failed to remove existing launcher"
+    with pytest.raises(FileExistsError, match=msg):
         shimgen.create_shim_symlinks(tmp_path, ["git"])
 
 

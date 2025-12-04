@@ -22,6 +22,15 @@ class RetryConfig:
     max_attempts: int
     retry_delay: float
 
+    def __post_init__(self) -> None:
+        """Validate retry configuration values."""
+        if self.max_attempts < 1:
+            msg = "max_attempts must be >= 1"
+            raise ValueError(msg)
+        if self.retry_delay < 0:
+            msg = "retry_delay must be >= 0"
+            raise ValueError(msg)
+
 
 DEFAULT_UNLINK_RETRY = RetryConfig(max_attempts=3, retry_delay=0.5)
 DEFAULT_RMTREE_RETRY = RetryConfig(max_attempts=4, retry_delay=0.1)
@@ -99,14 +108,17 @@ def retry_unlink(
     if not path.exists():
         return
 
+    log = logger or _logger
     for attempt in range(config.max_attempts):
         try:
             path.unlink()
             return  # noqa: TRY300
+        except FileNotFoundError:
+            return
         except (PermissionError, OSError) as exc:
             if attempt == config.max_attempts - 1:
                 _handle_unlink_failure(path, exc, exc_factory)
-            _log_retry_attempt(logger, attempt, path, config.retry_delay)
+            _log_retry_attempt(log, attempt, path, config.retry_delay)
             time.sleep(config.retry_delay)
 
 
@@ -143,6 +155,8 @@ def robust_rmtree(
             _fix_windows_permissions(path)
             shutil.rmtree(path)
         except OSError as exc:
+            if isinstance(exc, FileNotFoundError) or not path.exists():
+                return
             if attempt == config.max_attempts - 1:
                 _handle_rmtree_final_failure(path, config.max_attempts, exc, log)
             _log_retry_attempt(log, attempt, path, config.retry_delay)
