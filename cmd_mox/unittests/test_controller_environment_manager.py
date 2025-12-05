@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing as t
 from pathlib import Path
 
 import pytest
@@ -169,36 +170,37 @@ def test_validate_replay_environment_success(tmp_path: Path) -> None:
     assert socket_path == env.socket_path
 
 
-def test_replay_fails_when_shim_dir_is_file(tmp_path: Path) -> None:
-    """Replay rejects shim_dir paths that are files instead of directories."""
+@pytest.mark.parametrize(
+    ("setup_invalid_path", "expected_error"),
+    [
+        (
+            lambda base: _create_file(base / "not_a_dir"),
+            "Replay shim directory is not a directory",
+        ),
+        (
+            lambda base: base / "missing",
+            "Replay shim directory does not exist",
+        ),
+    ],
+    ids=["file_instead_of_directory", "missing_on_disk"],
+)
+def test_replay_fails_when_shim_dir_is_invalid(
+    setup_invalid_path: t.Callable[[Path], Path], expected_error: str
+) -> None:
+    """Replay rejects shim_dir paths that are not usable directories."""
     mox = CmdMox()
     with mox:
         env = mox.environment
         assert env is not None
         assert env.shim_dir is not None
-        file_path = Path(env.shim_dir) / "not_a_dir"
-        file_path.write_text("content")
-        env.shim_dir = file_path
 
-        with pytest.raises(
-            MissingEnvironmentError,
-            match="Replay shim directory is not a directory",
-        ):
+        invalid = setup_invalid_path(Path(env.shim_dir))
+        env.shim_dir = invalid
+
+        with pytest.raises(MissingEnvironmentError, match=expected_error):
             mox.replay()
 
 
-def test_replay_fails_when_shim_dir_missing_on_disk(tmp_path: Path) -> None:
-    """Replay rejects shim_dir paths that no longer exist on disk."""
-    mox = CmdMox()
-    with mox:
-        env = mox.environment
-        assert env is not None
-        assert env.shim_dir is not None
-        missing_path = Path(env.shim_dir) / "missing"
-        env.shim_dir = missing_path
-
-        with pytest.raises(
-            MissingEnvironmentError,
-            match="Replay shim directory does not exist",
-        ):
-            mox.replay()
+def _create_file(path: Path) -> Path:
+    path.write_text("content")
+    return path
