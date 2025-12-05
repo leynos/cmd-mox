@@ -102,6 +102,27 @@ def test_ensure_dir_exists_supports_custom_error_type() -> None:
         )
 
 
+def test_ensure_dir_exists_uses_missing_message_override() -> None:
+    """Custom missing_message overrides the default error text."""
+    msg = "custom message"
+    with pytest.raises(MissingEnvironmentError, match=msg):
+        ensure_dir_exists(
+            None,
+            name="Replay shim directory",
+            error_type=MissingEnvironmentError,
+            missing_message=msg,
+        )
+
+
+def test_ensure_dir_exists_accepts_str_path(tmp_path: Path) -> None:
+    """String paths are accepted and resolved correctly."""
+    directory = tmp_path / "present_str"
+    directory.mkdir()
+
+    result = ensure_dir_exists(str(directory), name="Shim directory")
+    assert result == directory
+
+
 def test_export_ipc_environment_sets_timeout() -> None:
     """export_ipc_environment exposes timeout overrides when provided."""
     with EnvironmentManager() as env:

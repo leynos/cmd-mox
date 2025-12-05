@@ -34,6 +34,12 @@ if t.TYPE_CHECKING:
     from .expectations import Expectation
 
 
+_ENV_ATTR_RULES: dict[str, tuple[str, bool]] = {
+    "shim_dir": ("Replay shim directory", True),
+    "socket_path": ("Replay socket path", False),
+}
+
+
 class Phase(enum.StrEnum):
     """Lifecycle phases for :class:`CmdMox`."""
 
@@ -439,21 +445,25 @@ class CmdMox:
 
     def _validate_env_attr(self, env: EnvironmentManager, attr: str) -> str | None:
         """Return an error message when *attr* is invalid, otherwise ``None``."""
+        label, requires_dir = _ENV_ATTR_RULES.get(
+            attr, (f"Replay {attr.replace('_', ' ')}", False)
+        )
         value = getattr(env, attr, None)
-        if attr == "shim_dir":
+
+        if requires_dir:
             try:
                 ensure_dir_exists(
                     value,
-                    name="Replay shim directory",
+                    name=label,
                     error_type=MissingEnvironmentError,
+                    missing_message=f"{label} is missing",
                 )
             except MissingEnvironmentError as exc:
                 return str(exc)
             return None
 
         if value is None:
-            label = attr.replace("_", " ")
-            return f"Replay {label} is missing"
+            return f"{label} is missing"
 
         return None
 

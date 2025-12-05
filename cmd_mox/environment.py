@@ -142,7 +142,7 @@ def ensure_dir_exists(
     if not directory.is_dir():
         msg = f"{name} is not a directory: {directory}"
         raise error_type(msg)
-    return directory
+    return directory.resolve()
 
 
 CleanupError = tuple[str, BaseException]
