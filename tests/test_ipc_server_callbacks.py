@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import typing as t
 from dataclasses import dataclass  # noqa: ICN003
@@ -223,6 +224,85 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
 
     assert result is None
     assert "malformed JSON" in caplog.text
+
+
+def test_parse_payload_returns_handler_metadata() -> None:
+    """Parsed requests should carry handler metadata for pipeline steps."""
+    import cmd_mox.ipc.server as server
+
+    raw = json.dumps(
+        {
+            "kind": server.KIND_PASSTHROUGH_RESULT,
+            "invocation_id": "abc",
+            "stdout": "out",
+            "stderr": "err",
+            "exit_code": 2,
+        }
+    ).encode()
+
+    parsed = server._parse_payload(raw)
+
+    assert parsed is not None
+    assert parsed.kind == server.KIND_PASSTHROUGH_RESULT
+    assert parsed.validator is server.validate_passthrough_payload
+    assert parsed.processor is server._process_passthrough_result
+    assert parsed.payload == {
+        "invocation_id": "abc",
+        "stdout": "out",
+        "stderr": "err",
+        "exit_code": 2,
+    }
+
+
+def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
+    """The request pipeline should validate, dispatch, and encode responses."""
+    import cmd_mox.ipc.server as server
+
+    handled: list[str] = []
+
+    def handler(invocation: Invocation) -> Response:
+        handled.append(invocation.command)
+        return Response(stdout="ok", stderr="", exit_code=0)
+
+    ipc_server = IPCServer(
+        tmp_path / "ipc.sock",
+        handlers=IPCHandlers(handler=handler),
+    )
+
+    raw = json.dumps(
+        {
+            "kind": server.KIND_INVOCATION,
+            "command": "echo",
+            "args": [],
+            "stdin": "",
+            "env": {},
+        }
+    ).encode()
+
+    response_bytes = server._request_pipeline(ipc_server, raw)
+
+    assert response_bytes is not None
+    assert handled == ["echo"]
+    payload = json.loads(response_bytes.decode("utf-8"))
+    assert payload == {"stdout": "ok", "stderr": "", "exit_code": 0, "env": {}}
+
+
+def test_request_pipeline_rejects_unknown_kind(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unknown IPC kinds should be logged and ignored without dispatch."""
+    import cmd_mox.ipc.server as server
+
+    caplog.set_level("ERROR", logger="cmd_mox.ipc.server")
+    ipc_server = IPCServer(tmp_path / "ipc.sock")
+
+    response = server._request_pipeline(
+        ipc_server,
+        json.dumps({"kind": "mystery"}).encode(),
+    )
+
+    assert response is None
+    assert "Unknown IPC payload kind" in caplog.text
 
 
 def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
