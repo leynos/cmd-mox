@@ -19,8 +19,10 @@ from cmd_mox.environment import (
     CMOX_IPC_TIMEOUT_ENV,
     CleanupError,
     EnvironmentManager,
+    ensure_dir_exists,
     temporary_env,
 )
+from cmd_mox.errors import MissingEnvironmentError
 from cmd_mox.fs_retry import RetryConfig, RobustRmtreeError, robust_rmtree
 from cmd_mox.unittests._env_helpers import (
     require_shim_dir,
@@ -60,6 +62,65 @@ def test_environment_manager_uses_unique_resources() -> None:
     assert first_socket != second_socket
     assert not first_dir.exists()
     assert not second_dir.exists()
+
+
+def test_ensure_dir_exists_accepts_directory(tmp_path: Path) -> None:
+    """Existing directories are returned unchanged."""
+    directory = tmp_path / "present"
+    directory.mkdir()
+
+    assert ensure_dir_exists(directory, name="Shim directory") == directory
+
+
+def test_ensure_dir_exists_rejects_missing_dir(tmp_path: Path) -> None:
+    """Missing directories raise with a consistent error message."""
+    missing = tmp_path / "absent"
+
+    msg = "Shim directory does not exist"
+    with pytest.raises(FileNotFoundError, match=msg):
+        ensure_dir_exists(missing, name="Shim directory")
+
+
+def test_ensure_dir_exists_rejects_non_directory(tmp_path: Path) -> None:
+    """Non-directory paths surface a clear error."""
+    file_path = tmp_path / "not_a_dir"
+    file_path.write_text("content")
+
+    msg = "Shim directory is not a directory"
+    with pytest.raises(FileNotFoundError, match=msg):
+        ensure_dir_exists(file_path, name="Shim directory")
+
+
+def test_ensure_dir_exists_supports_custom_error_type() -> None:
+    """Custom error types allow consistent domain exceptions."""
+    msg = "Replay shim directory is missing"
+    with pytest.raises(MissingEnvironmentError, match=msg):
+        ensure_dir_exists(
+            None,
+            name="Replay shim directory",
+            error_type=MissingEnvironmentError,
+        )
+
+
+def test_ensure_dir_exists_uses_missing_message_override() -> None:
+    """Custom missing_message overrides the default error text."""
+    msg = "custom message"
+    with pytest.raises(MissingEnvironmentError, match=msg):
+        ensure_dir_exists(
+            None,
+            name="Replay shim directory",
+            error_type=MissingEnvironmentError,
+            missing_message=msg,
+        )
+
+
+def test_ensure_dir_exists_accepts_str_path(tmp_path: Path) -> None:
+    """String paths are accepted and resolved correctly."""
+    directory = tmp_path / "present_str"
+    directory.mkdir()
+
+    result = ensure_dir_exists(str(directory), name="Shim directory")
+    assert result == directory
 
 
 def test_export_ipc_environment_sets_timeout() -> None:

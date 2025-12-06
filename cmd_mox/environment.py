@@ -119,6 +119,32 @@ def _ensure_windows_pathext(original: dict[str, str]) -> None:
     os.environ["PATHEXT"] = os.pathsep.join(parts)
 
 
+def ensure_dir_exists(
+    path: os.PathLike[str] | str | Path | None,
+    *,
+    name: str,
+    error_type: type[Exception] = FileNotFoundError,
+    missing_message: str | None = None,
+) -> Path:
+    """Return *path* as a ``Path`` when it refers to an existing directory.
+
+    Normalises path validation so callers raise consistent, descriptive errors
+    when environment directories disappear or are misconfigured.
+    """
+    if path is None:
+        msg = missing_message or f"{name} is missing"
+        raise error_type(msg)
+
+    directory = Path(path)
+    if not directory.exists():
+        msg = f"{name} does not exist: {directory}"
+        raise error_type(msg)
+    if not directory.is_dir():
+        msg = f"{name} is not a directory: {directory}"
+        raise error_type(msg)
+    return directory.resolve()
+
+
 CleanupError = tuple[str, BaseException]
 
 P = t.ParamSpec("P")
