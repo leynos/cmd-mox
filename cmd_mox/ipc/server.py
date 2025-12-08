@@ -371,47 +371,78 @@ _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
 }
 
 
-def _parse_payload(raw: bytes) -> tuple[dict[str, t.Any], str] | None:
+@dc.dataclass(slots=True)
+class ParsedRequest:
+    """Parsed request containing payload and dispatch metadata."""
+
+    payload: dict[str, t.Any]
+    kind: str
+    validator: _RequestValidator
+    processor: _RequestProcessor
+
+    def validate(self) -> Invocation | PassthroughResult | None:
+        """Run the validator associated with this request payload."""
+        return self.validator(self.payload)
+
+
+def _decode_payload(raw: bytes) -> dict[str, t.Any] | None:
+    """Decode raw request bytes into a mapping, logging malformed input once."""
     payload = parse_json_safely(raw)
-    if payload is None:
-        try:
-            obj = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            logger.exception("IPC received malformed JSON")
-            return None
-        logger.error("IPC payload not a dict: %r", obj)
+    if payload is not None:
+        return payload
+
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        logger.exception("IPC received malformed JSON")
         return None
 
-    copied_payload = payload.copy()
-    kind = str(copied_payload.pop("kind", KIND_INVOCATION))
-    return copied_payload, kind
+    logger.error("IPC payload not a dict: %r", obj)
+    return None
 
 
-def _lookup_handler(kind: str) -> tuple[_RequestValidator, _RequestProcessor] | None:
+def _parse_payload(raw: bytes) -> ParsedRequest | None:
+    payload = _decode_payload(raw)
+    if payload is None:
+        return None
+
+    kind = str(payload.get("kind", KIND_INVOCATION))
     handler_entry = _REQUEST_HANDLERS.get(kind)
     if handler_entry is None:
         logger.error("Unknown IPC payload kind: %r", kind)
         return None
-    return handler_entry
+
+    body = payload.copy()
+    body.pop("kind", None)
+    validator, processor = handler_entry
+    return ParsedRequest(
+        payload=body,
+        kind=kind,
+        validator=validator,
+        processor=processor,
+    )
 
 
-def _process_raw_request(server: _BaseIPCServer, raw: bytes) -> bytes | None:
+def _encode_response(response: Response) -> bytes:
+    return json.dumps(response.to_dict()).encode("utf-8")
+
+
+def _request_pipeline(server: _BaseIPCServer, raw: bytes) -> bytes | None:
+    """Parse, validate, dispatch, and encode an IPC request in order."""
     parsed = _parse_payload(raw)
     if parsed is None:
         return None
 
-    payload, kind = parsed
-    handler_entry = _lookup_handler(kind)
-    if handler_entry is None:
-        return None
-
-    validator, processor = handler_entry
-    obj = validator(payload)
+    obj = parsed.validate()
     if obj is None:
         return None
 
-    response = _execute_request(server, processor, obj)
-    return json.dumps(response.to_dict()).encode("utf-8")
+    response = _execute_request(server, parsed.processor, obj)
+    return _encode_response(response)
+
+
+def _process_raw_request(server: _BaseIPCServer, raw: bytes) -> bytes | None:
+    return _request_pipeline(server, raw)
 
 
 def _execute_request(
