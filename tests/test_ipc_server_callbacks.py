@@ -217,8 +217,6 @@ def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
 
 def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) -> None:
     """Invalid UTF-8 payloads should log and return ``None`` instead of raising."""
-    import cmd_mox.ipc.server as server
-
     caplog.set_level("ERROR", logger="cmd_mox.ipc.server")
 
     result = server._parse_payload(b"\xff\xfe")
@@ -375,8 +373,6 @@ def test_request_pipeline_rejects_unknown_kind(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Unknown IPC kinds should be logged and ignored without dispatch."""
-    import cmd_mox.ipc.server as server
-
     caplog.set_level("ERROR", logger="cmd_mox.ipc.server")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
