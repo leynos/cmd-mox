@@ -48,6 +48,14 @@ class Phase(enum.StrEnum):
     VERIFY = "VERIFY"
 
 
+class _ResponseStrategy(enum.Enum):
+    """Response selection strategy for invocation handling."""
+
+    MISSING_DOUBLE = enum.auto()
+    PASSTHROUGH = enum.auto()
+    REGULAR = enum.auto()
+
+
 class CmdMox:
     """Central orchestrator implementing the record-replay-verify lifecycle."""
 
@@ -365,24 +373,50 @@ class CmdMox:
         invocation.env.update(overrides)
         return overrides
 
-    def _make_response(self, invocation: Invocation) -> Response:
-        double = self._doubles.get(invocation.command)
-        if double is None:
-            resp = Response(stdout=invocation.command)
-        elif double.passthrough_mode:
-            resp = self._prepare_passthrough(double, invocation)
-        else:
-            resp = self._handle_regular_invocation(double, invocation)
-        invocation.apply(resp)
-        return resp
+    def _response_for_missing_double(self, invocation: Invocation) -> Response:
+        """Return a default response when no double is registered."""
+        return Response(stdout=invocation.command)
 
-    def _handle_regular_invocation(
+    def _response_for_regular(
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
         """Handle a non-passthrough invocation with optional recording."""
         resp = self._invoke_handler(double, invocation)
         if double.is_recording:
             double.invocations.append(invocation)
+        return resp
+
+    def _select_response_strategy(
+        self, double: CommandDouble | None
+    ) -> _ResponseStrategy:
+        """Determine the response strategy for the given double."""
+        if double is None:
+            return _ResponseStrategy.MISSING_DOUBLE
+        if double.passthrough_mode:
+            return _ResponseStrategy.PASSTHROUGH
+        return _ResponseStrategy.REGULAR
+
+    def _make_response(self, invocation: Invocation) -> Response:
+        """Build the response for an invocation using the appropriate strategy."""
+        double = self._doubles.get(invocation.command)
+        strategy = self._select_response_strategy(double)
+
+        if strategy is _ResponseStrategy.MISSING_DOUBLE:
+            resp = self._response_for_missing_double(invocation)
+        else:
+            if double is None:
+                msg = "Unexpected response strategy/double combination"
+                raise RuntimeError(msg)
+            match strategy:
+                case _ResponseStrategy.PASSTHROUGH:
+                    resp = self._prepare_passthrough(double, invocation)
+                case _ResponseStrategy.REGULAR:
+                    resp = self._response_for_regular(double, invocation)
+                case _:
+                    msg = f"Unhandled response strategy: {strategy}"
+                    raise RuntimeError(msg)
+
+        invocation.apply(resp)
         return resp
 
     def _handle_invocation(self, invocation: Invocation) -> Response:
