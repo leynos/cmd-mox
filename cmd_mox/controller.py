@@ -397,11 +397,13 @@ class CmdMox:
     ) -> Response:
         """Record passthrough intent and return instructions for the shim.
 
-        Environment merging happens here so that expectation-level overrides
-        (from :meth:`_apply_expectation_env`) are combined with the original
-        PATH before being passed to the coordinator. See
-        :class:`~cmd_mox.passthrough.PassthroughCoordinator` for concurrency
-        and lifetime guarantees.
+        This method prepares two separate values: ``extra_env`` (expectation
+        overrides from :meth:`_apply_expectation_env`) and ``lookup_path``
+        (the original PATH for command resolution). These are passed to
+        :class:`~cmd_mox.passthrough.PassthroughCoordinator` separately; the
+        final merging into an effective execution environment happens
+        downstream when the shim consumes the resulting
+        :class:`~cmd_mox.ipc.PassthroughRequest`.
         """
         overrides = self._apply_expectation_env(double, invocation)
         lookup_path = self.environment.original_environment.get(

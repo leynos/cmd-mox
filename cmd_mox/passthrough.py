@@ -34,10 +34,12 @@ class PassthroughCoordinator:
     Lifetime Guarantees
     -------------------
     Pending entries are assigned a monotonic deadline of
-    ``max(timeout, cleanup_ttl)`` from creation time. This means entries may
-    persist longer than the handler timeout when ``cleanup_ttl`` exceeds
-    ``timeout`` (the default values are 300s and 30s respectively). Stale
-    entries are pruned lazily on each coordinator access.
+    ``max(timeout, cleanup_ttl)`` from creation time. The ``timeout`` value
+    originates from :attr:`~cmd_mox.command_runner.CommandRunner.timeout`,
+    while ``cleanup_ttl`` is set via this class's constructor. Because
+    ``cleanup_ttl`` may exceed ``timeout``, entries can persist longer than
+    the per-request timeout would suggest. Stale entries are pruned lazily
+    on each coordinator access.
     """
 
     def __init__(self, *, cleanup_ttl: float = 300.0) -> None:
