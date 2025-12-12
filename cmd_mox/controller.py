@@ -429,7 +429,16 @@ class CmdMox:
     def _prepare_passthrough(
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
-        """Record passthrough intent and return instructions for the shim."""
+        """Record passthrough intent and return instructions for the shim.
+
+        This method prepares two separate values: ``extra_env`` (expectation
+        overrides from :meth:`_apply_expectation_env`) and ``lookup_path``
+        (the original PATH for command resolution). These are passed to
+        :class:`~cmd_mox.passthrough.PassthroughCoordinator` separately; the
+        final merging into an effective execution environment happens
+        downstream when the shim consumes the resulting
+        :class:`~cmd_mox.ipc.PassthroughRequest`.
+        """
         overrides = self._apply_expectation_env(double, invocation)
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")

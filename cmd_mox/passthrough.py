@@ -24,7 +24,23 @@ class PassthroughConfig:
 
 
 class PassthroughCoordinator:
-    """Manages pending passthrough requests and result finalization."""
+    """Manages pending passthrough requests and result finalization.
+
+    Concurrency
+    -----------
+    All public methods are thread-safe. Internal state is protected by a
+    lock, allowing concurrent prepare/finalize calls from multiple threads.
+
+    Lifetime Guarantees
+    -------------------
+    Pending entries are assigned a monotonic deadline of
+    ``max(timeout, cleanup_ttl)`` from creation time. The ``timeout`` value
+    originates from :attr:`~cmd_mox.command_runner.CommandRunner.timeout`,
+    while ``cleanup_ttl`` is set via this class's constructor. Because
+    ``cleanup_ttl`` may exceed ``timeout``, entries can persist longer than
+    the per-request timeout would suggest. Stale entries are pruned lazily
+    on each coordinator access.
+    """
 
     def __init__(self, *, cleanup_ttl: float = 300.0) -> None:
         self._pending: dict[str, tuple[CommandDouble, Invocation, float]] = {}
