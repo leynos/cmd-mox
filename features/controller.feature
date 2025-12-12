@@ -312,3 +312,14 @@ Feature: CmdMox basic functionality
     Then the verification error message should contain "Unfulfilled expectation."
     And the verification error message should contain "expected calls=2"
     And the verification error message should contain "Observed calls"
+
+  Scenario: commands can be used in pipelines
+    Given a CmdMox controller
+    And the command "grep" is mocked with args "foo file.txt" returning "c a b"
+    And the command "sort" is mocked with stdin "c a b" and args "-r" returning "c b a"
+    When I replay the controller
+    And I run the shell command "grep foo file.txt | sort -r"
+    Then the output should be "c b a"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "grep"
+    And the journal should contain 1 invocation of "sort"

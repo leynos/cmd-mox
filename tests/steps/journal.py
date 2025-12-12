@@ -15,8 +15,8 @@ from tests.helpers.parameters import (
     CommandOutput,
     EnvVar,
     decode_placeholders,
+    resolve_empty_placeholder,
 )
-from tests.steps.command_execution import _resolve_empty_placeholder
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
@@ -52,7 +52,7 @@ def _validate_journal_entry_details(
 @then(parsers.cfparse('the journal entry for "{cmd}" should record arguments "{args}"'))
 def check_journal_entry_arguments(mox: CmdMox, cmd: str, args: str) -> None:
     """Assert that the journal stores the exact argument vector for *cmd*."""
-    resolved_args = _resolve_empty_placeholder(args)
+    resolved_args = resolve_empty_placeholder(args)
     decoded_args = decode_placeholders(resolved_args)
     expectation = JournalEntryExpectation(cmd=cmd, args=decoded_args)
     _validate_journal_entry_details(mox, expectation)
@@ -90,8 +90,8 @@ def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrap
     val: str,
 ) -> None:
     """Validate journal entry records invocation details."""
-    resolved_args = _resolve_empty_placeholder(args)
-    resolved_stdin = _resolve_empty_placeholder(stdin)
+    resolved_args = resolve_empty_placeholder(args)
+    resolved_stdin = resolve_empty_placeholder(stdin)
     inputs = CommandInputs(args=resolved_args, stdin=resolved_stdin)
     env = EnvVar(name=var, value=val)
     _check_journal_entry_details_impl(mox, cmd, inputs, env)
