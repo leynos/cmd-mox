@@ -171,7 +171,7 @@
 
   - [ ] Document all public APIs and matchers
 
-  - [ ] Example tests for stubs, mocks, spies, pipelines, passthrough mode
+  - [x] Example tests for stubs, mocks, spies, pipelines, passthrough mode
 
   - [ ] Comparison/migration guide for `shellmock` users
 

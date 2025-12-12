@@ -100,6 +100,24 @@ def run_command_args(
     return _run(argv, check=True)
 
 
+@when(
+    parsers.cfparse('I run the shell command "{command_line}"'),
+    target_fixture="result",
+)
+def run_shell_command(
+    mox: CmdMox, command_line: str
+) -> subprocess.CompletedProcess[str]:
+    """Run *command_line* with shell parsing enabled (e.g., pipelines)."""
+    decoded = decode_placeholders(command_line)
+    return subprocess.run(  # noqa: S602
+        decoded,
+        capture_output=True,
+        text=True,
+        check=True,
+        shell=True,
+    )
+
+
 def _resolve_empty_placeholder(value: str) -> str:
     """Resolve the special '<empty>' placeholder to an empty string."""
     return "" if value == "<empty>" else value

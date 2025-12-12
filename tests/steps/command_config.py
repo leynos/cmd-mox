@@ -168,6 +168,23 @@ def mock_with_args_default_order(mox: CmdMox, cmd: str, args: str, text: str) ->
     mox.mock(cmd).with_args(*shlex.split(decoded)).returns(stdout=text)
 
 
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked with stdin "{stdin}" and args "{args}" '
+        'returning "{text}"'
+    )
+)
+def mock_with_args_and_stdin(
+    mox: CmdMox, cmd: str, stdin: str, args: str, text: str
+) -> None:
+    """Configure a mock that expects arguments and stdin."""
+    decoded_args = decode_placeholders(args)
+    resolved_stdin = "" if stdin == "<empty>" else decode_placeholders(stdin)
+    mox.mock(cmd).with_args(*shlex.split(decoded_args)).with_stdin(
+        resolved_stdin
+    ).returns(stdout=text)
+
+
 @given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))
 def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     """Stub command that outputs an injected env variable."""

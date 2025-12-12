@@ -259,3 +259,9 @@ def test_verification_redacts_sensitive_environment_values() -> None:
 def test_verification_reports_missing_invocations() -> None:
     """Verification errors highlight unfulfilled expectations."""
     pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "commands can be used in pipelines")
+def test_commands_can_be_used_in_pipelines() -> None:
+    """CmdMox supports piped shell commands by mocking each tool."""
+    pass
