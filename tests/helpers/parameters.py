@@ -46,3 +46,8 @@ def decode_placeholders(value: str) -> str:
     for token, replacement in _PLACEHOLDER_TOKENS.items():
         result = result.replace(token, replacement)
     return result
+
+
+def resolve_empty_placeholder(value: str) -> str:
+    """Resolve the special '<empty>' placeholder to an empty string."""
+    return "" if value == "<empty>" else value

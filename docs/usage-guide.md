@@ -32,8 +32,8 @@ failure surfaces. Automatic replay/verify can be disabled globally via the
 settings for a single pytest run.
 
 The repository includes runnable examples under `examples/` covering stubs,
-mocks, spies, pipelines, and passthrough mode. You can run them directly with
-`pytest examples` or copy the patterns into your own suite.
+mocks, spies, pipelines, and passthrough mode. These examples can be run
+directly with `pytest examples` or copied into an existing test suite.
 
 ## Platform support
 

@@ -17,7 +17,12 @@ from tests.helpers.controller import (
     escape_windows_batch_args,
     execute_command_with_details,
 )
-from tests.helpers.parameters import CommandInputs, EnvVar, decode_placeholders
+from tests.helpers.parameters import (
+    CommandInputs,
+    EnvVar,
+    decode_placeholders,
+    resolve_empty_placeholder,
+)
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
@@ -118,11 +123,6 @@ def run_shell_command(
     )
 
 
-def _resolve_empty_placeholder(value: str) -> str:
-    """Resolve the special '<empty>' placeholder to an empty string."""
-    return "" if value == "<empty>" else value
-
-
 def _run_command_args_stdin_env_impl(
     mox: CmdMox,
     cmd: str,
@@ -156,8 +156,8 @@ def run_command_args_stdin_env(
     val: str,
 ) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
     """Run *cmd* with arguments, stdin, and an environment variable."""
-    resolved_args = _resolve_empty_placeholder(args)
-    resolved_stdin = _resolve_empty_placeholder(stdin)
+    resolved_args = resolve_empty_placeholder(args)
+    resolved_stdin = resolve_empty_placeholder(stdin)
     decoded_args = decode_placeholders(resolved_args)
     inputs = CommandInputs(args=decoded_args, stdin=resolved_stdin)
     env = EnvVar(name=var, value=val)

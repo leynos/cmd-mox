@@ -11,7 +11,12 @@ from pytest_bdd import given, parsers
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Response
-from tests.helpers.parameters import CommandOutput, EnvVar, decode_placeholders
+from tests.helpers.parameters import (
+    CommandOutput,
+    EnvVar,
+    decode_placeholders,
+    resolve_empty_placeholder,
+)
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     import pytest
@@ -179,7 +184,7 @@ def mock_with_args_and_stdin(
 ) -> None:
     """Configure a mock that expects arguments and stdin."""
     decoded_args = decode_placeholders(args)
-    resolved_stdin = "" if stdin == "<empty>" else decode_placeholders(stdin)
+    resolved_stdin = resolve_empty_placeholder(stdin)
     mox.mock(cmd).with_args(*shlex.split(decoded_args)).with_stdin(
         resolved_stdin
     ).returns(stdout=text)

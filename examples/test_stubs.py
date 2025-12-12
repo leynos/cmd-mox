@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import typing as t
+
+from examples._utils import resolve_command
 
 pytest_plugins = ("cmd_mox.pytest_plugin",)
 
@@ -13,17 +14,12 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.ipc import Invocation
 
 
-def _resolve_command(name: str) -> str:
-    """Return an absolute path for *name* when available."""
-    return shutil.which(name) or name
-
-
 def test_stub_returns_canned_stdout(cmd_mox: CmdMox) -> None:
     """Stubs provide canned responses without strict verification."""
     cmd_mox.stub("hello").returns(stdout="world")
 
     result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
-        [_resolve_command("hello")],
+        [resolve_command("hello")],
         capture_output=True,
         text=True,
         check=True,
@@ -42,7 +38,7 @@ def test_stub_runs_dynamic_handler(cmd_mox: CmdMox) -> None:
     cmd_mox.stub("greeter").with_args("CmdMox").runs(handler)
 
     result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
-        [_resolve_command("greeter"), "CmdMox"],
+        [resolve_command("greeter"), "CmdMox"],
         capture_output=True,
         text=True,
         check=True,

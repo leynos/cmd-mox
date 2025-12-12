@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import typing as t
+
+from examples._utils import resolve_command
 
 pytest_plugins = ("cmd_mox.pytest_plugin",)
 
@@ -13,11 +14,6 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
     import pytest
 
     from cmd_mox.controller import CmdMox
-
-
-def _resolve_command(name: str) -> str:
-    """Return an absolute path for *name* when available."""
-    return shutil.which(name) or name
 
 
 def test_passthrough_spy_executes_real_command(
@@ -29,7 +25,7 @@ def test_passthrough_spy_executes_real_command(
     spy = cmd_mox.spy(command_name).passthrough()
 
     result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
-        [_resolve_command(command_name), "-c", "print('hello')"],
+        [resolve_command(command_name), "-c", "print('hello')"],
         capture_output=True,
         text=True,
         check=True,
