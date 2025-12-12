@@ -33,6 +33,8 @@ def test_stub_runs_dynamic_handler(cmd_mox: CmdMox) -> None:
     """Stubs can run a dynamic handler to compute output."""
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
+        if not invocation.args:
+            return ("", "missing argument", 1)
         return (f"hi {invocation.args[0]}", "", 0)
 
     cmd_mox.stub("greeter").with_args("CmdMox").runs(handler)
