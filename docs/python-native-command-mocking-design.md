@@ -1588,3 +1588,15 @@ preserve ordering for later verification. Configure bounds via
 `CmdMox(max_journal_entries=n)`; when full, the oldest entries are pruned.
 Verifiers consume this deque directly, ensuring that verification reflects the
 exact sequence observed during replay.
+
+### 8.9 Design Decisions for Documentation and Examples
+
+CmdMox ships with a set of runnable example tests under `/examples`. Each file
+is a small, user-facing pytest module that demonstrates a single pattern (stub,
+mock, spy, pipeline, passthrough). Keeping these examples as executable tests
+ensures they stay in sync with the public API and prevents documentation drift.
+
+Pipeline examples rely on shell parsing (`shell=True`) and therefore assume a
+POSIX-like shell. For portability the repository's behavioural pipeline check
+only runs in Unix-socket environments, and the standalone pipeline example is
+skipped on Windows where shell semantics and built-in commands differ.

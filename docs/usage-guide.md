@@ -31,6 +31,10 @@ failure surfaces. Automatic replay/verify can be disabled globally via the
 ``--cmd-mox-auto-lifecycle`` and ``--no-cmd-mox-auto-lifecycle`` override both
 settings for a single pytest run.
 
+The repository includes runnable examples under `examples/` covering stubs,
+mocks, spies, pipelines, and passthrough mode. These examples can be run
+directly with `pytest examples` or copied into an existing test suite.
+
 ## Platform support
 
 CmdMox supports Linux, macOS and Windows. Shims are generated as POSIX symlinks
@@ -272,6 +276,30 @@ spy.assert_not_called()
 
 These methods raise `AssertionError` when expectations are not met and are
 restricted to spy doubles.
+
+## Pipelines and shell syntax
+
+CmdMox intercepts individual executables by prepending shims to `PATH`. It does
+not interpret shell syntax itself, so constructs like pipelines (`|`) and I/O
+redirection (`>`, `<`) are handled by your shell. To test pipeline behaviour,
+mock each command in the pipeline separately and execute the full command line
+with `shell=True` so the shell wires stdout to stdin:
+
+```python
+def test_pipeline(cmd_mox):
+    cmd_mox.mock("grep").with_args("foo", "file.txt").returns(stdout="c a b")
+    cmd_mox.mock("sort").with_args("-r").with_stdin("c a b").returns(stdout="c b a")
+
+    result = subprocess.run(
+        "grep foo file.txt | sort -r",
+        shell=True,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "c b a"
+```
 
 ## Controller configuration and journals
 

@@ -11,7 +11,12 @@ from pytest_bdd import given, parsers
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Response
-from tests.helpers.parameters import CommandOutput, EnvVar, decode_placeholders
+from tests.helpers.parameters import (
+    CommandOutput,
+    EnvVar,
+    decode_placeholders,
+    resolve_empty_placeholder,
+)
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     import pytest
@@ -166,6 +171,23 @@ def mock_with_args_default_order(mox: CmdMox, cmd: str, args: str, text: str) ->
     """Configure a mock with arguments using default ordering."""
     decoded = decode_placeholders(args)
     mox.mock(cmd).with_args(*shlex.split(decoded)).returns(stdout=text)
+
+
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is mocked with stdin "{stdin}" and args "{args}" '
+        'returning "{text}"'
+    )
+)
+def mock_with_args_and_stdin(
+    mox: CmdMox, cmd: str, stdin: str, args: str, text: str
+) -> None:
+    """Configure a mock that expects arguments and stdin."""
+    decoded_args = decode_placeholders(args)
+    resolved_stdin = resolve_empty_placeholder(stdin)
+    mox.mock(cmd).with_args(*shlex.split(decoded_args)).with_stdin(
+        resolved_stdin
+    ).returns(stdout=text)
 
 
 @given(parsers.cfparse('the command "{cmd}" is stubbed with env var "{var}"="{val}"'))
