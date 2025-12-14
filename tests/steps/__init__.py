@@ -4,6 +4,7 @@ from .assertions import *  # noqa: F403
 from .command_config import *  # noqa: F403
 from .command_execution import *  # noqa: F403
 from .controller_setup import *  # noqa: F403
+from .documentation import *  # noqa: F403
 from .environment import *  # noqa: F403
 from .journal import *  # noqa: F403
 from .shim_management import *  # noqa: F403
