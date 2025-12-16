@@ -169,7 +169,7 @@
 
 - [ ] **API Reference & Tutorials**
 
-  - [ ] Document all public APIs and matchers
+  - [x] Document all public APIs and matchers *(done)*
 
   - [x] Example tests for stubs, mocks, spies, pipelines, passthrough mode
 

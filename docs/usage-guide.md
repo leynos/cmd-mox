@@ -79,11 +79,12 @@ skip_if_unsupported()
 ```
 
 `skip_if_unsupported` defers to `pytest.skip` on unsupported platforms. If you
-only need to gate a code path, `cmd_mox.is_supported_platform()` returns a
-boolean instead. Advanced tests can override the detected platform by setting
-the `CMD_MOX_PLATFORM_OVERRIDE` environment variable, which is primarily useful
-for simulating alternative environments inside CI pipelines (for example to
-exercise Windows-specific shims from a Linux runner).
+only need to gate a code path, `cmd_mox.is_supported()` returns a boolean
+instead. Advanced tests can override the detected platform by setting the
+`CMD_MOX_PLATFORM_OVERRIDE` environment variable (also exported as
+`PLATFORM_OVERRIDE_ENV`), which is primarily useful for simulating alternative
+environments inside CI pipelines (for example to exercise Windows-specific
+shims from a Linux runner).
 
 The cmd-mox test suite also uses the `pytest.mark.requires_unix_sockets` marker
 for scenarios that need to bind a Unix domain socket. Marking these tests keeps
@@ -164,6 +165,60 @@ Each comparator is a callable that returns `True` on match.
 `with_matching_args` expects one comparator per argv element (excluding the
 program name, i.e., `argv[1:]`), and `with_stdin` accepts either an exact
 string or a predicate `Callable[[str], bool]` for flexible input checks.
+
+### Argument matchers (comparators)
+
+CmdMox ships with a small set of matcher objects for `with_matching_args`. Each
+matcher is callable (`Callable[[str], bool]`) and can be mixed with custom
+predicates.
+
+- `Any` – matches any single argument.
+
+  ```python
+  from cmd_mox import Any
+
+  cmd_mox.mock("git").with_matching_args("clone", Any()).returns(exit_code=0)
+  ```
+
+- `IsA(typ)` – matches arguments convertible to `typ` (for example `int`).
+
+  ```python
+  from cmd_mox import IsA
+
+  cmd_mox.mock("tool").with_matching_args("--count", IsA(int)).returns()
+  ```
+
+- `Regex(pattern)` – matches when a regular expression search succeeds.
+
+  ```python
+  from cmd_mox import Regex
+
+  cmd_mox.mock("curl").with_matching_args(Regex(r"^https://")).returns()
+  ```
+
+- `Contains(substring)` – matches when `substring` is present.
+
+  ```python
+  from cmd_mox import Contains
+
+  cmd_mox.mock("echo").with_matching_args(Contains("hello")).returns()
+  ```
+
+- `StartsWith(prefix)` – matches when an argument begins with `prefix`.
+
+  ```python
+  from cmd_mox import StartsWith
+
+  cmd_mox.mock("tool").with_matching_args(StartsWith("--flag=")).returns()
+  ```
+
+- `Predicate(func)` – wraps a custom callable and uses its truthiness.
+
+  ```python
+  from cmd_mox import Predicate
+
+  cmd_mox.mock("tool").with_matching_args(Predicate(lambda v: v.endswith(".txt"))).returns()
+  ```
 
 ## Running tests
 
@@ -454,3 +509,71 @@ server.
   `TimeoutError`.
 
 Most tests should rely on the fixture to manage these variables.
+
+## Public API reference
+
+<!-- api-reference:start -->
+
+This section lists the symbols exported directly from `cmd_mox` (the package
+top-level). It mirrors `cmd_mox.__all__` so consumers can quickly find the
+supported surface area without navigating modules.
+
+### Controller and test doubles
+
+- `CmdMox` – controller implementing record → replay → verify.
+- `CommandDouble` – the fluent test-double object returned by factory methods.
+- `StubCommand` – stub double type (returned by `CmdMox.stub()`).
+- `MockCommand` – mock double type (returned by `CmdMox.mock()`).
+- `SpyCommand` – spy double type (returned by `CmdMox.spy()`).
+- `Expectation` – expectation model that powers argument/stdin/env matching.
+- `Invocation` – captured invocation details (command, args, stdin, env,
+  results).
+- `Response` – result payload returned from `returns()`/`runs()` handlers.
+
+### Matchers (comparators)
+
+- `Any` – match any string argument.
+- `IsA` – match values convertible to a type.
+- `Regex` – regex search matcher.
+- `Contains` – substring matcher.
+- `StartsWith` – prefix matcher.
+- `Predicate` – wrap a custom predicate function.
+
+### IPC servers
+
+- `IPCServer` – IPC server (Unix socket on POSIX, named pipe on Windows).
+- `NamedPipeServer` – explicit Windows named-pipe transport implementation.
+
+### Shims and environment helpers
+
+- `EnvironmentManager` – manages shim directory, `PATH`, and IPC env vars.
+- `temporary_env` – context manager to temporarily set `os.environ` entries.
+- `create_shim_symlinks` – low-level helper to generate command shims.
+- `SHIM_PATH` – filesystem path to the shared `shim.py` entrypoint used by
+  shims.
+
+### Platform helpers
+
+- `is_supported` – return `True` when cmd-mox supports the platform.
+- `skip_if_unsupported` – `pytest.skip()` on unsupported platforms.
+- `unsupported_reason` – return a human-readable reason when unsupported.
+- `PLATFORM_OVERRIDE_ENV` – name of the platform override env var
+  (`CMD_MOX_PLATFORM_OVERRIDE`).
+
+### Exceptions
+
+- `CmdMoxError` – base exception for cmd-mox errors.
+- `LifecycleError` – raised on invalid record/replay/verify transitions.
+- `MissingEnvironmentError` – raised when replay cannot start due to missing
+  env.
+- `UnexpectedCommandError` – raised when a command runs without a matching
+  double.
+- `UnfulfilledExpectationError` – raised when expected calls did not occur.
+- `VerificationError` – base class for verification failures.
+
+### Pytest helper
+
+- `cmd_mox_fixture` – alias for the pytest `cmd_mox` fixture function
+  (lazy-loaded).
+
+<!-- api-reference:end -->

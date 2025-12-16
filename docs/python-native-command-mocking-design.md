@@ -1600,3 +1600,18 @@ Pipeline examples rely on shell parsing (`shell=True`) and therefore assume a
 POSIX-like shell. For portability the repository's behavioural pipeline check
 only runs in Unix-socket environments, and the standalone pipeline example is
 skipped on Windows where shell semantics and built-in commands differ.
+
+### 8.10 Design Decisions for API Documentation Completeness
+
+CmdMox treats `cmd_mox.__all__` as the source of truth for the package's
+top-level public API. The usage guide therefore includes a dedicated "Public
+API reference" section that mirrors `__all__` so consumers can see what is
+supported without inspecting the source.
+
+To prevent documentation drift, the test suite enforces that every symbol
+listed in `cmd_mox.__all__` is present in the usage guide's API reference. This
+check is implemented twice:
+
+- A unit test asserts coverage at the string level for fast feedback.
+- A `pytest-bdd` scenario verifies the same user-facing behaviour as an
+  acceptance criterion ("the docs list every public symbol").
