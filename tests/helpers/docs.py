@@ -21,14 +21,22 @@ def extract_marked_block(text: str, *, name: str) -> str:
     start_marker = f"<!-- {name}:start -->"
     end_marker = f"<!-- {name}:end -->"
 
-    start = text.find(start_marker)
-    if start == -1:
-        msg = f"Start marker not found: {start_marker}"
+    start_count = text.count(start_marker)
+    if start_count != 1:
+        msg = (
+            f"Expected exactly one start marker ({start_marker}); found {start_count}."
+        )
         raise ValueError(msg)
 
+    end_count = text.count(end_marker)
+    if end_count != 1:
+        msg = f"Expected exactly one end marker ({end_marker}); found {end_count}."
+        raise ValueError(msg)
+
+    start = text.find(start_marker)
     end = text.find(end_marker, start + len(start_marker))
-    if end == -1:
-        msg = f"End marker not found: {end_marker}"
+    if end <= start:
+        msg = f"Markers are out of order for {name!r}."
         raise ValueError(msg)
 
     return text[start + len(start_marker) : end]

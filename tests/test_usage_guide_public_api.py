@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import cmd_mox
 from tests.helpers.docs import extract_marked_block
 
@@ -25,3 +27,11 @@ def test_usage_guide_does_not_reference_removed_platform_helper() -> None:
     """Avoid drift: the docs should not reference deprecated helper names."""
     text = USAGE_GUIDE_PATH.read_text(encoding="utf-8")
     assert "is_supported_platform" not in text
+
+
+def test_extract_marked_block_rejects_duplicate_markers() -> None:
+    """Guard against ambiguous extraction when multiple blocks exist."""
+    text = "<!-- api-reference:start -->one<!-- api-reference:end -->"
+    duplicated = f"{text}\n{text}"
+    with pytest.raises(ValueError, match="Expected exactly one start marker"):
+        extract_marked_block(duplicated, name="api-reference")
