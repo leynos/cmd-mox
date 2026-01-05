@@ -198,9 +198,9 @@
 
   - [ ] Announce project, collect early user feedback
 
-## **Future/Epic XI. Windows Platform Support & Record Mode**
+## **XI. Windows Platform Support**
 
-- [ ] **Windows Platform Enablement**
+- [x] **Windows Platform Enablement**
 
   - [x] Establish cross-platform IPC and shim abstractions that include Windows
         implementations (acceptance: end-to-end pytest suite passes on
@@ -220,13 +220,200 @@
         (`windows-latest` matrix job; minimal smoke: create shims, run mocked
         command, run passthrough spy; artefacts include IPC logs for debugging).
 
-- [ ] **Record Mode Evolution**
+## **XII. Record Mode**
 
-  - [ ] Provide tooling that turns passthrough recordings into reusable
-        fixtures or tests.
+Record Mode transforms passthrough spy recordings into reusable test fixtures,
+enabling developers to capture real command interactions and replay them in
+subsequent test runs without external dependencies. The comprehensive design is
+documented in `python-native-command-mocking-design.md` Section IX.
 
-  - [ ] Support persisting recorded interactions for later reuse within
-        CmdMox sessions.
+### **XII-A. Core Recording Infrastructure (MVP)**
+
+- [ ] Implement `RecordingSession` class with fixture persistence
+
+  - [ ] Session lifecycle management (start, record, finalize)
+  - [ ] Fixture metadata generation (timestamps, platform, versions)
+  - [ ] Environment variable subset filtering
+
+- [ ] Implement `FixtureFile` with JSON serialization and schema versioning
+
+  - [ ] Version 1.0 schema with recordings, metadata, and scrubbing rules
+  - [ ] `to_dict()` and `from_dict()` serialization methods
+  - [ ] Schema migration support for forward compatibility
+
+- [ ] Add `.record()` method to `CommandDouble`
+
+  - [ ] Fluent API: `spy("git").passthrough().record("fixtures/git.json")`
+  - [ ] Validation that passthrough mode is enabled
+  - [ ] Support for custom scrubber and env_allowlist parameters
+
+- [ ] Integrate recording into `PassthroughCoordinator.finalize_result()`
+
+  - [ ] Optional `RecordingSession` parameter on coordinator
+  - [ ] Automatic recording on passthrough completion
+
+- [ ] Unit tests for recording workflow
+
+  - [ ] Session lifecycle tests
+  - [ ] Serialization roundtrip tests
+  - [ ] Environment filtering tests
+
+### **XII-B. Replay Infrastructure**
+
+- [ ] Implement `ReplaySession` class with fixture loading
+
+  - [ ] Load and parse fixture files with schema validation
+  - [ ] Track consumed recordings during replay
+  - [ ] Support both strict and fuzzy matching modes
+
+- [ ] Implement `InvocationMatcher` for invocation matching
+
+  - [ ] Strict matching (command, args, stdin, env)
+  - [ ] Fuzzy matching (command and args only)
+  - [ ] Match scoring for best-fit selection
+
+- [ ] Add `.replay()` method to `CommandDouble`
+
+  - [ ] Fluent API: `spy("git").replay("fixtures/git.json")`
+  - [ ] Validation that passthrough mode is not enabled
+  - [ ] Support for strict parameter
+
+- [ ] Integrate replay into `CmdMox._make_response()`
+
+  - [ ] Check replay session before other response strategies
+  - [ ] Raise `UnexpectedCommandError` on unmatched strict replay
+
+- [ ] Add replay consumption verification to `CmdMox.verify()`
+
+  - [ ] Verify all recordings were consumed
+  - [ ] Report unconsumed recordings in verification errors
+
+- [ ] Unit tests for replay workflow
+
+  - [ ] Fixture loading tests
+  - [ ] Matching algorithm tests
+  - [ ] Consumption tracking tests
+
+### **XII-C. Scrubbing and Security**
+
+- [ ] Implement `Scrubber` class with default rules for common secrets
+
+  - [ ] GitHub PATs (`ghp_*`, `gho_*`, etc.)
+  - [ ] AWS access keys (`AKIA*`)
+  - [ ] Generic API keys and tokens
+  - [ ] Bearer authorization headers
+  - [ ] SSH private keys
+  - [ ] Database connection strings
+
+- [ ] Implement `ScrubbingRule` dataclass
+
+  - [ ] Pattern (string or compiled regex)
+  - [ ] Replacement string
+  - [ ] Applied-to fields (env, stdout, stderr, stdin)
+  - [ ] Description for documentation
+
+- [ ] Add environment variable filtering
+
+  - [ ] Default exclusion list (PATH, HOME, `*_KEY`, `*_SECRET`, etc.)
+  - [ ] Configurable allowlist
+  - [ ] Command-specific prefix matching (`GIT_*`, `AWS_*`, etc.)
+
+- [ ] Implement review mode for manual verification
+
+  - [ ] Generate companion `.review` file
+  - [ ] Show original alongside scrubbed values
+  - [ ] Include warnings for potentially sensitive data
+
+- [ ] Security-focused unit tests
+
+  - [ ] Pattern matching tests for all default rules
+  - [ ] Environment filtering tests
+  - [ ] Review file generation tests
+
+### **XII-D. Pytest Integration**
+
+- [ ] Add `@pytest.mark.cmdmox_record` marker
+
+  - [ ] Automatic fixture directory configuration
+  - [ ] Convention-based fixture naming (`<test_name>_<command>.json`)
+  - [ ] Integration with existing `cmd_mox` fixture
+
+- [ ] Add `@pytest.mark.cmdmox_replay` marker
+
+  - [ ] Automatic fixture loading from configured directory
+  - [ ] Strict/fuzzy mode configuration via marker parameter
+  - [ ] Error reporting for missing fixtures
+
+- [ ] Implement automatic fixture naming convention
+
+  - [ ] Based on test module and function names
+  - [ ] Support for custom naming via marker parameters
+  - [ ] Collision detection and handling
+
+- [ ] Ensure pytest-xdist compatibility for recording
+
+  - [ ] Worker-isolated fixture paths
+  - [ ] Concurrent recording safety
+  - [ ] Fixture aggregation for parallel runs
+
+### **XII-E. CLI Tool**
+
+- [ ] Implement `cmdmox record` subcommand
+
+  - [ ] `--output` for fixture path
+  - [ ] `--commands` for selective recording
+  - [ ] Execute target script with recording enabled
+
+- [ ] Implement `cmdmox replay` subcommand
+
+  - [ ] `--fixture` for fixture path
+  - [ ] `--strict` mode flag
+  - [ ] Execute target script with replay enabled
+
+- [ ] Implement `cmdmox generate-test` for code generation
+
+  - [ ] Generate pytest test from recorded fixture
+  - [ ] Include mock definitions for all recordings
+  - [ ] Support for output path configuration
+
+- [ ] Implement `cmdmox scrub` for post-hoc sanitization
+
+  - [ ] `--fixture` for input fixture
+  - [ ] `--rules` for custom rules file (YAML)
+  - [ ] In-place or output to new file
+
+- [ ] Implement `cmdmox validate` for fixture verification
+
+  - [ ] Schema validation against version
+  - [ ] Report invalid or corrupt fixtures
+  - [ ] Support for glob patterns
+
+### **XII-F. Documentation and Examples**
+
+- [ ] API reference documentation
+
+  - [ ] `RecordingSession` class documentation
+  - [ ] `ReplaySession` class documentation
+  - [ ] `Scrubber` and `ScrubbingRule` documentation
+  - [ ] `FixtureFile` schema documentation
+
+- [ ] Tutorial: Recording your first fixture
+
+  - [ ] Step-by-step guide for passthrough recording
+  - [ ] Example with git commands
+  - [ ] Explanation of fixture format
+
+- [ ] Tutorial: CI/CD replay workflows
+
+  - [ ] Using recorded fixtures in CI
+  - [ ] Managing fixture updates
+  - [ ] Best practices for fixture versioning
+
+- [ ] Migration guide from raw passthrough
+
+  - [ ] Converting existing passthrough tests
+  - [ ] Benefits of fixture-based testing
+  - [ ] Common patterns and anti-patterns
 
 **Legend:**
 
