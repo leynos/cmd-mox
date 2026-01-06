@@ -1622,6 +1622,16 @@ developers to capture real command interactions during test execution and replay
 them in subsequent runs, dramatically reducing test friction and enabling
 deterministic, fast test execution without external dependencies.
 
+> **Design Document Conventions:** This section contains both normative API
+> contracts and illustrative implementation details. **Normative** elements
+> (marked with "MUST", "SHALL", or presented in API tables) define the public
+> contract that implementations must honour. **Illustrative** elements
+> (class diagrams, code snippets showing internal wiring, and sequence diagrams)
+> demonstrate one possible implementation approach and may evolve without
+> constituting a breaking change. When in doubt, the public fluent API methods
+> (`.record()`, `.replay()`) and the fixture JSON schema are normative; internal
+> class structures and controller integration details are illustrative.
+
 ### 9.1 Conceptual Overview
 
 Record Mode operates in two complementary phases:
@@ -2320,6 +2330,42 @@ spy = cmd_mox.spy("aws").passthrough().record(
 The review file contains original values alongside scrubbed values, warnings for
 potentially sensitive data, and instructions for manual review before committing
 the fixture to version control.
+
+**Review File Structure:**
+
+The `.review` file is a human-readable report (not JSON) containing:
+
+1. A header warning that the file contains unscrubbed sensitive data
+2. For each recording, a side-by-side comparison of original and scrubbed values
+3. Flagged fields where scrubbing rules matched, with rule descriptions
+4. A checklist for the reviewer to acknowledge each sensitive field
+5. Instructions for deleting the review file after approval
+
+**Storage Practices (MUST follow):**
+
+Review files are **never** intended for version control. Projects using Record
+Mode MUST add the following patterns to `.gitignore`:
+
+```gitignore
+# CmdMox review files - contain unscrubbed sensitive data
+*.review
+**/*.review
+```
+
+The CLI tool (`cmdmox record --review`) prints a warning reminding developers
+to verify ignore patterns are in place. The `cmdmox validate` command can
+optionally check for accidentally committed `.review` files.
+
+**Acknowledgement Workflow:**
+
+1. Run recording with `review_mode=True`
+2. Inspect the generated `.review` file for unintended sensitive data leakage
+3. If scrubbing is insufficient, add custom `ScrubbingRule` entries and re-record
+4. Once satisfied, delete the `.review` file
+5. Commit only the scrubbed `.json` fixture
+
+The fixture file itself includes a `review_acknowledged` timestamp field (set
+when the review file is deleted after inspection) to provide an audit trail.
 
 ### 9.10 Design Decisions and Trade-offs
 

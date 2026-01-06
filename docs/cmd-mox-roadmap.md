@@ -11,7 +11,7 @@
 
 - [x] **Initial Documentation**
 
-  - [X] Draft README with basic usage and conceptual overview
+  - [x] Draft README with basic usage and conceptual overview
 
   - [x] Add this design spec as `docs/python-native-command-mocking-design.md`
 
@@ -397,7 +397,7 @@ documented in `python-native-command-mocking-design.md` Section IX.
   - [ ] `Scrubber` and `ScrubbingRule` documentation
   - [ ] `FixtureFile` schema documentation
 
-- [ ] Tutorial: Recording your first fixture
+- [ ] Tutorial: Recording a fixture
 
   - [ ] Step-by-step guide for passthrough recording
   - [ ] Example with git commands
