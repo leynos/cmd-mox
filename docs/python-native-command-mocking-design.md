@@ -1341,9 +1341,15 @@ Darwin environments, several avenues for future expansion exist.
   command names that differ only by case are rejected to avoid filesystem
   collisions. A dedicated Windows smoke job now runs in CI via the
   `windows-smoke` Makefile target, exercising mocked invocations and
-  passthrough spies while publishing `windows-ipc.log` for diagnostics. Future
-  work will focus on a "record mode" utility that captures passthrough sessions
-  for later reuse.
+  passthrough spies while publishing `windows-ipc.log` for diagnostics.
+
+- **Record Mode (Phase XII):** The comprehensive design for Record Mode is
+  detailed in Section IX. This feature transforms passthrough spy recordings
+  into reusable test fixtures, enabling developers to record interactions once
+  against real systems and replay them indefinitely in CI environments. Key
+  components include fixture persistence with JSON format and schema versioning,
+  scrubbing utilities for sensitive data sanitization, and a CLI tool for
+  recording, replaying, and generating test code from fixtures.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.
@@ -1357,14 +1363,6 @@ Darwin environments, several avenues for future expansion exist.
   communication could become a factor. Future versions could investigate
   higher- performance IPC strategies, such as using a binary serialization
   format like MessagePack or exploring shared memory for certain use cases.
-
-- **Test Generation Utility:** The "passthrough spy" feature is a stepping stone
-  to a powerful developer tool. A high-priority post-1.0 feature would be to
-  build a standalone utility that leverages this "record mode." This tool would
-  execute a target script, capture all its external command interactions, and
-  automatically generate a complete `pytest` test file with all the necessary
-  `CmdMox` mock definitions, dramatically accelerating the adoption of testing
-  for existing, legacy codebases.
 
 ### 8.3 Design Decisions for the Initial Controller
 
@@ -1615,3 +1613,887 @@ check is implemented twice:
 - A unit test asserts coverage at the string level for fast feedback.
 - A `pytest-bdd` scenario verifies the same user-facing behaviour as an
   acceptance criterion ("the docs list every public symbol").
+
+## IX. Record Mode: Persisting Passthrough Recordings
+
+This section details the design for Record Mode, a feature that transforms
+passthrough spy recordings into reusable test fixtures. Record Mode enables
+developers to capture real command interactions during test execution and replay
+them in subsequent runs, dramatically reducing test friction and enabling
+deterministic, fast test execution without external dependencies.
+
+> **Design Document Conventions:** This section contains both normative API
+> contracts and illustrative implementation details. **Normative** elements
+> (marked with "MUST", "SHALL", or presented in API tables) define the public
+> contract that implementations must honour. **Illustrative** elements
+> (class diagrams, code snippets showing internal wiring, and sequence diagrams)
+> demonstrate one possible implementation approach and may evolve without
+> constituting a breaking change. When in doubt, the public fluent API methods
+> (`.record()`, `.replay()`) and the fixture JSON schema are normative; internal
+> class structures and controller integration details are illustrative.
+
+### 9.1 Conceptual Overview
+
+Record Mode operates in two complementary phases:
+
+1. **Record Phase:** Execute real commands via passthrough spies while capturing
+   all interactions (command, args, stdin, env, stdout, stderr, exit_code) to
+   persistent fixture files.
+
+2. **Replay Phase:** Load previously recorded fixtures and use them to respond
+   to command invocations without executing real commands.
+
+This approach bridges the gap between realistic integration testing (passthrough
+mode) and fast, deterministic unit testing (mocked responses). Developers can
+record interactions once against real systems, then replay them indefinitely in
+CI environments without external dependencies.
+
+### 9.2 Architecture
+
+The Record Mode architecture introduces several new components that integrate
+with the existing passthrough infrastructure:
+
+```mermaid
+flowchart TB
+    subgraph TestCode["Test Code"]
+        A["spy('git').passthrough().record('fixtures/git.json')"]
+    end
+
+    subgraph CmdMox["CmdMox Controller"]
+        B[PassthroughCoordinator]
+        C[RecordingSession]
+    end
+
+    subgraph Execution["Command Execution"]
+        D[Real Command]
+    end
+
+    subgraph Persistence["Fixture Store"]
+        E["fixtures/git.json"]
+    end
+
+    A --> B
+    B --> C
+    B --> D
+    D --> B
+    C --> E
+```
+
+The recording flow extends the existing passthrough mechanism:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Test as Test Code
+    participant CmdMox as CmdMox Controller
+    participant Spy as PassthroughSpy
+    participant Recorder as RecordingSession
+    participant RealCmd as Real Command
+    participant Store as FixtureStore
+
+    Test->>CmdMox: spy("git").passthrough().record("fixtures/git")
+    CmdMox->>Spy: Configure passthrough + recording
+    Test->>Spy: Command invocation (via shim)
+    Spy->>Recorder: Start recording invocation
+    Spy->>RealCmd: Execute real command
+    RealCmd-->>Spy: stdout, stderr, exit_code
+    Spy->>Recorder: Complete recording with result
+    Recorder->>Store: Persist to fixture file
+    Spy-->>Test: Return real command output
+    Test->>CmdMox: verify()
+    CmdMox->>Recorder: Finalize session
+```
+
+The following diagram provides a detailed view of the recording flow, showing
+the interactions between `CommandDouble`, `PassthroughCoordinator`,
+`RecordingSession`, and the fixture store:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant TestCode as TestCode
+    participant CmdMox as CmdMoxController
+    participant CommandDouble as CommandDouble
+    participant Passthrough as PassthroughCoordinator
+    participant RecordingSession as RecordingSession
+    participant RealCommand as RealCommand
+    participant FixtureStore as FixtureStore
+
+    TestCode->>CmdMox: spy("git")
+    CmdMox-->>TestCode: CommandDouble
+    TestCode->>CommandDouble: passthrough()
+    TestCode->>CommandDouble: record("fixtures/git.json", scrubber, env_allowlist)
+    CommandDouble->>RecordingSession: __init__(fixture_path, scrubber, env_allowlist)
+    CommandDouble->>Passthrough: attach RecordingSession
+
+    TestCode->>CommandDouble: invoke via shim
+    CommandDouble->>Passthrough: handle_invocation(invocation)
+    Passthrough->>RealCommand: execute(invocation)
+    RealCommand-->>Passthrough: stdout, stderr, exit_code
+    Passthrough-->>CommandDouble: result
+    Passthrough->>RecordingSession: record(invocation, response)
+    RecordingSession->>RecordingSession: scrub + env_subset
+    RecordingSession->>FixtureStore: append_recording()
+    CommandDouble-->>TestCode: response
+
+    TestCode->>CmdMox: verify()
+    CmdMox->>RecordingSession: finalize()
+    RecordingSession->>FixtureStore: save_fixture()
+    CmdMox-->>TestCode: verification_result
+```
+
+The replay flow substitutes recorded responses for real command execution:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Test as Test Code
+    participant CmdMox as CmdMox Controller
+    participant Replay as ReplaySession
+    participant Store as FixtureStore
+
+    Test->>CmdMox: spy("git").replay("fixtures/git")
+    CmdMox->>Store: Load fixture file
+    Store-->>Replay: Parsed Invocation records
+    Test->>Replay: Command invocation (via shim)
+    Replay->>Replay: Match invocation to recording
+    Replay-->>Test: Return recorded output
+    Test->>CmdMox: verify()
+    CmdMox->>Replay: Validate all recordings consumed
+```
+
+The following diagram provides a detailed view of the replay flow, showing the
+interactions between `CommandDouble`, `ReplaySession`, `InvocationMatcher`, and
+the fixture store, including the matching logic and error handling paths:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant TestCode as TestCode
+    participant CmdMox as CmdMoxController
+    participant CommandDouble as CommandDouble
+    participant ReplaySession as ReplaySession
+    participant InvocationMatcher as InvocationMatcher
+    participant FixtureStore as FixtureStore
+
+    TestCode->>CmdMox: spy("git")
+    CmdMox-->>TestCode: CommandDouble
+    TestCode->>CommandDouble: replay("fixtures/git.json", strict=True)
+    CommandDouble->>ReplaySession: __init__(fixture_path, strict_matching)
+    ReplaySession->>FixtureStore: load(fixture_path)
+    FixtureStore-->>ReplaySession: FixtureFile
+
+    TestCode->>CommandDouble: invoke via shim
+    CommandDouble->>ReplaySession: match(invocation)
+    ReplaySession->>InvocationMatcher: find_match(invocation, recordings, consumed)
+    InvocationMatcher-->>ReplaySession: index or None
+    alt match found
+        ReplaySession->>ReplaySession: mark_recording_consumed(index)
+        ReplaySession-->>CommandDouble: recorded_response
+        CommandDouble-->>TestCode: recorded_response
+    else no match and strict_matching
+        ReplaySession-->>CommandDouble: None
+        CommandDouble->>TestCode: raise UnexpectedCommandError
+    else no match and not strict_matching
+        ReplaySession-->>CommandDouble: None
+        CommandDouble-->>TestCode: fallback_to_other_strategies
+    end
+
+    TestCode->>CmdMox: verify()
+    CmdMox->>ReplaySession: verify_all_consumed()
+    ReplaySession-->>CmdMox: ok_or_error
+    CmdMox-->>TestCode: verification_result
+```
+
+### 9.3 Fixture Format Specification
+
+Fixtures use JSON format for several reasons: human-readability, native Python
+support without dependencies, Git-friendliness (mergeable, diffable), and
+compatibility with the existing `Invocation.to_dict()` serialization.
+
+#### 9.3.1 Schema Definition (Version 1.0)
+
+<!-- markdownlint-disable MD013 -->
+
+```json
+{
+  "$schema": "https://cmdmox.dev/schemas/fixture-v1.json",
+  "version": "1.0",
+  "metadata": {
+    "created_at": "2024-01-15T10:30:00Z",
+    "cmdmox_version": "0.5.0",
+    "platform": "linux",
+    "python_version": "3.13.1",
+    "test_module": "tests/test_git_operations.py",
+    "test_function": "test_git_clone"
+  },
+  "recordings": [
+    {
+      "sequence": 0,
+      "command": "git",
+      "args": ["clone", "https://github.com/example/repo.git"],
+      "stdin": "",
+      "env_subset": {
+        "GIT_AUTHOR_NAME": "Test User"
+      },
+      "stdout": "Cloning into 'repo'...\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timestamp": "2024-01-15T10:30:01Z",
+      "duration_ms": 1234
+    }
+  ],
+  "scrubbing_rules": [
+    {
+      "pattern": "\\b[A-Za-z0-9]{40}\\b",
+      "replacement": "<GITHUB_TOKEN>",
+      "applied_to": ["env", "stdout", "stderr"]
+    }
+  ]
+}
+```
+
+<!-- markdownlint-enable MD013 -->
+
+#### 9.3.2 Field Definitions
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | string | Schema version for forward compatibility |
+| `metadata.created_at` | ISO8601 | Fixture creation timestamp |
+| `metadata.cmdmox_version` | string | CmdMox version used for recording |
+| `metadata.platform` | string | OS platform (linux/darwin/win32) |
+| `metadata.test_module` | string | Optional: originating test file |
+| `metadata.test_function` | string | Optional: originating test function |
+| `recordings[].sequence` | int | Invocation order within session |
+| `recordings[].command` | string | Command name |
+| `recordings[].args` | list | Command arguments |
+| `recordings[].stdin` | string | Standard input content |
+| `recordings[].env_subset` | dict | Relevant environment variables |
+| `recordings[].stdout` | string | Captured standard output |
+| `recordings[].stderr` | string | Captured standard error |
+| `recordings[].exit_code` | int | Process exit code |
+| `recordings[].timestamp` | ISO8601 | When invocation occurred |
+| `recordings[].duration_ms` | int | Real execution time |
+| `scrubbing_rules` | list | Applied sanitization rules |
+
+#### 9.3.3 Environment Variable Subset Strategy
+
+Recording the full environment would bloat fixture files (100+ variables
+typical), include system-specific paths that break portability, and potentially
+leak sensitive data. Instead, recordings capture an `env_subset` containing:
+
+1. Variables explicitly requested via `.with_env()`
+2. Variables matching known command prefixes (e.g., `GIT_*`, `AWS_*`, `DOCKER_*`)
+3. Variables specified in a configurable allowlist
+
+### 9.4 Module Structure
+
+Record Mode introduces a new subpackage within `cmd_mox`:
+
+```
+cmd_mox/
+    record/
+        __init__.py      # Public API exports
+        session.py       # RecordingSession, ReplaySession
+        fixture.py       # FixtureFile, FixtureMetadata, RecordedInvocation
+        scrubber.py      # Scrubber, ScrubbingRule
+        matching.py      # InvocationMatcher for replay
+        cli.py           # CLI tool: cmdmox record/replay/generate-test
+```
+
+### 9.5 Core Classes
+
+#### 9.5.1 RecordingSession
+
+The `RecordingSession` class manages the capture of passthrough invocations to
+fixture files:
+
+```mermaid
+classDiagram
+    class RecordingSession {
+        - Path fixture_path
+        - str | list~str~ | None command_filter
+        - Scrubber | None scrubber
+        - list~str~ env_allowlist
+        - list~RecordedInvocation~ _recordings
+        - datetime | None _started_at
+        - bool _finalized
+        + start() None
+        + record(invocation: Invocation, response: Response) None
+        + finalize() FixtureFile
+        + from_passthrough_spy(spy, fixture_path, **kwargs) RecordingSession
+    }
+```
+
+Key responsibilities:
+
+- Track recording session lifecycle (start, record, finalize)
+- Apply scrubbing rules before persisting
+- Filter environment variables to the configured subset
+- Generate fixture metadata including timestamps and platform info
+
+#### 9.5.2 ReplaySession
+
+The `ReplaySession` class replays recorded fixtures as mock responses:
+
+```mermaid
+classDiagram
+    class ReplaySession {
+        - Path fixture_path
+        - bool strict_matching
+        - bool allow_unmatched
+        - FixtureFile | None _fixture
+        - set~int~ _consumed
+        + load() None
+        + match(invocation: Invocation) Response | None
+        + verify_all_consumed() None
+    }
+```
+
+Key responsibilities:
+
+- Load and parse fixture files with schema validation
+- Match incoming invocations to recorded entries
+- Track which recordings have been consumed
+- Verify all recordings were replayed during `verify()`
+
+#### 9.5.3 FixtureFile
+
+The `FixtureFile` class represents a persisted fixture with full serialization
+support:
+
+```mermaid
+classDiagram
+    class FixtureFile {
+        + str version
+        + FixtureMetadata metadata
+        + list~RecordedInvocation~ recordings
+        + list~ScrubbingRule~ scrubbing_rules
+        + load(path: Path) FixtureFile
+        + save(path: Path) None
+        + to_dict() dict
+        + from_dict(data: dict) FixtureFile
+    }
+
+    class FixtureMetadata {
+        + str created_at
+        + str cmdmox_version
+        + str platform
+        + str python_version
+        + str | None test_module
+        + str | None test_function
+    }
+
+    class RecordedInvocation {
+        + int sequence
+        + str command
+        + list~str~ args
+        + str stdin
+        + dict~str, str~ env_subset
+        + str stdout
+        + str stderr
+        + int exit_code
+        + str timestamp
+        + int duration_ms
+    }
+
+    FixtureFile *-- FixtureMetadata
+    FixtureFile *-- RecordedInvocation
+```
+
+#### 9.5.4 Scrubber
+
+The `Scrubber` class sanitizes sensitive data from recordings before
+persistence:
+
+```mermaid
+classDiagram
+    class Scrubber {
+        - list~ScrubbingRule~ _rules
+        + scrub(recording: RecordedInvocation) RecordedInvocation
+        + add_rule(rule: ScrubbingRule) None
+        - _default_rules() list~ScrubbingRule~
+    }
+
+    class ScrubbingRule {
+        + str | Pattern pattern
+        + str replacement
+        + list~str~ applied_to
+        + str description
+    }
+
+    Scrubber *-- ScrubbingRule
+```
+
+Default scrubbing rules detect and redact:
+
+- GitHub personal access tokens (`ghp_*`, `gho_*`, `ghu_*`, `ghs_*`, `ghr_*`)
+- AWS access key IDs (`AKIA*`)
+- Generic API keys and tokens (`api_key=*`, `token=*`, `secret=*`)
+- Bearer authorization headers
+- SSH private keys
+- Database connection strings with embedded credentials
+
+#### 9.5.5 InvocationMatcher
+
+The `InvocationMatcher` class handles matching incoming invocations to recorded
+entries during replay:
+
+```mermaid
+classDiagram
+    class InvocationMatcher {
+        - bool strict
+        - bool match_env
+        - bool match_stdin
+        + matches(invocation: Invocation, recording: RecordedInvocation) bool
+        + find_match(invocation: Invocation, recordings: list, consumed: set) int | None
+    }
+```
+
+Matching modes:
+
+- **Strict:** Command, args, stdin, and env_subset must match exactly
+- **Fuzzy:** Command and args must match; stdin and env are optional
+
+### 9.6 Public API Extensions
+
+#### 9.6.1 Fluent API
+
+The `CommandDouble` class gains two new methods for recording and replay:
+
+```python
+# Recording passthrough interactions to a fixture
+spy = cmd_mox.spy("git").passthrough().record("fixtures/git_clone.json")
+
+# Recording with custom scrubbing rules
+scrubber = Scrubber()
+scrubber.add_rule(ScrubbingRule(
+    pattern=r"--token=\S+",
+    replacement="--token=<TOKEN>",
+    description="CLI token argument"
+))
+spy = cmd_mox.spy("aws").passthrough().record(
+    "fixtures/aws_s3.json",
+    scrubber=scrubber,
+    env_allowlist=["AWS_REGION", "AWS_PROFILE"]
+)
+
+# Replaying from a recorded fixture
+spy = cmd_mox.spy("git").replay("fixtures/git_clone.json")
+
+# Strict replay (fail on any unmatched invocation)
+spy = cmd_mox.spy("git").replay("fixtures/git_clone.json", strict=True)
+```
+
+#### 9.6.2 Table 3: Record Mode API Methods
+
+<!-- markdownlint-disable MD013 -->
+
+| Method | Purpose | Example |
+|--------|---------|---------|
+| `.record(path, *, scrubber, env_allowlist)` | Enable recording on passthrough spy | `.record("fixtures/git.json")` |
+| `.replay(path, *, strict)` | Load fixture and replay responses | `.replay("fixtures/git.json")` |
+| `Scrubber()` | Create scrubber with default rules | `Scrubber()` |
+| `Scrubber.add_rule(rule)` | Add custom scrubbing rule | `scrubber.add_rule(rule)` |
+| `ScrubbingRule(pattern, replacement)` | Define a scrubbing pattern | `ScrubbingRule(r"token=\S+", "token=<REDACTED>")` |
+
+<!-- markdownlint-enable MD013 -->
+
+#### 9.6.3 Pytest Markers
+
+Record Mode integrates with pytest through markers for automatic fixture
+management:
+
+```python
+# Automatically record to fixtures/<test_name>_<command>.json
+@pytest.mark.cmdmox_record(fixture_dir="fixtures/")
+def test_git_operations(cmd_mox):
+    spy = cmd_mox.spy("git").passthrough()
+    # Recording happens automatically
+    ...
+
+# Automatically replay from fixtures/<test_name>_<command>.json
+@pytest.mark.cmdmox_replay(fixture_dir="fixtures/")
+def test_git_operations(cmd_mox):
+    spy = cmd_mox.spy("git")
+    # Replay happens automatically
+    ...
+```
+
+#### 9.6.4 Context Manager Interface
+
+For explicit control or use outside pytest:
+
+```python
+from cmd_mox.record import RecordingContext, ReplayContext
+
+# Recording context captures all passthrough invocations
+with cmd_mox.CmdMox() as mox:
+    with RecordingContext(mox, "fixtures/session.json") as recording:
+        mox.spy("git").passthrough()
+        mox.spy("docker").passthrough()
+        mox.replay()
+
+        # Execute code under test...
+
+    # Fixture automatically saved on context exit
+
+# Replay context loads fixture and configures spies
+with cmd_mox.CmdMox() as mox:
+    with ReplayContext(mox, "fixtures/session.json") as replay:
+        # Spies automatically configured from fixture
+        mox.replay()
+
+        # Execute code under test with recorded responses
+```
+
+### 9.7 CLI Tool
+
+Record Mode includes a command-line interface for recording, replaying, and
+managing fixtures:
+
+```bash
+# Record command interactions during script execution
+cmdmox record --output fixtures/session.json -- ./my_script.sh
+
+# Record specific commands only
+cmdmox record --commands git,docker --output fixtures/ci.json -- make deploy
+
+# Replay from fixture during script execution
+cmdmox replay --fixture fixtures/session.json -- ./my_script.sh
+
+# Generate pytest test code from recorded fixture
+cmdmox generate-test --fixture fixtures/session.json --output tests/test_generated.py
+
+# Scrub sensitive data from an existing fixture
+cmdmox scrub --fixture fixtures/session.json --rules rules.yaml
+
+# Validate fixture format and schema
+cmdmox validate fixtures/*.json
+```
+
+### 9.8 Integration with Existing Components
+
+#### 9.8.1 PassthroughCoordinator Extension
+
+The `PassthroughCoordinator` gains an optional `RecordingSession` parameter:
+
+```python
+class PassthroughCoordinator:
+    def __init__(
+        self,
+        *,
+        cleanup_ttl: float = 300.0,
+        recording_session: RecordingSession | None = None,
+    ) -> None:
+        # ... existing initialization ...
+        self._recording_session = recording_session
+
+    def finalize_result(
+        self, result: PassthroughResult
+    ) -> tuple[CommandDouble, Invocation, Response]:
+        """Finalize passthrough and optionally record the interaction."""
+        double, invocation, resp = self._finalize_result_internal(result)
+
+        if self._recording_session is not None:
+            self._recording_session.record(invocation, resp)
+
+        return double, invocation, resp
+```
+
+#### 9.8.2 CommandDouble Extension
+
+The `CommandDouble` class gains recording and replay session attributes:
+
+```python
+class CommandDouble:
+    # ... existing attributes ...
+    _recording_session: RecordingSession | None = None
+    _replay_session: ReplaySession | None = None
+
+    def record(
+        self,
+        fixture_path: str | Path,
+        *,
+        scrubber: Scrubber | None = None,
+        env_allowlist: list[str] | None = None,
+    ) -> Self:
+        """Enable recording of passthrough invocations to a fixture file."""
+        if not self.passthrough_mode:
+            raise ValueError("record() requires passthrough(); call it first")
+        self._recording_session = RecordingSession(
+            fixture_path=Path(fixture_path),
+            scrubber=scrubber,
+            env_allowlist=env_allowlist or [],
+        )
+        return self
+
+    def replay(
+        self,
+        fixture_path: str | Path,
+        *,
+        strict: bool = True,
+    ) -> Self:
+        """Load a fixture and replay recorded responses."""
+        if self.passthrough_mode:
+            raise ValueError("replay() cannot be combined with passthrough()")
+        self._replay_session = ReplaySession(
+            fixture_path=Path(fixture_path),
+            strict_matching=strict,
+        )
+        self._replay_session.load()
+        return self
+```
+
+#### 9.8.3 Controller Integration
+
+The `CmdMox` controller integrates replay into the response generation flow:
+
+```python
+class CmdMox:
+    def _make_response(self, invocation: Invocation) -> Response:
+        """Build response, checking replay sessions first."""
+        double = self._doubles.get(invocation.command)
+
+        # Check for replay session before other strategies
+        if double and double._replay_session:
+            matched = double._replay_session.match(invocation)
+            if matched:
+                return matched
+            if double._replay_session.strict_matching:
+                raise UnexpectedCommandError(
+                    f"No fixture recording matches: {invocation}"
+                )
+
+        # Fall through to existing logic
+        return self._make_response_original(invocation)
+
+    def verify(self) -> None:
+        """Extended verification including replay consumption checks."""
+        # ... existing verification ...
+
+        # Verify all replay recordings were consumed
+        for name, double in self._doubles.items():
+            if double._replay_session:
+                double._replay_session.verify_all_consumed()
+
+        # Finalize any active recording sessions
+        for name, double in self._doubles.items():
+            if double._recording_session and not double._recording_session._finalized:
+                double._recording_session.finalize()
+```
+
+### 9.9 Security Considerations
+
+#### 9.9.1 Default Scrubbing Patterns
+
+<!-- markdownlint-disable MD013 -->
+
+| Pattern | Example | Replacement |
+|---------|---------|-------------|
+| GitHub PATs | `ghp_1234567890abcdef...` | `<GITHUB_TOKEN>` |
+| AWS Access Keys | `AKIAIOSFODNN7EXAMPLE` | `<AWS_ACCESS_KEY>` |
+| Generic API keys | `api_key=abc123` | `api_key=<REDACTED>` |
+| Bearer tokens | `Authorization: Bearer xyz` | `Authorization: Bearer <REDACTED>` |
+| SSH private keys | `-----BEGIN RSA PRIVATE KEY-----` | `<SSH_PRIVATE_KEY>` |
+| Database URLs | `postgres://user:pass@host/db` | `postgres://user:<REDACTED>@host/db` |
+
+<!-- markdownlint-enable MD013 -->
+
+#### 9.9.2 Environment Variable Filtering
+
+**Excluded by default** (system-specific or sensitive):
+
+- `PATH`, `HOME`, `USER`, `SHELL` (system-specific)
+- `SSH_AUTH_SOCK`, `GPG_AGENT_INFO` (session-specific)
+- Variables matching `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`
+
+**Included by default**:
+
+- Variables explicitly requested via `.with_env()`
+- Variables on the user-defined allowlist
+- Variables matching command-specific prefixes (e.g., `GIT_*` for git)
+
+#### 9.9.3 Review Workflow
+
+For sensitive fixtures, a review mode generates a companion file for manual
+verification:
+
+```python
+spy = cmd_mox.spy("aws").passthrough().record(
+    "fixtures/aws.json",
+    review_mode=True  # Generates fixtures/aws.json.review
+)
+```
+
+The review file contains original values alongside scrubbed values, warnings for
+potentially sensitive data, and instructions for manual review before committing
+the fixture to version control.
+
+**Review File Structure:**
+
+The `.review` file is a human-readable report (not JSON) containing:
+
+1. A header warning that the file contains unscrubbed sensitive data
+2. For each recording, a side-by-side comparison of original and scrubbed values
+3. Flagged fields where scrubbing rules matched, with rule descriptions
+4. A checklist for the reviewer to acknowledge each sensitive field
+5. Instructions for deleting the review file after approval
+
+**Storage Practices (MUST follow):**
+
+Review files are **never** intended for version control. Projects using Record
+Mode MUST add the following patterns to `.gitignore`:
+
+```gitignore
+# CmdMox review files - contain unscrubbed sensitive data
+*.review
+**/*.review
+```
+
+The CLI tool (`cmdmox record --review`) prints a warning reminding developers
+to verify ignore patterns are in place. The `cmdmox validate` command can
+optionally check for accidentally committed `.review` files.
+
+**Acknowledgement Workflow:**
+
+1. Run recording with `review_mode=True`
+2. Inspect the generated `.review` file for unintended sensitive data leakage
+3. If scrubbing is insufficient, add custom `ScrubbingRule` entries and re-record
+4. Once satisfied, delete the `.review` file
+5. Commit only the scrubbed `.json` fixture
+
+The fixture file itself includes a `review_acknowledged` timestamp field (set
+when the review file is deleted after inspection) to provide an audit trail.
+
+### 9.10 Design Decisions and Trade-offs
+
+#### 9.10.1 JSON vs YAML for Fixtures
+
+**Decision:** JSON
+
+**Rationale:**
+
+- `Invocation.to_dict()` already produces JSON-compatible output
+- No additional dependency (YAML requires `pyyaml`)
+- Better tooling support (JSON Schema validation, IDE formatters)
+- Slightly faster parsing than YAML
+
+**Trade-off:** YAML would be more human-readable for manual editing, but JSON's
+tooling advantages outweigh this.
+
+#### 9.10.2 Strict vs Fuzzy Matching
+
+**Decision:** Support both via `strict` parameter
+
+**Rationale:**
+
+- Strict matching ensures deterministic replay for consistent CI
+- Fuzzy matching accommodates non-deterministic elements (timestamps, UUIDs)
+- Users choose based on their specific requirements
+
+#### 9.10.3 Full Environment vs Subset
+
+**Decision:** Record environment subset only
+
+**Rationale:**
+
+- Full environment is 100+ variables, mostly irrelevant
+- Reduces fixture size by approximately 90%
+- Improves portability across machines and platforms
+- Reduces secret exposure risk
+
+#### 9.10.4 Per-Command vs Session-Level Fixtures
+
+**Decision:** Support both
+
+**Rationale:**
+
+- Per-command fixtures are simpler for single-command tests
+- Session fixtures capture cross-command interactions and ordering
+- Different use cases require different granularity
+
+### 9.11 Versioning and Forward Compatibility
+
+#### 9.11.1 Schema Versioning
+
+Fixtures include a `version` field following semantic versioning:
+
+- Breaking changes increment the major version
+- New optional fields increment the minor version
+- CmdMox maintains a migration table for old versions
+
+#### 9.11.2 Upgrade Path
+
+```python
+class FixtureFile:
+    @classmethod
+    def load(cls, path: Path) -> FixtureFile:
+        data = json.load(path.open())
+        version = data.get("version", "0.0")
+
+        if version < "1.0":
+            data = migrate_v0_to_v1(data)
+
+        return cls.from_dict(data)
+```
+
+### 9.12 Class Relationships Summary
+
+```mermaid
+classDiagram
+    class CommandDouble {
+        + record(path, scrubber) Self
+        + replay(path, strict) Self
+        - _recording_session RecordingSession
+        - _replay_session ReplaySession
+    }
+
+    class RecordingSession {
+        - Path fixture_path
+        - Scrubber scrubber
+        - list~str~ env_allowlist
+        - list~RecordedInvocation~ _recordings
+        + start() None
+        + record(invocation, response) None
+        + finalize() FixtureFile
+    }
+
+    class ReplaySession {
+        - Path fixture_path
+        - bool strict_matching
+        - FixtureFile _fixture
+        - set~int~ _consumed
+        + load() None
+        + match(invocation) Response
+        + verify_all_consumed() None
+    }
+
+    class FixtureFile {
+        + str version
+        + FixtureMetadata metadata
+        + list~RecordedInvocation~ recordings
+        + list~ScrubbingRule~ scrubbing_rules
+        + load(path) FixtureFile
+        + save(path) None
+    }
+
+    class Scrubber {
+        - list~ScrubbingRule~ _rules
+        + scrub(recording) RecordedInvocation
+        + add_rule(rule) None
+    }
+
+    class PassthroughCoordinator {
+        - RecordingSession _recording_session
+        + finalize_result(result) tuple
+    }
+
+    CommandDouble --> RecordingSession : _recording_session
+    CommandDouble --> ReplaySession : _replay_session
+    RecordingSession --> FixtureFile : creates
+    RecordingSession --> Scrubber : uses
+    ReplaySession --> FixtureFile : loads
+    PassthroughCoordinator --> RecordingSession : delegates
+```
