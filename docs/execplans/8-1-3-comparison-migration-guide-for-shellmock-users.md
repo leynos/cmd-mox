@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Constraints`, `Tolerances`,
 `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`, and
 `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
-Status: DRAFT
+Status: COMPLETE
 
 PLANS.md does not exist in this repository.
 
@@ -58,8 +58,11 @@ expected mocked command behaviour.
 ## Progress
 
     - [x] (2026-01-12) Drafted initial ExecPlan.
-    - [ ] Create the migration guide document and add it to the docs index.
-    - [ ] Validate documentation linting and Mermaid diagrams.
+    - [x] (2026-01-12) Created `docs/shellmock-migration-guide.md` with mapping,
+      examples, and checklist.
+    - [x] (2026-01-12) Linked the guide from `docs/contents.md` and added a
+      cross-reference in `docs/usage-guide.md`.
+    - [x] (2026-01-12) Ran `make markdownlint` and `make nixie`.
 
 ## Surprises & Discoveries
 
@@ -75,10 +78,19 @@ expected mocked command behaviour.
       Rationale: Keeps the guide discoverable and focused while preserving the
       usage guide as the main API reference.
       Date/Author: 2026-01-12 / Codex
+    - Decision: Keep shellmock snippets conceptual and note that CLI syntax
+      can vary by version.
+      Rationale: Avoids locking the guide to a single shellmock CLI variant
+      while still giving users a clear translation path.
+      Date/Author: 2026-01-12 / Codex
 
 ## Outcomes & Retrospective
 
-To be completed after implementation.
+Completed the shellmock migration guide, linked it from the documentation
+index and usage guide, and recorded design decisions in
+`docs/python-native-command-mocking-design.md`. Documentation linting and
+Mermaid validation pass via `make markdownlint` and `make nixie` (warnings about
+the `nixie` Makefile target remain pre-existing).
 
 ## Context and Orientation
 
@@ -180,3 +192,9 @@ Expected linting transcripts (examples only):
 No new dependencies. Reference shellmock documentation for CLI flag meanings
 and use existing CmdMox APIs from `docs/usage-guide.md` and
 `docs/python-native-command-mocking-design.md`.
+
+## Revision note (required when editing an ExecPlan)
+
+Updated the plan to COMPLETE status, recorded implementation progress, and
+summarised outcomes after creating the migration guide, linking it in the docs
+index and usage guide, and running the required lint and Mermaid validations.
