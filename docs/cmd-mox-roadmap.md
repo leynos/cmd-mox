@@ -173,7 +173,7 @@
 
   - [x] Example tests for stubs, mocks, spies, pipelines, passthrough mode
 
-  - [ ] Comparison/migration guide for `shellmock` users
+  - [x] Comparison/migration guide for `shellmock` users
 
 ## **IX. Quality Assurance**
 
