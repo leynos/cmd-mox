@@ -1,25 +1,28 @@
 # Shellmock migration guide
 
 This guide helps shellmock users migrate to CmdMox. It focuses on translating
-shellmock expectations into CmdMox's Python API while highlighting behavioural
-differences that matter during test execution.
+shellmock expectations into CmdMox's Python application programming interface
+(API) while highlighting behavioural differences that matter during test
+execution.
 
 ## Who this is for
 
-Use this guide if you already have shellmock-based tests or CLI fixtures and
-want to move to CmdMox's pytest-first workflow. If you are new to CmdMox, read
-`docs/usage-guide.md` first, then return here for the mapping examples.
-Shellmock CLI syntax can vary by version, so treat the shellmock snippets as
-conceptual and confirm the exact flags in your local shellmock documentation.
+This guide is intended for projects that already use shellmock-based tests or
+command-line interface (CLI) fixtures and are moving to CmdMox's pytest-first
+workflow. For new CmdMox users, read `docs/usage-guide.md` first, then return
+here for the mapping examples. Shellmock CLI syntax can vary by version, so
+the shellmock snippets are conceptual; confirm the exact flags in local
+shellmock documentation.
 
 ## What changes when moving to CmdMox
 
 - CmdMox is configured from Python tests (typically via pytest fixtures), not
   shell scripts.
 - CmdMox follows a strict record -> replay -> verify lifecycle. Verification
-  happens automatically in the pytest fixture unless you disable auto
-  lifecycle.
-- CmdMox uses Python shims and IPC to capture invocations instead of shell
+  happens automatically in the pytest fixture unless auto lifecycle is
+  disabled.
+- CmdMox uses Python shims and inter-process communication (IPC) to capture
+  invocations instead of shell
   scripts and log files.
 - Matchers are expressed as Python objects (for example `Regex`, `Contains`)
   rather than CLI flags.
@@ -72,7 +75,7 @@ Notes:
 - `cmd_mox.stub(...)` does not require verification (it is non-strict), but
   verification still runs by default in the pytest fixture.
 - When using the context manager API instead of pytest, call `mox.replay()`
-  before running your code and `mox.verify()` after.
+  before running the code under test and `mox.verify()` after.
 
 ## Example 2: strict mock with args and stdin
 
@@ -118,10 +121,10 @@ If the order or call count matters, add `.times(n)`, `.in_order()`, or
 
 ## Common gotchas
 
-- CmdMox only intercepts commands while in replay mode. If you are not using
-  the pytest fixture, call `mox.replay()` before running the code under test.
+- CmdMox only intercepts commands while in replay mode. When the pytest
+  fixture is not used, call `mox.replay()` before running the code under test.
 - CmdMox enforces strict ordering for mocks by default. Use `.any_order()` if
-  ordering is not important for a particular expectation.
+  ordering is not relevant for a particular expectation.
 - CmdMox can match stdin and environment variables, but those must be declared
   explicitly with `.with_stdin(...)` and `.with_env(...)`.
 

@@ -12,10 +12,10 @@ PLANS.md does not exist in this repository.
 
 Deliver a clear, runnable migration guide that helps shellmock users adopt
 CmdMox without guesswork. Success is observable when a new documentation page
-shows side-by-side translations from shellmock CLI usage to CmdMox Python
-fixtures, lists feature parity and gaps, and the documentation index links to
-it. A reader should be able to copy one of the examples, run tests, and get the
-expected mocked command behaviour.
+shows side-by-side translations from shellmock command-line interface (CLI)
+usage to CmdMox Python fixtures, lists feature parity and gaps, and the
+documentation index links to it. A reader should be able to copy one of the
+examples, run tests, and get the expected mocked command behaviour.
 
 ## Constraints
 

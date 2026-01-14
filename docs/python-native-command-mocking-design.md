@@ -1614,21 +1614,21 @@ check is implemented twice:
 - A `pytest-bdd` scenario verifies the same user-facing behaviour as an
   acceptance criterion ("the docs list every public symbol").
 
-### 8.11 Design Decisions for the shellmock Migration Guide
+### 8.11 Design Decisions for the `shellmock` Migration Guide
 
-The shellmock migration guide will be published as a standalone document at
+The `shellmock` migration guide will be published as a standalone document at
 `docs/shellmock-migration-guide.md` to keep migration content focused without
 overloading the usage guide. The documentation index in `docs/contents.md` will
 link to this guide, and `docs/usage-guide.md` will include a short cross-link
 for discoverability.
 
-The guide will include a concise feature mapping table (shellmock CLI flags to
+The guide will include a concise feature mapping table (`shellmock` CLI flags to
 CmdMox fluent API calls), at least two end-to-end translated examples (a simple
 stub and a strict mock with verification), and a brief migration checklist.
 This keeps parity with the mapping in Table 1 while providing actionable,
 copy-pasteable examples for new users.
-Shellmock snippets will be labeled as conceptual to acknowledge CLI variations
-across shellmock versions, with a note to confirm exact flags in local
+`shellmock` snippets will be labeled as conceptual to acknowledge CLI
+variations across `shellmock` versions, with a note to confirm exact flags in
 documentation.
 
 ## IX. Record Mode: Persisting Passthrough Recordings
