@@ -86,19 +86,19 @@ examples, run tests, and get the expected mocked command behaviour.
 
 ## Outcomes & Retrospective
 
-Completed the shellmock migration guide, linked it from the documentation
-index and usage guide, and recorded design decisions in
+Completed the shellmock migration guide, linked it from the documentation index
+and usage guide, and recorded design decisions in
 `docs/python-native-command-mocking-design.md`. Documentation linting and
-Mermaid validation pass via `make markdownlint` and `make nixie` (warnings about
-the `nixie` Makefile target remain pre-existing).
+Mermaid validation pass via `make markdownlint` and `make nixie` (warnings
+about the `nixie` Makefile target remain pre-existing).
 
 ## Context and Orientation
 
 CmdMox documentation lives in `docs/usage-guide.md` (user-facing API guidance)
 and `docs/python-native-command-mocking-design.md` (design rationale and
 feature mappings, including a shellmock-to-CmdMox table). The documentation
-index is `docs/contents.md`. The roadmap entry for this work is under
-"VIII. Documentation, Examples & Usability" in `docs/cmd-mox-roadmap.md`.
+index is `docs/contents.md`. The roadmap entry for this work is under "VIII.
+Documentation, Examples & Usability" in `docs/cmd-mox-roadmap.md`.
 
 Shellmock is a shell-script-based command mocking tool. CmdMox provides similar
 behaviour with Python shims and a record-replay-verify workflow.
@@ -173,16 +173,16 @@ Quality method (how we check):
 
 ## Idempotence and Recovery
 
-The documentation edits are safe to re-run. If linting fails, fix the
-reported Markdown issues and re-run the commands. If the guide content needs
-adjustment, edit the single guide file and re-run linting.
+The documentation edits are safe to re-run. If linting fails, fix the reported
+Markdown issues and re-run the commands. If the guide content needs adjustment,
+edit the single guide file and re-run linting.
 
 ## Artifacts and Notes
 
 Expected linting transcripts (examples only):
 
     $ make markdownlint
-    markdownlint docs/...
+    markdownlint docs/…
 
     $ make nixie
     nixie: all mermaid diagrams are valid

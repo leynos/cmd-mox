@@ -63,7 +63,6 @@ DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
 IO_CANCEL_GRACE: t.Final[float] = 0.05
 
-_T = t.TypeVar("_T")
 _SENTINEL: t.Final[object] = object()
 
 
@@ -142,12 +141,12 @@ def _handle_retry_failure(
     )
 
 
-def retry_with_backoff(
-    func: t.Callable[[int], _T],
+def retry_with_backoff[T](
+    func: t.Callable[[int], T],
     *,
     retry_config: RetryConfig,
     strategy: RetryStrategy | None = None,
-) -> _T:
+) -> T:
     """Execute *func* until it succeeds or retries are exhausted.
 
     The callable receives the 0-based attempt index. When provided, the
@@ -256,12 +255,12 @@ def _extract_outcome(outcome: dict[str, t.Any]) -> object:
     return value
 
 
-def _run_blocking_io(
-    func: t.Callable[[], _T],
+def _run_blocking_io[T](
+    func: t.Callable[[], T],
     *,
     deadline: float,
     cancel: t.Callable[[], None],
-) -> _T:
+) -> T:
     """Execute *func* on a worker thread until completion or timeout."""
     outcome: dict[str, t.Any] = {"value": _SENTINEL}
 
@@ -280,7 +279,7 @@ def _run_blocking_io(
 
     remaining = _validate_initial_deadline(deadline, cancel, thread)
     _join_with_timeout_and_cancel(thread, remaining, cancel)
-    return t.cast("_T", _extract_outcome(outcome))
+    return t.cast("T", _extract_outcome(outcome))
 
 
 def _connect_unix_with_retries(

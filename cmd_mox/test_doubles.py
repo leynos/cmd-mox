@@ -13,9 +13,6 @@ Self = t.Self
 if t.TYPE_CHECKING:  # pragma: no cover - typing-only import
     from .controller import CmdMox
 
-T = t.TypeVar("T")
-
-
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from pathlib import Path  # noqa: F401
 
@@ -261,7 +258,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
             raise AssertionError(msg)
         return self.invocations[-1]
 
-    def _assert_equal(self, label: str, actual: T, expected: T) -> None:
+    def _assert_equal[T](self, label: str, actual: T, expected: T) -> None:
         """Raise ``AssertionError`` if *actual* != *expected*.
 
         The *label* provides contextual information for the error message,

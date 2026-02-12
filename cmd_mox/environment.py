@@ -145,7 +145,7 @@ def ensure_dir_exists(
     return directory.resolve()
 
 
-CleanupError = tuple[str, BaseException]
+type CleanupError = tuple[str, BaseException]
 
 P = t.ParamSpec("P")
 R = t.TypeVar("R")

@@ -10,37 +10,35 @@ execution.
 This guide is intended for projects that already use shellmock-based tests or
 command-line interface (CLI) fixtures and are moving to CmdMox's pytest-first
 workflow. For new CmdMox users, read `docs/usage-guide.md` first, then return
-here for the mapping examples. Shellmock CLI syntax can vary by version, so
-the shellmock snippets are conceptual; confirm the exact flags in local
-shellmock documentation.
+here for the mapping examples. Shellmock CLI syntax can vary by version, so the
+shellmock snippets are conceptual; confirm the exact flags in local shellmock
+documentation.
 
 ## What changes when moving to CmdMox
 
 - CmdMox is configured from Python tests (typically via pytest fixtures), not
   shell scripts.
 - CmdMox follows a strict record -> replay -> verify lifecycle. Verification
-  happens automatically in the pytest fixture unless auto lifecycle is
-  disabled.
+  happens automatically in the pytest fixture unless auto lifecycle is disabled.
 - CmdMox uses Python shims and inter-process communication (IPC) to capture
-  invocations instead of shell
-  scripts and log files.
+  invocations instead of shell scripts and log files.
 - Matchers are expressed as Python objects (for example `Regex`, `Contains`)
   rather than CLI flags.
 
 ## Feature mapping
 
 <!-- markdownlint-disable MD013 -->
-| shellmock concept or flag | CmdMox equivalent |
-| --- | --- |
-| Mock an executable command | `cmd_mox.mock("cmd")` |
-| Define exact args (`--match`) | `.with_args("arg1", "arg2")` |
-| Define stdout (`--output`) | `.returns(stdout="...")` |
-| Define exit status (`--status`) | `.returns(exit_code=...)` |
-| Partial arg match (`--type partial`) | `.with_matching_args(Contains("arg"))` |
-| Regex arg match (`--type regex`) | `.with_matching_args(Regex(r"pattern"))` |
-| Match stdin (`--match-stdin`) | `.with_stdin("payload")` |
-| Custom behaviour (`--exec`) | `.runs(handler)` |
-| Verify expectations (`shellmock_verify`) | `cmd_mox.verify()` |
+| shellmock concept or flag                | CmdMox equivalent                        |
+| ---------------------------------------- | ---------------------------------------- |
+| Mock an executable command               | `cmd_mox.mock("cmd")`                    |
+| Define exact args (`--match`)            | `.with_args("arg1", "arg2")`             |
+| Define stdout (`--output`)               | `.returns(stdout="...")`                 |
+| Define exit status (`--status`)          | `.returns(exit_code=...)`                |
+| Partial arg match (`--type partial`)     | `.with_matching_args(Contains("arg"))`   |
+| Regex arg match (`--type regex`)         | `.with_matching_args(Regex(r"pattern"))` |
+| Match stdin (`--match-stdin`)            | `.with_stdin("payload")`                 |
+| Custom behaviour (`--exec`)              | `.runs(handler)`                         |
+| Verify expectations (`shellmock_verify`) | `cmd_mox.verify()`                       |
 <!-- markdownlint-enable MD013 -->
 
 ## Example 1: simple stub

@@ -105,9 +105,7 @@ else:  # pragma: no cover - non-Windows fallback for type-checkers
 
 logger = logging.getLogger(__name__)
 
-_RequestValidator = t.Callable[[dict[str, t.Any]], t.Any | None]
-_DispatchArg = t.TypeVar("_DispatchArg", Invocation, PassthroughResult)
-_BackendT = t.TypeVar("_BackendT")
+type _RequestValidator = t.Callable[[dict[str, t.Any]], t.Any | None]
 
 
 def _process_invocation(
@@ -124,7 +122,7 @@ def _process_passthrough_result(
     return server.handle_passthrough_result(result)
 
 
-class _ServerLifecycle(abc.ABC, t.Generic[_BackendT]):
+class _ServerLifecycle[BackendT](abc.ABC):
     """Shared lifecycle management for IPC transports."""
 
     def __init__(
@@ -136,11 +134,11 @@ class _ServerLifecycle(abc.ABC, t.Generic[_BackendT]):
         self.socket_path = Path(socket_path)
         self.timeout = timeout
         self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
-        self._server: _BackendT | None = None
+        self._server: BackendT | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
-    def __enter__(self) -> _ServerLifecycle[_BackendT]:
+    def __enter__(self) -> _ServerLifecycle[BackendT]:
         self.start()
         return self
 
@@ -181,21 +179,21 @@ class _ServerLifecycle(abc.ABC, t.Generic[_BackendT]):
         self._post_stop_cleanup()
 
     @abc.abstractmethod
-    def _create_backend(self) -> tuple[_BackendT, threading.Thread]: ...
+    def _create_backend(self) -> tuple[BackendT, threading.Thread]: ...
 
-    def _prepare_backend_start(self) -> None:
+    def _prepare_backend_start(self) -> None:  # noqa: B027
         """Perform any setup required before starting the backend server."""
 
-    def _export_environment(self) -> None:
+    def _export_environment(self) -> None:  # noqa: B027
         """Export environment variables for client processes."""
 
     def _start_backend_thread(self, thread: threading.Thread) -> None:
         thread.start()
 
-    def _wait_until_ready(self) -> None:
+    def _wait_until_ready(self) -> None:  # noqa: B027
         """Wait for the backend server to be ready to accept connections."""
 
-    def _stop_backend(self, server: _BackendT | None) -> None:
+    def _stop_backend(self, server: BackendT | None) -> None:  # noqa: B027
         """Stop the backend server instance."""
 
     def _join_backend_thread(self, thread: threading.Thread | None) -> None:
@@ -203,7 +201,7 @@ class _ServerLifecycle(abc.ABC, t.Generic[_BackendT]):
             return
         thread.join(self.timeout)
 
-    def _post_stop_cleanup(self) -> None:
+    def _post_stop_cleanup(self) -> None:  # noqa: B027
         """Perform cleanup after the backend server has stopped."""
 
 
@@ -228,7 +226,7 @@ class TimeoutConfig:
         validate_optional_timeout(self.accept_timeout, name="accept_timeout")
 
 
-class _BaseIPCServer(_ServerLifecycle[_BackendT]):
+class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
     """Shared handler wiring for IPC transports."""
 
     def __init__(
@@ -246,14 +244,13 @@ class _BaseIPCServer(_ServerLifecycle[_BackendT]):
         self._handler = handlers.handler
         self._passthrough_handler = handlers.passthrough_handler
 
-    def _dispatch(
+    def _dispatch[DispatchArg: (Invocation, PassthroughResult)](
         self,
-        handler: t.Callable[[_DispatchArg], Response] | None,
-        argument: _DispatchArg,
+        handler: t.Callable[[DispatchArg], Response] | None,
+        argument: DispatchArg,
         *,
-        default: t.Callable[[_DispatchArg], Response],
-        error_builder: t.Callable[[_DispatchArg, Exception], RuntimeError]
-        | None = None,
+        default: t.Callable[[DispatchArg], Response],
+        error_builder: t.Callable[[DispatchArg, Exception], RuntimeError] | None = None,
     ) -> Response:
         """Invoke *handler* when provided, otherwise fall back to *default*."""
         if handler is None:
@@ -360,7 +357,7 @@ class CallbackIPCServer(IPCServer):
         )
 
 
-_RequestProcessor = t.Callable[[_BaseIPCServer, t.Any], Response]
+type _RequestProcessor = t.Callable[[_BaseIPCServer, t.Any], Response]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
     KIND_INVOCATION: (validate_invocation_payload, _process_invocation),

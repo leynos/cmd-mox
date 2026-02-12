@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses as dc
 import enum
 import os
-import types  # noqa: TC003
 import typing as t
 from collections import deque
 from pathlib import Path
@@ -31,6 +30,8 @@ from .test_doubles import CommandDouble, DoubleKind
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
 if t.TYPE_CHECKING:
+    import types
+
     from .expectations import Expectation
 
 
