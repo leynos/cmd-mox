@@ -109,7 +109,7 @@ def test_main_skips_interactive_stdin(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    assert t.cast("SystemExit", excinfo.value).code == 0
+    assert excinfo.value.code == 0
     invocation = captured["invocation"]
     assert invocation.stdin == ""
     assert not interactive.read_called
@@ -138,7 +138,7 @@ def test_main_honours_custom_timeout(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    assert t.cast("SystemExit", excinfo.value).code == 0
+    assert excinfo.value.code == 0
     assert captured["timeout"] == pytest.approx(1.75)
     out = capsys.readouterr()
     assert out.out == "custom"
@@ -159,8 +159,7 @@ def test_main_requires_socket_env(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    exit_exc = t.cast("SystemExit", excinfo.value)
-    assert exit_exc.code == 1
+    assert excinfo.value.code == 1
     out = capsys.readouterr()
     assert "IPC socket not specified" in out.err
 
@@ -183,7 +182,6 @@ def test_main_rejects_invalid_timeout(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    exit_exc = t.cast("SystemExit", excinfo.value)
-    assert exit_exc.code == 1
+    assert excinfo.value.code == 1
     out = capsys.readouterr()
     assert f"invalid timeout: '{raw_timeout}'" in out.err

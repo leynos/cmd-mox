@@ -208,10 +208,10 @@ class _HandleCloser:
         if self._closed:
             return
         self._closed = True
-        with contextlib.suppress(pywintypes.error):  # type: ignore[name-defined]
+        with contextlib.suppress(pywintypes.error):
             # Double-close or already aborted handles may report INVALID_HANDLE;
             # callers only care that resources are reclaimed.
-            win32file.CloseHandle(self._handle)  # type: ignore[union-attr]
+            win32file.CloseHandle(self._handle)
 
     @property
     def closed(self) -> bool:
@@ -374,23 +374,23 @@ def _wait_for_pipe_availability(
         wait_duration = min(delay, _remaining_time(deadline))
     wait_ms = max(1, int(wait_duration * 1000))
     try:
-        win32pipe.WaitNamedPipe(pipe_name, wait_ms)  # type: ignore[union-attr]
-    except pywintypes.error:  # type: ignore[name-defined]
+        win32pipe.WaitNamedPipe(pipe_name, wait_ms)
+    except pywintypes.error:
         time.sleep(wait_duration)
 
 
 def _create_pipe_handle(pipe_name: str) -> object:
     """Create and configure a handle for *pipe_name*."""
-    handle = win32file.CreateFile(  # type: ignore[union-attr]
+    handle = win32file.CreateFile(
         pipe_name,
-        win32file.GENERIC_READ | win32file.GENERIC_WRITE,  # type: ignore[union-attr]
+        win32file.GENERIC_READ | win32file.GENERIC_WRITE,
         0,
         None,
-        win32file.OPEN_EXISTING,  # type: ignore[union-attr]
+        win32file.OPEN_EXISTING,
         0,
         None,
     )
-    win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
+    win32pipe.SetNamedPipeHandleState(
         handle,
         t.cast("int", getattr(win32pipe, "PIPE_READMODE_MESSAGE", 2)),
         None,

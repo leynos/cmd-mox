@@ -1,7 +1,6 @@
 """Unit tests for shim timeout validation."""
 
 import sys
-import typing as t
 from pathlib import Path
 
 import pytest
@@ -32,6 +31,6 @@ def test_main_errors_on_invalid_timeout(
     with pytest.raises(SystemExit) as exc:
         shim.main()
 
-    assert t.cast("SystemExit", exc.value).code == 1
+    assert exc.value.code == 1
     stderr = capsys.readouterr().err
     assert f"invalid timeout: '{value}'" in stderr

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import typing as t
 from pathlib import Path
 
 import pytest
@@ -95,7 +94,7 @@ def replay_controller_missing_env(mox: CmdMox) -> MissingEnvironmentError:
         stack.enter_context(mox)
         with pytest.raises(MissingEnvironmentError) as excinfo:
             mox.replay()
-    return t.cast("MissingEnvironmentError", excinfo.value)
+    return excinfo.value
 
 
 @when(
@@ -150,7 +149,7 @@ def verify_controller_expect_error(
             mox.verify()
     finally:
         mox_stack.close()
-    return t.cast("VerificationError", excinfo.value)
+    return excinfo.value
 
 
 @then("the controller should use the Windows named pipe server")

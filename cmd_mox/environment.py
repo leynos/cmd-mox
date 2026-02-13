@@ -57,7 +57,7 @@ def _get_short_path(path: Path) -> Path | None:
     ctypes_module = t.cast("t.Any", ctypes)
     kernel32 = ctypes_module.WinDLL("kernel32", use_last_error=True)
     get_short_path_name = kernel32.GetShortPathNameW
-    get_short_path_name.argtypes = (  # type: ignore[attr-defined]
+    get_short_path_name.argtypes = (
         wintypes.LPCWSTR,
         wintypes.LPWSTR,
         wintypes.DWORD,

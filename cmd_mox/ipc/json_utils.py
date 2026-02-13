@@ -25,7 +25,7 @@ def parse_json_safely(data: bytes) -> dict[str, t.Any] | None:
 def validate_invocation_payload(payload: dict[str, t.Any]) -> Invocation | None:
     """Return an :class:`Invocation` if *payload* has the required fields."""
     try:
-        return Invocation(**payload)  # type: ignore[arg-type]
+        return Invocation(**payload)
     except TypeError:
         logger.exception("IPC payload missing required fields: %r", payload)
         return None
@@ -36,7 +36,7 @@ def validate_passthrough_payload(
 ) -> PassthroughResult | None:
     """Return a :class:`PassthroughResult` for passthrough result payloads."""
     try:
-        return PassthroughResult(**payload)  # type: ignore[arg-type]
+        return PassthroughResult(**payload)
     except TypeError:
         logger.exception("IPC passthrough payload missing required fields: %r", payload)
         return None

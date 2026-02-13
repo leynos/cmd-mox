@@ -50,7 +50,7 @@ from .socket_utils import cleanup_stale_socket, wait_for_socket
 
 
 def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
-    class _UnsupportedUnixServer(socketserver.BaseServer):  # type: ignore[misc]
+    class _UnsupportedUnixServer(socketserver.BaseServer):
         """Placeholder that raises when Unix sockets are requested on Windows."""
 
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -70,8 +70,8 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
     if unix_server is not None:
 
         class _ThreadingUnixCompat(
-            socketserver.ThreadingMixIn,  # type: ignore[misc]
-            unix_server,  # type: ignore[valid-type]
+            socketserver.ThreadingMixIn,
+            unix_server,
         ):
             """Threading shim for platforms lacking ThreadingUnixStreamServer."""
 
@@ -502,7 +502,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         # Named pipes do not leave filesystem artefacts that require cleanup.
         return
 
-    def _create_backend(self) -> tuple[_NamedPipeState, threading.Thread]:  # type: ignore[override]
+    def _create_backend(self) -> tuple[_NamedPipeState, threading.Thread]:
         state = _NamedPipeState(
             pipe_name=self._pipe_name,
             outer=self,
@@ -511,7 +511,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         thread = threading.Thread(target=state.serve_forever, daemon=True)
         return state, thread
 
-    def _wait_until_ready(self) -> None:  # type: ignore[override]
+    def _wait_until_ready(self) -> None:
         state = self._server
         if state is None:
             return
@@ -522,7 +522,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
             )
             raise RuntimeError(msg)
 
-    def _stop_backend(self, server: _NamedPipeState | None) -> None:  # type: ignore[override]
+    def _stop_backend(self, server: _NamedPipeState | None) -> None:
         if server is None:
             return
         server.stop()
@@ -573,8 +573,8 @@ class _NamedPipeState:
     def _try_connect_pipe(self, handle: object) -> tuple[bool, bool]:
         """Attempt to connect *handle* to the named pipe."""
         try:
-            win32pipe.ConnectNamedPipe(handle, None)  # type: ignore[union-attr]
-        except pywintypes.error as exc:  # type: ignore[name-defined]
+            win32pipe.ConnectNamedPipe(handle, None)
+        except pywintypes.error as exc:
             return self._handle_connection_error(exc, handle)
         return True, True
 
@@ -598,7 +598,7 @@ class _NamedPipeState:
 
     @staticmethod
     def _close_handle(handle: object) -> None:
-        win32file.CloseHandle(handle)  # type: ignore[union-attr]
+        win32file.CloseHandle(handle)
 
     def _spawn_handler_thread(self, handle: object) -> None:
         """Create and track the per-client handler thread."""
@@ -666,7 +666,7 @@ class _NamedPipeState:
                 continue
 
             if self.stop_event.is_set():
-                win32file.CloseHandle(handle)  # type: ignore[union-attr]
+                win32file.CloseHandle(handle)
                 break
 
             self._spawn_handler_thread(handle)
@@ -691,13 +691,13 @@ class _NamedPipeState:
 
     def _create_pipe_instance(self) -> object:
         timeout_ms = max(1, int(self.accept_timeout * 1000))
-        return win32pipe.CreateNamedPipe(  # type: ignore[union-attr]
+        return win32pipe.CreateNamedPipe(
             self.pipe_name,
-            win32pipe.PIPE_ACCESS_DUPLEX,  # type: ignore[union-attr]
-            win32pipe.PIPE_TYPE_MESSAGE  # type: ignore[union-attr]
-            | win32pipe.PIPE_READMODE_MESSAGE  # type: ignore[union-attr]
-            | win32pipe.PIPE_WAIT,  # type: ignore[union-attr]
-            win32pipe.PIPE_UNLIMITED_INSTANCES,  # type: ignore[union-attr]
+            win32pipe.PIPE_ACCESS_DUPLEX,
+            win32pipe.PIPE_TYPE_MESSAGE
+            | win32pipe.PIPE_READMODE_MESSAGE
+            | win32pipe.PIPE_WAIT,
+            win32pipe.PIPE_UNLIMITED_INSTANCES,
             PIPE_CHUNK_SIZE,
             PIPE_CHUNK_SIZE,
             timeout_ms,
@@ -717,13 +717,13 @@ class _NamedPipeState:
                     response_bytes,
                     win32file=t.cast("Win32FileProtocol", win32file),
                 )
-        except pywintypes.error as exc:  # type: ignore[name-defined]
+        except pywintypes.error as exc:
             if exc.winerror not in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
                 logger.exception("Named pipe handler failed")
         finally:
-            with contextlib.suppress(pywintypes.error):  # type: ignore[name-defined]
-                win32pipe.DisconnectNamedPipe(handle)  # type: ignore[union-attr]
-            win32file.CloseHandle(handle)  # type: ignore[union-attr]
+            with contextlib.suppress(pywintypes.error):
+                win32pipe.DisconnectNamedPipe(handle)
+            win32file.CloseHandle(handle)
             with self._client_lock:
                 self._client_threads.discard(thread)
 
@@ -737,21 +737,21 @@ class _NamedPipeState:
 
     def _poke_pipe(self) -> None:
         try:
-            handle = win32file.CreateFile(  # type: ignore[union-attr]
+            handle = win32file.CreateFile(
                 self.pipe_name,
-                win32file.GENERIC_READ | win32file.GENERIC_WRITE,  # type: ignore[union-attr]
+                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
                 0,
                 None,
-                win32file.OPEN_EXISTING,  # type: ignore[union-attr]
+                win32file.OPEN_EXISTING,
                 0,
                 None,
             )
-        except pywintypes.error as exc:  # type: ignore[name-defined]
+        except pywintypes.error as exc:
             if exc.winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
                 logger.debug("Named pipe wakeup failed: %s", exc)
             return
         else:
-            win32file.CloseHandle(handle)  # type: ignore[union-attr]
+            win32file.CloseHandle(handle)
 
 
 __all__ = [
