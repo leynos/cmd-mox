@@ -23,20 +23,25 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
 def test_cmdmox_replay_verify_out_of_order(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
-    """Calling replay() or verify() out of order should raise LifecycleError."""
+    """Replay is idempotent in replay phase and strict elsewhere."""
     mox = CmdMox()
     with pytest.raises(LifecycleError):
         mox.verify()
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
     mox.replay()
-    with pytest.raises(LifecycleError):
-        mox.replay()
+    server = mox._server
     cmd_path = require_shim_dir(mox.environment) / "foo"
     run([str(cmd_path)])
+    assert len(mox.journal) == 1
+    mox.replay()
+    assert mox._server is server
+    assert len(mox.journal) == 1
     mox.verify()
     with pytest.raises(LifecycleError):
         mox.verify()
+    with pytest.raises(LifecycleError):
+        mox.replay()
 
 
 def test_phase_property_tracks_lifecycle() -> None:

@@ -279,7 +279,14 @@ class CmdMox:
         return self._get_double(command_name, DoubleKind.SPY)
 
     def replay(self) -> None:
-        """Transition to replay mode and start the IPC server."""
+        """Transition to replay mode and start the IPC server.
+
+        Calling :meth:`replay` while already in :class:`Phase.REPLAY` is a
+        no-op so helpers can safely guard replay transitions without extra
+        phase checks.
+        """
+        if self._phase is Phase.REPLAY:
+            return
         self._check_replay_preconditions()
         try:
             self._start_ipc_server()

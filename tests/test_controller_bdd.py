@@ -117,6 +117,15 @@ def test_replay_cleanup_handles_interrupts() -> None:
     pass
 
 
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "replay is idempotent during replay phase",
+)
+def test_replay_is_idempotent_during_replay_phase() -> None:
+    """Repeated replay() calls should be safe once replay is active."""
+    pass
+
+
 @scenario(str(FEATURES_DIR / "controller.feature"), "stub runs dynamic handler")
 def test_stub_runs_dynamic_handler() -> None:
     """Stub executes a custom handler."""

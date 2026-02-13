@@ -84,6 +84,13 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
     return stack
 
 
+@when("I replay the controller again")
+def replay_controller_again(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
+    """Invoke replay() again while the replay context is already active."""
+    del mox_stack
+    mox.replay()
+
+
 @when(
     "I replay the controller expecting a missing environment error",
     target_fixture="replay_error",
