@@ -64,6 +64,18 @@ def _assert_exit_code(exc: pytest.ExceptionInfo[BaseException], expected: int) -
     assert err.code == expected
 
 
+def _pytest_skip(reason: str) -> t.NoReturn:
+    """Invoke ``pytest.skip`` through a typed callable cast for ``ty``."""
+    skip = t.cast("t.Callable[[str], t.NoReturn]", pytest.skip)
+    skip(reason)
+
+
+def _pytest_fail(reason: str) -> t.NoReturn:
+    """Invoke ``pytest.fail`` through a typed callable cast for ``ty``."""
+    fail = t.cast("t.Callable[[str], t.NoReturn]", pytest.fail)
+    fail(reason)
+
+
 def test_validate_environment_returns_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -246,10 +258,14 @@ def test_execute_invocation_returns_response_without_passthrough(
         return expected
 
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
+
+    def fail_passthrough(*_args: object, **_kwargs: object) -> t.NoReturn:
+        return _pytest_fail("passthrough handler should not run")
+
     monkeypatch.setattr(
         shim,
         "_handle_passthrough",
-        lambda *args, **kwargs: pytest.fail("passthrough handler should not run"),  # type: ignore[invalid-argument-type]  # ty misreads @_with_exception
+        fail_passthrough,  # type: ignore[invalid-argument-type]  # ty misreads @_with_exception
     )
 
     result = _execute_invocation(invocation, timeout=1.5)
@@ -456,11 +472,11 @@ def _make_directory_symlink(tmp_path: Path) -> Path:
     target_dir.mkdir()
     symlink = tmp_path / "dir-link"
     if not hasattr(os, "symlink"):
-        pytest.skip("Platform does not support symlinks")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
+        return _pytest_skip("Platform does not support symlinks")
     try:
         symlink.symlink_to(target_dir, target_is_directory=True)
     except OSError as exc:  # pragma: no cover - windows without admin rights
-        pytest.skip(f"Symlinks unavailable: {exc}")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
+        return _pytest_skip(f"Symlinks unavailable: {exc}")
     return symlink
 
 

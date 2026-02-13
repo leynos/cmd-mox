@@ -120,7 +120,8 @@ def skip_if_unsupported(
     except ModuleNotFoundError as exc:  # pragma: no cover - pytest is a test dep
         raise RuntimeError(_PYTEST_REQUIRED_MESSAGE) from exc
 
-    pytest.skip(skip_reason)  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
+    skip = t.cast("t.Callable[[str], t.NoReturn]", pytest.skip)
+    skip(skip_reason)  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
 
 
 __all__ = (

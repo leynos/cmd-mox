@@ -26,6 +26,12 @@ _ERROR_TYPES: dict[str, type[VerificationError]] = {
 }
 
 
+def _pytest_skip(reason: str) -> t.NoReturn:
+    """Invoke ``pytest.skip`` through a typed callable cast for ``ty``."""
+    skip = t.cast("t.Callable[[str], t.NoReturn]", pytest.skip)
+    skip(reason)
+
+
 @given("a CmdMox controller", target_fixture="mox")
 def create_controller() -> CmdMox:
     """Create a fresh CmdMox instance."""
@@ -163,6 +169,6 @@ def verify_controller_expect_error(
 def assert_windows_named_pipe_server(mox: CmdMox) -> None:
     """Assert the controller swaps to the named pipe transport on Windows."""
     if os.name != "nt":  # pragma: no cover - guarded by feature preconditions
-        pytest.skip("Named pipe assertions only apply on Windows")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
+        _pytest_skip("Named pipe assertions only apply on Windows")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
     server = mox._server
     assert isinstance(server, CallbackNamedPipeServer), server
