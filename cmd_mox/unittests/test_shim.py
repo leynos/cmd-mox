@@ -249,7 +249,7 @@ def test_execute_invocation_returns_response_without_passthrough(
     monkeypatch.setattr(
         shim,
         "_handle_passthrough",
-        lambda *args, **kwargs: pytest.fail("passthrough handler should not run"),
+        lambda *args, **kwargs: pytest.fail("passthrough handler should not run"),  # type: ignore[invalid-argument-type]  # ty misreads @_with_exception
     )
 
     result = _execute_invocation(invocation, timeout=1.5)
@@ -456,11 +456,11 @@ def _make_directory_symlink(tmp_path: Path) -> Path:
     target_dir.mkdir()
     symlink = tmp_path / "dir-link"
     if not hasattr(os, "symlink"):
-        pytest.skip("Platform does not support symlinks")
+        pytest.skip("Platform does not support symlinks")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
     try:
         symlink.symlink_to(target_dir, target_is_directory=True)
     except OSError as exc:  # pragma: no cover - windows without admin rights
-        pytest.skip(f"Symlinks unavailable: {exc}")
+        pytest.skip(f"Symlinks unavailable: {exc}")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
     return symlink
 
 

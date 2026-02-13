@@ -156,6 +156,6 @@ def verify_controller_expect_error(
 def assert_windows_named_pipe_server(mox: CmdMox) -> None:
     """Assert the controller swaps to the named pipe transport on Windows."""
     if os.name != "nt":  # pragma: no cover - guarded by feature preconditions
-        pytest.skip("Named pipe assertions only apply on Windows")
+        pytest.skip("Named pipe assertions only apply on Windows")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
     server = mox._server
     assert isinstance(server, CallbackNamedPipeServer), server
