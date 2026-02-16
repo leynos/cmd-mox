@@ -255,7 +255,7 @@ class _CmdMoxManager:
                 )
         message = _format_teardown_failure(errors, nodeid=self._nodeid)
         fail = t.cast("t.Callable[[str], t.NoReturn]", pytest.fail)
-        fail(message)  # type: ignore[invalid-argument-type]  # ty misreads @_with_exception
+        fail(message)  # ty misreads @_with_exception
 
     def _auto_lifecycle_enabled(self) -> bool:
         """Resolve the auto-lifecycle flag respecting all configuration sources.

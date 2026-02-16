@@ -254,7 +254,7 @@ def test_execute_invocation_returns_response_without_passthrough(
     monkeypatch.setattr(
         shim,
         "_handle_passthrough",
-        fail_passthrough,  # type: ignore[invalid-argument-type]  # ty misreads @_with_exception
+        fail_passthrough,  # ty misreads @_with_exception
     )
 
     result = _execute_invocation(invocation, timeout=1.5)

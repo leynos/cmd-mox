@@ -42,8 +42,8 @@ multiple times.
 - Scope: if implementation requires changing more than 5 files or 250 net new
   lines, stop and escalate.
 - Semantics: if idempotence appears to require restarting Inter-Process
-  Communication (IPC) server or
-  clearing `journal`, stop and escalate with options.
+  Communication (IPC) server or clearing `journal`, stop and escalate with
+  options.
 - Compatibility: if relaxing replay breaks plugin auto-lifecycle guarantees or
   context manager teardown guarantees, stop and escalate.
 - Validation: if any required quality gate fails twice after targeted fixes,
@@ -134,10 +134,9 @@ multiple times.
   Date/Author: 2026-02-13 / Codex.
 
 - Decision: Add a behavioural Behaviour-Driven Development (BDD) scenario in
-  addition to unit coverage.
-  Rationale: Project guidance requires behavioural tests for new functionality,
-  and replay idempotence is externally observable in controller workflow.
-  Date/Author: 2026-02-13 / Codex.
+  addition to unit coverage. Rationale: Project guidance requires behavioural
+  tests for new functionality, and replay idempotence is externally observable
+  in controller workflow. Date/Author: 2026-02-13 / Codex.
 
 ## Outcomes & Retrospective
 
