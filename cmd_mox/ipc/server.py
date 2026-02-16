@@ -105,7 +105,9 @@ else:  # pragma: no cover - non-Windows fallback for type-checkers
 
 logger = logging.getLogger(__name__)
 
-type _RequestValidator = t.Callable[[dict[str, t.Any]], t.Any | None]
+type _RequestValidator = t.Callable[
+    [dict[str, t.Any]], Invocation | PassthroughResult | None
+]
 
 
 def _process_invocation(
@@ -500,7 +502,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
 
     def _prepare_backend_start(self) -> None:
         # Named pipes do not leave filesystem artefacts that require cleanup.
-        return
+        pass
 
     def _create_backend(self) -> tuple[_NamedPipeState, threading.Thread]:
         state = _NamedPipeState(
