@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import enum
+import logging
 import os
 import typing as t
 from collections import deque
@@ -34,6 +35,7 @@ if t.TYPE_CHECKING:
 
     from .expectations import Expectation
 
+logger = logging.getLogger(__name__)
 
 _ENV_ATTR_RULES: dict[str, tuple[str, bool]] = {
     "shim_dir": ("Replay shim directory", True),
@@ -286,6 +288,7 @@ class CmdMox:
         phase checks.
         """
         if self._phase is Phase.REPLAY:
+            logger.debug("replay() called while already in REPLAY phase; ignoring")
             return
         self._check_replay_preconditions()
         try:
