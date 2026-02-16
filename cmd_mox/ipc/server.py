@@ -424,7 +424,7 @@ def _encode_response(response: Response) -> bytes:
     return json.dumps(response.to_dict()).encode("utf-8")
 
 
-def _request_pipeline(server: _BaseIPCServer, raw: bytes) -> bytes | None:
+def _request_pipeline(server: _BaseIPCServer[t.Any], raw: bytes) -> bytes | None:
     """Parse, validate, dispatch, and encode an IPC request in order."""
     parsed = _parse_payload(raw)
     if parsed is None:
@@ -438,12 +438,12 @@ def _request_pipeline(server: _BaseIPCServer, raw: bytes) -> bytes | None:
     return _encode_response(response)
 
 
-def _process_raw_request(server: _BaseIPCServer, raw: bytes) -> bytes | None:
+def _process_raw_request(server: _BaseIPCServer[t.Any], raw: bytes) -> bytes | None:
     return _request_pipeline(server, raw)
 
 
 def _execute_request(
-    server: _BaseIPCServer, processor: _RequestProcessor, obj: object
+    server: _BaseIPCServer[t.Any], processor: _RequestProcessor, obj: object
 ) -> Response:
     try:
         return processor(server, obj)
