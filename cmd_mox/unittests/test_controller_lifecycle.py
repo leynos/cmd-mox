@@ -79,6 +79,24 @@ def test_context_manager_auto_verify(
         mox.verify()
 
 
+def test_replay_after_exit_without_verify_raises() -> None:
+    """replay() must not silently no-op after context exit without verify.
+
+    When ``verify_on_exit=False`` the context manager tears down the
+    Inter-Process Communication (IPC) server and clears ``_entered``
+    but leaves the phase as ``REPLAY``.  A subsequent ``replay()`` call
+    must not be treated as an idempotent no-op; it should raise
+    ``LifecycleError`` because the context is no longer active.
+    """
+    mox = CmdMox(verify_on_exit=False)
+    mox.stub("dummy").returns(stdout="ok")
+    with mox:
+        mox.replay()
+    # Context exited: server stopped, _entered=False, phase still REPLAY.
+    with pytest.raises(LifecycleError):
+        mox.replay()
+
+
 def test_replay_cleans_up_on_keyboard_interrupt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

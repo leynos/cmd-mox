@@ -14,12 +14,34 @@ import pytest
 
 
 def pytest_skip(reason: str) -> t.NoReturn:
-    """Invoke ``pytest.skip`` through a typed callable cast for ``ty``."""
+    """Invoke ``pytest.skip`` via a typed cast so ``ty`` sees ``NoReturn``.
+
+    Parameters
+    ----------
+    reason : str
+        The skip reason forwarded to ``pytest.skip``.
+
+    Raises
+    ------
+    pytest.skip.Exception
+        Always raised; the function never returns normally.
+    """
     skip = t.cast("t.Callable[[str], t.NoReturn]", pytest.skip)
     skip(reason)
 
 
 def pytest_fail(reason: str) -> t.NoReturn:
-    """Invoke ``pytest.fail`` through a typed callable cast for ``ty``."""
+    """Invoke ``pytest.fail`` via a typed cast so ``ty`` sees ``NoReturn``.
+
+    Parameters
+    ----------
+    reason : str
+        The failure reason forwarded to ``pytest.fail``.
+
+    Raises
+    ------
+    pytest.fail.Exception
+        Always raised; the function never returns normally.
+    """
     fail = t.cast("t.Callable[[str], t.NoReturn]", pytest.fail)
     fail(reason)

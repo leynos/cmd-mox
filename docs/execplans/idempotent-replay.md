@@ -1,8 +1,9 @@
 # Make `CmdMox.replay()` Idempotent in Replay Phase
 
-This ExecPlan is a living document. The sections `Constraints`, `Tolerances`,
-`Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`, and
-`Outcomes & Retrospective` must be kept up to date as work proceeds.
+This execution plan (ExecPlan) is a living document. The sections
+`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
+`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
+proceeds.
 
 Status: COMPLETE (with pre-existing typecheck baseline failures)
 
@@ -18,14 +19,14 @@ errors still occur for invalid transitions (for example calling `replay()`
 before `__enter__()` or after `verify()`).
 
 This change removes the need for downstream monkeypatches that wrap replay with
-a phase guard and restores historical helper behavior that may call `replay()`
+a phase guard and restores historical helper behaviour that may call `replay()`
 multiple times.
 
 ## Constraints
 
 - Keep the public lifecycle model `record -> replay -> verify` intact.
 - Only relax one edge: `replay()` called during `Phase.REPLAY` becomes a no-op.
-- Preserve existing behavior for:
+- Preserve existing behaviour for:
   - `replay()` before entering context (`LifecycleError`).
   - `replay()` during `Phase.VERIFY` (`LifecycleError`).
   - `verify()` phase checks and environment cleanup.
@@ -34,13 +35,14 @@ multiple times.
   - observe failure,
   - implement code,
   - re-run all quality gates.
-- Update user-facing docs in `docs/` to match final behavior.
+- Update user-facing docs in `docs/` to match final behaviour.
 
 ## Tolerances (Exception Triggers)
 
 - Scope: if implementation requires changing more than 5 files or 250 net new
   lines, stop and escalate.
-- Semantics: if idempotence appears to require restarting IPC server or
+- Semantics: if idempotence appears to require restarting Inter-Process
+  Communication (IPC) server or
   clearing `journal`, stop and escalate with options.
 - Compatibility: if relaxing replay breaks plugin auto-lifecycle guarantees or
   context manager teardown guarantees, stop and escalate.
@@ -55,8 +57,8 @@ multiple times.
 
 - Risk: Accidental side effects on second replay call (server restart, journal
   reset, shim churn). Severity: medium. Likelihood: low. Mitigation: assert
-  no-op behavior explicitly in tests (phase unchanged, existing recorded
-  invocation/journal behavior unaffected).
+  no-op behaviour explicitly in tests (phase unchanged, existing recorded
+  invocation/journal behaviour unaffected).
 
 - Risk: Documentation drift if strict lifecycle wording is not clarified.
   Severity: low. Likelihood: medium. Mitigation: update `docs/usage-guide.md`
@@ -68,13 +70,13 @@ multiple times.
   `docs/execplans/idempotent-replay.md`.
 - [x] (2026-02-13 00:08 UTC) Modified unit tests first in
   `cmd_mox/unittests/test_controller_lifecycle.py` to encode replay idempotence
-  and strict post-verify failure behavior.
+  and strict post-verify failure behaviour.
 - [x] (2026-02-13 00:09 UTC) Confirmed fail-before-fix with targeted test run
   (`LifecycleError` on second `replay()`).
-- [x] (2026-02-13 00:10 UTC) Implemented controller replay no-op behavior for
+- [x] (2026-02-13 00:10 UTC) Implemented controller replay no-op behaviour for
   `Phase.REPLAY` in `cmd_mox/controller.py`.
 - [x] (2026-02-13 00:11 UTC) Updated `docs/usage-guide.md` lifecycle wording.
-- [x] (2026-02-13 00:13 UTC) Added behavioral coverage:
+- [x] (2026-02-13 00:13 UTC) Added behavioural coverage:
   - `features/controller.feature` scenario
     `replay is idempotent during replay phase`.
   - `tests/test_controller_bdd.py` scenario binding.
@@ -124,15 +126,16 @@ multiple times.
 
 - Decision: Implement idempotence directly in `CmdMox.replay()` instead of
   monkeypatching in test harnesses. Rationale: Avoids hidden runtime mutation,
-  keeps behavior explicit, and lets tests/documentation define contract
+  keeps behaviour explicit, and lets tests/documentation define contract
   centrally. Date/Author: 2026-02-13 / Codex.
 
 - Decision: Preserve strict lifecycle errors outside the replay-repeat case.
   Rationale: Maintains guardrails and avoids masking real lifecycle misuse.
   Date/Author: 2026-02-13 / Codex.
 
-- Decision: Add a behavioral BDD scenario in addition to unit coverage.
-  Rationale: Project guidance requires behavioral tests for new functionality,
+- Decision: Add a behavioural Behaviour-Driven Development (BDD) scenario in
+  addition to unit coverage.
+  Rationale: Project guidance requires behavioural tests for new functionality,
   and replay idempotence is externally observable in controller workflow.
   Date/Author: 2026-02-13 / Codex.
 
@@ -146,7 +149,7 @@ What changed:
 - Updated `cmd_mox/controller.py` to treat replay-in-replay as a no-op.
 - Updated unit lifecycle expectations in
   `cmd_mox/unittests/test_controller_lifecycle.py`.
-- Added behavioral scenario coverage in `features/controller.feature`,
+- Added behavioural scenario coverage in `features/controller.feature`,
   `tests/test_controller_bdd.py`, and `tests/steps/controller_setup.py`.
 - Updated `docs/usage-guide.md` to document replay idempotence.
 
@@ -165,7 +168,7 @@ Remaining follow-up:
 
 ## Context and Orientation
 
-Primary runtime behavior lives in `cmd_mox/controller.py`, especially:
+Primary runtime behaviour lives in `cmd_mox/controller.py`, especially:
 
 - `CmdMox.replay()`
 - `_check_replay_preconditions()`
@@ -174,7 +177,7 @@ Primary runtime behavior lives in `cmd_mox/controller.py`, especially:
 Existing lifecycle expectations are tested in:
 
 - `cmd_mox/unittests/test_controller_lifecycle.py`
-- behavioral scenarios under `features/controller.feature` and
+- behavioural scenarios under `features/controller.feature` and
   `tests/test_controller_bdd.py`.
 
 User-facing lifecycle documentation appears in:
@@ -187,7 +190,7 @@ The pytest plugin drives auto-lifecycle and should remain unaffected:
 
 ## Plan of Work
 
-Stage A: Define behavioral contract in tests first.
+Stage A: Define behavioural contract in tests first.
 
 Update lifecycle tests so they express the new rule: a second `replay()` call
 in replay phase does nothing and does not raise, while replay from invalid
@@ -261,7 +264,7 @@ The change is accepted only if all statements below are true:
 - `replay()` still raises `LifecycleError` when called in invalid lifecycle
   states (`Phase.RECORD` without entering context, `Phase.VERIFY`).
 - No regression in full test/lint/format/typecheck gates.
-- Documentation reflects the replay idempotence behavior accurately.
+- Documentation reflects the replay idempotence behaviour accurately.
 
 Evidence to capture in implementation PR/summary:
 
@@ -285,7 +288,7 @@ If a quality gate fails:
 - re-run the same gate command,
 - then re-run all required gates before completion.
 
-## Artifacts and Notes
+## Artefacts and Notes
 
 Expected touched files during implementation:
 
@@ -311,7 +314,7 @@ No new dependencies are expected.
 
 Public API impact:
 
-- behavioral relaxation of `CmdMox.replay()` during `Phase.REPLAY`;
+- behavioural relaxation of `CmdMox.replay()` during `Phase.REPLAY`;
 - no new symbols required.
 
 Potential downstream effect:
@@ -321,6 +324,6 @@ Potential downstream effect:
 ## Revision note (required when editing an ExecPlan)
 
 Plan updated to COMPLETE after implementing replay idempotence, adding unit and
-behavioral coverage, updating usage docs, and running quality gates. Documented
-the existing repository-wide typecheck baseline failure separately as an
-out-of-scope blocker.
+behavioural coverage, updating usage docs, and running quality gates.
+Documented the existing repository-wide typecheck baseline failure separately
+as an out-of-scope blocker.
