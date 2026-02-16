@@ -26,6 +26,7 @@ from cmd_mox.shim import (
     _validate_override_path,
     _write_response,
 )
+from tests.helpers.pytest_typing import pytest_fail, pytest_skip
 
 
 def test_resolve_command_name_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -246,10 +247,14 @@ def test_execute_invocation_returns_response_without_passthrough(
         return expected
 
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
+
+    def fail_passthrough(*_args: object, **_kwargs: object) -> t.NoReturn:
+        return pytest_fail("passthrough handler should not run")
+
     monkeypatch.setattr(
         shim,
         "_handle_passthrough",
-        lambda *args, **kwargs: pytest.fail("passthrough handler should not run"),  # type: ignore[invalid-argument-type]  # ty misreads @_with_exception
+        fail_passthrough,  # ty misreads @_with_exception
     )
 
     result = _execute_invocation(invocation, timeout=1.5)
@@ -456,11 +461,11 @@ def _make_directory_symlink(tmp_path: Path) -> Path:
     target_dir.mkdir()
     symlink = tmp_path / "dir-link"
     if not hasattr(os, "symlink"):
-        pytest.skip("Platform does not support symlinks")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
+        return pytest_skip("Platform does not support symlinks")
     try:
         symlink.symlink_to(target_dir, target_is_directory=True)
     except OSError as exc:  # pragma: no cover - windows without admin rights
-        pytest.skip(f"Symlinks unavailable: {exc}")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
+        return pytest_skip(f"Symlinks unavailable: {exc}")
     return symlink
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import enum
+import logging
 import os
 import typing as t
 from collections import deque
@@ -34,6 +35,7 @@ if t.TYPE_CHECKING:
 
     from .expectations import Expectation
 
+logger = logging.getLogger(__name__)
 
 _ENV_ATTR_RULES: dict[str, tuple[str, bool]] = {
     "shim_dir": ("Replay shim directory", True),
@@ -279,7 +281,18 @@ class CmdMox:
         return self._get_double(command_name, DoubleKind.SPY)
 
     def replay(self) -> None:
-        """Transition to replay mode and start the IPC server."""
+        """Transition to replay mode and start the IPC server.
+
+        Calling :meth:`replay` while the context is entered and the
+        controller is already in :class:`Phase.REPLAY` is a no-op so
+        helpers can safely guard replay transitions without extra phase
+        checks.  If the context has been exited (e.g. via
+        ``verify_on_exit=False``) the call falls through to the normal
+        precondition checks and raises :class:`LifecycleError`.
+        """
+        if self._phase is Phase.REPLAY and self._entered:
+            logger.debug("replay() called while already in REPLAY phase; ignoring")
+            return
         self._check_replay_preconditions()
         try:
             self._start_ipc_server()

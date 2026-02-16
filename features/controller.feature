@@ -123,6 +123,16 @@ Feature: CmdMox basic functionality
     Then the shim directory should be cleaned up after interruption
     And the IPC socket should be cleaned up after interruption
 
+  Scenario: replay is idempotent during replay phase
+    Given a CmdMox controller
+    And the command "hi" is stubbed to return "hello"
+    When I replay the controller
+    And I replay the controller again
+    And I run the command "hi"
+    Then the output should be "hello"
+    When I verify the controller
+    Then the journal should contain 1 invocation of "hi"
+
   Scenario: replay fails when environment disappears during startup
     Given a CmdMox controller
     And the replay environment is invalidated during startup

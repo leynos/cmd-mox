@@ -18,6 +18,7 @@ from cmd_mox.errors import (
     VerificationError,
 )
 from cmd_mox.ipc import CallbackNamedPipeServer
+from tests.helpers.pytest_typing import pytest_skip
 
 _ERROR_TYPES: dict[str, type[VerificationError]] = {
     "UnexpectedCommandError": UnexpectedCommandError,
@@ -82,6 +83,13 @@ def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
     stack.enter_context(mox)
     mox.replay()
     return stack
+
+
+@when("I replay the controller again")
+def replay_controller_again(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
+    """Invoke replay() again while the replay context is already active."""
+    del mox_stack
+    mox.replay()
 
 
 @when(
@@ -156,6 +164,8 @@ def verify_controller_expect_error(
 def assert_windows_named_pipe_server(mox: CmdMox) -> None:
     """Assert the controller swaps to the named pipe transport on Windows."""
     if os.name != "nt":  # pragma: no cover - guarded by feature preconditions
-        pytest.skip("Named pipe assertions only apply on Windows")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
+        pytest_skip(
+            "Named pipe assertions only apply on Windows"
+        )  # ty misreads @_with_exception
     server = mox._server
     assert isinstance(server, CallbackNamedPipeServer), server

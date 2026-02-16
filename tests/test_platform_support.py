@@ -7,6 +7,7 @@ import typing as t
 import pytest
 
 import cmd_mox.platform as platform
+from tests.helpers.pytest_typing import pytest_fail
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for type hints
     from _pytest.pytester import Pytester
@@ -95,7 +96,7 @@ def test_skip_if_unsupported_ignores_reason_on_supported_platform() -> None:
     try:
         platform.skip_if_unsupported(platform="linux", reason="custom skip")
     except pytest.skip.Exception as exc:  # pragma: no cover - indicates a bug
-        pytest.fail(f"unexpected skip: {exc}")  # type: ignore[invalid-argument-type]  # ty misreads @_with_exception
+        pytest_fail(f"unexpected skip: {exc}")  # ty misreads @_with_exception
 
 
 def test_skip_if_unsupported_noop_on_supported_platform() -> None:

@@ -23,20 +23,26 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
 def test_cmdmox_replay_verify_out_of_order(
     run: t.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
-    """Calling replay() or verify() out of order should raise LifecycleError."""
+    """Replay is idempotent in replay phase and strict elsewhere."""
     mox = CmdMox()
     with pytest.raises(LifecycleError):
         mox.verify()
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
     mox.replay()
-    with pytest.raises(LifecycleError):
-        mox.replay()
     cmd_path = require_shim_dir(mox.environment) / "foo"
     run([str(cmd_path)])
+    assert len(mox.journal) == 1
+    # Second replay() must be a no-op: phase stays REPLAY and the
+    # journal is not cleared (a real restart calls journal.clear()).
+    mox.replay()
+    assert mox.phase is Phase.REPLAY
+    assert len(mox.journal) == 1
     mox.verify()
     with pytest.raises(LifecycleError):
         mox.verify()
+    with pytest.raises(LifecycleError):
+        mox.replay()
 
 
 def test_phase_property_tracks_lifecycle() -> None:
@@ -72,6 +78,30 @@ def test_context_manager_auto_verify(
 
     with pytest.raises(LifecycleError):
         mox.verify()
+
+
+def test_replay_after_exit_without_verify_raises() -> None:
+    """Replay after context exit without verify must raise.
+
+    When ``verify_on_exit=False`` the context manager tears down the
+    IPC server and clears ``_entered`` but leaves the phase as
+    ``REPLAY``.  A subsequent ``replay()`` call must not be treated as
+    an idempotent no-op; it should raise because the context is no
+    longer active.
+
+    Raises
+    ------
+    LifecycleError
+        Expected when ``replay()`` is called after the context has
+        exited with ``verify_on_exit=False``.
+    """
+    mox = CmdMox(verify_on_exit=False)
+    mox.stub("dummy").returns(stdout="ok")
+    with mox:
+        mox.replay()
+    # Context exited: server stopped, _entered=False, phase still REPLAY.
+    with pytest.raises(LifecycleError):
+        mox.replay()
 
 
 def test_replay_cleans_up_on_keyboard_interrupt(
