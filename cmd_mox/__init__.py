@@ -36,7 +36,7 @@ if t.TYPE_CHECKING:
 else:  # pragma: no cover - typing fallback only
     _ModuleType = type(importlib)
 
-_CmdMoxFixture = t.Callable[..., object]
+type _CmdMoxFixture = t.Callable[..., object]
 
 _CMD_MOX_FIXTURE_PYTEST_REQUIRED_MESSAGE: t.Final[str] = (
     "cmd_mox_fixture requires pytest; install 'pytest' to use the fixture."

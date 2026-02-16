@@ -63,7 +63,6 @@ DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
 MIN_RETRY_SLEEP: t.Final[float] = 0.001
 IO_CANCEL_GRACE: t.Final[float] = 0.05
 
-_T = t.TypeVar("_T")
 _SENTINEL: t.Final[object] = object()
 
 
@@ -142,12 +141,12 @@ def _handle_retry_failure(
     )
 
 
-def retry_with_backoff(
-    func: t.Callable[[int], _T],
+def retry_with_backoff[T](
+    func: t.Callable[[int], T],
     *,
     retry_config: RetryConfig,
     strategy: RetryStrategy | None = None,
-) -> _T:
+) -> T:
     """Execute *func* until it succeeds or retries are exhausted.
 
     The callable receives the 0-based attempt index. When provided, the
@@ -209,10 +208,10 @@ class _HandleCloser:
         if self._closed:
             return
         self._closed = True
-        with contextlib.suppress(pywintypes.error):  # type: ignore[name-defined]
+        with contextlib.suppress(pywintypes.error):
             # Double-close or already aborted handles may report INVALID_HANDLE;
             # callers only care that resources are reclaimed.
-            win32file.CloseHandle(self._handle)  # type: ignore[union-attr]
+            win32file.CloseHandle(self._handle)
 
     @property
     def closed(self) -> bool:
@@ -256,12 +255,12 @@ def _extract_outcome(outcome: dict[str, t.Any]) -> object:
     return value
 
 
-def _run_blocking_io(
-    func: t.Callable[[], _T],
+def _run_blocking_io[T](
+    func: t.Callable[[], T],
     *,
     deadline: float,
     cancel: t.Callable[[], None],
-) -> _T:
+) -> T:
     """Execute *func* on a worker thread until completion or timeout."""
     outcome: dict[str, t.Any] = {"value": _SENTINEL}
 
@@ -280,7 +279,7 @@ def _run_blocking_io(
 
     remaining = _validate_initial_deadline(deadline, cancel, thread)
     _join_with_timeout_and_cancel(thread, remaining, cancel)
-    return t.cast("_T", _extract_outcome(outcome))
+    return t.cast("T", _extract_outcome(outcome))
 
 
 def _connect_unix_with_retries(
@@ -375,23 +374,23 @@ def _wait_for_pipe_availability(
         wait_duration = min(delay, _remaining_time(deadline))
     wait_ms = max(1, int(wait_duration * 1000))
     try:
-        win32pipe.WaitNamedPipe(pipe_name, wait_ms)  # type: ignore[union-attr]
-    except pywintypes.error:  # type: ignore[name-defined]
+        win32pipe.WaitNamedPipe(pipe_name, wait_ms)
+    except pywintypes.error:
         time.sleep(wait_duration)
 
 
 def _create_pipe_handle(pipe_name: str) -> object:
     """Create and configure a handle for *pipe_name*."""
-    handle = win32file.CreateFile(  # type: ignore[union-attr]
+    handle = win32file.CreateFile(
         pipe_name,
-        win32file.GENERIC_READ | win32file.GENERIC_WRITE,  # type: ignore[union-attr]
+        win32file.GENERIC_READ | win32file.GENERIC_WRITE,
         0,
         None,
-        win32file.OPEN_EXISTING,  # type: ignore[union-attr]
+        win32file.OPEN_EXISTING,
         0,
         None,
     )
-    win32pipe.SetNamedPipeHandleState(  # type: ignore[union-attr]
+    win32pipe.SetNamedPipeHandleState(
         handle,
         t.cast("int", getattr(win32pipe, "PIPE_READMODE_MESSAGE", 2)),
         None,

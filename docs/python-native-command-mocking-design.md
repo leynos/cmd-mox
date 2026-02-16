@@ -1347,9 +1347,9 @@ Darwin environments, several avenues for future expansion exist.
   detailed in Section IX. This feature transforms passthrough spy recordings
   into reusable test fixtures, enabling developers to record interactions once
   against real systems and replay them indefinitely in CI environments. Key
-  components include fixture persistence with JSON format and schema versioning,
-  scrubbing utilities for sensitive data sanitization, and a CLI tool for
-  recording, replaying, and generating test code from fixtures.
+  components include fixture persistence with JSON format and schema
+  versioning, scrubbing utilities for sensitive data sanitization, and a CLI
+  tool for recording, replaying, and generating test code from fixtures.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.
@@ -1622,22 +1622,21 @@ overloading the usage guide. The documentation index in `docs/contents.md` will
 link to this guide, and `docs/usage-guide.md` will include a short cross-link
 for discoverability.
 
-The guide will include a concise feature mapping table (`shellmock` CLI flags to
-CmdMox fluent API calls), at least two end-to-end translated examples (a simple
-stub and a strict mock with verification), and a brief migration checklist.
-This keeps parity with the mapping in Table 1 while providing actionable,
-copy-pasteable examples for new users.
-`shellmock` snippets will be labeled as conceptual to acknowledge CLI
-variations across `shellmock` versions, with a note to confirm exact flags in
-documentation.
+The guide will include a concise feature mapping table (`shellmock` CLI flags
+to CmdMox fluent API calls), at least two end-to-end translated examples (a
+simple stub and a strict mock with verification), and a brief migration
+checklist. This keeps parity with the mapping in Table 1 while providing
+actionable, copy-pasteable examples for new users. `shellmock` snippets will be
+labelled as conceptual to acknowledge CLI variations across `shellmock`
+versions, with a note to confirm exact flags in documentation.
 
 ## IX. Record Mode: Persisting Passthrough Recordings
 
 This section details the design for Record Mode, a feature that transforms
 passthrough spy recordings into reusable test fixtures. Record Mode enables
-developers to capture real command interactions during test execution and replay
-them in subsequent runs, dramatically reducing test friction and enabling
-deterministic, fast test execution without external dependencies.
+developers to capture real command interactions during test execution and
+replay them in subsequent runs, dramatically reducing test friction and
+enabling deterministic, fast test execution without external dependencies.
 
 > **Design Document Conventions:** This section contains both normative API
 > contracts and illustrative implementation details. **Normative** elements
@@ -1660,10 +1659,10 @@ Record Mode operates in two complementary phases:
 2. **Replay Phase:** Load previously recorded fixtures and use them to respond
    to command invocations without executing real commands.
 
-This approach bridges the gap between realistic integration testing (passthrough
-mode) and fast, deterministic unit testing (mocked responses). Developers can
-record interactions once against real systems, then replay them indefinitely in
-CI environments without external dependencies.
+This approach bridges the gap between realistic integration testing
+(passthrough mode) and fast, deterministic unit testing (mocked responses).
+Developers can record interactions once against real systems, then replay them
+indefinitely in CI environments without external dependencies.
 
 ### 9.2 Architecture
 
@@ -1874,25 +1873,25 @@ compatibility with the existing `Invocation.to_dict()` serialization.
 
 #### 9.3.2 Field Definitions
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `version` | string | Schema version for forward compatibility |
-| `metadata.created_at` | ISO8601 | Fixture creation timestamp |
-| `metadata.cmdmox_version` | string | CmdMox version used for recording |
-| `metadata.platform` | string | OS platform (linux/darwin/win32) |
-| `metadata.test_module` | string | Optional: originating test file |
-| `metadata.test_function` | string | Optional: originating test function |
-| `recordings[].sequence` | int | Invocation order within session |
-| `recordings[].command` | string | Command name |
-| `recordings[].args` | list | Command arguments |
-| `recordings[].stdin` | string | Standard input content |
-| `recordings[].env_subset` | dict | Relevant environment variables |
-| `recordings[].stdout` | string | Captured standard output |
-| `recordings[].stderr` | string | Captured standard error |
-| `recordings[].exit_code` | int | Process exit code |
-| `recordings[].timestamp` | ISO8601 | When invocation occurred |
-| `recordings[].duration_ms` | int | Real execution time |
-| `scrubbing_rules` | list | Applied sanitization rules |
+| Field                      | Type    | Description                              |
+| -------------------------- | ------- | ---------------------------------------- |
+| `version`                  | string  | Schema version for forward compatibility |
+| `metadata.created_at`      | ISO8601 | Fixture creation timestamp               |
+| `metadata.cmdmox_version`  | string  | CmdMox version used for recording        |
+| `metadata.platform`        | string  | OS platform (linux/darwin/win32)         |
+| `metadata.test_module`     | string  | Optional: originating test file          |
+| `metadata.test_function`   | string  | Optional: originating test function      |
+| `recordings[].sequence`    | int     | Invocation order within session          |
+| `recordings[].command`     | string  | Command name                             |
+| `recordings[].args`        | list    | Command arguments                        |
+| `recordings[].stdin`       | string  | Standard input content                   |
+| `recordings[].env_subset`  | dict    | Relevant environment variables           |
+| `recordings[].stdout`      | string  | Captured standard output                 |
+| `recordings[].stderr`      | string  | Captured standard error                  |
+| `recordings[].exit_code`   | int     | Process exit code                        |
+| `recordings[].timestamp`   | ISO8601 | When invocation occurred                 |
+| `recordings[].duration_ms` | int     | Real execution time                      |
+| `scrubbing_rules`          | list    | Applied sanitization rules               |
 
 #### 9.3.3 Environment Variable Subset Strategy
 
@@ -1901,7 +1900,8 @@ typical), include system-specific paths that break portability, and potentially
 leak sensitive data. Instead, recordings capture an `env_subset` containing:
 
 1. Variables explicitly requested via `.with_env()`
-2. Variables matching known command prefixes (e.g., `GIT_*`, `AWS_*`, `DOCKER_*`)
+2. Variables matching known command prefixes (e.g., `GIT_*`, `AWS_*`,
+   `DOCKER_*`)
 3. Variables specified in a configurable allowlist
 
 ### 9.4 Module Structure
@@ -2107,13 +2107,13 @@ spy = cmd_mox.spy("git").replay("fixtures/git_clone.json", strict=True)
 
 <!-- markdownlint-disable MD013 -->
 
-| Method | Purpose | Example |
-|--------|---------|---------|
-| `.record(path, *, scrubber, env_allowlist)` | Enable recording on passthrough spy | `.record("fixtures/git.json")` |
-| `.replay(path, *, strict)` | Load fixture and replay responses | `.replay("fixtures/git.json")` |
-| `Scrubber()` | Create scrubber with default rules | `Scrubber()` |
-| `Scrubber.add_rule(rule)` | Add custom scrubbing rule | `scrubber.add_rule(rule)` |
-| `ScrubbingRule(pattern, replacement)` | Define a scrubbing pattern | `ScrubbingRule(r"token=\S+", "token=<REDACTED>")` |
+| Method                                      | Purpose                             | Example                                           |
+| ------------------------------------------- | ----------------------------------- | ------------------------------------------------- |
+| `.record(path, *, scrubber, env_allowlist)` | Enable recording on passthrough spy | `.record("fixtures/git.json")`                    |
+| `.replay(path, *, strict)`                  | Load fixture and replay responses   | `.replay("fixtures/git.json")`                    |
+| `Scrubber()`                                | Create scrubber with default rules  | `Scrubber()`                                      |
+| `Scrubber.add_rule(rule)`                   | Add custom scrubbing rule           | `scrubber.add_rule(rule)`                         |
+| `ScrubbingRule(pattern, replacement)`       | Define a scrubbing pattern          | `ScrubbingRule(r"token=\S+", "token=<REDACTED>")` |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2307,14 +2307,14 @@ class CmdMox:
 
 <!-- markdownlint-disable MD013 -->
 
-| Pattern | Example | Replacement |
-|---------|---------|-------------|
-| GitHub PATs | `ghp_1234567890abcdef...` | `<GITHUB_TOKEN>` |
-| AWS Access Keys | `AKIAIOSFODNN7EXAMPLE` | `<AWS_ACCESS_KEY>` |
-| Generic API keys | `api_key=abc123` | `api_key=<REDACTED>` |
-| Bearer tokens | `Authorization: Bearer xyz` | `Authorization: Bearer <REDACTED>` |
-| SSH private keys | `-----BEGIN RSA PRIVATE KEY-----` | `<SSH_PRIVATE_KEY>` |
-| Database URLs | `postgres://user:pass@host/db` | `postgres://user:<REDACTED>@host/db` |
+| Pattern          | Example                           | Replacement                          |
+| ---------------- | --------------------------------- | ------------------------------------ |
+| GitHub PATs      | `ghp_1234567890abcdef...`         | `<GITHUB_TOKEN>`                     |
+| AWS Access Keys  | `AKIAIOSFODNN7EXAMPLE`            | `<AWS_ACCESS_KEY>`                   |
+| Generic API keys | `api_key=abc123`                  | `api_key=<REDACTED>`                 |
+| Bearer tokens    | `Authorization: Bearer xyz`       | `Authorization: Bearer <REDACTED>`   |
+| SSH private keys | `-----BEGIN RSA PRIVATE KEY-----` | `<SSH_PRIVATE_KEY>`                  |
+| Database URLs    | `postgres://user:pass@host/db`    | `postgres://user:<REDACTED>@host/db` |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2344,9 +2344,9 @@ spy = cmd_mox.spy("aws").passthrough().record(
 )
 ```
 
-The review file contains original values alongside scrubbed values, warnings for
-potentially sensitive data, and instructions for manual review before committing
-the fixture to version control.
+The review file contains original values alongside scrubbed values, warnings
+for potentially sensitive data, and instructions for manual review before
+committing the fixture to version control.
 
 **Review File Structure:**
 
@@ -2377,7 +2377,8 @@ optionally check for accidentally committed `.review` files.
 
 1. Run recording with `review_mode=True`
 2. Inspect the generated `.review` file for unintended sensitive data leakage
-3. If scrubbing is insufficient, add custom `ScrubbingRule` entries and re-record
+3. If scrubbing is insufficient, add custom `ScrubbingRule` entries and
+   re-record
 4. Once satisfied, delete the `.review` file
 5. Commit only the scrubbed `.json` fixture
 

@@ -10,7 +10,7 @@ from pytest_bdd import parsers, then, when
 
 from cmd_mox.environment import EnvironmentManager
 
-ReplayInterruptionMapping = t.Mapping[str, Path | EnvironmentManager | None]
+type ReplayInterruptionMapping = t.Mapping[str, Path | EnvironmentManager | None]
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox

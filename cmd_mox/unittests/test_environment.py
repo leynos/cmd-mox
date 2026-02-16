@@ -29,7 +29,7 @@ from cmd_mox.unittests._env_helpers import (
     require_socket_path,
 )
 
-CleanupCallable = t.Callable[[list[envmod.CleanupError]], None]
+type CleanupCallable = t.Callable[[list[envmod.CleanupError]], None]
 
 
 def test_environment_manager_modifies_and_restores() -> None:

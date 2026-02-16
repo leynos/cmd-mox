@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import typing as t
 from pathlib import Path
 
 import pytest
@@ -95,7 +94,7 @@ def replay_controller_missing_env(mox: CmdMox) -> MissingEnvironmentError:
         stack.enter_context(mox)
         with pytest.raises(MissingEnvironmentError) as excinfo:
             mox.replay()
-    return t.cast("MissingEnvironmentError", excinfo.value)
+    return excinfo.value
 
 
 @when(
@@ -150,13 +149,13 @@ def verify_controller_expect_error(
             mox.verify()
     finally:
         mox_stack.close()
-    return t.cast("VerificationError", excinfo.value)
+    return excinfo.value
 
 
 @then("the controller should use the Windows named pipe server")
 def assert_windows_named_pipe_server(mox: CmdMox) -> None:
     """Assert the controller swaps to the named pipe transport on Windows."""
     if os.name != "nt":  # pragma: no cover - guarded by feature preconditions
-        pytest.skip("Named pipe assertions only apply on Windows")
+        pytest.skip("Named pipe assertions only apply on Windows")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
     server = mox._server
     assert isinstance(server, CallbackNamedPipeServer), server

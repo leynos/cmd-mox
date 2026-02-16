@@ -95,7 +95,7 @@ def test_skip_if_unsupported_ignores_reason_on_supported_platform() -> None:
     try:
         platform.skip_if_unsupported(platform="linux", reason="custom skip")
     except pytest.skip.Exception as exc:  # pragma: no cover - indicates a bug
-        pytest.fail(f"unexpected skip: {exc}")
+        pytest.fail(f"unexpected skip: {exc}")  # type: ignore[invalid-argument-type]  # ty misreads @_with_exception
 
 
 def test_skip_if_unsupported_noop_on_supported_platform() -> None:

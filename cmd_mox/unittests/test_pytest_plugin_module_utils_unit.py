@@ -8,7 +8,7 @@ import pytest
 
 from cmd_mox.unittests import pytest_plugin_module_utils as plugin_utils
 
-CaseType = tuple[plugin_utils.LifecyclePhase, bool, tuple[str, ...]]
+type CaseType = tuple[plugin_utils.LifecyclePhase, bool, tuple[str, ...]]
 
 
 @pytest.mark.parametrize(
