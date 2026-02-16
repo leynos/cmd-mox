@@ -107,9 +107,9 @@ The three phases are defined in the design document:
 3. **Verify** – ensure every expectation was met and nothing unexpected
    happened.
 
-These phases form a strict sequence for reliable command-line tests.
-Calling `replay()` more than once during the replay phase is explicitly
-idempotent: subsequent calls are no-ops.
+These phases form a strict sequence for reliable command-line tests. Calling
+`replay()` more than once during the replay phase is explicitly idempotent:
+subsequent calls are no-ops.
 
 A typical test brings the three phases together:
 

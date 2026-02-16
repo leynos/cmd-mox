@@ -50,31 +50,25 @@ multiple times.
 ## Risks
 
 - Risk: Hidden coupling to strict replay transition in tests or helpers.
-  Severity: medium.
-  Likelihood: medium.
-  Mitigation: add focused regression tests for repeated replay and retain
-  strict errors for other phases.
+  Severity: medium. Likelihood: medium. Mitigation: add focused regression
+  tests for repeated replay and retain strict errors for other phases.
 
 - Risk: Accidental side effects on second replay call (server restart, journal
-  reset, shim churn).
-  Severity: medium.
-  Likelihood: low.
-  Mitigation: assert no-op behavior explicitly in tests (phase unchanged,
-  existing recorded invocation/journal behavior unaffected).
+  reset, shim churn). Severity: medium. Likelihood: low. Mitigation: assert
+  no-op behavior explicitly in tests (phase unchanged, existing recorded
+  invocation/journal behavior unaffected).
 
 - Risk: Documentation drift if strict lifecycle wording is not clarified.
-  Severity: low.
-  Likelihood: medium.
-  Mitigation: update `docs/usage-guide.md` lifecycle section to state the
-  idempotent replay exception.
+  Severity: low. Likelihood: medium. Mitigation: update `docs/usage-guide.md`
+  lifecycle section to state the idempotent replay exception.
 
 ## Progress
 
 - [x] (2026-02-13 00:00 UTC) Drafted initial ExecPlan in
   `docs/execplans/idempotent-replay.md`.
 - [x] (2026-02-13 00:08 UTC) Modified unit tests first in
-  `cmd_mox/unittests/test_controller_lifecycle.py` to encode replay
-  idempotence and strict post-verify failure behavior.
+  `cmd_mox/unittests/test_controller_lifecycle.py` to encode replay idempotence
+  and strict post-verify failure behavior.
 - [x] (2026-02-13 00:09 UTC) Confirmed fail-before-fix with targeted test run
   (`LifecycleError` on second `replay()`).
 - [x] (2026-02-13 00:10 UTC) Implemented controller replay no-op behavior for
@@ -104,37 +98,34 @@ multiple times.
 ## Surprises & Discoveries
 
 - Observation: Repository-level project memory tools (`qdrant-find`,
-  `qdrant-store`) are not available in this environment session.
-  Evidence: `list_mcp_resources` and `list_mcp_resource_templates` returned no
-  configured resources/templates.
-  Impact: Discovery relied on local repository inspection only.
+  `qdrant-store`) are not available in this environment session. Evidence:
+  `list_mcp_resources` and `list_mcp_resource_templates` returned no configured
+  resources/templates. Impact: Discovery relied on local repository inspection
+  only.
 
 - Observation: `pytest` is not directly on PATH in this environment.
-  Evidence: `/bin/bash: line 1: pytest: command not found`.
-  Impact: Targeted checks must run through `uv run pytest` (or Makefile
-  wrappers) to use the project virtual environment.
+  Evidence: `/bin/bash: line 1: pytest: command not found`. Impact: Targeted
+  checks must run through `uv run pytest` (or Makefile wrappers) to use the
+  project virtual environment.
 
 - Observation: `make markdownlint` lints `.uv-cache` markdown files created by
-  `uv run`.
-  Evidence: markdownlint error under
-  `.uv-cache/sdists-v9/.../markupsafe/.../README.md`.
-  Impact: remove cache contents before markdown linting to avoid false failures
-  unrelated to repository sources.
+  `uv run`. Evidence: markdownlint error under
+  `.uv-cache/sdists-v9/.../markupsafe/.../README.md`. Impact: remove cache
+  contents before markdown linting to avoid false failures unrelated to
+  repository sources.
 
 - Observation: `make typecheck` currently fails on repository baseline.
   Evidence: `Found 60 diagnostics` across files not touched by this change,
   including `cmd_mox/platform.py`, `cmd_mox/pytest_plugin.py`, and multiple
-  IPC/test modules.
-  Impact: implementation could not produce a clean typecheck gate without
-  unrelated broad-scope remediation.
+  IPC/test modules. Impact: implementation could not produce a clean typecheck
+  gate without unrelated broad-scope remediation.
 
 ## Decision Log
 
 - Decision: Implement idempotence directly in `CmdMox.replay()` instead of
-  monkeypatching in test harnesses.
-  Rationale: Avoids hidden runtime mutation, keeps behavior explicit, and lets
-  tests/documentation define contract centrally.
-  Date/Author: 2026-02-13 / Codex.
+  monkeypatching in test harnesses. Rationale: Avoids hidden runtime mutation,
+  keeps behavior explicit, and lets tests/documentation define contract
+  centrally. Date/Author: 2026-02-13 / Codex.
 
 - Decision: Preserve strict lifecycle errors outside the replay-repeat case.
   Rationale: Maintains guardrails and avoids masking real lifecycle misuse.
@@ -204,9 +195,9 @@ phases still raises. Run targeted tests to demonstrate the pre-change failure.
 
 Stage B: Implement minimal runtime change.
 
-Adjust controller replay flow so `Phase.REPLAY` returns immediately. Ensure this
-no-op path does not restart IPC server, does not clear `journal`, and does not
-mutate environment state.
+Adjust controller replay flow so `Phase.REPLAY` returns immediately. Ensure
+this no-op path does not restart IPC server, does not clear `journal`, and does
+not mutate environment state.
 
 Stage C: Align docs.
 
