@@ -138,7 +138,7 @@ class _ServerLifecycle[BackendT](abc.ABC):
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
-    def __enter__(self) -> _ServerLifecycle[BackendT]:
+    def __enter__(self) -> t.Self:
         self.start()
         return self
 
@@ -357,7 +357,7 @@ class CallbackIPCServer(IPCServer):
         )
 
 
-type _RequestProcessor = t.Callable[[_BaseIPCServer, t.Any], Response]
+type _RequestProcessor = t.Callable[[_BaseIPCServer[t.Any], t.Any], Response]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
     KIND_INVOCATION: (validate_invocation_payload, _process_invocation),

@@ -1627,7 +1627,7 @@ to CmdMox fluent API calls), at least two end-to-end translated examples (a
 simple stub and a strict mock with verification), and a brief migration
 checklist. This keeps parity with the mapping in Table 1 while providing
 actionable, copy-pasteable examples for new users. `shellmock` snippets will be
-labeled as conceptual to acknowledge CLI variations across `shellmock`
+labelled as conceptual to acknowledge CLI variations across `shellmock`
 versions, with a note to confirm exact flags in documentation.
 
 ## IX. Record Mode: Persisting Passthrough Recordings
