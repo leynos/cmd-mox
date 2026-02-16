@@ -30,12 +30,13 @@ def test_cmdmox_replay_verify_out_of_order(
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
     mox.replay()
-    server = mox._server
     cmd_path = require_shim_dir(mox.environment) / "foo"
     run([str(cmd_path)])
     assert len(mox.journal) == 1
+    # Second replay() must be a no-op: phase stays REPLAY and the
+    # journal is not cleared (a real restart calls journal.clear()).
     mox.replay()
-    assert mox._server is server
+    assert mox.phase is Phase.REPLAY
     assert len(mox.journal) == 1
     mox.verify()
     with pytest.raises(LifecycleError):
@@ -80,13 +81,19 @@ def test_context_manager_auto_verify(
 
 
 def test_replay_after_exit_without_verify_raises() -> None:
-    """replay() must not silently no-op after context exit without verify.
+    """Replay after context exit without verify must raise.
 
     When ``verify_on_exit=False`` the context manager tears down the
-    Inter-Process Communication (IPC) server and clears ``_entered``
-    but leaves the phase as ``REPLAY``.  A subsequent ``replay()`` call
-    must not be treated as an idempotent no-op; it should raise
-    ``LifecycleError`` because the context is no longer active.
+    IPC server and clears ``_entered`` but leaves the phase as
+    ``REPLAY``.  A subsequent ``replay()`` call must not be treated as
+    an idempotent no-op; it should raise because the context is no
+    longer active.
+
+    Raises
+    ------
+    LifecycleError
+        Expected when ``replay()`` is called after the context has
+        exited with ``verify_on_exit=False``.
     """
     mox = CmdMox(verify_on_exit=False)
     mox.stub("dummy").returns(stdout="ok")
