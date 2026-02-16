@@ -26,6 +26,7 @@ from cmd_mox.shim import (
     _validate_override_path,
     _write_response,
 )
+from tests.helpers.pytest_typing import pytest_fail, pytest_skip
 
 
 def test_resolve_command_name_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,18 +63,6 @@ def _assert_exit_code(exc: pytest.ExceptionInfo[BaseException], expected: int) -
     err = exc.value
     assert isinstance(err, SystemExit)
     assert err.code == expected
-
-
-def _pytest_skip(reason: str) -> t.NoReturn:
-    """Invoke ``pytest.skip`` through a typed callable cast for ``ty``."""
-    skip = t.cast("t.Callable[[str], t.NoReturn]", pytest.skip)
-    skip(reason)
-
-
-def _pytest_fail(reason: str) -> t.NoReturn:
-    """Invoke ``pytest.fail`` through a typed callable cast for ``ty``."""
-    fail = t.cast("t.Callable[[str], t.NoReturn]", pytest.fail)
-    fail(reason)
 
 
 def test_validate_environment_returns_timeout(
@@ -260,7 +249,7 @@ def test_execute_invocation_returns_response_without_passthrough(
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
 
     def fail_passthrough(*_args: object, **_kwargs: object) -> t.NoReturn:
-        return _pytest_fail("passthrough handler should not run")
+        return pytest_fail("passthrough handler should not run")
 
     monkeypatch.setattr(
         shim,
@@ -472,11 +461,11 @@ def _make_directory_symlink(tmp_path: Path) -> Path:
     target_dir.mkdir()
     symlink = tmp_path / "dir-link"
     if not hasattr(os, "symlink"):
-        return _pytest_skip("Platform does not support symlinks")
+        return pytest_skip("Platform does not support symlinks")
     try:
         symlink.symlink_to(target_dir, target_is_directory=True)
     except OSError as exc:  # pragma: no cover - windows without admin rights
-        return _pytest_skip(f"Symlinks unavailable: {exc}")
+        return pytest_skip(f"Symlinks unavailable: {exc}")
     return symlink
 
 

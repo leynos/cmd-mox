@@ -18,18 +18,13 @@ from cmd_mox.errors import (
     VerificationError,
 )
 from cmd_mox.ipc import CallbackNamedPipeServer
+from tests.helpers.pytest_typing import pytest_skip
 
 _ERROR_TYPES: dict[str, type[VerificationError]] = {
     "UnexpectedCommandError": UnexpectedCommandError,
     "UnfulfilledExpectationError": UnfulfilledExpectationError,
     "VerificationError": VerificationError,
 }
-
-
-def _pytest_skip(reason: str) -> t.NoReturn:
-    """Invoke ``pytest.skip`` through a typed callable cast for ``ty``."""
-    skip = t.cast("t.Callable[[str], t.NoReturn]", pytest.skip)
-    skip(reason)
 
 
 @given("a CmdMox controller", target_fixture="mox")
@@ -169,6 +164,6 @@ def verify_controller_expect_error(
 def assert_windows_named_pipe_server(mox: CmdMox) -> None:
     """Assert the controller swaps to the named pipe transport on Windows."""
     if os.name != "nt":  # pragma: no cover - guarded by feature preconditions
-        _pytest_skip("Named pipe assertions only apply on Windows")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
+        pytest_skip("Named pipe assertions only apply on Windows")  # type: ignore[invalid-argument-type, too-many-positional-arguments]  # ty misreads @_with_exception
     server = mox._server
     assert isinstance(server, CallbackNamedPipeServer), server
