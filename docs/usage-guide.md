@@ -336,6 +336,102 @@ spy.assert_not_called()
 These methods raise `AssertionError` when expectations are not met and are
 restricted to spy doubles.
 
+## Recording sessions (fixture capture)
+
+A `RecordingSession` captures passthrough spy interactions and persists them as
+versioned JSON fixture files. This is the foundation for Record Mode: run
+commands against real systems once, then replay the recorded interactions in
+future test runs without external dependencies.
+
+### Creating a recording session
+
+```python
+from pathlib import Path
+from cmd_mox.record import RecordingSession
+
+session = RecordingSession(
+    Path("fixtures/git_clone.json"),
+    env_allowlist=["GIT_AUTHOR_NAME", "GIT_COMMITTER_EMAIL"],
+)
+```
+
+The `env_allowlist` parameter specifies environment variable keys that should
+always be included in recordings, even if they would otherwise be filtered.
+
+### Lifecycle: start, record, finalize
+
+A session follows a strict lifecycle:
+
+```python
+session.start()                              # Begin the session
+session.record(invocation, response)         # Capture an interaction
+session.record(invocation2, response2)       # Capture another
+fixture = session.finalize()                 # Persist and return FixtureFile
+```
+
+- `start()` initializes the session timestamp. Calling `record()` before
+  `start()` raises `LifecycleError`.
+- `record(invocation, response, *, duration_ms=0)` appends a recording with
+  auto-incrementing sequence numbers and filtered environment variables. The
+  optional `duration_ms` parameter records execution timing.
+- `finalize()` writes the fixture to disk and returns the `FixtureFile`. It
+  is idempotent: calling it again returns the same object. Calling `record()`
+  after `finalize()` raises `LifecycleError`.
+
+### Environment variable filtering
+
+Recordings capture only a safe, portable subset of environment variables:
+
+- **Excluded by default:** `PATH`, `HOME`, `USER`, `SHELL`, `SSH_AUTH_SOCK`,
+  `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and keys
+  matching sensitive patterns (`*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_KEY`,
+  `*_CREDENTIALS`).
+- **Included by default:** command-specific prefix keys (e.g., `GIT_*` for
+  git, `AWS_*` for aws), allowlisted keys, and explicitly requested keys.
+- **Override:** use `env_allowlist` to force-include specific keys, or pass
+  `explicit_keys` to `filter_env_subset()` for keys from `.with_env()`.
+
+### Fixture file format
+
+Fixtures are stored as JSON with a versioned schema:
+
+```json
+{
+  "version": "1.0",
+  "metadata": {
+    "created_at": "2025-01-15T10:30:00+00:00",
+    "cmdmox_version": "0.2.0",
+    "platform": "linux",
+    "python_version": "3.12.0"
+  },
+  "recordings": [
+    {
+      "sequence": 0,
+      "command": "git",
+      "args": ["status"],
+      "stdin": "",
+      "env_subset": {"GIT_AUTHOR_NAME": "Test User"},
+      "stdout": "M file.py\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timestamp": "2025-01-15T10:30:01+00:00",
+      "duration_ms": 42
+    }
+  ],
+  "scrubbing_rules": []
+}
+```
+
+Fixture files can be loaded and round-tripped:
+
+```python
+from cmd_mox.record import FixtureFile
+
+fixture = FixtureFile.load(Path("fixtures/git_clone.json"))
+assert fixture.version == "1.0"
+assert len(fixture.recordings) == 1
+```
+
 ## Pipelines and shell syntax
 
 CmdMox intercepts individual executables by prepending shims to `PATH`. It does

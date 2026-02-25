@@ -2432,6 +2432,42 @@ tooling advantages outweigh this.
 - Session fixtures capture cross-command interactions and ordering
 - Different use cases require different granularity
 
+#### 9.10.5 Duration Tracking in RecordingSession
+
+**Decision:** Accept `duration_ms` as an optional keyword argument to
+`RecordingSession.record()` defaulting to `0`
+
+**Rationale:**
+
+- The `RecordingSession` receives pre-built `(Invocation, Response)` pairs
+- Timing is the responsibility of the caller (the passthrough coordinator
+  brackets the real command execution)
+- Accepting it as a parameter keeps the session stateless with respect to
+  timing and avoids coupling to execution infrastructure
+
+#### 9.10.6 Scrubber as Protocol
+
+**Decision:** Define `Scrubber` as a `typing.Protocol` with a single `scrub()`
+method
+
+**Rationale:**
+
+- Protocols enable structural subtyping without requiring inheritance
+- Any object with a matching `scrub()` method satisfies the type constraint
+- Keeps the XII-A recording MVP independent of the XII-C scrubbing
+  implementation
+
+#### 9.10.7 Version Detection via importlib.metadata
+
+**Decision:** Retrieve the CmdMox version at runtime via
+`importlib.metadata.version("cmd-mox")` with a fallback to `"unknown"`
+
+**Rationale:**
+
+- The project does not expose `__version__` in `cmd_mox/__init__.py`
+- `importlib.metadata` is the standard mechanism for accessing installed
+  package metadata in Python 3.8+
+
 ### 9.11 Versioning and Forward Compatibility
 
 #### 9.11.1 Schema Versioning
