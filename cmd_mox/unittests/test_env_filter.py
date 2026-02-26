@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cmd_mox.record.env_filter import filter_env_subset
 
 
@@ -129,32 +131,41 @@ class TestFilterEnvSubset:
         assert "CMOX_REAL_COMMAND_echo" not in result
         assert "SAFE_VAR" in result
 
-    def test_excludes_cmox_internal_keys_even_when_allowlisted(self) -> None:
-        """CmdMox internal keys are excluded even if placed on the allowlist."""
-        env = {
-            "CMOX_IPC_SOCKET": "ipc-socket-path",
-            "CMD_MOX_DEBUG": "1",
-            "SAFE_VAR": "keep",
-        }
+    @pytest.mark.parametrize(
+        ("label", "allowlist", "explicit_keys", "cmox_keys"),
+        [
+            (
+                "allowlist",
+                ["CMOX_IPC_SOCKET", "CMD_MOX_DEBUG"],
+                None,
+                ["CMOX_IPC_SOCKET", "CMD_MOX_DEBUG"],
+            ),
+            (
+                "explicit_keys",
+                None,
+                ["CMOX_IPC_SOCKET"],
+                ["CMOX_IPC_SOCKET"],
+            ),
+        ],
+        ids=["allowlist", "explicit_keys"],
+    )
+    def test_excludes_cmox_internal_keys_even_when_requested(
+        self,
+        label: str,
+        allowlist: list[str] | None,
+        explicit_keys: list[str] | None,
+        cmox_keys: list[str],
+    ) -> None:
+        """CmdMox internal keys are excluded regardless of request method."""
+        env = dict.fromkeys(cmox_keys, "value")
+        env["SAFE_VAR"] = "keep"
+
         result = filter_env_subset(
             env,
-            allowlist=["CMOX_IPC_SOCKET", "CMD_MOX_DEBUG"],
+            allowlist=allowlist,
+            explicit_keys=explicit_keys,
         )
 
-        assert "CMOX_IPC_SOCKET" not in result
-        assert "CMD_MOX_DEBUG" not in result
-        assert "SAFE_VAR" in result
-
-    def test_excludes_cmox_internal_keys_even_when_explicit(self) -> None:
-        """CmdMox internal keys are excluded even if explicitly requested."""
-        env = {
-            "CMOX_IPC_SOCKET": "ipc-socket-path",
-            "SAFE_VAR": "keep",
-        }
-        result = filter_env_subset(
-            env,
-            explicit_keys=["CMOX_IPC_SOCKET"],
-        )
-
-        assert "CMOX_IPC_SOCKET" not in result
+        for key in cmox_keys:
+            assert key not in result, f"{key} should be excluded even when in {label}"
         assert "SAFE_VAR" in result
