@@ -4,20 +4,13 @@ from __future__ import annotations
 
 import dataclasses as dc
 import logging
-import re
 import typing as t
 
-from cmd_mox.expectations import SENSITIVE_ENV_KEY_TOKENS
+from cmd_mox.expectations import is_sensitive_recording_env_key
 
 logger = logging.getLogger(__name__)
 
 _REPR_FIELD_LIMIT: t.Final[int] = 256
-_SENSITIVE_TOKENS: tuple[str, ...] = tuple(
-    token.casefold() for token in SENSITIVE_ENV_KEY_TOKENS
-)
-_SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?|PASS(?:WORD)?|PWD)(?=[_-]|\d|$)"
-)
 
 
 def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:
@@ -66,11 +59,9 @@ class Invocation:
         """Return a convenient debug representation."""
         safe_env: dict[str, str] = {}
         for key, value in self.env.items():
-            key_cf = key.casefold()
-            should_redact = any(token in key_cf for token in _SENSITIVE_TOKENS) or (
-                _SECRET_ENV_KEY_RE.search(key) is not None
+            safe_env[key] = (
+                "<redacted>" if is_sensitive_recording_env_key(key) else value
             )
-            safe_env[key] = "<redacted>" if should_redact else value
 
         data = {
             "command": self.command,

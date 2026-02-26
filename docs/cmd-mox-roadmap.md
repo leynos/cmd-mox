@@ -229,16 +229,16 @@ documented in `python-native-command-mocking-design.md` Section IX.
 
 ### **XII-A. Core Recording Infrastructure (MVP)**
 
-- [ ] Implement `RecordingSession` class with fixture persistence
+- [x] Implement `RecordingSession` class with fixture persistence
 
-  - [ ] Session lifecycle management (start, record, finalize)
-  - [ ] Fixture metadata generation (timestamps, platform, versions)
-  - [ ] Environment variable subset filtering
+  - [x] Session lifecycle management (start, record, finalize)
+  - [x] Fixture metadata generation (timestamps, platform, versions)
+  - [x] Environment variable subset filtering
 
-- [ ] Implement `FixtureFile` with JSON serialization and schema versioning
+- [x] Implement `FixtureFile` with JSON serialization and schema versioning
 
-  - [ ] Version 1.0 schema with recordings, metadata, and scrubbing rules
-  - [ ] `to_dict()` and `from_dict()` serialization methods
+  - [x] Version 1.0 schema with recordings, metadata, and scrubbing rules
+  - [x] `to_dict()` and `from_dict()` serialization methods
   - [ ] Schema migration support for forward compatibility
 
 - [ ] Add `.record()` method to `CommandDouble`

@@ -301,6 +301,71 @@ def test_expectation_failures(
     )
 
 
+class TestStdinMatching:
+    """Tests for Expectation stdin matching and mismatch explanation."""
+
+    def test_literal_string_stdin_matches(self) -> None:
+        """A literal string stdin matches when invocation.stdin is equal."""
+        exp = Expectation("cmd").with_stdin("hello")
+        inv = Invocation(command="cmd", args=[], stdin="hello", env={})
+        assert exp.matches(inv) is True
+        assert exp.explain_mismatch(inv) == "args, stdin, or env mismatch"
+
+    def test_literal_string_stdin_mismatch(self) -> None:
+        """A literal string stdin does not match a different value."""
+        exp = Expectation("cmd").with_stdin("hello")
+        inv = Invocation(command="cmd", args=[], stdin="world", env={})
+        assert exp.matches(inv) is False
+        reason = exp.explain_mismatch(inv)
+        assert reason is not None
+        assert "world" in reason
+
+    def test_callable_stdin_matches(self) -> None:
+        """A callable stdin predicate is invoked with invocation.stdin."""
+        exp = Expectation("cmd").with_stdin(lambda s: s.startswith("ok"))
+        inv = Invocation(command="cmd", args=[], stdin="ok-data", env={})
+        assert exp.matches(inv) is True
+
+    def test_callable_stdin_mismatch(self) -> None:
+        """A callable stdin predicate that returns False causes mismatch."""
+        exp = Expectation("cmd").with_stdin(lambda s: s == "expected")
+        inv = Invocation(command="cmd", args=[], stdin="actual", env={})
+        assert exp.matches(inv) is False
+        reason = exp.explain_mismatch(inv)
+        assert reason is not None
+        assert "actual" in reason
+
+    def test_callable_stdin_exception_returns_false(self) -> None:
+        """A callable stdin predicate that raises is treated as non-match."""
+        exp = Expectation("cmd").with_stdin(lambda s: 1 / 0)
+        inv = Invocation(command="cmd", args=[], stdin="data", env={})
+        assert exp.matches(inv) is False
+        reason = exp.explain_mismatch(inv)
+        assert reason is not None
+        assert "raised" in reason
+
+    def test_non_string_non_callable_stdin_does_not_match(self) -> None:
+        """A non-string, non-callable stdin value is rejected.
+
+        This test intentionally sets stdin to an invalid type via direct
+        attribute mutation because the public with_stdin() API enforces
+        type constraints.  It exercises the defensive fallback branch.
+        """
+        exp = Expectation("cmd")
+        exp.stdin = 42  # type: ignore[assignment]
+        inv = Invocation(command="cmd", args=[], stdin="hello", env={})
+        assert exp.matches(inv) is False
+        reason = exp.explain_mismatch(inv)
+        assert reason is not None
+        assert "not str or callable" in reason
+
+    def test_none_stdin_always_matches(self) -> None:
+        """When stdin expectation is None, any stdin value matches."""
+        exp = Expectation("cmd")
+        inv = Invocation(command="cmd", args=[], stdin="anything", env={})
+        assert exp.matches(inv) is True
+
+
 def test_validate_matchers_returns_false_when_missing() -> None:
     """_validate_matchers fails safely when matchers list is absent."""
     expectation = Expectation("cmd")
