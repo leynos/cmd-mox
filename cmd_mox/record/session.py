@@ -76,6 +76,31 @@ class RecordingSession:
             raise LifecycleError(msg)
         self._started_at = dt.datetime.now(dt.UTC)
 
+    def _validate_record_preconditions(self, duration_ms: int) -> None:
+        """Validate preconditions before recording an invocation.
+
+        Parameters
+        ----------
+        duration_ms : int
+            Wall-clock execution time in milliseconds to validate.
+
+        Raises
+        ------
+        LifecycleError
+            If the session has not been started or has been finalized.
+        ValueError
+            If *duration_ms* is negative.
+        """
+        if self._started_at is None:
+            msg = "Recording session has not been started; call start() first"
+            raise LifecycleError(msg)
+        if self._finalized:
+            msg = "Cannot record after the session has been finalized"
+            raise LifecycleError(msg)
+        if duration_ms < 0:
+            msg = f"duration_ms must be non-negative, got {duration_ms}"
+            raise ValueError(msg)
+
     def record(
         self,
         invocation: Invocation,
@@ -101,15 +126,7 @@ class RecordingSession:
         ValueError
             If *duration_ms* is negative.
         """
-        if self._started_at is None:
-            msg = "Recording session has not been started; call start() first"
-            raise LifecycleError(msg)
-        if self._finalized:
-            msg = "Cannot record after the session has been finalized"
-            raise LifecycleError(msg)
-        if duration_ms < 0:
-            msg = f"duration_ms must be non-negative, got {duration_ms}"
-            raise ValueError(msg)
+        self._validate_record_preconditions(duration_ms)
 
         # Skip if command filter is set and this command is not in it.
         if self._command_filter and invocation.command not in self._command_filter:

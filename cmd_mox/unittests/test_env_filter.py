@@ -70,7 +70,7 @@ class TestFilterEnvSubset:
 
         assert "GIT_AUTHOR_NAME" in result
         assert "GIT_COMMITTER_EMAIL" in result
-        assert "UNRELATED" in result
+        assert "UNRELATED" not in result
         assert "PATH" not in result
 
     def test_includes_explicitly_requested_keys(self) -> None:

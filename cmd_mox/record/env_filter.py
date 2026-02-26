@@ -75,8 +75,9 @@ def _should_include_env_key(
     if cmd_prefix and key.startswith(cmd_prefix):
         return True
 
-    # Remaining non-excluded keys pass through.
-    return True
+    # When a command is specified, exclude keys that don't match the prefix.
+    # When no command is specified, include all remaining non-excluded keys.
+    return not cmd_prefix
 
 
 def filter_env_subset(
