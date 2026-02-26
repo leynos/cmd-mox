@@ -13,7 +13,9 @@ import importlib.metadata
 import json
 import sys
 import typing as t
-from pathlib import Path
+
+if t.TYPE_CHECKING:
+    from pathlib import Path
 
 from .scrubber import ScrubbingRule, ScrubbingRuleDict
 
@@ -176,12 +178,11 @@ class FixtureFile:
 
     def save(self, path: Path) -> None:
         """Write this fixture to *path* as JSON, creating directories as needed."""
-        resolved = Path(path)
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
 
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
         """Load a fixture from a JSON file at *path*."""
-        data = json.loads(Path(path).read_text())
+        data = json.loads(path.read_text())
         return cls.from_dict(data)

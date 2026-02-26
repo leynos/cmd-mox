@@ -87,10 +87,10 @@ def fixture_file_exists(session: RecordingSession) -> None:
     assert session.fixture_path.exists()
 
 
-@then(parsers.parse("the fixture contains {count:d} recording"))
-def fixture_has_n_recordings(fixture: FixtureFile, count: int) -> None:
+@then(parsers.re(r"the fixture contains (?P<count>\d+) recordings?"))
+def fixture_has_n_recordings(fixture: FixtureFile, count: str) -> None:
     """Assert the fixture contains exactly *count* recordings."""
-    assert len(fixture.recordings) == count
+    assert len(fixture.recordings) == int(count)
 
 
 @then(parsers.parse('the recording command is "{cmd}"'))
