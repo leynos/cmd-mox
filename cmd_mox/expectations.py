@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import re
 import typing as t
 
 SENSITIVE_ENV_KEY_TOKENS: t.Final[tuple[str, ...]] = (
@@ -16,11 +17,29 @@ _SENSITIVE_TOKENS: t.Final[tuple[str, ...]] = tuple(
     tok.casefold() for tok in SENSITIVE_ENV_KEY_TOKENS
 )
 
+# Comprehensive regex for secret-bearing env key segments.  Matches KEY,
+# TOKEN, SECRET, PASSWORD, CREDENTIALS, PASS, and PWD as word segments
+# delimited by underscores, hyphens, or string boundaries.
+_SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
+    r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?"
+    r"|PASS(?:WORD)?|PWD)(?=[_-]|\d|$)"
+)
+
 
 def _is_sensitive_env_key(key: str) -> bool:
-    """Return True if key likely holds secret material."""
+    """Return True if key likely holds secret material (substring match)."""
     k = key.casefold()
     return any(tkn in k for tkn in _SENSITIVE_TOKENS)
+
+
+def is_sensitive_recording_env_key(key: str) -> bool:
+    """Return True if *key* should be treated as secret-bearing for recordings.
+
+    Combines the substring-based check from :func:`_is_sensitive_env_key` with
+    a regex that catches word-segment patterns such as ``GITHUB_KEY`` or
+    ``DB_PWD``.
+    """
+    return _is_sensitive_env_key(key) or bool(_SECRET_ENV_KEY_RE.search(key))
 
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -182,18 +201,20 @@ class Expectation:
         """Return a message if stdin fails to satisfy the expectation."""
         if self.stdin is None:
             return None
-        if not isinstance(self.stdin, str):
-            try:
-                ok = bool(self.stdin(invocation.stdin))
-            except Exception as exc:  # noqa: BLE001
-                return (
-                    f"stdin predicate {self.stdin!r} raised "
-                    f"{exc.__class__.__name__}: {exc}"
-                )
-            if not ok:
-                return f"stdin {invocation.stdin!r} failed {self.stdin!r}"
-        elif invocation.stdin != self.stdin:
-            return f"stdin {invocation.stdin!r} != {self.stdin!r}"
+        if isinstance(self.stdin, str):
+            if invocation.stdin != self.stdin:
+                return f"stdin {invocation.stdin!r} != {self.stdin!r}"
+            return None
+        if not callable(self.stdin):
+            return f"stdin expectation {self.stdin!r} is not str or callable"
+        try:
+            ok = bool(self.stdin(invocation.stdin))
+        except Exception as exc:  # noqa: BLE001
+            return (
+                f"stdin predicate {self.stdin!r} raised {exc.__class__.__name__}: {exc}"
+            )
+        if not ok:
+            return f"stdin {invocation.stdin!r} failed {self.stdin!r}"
         return None
 
     def _explain_env_mismatch(self, invocation: Invocation) -> str | None:
@@ -216,9 +237,11 @@ class Expectation:
         """Check stdin data or predicate."""
         if self.stdin is None:
             return True
-        if not isinstance(self.stdin, str):
+        if isinstance(self.stdin, str):
+            return invocation.stdin == self.stdin
+        if callable(self.stdin):
             return bool(self.stdin(invocation.stdin))
-        return invocation.stdin == self.stdin
+        return False
 
     def _matches_env(self, invocation: Invocation) -> bool:
         """Verify required environment variables."""

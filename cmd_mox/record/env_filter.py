@@ -8,16 +8,9 @@ Section 9.9.2.
 
 from __future__ import annotations
 
-import re
 import typing as t
 
-from cmd_mox.expectations import _is_sensitive_env_key
-
-# Comprehensive regex for secret-bearing env key segments, matching the
-# pattern used in cmd_mox.ipc.models for repr redaction.
-_SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?|PASS(?:WORD)?|PWD)(?=[_-]|\d|$)"
-)
+from cmd_mox.expectations import is_sensitive_recording_env_key
 
 # System-specific keys that are excluded by default.
 EXCLUDED_SYSTEM_KEYS: t.Final[frozenset[str]] = frozenset(
@@ -74,9 +67,16 @@ def _should_include_env_key(
         return False
 
     # Sensitive keys (password, token, secret, key, credentials, etc.) are
-    # excluded; command-specific prefix keys and remaining non-excluded keys
-    # pass through.
-    return not (_is_sensitive_env_key(key) or _SECRET_ENV_KEY_RE.search(key))
+    # excluded even if they share a command-specific prefix.
+    if is_sensitive_recording_env_key(key):
+        return False
+
+    # Command-specific prefix keys are included.
+    if cmd_prefix and key.startswith(cmd_prefix):
+        return True
+
+    # Remaining non-excluded keys pass through.
+    return True
 
 
 def filter_env_subset(

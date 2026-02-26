@@ -103,6 +103,17 @@ class TestFilterEnvSubset:
         """An empty env produces an empty result."""
         assert filter_env_subset({}) == {}
 
+    def test_excludes_sensitive_command_prefix_keys(self) -> None:
+        """Sensitive keys with command-specific prefixes are still excluded."""
+        env = {
+            "GIT_SECRET_TOKEN": "s3cr3t",
+            "GIT_AUTHOR_NAME": "User",
+        }
+        result = filter_env_subset(env, command="git")
+
+        assert "GIT_AUTHOR_NAME" in result
+        assert "GIT_SECRET_TOKEN" not in result
+
     def test_excludes_cmox_internal_keys(self) -> None:
         """CmdMox internal environment variables are excluded."""
         env = {

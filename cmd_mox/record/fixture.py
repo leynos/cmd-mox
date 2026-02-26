@@ -13,11 +13,9 @@ import importlib.metadata
 import json
 import sys
 import typing as t
+from pathlib import Path
 
-if t.TYPE_CHECKING:
-    from pathlib import Path
-
-from .scrubber import ScrubbingRule
+from .scrubber import ScrubbingRule, ScrubbingRuleDict
 
 _SCHEMA_VERSION: t.Final[str] = "1.0"
 
@@ -105,13 +103,15 @@ class FixtureMetadata:
     @classmethod
     def from_dict(cls, data: dict[str, t.Any]) -> FixtureMetadata:
         """Construct from a JSON-compatible mapping."""
+        raw_module = data.get("test_module")
+        raw_function = data.get("test_function")
         return cls(
             created_at=str(data["created_at"]),
             cmdmox_version=str(data["cmdmox_version"]),
             platform=str(data["platform"]),
             python_version=str(data["python_version"]),
-            test_module=data.get("test_module"),
-            test_function=data.get("test_function"),
+            test_module=raw_module if isinstance(raw_module, str) else None,
+            test_function=raw_function if isinstance(raw_function, str) else None,
         )
 
     @classmethod
@@ -160,22 +160,19 @@ class FixtureFile:
                 RecordedInvocation.from_dict(r) for r in data.get("recordings", [])
             ],
             scrubbing_rules=[
-                ScrubbingRule.from_dict(r) for r in data.get("scrubbing_rules", [])
+                ScrubbingRule.from_dict(t.cast("ScrubbingRuleDict", r))
+                for r in data.get("scrubbing_rules", [])
             ],
         )
 
     def save(self, path: Path) -> None:
         """Write this fixture to *path* as JSON, creating directories as needed."""
-        from pathlib import Path as _Path
-
-        resolved = _Path(path)
+        resolved = Path(path)
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
 
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
         """Load a fixture from a JSON file at *path*."""
-        from pathlib import Path as _Path
-
-        data = json.loads(_Path(path).read_text())
+        data = json.loads(Path(path).read_text())
         return cls.from_dict(data)

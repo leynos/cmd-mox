@@ -14,6 +14,15 @@ if t.TYPE_CHECKING:
     from .fixture import RecordedInvocation
 
 
+class ScrubbingRuleDict(t.TypedDict):
+    """Typed dictionary shape for serialized scrubbing rules."""
+
+    pattern: str
+    replacement: str
+    applied_to: list[str]
+    description: str | None
+
+
 @dc.dataclass(slots=True)
 class ScrubbingRule:
     """A single pattern-replacement rule applied during scrubbing."""
@@ -25,23 +34,23 @@ class ScrubbingRule:
     )
     description: str = ""
 
-    def to_dict(self) -> dict[str, t.Any]:
+    def to_dict(self) -> ScrubbingRuleDict:
         """Return a JSON-serializable mapping."""
-        return {
-            "pattern": self.pattern,
-            "replacement": self.replacement,
-            "applied_to": list(self.applied_to),
-            "description": self.description,
-        }
+        return ScrubbingRuleDict(
+            pattern=self.pattern,
+            replacement=self.replacement,
+            applied_to=list(self.applied_to),
+            description=self.description or None,
+        )
 
     @classmethod
-    def from_dict(cls, data: dict[str, t.Any]) -> ScrubbingRule:
+    def from_dict(cls, data: ScrubbingRuleDict) -> ScrubbingRule:
         """Construct a rule from a JSON-compatible mapping."""
         return cls(
             pattern=str(data["pattern"]),
             replacement=str(data["replacement"]),
             applied_to=list(data.get("applied_to", ["env", "stdout", "stderr"])),
-            description=str(data.get("description", "")),
+            description=str(data.get("description") or ""),
         )
 
 

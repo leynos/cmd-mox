@@ -51,7 +51,11 @@ class RecordingSession:
         self._scrubber = scrubber
         self._env_allowlist: list[str] = list(env_allowlist or [])
         self._command_filter: list[str] | None = (
-            [command_filter] if isinstance(command_filter, str) else command_filter
+            [command_filter]
+            if isinstance(command_filter, str)
+            else list(command_filter)
+            if command_filter is not None
+            else None
         )
 
         self._recordings: list[RecordedInvocation] = []
@@ -94,6 +98,8 @@ class RecordingSession:
         ------
         LifecycleError
             If the session has not been started or has been finalized.
+        ValueError
+            If *duration_ms* is negative.
         """
         if self._started_at is None:
             msg = "Recording session has not been started; call start() first"
@@ -101,6 +107,9 @@ class RecordingSession:
         if self._finalized:
             msg = "Cannot record after the session has been finalized"
             raise LifecycleError(msg)
+        if duration_ms < 0:
+            msg = f"duration_ms must be non-negative, got {duration_ms}"
+            raise ValueError(msg)
 
         # Skip if command filter is set and this command is not in it.
         if self._command_filter and invocation.command not in self._command_filter:

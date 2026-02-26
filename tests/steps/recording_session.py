@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import sys
 import typing as t
 
@@ -124,9 +125,10 @@ def metadata_has_platform(fixture: FixtureFile) -> None:
 
 @then("the fixture metadata contains a valid ISO8601 timestamp")
 def metadata_has_timestamp(fixture: FixtureFile) -> None:
-    """Assert fixture metadata contains a non-empty ISO8601 timestamp."""
+    """Assert fixture metadata contains a valid, parseable ISO8601 timestamp."""
     assert fixture.metadata.created_at
-    assert "T" in fixture.metadata.created_at
+    parsed = dt.datetime.fromisoformat(fixture.metadata.created_at)
+    assert isinstance(parsed, dt.datetime)
 
 
 @then("the fixture metadata contains the Python version")

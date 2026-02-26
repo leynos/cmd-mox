@@ -235,10 +235,10 @@ documented in `python-native-command-mocking-design.md` Section IX.
   - [x] Fixture metadata generation (timestamps, platform, versions)
   - [x] Environment variable subset filtering
 
-- [ ] Implement `FixtureFile` with JSON serialization and schema versioning
+- [x] Implement `FixtureFile` with JSON serialization and schema versioning
 
-  - [ ] Version 1.0 schema with recordings, metadata, and scrubbing rules
-  - [ ] `to_dict()` and `from_dict()` serialization methods
+  - [x] Version 1.0 schema with recordings, metadata, and scrubbing rules
+  - [x] `to_dict()` and `from_dict()` serialization methods
   - [ ] Schema migration support for forward compatibility
 
 - [ ] Add `.record()` method to `CommandDouble`

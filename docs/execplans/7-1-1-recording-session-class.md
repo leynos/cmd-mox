@@ -41,10 +41,10 @@ done.
 - No modifications to `PassthroughCoordinator` or `CommandDouble` in this
   plan (integration is XII-A follow-on items, not in scope).
 - Scrubber class does not exist yet (XII-C). `RecordingSession` accepts
-  `scrubber: Scrubber | None = None`. For MVP, `None` means no scrubbing.
-  Define a minimal `Scrubber` Protocol in `cmd_mox/record/scrubber.py` so the
-  type annotation is valid and future XII-C work can provide a concrete
-  implementation.
+  `scrubber: Scrubber | None = None`. For the minimum viable product (MVP),
+  `None` means no scrubbing. Define a minimal `Scrubber` Protocol in
+  `cmd_mox/record/scrubber.py` so the type annotation is valid and future XII-C
+  work can provide a concrete implementation.
 - Quality gates: `make check-fmt`, `make typecheck`, `make lint`, `make test`
   must all pass.
 
@@ -206,9 +206,9 @@ All acceptance criteria met:
 ### Project overview
 
 CmdMox is a Python-native command mocking library. It intercepts external
-command invocations via PATH-based shim scripts and an IPC bus, providing
-stub/mock/spy test doubles. The project follows a record-replay-verify
-lifecycle.
+command invocations via PATH-based shim scripts and an inter-process
+communication (IPC) bus, providing stub/mock/spy test doubles. The project
+follows a record-replay-verify lifecycle.
 
 ### Key existing files
 
@@ -306,8 +306,8 @@ Run all quality gates and fix any issues.
 
 The change is accepted when all of the following are true:
 
-- `make test` passes with all new tests green (expect ~22 new tests: 6
-  fixture + 10 session + 6 env filter + 3 BDD scenarios).
+- `make test` passes with all new tests green (10 fixture + 20 session + 9
+  env filter + 3 BDD scenarios + 7 stdin-matching expectations).
 - `make lint` passes with no new warnings.
 - `make check-fmt` passes.
 - `make typecheck` does not introduce new diagnostics beyond the pre-existing

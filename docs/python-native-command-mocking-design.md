@@ -2126,13 +2126,13 @@ record module types, including the `EnvFilter` module-level function and the
 classDiagram
     class RecordingSession {
         - Path _fixture_path
-        - Scrubber _scrubber
+        - Scrubber | None _scrubber
         - list~str~ _env_allowlist
-        - list~str~ _command_filter
+        - list~str~ | None _command_filter
         - list~RecordedInvocation~ _recordings
-        - datetime _started_at
+        - datetime | None _started_at
         - bool _finalized
-        - FixtureFile _fixture_file
+        - FixtureFile | None _fixture_file
         + RecordingSession(fixture_path, scrubber, env_allowlist, command_filter)
         + start() void
         + record(invocation, response, duration_ms) void
@@ -2159,8 +2159,8 @@ classDiagram
         + str cmdmox_version
         + str platform
         + str python_version
-        + str test_module
-        + str test_function
+        + str | None test_module
+        + str | None test_function
         + to_dict() dict~str, any~
         + from_dict(data) FixtureMetadata
         + create(test_module, test_function) FixtureMetadata

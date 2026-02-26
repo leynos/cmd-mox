@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import typing as t
 
 import pytest
 
 from cmd_mox.errors import LifecycleError
 from cmd_mox.ipc import Invocation, Response
-from cmd_mox.record.fixture import FixtureFile
+from cmd_mox.record.fixture import FixtureFile, RecordedInvocation
 from cmd_mox.record.session import RecordingSession
 
 if t.TYPE_CHECKING:
@@ -171,3 +172,94 @@ class TestRecordingSessionEnvFiltering:
         env = session._recordings[0].env_subset
         assert "MY_CUSTOM_KEY" in env
         assert "PATH" not in env
+
+
+class TestRecordingSessionCommandFilter:
+    """Tests for RecordingSession command_filter behavior."""
+
+    def test_command_filter_includes_matching_command(self, tmp_path: Path) -> None:
+        """Invocations matching the filter are recorded."""
+        session = RecordingSession(tmp_path / "out.json", command_filter="git")
+        session.start()
+        session.record(_make_invocation(command="git"), _make_response())
+        assert len(session._recordings) == 1
+        assert session._recordings[0].command == "git"
+
+    def test_command_filter_excludes_non_matching_command(self, tmp_path: Path) -> None:
+        """Invocations not matching the filter are silently skipped."""
+        session = RecordingSession(tmp_path / "out.json", command_filter="git")
+        session.start()
+        session.record(_make_invocation(command="echo"), _make_response())
+        assert len(session._recordings) == 0
+
+    def test_command_filter_mixed(self, tmp_path: Path) -> None:
+        """Only matching commands survive filtering through to finalize."""
+        session = RecordingSession(tmp_path / "out.json", command_filter="git")
+        session.start()
+        session.record(
+            _make_invocation(command="git"), _make_response(stdout="git-ok\n")
+        )
+        session.record(
+            _make_invocation(command="echo"),
+            _make_response(stdout="echo-ok\n"),
+        )
+        fixture = session.finalize()
+        assert len(fixture.recordings) == 1
+        assert fixture.recordings[0].command == "git"
+
+    def test_command_filter_list_input_is_copied(self, tmp_path: Path) -> None:
+        """Mutating the original list after construction has no effect."""
+        cmds = ["git"]
+        session = RecordingSession(tmp_path / "out.json", command_filter=cmds)
+        cmds.append("echo")
+        session.start()
+        session.record(_make_invocation(command="echo"), _make_response())
+        assert len(session._recordings) == 0
+
+
+class TestRecordingSessionScrubber:
+    """Tests for RecordingSession scrubber integration."""
+
+    def test_scrubber_is_applied_to_recording(self, tmp_path: Path) -> None:
+        """A scrubber rewrites the recording before it is stored."""
+
+        class _RedactStdout:
+            def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+                return dc.replace(recording, stdout="<redacted>")
+
+        session = RecordingSession(tmp_path / "out.json", scrubber=_RedactStdout())
+        session.start()
+        original_response = _make_response(stdout="secret output\n")
+        session.record(_make_invocation(), original_response)
+
+        # Original response object is untouched.
+        assert original_response.stdout == "secret output\n"
+        # Stored recording reflects the scrubbed value.
+        assert session._recordings[0].stdout == "<redacted>"
+
+    def test_scrubber_result_is_persisted(self, tmp_path: Path) -> None:
+        """Scrubbed data is what ends up in the persisted fixture file."""
+
+        class _RedactStdout:
+            def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+                return dc.replace(recording, stdout="<redacted>")
+
+        path = tmp_path / "fixture.json"
+        session = RecordingSession(path, scrubber=_RedactStdout())
+        session.start()
+        session.record(_make_invocation(), _make_response(stdout="secret\n"))
+        session.finalize()
+
+        loaded = FixtureFile.load(path)
+        assert loaded.recordings[0].stdout == "<redacted>"
+
+
+class TestRecordingSessionDurationValidation:
+    """Tests for duration_ms validation in RecordingSession."""
+
+    def test_negative_duration_ms_raises(self, tmp_path: Path) -> None:
+        """record() rejects negative duration_ms with ValueError."""
+        session = RecordingSession(tmp_path / "out.json")
+        session.start()
+        with pytest.raises(ValueError, match="non-negative"):
+            session.record(_make_invocation(), _make_response(), duration_ms=-1)
