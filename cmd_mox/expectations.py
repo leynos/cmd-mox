@@ -182,7 +182,7 @@ class Expectation:
         """Return a message if stdin fails to satisfy the expectation."""
         if self.stdin is None:
             return None
-        if callable(self.stdin):
+        if not isinstance(self.stdin, str):
             try:
                 ok = bool(self.stdin(invocation.stdin))
             except Exception as exc:  # noqa: BLE001
@@ -216,7 +216,7 @@ class Expectation:
         """Check stdin data or predicate."""
         if self.stdin is None:
             return True
-        if callable(self.stdin):
+        if not isinstance(self.stdin, str):
             return bool(self.stdin(invocation.stdin))
         return invocation.stdin == self.stdin
 
