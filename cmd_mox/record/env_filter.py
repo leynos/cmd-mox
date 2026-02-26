@@ -54,13 +54,13 @@ def _should_include_env_key(
     cmd_prefix: str,
 ) -> bool:
     """Return True if *key* should be included in the filtered subset."""
+    # CmdMox internals are never recorded, even if allowlisted or explicit.
+    if _is_cmox_internal(key):
+        return False
+
     # Explicitly requested keys always pass through.
     if key in explicit or key in allow:
         return True
-
-    # CmdMox internals are never recorded.
-    if _is_cmox_internal(key):
-        return False
 
     # System keys are excluded.
     if key in EXCLUDED_SYSTEM_KEYS:

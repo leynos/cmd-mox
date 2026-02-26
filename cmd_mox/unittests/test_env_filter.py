@@ -128,3 +128,33 @@ class TestFilterEnvSubset:
         assert "CMOX_IPC_TIMEOUT" not in result
         assert "CMOX_REAL_COMMAND_echo" not in result
         assert "SAFE_VAR" in result
+
+    def test_excludes_cmox_internal_keys_even_when_allowlisted(self) -> None:
+        """CmdMox internal keys are excluded even if placed on the allowlist."""
+        env = {
+            "CMOX_IPC_SOCKET": "ipc-socket-path",
+            "CMD_MOX_DEBUG": "1",
+            "SAFE_VAR": "keep",
+        }
+        result = filter_env_subset(
+            env,
+            allowlist=["CMOX_IPC_SOCKET", "CMD_MOX_DEBUG"],
+        )
+
+        assert "CMOX_IPC_SOCKET" not in result
+        assert "CMD_MOX_DEBUG" not in result
+        assert "SAFE_VAR" in result
+
+    def test_excludes_cmox_internal_keys_even_when_explicit(self) -> None:
+        """CmdMox internal keys are excluded even if explicitly requested."""
+        env = {
+            "CMOX_IPC_SOCKET": "ipc-socket-path",
+            "SAFE_VAR": "keep",
+        }
+        result = filter_env_subset(
+            env,
+            explicit_keys=["CMOX_IPC_SOCKET"],
+        )
+
+        assert "CMOX_IPC_SOCKET" not in result
+        assert "SAFE_VAR" in result

@@ -40,6 +40,12 @@ def _make_response(
 class TestRecordingSessionLifecycle:
     """Tests for RecordingSession start/record/finalize lifecycle."""
 
+    def test_fixture_path_property(self, tmp_path: Path) -> None:
+        """fixture_path property exposes the configured fixture path."""
+        path = tmp_path / "out.json"
+        session = RecordingSession(path)
+        assert session.fixture_path == path
+
     def test_start_sets_started_at(self, tmp_path: Path) -> None:
         """After start(), the session has a non-None _started_at."""
         session = RecordingSession(tmp_path / "out.json")

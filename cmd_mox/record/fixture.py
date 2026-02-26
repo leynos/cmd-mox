@@ -136,6 +136,8 @@ class FixtureMetadata:
 class FixtureFile:
     """A complete fixture file with metadata, recordings, and scrubbing rules."""
 
+    SCHEMA_VERSION: t.ClassVar[str] = _SCHEMA_VERSION
+
     version: str
     metadata: FixtureMetadata
     recordings: list[RecordedInvocation]
@@ -153,8 +155,15 @@ class FixtureFile:
     @classmethod
     def from_dict(cls, data: dict[str, t.Any]) -> FixtureFile:
         """Construct from a JSON-compatible mapping."""
+        version = str(data["version"])
+        if version != cls.SCHEMA_VERSION:
+            msg = (
+                f"Unsupported fixture schema version {version!r}; "
+                f"expected {cls.SCHEMA_VERSION!r}"
+            )
+            raise ValueError(msg)
         return cls(
-            version=str(data["version"]),
+            version=version,
             metadata=FixtureMetadata.from_dict(data["metadata"]),
             recordings=[
                 RecordedInvocation.from_dict(r) for r in data.get("recordings", [])

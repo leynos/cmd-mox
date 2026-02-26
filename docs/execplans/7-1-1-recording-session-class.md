@@ -306,8 +306,8 @@ Run all quality gates and fix any issues.
 
 The change is accepted when all of the following are true:
 
-- `make test` passes with all new tests green (10 fixture + 20 session + 9
-  env filter + 3 BDD scenarios + 7 stdin-matching expectations).
+- `make test` passes with all new tests green (10 fixture + 13 session + 8
+  env filter + 3 BDD scenarios).
 - `make lint` passes with no new warnings.
 - `make check-fmt` passes.
 - `make typecheck` does not introduce new diagnostics beyond the pre-existing

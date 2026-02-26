@@ -84,7 +84,7 @@ def finalize_session(session: RecordingSession) -> FixtureFile:
 @then("the fixture file exists on disk")
 def fixture_file_exists(session: RecordingSession) -> None:
     """Assert that the fixture file was written to disk."""
-    assert session._fixture_path.exists()
+    assert session.fixture_path.exists()
 
 
 @then(parsers.parse("the fixture contains {count:d} recording"))

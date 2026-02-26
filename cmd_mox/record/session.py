@@ -63,6 +63,11 @@ class RecordingSession:
         self._finalized: bool = False
         self._fixture_file: FixtureFile | None = None
 
+    @property
+    def fixture_path(self) -> Path:
+        """The destination path for the fixture JSON file."""
+        return self._fixture_path
+
     def start(self) -> None:
         """Begin the recording session.
 
@@ -172,7 +177,7 @@ class RecordingSession:
 
         metadata = FixtureMetadata.create()
         fixture = FixtureFile(
-            version="1.0",
+            version=FixtureFile.SCHEMA_VERSION,
             metadata=metadata,
             recordings=list(self._recordings),
             scrubbing_rules=[],

@@ -224,12 +224,9 @@ class Expectation:
         for key, value in self.env.items():
             actual = invocation.env.get(key)
             if actual != value:
-                exp = "***" if _is_sensitive_env_key(key) else value
-                act = (
-                    "***"
-                    if actual is not None and _is_sensitive_env_key(key)
-                    else actual
-                )
+                sensitive = is_sensitive_recording_env_key(key)
+                exp = "***" if sensitive else value
+                act = "***" if actual is not None and sensitive else actual
                 return f"env[{key!r}]={act!r} != {exp!r}"
         return None
 
@@ -240,7 +237,10 @@ class Expectation:
         if isinstance(self.stdin, str):
             return invocation.stdin == self.stdin
         if callable(self.stdin):
-            return bool(self.stdin(invocation.stdin))
+            try:
+                return bool(self.stdin(invocation.stdin))
+            except Exception:  # noqa: BLE001
+                return False
         return False
 
     def _matches_env(self, invocation: Invocation) -> bool:

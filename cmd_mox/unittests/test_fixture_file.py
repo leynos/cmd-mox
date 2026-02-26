@@ -6,6 +6,8 @@ import json
 import sys
 import typing as t
 
+import pytest
+
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.scrubber import ScrubbingRule
 
@@ -173,6 +175,13 @@ class TestFixtureFile:
         assert nested_path.exists()
         loaded = FixtureFile.load(nested_path)
         assert loaded.version == "1.0"
+
+    def test_from_dict_rejects_incompatible_version(self) -> None:
+        """from_dict() raises ValueError for unsupported schema versions."""
+        data = _sample_fixture().to_dict()
+        data["version"] = "99.0"
+        with pytest.raises(ValueError, match=r"99\.0"):
+            FixtureFile.from_dict(data)
 
     def test_scrubbing_rules_serialization(self) -> None:
         """Scrubbing rules survive serialization."""
