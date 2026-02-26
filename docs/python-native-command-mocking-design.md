@@ -1950,6 +1950,49 @@ Key responsibilities:
 - Filter environment variables to the configured subset
 - Generate fixture metadata including timestamps and platform info
 
+The following sequence diagram illustrates the complete `RecordingSession`
+lifecycle, including environment filtering, optional scrubbing, and idempotent
+finalization:
+
+```mermaid
+sequenceDiagram
+    actor TestCode
+    participant Session as RecordingSession
+    participant EnvFilter as filter_env_subset
+    participant Scrubber as Scrubber
+    participant Fixture as FixtureFile
+    participant FS as FileSystem
+
+    TestCode->>Session: RecordingSession(fixture_path, scrubber, env_allowlist, command_filter)
+    TestCode->>Session: start()
+    activate Session
+
+    TestCode->>Session: record(invocation, response, duration_ms)
+    alt session not started
+        Session-->>TestCode: raise LifecycleError
+    else session started and not finalized
+        Session->>EnvFilter: filter_env_subset(invocation.env, command, allowlist, explicit_keys=None)
+        EnvFilter-->>Session: env_subset
+        Session->>Session: build RecordedInvocation
+        opt scrubber is not None
+            Session->>Scrubber: scrub(recording)
+            Scrubber-->>Session: scrubbed_recording
+        end
+        Session->>Session: append to _recordings
+    end
+
+    TestCode->>Session: finalize()
+    alt already finalized
+        Session-->>TestCode: return existing FixtureFile
+    else first finalize
+        Session->>Fixture: FixtureFile(version, metadata, recordings, scrubbing_rules)
+        Session->>FS: save(fixture_path, FixtureFile)
+        FS-->>Session: ok
+        Session-->>TestCode: FixtureFile
+    end
+    deactivate Session
+```
+
 #### 9.5.2 ReplaySession
 
 The `ReplaySession` class replays recorded fixtures as mock responses:
@@ -2072,6 +2115,111 @@ Matching modes:
 
 - **Strict:** Command, args, stdin, and env_subset must match exactly
 - **Fuzzy:** Command and args must match; stdin and env are optional
+
+#### 9.5.6 Record Module Class Relationships
+
+The following class diagram shows the relationships between all implemented
+record module types, including the `EnvFilter` module-level function and the
+`Invocation`/`Response` IPC models consumed during recording:
+
+```mermaid
+classDiagram
+    class RecordingSession {
+        - Path _fixture_path
+        - Scrubber _scrubber
+        - list~str~ _env_allowlist
+        - list~str~ _command_filter
+        - list~RecordedInvocation~ _recordings
+        - datetime _started_at
+        - bool _finalized
+        - FixtureFile _fixture_file
+        + RecordingSession(fixture_path, scrubber, env_allowlist, command_filter)
+        + start() void
+        + record(invocation, response, duration_ms) void
+        + finalize() FixtureFile
+    }
+
+    class RecordedInvocation {
+        + int sequence
+        + str command
+        + list~str~ args
+        + str stdin
+        + dict~str, str~ env_subset
+        + str stdout
+        + str stderr
+        + int exit_code
+        + str timestamp
+        + int duration_ms
+        + to_dict() dict~str, any~
+        + from_dict(data) RecordedInvocation
+    }
+
+    class FixtureMetadata {
+        + str created_at
+        + str cmdmox_version
+        + str platform
+        + str python_version
+        + str test_module
+        + str test_function
+        + to_dict() dict~str, any~
+        + from_dict(data) FixtureMetadata
+        + create(test_module, test_function) FixtureMetadata
+    }
+
+    class FixtureFile {
+        + str version
+        + FixtureMetadata metadata
+        + list~RecordedInvocation~ recordings
+        + list~ScrubbingRule~ scrubbing_rules
+        + to_dict() dict~str, any~
+        + from_dict(data) FixtureFile
+        + save(path) void
+        + load(path) FixtureFile
+    }
+
+    class ScrubbingRule {
+        + str pattern
+        + str replacement
+        + list~str~ applied_to
+        + str description
+        + to_dict() dict~str, any~
+        + from_dict(data) ScrubbingRule
+    }
+
+    class Scrubber {
+        <<protocol>>
+        + scrub(recording) RecordedInvocation
+    }
+
+    class Invocation {
+        + str command
+        + list~str~ args
+        + str stdin
+        + dict~str, str~ env
+    }
+
+    class Response {
+        + str stdout
+        + str stderr
+        + int exit_code
+    }
+
+    class EnvFilter {
+        <<module>>
+        + filter_env_subset(env, command, allowlist, explicit_keys) dict~str, str~
+    }
+
+    RecordingSession --> FixtureFile : creates
+    RecordingSession --> RecordedInvocation : aggregates
+    RecordingSession ..> Scrubber : optional
+    RecordingSession ..> EnvFilter : uses
+    FixtureFile o-- FixtureMetadata
+    FixtureFile o-- RecordedInvocation
+    FixtureFile o-- ScrubbingRule
+    Scrubber ..> RecordedInvocation : scrubs
+    RecordingSession ..> Invocation : consumes
+    RecordingSession ..> Response : consumes
+```
 
 ### 9.6 Public API Extensions
 

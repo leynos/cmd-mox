@@ -53,6 +53,32 @@ def _is_cmox_internal(key: str) -> bool:
     return key.startswith(_CMOX_ENV_PREFIX) or key.startswith(_CMD_MOX_ENV_PREFIX)
 
 
+def _should_include_env_key(
+    key: str,
+    *,
+    explicit: set[str],
+    allow: set[str],
+    cmd_prefix: str,
+) -> bool:
+    """Return True if *key* should be included in the filtered subset."""
+    # Explicitly requested keys always pass through.
+    if key in explicit or key in allow:
+        return True
+
+    # CmdMox internals are never recorded.
+    if _is_cmox_internal(key):
+        return False
+
+    # System keys are excluded.
+    if key in EXCLUDED_SYSTEM_KEYS:
+        return False
+
+    # Sensitive keys (password, token, secret, key, credentials, etc.) are
+    # excluded; command-specific prefix keys and remaining non-excluded keys
+    # pass through.
+    return not (_is_sensitive_env_key(key) or _SECRET_ENV_KEY_RE.search(key))
+
+
 def filter_env_subset(
     env: dict[str, str],
     *,
@@ -78,31 +104,10 @@ def filter_env_subset(
     explicit = set(explicit_keys or [])
     cmd_prefix = COMMAND_ENV_PREFIXES.get(command.lower(), "")
 
-    result: dict[str, str] = {}
-    for key, value in env.items():
-        # Explicitly requested keys always pass through.
-        if key in explicit or key in allow:
-            result[key] = value
-            continue
-
-        # CmdMox internals are never recorded.
-        if _is_cmox_internal(key):
-            continue
-
-        # System keys are excluded.
-        if key in EXCLUDED_SYSTEM_KEYS:
-            continue
-
-        # Sensitive keys (password, token, secret, key, credentials, etc.).
-        if _is_sensitive_env_key(key) or _SECRET_ENV_KEY_RE.search(key) is not None:
-            continue
-
-        # Command-specific prefix keys are included.
-        if cmd_prefix and key.startswith(cmd_prefix):
-            result[key] = value
-            continue
-
-        # Remaining non-excluded keys pass through.
-        result[key] = value
-
-    return result
+    return {
+        key: value
+        for key, value in env.items()
+        if _should_include_env_key(
+            key, explicit=explicit, allow=allow, cmd_prefix=cmd_prefix
+        )
+    }
