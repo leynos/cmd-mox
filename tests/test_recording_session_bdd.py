@@ -33,3 +33,11 @@ def test_env_variables_filtered() -> None:
 )
 def test_fixture_metadata_generated() -> None:
     """Fixture metadata captures platform, timestamp, and version."""
+
+
+@scenario(
+    str(FEATURES_DIR / "recording_session.feature"),
+    "loading a fixture with an older schema version migrates it",
+)
+def test_fixture_migration_from_old_version() -> None:
+    """Older schema versions are migrated on load."""

@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sys
 import typing as t
 
 from pytest_bdd import given, parsers, then, when
 
 from cmd_mox.ipc import Invocation, Response
+from cmd_mox.record.fixture import FixtureFile
 from cmd_mox.record.session import RecordingSession
 
 if t.TYPE_CHECKING:
     from pathlib import Path
-
-    from cmd_mox.record.fixture import FixtureFile
 
 
 @given(
@@ -135,3 +135,56 @@ def metadata_has_timestamp(fixture: FixtureFile) -> None:
 def metadata_has_python_version(fixture: FixtureFile) -> None:
     """Assert fixture metadata python_version matches the current runtime."""
     assert fixture.metadata.python_version == sys.version
+
+
+# -- Steps for fixture migration scenario ------------------------------------
+
+
+@given("a v0.9 fixture file on disk", target_fixture="fixture_path")
+def v09_fixture_on_disk(tmp_path: Path) -> Path:
+    """Write a v0.9 fixture file to disk for migration testing."""
+    data = {
+        "version": "0.9",
+        "metadata": {
+            "created_at": "2025-01-15T10:30:00Z",
+            "cmdmox_version": "0.1.0",
+            "platform": sys.platform,
+            "python_version": sys.version,
+        },
+        "recordings": [
+            {
+                "sequence": 0,
+                "command": "echo",
+                "args": ["hello"],
+                "stdin": "",
+                "env_subset": {},
+                "stdout": "hello\n",
+                "stderr": "",
+                "exit_code": 0,
+                "timestamp": "2025-01-15T10:30:01Z",
+                "duration_ms": 5,
+            },
+        ],
+        "scrubbing_rules": [],
+    }
+    path = tmp_path / "old_fixture.json"
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    return path
+
+
+@when("the fixture file is loaded", target_fixture="loaded_fixture")
+def load_fixture_file(fixture_path: Path) -> FixtureFile:
+    """Load the fixture file from disk."""
+    return FixtureFile.load(fixture_path)
+
+
+@then(parsers.parse('the loaded fixture has version "{version}"'))
+def loaded_fixture_has_version(loaded_fixture: FixtureFile, version: str) -> None:
+    """Assert the loaded fixture's version matches."""
+    assert loaded_fixture.version == version
+
+
+@then(parsers.re(r"the loaded fixture contains (?P<count>\d+) recordings?"))
+def loaded_fixture_has_n_recordings(loaded_fixture: FixtureFile, count: str) -> None:
+    """Assert the loaded fixture contains exactly *count* recordings."""
+    assert len(loaded_fixture.recordings) == int(count)

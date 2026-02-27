@@ -21,6 +21,109 @@ from .scrubber import ScrubbingRule, ScrubbingRuleDict
 
 _SCHEMA_VERSION: t.Final[str] = "1.0"
 
+# ---------------------------------------------------------------------------
+# Schema version parsing and migration
+# ---------------------------------------------------------------------------
+
+type _MigrationFn = t.Callable[[dict[str, t.Any]], dict[str, t.Any]]
+
+
+def _parse_version(version_str: str) -> tuple[int, int]:
+    """Parse a ``"major.minor"`` version string into a comparable tuple.
+
+    Parameters
+    ----------
+    version_str : str
+        A version string in ``"major.minor"`` format (e.g. ``"1.0"``).
+
+    Returns
+    -------
+    tuple[int, int]
+        A ``(major, minor)`` tuple suitable for comparison.
+
+    Raises
+    ------
+    ValueError
+        If the string cannot be parsed as two dot-separated integers.
+    """
+    parts = version_str.strip().split(".")
+    if len(parts) != 2:
+        msg = f"Invalid schema version {version_str!r}; expected 'major.minor'"
+        raise ValueError(msg)
+    try:
+        return (int(parts[0]), int(parts[1]))
+    except ValueError:
+        msg = f"Invalid schema version {version_str!r}; expected numeric 'major.minor'"
+        raise ValueError(msg) from None
+
+
+def _migrate_v0_to_v1(data: dict[str, t.Any]) -> dict[str, t.Any]:
+    """Migrate a v0.x fixture dict to v1.0 format.
+
+    The v0.x schema is hypothetical (v1.0 is the first release).  This
+    migration exists to exercise the pipeline and serve as a template for
+    future migrations.
+    """
+    data["version"] = "1.0"
+    return data
+
+
+# Maps source *major* version -> (target version tuple, migration function).
+# All files with a given major version are migrated using the registered
+# function.  Migrations chain: v0 -> v1 -> v2 etc.
+_MIGRATIONS: dict[int, tuple[tuple[int, int], _MigrationFn]] = {
+    0: ((1, 0), _migrate_v0_to_v1),
+}
+
+
+def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
+    """Apply chained migrations to bring *data* up to the current schema.
+
+    Parameters
+    ----------
+    data : dict[str, t.Any]
+        The raw fixture dict, potentially at an older schema version.
+
+    Returns
+    -------
+    dict[str, t.Any]
+        The fixture dict migrated to the current schema version.
+
+    Raises
+    ------
+    ValueError
+        If the version is incompatible and no migration path exists.
+    """
+    current = _parse_version(_SCHEMA_VERSION)
+    file_ver = _parse_version(str(data.get("version", "0.0")))
+
+    # Same major version: tolerate minor differences (semver contract).
+    if file_ver[0] == current[0]:
+        return data
+
+    # Higher major version with no downgrade path.
+    if file_ver > current:
+        msg = (
+            f"Unsupported fixture schema version {data.get('version')!r}; "
+            f"no migration path to {_SCHEMA_VERSION!r}"
+        )
+        raise ValueError(msg)
+
+    # Chain migrations until the major versions match.
+    while file_ver[0] < current[0]:
+        entry = _MIGRATIONS.get(file_ver[0])
+        if entry is None:
+            msg = (
+                f"No migration path from schema version "
+                f"{data.get('version')!r} to {_SCHEMA_VERSION!r}"
+            )
+            raise ValueError(msg)
+        target, migrate_fn = entry
+        data = migrate_fn(data)
+        file_ver = target
+
+    return data
+
 
 def _cmdmox_version() -> str:
     """Return the installed cmd-mox version, or ``"unknown"``."""
@@ -156,16 +259,15 @@ class FixtureFile:
 
     @classmethod
     def from_dict(cls, data: dict[str, t.Any]) -> FixtureFile:
-        """Construct from a JSON-compatible mapping."""
-        version = str(data["version"])
-        if version != cls.SCHEMA_VERSION:
-            msg = (
-                f"Unsupported fixture schema version {version!r}; "
-                f"expected {cls.SCHEMA_VERSION!r}"
-            )
-            raise ValueError(msg)
+        """Construct from a JSON-compatible mapping.
+
+        Older schema versions are migrated forward automatically.  Minor
+        version differences within the same major version are tolerated
+        because unknown fields are ignored.
+        """
+        data = _apply_migrations(data)
         return cls(
-            version=version,
+            version=cls.SCHEMA_VERSION,
             metadata=FixtureMetadata.from_dict(data["metadata"]),
             recordings=[
                 RecordedInvocation.from_dict(r) for r in data.get("recordings", [])

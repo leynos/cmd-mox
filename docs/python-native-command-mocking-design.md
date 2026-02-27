@@ -2616,6 +2616,24 @@ method
 - `importlib.metadata` is the standard mechanism for accessing installed
   package metadata in Python 3.8+
 
+#### 9.10.8 Tuple-Based Version Comparison and Migration Registry
+
+**Decision:** Parse schema version strings into `(major, minor)` integer tuples
+for comparison. Maintain a migration registry keyed by source major version,
+with chainable migration functions (v0 -> v1 -> v2 etc.). Minor version
+differences within the same major version are tolerated without migration.
+
+**Rationale:**
+
+- String comparison of version numbers is unreliable (e.g. `"9.0" < "10.0"` is
+  `False` with string comparison)
+- Keying migrations by major version avoids registering an entry for every
+  possible minor version
+- Chainable migrations let each function know only about two adjacent major
+  versions, following the Django/Alembic pattern
+- Same-major tolerance follows the semantic versioning contract: minor versions
+  add optional fields but do not break existing readers
+
 ### 9.11 Versioning and Forward Compatibility
 
 #### 9.11.1 Schema Versioning

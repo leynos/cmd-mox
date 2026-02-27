@@ -31,3 +31,9 @@ Feature: Recording session captures passthrough interactions
     Then the fixture metadata contains the current platform
     And the fixture metadata contains a valid ISO8601 timestamp
     And the fixture metadata contains the Python version
+
+  Scenario: loading a fixture with an older schema version migrates it
+    Given a v0.9 fixture file on disk
+    When the fixture file is loaded
+    Then the loaded fixture has version "1.0"
+    And the loaded fixture contains 1 recording

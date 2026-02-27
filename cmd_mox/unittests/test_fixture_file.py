@@ -176,8 +176,29 @@ class TestFixtureFile:
         loaded = FixtureFile.load(nested_path)
         assert loaded.version == "1.0"
 
-    def test_from_dict_rejects_incompatible_version(self) -> None:
-        """from_dict() raises ValueError for unsupported schema versions."""
+    def test_from_dict_migrates_old_version(self) -> None:
+        """from_dict() migrates a v0.9 fixture to v1.0."""
+        data = _sample_fixture().to_dict()
+        data["version"] = "0.9"
+        result = FixtureFile.from_dict(data)
+
+        assert result.version == "1.0"
+        assert len(result.recordings) == 1
+        assert result.recordings[0].command == "git"
+
+    def test_from_dict_tolerates_higher_minor_version(self) -> None:
+        """from_dict() accepts a v1.1 fixture when current schema is v1.0."""
+        data = _sample_fixture().to_dict()
+        data["version"] = "1.1"
+        data["new_future_field"] = "should be ignored"
+        result = FixtureFile.from_dict(data)
+
+        assert result.version == "1.0"
+        assert len(result.recordings) == 1
+        assert result.recordings[0].command == "git"
+
+    def test_from_dict_rejects_incompatible_major_version(self) -> None:
+        """from_dict() raises ValueError for a higher major with no migration."""
         data = _sample_fixture().to_dict()
         data["version"] = "99.0"
         with pytest.raises(ValueError, match=r"99\.0"):
@@ -204,3 +225,32 @@ class TestFixtureFile:
         assert rebuilt.scrubbing_rules[0].replacement == "<GITHUB_TOKEN>"
         assert rebuilt.scrubbing_rules[0].applied_to == ["env", "stdout"]
         assert rebuilt.scrubbing_rules[0].description == "GitHub PAT"
+
+
+class TestVersionParsing:
+    """Tests for the _parse_version helper."""
+
+    def test_parse_simple_version(self) -> None:
+        """Parse '1.0' into (1, 0) tuple."""
+        from cmd_mox.record.fixture import _parse_version
+
+        assert _parse_version("1.0") == (1, 0)
+
+    def test_parse_minor_version(self) -> None:
+        """Parse '1.1' into (1, 1) tuple."""
+        from cmd_mox.record.fixture import _parse_version
+
+        assert _parse_version("1.1") == (1, 1)
+
+    def test_parse_zero_version(self) -> None:
+        """Parse '0.9' into (0, 9) tuple."""
+        from cmd_mox.record.fixture import _parse_version
+
+        assert _parse_version("0.9") == (0, 9)
+
+    def test_parse_invalid_version_raises(self) -> None:
+        """Non-numeric version string raises ValueError."""
+        from cmd_mox.record.fixture import _parse_version
+
+        with pytest.raises(ValueError, match="Invalid"):
+            _parse_version("abc")
