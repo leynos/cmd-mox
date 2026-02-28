@@ -186,6 +186,25 @@ class TestFixtureFile:
         assert len(result.recordings) == 1
         assert result.recordings[0].command == "git"
 
+    def test_from_dict_migrates_when_version_missing(self) -> None:
+        """from_dict() treats missing version as legacy and migrates to v1.0."""
+        data = _sample_fixture().to_dict()
+        data.pop("version", None)
+        result = FixtureFile.from_dict(data)
+
+        assert result.version == "1.0"
+        assert len(result.recordings) == 1
+        assert result.recordings[0].command == "git"
+
+    def test_from_dict_does_not_mutate_input(self) -> None:
+        """from_dict() does not modify the caller's dict."""
+        data = _sample_fixture().to_dict()
+        data["version"] = "0.9"
+        original_version = data["version"]
+        FixtureFile.from_dict(data)
+
+        assert data["version"] == original_version
+
     def test_from_dict_tolerates_higher_minor_version(self) -> None:
         """from_dict() accepts a v1.1 fixture when current schema is v1.0."""
         data = _sample_fixture().to_dict()
@@ -236,6 +255,12 @@ class TestVersionParsing:
 
         assert _parse_version("1.0") == (1, 0)
 
+    def test_parse_version_with_whitespace(self) -> None:
+        """Surrounding whitespace is stripped before parsing."""
+        from cmd_mox.record.fixture import _parse_version
+
+        assert _parse_version(" 1.0 ") == (1, 0)
+
     def test_parse_minor_version(self) -> None:
         """Parse '1.1' into (1, 1) tuple."""
         from cmd_mox.record.fixture import _parse_version
@@ -248,9 +273,17 @@ class TestVersionParsing:
 
         assert _parse_version("0.9") == (0, 9)
 
-    def test_parse_invalid_version_raises(self) -> None:
-        """Non-numeric version string raises ValueError."""
+    def test_parse_negative_component_raises(self) -> None:
+        """Negative version components are rejected."""
         from cmd_mox.record.fixture import _parse_version
 
         with pytest.raises(ValueError, match="Invalid"):
-            _parse_version("abc")
+            _parse_version("1.-1")
+
+    @pytest.mark.parametrize("bad_version", ["1", "1.2.3", "1.a", "abc"])
+    def test_parse_rejects_invalid_formats(self, bad_version: str) -> None:
+        """Various malformed version strings are rejected."""
+        from cmd_mox.record.fixture import _parse_version
+
+        with pytest.raises(ValueError, match="Invalid"):
+            _parse_version(bad_version)

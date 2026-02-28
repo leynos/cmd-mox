@@ -188,3 +188,10 @@ def loaded_fixture_has_version(loaded_fixture: FixtureFile, version: str) -> Non
 def loaded_fixture_has_n_recordings(loaded_fixture: FixtureFile, count: str) -> None:
     """Assert the loaded fixture contains exactly *count* recordings."""
     assert len(loaded_fixture.recordings) == int(count)
+
+
+@then("the loaded fixture metadata is preserved")
+def loaded_fixture_metadata_preserved(loaded_fixture: FixtureFile) -> None:
+    """Assert key metadata fields survive migration unchanged."""
+    assert loaded_fixture.metadata.cmdmox_version == "0.1.0"
+    assert loaded_fixture.metadata.platform == sys.platform

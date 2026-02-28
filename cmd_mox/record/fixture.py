@@ -51,10 +51,14 @@ def _parse_version(version_str: str) -> tuple[int, int]:
         msg = f"Invalid schema version {version_str!r}; expected 'major.minor'"
         raise ValueError(msg)
     try:
-        return (int(parts[0]), int(parts[1]))
+        major, minor = int(parts[0]), int(parts[1])
     except ValueError:
         msg = f"Invalid schema version {version_str!r}; expected numeric 'major.minor'"
         raise ValueError(msg) from None
+    if major < 0 or minor < 0:
+        msg = f"Invalid schema version {version_str!r}; components must be non-negative"
+        raise ValueError(msg)
+    return (major, minor)
 
 
 def _migrate_v0_to_v1(data: dict[str, t.Any]) -> dict[str, t.Any]:
@@ -79,6 +83,10 @@ _MIGRATIONS: dict[int, tuple[tuple[int, int], _MigrationFn]] = {
 def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
     """Apply chained migrations to bring *data* up to the current schema.
 
+    The input dict is shallow-copied so the caller's original is never
+    mutated.  A missing ``version`` key is treated as ``"0.0"`` (legacy
+    fixture predating the version field).
+
     Parameters
     ----------
     data : dict[str, t.Any]
@@ -94,8 +102,18 @@ def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
     ValueError
         If the version is incompatible and no migration path exists.
     """
+    data = dict(data)  # shallow copy to avoid mutating the caller's dict
+
+    raw_version = data.get("version")
+    if raw_version is None:
+        data["version"] = "0.0"
+    elif not isinstance(raw_version, str):
+        actual = type(raw_version).__name__
+        msg = f"Invalid fixture version field: expected str, got {actual}"
+        raise ValueError(msg)
+
     current = _parse_version(_SCHEMA_VERSION)
-    file_ver = _parse_version(str(data.get("version", "0.0")))
+    file_ver = _parse_version(data["version"])
 
     # Same major version: tolerate minor differences (semver contract).
     if file_ver[0] == current[0]:
@@ -104,7 +122,7 @@ def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
     # Higher major version with no downgrade path.
     if file_ver > current:
         msg = (
-            f"Unsupported fixture schema version {data.get('version')!r}; "
+            f"Unsupported fixture schema version {data['version']!r}; "
             f"no migration path to {_SCHEMA_VERSION!r}"
         )
         raise ValueError(msg)
@@ -115,10 +133,16 @@ def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
         if entry is None:
             msg = (
                 f"No migration path from schema version "
-                f"{data.get('version')!r} to {_SCHEMA_VERSION!r}"
+                f"{data['version']!r} to {_SCHEMA_VERSION!r}"
             )
             raise ValueError(msg)
         target, migrate_fn = entry
+        if target[0] <= file_ver[0]:
+            msg = (
+                f"Misconfigured migration for major version {file_ver[0]}: "
+                f"target {target} does not advance the major version"
+            )
+            raise ValueError(msg)
         data = migrate_fn(data)
         file_ver = target
 

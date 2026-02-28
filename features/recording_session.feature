@@ -37,3 +37,4 @@ Feature: Recording session captures passthrough interactions
     When the fixture file is loaded
     Then the loaded fixture has version "1.0"
     And the loaded fixture contains 1 recording
+    And the loaded fixture metadata is preserved

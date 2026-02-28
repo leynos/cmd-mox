@@ -47,8 +47,8 @@ This completes the final unchecked roadmap item under XII-A in
 - NumPy-style docstrings on all public functions and classes.
 - Cyclomatic complexity max 9 per function (Ruff C90).
 - Max 4 positional function parameters (Ruff PLR0913).
-- TDD workflow per `AGENTS.md`: write tests first (red), then implement
-  (green), then quality gates.
+- Test-driven development (TDD) workflow per `AGENTS.md`: write tests first
+  (red), then implement (green), then quality gates.
 - The public signatures of `FixtureFile.from_dict()`, `FixtureFile.load()`,
   `FixtureFile.save()`, and `FixtureFile.to_dict()` must not change.
 - `FixtureFile.SCHEMA_VERSION` remains `"1.0"` -- this plan adds the migration
@@ -94,7 +94,8 @@ This completes the final unchecked roadmap item under XII-A in
 - [x] (2026-02-27) Write this ExecPlan and obtain approval.
 - [x] (2026-02-27) Stage A: Write failing unit tests for version parsing and
   migration. 7 new tests (4 version parsing + 3 migration).
-- [x] (2026-02-27) Stage B: Write failing BDD scenario for fixture migration.
+- [x] (2026-02-27) Stage B: Write failing behaviour-driven development (BDD)
+  scenario for fixture migration.
   1 new scenario with 4 step definitions.
 - [x] (2026-02-27) Stage C: Implement migration infrastructure in
   `fixture.py`. Added `_parse_version`, `_migrate_v0_to_v1`, `_MIGRATIONS`
