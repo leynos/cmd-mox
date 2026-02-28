@@ -80,6 +80,111 @@ _MIGRATIONS: dict[int, tuple[tuple[int, int], _MigrationFn]] = {
 }
 
 
+def _normalize_version_field(data: dict[str, t.Any]) -> None:
+    """Ensure *data* has a valid ``version`` field, mutating in-place.
+
+    A missing ``version`` key is treated as ``"0.0"`` (legacy fixture
+    predating the version field).
+
+    Parameters
+    ----------
+    data : dict[str, t.Any]
+        The raw fixture dict whose ``version`` field will be validated
+        and, if absent, set to ``"0.0"``.
+
+    Raises
+    ------
+    ValueError
+        If the ``version`` field is present but is not a string.
+    """
+    raw_version = data.get("version")
+    if raw_version is None:
+        data["version"] = "0.0"
+    elif not isinstance(raw_version, str):
+        actual = type(raw_version).__name__
+        msg = f"Invalid fixture version field: expected str, got {actual}"
+        raise ValueError(msg)
+
+
+def _check_version_compatibility(
+    file_ver: tuple[int, int],
+    current: tuple[int, int],
+    file_version_str: str,
+) -> None:
+    """Reject fixture versions newer than the running schema.
+
+    Parameters
+    ----------
+    file_ver : tuple[int, int]
+        The parsed ``(major, minor)`` version from the fixture file.
+    current : tuple[int, int]
+        The parsed ``(major, minor)`` version of the current schema.
+    file_version_str : str
+        The raw version string from the fixture, used in error messages.
+
+    Raises
+    ------
+    ValueError
+        If *file_ver* is higher than *current* (no downgrade path).
+    """
+    if file_ver > current:
+        msg = (
+            f"Unsupported fixture schema version {file_version_str!r}; "
+            f"no migration path to {_SCHEMA_VERSION!r}"
+        )
+        raise ValueError(msg)
+
+
+def _execute_migration_chain(
+    data: dict[str, t.Any],
+    file_ver: tuple[int, int],
+    current: tuple[int, int],
+) -> dict[str, t.Any]:
+    """Chain migrations until the major versions match.
+
+    Parameters
+    ----------
+    data : dict[str, t.Any]
+        The fixture dict to migrate.  Each migration function receives
+        and returns a dict, so successive calls are chained.
+    file_ver : tuple[int, int]
+        The parsed ``(major, minor)`` version of the fixture.
+    current : tuple[int, int]
+        The parsed ``(major, minor)`` version of the current schema.
+
+    Returns
+    -------
+    dict[str, t.Any]
+        The fixture dict after all applicable migrations have been
+        applied.
+
+    Raises
+    ------
+    ValueError
+        If no migration is registered for the current major version,
+        or if a migration does not advance the major version.
+    """
+    while file_ver[0] < current[0]:
+        entry = _MIGRATIONS.get(file_ver[0])
+        if entry is None:
+            msg = (
+                f"No migration path from schema version "
+                f"{data['version']!r} to {_SCHEMA_VERSION!r}"
+            )
+            raise ValueError(msg)
+        target, migrate_fn = entry
+        if target[0] <= file_ver[0]:
+            msg = (
+                f"Misconfigured migration for major version {file_ver[0]}: "
+                f"target {target} does not advance the major version"
+            )
+            raise ValueError(msg)
+        data = migrate_fn(data)
+        file_ver = target
+
+    return data
+
+
 def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
     """Apply chained migrations to bring *data* up to the current schema.
 
@@ -104,13 +209,7 @@ def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
     """
     data = dict(data)  # shallow copy to avoid mutating the caller's dict
 
-    raw_version = data.get("version")
-    if raw_version is None:
-        data["version"] = "0.0"
-    elif not isinstance(raw_version, str):
-        actual = type(raw_version).__name__
-        msg = f"Invalid fixture version field: expected str, got {actual}"
-        raise ValueError(msg)
+    _normalize_version_field(data)
 
     current = _parse_version(_SCHEMA_VERSION)
     file_ver = _parse_version(data["version"])
@@ -119,34 +218,9 @@ def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
     if file_ver[0] == current[0]:
         return data
 
-    # Higher major version with no downgrade path.
-    if file_ver > current:
-        msg = (
-            f"Unsupported fixture schema version {data['version']!r}; "
-            f"no migration path to {_SCHEMA_VERSION!r}"
-        )
-        raise ValueError(msg)
+    _check_version_compatibility(file_ver, current, data["version"])
 
-    # Chain migrations until the major versions match.
-    while file_ver[0] < current[0]:
-        entry = _MIGRATIONS.get(file_ver[0])
-        if entry is None:
-            msg = (
-                f"No migration path from schema version "
-                f"{data['version']!r} to {_SCHEMA_VERSION!r}"
-            )
-            raise ValueError(msg)
-        target, migrate_fn = entry
-        if target[0] <= file_ver[0]:
-            msg = (
-                f"Misconfigured migration for major version {file_ver[0]}: "
-                f"target {target} does not advance the major version"
-            )
-            raise ValueError(msg)
-        data = migrate_fn(data)
-        file_ver = target
-
-    return data
+    return _execute_migration_chain(data, file_ver, current)
 
 
 def _cmdmox_version() -> str:
