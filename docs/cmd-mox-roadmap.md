@@ -415,6 +415,105 @@ documented in `python-native-command-mocking-design.md` Section IX.
   - [ ] Benefits of fixture-based testing
   - [ ] Common patterns and anti-patterns
 
+## **XIII. Rust Mock Command Binary**
+
+This phase introduces a native `cmdmox-mock` launcher to reduce fragility from
+shell and `.cmd` wrappers while preserving CmdMox's current IPC protocol and
+record/replay/verify semantics.
+
+### **XIII-A. Rust Workspace and Build Foundation**
+
+- [ ] Introduce Cuprum-style Rust repository structure
+
+  - [ ] Add `rust/Cargo.toml` workspace root for native components
+  - [ ] Add `rust/cmdmox-mock/` binary crate
+  - [ ] Add `rust/Makefile` with native `build`, `test`, `lint`, and
+        `check-fmt` targets
+
+- [ ] Add Python-to-native backend probing utilities
+
+  - [ ] Implement `cmd_mox/_rust_mock_backend.py` availability probe
+  - [ ] Expose launcher discovery helper returning the resolved binary path
+  - [ ] Keep probe failures explicit (distinguish "missing binary" vs
+        "binary present but broken")
+
+### **XIII-B. Launcher Backend Selection and Integration**
+
+- [ ] Add backend selection controls to CmdMox runtime
+
+  - [ ] `CMOX_SHIM_BACKEND=auto|python|rust` selection semantics
+  - [ ] Default `auto` to prefer Rust when binary is available
+  - [ ] `rust` mode fails fast with actionable errors when unavailable
+
+- [ ] Integrate backend selection into shim generation
+
+  - [ ] POSIX: symlink mocked command names to selected launcher
+  - [ ] Windows Python backend: retain `.cmd` wrappers for compatibility
+  - [ ] Windows Rust backend: emit/link `*.exe` command shims to
+        `cmdmox-mock.exe`
+
+### **XIII-C. Native Launcher Implementation**
+
+- [ ] Implement `cmdmox-mock` core invocation pathway
+
+  - [ ] Resolve command identity from `argv[0]` across POSIX and Windows
+  - [ ] Capture args, stdin, and env with parity to Python shim payloads
+  - [ ] Preserve timeout and error semantics expected by the controller
+
+- [ ] Implement IPC client support for existing CmdMox protocol
+
+  - [ ] Unix domain socket client for Unix-like platforms
+  - [ ] Named pipe client for Windows using the existing logical socket mapping
+  - [ ] Protocol compatibility tests against current Python IPC server
+
+- [ ] Implement passthrough execution parity
+
+  - [ ] Reuse controller-provided PATH filtering and env overlay semantics
+  - [ ] Execute real command and report stdout/stderr/exit code exactly once
+  - [ ] Preserve error surfaces for missing executables and non-executable paths
+
+### **XIII-D. Packaging and Distribution**
+
+- [ ] Add native wheel build pipeline for Rust launcher artefacts
+
+  - [ ] Build and include `cmdmox-mock` binaries for Linux, macOS, and Windows
+  - [ ] Ensure wheel metadata and Python package version stay aligned
+  - [ ] Publish pure Python wheel alongside native wheels
+
+- [ ] Keep source-install pathway explicit
+
+  - [ ] Document Rust toolchain requirements for contributors
+  - [ ] Ensure source installs can fall back to Python shim backend
+  - [ ] Verify `pip install` from sdist does not hard-require Rust for runtime
+
+### **XIII-E. Testing, CI, and Performance Validation**
+
+- [ ] Add backend parity test matrix
+
+  - [ ] Parametrize shim behaviour tests for `python` and `rust` backends
+  - [ ] Add parity tests for argument quoting, stdin capture, and env transport
+  - [ ] Add Windows-specific parity tests for caret/percent and space handling
+
+- [ ] Add CI workflows for native launcher confidence
+
+  - [ ] Per-OS smoke jobs running backend-specific command interception tests
+  - [ ] Failure artefacts include backend logs and IPC transcripts
+  - [ ] Non-regression checks for backend-selection fallback behaviour
+
+### **XIII-F. Rollout and Documentation**
+
+- [ ] Extend the design and user docs for dual-backend operation
+
+  - [ ] Document backend-selection flags and troubleshooting guidance
+  - [ ] Document operational differences and known limitations per backend
+  - [ ] Add migration guidance for users relying on current shell/`.cmd` shims
+
+- [ ] Define rollout gates before switching default backend behaviour
+
+  - [ ] Backend parity criteria met across Linux/macOS/Windows CI
+  - [ ] No open severity-1 compatibility regressions vs Python shim backend
+  - [ ] Release notes include explicit rollback instructions (`CMOX_SHIM_BACKEND`)
+
 **Legend:**
 
 - Each `[ ]` is an implementable, trackable unit (suitable for tickets/epics in

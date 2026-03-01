@@ -97,17 +97,23 @@ brittle and inefficient task of parsing these flat text files to verify the
 interactions. This approach struggles with structured data, concurrency, and
 complex quoting or argument-passing scenarios.
 
-`CmdMox` will instead generate lightweight *Python scripts* as its shims. This
-design choice unlocks a far more powerful and robust implementation. A Python
-shim can leverage the full breadth of Python's standard library for
-sophisticated Inter-Process Communication (IPC). Instead of writing to fragile
-log files, the shim can communicate with the main `CmdMox` test process over a
-dedicated, high-performance channel like a Unix domain socket. This allows for
-the bidirectional transfer of rich, structured data (e.g., JSON-serialized
-objects representing the command, its arguments, environment, and `stdin`
-content). This architectural decision elevates `CmdMox` beyond the capabilities
-of its shell-based predecessors, enabling more complex features, better
-performance, and greater reliability, as detailed in Section III.
+`CmdMox` currently generates lightweight *Python scripts* as its shims. This
+design choice already unlocks a far more robust implementation than shell
+scripts. A Python shim can leverage the standard library for sophisticated
+Inter-Process Communication (IPC). Instead of writing to fragile log files, the
+shim can communicate with the main `CmdMox` test process over a dedicated,
+high-performance channel like a Unix domain socket. This allows for the
+bidirectional transfer of rich, structured data (e.g., JSON-serialized objects
+representing the command, its arguments, environment, and `stdin` content).
+
+To further reduce launcher fragility, the next design increment introduces a
+native Rust mock-command binary (`cmdmox-mock`) as an alternative shim
+entrypoint. Instead of relying on shell wrappers (notably `.cmd` launchers on
+Windows) to bootstrap Python, per-command shims can target the Rust binary
+directly (`git -> cmdmox-mock` on POSIX, `git.exe -> cmdmox-mock.exe` on
+Windows). The binary will speak the same IPC protocol and preserve the same
+record/replay/verify semantics while eliminating a class of quoting, escaping,
+and interpreter-resolution failures.
 
 ### 1.3 Defining the Terminology: Stubs, Mocks, and Spies
 
@@ -440,30 +446,44 @@ existing shell-based tools.
 ### 3.1 The Shim Generation Engine
 
 This component is responsible for the on-the-fly creation of the executable
-Python shims that intercept command calls. To maximize efficiency and minimize
-disk I/O, the engine will not write a unique script for every mocked command.
+launchers that intercept command calls. To maximize efficiency and minimize
+disk I/O, the engine will not write a unique launcher for every mocked command.
 
-Instead, the `CmdMox` library will contain a single, generic `shim.py` template
-script. When `mox.replay()` is invoked, the `CmdMox` controller will execute
-the following steps:
+CmdMox maintains two launcher backends:
+
+- **Python backend (current):** a single, generic `shim.py` template.
+- **Rust backend (Phase XIII):** a single, generic `cmdmox-mock` native binary.
+
+Backend selection is runtime-configurable via `CMOX_SHIM_BACKEND`:
+`auto` (default), `python`, or `rust`.
+
+When `mox.replay()` is invoked, the `CmdMox` controller executes the following
+steps:
 
 1. Create a temporary directory with a unique, process-safe name (e.g.,
    `/tmp/cmdmox-pytest-worker-1-pid-12345`).
 
-2. For each unique command name being mocked (e.g., `git`, `curl`), it will
-   create a symbolic link inside the temporary directory (e.g., `git` ->
-   `.../ cmdmox/internal/shim.py`). This avoids duplicating the script's
-   content on disk.
+2. Resolve the active launcher artifact (`shim.py` or `cmdmox-mock[.exe]`) from
+   the selected backend.
 
-3. The master `shim.py` script itself will be made executable (`chmod +x`). The
-   operating system will follow the symlink and execute the target script.
+3. For each unique command name being mocked (e.g., `git`, `curl`), create a
+   lightweight filesystem entry in the temporary directory that points to the
+   launcher artifact.
+   - POSIX: symlink `git -> <launcher>`.
+   - Windows Python backend: generate `git.cmd` wrapper targeting `shim.py`.
+   - Windows Rust backend: create `git.exe` hardlink/copy to
+     `cmdmox-mock.exe`.
 
-4. The shim script will determine which command it is impersonating by
-   inspecting its own invocation name (`sys.argv`).
+4. Ensure the launcher artifact is executable.
 
-This symlink-based approach is highly efficient and ensures that any updates or
-bug fixes to the shim logic only need to be applied to one central template
-regardless of platform. On Windows the generator writes lightweight `.cmd`
+5. The launcher determines which command it impersonates from its invocation
+   name (`argv[0]`).
+
+This single-launcher approach is efficient and ensures bug fixes are applied in
+one place per backend. The Python backend preserves current behaviour, while
+the Rust backend removes shell-wrapper hops from the invocation path.
+
+For the Python backend on Windows, the generator writes lightweight `.cmd`
 launchers that shell out to `shim.py`. The launchers use CRLF delimiters for
 native compatibility and CmdMox amends `PATHEXT` during replay so the command
 processor will resolve the batch wrappers even on hosts where the extension was
@@ -565,9 +585,14 @@ features that are infeasible with file-based logging.
 
 #### Implementation Notes
 
+- Unless otherwise stated, these notes describe the Python shim backend. The
+  Rust backend must preserve the same externally visible semantics and IPC
+  payload shape.
 - The shim infers the command name from ``argv[0]`` via :class:`pathlib.Path`
   so that the same script can impersonate any executable linked into the shim
   directory.
+- The Rust launcher mirrors this behaviour using OS-native path APIs and sends
+  the same normalized command identity to the controller.
 - The shim defers :func:`cmd_mox._shim_bootstrap.bootstrap_shim_path` until the
   entrypoint executes, avoiding import-time mutations of ``sys.path`` or
   ``sys.modules`` for consumers that import :mod:`cmd_mox.shim` as a helper
@@ -1314,19 +1339,28 @@ and scripts. By synthesizing the ergonomic, "Record-Replay-Verify" paradigm of
 PyMox with a robust `PATH`-hijacking mechanism, `CmdMox` offers a powerful and
 developer-friendly solution.
 
-The key architectural innovations—the use of Python shims over shell scripts
-and the implementation of a sophisticated, socket-based IPC bus—liberate the
-framework from the brittleness of file-based communication. This design
-provides a solid foundation for reliable, process-safe, and highly-featured
-test doubles. The fluent, chainable API ensures that tests are not only
-effective but also readable and maintainable. The inclusion of stubs, strict
-mocks, and observational spies (including a passthrough mode) provides a
-complete toolkit for tackling a wide range of testing scenarios.
+The key architectural innovations—the move from shell shims to structured IPC,
+and a backend-pluggable launcher strategy (Python shim today, Rust launcher
+next)—liberate the framework from the brittleness of file-based communication
+and shell-wrapper edge cases. This design provides a solid foundation for
+reliable, process-safe, and highly-featured test doubles. The fluent, chainable
+API ensures that tests are not only effective but also readable and
+maintainable. The inclusion of stubs, strict mocks, and observational spies
+(including a passthrough mode) provides a complete toolkit for tackling a wide
+range of testing scenarios.
 
 ### 8.2 Future Roadmap
 
 While the design for version 1.0 is comprehensive for Linux, FreeBSD, and
 Darwin environments, several avenues for future expansion exist.
+
+- **Rust Mock Command Binary (Phase XIII):** To reduce fragility in launcher
+  startup paths, CmdMox will introduce a native `cmdmox-mock` binary written in
+  Rust. Following the structure proven in `leynos/cuprum`, CmdMox will add a
+  top-level `rust/` workspace and a focused binary crate, while retaining a
+  Python-side backend probe and fallback mode. This keeps the existing Python
+  shim path as a compatibility and debugging reference while enabling a more
+  robust default on platforms with native binaries available.
 
 - **Windows Support:** CmdMox now provides first-class Windows support. The IPC
   layer retains Unix domain sockets where available and augments the startup
@@ -1629,6 +1663,43 @@ checklist. This keeps parity with the mapping in Table 1 while providing
 actionable, copy-pasteable examples for new users. `shellmock` snippets will be
 labelled as conceptual to acknowledge CLI variations across `shellmock`
 versions, with a note to confirm exact flags in documentation.
+
+### 8.12 Design Decisions for the Rust Mock Command Binary
+
+The Rust launcher exists to remove the most fragile layer in the current
+execution path: shell and batch wrappers used to bootstrap the mock process.
+Known fragile areas include escaping rules in `cmd.exe`, wrapper generation
+correctness, and interpreter-resolution drift when Python is relocated between
+test runs.
+
+CmdMox will follow a Cuprum-inspired repository layout for Rust adoption:
+
+- Keep the Python package as-is under `cmd_mox/`.
+- Add `rust/Cargo.toml` as a workspace root for native components.
+- Add `rust/cmdmox-mock/` as the dedicated launcher binary crate.
+- Optionally add `rust/Makefile` with native-only `build`, `lint`, `test`, and
+  `check-fmt` targets to keep Rust workflows isolated from Python workflows.
+
+Backend selection remains explicit and testable:
+
+- `CMOX_SHIM_BACKEND=auto`: use Rust launcher when available, else Python.
+- `CMOX_SHIM_BACKEND=rust`: require Rust launcher; fail fast if unavailable.
+- `CMOX_SHIM_BACKEND=python`: force existing `shim.py` backend.
+
+Packaging and distribution follow an additive model:
+
+- Publish platform-specific wheels containing `cmdmox-mock` binaries for
+  supported targets.
+- Continue publishing a pure Python wheel that ships without native binaries.
+- Keep runtime fallback automatic so unsupported platforms still function.
+
+Verification treats both backends as first-class:
+
+- Parametrize shim-related tests to run against both `python` and `rust`
+  backends.
+- Add parity tests that assert identical invocation payloads, response handling,
+  passthrough behaviour, and failure diagnostics.
+- Extend CI to run at least one backend-parity job per supported OS.
 
 ## IX. Record Mode: Persisting Passthrough Recordings
 
