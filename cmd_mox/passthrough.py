@@ -123,6 +123,11 @@ class PassthroughCoordinator:
             env=dict(invocation.env),
         )
         invocation.apply(resp)
+
+        recording_session = getattr(double, "_recording_session", None)
+        if recording_session is not None:
+            recording_session.record(invocation, resp)
+
         return double, invocation, resp
 
     def has_pending(self, invocation_id: str) -> bool:

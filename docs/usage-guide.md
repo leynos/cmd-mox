@@ -442,6 +442,54 @@ fixture loads correctly into v1.0 code because unknown fields are ignored.
 Incompatible major versions with no registered migration path raise
 `ValueError`.
 
+## Automatic recording with `.record()`
+
+The `CommandDouble.record()` fluent method connects passthrough spies to
+recording sessions automatically. Instead of manually creating and managing a
+`RecordingSession`, call `.record()` on a passthrough spy:
+
+```python
+def test_git_clone(cmd_mox):
+    spy = cmd_mox.spy("git").passthrough().record("fixtures/git_clone.json")
+    # ... run code that invokes git ...
+    # Fixture is written automatically during verify()
+```
+
+Each passthrough invocation is captured by the `PassthroughCoordinator` and
+recorded to the fixture file when `verify()` runs (or when the context manager
+exits).
+
+### Parameters
+
+The `record()` method accepts optional parameters for controlling what is
+recorded:
+
+```python
+from cmd_mox.record import Scrubber
+
+spy = cmd_mox.spy("aws").passthrough().record(
+    "fixtures/aws_s3.json",
+    scrubber=my_scrubber,                          # sanitize sensitive data
+    env_allowlist=["AWS_REGION", "AWS_PROFILE"],   # include these env vars
+)
+```
+
+- **`fixture_path`** (`str | Path`): destination for the fixture JSON file.
+- **`scrubber`** (`Scrubber | None`): optional scrubber instance for sanitizing
+  recordings before persistence. When `None` (the default), no scrubbing is
+  applied.
+- **`env_allowlist`** (`list[str] | None`): environment variable keys to always
+  include in recordings, in addition to the default command-specific prefixes.
+
+### Validation
+
+Calling `record()` without first calling `passthrough()` raises `ValueError`:
+
+```python
+# This raises ValueError: "record() requires passthrough(); call it first"
+cmd_mox.spy("git").record("fixtures/git.json")
+```
+
 ## Pipelines and shell syntax
 
 CmdMox intercepts individual executables by prepending shims to `PATH`. It does
