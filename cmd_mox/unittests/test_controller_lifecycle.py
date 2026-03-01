@@ -131,3 +131,32 @@ def test_replay_cleans_up_on_keyboard_interrupt(
     assert not shim_dir.exists()
     assert not socket_path.exists()
     assert not mox._entered
+
+
+def test_verify_cleans_up_when_recording_finalize_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """IPC server stops and environment restores despite recording errors.
+
+    Regression: if recording session finalization and environment cleanup
+    share the same finally block without independent guarding, an I/O
+    error during fixture persistence prevents mandatory IPC shutdown and
+    environment restoration.
+    """
+    mox = CmdMox()
+    mox.stub("dummy").returns(stdout="ok")
+    mox.__enter__()
+    mox.replay()
+
+    def _boom() -> None:
+        raise OSError("boom")
+
+    monkeypatch.setattr(mox, "_finalize_recording_sessions", _boom)
+
+    with pytest.raises(OSError, match="boom"):
+        mox.verify()
+
+    # Mandatory cleanup must have happened despite the OSError.
+    assert EnvironmentManager.get_active_manager() is None
+    assert not mox._entered
+    assert mox.phase is Phase.VERIFY
