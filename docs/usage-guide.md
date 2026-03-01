@@ -456,8 +456,10 @@ def test_git_clone(cmd_mox):
 ```
 
 Each passthrough invocation is captured by the `PassthroughCoordinator` and
-recorded to the fixture file when `verify()` runs (or when the context manager
-exits).
+persisted to the fixture file when `verify()` is called. When
+`verify_on_exit=True` (the default), the context manager calls `verify()`
+automatically on exit. If `verify_on_exit=False`, fixtures are **not** written
+unless you call `verify()` explicitly.
 
 ### Parameters
 
@@ -465,11 +467,21 @@ The `record()` method accepts optional parameters for controlling what is
 recorded:
 
 ```python
-from cmd_mox.record import Scrubber
+import dataclasses as dc
+
+from cmd_mox.record.fixture import RecordedInvocation
+
+
+class RedactSecrets:
+    """Scrubber that replaces secret values in stdout."""
+
+    def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+        return dc.replace(recording, stdout=recording.stdout.replace("AKIA", "****"))
+
 
 spy = cmd_mox.spy("aws").passthrough().record(
     "fixtures/aws_s3.json",
-    scrubber=my_scrubber,                          # sanitize sensitive data
+    scrubber=RedactSecrets(),                      # sanitize sensitive data
     env_allowlist=["AWS_REGION", "AWS_PROFILE"],   # include these env vars
 )
 ```

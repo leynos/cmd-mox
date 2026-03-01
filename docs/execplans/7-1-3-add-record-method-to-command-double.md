@@ -109,19 +109,17 @@ disk. New unit tests in `cmd_mox/unittests/test_command_double_record.py` and
 - Observation: The existing `_FakeDouble` test double in
   `cmd_mox/unittests/test_passthrough.py` does not carry `_recording_session`,
   causing `AttributeError` when `finalize_result()` accessed
-  `double._recording_session` directly.
-  Evidence: Test failure on first run: `AttributeError: '_FakeDouble' object
-  has no attribute '_recording_session'`.
-  Impact: Used `getattr(double, "_recording_session", None)` in the
-  coordinator for defensive access, which is appropriate since the coordinator
-  uses a `TYPE_CHECKING`-only import for `CommandDouble` and tests use cast
-  fakes.
+  `double._recording_session` directly. Evidence: Test failure on first run:
+  `AttributeError: '_FakeDouble' object has no attribute '_recording_session'`.
+  Impact: Used `getattr(double, "_recording_session", None)` in the coordinator
+  for defensive access, which is appropriate since the coordinator uses a
+  `TYPE_CHECKING`-only import for `CommandDouble` and tests use cast fakes.
 
 - Observation: The `make fmt` command reformatted a pre-existing file
   (`docs/execplans/7-1-2-fixture-file.md`), causing an MD032 markdown lint
   error where a line starting with a dash was merged into a paragraph.
-  Evidence: `markdownlint-cli2` reported MD032 on line 443 of the file.
-  Impact: Fixed by rewording the affected paragraph to avoid leading dash.
+  Evidence: `markdownlint-cli2` reported MD032 on line 443 of the file. Impact:
+  Fixed by rewording the affected paragraph to avoid leading dash.
 
 ## Decision Log
 
@@ -184,6 +182,14 @@ All acceptance criteria met:
   fixture file fixup). Well within the 10-file tolerance.
 - The implementation is minimal: 3 source file edits totaling ~40 lines of
   production code. The bulk of the work was tests and documentation.
+- Post-merge fix: the original `verify()` placed `_finalize_recording_sessions()`
+  and `_finalize_verification()` sequentially in the same `finally` block. If
+  recording finalization raised (e.g., `OSError` from an unwritable fixture
+  path), `_finalize_verification()` was skipped, leaking IPC server state and
+  environment mutations. Fixed by wrapping `_finalize_recording_sessions()` in
+  its own `try/except` so `_finalize_verification()` always runs. A
+  `threading.Lock` was also added to `RecordingSession.record()` to serialize
+  concurrent sequence assignment from multiple IPC threads.
 
 ## Context and Orientation
 

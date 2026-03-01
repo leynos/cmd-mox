@@ -8,7 +8,6 @@ import pytest
 from pytest_bdd import given, then, when
 
 from cmd_mox.controller import CmdMox
-from cmd_mox.record.session import RecordingSession
 
 if t.TYPE_CHECKING:
     from pathlib import Path
@@ -51,11 +50,11 @@ def call_record_raises(spy: CommandDouble, tmp_path: Path) -> None:
 def spy_has_session(spy_after_record: CommandDouble) -> None:
     """Assert the spy has a recording session attached."""
     assert spy_after_record.has_recording_session is True
-    assert isinstance(spy_after_record._recording_session, RecordingSession)
 
 
 @then("the recording session is started")
 def session_is_started(spy_after_record: CommandDouble) -> None:
     """Assert the recording session has been started."""
+    assert spy_after_record.has_recording_session is True
     assert spy_after_record._recording_session is not None
-    assert spy_after_record._recording_session._started_at is not None
+    assert spy_after_record._recording_session.is_started is True

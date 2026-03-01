@@ -10,6 +10,7 @@ Lifecycle: ``start()`` -> ``record()`` (one or more) -> ``finalize()``.
 from __future__ import annotations
 
 import datetime as dt
+import threading
 import typing as t
 from pathlib import Path
 
@@ -59,6 +60,7 @@ class RecordingSession:
         )
 
         self._recordings: list[RecordedInvocation] = []
+        self._lock = threading.Lock()
         self._started_at: dt.datetime | None = None
         self._finalized: bool = False
         self._fixture_file: FixtureFile | None = None
@@ -67,6 +69,11 @@ class RecordingSession:
     def fixture_path(self) -> Path:
         """The destination path for the fixture JSON file."""
         return self._fixture_path
+
+    @property
+    def is_started(self) -> bool:
+        """Return ``True`` if the session has been started."""
+        return self._started_at is not None
 
     def start(self) -> None:
         """Begin the recording session.
@@ -143,23 +150,27 @@ class RecordingSession:
             allowlist=self._env_allowlist,
         )
 
-        recording = RecordedInvocation(
-            sequence=len(self._recordings),
-            command=invocation.command,
-            args=list(invocation.args),
-            stdin=invocation.stdin,
-            env_subset=env_subset,
-            stdout=response.stdout,
-            stderr=response.stderr,
-            exit_code=response.exit_code,
-            timestamp=dt.datetime.now(dt.UTC).isoformat(),
-            duration_ms=duration_ms,
-        )
+        # Sequence assignment and list append must be atomic so that
+        # concurrent passthrough completions on different IPC threads
+        # produce correct, gap-free sequence numbers.
+        with self._lock:
+            recording = RecordedInvocation(
+                sequence=len(self._recordings),
+                command=invocation.command,
+                args=list(invocation.args),
+                stdin=invocation.stdin,
+                env_subset=env_subset,
+                stdout=response.stdout,
+                stderr=response.stderr,
+                exit_code=response.exit_code,
+                timestamp=dt.datetime.now(dt.UTC).isoformat(),
+                duration_ms=duration_ms,
+            )
 
-        if self._scrubber is not None:
-            recording = self._scrubber.scrub(recording)
+            if self._scrubber is not None:
+                recording = self._scrubber.scrub(recording)
 
-        self._recordings.append(recording)
+            self._recordings.append(recording)
 
     def finalize(self) -> FixtureFile:
         """Finalize the session and persist the fixture to disk.
