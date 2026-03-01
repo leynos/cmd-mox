@@ -1,523 +1,375 @@
-# CmdMox Implementation Roadmap
+# CmdMox roadmap
 
-## **I. Project Foundation & Infrastructure**
+This roadmap translates the design into actionable increments without calendar
+commitments. Phases are ordered and build on one another. Steps group related
+workstreams. Tasks are measurable and must meet acceptance criteria to count as
+done.
 
-- [x] **Establish Core Repository Structure**
+## 1. Project foundation and infrastructure
 
-  - [x] Create project skeleton (`cmd_mox/`, `tests/`, `conftest.py`, etc.)
+Focus: Establish the repository skeleton, development toolchain, and baseline
+documentation.
 
-  - [x] Set up packaging, CI, linting, type-checking (e.g., `pyproject.toml`,
-    `pytest`, `ruff`, `mypy`)
+### 1.1. Core repository structure
 
-- [x] **Initial Documentation**
+- [x] 1.1.1. Create project skeleton (`cmd_mox/`, `tests/`, `conftest.py`, and
+  related directories).
+- [x] 1.1.2. Set up packaging, Continuous Integration (CI), linting, and
+  type-checking (`pyproject.toml`, `pytest`, `ruff`, and `mypy`).
 
-  - [x] Draft README with basic usage and conceptual overview
+### 1.2. Initial documentation
 
-  - [x] Add this design spec as `docs/python-native-command-mocking-design.md`
+- [x] 1.2.1. Draft `README.md` with basic usage and conceptual overview.
+- [x] 1.2.2. Add the design specification as
+  `docs/python-native-command-mocking-design.md`.
 
-## **II. Core Components: Environment & IPC**
+## 2. Core components: environment and inter-process communication
 
-- [x] **Environment Manager**
+Focus: Provide robust runtime environment management, shim generation, and
+inter-process communication (IPC).
 
-  - [x] Context manager to save/restore environment (`PATH`, etc.)
+### 2.1. Environment manager
 
-  - [x] Temporary shim directory creation/cleanup
+- [x] 2.1.1. Implement context manager to save and restore environment variables
+  (including `PATH`).
+- [x] 2.1.2. Implement temporary shim directory creation and cleanup.
+- [x] 2.1.3. Publish environment variable(s) used for IPC endpoint discovery.
 
-  - [x] Environment variable for IPC socket path
+### 2.2. Shim generation engine
 
-- [x] **Shim Generation Engine**
+- [x] 2.2.1. Ship a single Python `shim.py` template.
+- [x] 2.2.2. Generate per-command symlinks in the temporary shim directory.
+- [x] 2.2.3. Route behaviour by command identity derived from `argv[0]`.
+- [x] 2.2.4. Ensure shim executability on all supported Unix platforms.
 
-  - [x] Single Python `shim.py` script (template)
+### 2.3. IPC bus
 
-  - [x] Logic to create per-command symlinks in temp directory
+- [x] 2.3.1. Implement lightweight IPC server in the main test process.
+- [x] 2.3.2. Start and stop the IPC server in sync with lifecycle transitions.
+- [x] 2.3.3. Use structured JSON communication for invocation and response
+  payloads.
+- [x] 2.3.4. Implement timeout handling and robust IPC cleanup.
 
-  - [x] Symlink invokes correct behaviour based on `argv[0]`
+## 3. CmdMox controller and public API
 
-  - [x] Make shims executable on all supported Unix platforms
+Focus: Provide a stable controller abstraction and ergonomic test integration.
 
-- [x] **IPC Bus (Unix Domain Sockets)**
+### 3.1. Controller lifecycle
 
-  - [x] Lightweight IPC server in main test process
+- [x] 3.1.1. Implement `CmdMox` controller state for expectations, stubs, spies,
+  and the invocation journal.
+- [x] 3.1.2. Implement lifecycle transitions (`record`, `replay`, and
+  `verify`).
 
-  - [x] Start/stop server in sync with test lifecycle
+### 3.2. Factory methods
 
-  - [x] Structured (JSON) communication: invocation/request, response/result
+- [x] 3.2.1. Implement `cmd_mox.mock(cmd)`.
+- [x] 3.2.2. Implement `cmd_mox.stub(cmd)`.
+- [x] 3.2.3. Implement `cmd_mox.spy(cmd)`.
 
-  - [x] Timeout/error handling and robust socket cleanup
+### 3.3. Pytest plugin
 
-## **III. CmdMox Controller & Public API**
+- [x] 3.3.1. Register `cmd_mox` fixture.
+- [x] 3.3.2. Add pytest-xdist awareness for worker-specific temporary paths.
 
-- [x] `CmdMox` **Controller Class**
+### 3.4. Context manager interface
 
-  - [x] Holds expectations, stubs, spies, and the invocation journal
+- [x] 3.4.1. Support explicit `with cmd_mox.CmdMox() as mox:` usage.
 
-  - [x] Manages lifecycle: record → replay → verify
+## 4. Command double implementations
 
-- [x] **Factory Methods**
+Focus: Provide complete stub, mock, and spy capabilities with fluent APIs.
 
-  - [x] `cmd_mox.mock(cmd)`, `cmd_mox.stub(cmd)`, `cmd_mox.spy(cmd)`
+### 4.1. Stub command
 
-- [x] **Pytest Plugin**
+- [x] 4.1.1. Implement `.returns()` and `.runs()` for static and dynamic
+  behaviour.
+- [x] 4.1.2. Exclude stubs from strict verification requirements.
 
-  - [x] Register `cmd_mox` fixture
+### 4.2. Mock command
 
-  - [x] xdist/parallelisation awareness (worker IDs, temp dirs)
+- [x] 4.2.1. Implement `.with_args()`, `.with_matching_args()`, and
+  `.with_stdin()`.
+- [x] 4.2.2. Implement `.returns()` and `.runs()`.
+- [x] 4.2.3. Implement `.times()`, `.in_order()`, and `.any_order()`.
+- [x] 4.2.4. Implement `.with_env()` for environment matching and injection.
+- [x] 4.2.5. Enforce strict record-replay-verify behaviour.
 
-- [x] **Context Manager Interface**
+### 4.3. Spy command
 
-  - [x] Support for explicit `with cmd_mox.CmdMox() as mox:` usage
+- [x] 4.3.1. Implement `.returns()` for canned responses.
+- [x] 4.3.2. Implement `.passthrough()` for real command execution in replay.
+- [x] 4.3.3. Maintain invocation history (`invocations` and `call_count`).
 
-## **IV. Command Double Implementations**
+### 4.4. Fluent API enhancements
 
-- [x] **StubCommand**
+- [x] 4.4.1. Implement fluent expectation DSL. See
+  `python-native-command-mocking-design.md#24-the-fluent-api-for-defining-expectations`.
+- [x] 4.4.2. Add spy assertion helpers mirroring `unittest.mock` semantics
+  (`assert_called`, `assert_called_with`, and `assert_not_called`).
 
-  - [x] `.returns()` and `.runs()` (static/dynamic behaviour)
+## 5. Matching and verification engine
 
-  - [x] No verification/required calls
+Focus: Verify interactions deterministically with clear diagnostics.
 
-- [x] **MockCommand** *(done)*
+### 5.1. Comparator classes
 
-  - [x] `.with_args()`, `.with_matching_args()`, `.with_stdin()`
+- [x] 5.1.1. Implement `Any`, `IsA`, `Regex`, `Contains`, `StartsWith`, and
+  `Predicate` comparators.
+- [x] 5.1.2. Integrate comparator plumbing into mock argument matching.
 
-  - [x] `.returns()`, `.runs()`
+### 5.2. Invocation journal
 
-  - [x] `.times()`, `.in_order()`, `.any_order()`
+- [x] 5.2.1. Capture command, args, stdin, env, stdout, stderr, and exit code
+  for each invocation.
+- [x] 5.2.2. Store journal entries in a deque to preserve order.
+- [x] 5.2.3. Support configurable journal bounds via `max_journal_entries`.
 
-  - [x] `.with_env()` for environment matching/injection
+### 5.3. Verification algorithm
 
-  - [x] Strict record-replay-verify logic
+- [x] 5.3.1. Fail early on unexpected calls.
+- [x] 5.3.2. Report unfulfilled expectations.
+- [x] 5.3.3. Verify call counts and strict ordering constraints.
+- [x] 5.3.4. Emit clear diff-style error reports (`VerificationError` and
+  related subclasses).
 
-- [x] **SpyCommand**
+## 6. Shim behaviour
 
-  - [x] `.returns()` for canned response
+Focus: Ensure launcher behaviour is correct, portable, and deterministic.
 
-  - [x] `.passthrough()` for record/replay mode
+### 6.1. Shim startup logic
 
-  - [x] Maintain call history (`invocations`, `call_count` API)
+- [x] 6.1.1. Determine mocked command identity via `argv[0]`.
+- [x] 6.1.2. Connect to IPC endpoint.
+- [x] 6.1.3. Capture stdin, argv, and env.
+- [x] 6.1.4. Send invocation to IPC server and wait for response.
+- [x] 6.1.5. Apply returned behaviour (`stdout`, `stderr`, and exit code).
 
-### Fluent API Enhancements
+### 6.2. Passthrough spies
 
-- [x] Fluent expectation DSL (see
-    [design section](python-native-command-mocking-design.md#24-the-fluent-api-for-defining-expectations)
-    )
-- [x] Assertion helpers for spy inspection mirroring `unittest.mock`
-    semantics (`assert_called`, `assert_called_with`, `assert_not_called`)
+- [x] 6.2.1. Extend IPC protocol to request real command execution.
+- [x] 6.2.2. Resolve and execute real command using original `PATH`, then return
+  result payload.
 
-## **V. Matching & Verification Engine**
+## 7. Advanced features and edge cases
 
-- [x] **Comparator Classes**
+Focus: Handle environment overlays, concurrency, and cleanup guarantees.
 
-  - [x] Implement: `Any`, `IsA`, `Regex`, `Contains`, `StartsWith`, `Predicate`
+### 7.1. Environment variable injection
 
-  - [x] Flexible matcher plumbing in mock argument matching
+- [x] 7.1.1. Implement `.with_env()` injection before handler or canned response
+  execution.
 
-- [x] **Invocation Journal**
+### 7.2. Concurrency support
 
-- [x] Capture: command, args, stdin, env, stdout, stderr, exit_code per
-  invocation
+- [x] 7.2.1. Ensure safe parallel use with unique per-test temporary paths and
+  socket names.
 
-  - [x] Store as a deque to preserve order during verification
-  - [x] Configurable max journal size via `max_journal_entries`
+### 7.3. Robust cleanup
 
-- [x] **Verification Algorithm**
+- [x] 7.3.1. Always restore environment and remove temporary paths on errors and
+  interrupts.
 
-  - [x] Unexpected calls (fail early)
+## 8. Documentation, examples, and usability
 
-  - [x] Unfulfilled expectations
+Focus: Provide complete user guidance and migration pathways.
 
-  - [x] Call counts, strict ordering checks
+### 8.1. API reference and tutorials
 
-  - [x] Clear diff-style error reporting (`VerificationError` etc.)
+- [x] 8.1.1. Publish complete public API and matcher documentation.
+- [x] 8.1.2. Add example tests for stubs, mocks, spies, pipelines, and
+  passthrough mode.
+- [x] 8.1.3. Publish migration guide for `shellmock` users.
 
-## **VI. Shim Behaviour**
+## 9. Quality assurance
 
-- [x] **Shim Startup Logic**
+Focus: Expand automated confidence across unit, integration, and behavioural
+layers.
 
-  - [x] Determine which command to simulate via `argv[0]`
+### 9.1. Unit and integration testing
 
-  - [x] Connect to IPC socket
+- [ ] 9.1.1. Reach full test coverage across core components, especially IPC and
+  environment manipulation.
+- [ ] 9.1.2. Add explicit pytest-xdist compatibility tests.
+- [ ] 9.1.3. Add regression suite for pipelines, missing commands, and complex
+  argument handling.
+- [ ] 9.1.4. Add behavioural acceptance tests covering full fluent API with
+  `pytest-bdd` and `cfparse`.
 
-  - [x] Capture stdin, argv, env
+## 10. Release and post-MVP
 
-  - [x] Send invocation to IPC server, wait for response
+Focus: Prepare and execute initial public release.
 
-  - [x] Apply returned behaviour: print `stdout`, `stderr`, exit with code
+### 10.1. First public release (1.0.0)
 
-- [x] **Passthrough Spies**
+- [ ] 10.1.1. Polish documentation, perform cleanup, and publish to PyPI.
+- [ ] 10.1.2. Announce project and collect early user feedback.
 
-  - [x] IPC protocol for server to direct shim to run "real" command
+## 11. Windows platform support
 
-  - [x] Shim locates real command in original `PATH`, executes, sends result
+Focus: Deliver first-class Windows compatibility for IPC and shims.
 
-## **VII. Advanced Features & Edge Cases**
+### 11.1. Windows platform enablement
 
-- [x] **Environment Variable Injection**
+- [x] 11.1.1. Establish cross-platform IPC and shim abstractions including
+  Windows implementations. Acceptance: end-to-end pytest suite passes on
+  `windows-latest` with IPC and shims enabled.
+- [x] 11.1.2. Implement Windows named-pipe IPC (`win32pipe` and `win32file`) and
+  package `pywin32` dependency.
+- [x] 11.1.3. Validate environment and filesystem helpers on Windows, including
+  `PATHEXT` lookup, CRLF launchers, quoting and escaping, max-path handling,
+  and case-insensitive filesystem behaviour.
+- [x] 11.1.4. Extend CI to exercise Windows workflows (`windows-latest` matrix
+  job) and publish IPC diagnostics artefacts.
 
-  - [x] `.with_env()` applies mock-specific env before executing the handler or
-    canned response
+## 12. Record mode
 
-- [x] **Concurrency Support**
+Record mode transforms passthrough spy recordings into reusable fixtures. This
+supports deterministic replay without external dependencies. See
+`python-native-command-mocking-design.md` section IX.
 
-  - [x] Safe parallel use: unique per-test temp dirs, socket names, no shared
-    files
+### 12.1. Core recording infrastructure (MVP)
 
-- [x] **Robust Cleanup**
+- [x] 12.1.1. Implement `RecordingSession` with fixture persistence,
+  session lifecycle management, fixture metadata generation, and environment
+  subset filtering.
+- [x] 12.1.2. Implement `FixtureFile` with JSON serialisation, versioned schema
+  (`1.0`), and migration support.
+- [ ] 12.1.3. Add `.record()` to `CommandDouble` with validation that
+  passthrough mode is enabled and support for custom scrubber and allowlist
+  parameters.
+- [ ] 12.1.4. Integrate recording into `PassthroughCoordinator.finalize_result()`
+  with optional recording session wiring.
+- [ ] 12.1.5. Add unit tests for recording lifecycle, serialisation roundtrips,
+  and environment filtering.
 
-  - [x] Always restore env and remove temp dirs/sockets, even on error/interrupt
+### 12.2. Replay infrastructure
 
-## **VIII. Documentation, Examples & Usability**
+- [ ] 12.2.1. Implement `ReplaySession` with fixture loading, schema validation,
+  consumed-record tracking, and strict and fuzzy modes.
+- [ ] 12.2.2. Implement `InvocationMatcher` with strict matching, fuzzy
+  matching, and best-fit score selection.
+- [ ] 12.2.3. Add `.replay()` to `CommandDouble`, including passthrough
+  incompatibility validation and strict-mode option.
+- [ ] 12.2.4. Integrate replay into `CmdMox._make_response()` and raise
+  `UnexpectedCommandError` for unmatched strict replay invocations.
+- [ ] 12.2.5. Extend `CmdMox.verify()` to report unconsumed recordings.
+- [ ] 12.2.6. Add unit tests for fixture loading, matcher behaviour, and
+  consumption tracking.
 
-- [ ] **API Reference & Tutorials**
+### 12.3. Scrubbing and security
 
-  - [x] Document all public APIs and matchers *(done)*
+- [ ] 12.3.1. Implement `Scrubber` with default secret redaction patterns,
+  including GitHub PATs, AWS access keys, generic tokens, bearer headers,
+  private keys, and database connection strings.
+- [ ] 12.3.2. Implement `ScrubbingRule` dataclass with pattern, replacement,
+  target fields, and documentation description.
+- [ ] 12.3.3. Add environment filtering with default exclusions, configurable
+  allowlist, and command-specific prefix support.
+- [ ] 12.3.4. Implement review mode to emit companion `.review` artefacts
+  showing original and scrubbed values with sensitivity warnings.
+- [ ] 12.3.5. Add security-focused unit tests for default patterns,
+  environment filtering, and review-file generation.
 
-  - [x] Example tests for stubs, mocks, spies, pipelines, passthrough mode
+### 12.4. Pytest integration
 
-  - [x] Comparison/migration guide for `shellmock` users
+- [ ] 12.4.1. Add `@pytest.mark.cmdmox_record` marker with automatic fixture
+  directory handling and convention-based naming.
+- [ ] 12.4.2. Add `@pytest.mark.cmdmox_replay` marker with automatic fixture
+  loading and strict or fuzzy mode configuration.
+- [ ] 12.4.3. Implement automatic fixture naming based on test module and
+  function names, with collision handling and custom override support.
+- [ ] 12.4.4. Ensure pytest-xdist recording compatibility with worker-isolated
+  fixture paths and parallel aggregation support.
 
-## **IX. Quality Assurance**
+### 12.5. CLI tool
 
-- [ ] **Unit & Integration Testing**
+- [ ] 12.5.1. Implement `cmdmox record` with `--output`, optional command
+  filters, and target command execution.
+- [ ] 12.5.2. Implement `cmdmox replay` with fixture selection and strict mode.
+- [ ] 12.5.3. Implement `cmdmox generate-test` to emit pytest tests from
+  recorded fixtures.
+- [ ] 12.5.4. Implement `cmdmox scrub` for post-hoc fixture sanitisation.
+- [ ] 12.5.5. Implement `cmdmox validate` for schema and corruption checks,
+  including glob support.
 
-  - [ ] Full test coverage for all core components (especially IPC and env
-    manipulation)
+### 12.6. Documentation and examples
 
-  - [ ] Tests for pytest-xdist compatibility
+- [ ] 12.6.1. Document `RecordingSession`, `ReplaySession`, `Scrubber`,
+  `ScrubbingRule`, and fixture schema.
+- [ ] 12.6.2. Add tutorial for recording fixtures, including end-to-end Git
+  examples and fixture format explanation.
+- [ ] 12.6.3. Add tutorial for Continuous Integration and Continuous Deployment
+  (CI/CD) replay workflows, fixture update practices, and versioning guidance.
+- [ ] 12.6.4. Add migration guide from raw passthrough tests to fixture-based
+  workflows.
 
-  - [ ] Regression suite for edge cases (pipelines, missing commands, complex
-    args)
+## 13. Rust mock command binary
 
-  - [ ] Behavioural acceptance tests covering the full fluent API using
-        `pytest-bdd` and `cfparse`
+This phase introduces native `cmdmox-mock` launcher support to reduce fragility
+from shell and `.cmd` wrappers while preserving existing IPC protocol and
+record-replay-verify semantics. See
+`python-native-command-mocking-design.md` section 8.12.
 
-## **X. Release & Post-MVP**
+### 13.1. Rust workspace and build foundation
 
-- [ ] **First Public Release (1.0.0)**
+- [ ] 13.1.1. Introduce Cuprum-style Rust structure with `rust/Cargo.toml`
+  workspace root, `rust/cmdmox-mock/` binary crate, and `rust/Makefile`
+  targets for native build, test, lint, and format checks.
+- [ ] 13.1.2. Add Python-side backend probing utilities in
+  `cmd_mox/_rust_mock_backend.py`, including resolved binary discovery.
+- [ ] 13.1.3. Differentiate probe failures explicitly (missing binary versus
+  present but broken binary).
 
-  - [ ] Polish docs, clean up, push to PyPI
+### 13.2. Launcher backend selection and integration
 
-  - [ ] Announce project, collect early user feedback
+- [ ] 13.2.1. Add `CMOX_SHIM_BACKEND=auto|python|rust` runtime selection.
+- [ ] 13.2.2. Make `auto` prefer Rust when available and `rust` fail fast with
+  actionable diagnostics when unavailable.
+- [ ] 13.2.3. Integrate backend-aware shim generation across platforms:
+  POSIX symlinks to selected launcher, Windows `.cmd` for Python backend, and
+  Windows `.exe` launcher links for Rust backend.
 
-## **XI. Windows Platform Support**
+### 13.3. Native launcher implementation
 
-- [x] **Windows Platform Enablement**
+- [ ] 13.3.1. Implement `cmdmox-mock` invocation pathway with cross-platform
+  command identity resolution, argument capture, stdin capture, and environment
+  capture matching Python shim payload shape.
+- [ ] 13.3.2. Implement IPC client compatibility for Unix domain sockets and
+  Windows named pipes using existing logical socket mapping.
+- [ ] 13.3.3. Preserve passthrough execution parity for PATH filtering,
+  environment overlays, result reporting, and missing executable failures.
 
-  - [x] Establish cross-platform IPC and shim abstractions that include Windows
-        implementations (acceptance: end-to-end pytest suite passes on
-        `windows-latest` GH runner with IPC + shims enabled).
+### 13.4. Packaging and distribution
 
-  - [x] Implement Windows named-pipe IPC (win32pipe/win32file) and package the
-        pywin32 dependency so CmdMox can communicate with shims on Windows
-        hosts without relying on Unix domain sockets.
+- [ ] 13.4.1. Add native wheel pipeline including `cmdmox-mock` binaries for
+  Linux, macOS, and Windows, and keep Python package and wheel metadata aligned.
+- [ ] 13.4.2. Continue publishing pure Python wheels alongside native wheels.
+- [ ] 13.4.3. Document source-build requirements and ensure source installs can
+  still run via Python shim fallback.
 
-  - [x] Validate environment management and filesystem helpers on Windows,
-        addressing portability gaps discovered during testing (cover: `PATHEXT`
-        lookup semantics, CRLF line endings for batch shims, argument
-        quoting/escaping rules with spaces and carets, max path handling,
-        case-insensitive filesystem behaviour).
+### 13.5. Testing, CI, and performance validation
 
-  - [x] Extend CI and automated testing to exercise core workflows on Windows
-        (`windows-latest` matrix job; minimal smoke: create shims, run mocked
-        command, run passthrough spy; artefacts include IPC logs for debugging).
+- [ ] 13.5.1. Add backend parity matrix running shim behaviour tests against
+  both `python` and `rust` backends.
+- [ ] 13.5.2. Add parity tests for quoting, stdin capture, env transport, and
+  Windows-specific caret, percent, and space handling.
+- [ ] 13.5.3. Add per-OS CI smoke workflows with backend logs and IPC transcript
+  artefacts, plus non-regression checks for fallback selection behaviour.
 
-## **XII. Record Mode**
+### 13.6. Rollout and documentation
 
-Record Mode transforms passthrough spy recordings into reusable test fixtures,
-enabling developers to capture real command interactions and replay them in
-subsequent test runs without external dependencies. The comprehensive design is
-documented in `python-native-command-mocking-design.md` Section IX.
+- [ ] 13.6.1. Extend design and user documentation for dual backend operation,
+  including backend selection flags, troubleshooting, and limitations.
+- [ ] 13.6.2. Add migration guidance for users relying on existing shell and
+  `.cmd` shims.
+- [ ] 13.6.3. Define rollout gates before default backend changes: parity across
+  Linux, macOS, and Windows CI, no open severity-1 regressions, and release
+  notes containing rollback instructions via `CMOX_SHIM_BACKEND`.
 
-### **XII-A. Core Recording Infrastructure (MVP)**
+## Legend
 
-- [x] Implement `RecordingSession` class with fixture persistence
-
-  - [x] Session lifecycle management (start, record, finalize)
-  - [x] Fixture metadata generation (timestamps, platform, versions)
-  - [x] Environment variable subset filtering
-
-- [x] Implement `FixtureFile` with JSON serialization and schema versioning
-
-  - [x] Version 1.0 schema with recordings, metadata, and scrubbing rules
-  - [x] `to_dict()` and `from_dict()` serialization methods
-  - [x] Schema migration support for forward compatibility
-
-- [ ] Add `.record()` method to `CommandDouble`
-
-  - [ ] Fluent API: `spy("git").passthrough().record("fixtures/git.json")`
-  - [ ] Validation that passthrough mode is enabled
-  - [ ] Support for custom scrubber and env_allowlist parameters
-
-- [ ] Integrate recording into `PassthroughCoordinator.finalize_result()`
-
-  - [ ] Optional `RecordingSession` parameter on coordinator
-  - [ ] Automatic recording on passthrough completion
-
-- [ ] Unit tests for recording workflow
-
-  - [ ] Session lifecycle tests
-  - [ ] Serialization roundtrip tests
-  - [ ] Environment filtering tests
-
-### **XII-B. Replay Infrastructure**
-
-- [ ] Implement `ReplaySession` class with fixture loading
-
-  - [ ] Load and parse fixture files with schema validation
-  - [ ] Track consumed recordings during replay
-  - [ ] Support both strict and fuzzy matching modes
-
-- [ ] Implement `InvocationMatcher` for invocation matching
-
-  - [ ] Strict matching (command, args, stdin, env)
-  - [ ] Fuzzy matching (command and args only)
-  - [ ] Match scoring for best-fit selection
-
-- [ ] Add `.replay()` method to `CommandDouble`
-
-  - [ ] Fluent API: `spy("git").replay("fixtures/git.json")`
-  - [ ] Validation that passthrough mode is not enabled
-  - [ ] Support for strict parameter
-
-- [ ] Integrate replay into `CmdMox._make_response()`
-
-  - [ ] Check replay session before other response strategies
-  - [ ] Raise `UnexpectedCommandError` on unmatched strict replay
-
-- [ ] Add replay consumption verification to `CmdMox.verify()`
-
-  - [ ] Verify all recordings were consumed
-  - [ ] Report unconsumed recordings in verification errors
-
-- [ ] Unit tests for replay workflow
-
-  - [ ] Fixture loading tests
-  - [ ] Matching algorithm tests
-  - [ ] Consumption tracking tests
-
-### **XII-C. Scrubbing and Security**
-
-- [ ] Implement `Scrubber` class with default rules for common secrets
-
-  - [ ] GitHub PATs (`ghp_*`, `gho_*`, etc.)
-  - [ ] AWS access keys (`AKIA*`)
-  - [ ] Generic API keys and tokens
-  - [ ] Bearer authorization headers
-  - [ ] SSH private keys
-  - [ ] Database connection strings
-
-- [ ] Implement `ScrubbingRule` dataclass
-
-  - [ ] Pattern (string or compiled regex)
-  - [ ] Replacement string
-  - [ ] Applied-to fields (env, stdout, stderr, stdin)
-  - [ ] Description for documentation
-
-- [ ] Add environment variable filtering
-
-  - [ ] Default exclusion list (PATH, HOME, `*_KEY`, `*_SECRET`, etc.)
-  - [ ] Configurable allowlist
-  - [ ] Command-specific prefix matching (`GIT_*`, `AWS_*`, etc.)
-
-- [ ] Implement review mode for manual verification
-
-  - [ ] Generate companion `.review` file
-  - [ ] Show original alongside scrubbed values
-  - [ ] Include warnings for potentially sensitive data
-
-- [ ] Security-focused unit tests
-
-  - [ ] Pattern matching tests for all default rules
-  - [ ] Environment filtering tests
-  - [ ] Review file generation tests
-
-### **XII-D. Pytest Integration**
-
-- [ ] Add `@pytest.mark.cmdmox_record` marker
-
-  - [ ] Automatic fixture directory configuration
-  - [ ] Convention-based fixture naming (`<test_name>_<command>.json`)
-  - [ ] Integration with existing `cmd_mox` fixture
-
-- [ ] Add `@pytest.mark.cmdmox_replay` marker
-
-  - [ ] Automatic fixture loading from configured directory
-  - [ ] Strict/fuzzy mode configuration via marker parameter
-  - [ ] Error reporting for missing fixtures
-
-- [ ] Implement automatic fixture naming convention
-
-  - [ ] Based on test module and function names
-  - [ ] Support for custom naming via marker parameters
-  - [ ] Collision detection and handling
-
-- [ ] Ensure pytest-xdist compatibility for recording
-
-  - [ ] Worker-isolated fixture paths
-  - [ ] Concurrent recording safety
-  - [ ] Fixture aggregation for parallel runs
-
-### **XII-E. CLI Tool**
-
-- [ ] Implement `cmdmox record` subcommand
-
-  - [ ] `--output` for fixture path
-  - [ ] `--commands` for selective recording
-  - [ ] Execute target script with recording enabled
-
-- [ ] Implement `cmdmox replay` subcommand
-
-  - [ ] `--fixture` for fixture path
-  - [ ] `--strict` mode flag
-  - [ ] Execute target script with replay enabled
-
-- [ ] Implement `cmdmox generate-test` for code generation
-
-  - [ ] Generate pytest test from recorded fixture
-  - [ ] Include mock definitions for all recordings
-  - [ ] Support for output path configuration
-
-- [ ] Implement `cmdmox scrub` for post-hoc sanitization
-
-  - [ ] `--fixture` for input fixture
-  - [ ] `--rules` for custom rules file (YAML)
-  - [ ] In-place or output to new file
-
-- [ ] Implement `cmdmox validate` for fixture verification
-
-  - [ ] Schema validation against version
-  - [ ] Report invalid or corrupt fixtures
-  - [ ] Support for glob patterns
-
-### **XII-F. Documentation and Examples**
-
-- [ ] API reference documentation
-
-  - [ ] `RecordingSession` class documentation
-  - [ ] `ReplaySession` class documentation
-  - [ ] `Scrubber` and `ScrubbingRule` documentation
-  - [ ] `FixtureFile` schema documentation
-
-- [ ] Tutorial: Recording a fixture
-
-  - [ ] Step-by-step guide for passthrough recording
-  - [ ] Example with git commands
-  - [ ] Explanation of fixture format
-
-- [ ] Tutorial: CI/CD replay workflows
-
-  - [ ] Using recorded fixtures in CI
-  - [ ] Managing fixture updates
-  - [ ] Best practices for fixture versioning
-
-- [ ] Migration guide from raw passthrough
-
-  - [ ] Converting existing passthrough tests
-  - [ ] Benefits of fixture-based testing
-  - [ ] Common patterns and anti-patterns
-
-## **XIII. Rust Mock Command Binary**
-
-This phase introduces a native `cmdmox-mock` launcher to reduce fragility from
-shell and `.cmd` wrappers while preserving CmdMox's current IPC protocol and
-record/replay/verify semantics.
-
-### **XIII-A. Rust Workspace and Build Foundation**
-
-- [ ] Introduce Cuprum-style Rust repository structure
-
-  - [ ] Add `rust/Cargo.toml` workspace root for native components
-  - [ ] Add `rust/cmdmox-mock/` binary crate
-  - [ ] Add `rust/Makefile` with native `build`, `test`, `lint`, and
-        `check-fmt` targets
-
-- [ ] Add Python-to-native backend probing utilities
-
-  - [ ] Implement `cmd_mox/_rust_mock_backend.py` availability probe
-  - [ ] Expose launcher discovery helper returning the resolved binary path
-  - [ ] Keep probe failures explicit (distinguish "missing binary" vs
-        "binary present but broken")
-
-### **XIII-B. Launcher Backend Selection and Integration**
-
-- [ ] Add backend selection controls to CmdMox runtime
-
-  - [ ] `CMOX_SHIM_BACKEND=auto|python|rust` selection semantics
-  - [ ] Default `auto` to prefer Rust when binary is available
-  - [ ] `rust` mode fails fast with actionable errors when unavailable
-
-- [ ] Integrate backend selection into shim generation
-
-  - [ ] POSIX: symlink mocked command names to selected launcher
-  - [ ] Windows Python backend: retain `.cmd` wrappers for compatibility
-  - [ ] Windows Rust backend: emit/link `*.exe` command shims to
-        `cmdmox-mock.exe`
-
-### **XIII-C. Native Launcher Implementation**
-
-- [ ] Implement `cmdmox-mock` core invocation pathway
-
-  - [ ] Resolve command identity from `argv[0]` across POSIX and Windows
-  - [ ] Capture args, stdin, and env with parity to Python shim payloads
-  - [ ] Preserve timeout and error semantics expected by the controller
-
-- [ ] Implement IPC client support for existing CmdMox protocol
-
-  - [ ] Unix domain socket client for Unix-like platforms
-  - [ ] Named pipe client for Windows using the existing logical socket mapping
-  - [ ] Protocol compatibility tests against current Python IPC server
-
-- [ ] Implement passthrough execution parity
-
-  - [ ] Reuse controller-provided PATH filtering and env overlay semantics
-  - [ ] Execute real command and report stdout/stderr/exit code exactly once
-  - [ ] Preserve error surfaces for missing executables and non-executable paths
-
-### **XIII-D. Packaging and Distribution**
-
-- [ ] Add native wheel build pipeline for Rust launcher artefacts
-
-  - [ ] Build and include `cmdmox-mock` binaries for Linux, macOS, and Windows
-  - [ ] Ensure wheel metadata and Python package version stay aligned
-  - [ ] Publish pure Python wheel alongside native wheels
-
-- [ ] Keep source-install pathway explicit
-
-  - [ ] Document Rust toolchain requirements for contributors
-  - [ ] Ensure source installs can fall back to Python shim backend
-  - [ ] Verify `pip install` from sdist does not hard-require Rust for runtime
-
-### **XIII-E. Testing, CI, and Performance Validation**
-
-- [ ] Add backend parity test matrix
-
-  - [ ] Parametrize shim behaviour tests for `python` and `rust` backends
-  - [ ] Add parity tests for argument quoting, stdin capture, and env transport
-  - [ ] Add Windows-specific parity tests for caret/percent and space handling
-
-- [ ] Add CI workflows for native launcher confidence
-
-  - [ ] Per-OS smoke jobs running backend-specific command interception tests
-  - [ ] Failure artefacts include backend logs and IPC transcripts
-  - [ ] Non-regression checks for backend-selection fallback behaviour
-
-### **XIII-F. Rollout and Documentation**
-
-- [ ] Extend the design and user docs for dual-backend operation
-
-  - [ ] Document backend-selection flags and troubleshooting guidance
-  - [ ] Document operational differences and known limitations per backend
-  - [ ] Add migration guidance for users relying on current shell/`.cmd` shims
-
-- [ ] Define rollout gates before switching default backend behaviour
-
-  - [ ] Backend parity criteria met across Linux/macOS/Windows CI
-  - [ ] No open severity-1 compatibility regressions vs Python shim backend
-  - [ ] Release notes include explicit rollback instructions (`CMOX_SHIM_BACKEND`)
-
-**Legend:**
-
-- Each `[ ]` is an implementable, trackable unit (suitable for tickets/epics in
-  e.g. GitHub Projects, Jira, etc.)
-
+- Each unchecked box represents an implementable, trackable unit suitable for
+  project management tools.
 - [ ] All MVP checkboxes above this point should be completed before first
   public release.
