@@ -432,6 +432,16 @@ assert fixture.version == "1.0"
 assert len(fixture.recordings) == 1
 ```
 
+### Schema versioning and migration
+
+Fixture files include a `version` field following semantic versioning. CmdMox
+automatically migrates older fixture files to the current schema when loading
+via `FixtureFile.load()` or `FixtureFile.from_dict()`. Minor version
+differences within the same major version are tolerated -- for example, a v1.1
+fixture loads correctly into v1.0 code because unknown fields are ignored.
+Incompatible major versions with no registered migration path raise
+`ValueError`.
+
 ## Pipelines and shell syntax
 
 CmdMox intercepts individual executables by prepending shims to `PATH`. It does

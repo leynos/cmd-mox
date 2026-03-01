@@ -2616,6 +2616,24 @@ method
 - `importlib.metadata` is the standard mechanism for accessing installed
   package metadata in Python 3.8+
 
+#### 9.10.8 Tuple-Based Version Comparison and Migration Registry
+
+**Decision:** Parse schema version strings into `(major, minor)` integer tuples
+for comparison. Maintain a migration registry keyed by source major version,
+with chainable migration functions (v0 -> v1 -> v2 etc.). Minor version
+differences within the same major version are tolerated without migration.
+
+**Rationale:**
+
+- String comparison of version numbers is unreliable (e.g. `"9.0" < "10.0"` is
+  `False` with string comparison)
+- Keying migrations by major version avoids registering an entry for every
+  possible minor version
+- Chainable migrations let each function know only about two adjacent major
+  versions, following the Django/Alembic pattern
+- Same-major tolerance follows the semantic versioning contract: minor versions
+  add optional fields but do not break existing readers
+
 ### 9.11 Versioning and Forward Compatibility
 
 #### 9.11.1 Schema Versioning
@@ -2629,15 +2647,35 @@ Fixtures include a `version` field following semantic versioning:
 #### 9.11.2 Upgrade Path
 
 ```python
+def _parse_version(version_str: str) -> tuple[int, int]:
+    major, minor = version_str.split(".")
+    return (int(major), int(minor))
+
+def _migrate_v0_to_v1(data: dict) -> dict:
+    data["version"] = "1.0"
+    return data
+
+# Migration registry: source major version -> (target version, function)
+_MIGRATIONS = {0: ((1, 0), _migrate_v0_to_v1)}
+
+def _apply_migrations(data: dict) -> dict:
+    """Deep-copy data and chain migrations to the current schema."""
+    data = copy.deepcopy(data)
+    if "version" not in data:
+        data["version"] = "0.0"
+    file_ver = _parse_version(data["version"])
+    current = _parse_version(_SCHEMA_VERSION)
+    while file_ver[0] < current[0]:
+        target, migrate_fn = _MIGRATIONS[file_ver[0]]
+        data = migrate_fn(data)
+        file_ver = target
+    return data
+
 class FixtureFile:
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
         data = json.load(path.open())
-        version = data.get("version", "0.0")
-
-        if version < "1.0":
-            data = migrate_v0_to_v1(data)
-
+        data = _apply_migrations(data)
         return cls.from_dict(data)
 ```
 
