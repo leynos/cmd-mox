@@ -7,6 +7,7 @@ deserialization, and file I/O.
 
 from __future__ import annotations
 
+import copy
 import dataclasses as dc
 import datetime as dt
 import importlib.metadata
@@ -189,7 +190,7 @@ def _execute_migration_chain(
 def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
     """Apply chained migrations to bring *data* up to the current schema.
 
-    The input dict is shallow-copied so the caller's original is never
+    The input dict is deep-copied so the caller's original is never
     mutated.  A missing ``version`` key is treated as ``"0.0"`` (legacy
     fixture predating the version field).
 
@@ -208,7 +209,7 @@ def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
     ValueError
         If the version is incompatible and no migration path exists.
     """
-    data = dict(data)  # shallow copy to avoid mutating the caller's dict
+    data = copy.deepcopy(data)  # deep copy to avoid mutating the caller's dict
 
     _normalize_version_field(data)
 

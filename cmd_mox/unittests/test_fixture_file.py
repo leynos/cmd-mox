@@ -205,6 +205,18 @@ class TestFixtureFile:
 
         assert data["version"] == original_version
 
+    def test_from_dict_does_not_share_nested_references(self) -> None:
+        """_apply_migrations deep-copies so nested objects are isolated."""
+        from cmd_mox.record.fixture import _apply_migrations
+
+        data = _sample_fixture().to_dict()
+        data["version"] = "0.9"
+        original_metadata = data["metadata"]
+        result = _apply_migrations(data)
+
+        # The nested metadata dict must be a distinct object, not shared.
+        assert result["metadata"] is not original_metadata
+
     def test_from_dict_tolerates_higher_minor_version(self) -> None:
         """from_dict() accepts a v1.1 fixture when current schema is v1.0."""
         data = _sample_fixture().to_dict()

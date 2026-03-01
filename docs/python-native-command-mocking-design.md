@@ -2651,19 +2651,31 @@ def _parse_version(version_str: str) -> tuple[int, int]:
     major, minor = version_str.split(".")
     return (int(major), int(minor))
 
+def _migrate_v0_to_v1(data: dict) -> dict:
+    data["version"] = "1.0"
+    return data
+
 # Migration registry: source major version -> (target version, function)
-_MIGRATIONS = {0: ((1, 0), migrate_v0_to_v1)}
+_MIGRATIONS = {0: ((1, 0), _migrate_v0_to_v1)}
+
+def _apply_migrations(data: dict) -> dict:
+    """Deep-copy data and chain migrations to the current schema."""
+    data = copy.deepcopy(data)
+    if "version" not in data:
+        data["version"] = "0.0"
+    file_ver = _parse_version(data["version"])
+    current = _parse_version(_SCHEMA_VERSION)
+    while file_ver[0] < current[0]:
+        target, migrate_fn = _MIGRATIONS[file_ver[0]]
+        data = migrate_fn(data)
+        file_ver = target
+    return data
 
 class FixtureFile:
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
         data = json.load(path.open())
-        version = _parse_version(data.get("version", "0.0"))
-
-        if version < (1, 0):
-            _, migrate_fn = _MIGRATIONS[version[0]]
-            data = migrate_fn(data)
-
+        data = _apply_migrations(data)
         return cls.from_dict(data)
 ```
 
