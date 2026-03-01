@@ -346,7 +346,7 @@ Fix any issues found. Re-run all gates after fixes.
    entry documenting the tuple-based version comparison and migration registry
    design.
 
-4. Run `make markdownlint` to validate markdown changes.
+4. Run `make markdownlint` and `make nixie` to validate markdown changes.
 
 ### Stage F: Final validation and completion
 
@@ -408,6 +408,7 @@ set -o pipefail && make typecheck 2>&1 | tee /tmp/typecheck.log
 set -o pipefail && make lint 2>&1 | tee /tmp/lint.log
 set -o pipefail && make test 2>&1 | tee /tmp/test.log
 set -o pipefail && make markdownlint 2>&1 | tee /tmp/mdlint.log
+set -o pipefail && make nixie 2>&1 | tee /tmp/nixie.log
 ```
 
 ## Idempotence and recovery
@@ -416,7 +417,7 @@ All steps are idempotent. The migration framework is purely additive -- it does
 not modify the on-disk format of v1.0 fixtures. `_apply_migrations()` is a
 no-op for v1.0 data, so existing save/load roundtrips are unchanged.
 
-If a step fails partway, re-running `make test` after fixing the issue is safe.
+If a step fails partway, rerunning `make test` after fixing the issue is safe.
 No state machines or filesystem mutations beyond JSON file I/O are involved.
 
 ## Artifacts and notes
@@ -439,8 +440,8 @@ No state machines or filesystem mutations beyond JSON file I/O are involved.
 - `docs/python-native-command-mocking-design.md` -- add design decision.
 
 Expected: ~80-100 net new lines in `fixture.py`, ~50-60 in test files, ~20-30
-in BDD files, ~10 in docs. Total ~160-200 net new lines across 8 modified
-files and 1 new file. Within the 250-line/8-file tolerance.
+in BDD files, ~10 in docs. Total ~160-200 net new lines across 8 modified files
+and 1 new file. Within the 250-line/8-file tolerance.
 
 ## Interfaces and dependencies
 
