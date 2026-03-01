@@ -241,22 +241,22 @@ documented in `python-native-command-mocking-design.md` Section IX.
   - [x] `to_dict()` and `from_dict()` serialization methods
   - [x] Schema migration support for forward compatibility
 
-- [ ] Add `.record()` method to `CommandDouble`
+- [x] Add `.record()` method to `CommandDouble`
 
-  - [ ] Fluent API: `spy("git").passthrough().record("fixtures/git.json")`
-  - [ ] Validation that passthrough mode is enabled
-  - [ ] Support for custom scrubber and env_allowlist parameters
+  - [x] Fluent API: `spy("git").passthrough().record("fixtures/git.json")`
+  - [x] Validation that passthrough mode is enabled
+  - [x] Support for custom scrubber and env_allowlist parameters
 
-- [ ] Integrate recording into `PassthroughCoordinator.finalize_result()`
+- [x] Integrate recording into `PassthroughCoordinator.finalize_result()`
 
-  - [ ] Optional `RecordingSession` parameter on coordinator
-  - [ ] Automatic recording on passthrough completion
+  - [x] Optional `RecordingSession` parameter on coordinator
+  - [x] Automatic recording on passthrough completion
 
-- [ ] Unit tests for recording workflow
+- [x] Unit tests for recording workflow
 
-  - [ ] Session lifecycle tests
-  - [ ] Serialization roundtrip tests
-  - [ ] Environment filtering tests
+  - [x] Session lifecycle tests
+  - [x] Serialization roundtrip tests
+  - [x] Environment filtering tests
 
 ### **XII-B. Replay Infrastructure**
 

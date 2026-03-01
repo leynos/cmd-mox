@@ -310,6 +310,7 @@ class CmdMox:
         try:
             self._run_verifiers()
         finally:
+            self._finalize_recording_sessions()
             self._finalize_verification()
 
     # ------------------------------------------------------------------
@@ -603,6 +604,12 @@ class CmdMox:
         UnexpectedCommandVerifier().verify(self.journal, self._doubles)
         OrderVerifier(self._ordered).verify(self.journal)
         CountVerifier().verify(expectations, inv_map)
+
+    def _finalize_recording_sessions(self) -> None:
+        """Finalize all active recording sessions and persist fixtures."""
+        for double in self._doubles.values():
+            if double._recording_session is not None:
+                double._recording_session.finalize()
 
     def _finalize_verification(self) -> None:
         """Stop the server, clean up the environment, and update phase."""

@@ -2634,6 +2634,28 @@ differences within the same major version are tolerated without migration.
 - Same-major tolerance follows the semantic versioning contract: minor versions
   add optional fields but do not break existing readers
 
+#### 9.10.9 Coordinator-Based Recording Integration
+
+**Decision:** Integrate recording into
+`PassthroughCoordinator.finalize_result()` by inspecting
+`double._recording_session` rather than adding a constructor parameter to the
+coordinator. The coordinator uses `getattr()` for defensive access since test
+fakes may not carry the attribute.
+
+**Rationale:**
+
+- Recording sessions are per-double: each spy can record to a different fixture
+  file, so a single `recording_session` parameter on the shared coordinator
+  does not fit
+- The coordinator already stores the double in its pending dict and returns it
+  from `finalize_result()`, so it can inspect the double's session attribute
+  directly with zero additional state
+- `getattr(double, "_recording_session", None)` provides safe access without
+  requiring test fakes to carry the attribute
+- Session finalization is handled by the controller in `verify()` after
+  verifiers run but before environment teardown, ensuring fixture files are
+  persisted even if verification raises
+
 ### 9.11 Versioning and Forward Compatibility
 
 #### 9.11.1 Schema Versioning
