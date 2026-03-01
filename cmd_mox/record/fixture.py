@@ -84,7 +84,8 @@ def _normalize_version_field(data: dict[str, t.Any]) -> None:
     """Ensure *data* has a valid ``version`` field, mutating in-place.
 
     A missing ``version`` key is treated as ``"0.0"`` (legacy fixture
-    predating the version field).
+    predating the version field).  An explicit ``None`` value is treated
+    as an invalid type, not as a missing key.
 
     Parameters
     ----------
@@ -95,13 +96,13 @@ def _normalize_version_field(data: dict[str, t.Any]) -> None:
     Raises
     ------
     ValueError
-        If the ``version`` field is present but is not a string.
+        If the ``version`` field is present but is not a string
+        (including ``None``).
     """
-    raw_version = data.get("version")
-    if raw_version is None:
+    if "version" not in data:
         data["version"] = "0.0"
-    elif not isinstance(raw_version, str):
-        actual = type(raw_version).__name__
+    elif not isinstance(data["version"], str):
+        actual = type(data["version"]).__name__
         msg = f"Invalid fixture version field: expected str, got {actual}"
         raise ValueError(msg)
 

@@ -223,6 +223,13 @@ class TestFixtureFile:
         with pytest.raises(ValueError, match=r"99\.0"):
             FixtureFile.from_dict(data)
 
+    def test_from_dict_rejects_explicit_null_version(self) -> None:
+        """from_dict() raises ValueError when version is explicitly None."""
+        data = _sample_fixture().to_dict()
+        data["version"] = None
+        with pytest.raises(ValueError, match="expected str"):
+            FixtureFile.from_dict(data)
+
     def test_scrubbing_rules_serialization(self) -> None:
         """Scrubbing rules survive serialization."""
         rule = ScrubbingRule(

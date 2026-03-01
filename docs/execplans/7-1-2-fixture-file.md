@@ -230,8 +230,9 @@ supporting models. This plan adds the final XII-A item: schema migration.
 
 ### Typecheck baseline
 
-The current typecheck baseline is 0 diagnostics (per qdrant notes: the
-previous 2 diagnostics in `expectations.py` were fixed).
+The current typecheck baseline is 0 diagnostics (per project memory
+notes in the Qdrant vector store: the previous 2 diagnostics in
+`expectations.py` were fixed).
 
 ## Plan of work
 

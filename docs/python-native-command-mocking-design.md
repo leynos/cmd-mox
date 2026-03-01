@@ -2647,14 +2647,22 @@ Fixtures include a `version` field following semantic versioning:
 #### 9.11.2 Upgrade Path
 
 ```python
+def _parse_version(version_str: str) -> tuple[int, int]:
+    major, minor = version_str.split(".")
+    return (int(major), int(minor))
+
+# Migration registry: source major version -> (target version, function)
+_MIGRATIONS = {0: ((1, 0), migrate_v0_to_v1)}
+
 class FixtureFile:
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
         data = json.load(path.open())
-        version = data.get("version", "0.0")
+        version = _parse_version(data.get("version", "0.0"))
 
-        if version < "1.0":
-            data = migrate_v0_to_v1(data)
+        if version < (1, 0):
+            _, migrate_fn = _MIGRATIONS[version[0]]
+            data = migrate_fn(data)
 
         return cls.from_dict(data)
 ```
