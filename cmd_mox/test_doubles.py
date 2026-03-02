@@ -14,7 +14,10 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing-only import
     from .controller import CmdMox
 
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    from pathlib import Path  # noqa: F401
+    from pathlib import Path
+
+    from .record.scrubber import Scrubber
+    from .record.session import RecordingSession
 
     class _ExpectationProtocol(t.Protocol):
         def with_args(self, *args: str) -> Self: ...
@@ -72,6 +75,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
     T_Kind = DoubleKind
 
     __slots__ = (
+        "_recording_session",
         "controller",
         "expectation",
         "handler",
@@ -91,6 +95,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
         self.invocations: list[Invocation] = []
         self.passthrough_mode = False
         self.expectation = Expectation(name)
+        self._recording_session: RecordingSession | None = None
 
     def returns(self, stdout: str = "", stderr: str = "", exit_code: int = 0) -> Self:
         """Set the static response and return ``self``."""
@@ -183,6 +188,54 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
             raise ValueError(msg)
         self.passthrough_mode = True
         return self
+
+    def record(
+        self,
+        fixture_path: str | Path,
+        *,
+        scrubber: Scrubber | None = None,
+        env_allowlist: list[str] | None = None,
+    ) -> Self:
+        """Enable recording of passthrough invocations to a fixture file.
+
+        Must be called after :meth:`passthrough`. Creates and starts a
+        :class:`~cmd_mox.record.session.RecordingSession` that will capture
+        each passthrough result via the coordinator.
+
+        Parameters
+        ----------
+        fixture_path:
+            Destination path for the fixture JSON file.
+        scrubber:
+            Optional scrubber for sanitizing recordings before persistence.
+        env_allowlist:
+            Environment variable keys to always include in recordings.
+        """
+        if not self.passthrough_mode:
+            msg = "record() requires passthrough(); call it first"
+            raise ValueError(msg)
+
+        from pathlib import Path as _Path
+
+        from .record.session import RecordingSession as _RecordingSession
+
+        self._recording_session = _RecordingSession(
+            fixture_path=_Path(fixture_path),
+            scrubber=scrubber,
+            env_allowlist=env_allowlist or [],
+        )
+        self._recording_session.start()
+        return self
+
+    @property
+    def has_recording_session(self) -> bool:
+        """Return ``True`` if a recording session is attached."""
+        return self._recording_session is not None
+
+    @property
+    def recording_session(self) -> RecordingSession | None:
+        """Return the attached recording session, or ``None``."""
+        return self._recording_session
 
     # ------------------------------------------------------------------
     # Matching helpers

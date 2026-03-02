@@ -72,22 +72,20 @@ This completes the final unchecked roadmap item under XII-A in
 ## Risks
 
 - Risk: The design spec Section 9.11 example uses string comparison for
-  versions (`if version < "1.0"`), which is unreliable for multi-digit
-  versions (e.g. `"9.0" < "10.0"` is `False` as strings).
-  Severity: medium. Likelihood: certain.
-  Mitigation: Use `tuple[int, int]` comparison instead. Document this
+  versions (`if version < "1.0"`), which is unreliable for multi-digit versions
+  (e.g. `"9.0" < "10.0"` is `False` as strings). Severity: medium. Likelihood:
+  certain. Mitigation: Use `tuple[int, int]` comparison instead. Document this
   divergence from the spec's literal example in the Decision Log.
 
 - Risk: Since v1.0 is the first schema version, there is no real pre-1.0 data
-  to migrate. Tests must use synthetic data.
-  Severity: low. Likelihood: certain.
-  Mitigation: Provide a placeholder `_migrate_v0_to_v1` function that sets
-  `"version": "1.0"`. This exercises the full migration pipeline end-to-end
-  and serves as a template for future migrations.
+  to migrate. Tests must use synthetic data. Severity: low. Likelihood:
+  certain. Mitigation: Provide a placeholder `_migrate_v0_to_v1` function that
+  sets `"version": "1.0"`. This exercises the full migration pipeline
+  end-to-end and serves as a template for future migrations.
 
 - Risk: PEP 695 `type` statement syntax may cause issues with `ty` or `ruff`.
-  Severity: low. Likelihood: low.
-  Mitigation: Use `t.TypeAlias` or inline the callable type if needed.
+  Severity: low. Likelihood: low. Mitigation: Use `t.TypeAlias` or inline the
+  callable type if needed.
 
 ## Progress
 
@@ -95,8 +93,7 @@ This completes the final unchecked roadmap item under XII-A in
 - [x] (2026-02-27) Stage A: Write failing unit tests for version parsing and
   migration. 7 new tests (4 version parsing + 3 migration).
 - [x] (2026-02-27) Stage B: Write failing behaviour-driven development (BDD)
-  scenario for fixture migration.
-  1 new scenario with 4 step definitions.
+  scenario for fixture migration. 1 new scenario with 4 step definitions.
 - [x] (2026-02-27) Stage C: Implement migration infrastructure in
   `fixture.py`. Added `_parse_version`, `_migrate_v0_to_v1`, `_MIGRATIONS`
   registry, `_apply_migrations`; refactored `from_dict()`.
@@ -111,54 +108,49 @@ This completes the final unchecked roadmap item under XII-A in
 
 - Observation: Ruff UP040 requires PEP 695 `type` statement instead of
   `t.TypeAlias` annotation. The `type _MigrationFn = ...` syntax works
-  correctly with both `ty 0.0.19` and `ruff`.
-  Evidence: `make lint` flagged `t.TypeAlias` as UP040; switching to `type`
-  keyword resolved it.
-  Impact: Future type aliases in this project should use PEP 695 `type`
-  statement directly.
+  correctly with both `ty 0.0.19` and `ruff`. Evidence: `make lint` flagged
+  `t.TypeAlias` as UP040; switching to `type` keyword resolved it. Impact:
+  Future type aliases in this project should use PEP 695 `type` statement
+  directly.
 
 - Observation: PLR2004 (magic number comparison) is not enabled for this
-  project's source files, only suppressed in test files via per-file-ignores.
-  A `# noqa: PLR2004` on the `len(parts) != 2` check was unnecessary and
-  triggered RUF100.
-  Evidence: `make lint` flagged the unused noqa directive.
-  Impact: Only add noqa comments after confirming the rule is actually
-  enabled.
+  project's source files, only suppressed in test files via per-file-ignores. A
+  `# noqa: PLR2004` on the `len(parts) != 2` check was unnecessary and
+  triggered RUF100. Evidence: `make lint` flagged the unused noqa directive.
+  Impact: Only add noqa comments after confirming the rule is actually enabled.
 
 ## Decision log
 
 - Decision: Keep all migration functions in `cmd_mox/record/fixture.py` rather
-  than a separate `migrations.py` module.
-  Rationale: The migration table is small (initially one placeholder entry),
-  tightly coupled to `FixtureFile.from_dict()`, and benefits from proximity
-  to the schema definitions. A separate module would be premature abstraction.
-  If the table grows beyond 3-4 entries, extraction can be a follow-up.
-  Date/Author: 2026-02-27 / DevBoxer agent.
+  than a separate `migrations.py` module. Rationale: The migration table is
+  small (initially one placeholder entry), tightly coupled to
+  `FixtureFile.from_dict()`, and benefits from proximity to the schema
+  definitions. A separate module would be premature abstraction. If the table
+  grows beyond 3-4 entries, extraction can be a follow-up. Date/Author:
+  2026-02-27 / DevBoxer agent.
 
 - Decision: Use `tuple[int, int]` for version comparison, not string
-  comparison.
-  Rationale: String comparison of version numbers is unreliable (e.g.
-  `"9.0" < "10.0"` is `False`). Tuple comparison with integers is correct,
-  explicit, and requires no dependencies. This diverges from the literal code
-  in Section 9.11.2 but preserves its intent.
-  Date/Author: 2026-02-27 / DevBoxer agent.
+  comparison. Rationale: String comparison of version numbers is unreliable
+  (e.g. `"9.0" < "10.0"` is `False`). Tuple comparison with integers is
+  correct, explicit, and requires no dependencies. This diverges from the
+  literal code in Section 9.11.2 but preserves its intent. Date/Author:
+  2026-02-27 / DevBoxer agent.
 
 - Decision: Implement chainable migrations keyed by source major version
   (i.e. `_MIGRATIONS: dict[int, ...]`), not by exact `(major, minor)` tuple.
   Rationale: A migration from major version 0 applies to any 0.x variant.
-  Keying by major avoids registering an entry for every possible minor
-  version. Chaining lets each migration only know about two adjacent major
-  versions (standard pattern from Django/Alembic).
-  Date/Author: 2026-02-27 / DevBoxer agent.
+  Keying by major avoids registering an entry for every possible minor version.
+  Chaining lets each migration only know about two adjacent major versions
+  (standard pattern from Django/Alembic). Date/Author: 2026-02-27 / DevBoxer
+  agent.
 
 - Decision: Minor version tolerance means same-major files always load. After
   migration, the in-memory `FixtureFile` normalizes its `version` field to
-  `SCHEMA_VERSION` (`"1.0"`).
-  Rationale: The semantic versioning contract says minor versions add optional
-  fields but do not break existing readers. The existing `from_dict()`
-  implementations use `.get()` with defaults, so unknown extra fields are
-  silently ignored. Normalizing the version avoids carrying forward a version
-  string that the code does not fully understand.
+  `SCHEMA_VERSION` (`"1.0"`). Rationale: The semantic versioning contract says
+  minor versions add optional fields but do not break existing readers. The
+  existing `from_dict()` implementations use `.get()` with defaults, so unknown
+  extra fields are silently ignored. Normalizing the version avoids carrying
+  forward a version string that the code does not fully understand.
   Date/Author: 2026-02-27 / DevBoxer agent.
 
 ## Outcomes & retrospective
@@ -230,9 +222,9 @@ supporting models. This plan adds the final XII-A item: schema migration.
 
 ### Typecheck baseline
 
-The current typecheck baseline is 0 diagnostics (per project memory
-notes in the Qdrant vector store: the previous 2 diagnostics in
-`expectations.py` were fixed).
+The current typecheck baseline is 0 diagnostics (per project memory notes in
+the Qdrant vector store: the previous 2 diagnostics in `expectations.py` were
+fixed).
 
 ## Plan of work
 
@@ -260,9 +252,8 @@ Edit `cmd_mox/unittests/test_fixture_file.py` to add:
      matching `"99.0"`.
 
 3. Remove or rename the existing `test_from_dict_rejects_incompatible_version`
-   (line 179) since the new
-   `test_from_dict_rejects_incompatible_major_version` covers the same
-   scenario with a more precise name.
+   (line 179) since the new `test_from_dict_rejects_incompatible_major_version`
+   covers the same scenario with a more precise name.
 
 **Validation**: run `make test` -- new tests should fail (import errors or
 assertion failures). Existing tests should still pass.
@@ -293,8 +284,8 @@ Add step definitions in `tests/steps/recording_session.py`:
 
 Wire the scenario in `tests/test_recording_session_bdd.py`.
 
-**Validation**: run `make test` -- the new BDD test should fail. Existing
-BDD tests should still pass.
+**Validation**: run `make test` -- the new BDD test should fail. Existing BDD
+tests should still pass.
 
 ### Stage C: Implement migration infrastructure (green phase)
 
@@ -309,8 +300,8 @@ Edit `cmd_mox/record/fixture.py` to add the following, all as private
    `data`. This exercises the pipeline; v0.x is hypothetical.
 
 3. `_MIGRATIONS: dict[int, tuple[tuple[int, int], t.Callable[...]]]` --
-   maps source major version to `(target_version_tuple, migration_fn)`.
-   Initial contents: `{0: ((1, 0), _migrate_v0_to_v1)}`.
+   maps source major version to `(target_version_tuple, migration_fn)`. Initial
+   contents: `{0: ((1, 0), _migrate_v0_to_v1)}`.
 
 4. `_apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]` -- the
    core migration loop:
@@ -355,7 +346,7 @@ Fix any issues found. Re-run all gates after fixes.
    entry documenting the tuple-based version comparison and migration registry
    design.
 
-4. Run `make markdownlint` to validate markdown changes.
+4. Run `make markdownlint` and `make nixie` to validate markdown changes.
 
 ### Stage F: Final validation and completion
 
@@ -417,17 +408,17 @@ set -o pipefail && make typecheck 2>&1 | tee /tmp/typecheck.log
 set -o pipefail && make lint 2>&1 | tee /tmp/lint.log
 set -o pipefail && make test 2>&1 | tee /tmp/test.log
 set -o pipefail && make markdownlint 2>&1 | tee /tmp/mdlint.log
+set -o pipefail && make nixie 2>&1 | tee /tmp/nixie.log
 ```
 
 ## Idempotence and recovery
 
-All steps are idempotent. The migration framework is purely additive -- it
-does not modify the on-disk format of v1.0 fixtures. `_apply_migrations()` is
-a no-op for v1.0 data, so existing save/load roundtrips are unchanged.
+All steps are idempotent. The migration framework is purely additive -- it does
+not modify the on-disk format of v1.0 fixtures. `_apply_migrations()` is a
+no-op for v1.0 data, so existing save/load roundtrips are unchanged.
 
-If a step fails partway, re-running `make test` after fixing the issue is
-safe. No state machines or filesystem mutations beyond JSON file I/O are
-involved.
+If a step fails partway, rerunning `make test` after fixing the issue is safe.
+No state machines or filesystem mutations beyond JSON file I/O are involved.
 
 ## Artifacts and notes
 
@@ -449,8 +440,8 @@ involved.
 - `docs/python-native-command-mocking-design.md` -- add design decision.
 
 Expected: ~80-100 net new lines in `fixture.py`, ~50-60 in test files, ~20-30
-in BDD files, ~10 in docs. Total ~160-200 net new lines across 8 modified
-files + 1 new file. Within the 250-line/8-file tolerance.
+in BDD files, ~10 in docs. Total ~160-200 net new lines across 8 modified files
+and 1 new file. Within the 250-line/8-file tolerance.
 
 ## Interfaces and dependencies
 

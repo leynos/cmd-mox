@@ -2340,32 +2340,31 @@ cmdmox validate fixtures/*.json
 
 ### 9.8 Integration with Existing Components
 
-#### 9.8.1 PassthroughCoordinator Extension
+#### 9.8.1 PassthroughCoordinator recording integration
 
-The `PassthroughCoordinator` gains an optional `RecordingSession` parameter:
+The `PassthroughCoordinator` inspects each double's `_recording_session`
+attribute when finalizing passthrough results. No constructor parameter is
+needed because recording sessions are per-double (see decision 9.10.9):
 
 ```python
 class PassthroughCoordinator:
-    def __init__(
-        self,
-        *,
-        cleanup_ttl: float = 300.0,
-        recording_session: RecordingSession | None = None,
-    ) -> None:
-        # ... existing initialization ...
-        self._recording_session = recording_session
-
     def finalize_result(
         self, result: PassthroughResult
     ) -> tuple[CommandDouble, Invocation, Response]:
         """Finalize passthrough and optionally record the interaction."""
-        double, invocation, resp = self._finalize_result_internal(result)
+        # ... resolve pending entry, build response ...
 
-        if self._recording_session is not None:
-            self._recording_session.record(invocation, resp)
+        recording_session = getattr(double, "_recording_session", None)
+        if recording_session is not None:
+            recording_session.record(invocation, resp)
 
         return double, invocation, resp
 ```
+
+`getattr()` is used for defensive access because test fakes may not carry the
+`_recording_session` slot. Session finalization (persistence to disk) is
+performed by the controller in `verify()` after verifiers run but before
+environment teardown.
 
 #### 9.8.2 CommandDouble Extension
 
@@ -2634,6 +2633,28 @@ differences within the same major version are tolerated without migration.
 - Same-major tolerance follows the semantic versioning contract: minor versions
   add optional fields but do not break existing readers
 
+#### 9.10.9 Coordinator-Based Recording Integration
+
+**Decision:** Integrate recording into
+`PassthroughCoordinator.finalize_result()` by inspecting
+`double._recording_session` rather than adding a constructor parameter to the
+coordinator. The coordinator uses `getattr()` for defensive access since test
+fakes may not carry the attribute.
+
+**Rationale:**
+
+- Recording sessions are per-double: each spy can record to a different fixture
+  file, so a single `recording_session` parameter on the shared coordinator
+  does not fit
+- The coordinator already stores the double in its pending dict and returns it
+  from `finalize_result()`, so it can inspect the double's session attribute
+  directly with zero additional state
+- `getattr(double, "_recording_session", None)` provides safe access without
+  requiring test fakes to carry the attribute
+- Session finalization is handled by the controller in `verify()` after
+  verifiers run but before environment teardown, ensuring fixture files are
+  persisted even if verification raises
+
 ### 9.11 Versioning and Forward Compatibility
 
 #### 9.11.1 Schema Versioning
@@ -2726,7 +2747,6 @@ classDiagram
     }
 
     class PassthroughCoordinator {
-        - RecordingSession _recording_session
         + finalize_result(result) tuple
     }
 
@@ -2735,5 +2755,5 @@ classDiagram
     RecordingSession --> FixtureFile : creates
     RecordingSession --> Scrubber : uses
     ReplaySession --> FixtureFile : loads
-    PassthroughCoordinator --> RecordingSession : delegates
+    PassthroughCoordinator ..> CommandDouble : inspects _recording_session
 ```
