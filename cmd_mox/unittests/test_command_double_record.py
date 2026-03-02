@@ -26,40 +26,35 @@ class TestRecordFluentAPI:
         result = spy.record(tmp_path / "fixture.json")
         assert result is spy
 
-    def test_record_raises_without_passthrough(self, tmp_path: Path) -> None:
-        """record() raises ValueError when passthrough mode is not enabled."""
+    @pytest.mark.parametrize("kind", ["spy", "stub", "mock"])
+    def test_record_raises_without_passthrough(self, kind: str, tmp_path: Path) -> None:
+        """record() raises ValueError when passthrough is not enabled."""
         mox = CmdMox()
-        spy = mox.spy("git")
+        double = getattr(mox, kind)("git")
         with pytest.raises(ValueError, match=r"record.*requires passthrough"):
-            spy.record(tmp_path / "fixture.json")
+            double.record(tmp_path / "fixture.json")
 
-    def test_record_raises_on_stub(self, tmp_path: Path) -> None:
-        """record() raises ValueError on a stub double."""
+    def test_record_raises_when_session_already_active(self, tmp_path: Path) -> None:
+        """record() raises when a recording session is already attached."""
         mox = CmdMox()
-        stub = mox.stub("git")
-        with pytest.raises(ValueError, match=r"record.*requires passthrough"):
-            stub.record(tmp_path / "fixture.json")
-
-    def test_record_raises_on_mock(self, tmp_path: Path) -> None:
-        """record() raises ValueError on a mock double."""
-        mox = CmdMox()
-        mock = mox.mock("git")
-        with pytest.raises(ValueError, match=r"record.*requires passthrough"):
-            mock.record(tmp_path / "fixture.json")
+        spy = mox.spy("git").passthrough().record(tmp_path / "first.json")
+        with pytest.raises(RuntimeError, match="already"):
+            spy.record(tmp_path / "second.json")
 
     def test_record_creates_recording_session(self, tmp_path: Path) -> None:
         """record() creates a RecordingSession on the double."""
         mox = CmdMox()
         spy = mox.spy("git").passthrough().record(tmp_path / "fixture.json")
-        assert spy._recording_session is not None
-        assert isinstance(spy._recording_session, RecordingSession)
+        assert spy.recording_session is not None
+        assert isinstance(spy.recording_session, RecordingSession)
 
     def test_record_starts_session_immediately(self, tmp_path: Path) -> None:
         """record() calls start() on the session so it is ready to record."""
         mox = CmdMox()
         spy = mox.spy("git").passthrough().record(tmp_path / "fixture.json")
-        assert spy._recording_session is not None
-        assert spy._recording_session._started_at is not None
+        session = spy.recording_session
+        assert session is not None
+        assert session.is_started is True
 
     def test_record_forwards_scrubber(self, tmp_path: Path) -> None:
         """record() passes the scrubber parameter to RecordingSession."""
@@ -78,8 +73,9 @@ class TestRecordFluentAPI:
                 scrubber=scrubber,
             )
         )
-        assert spy._recording_session is not None
-        assert spy._recording_session._scrubber is scrubber
+        session = spy.recording_session
+        assert session is not None
+        assert session._scrubber is scrubber
 
     def test_record_forwards_env_allowlist(self, tmp_path: Path) -> None:
         """record() passes the env_allowlist parameter to RecordingSession."""
@@ -92,8 +88,9 @@ class TestRecordFluentAPI:
                 env_allowlist=["GIT_AUTHOR_NAME", "GIT_DIR"],
             )
         )
-        assert spy._recording_session is not None
-        assert spy._recording_session._env_allowlist == [
+        session = spy.recording_session
+        assert session is not None
+        assert session._env_allowlist == [
             "GIT_AUTHOR_NAME",
             "GIT_DIR",
         ]
@@ -103,8 +100,9 @@ class TestRecordFluentAPI:
         mox = CmdMox()
         path_str = str(tmp_path / "fixture.json")
         spy = mox.spy("git").passthrough().record(path_str)
-        assert spy._recording_session is not None
-        assert spy._recording_session.fixture_path == tmp_path / "fixture.json"
+        session = spy.recording_session
+        assert session is not None
+        assert session.fixture_path == tmp_path / "fixture.json"
 
 
 class TestHasRecordingSession:

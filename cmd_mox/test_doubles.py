@@ -214,6 +214,9 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
         if not self.passthrough_mode:
             msg = "record() requires passthrough(); call it first"
             raise ValueError(msg)
+        if self._recording_session is not None:
+            msg = "record() already called; finalize the existing session first"
+            raise RuntimeError(msg)
 
         from pathlib import Path as _Path
 
