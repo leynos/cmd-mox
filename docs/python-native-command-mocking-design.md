@@ -1365,17 +1365,19 @@ Darwin environments, several avenues for future expansion exist.
 - **Windows Support:** CmdMox now provides first-class Windows support. The IPC
   layer retains Unix domain sockets where available and augments the startup
   handshake so Windows clients can detect readiness even though no filesystem
-  socket appears. Shim generation emits `.cmd` launchers that shell out to the
-  active Python interpreter and invoke `shim.py`, preserving argument quoting
-  and inheriting the test process environment. Environment management reuses
-  the existing `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`,
-  and restores the original environment on teardown. Long shim paths are
-  collapsed to their short (8.3) counterparts whenever the Windows `MAX_PATH`
-  limit is at risk, PATH filtering treats casing consistently, and duplicate
-  command names that differ only by case are rejected to avoid filesystem
-  collisions. A dedicated Windows smoke job now runs in CI via the
-  `windows-smoke` Makefile target, exercising mocked invocations and
-  passthrough spies while publishing `windows-ipc.log` for diagnostics.
+  socket appears. Shim generation is backend-dependent: the Python backend emits
+  `.cmd` launchers that shell out to the active Python interpreter and invoke
+  `shim.py`, while the Rust backend emits `*.exe` launchers backed by
+  `cmdmox-mock.exe`. Both backends preserve argument quoting and inherit the
+  test process environment. Environment management reuses the existing
+  `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`, and restores the
+  original environment on teardown. Long shim paths are collapsed to their short
+  (8.3) counterparts whenever the Windows `MAX_PATH` limit is at risk, PATH
+  filtering treats casing consistently, and duplicate command names that differ
+  only by case are rejected to avoid filesystem collisions. A dedicated Windows
+  smoke job now runs in CI via the `windows-smoke` Makefile target, exercising
+  mocked invocations and passthrough spies while publishing `windows-ipc.log`
+  for diagnostics.
 
 - **Record Mode (Phase XII):** The comprehensive design for Record Mode is
   detailed in Section IX. This feature transforms passthrough spy recordings

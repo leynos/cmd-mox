@@ -30,7 +30,7 @@ consistent for developers.
   comprehension.
 - Company names are treated as collective nouns: “df12 Productions are
   expanding”.
-- Avoid first and second person personal pronouns outside the `README.md`
+- Avoid first- and second-person personal pronouns outside the `README.md`
   file.
 
 ## Headings
@@ -47,7 +47,7 @@ consistent for developers.
 - Provide code blocks and lists using standard Markdown syntax.
 - Always provide a language identifier for fenced code blocks; use `plaintext`
   for non-code text.
-- Use `-` as the first level bullet and renumber lists when items change.
+- Use `-` as the first-level bullet and renumber lists when items change.
 - Prefer inline links using `[text](url)` or angle brackets around the URL.
 - Ensure blank lines before and after bulleted lists and fenced blocks.
 - Ensure tables have a delimiter line below the header row.
