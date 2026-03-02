@@ -55,6 +55,6 @@ def spy_has_session(spy_after_record: CommandDouble) -> None:
 @then("the recording session is started")
 def session_is_started(spy_after_record: CommandDouble) -> None:
     """Assert the recording session has been started."""
-    assert spy_after_record.has_recording_session is True
-    assert spy_after_record._recording_session is not None
-    assert spy_after_record._recording_session.is_started is True
+    session = spy_after_record.recording_session
+    assert session is not None
+    assert session.is_started is True
