@@ -232,6 +232,11 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; 
         """Return ``True`` if a recording session is attached."""
         return self._recording_session is not None
 
+    @property
+    def recording_session(self) -> RecordingSession | None:
+        """Return the attached recording session, or ``None``."""
+        return self._recording_session
+
     # ------------------------------------------------------------------
     # Matching helpers
     # ------------------------------------------------------------------

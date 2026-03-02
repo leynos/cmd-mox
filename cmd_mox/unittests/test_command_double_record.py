@@ -121,3 +121,20 @@ class TestHasRecordingSession:
         mox = CmdMox()
         spy = mox.spy("git").passthrough().record(tmp_path / "fixture.json")
         assert spy.has_recording_session is True
+
+
+class TestRecordingSessionProperty:
+    """Tests for the recording_session read-only property."""
+
+    def test_none_by_default(self) -> None:
+        """recording_session is None when no session is attached."""
+        mox = CmdMox()
+        spy = mox.spy("git")
+        assert spy.recording_session is None
+
+    def test_returns_session_after_record(self, tmp_path: Path) -> None:
+        """recording_session returns the RecordingSession after record()."""
+        mox = CmdMox()
+        spy = mox.spy("git").passthrough().record(tmp_path / "fixture.json")
+        assert spy.recording_session is not None
+        assert isinstance(spy.recording_session, RecordingSession)
