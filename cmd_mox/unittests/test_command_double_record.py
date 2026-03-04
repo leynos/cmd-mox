@@ -57,28 +57,35 @@ class TestRecordFluentAPI:
         assert session.is_started is True
 
     def test_record_forwards_scrubber(self, tmp_path: Path) -> None:
-        """record() passes the scrubber parameter to RecordingSession."""
+        """record() passes the scrubber so recordings are scrubbed on persist."""
+        from cmd_mox.ipc import Invocation, Response
 
         class _TestScrubber:
             def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
                 return dc.replace(recording, stdout="<scrubbed>")
 
-        scrubber = _TestScrubber()
         mox = CmdMox()
         spy = (
             mox.spy("git")
             .passthrough()
             .record(
                 tmp_path / "fixture.json",
-                scrubber=scrubber,
+                scrubber=_TestScrubber(),
             )
         )
         session = spy.recording_session
         assert session is not None
-        assert session._scrubber is scrubber
+        session.record(
+            Invocation(command="git", args=["status"], stdin="", env={}),
+            Response(stdout="secret", stderr="", exit_code=0),
+        )
+        fixture = session.finalize()
+        assert fixture.recordings[0].stdout == "<scrubbed>"
 
     def test_record_forwards_env_allowlist(self, tmp_path: Path) -> None:
-        """record() passes the env_allowlist parameter to RecordingSession."""
+        """record() passes env_allowlist so allowed keys appear in recordings."""
+        from cmd_mox.ipc import Invocation, Response
+
         mox = CmdMox()
         spy = (
             mox.spy("git")
@@ -90,10 +97,23 @@ class TestRecordFluentAPI:
         )
         session = spy.recording_session
         assert session is not None
-        assert session._env_allowlist == [
-            "GIT_AUTHOR_NAME",
-            "GIT_DIR",
-        ]
+        session.record(
+            Invocation(
+                command="git",
+                args=["status"],
+                stdin="",
+                env={
+                    "GIT_AUTHOR_NAME": "Tester",
+                    "GIT_DIR": ".git",
+                    "PATH": "/usr/bin",
+                },
+            ),
+            Response(stdout="ok", stderr="", exit_code=0),
+        )
+        fixture = session.finalize()
+        env = fixture.recordings[0].env_subset
+        assert "GIT_AUTHOR_NAME" in env
+        assert "GIT_DIR" in env
 
     def test_record_accepts_string_path(self, tmp_path: Path) -> None:
         """record() accepts a string path and converts it to Path."""

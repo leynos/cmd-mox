@@ -310,18 +310,21 @@ class CmdMox:
         try:
             self._run_verifiers()
         finally:
-            # Guard verification cleanup from recording write failures:
-            # _finalize_recording_sessions() may raise (e.g. OSError from an
-            # unwritable fixture path).  _finalize_verification() MUST still
-            # run to stop the IPC server and restore the environment.
-            recording_error: BaseException | None = None
+            # Quiesce the IPC server first so in-flight passthrough
+            # completions cannot race with recording session finalization.
+            # Both finalizers must always run; surface the first error.
+            first_error: BaseException | None = None
+            try:
+                self._finalize_verification()
+            except BaseException as exc:  # noqa: BLE001
+                first_error = exc
             try:
                 self._finalize_recording_sessions()
             except BaseException as exc:  # noqa: BLE001
-                recording_error = exc
-            self._finalize_verification()
-            if recording_error is not None:
-                raise recording_error
+                if first_error is None:
+                    first_error = exc
+            if first_error is not None:
+                raise first_error
 
     # ------------------------------------------------------------------
     # Internal helpers

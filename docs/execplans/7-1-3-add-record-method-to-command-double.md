@@ -182,7 +182,8 @@ All acceptance criteria met:
   fixture file fixup). Well within the 10-file tolerance.
 - The implementation is minimal: 3 source file edits totaling ~40 lines of
   production code. The bulk of the work was tests and documentation.
-- Post-merge fix: the original `verify()` placed `_finalize_recording_sessions()`
+- Post-merge fix: the original `verify()` placed
+  `_finalize_recording_sessions()`
   and `_finalize_verification()` sequentially in the same `finally` block. If
   recording finalization raised (e.g., `OSError` from an unwritable fixture
   path), `_finalize_verification()` was skipped, leaking IPC server state and
@@ -206,7 +207,7 @@ lifecycle.
   API methods (`returns()`, `runs()`, `passthrough()`, `with_args()`, etc.),
   and spy assertions. Uses `DoubleKind` enum (STUB, MOCK, SPY). Current slots:
   `controller`, `expectation`, `handler`, `invocations`, `kind`, `name`,
-  `passthrough_mode`, `response`.
+  `passthrough_mode`, `response`, `_recording_session`.
 
 - `cmd_mox/passthrough.py` — `PassthroughCoordinator` with thread-safe pending
   dict mapping `invocation_id → (double, invocation, deadline)`.

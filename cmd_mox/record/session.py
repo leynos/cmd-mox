@@ -91,6 +91,9 @@ class RecordingSession:
     def _validate_record_preconditions(self, duration_ms: int) -> None:
         """Validate preconditions before recording an invocation.
 
+        Must be called while holding ``self._lock`` so that the
+        ``_finalized`` check and subsequent append are atomic.
+
         Parameters
         ----------
         duration_ms : int
@@ -138,22 +141,22 @@ class RecordingSession:
         ValueError
             If *duration_ms* is negative.
         """
-        self._validate_record_preconditions(duration_ms)
-
-        # Skip if command filter is set and this command is not in it.
-        if self._command_filter and invocation.command not in self._command_filter:
-            return
-
-        env_subset = filter_env_subset(
-            invocation.env,
-            command=invocation.command,
-            allowlist=self._env_allowlist,
-        )
-
-        # Sequence assignment and list append must be atomic so that
-        # concurrent passthrough completions on different IPC threads
-        # produce correct, gap-free sequence numbers.
+        # Lifecycle validation and append are inside the same critical
+        # section so a concurrent finalize() cannot snapshot _recordings
+        # between the _finalized check and the append.
         with self._lock:
+            self._validate_record_preconditions(duration_ms)
+
+            # Skip if command filter is set and this command is not in it.
+            if self._command_filter and invocation.command not in self._command_filter:
+                return
+
+            env_subset = filter_env_subset(
+                invocation.env,
+                command=invocation.command,
+                allowlist=self._env_allowlist,
+            )
+
             recording = RecordedInvocation(
                 sequence=len(self._recordings),
                 command=invocation.command,
@@ -186,14 +189,16 @@ class RecordingSession:
         if self._fixture_file is not None:
             return self._fixture_file
 
-        metadata = FixtureMetadata.create()
-        fixture = FixtureFile(
-            version=FixtureFile.SCHEMA_VERSION,
-            metadata=metadata,
-            recordings=list(self._recordings),
-            scrubbing_rules=[],
-        )
+        with self._lock:
+            metadata = FixtureMetadata.create()
+            fixture = FixtureFile(
+                version=FixtureFile.SCHEMA_VERSION,
+                metadata=metadata,
+                recordings=list(self._recordings),
+                scrubbing_rules=[],
+            )
+            self._finalized = True
+
         fixture.save(self._fixture_path)
-        self._finalized = True
         self._fixture_file = fixture
         return fixture
