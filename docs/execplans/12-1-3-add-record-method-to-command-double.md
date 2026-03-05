@@ -183,14 +183,14 @@ All acceptance criteria met:
 - The implementation is minimal: 3 source file edits totaling ~40 lines of
   production code. The bulk of the work was tests and documentation.
 - Post-merge fix: the original `verify()` placed
-  `_finalize_recording_sessions()`
-  and `_finalize_verification()` sequentially in the same `finally` block. If
-  recording finalization raised (e.g., `OSError` from an unwritable fixture
-  path), `_finalize_verification()` was skipped, leaking IPC server state and
-  environment mutations. Fixed by wrapping `_finalize_recording_sessions()` in
-  its own `try/except` so `_finalize_verification()` always runs. A
-  `threading.Lock` was also added to `RecordingSession.record()` to serialize
-  concurrent sequence assignment from multiple IPC threads.
+  `_finalize_recording_sessions()` and `_finalize_verification()` sequentially
+  in the same `finally` block. If recording finalization raised (e.g.,
+  `OSError` from an unwritable fixture path), `_finalize_verification()` was
+  skipped, leaking IPC server state and environment mutations. Fixed by
+  wrapping `_finalize_recording_sessions()` in its own `try/except` so
+  `_finalize_verification()` always runs. A `threading.Lock` was also added to
+  `RecordingSession.record()` to serialize concurrent sequence assignment from
+  multiple IPC threads.
 
 ## Context and Orientation
 

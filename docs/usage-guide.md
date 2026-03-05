@@ -502,6 +502,96 @@ Calling `record()` without first calling `passthrough()` raises `ValueError`:
 cmd_mox.spy("git").record("fixtures/git.json")
 ```
 
+## Replay sessions (fixture replay)
+
+A `ReplaySession` is the counterpart to `RecordingSession`. Where recording
+captures real command interactions to fixture files, replay loads those
+fixtures and uses them to respond to invocations without executing real
+commands. This enables fast, deterministic tests from previously captured
+interactions.
+
+### Creating and loading a replay session
+
+```python
+from cmd_mox.record import ReplaySession
+
+session = ReplaySession("fixtures/git_clone.json")
+session.load()  # loads and validates the fixture from disk
+```
+
+The constructor accepts:
+
+- **`fixture_path`** (`str | Path`): path to the JSON fixture file to load.
+- **`strict_matching`** (`bool`): when `True` (default), matching requires
+  command, args, stdin, and env_subset to match. When `False`, only command and
+  args must match (fuzzy mode).
+- **`allow_unmatched`** (`bool`): when `True`, `verify_all_consumed()` does
+  not raise even if some recordings were not consumed. Defaults to `False`.
+
+Calling `load()` a second time raises `LifecycleError`. Calling `match()` or
+`verify_all_consumed()` before `load()` also raises `LifecycleError`.
+
+### Matching invocations
+
+```python
+from cmd_mox.ipc import Invocation
+
+invocation = Invocation(
+    command="git", args=["status"], stdin="", env={}
+)
+response = session.match(invocation)
+if response is not None:
+    print(response.stdout)  # the recorded stdout
+```
+
+`match()` searches the loaded recordings in order, returning a `Response` built
+from the first unconsumed recording that matches. Each matched recording is
+marked as consumed and will not match again.
+
+### Matching modes
+
+**Strict mode** (default) requires all of the following to match:
+
+- Command name (exact equality)
+- Arguments (exact list equality)
+- Standard input (exact string equality)
+- Environment subset (every key-value pair in the recorded `env_subset` must
+  be present in the invocation `env`; extra keys in the invocation are allowed)
+
+**Fuzzy mode** (`strict_matching=False`) requires only:
+
+- Command name (exact equality)
+- Arguments (exact list equality)
+
+Stdin and environment differences are ignored, which is useful when those
+fields contain non-deterministic values such as timestamps or UUIDs.
+
+```python
+# Fuzzy mode: matches on command + args only
+session = ReplaySession("fixtures/git.json", strict_matching=False)
+session.load()
+```
+
+### Consumed-record tracking
+
+Each successful `match()` call marks the matched recording as consumed.
+Consumed recordings are skipped in subsequent `match()` calls. When the fixture
+contains two identical recordings, the first call consumes the first recording
+and the second call consumes the second.
+
+### Verifying all recordings were consumed
+
+```python
+session.verify_all_consumed()
+```
+
+`verify_all_consumed()` raises `VerificationError` if any recording was not
+consumed, listing the unconsumed recordings by index, command, and arguments.
+
+When `allow_unmatched=True`, `verify_all_consumed()` always succeeds regardless
+of how many recordings remain unconsumed. This is useful for fixtures that
+contain more recordings than a specific test exercises.
+
 ## Pipelines and shell syntax
 
 CmdMox intercepts individual executables by prepending shims to `PATH`. It does
