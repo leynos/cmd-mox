@@ -1,0 +1,158 @@
+"""Unit tests for CommandDouble.record() fluent API."""
+
+from __future__ import annotations
+
+import dataclasses as dc
+import typing as t
+
+import pytest
+
+from cmd_mox.controller import CmdMox
+from cmd_mox.record.session import RecordingSession
+
+if t.TYPE_CHECKING:
+    from pathlib import Path
+
+    from cmd_mox.record.fixture import RecordedInvocation
+
+
+class TestRecordFluentAPI:
+    """Tests for the CommandDouble.record() fluent method."""
+
+    def test_record_returns_self(self, tmp_path: Path) -> None:
+        """record() returns the same CommandDouble instance for chaining."""
+        mox = CmdMox()
+        spy = mox.spy("git").passthrough()
+        result = spy.record(tmp_path / "fixture.json")
+        assert result is spy
+
+    @pytest.mark.parametrize("kind", ["spy", "stub", "mock"])
+    def test_record_raises_without_passthrough(self, kind: str, tmp_path: Path) -> None:
+        """record() raises ValueError when passthrough is not enabled."""
+        mox = CmdMox()
+        double = getattr(mox, kind)("git")
+        with pytest.raises(ValueError, match=r"record.*requires passthrough"):
+            double.record(tmp_path / "fixture.json")
+
+    def test_record_raises_when_session_already_active(self, tmp_path: Path) -> None:
+        """record() raises when a recording session is already attached."""
+        mox = CmdMox()
+        spy = mox.spy("git").passthrough().record(tmp_path / "first.json")
+        with pytest.raises(RuntimeError, match="already"):
+            spy.record(tmp_path / "second.json")
+
+    def test_record_creates_recording_session(self, tmp_path: Path) -> None:
+        """record() creates a RecordingSession on the double."""
+        mox = CmdMox()
+        spy = mox.spy("git").passthrough().record(tmp_path / "fixture.json")
+        assert spy.recording_session is not None
+        assert isinstance(spy.recording_session, RecordingSession)
+
+    def test_record_starts_session_immediately(self, tmp_path: Path) -> None:
+        """record() calls start() on the session so it is ready to record."""
+        mox = CmdMox()
+        spy = mox.spy("git").passthrough().record(tmp_path / "fixture.json")
+        session = spy.recording_session
+        assert session is not None
+        assert session.is_started is True
+
+    def test_record_forwards_scrubber(self, tmp_path: Path) -> None:
+        """record() passes the scrubber so recordings are scrubbed on persist."""
+        from cmd_mox.ipc import Invocation, Response
+
+        class _TestScrubber:
+            def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+                return dc.replace(recording, stdout="<scrubbed>")
+
+        mox = CmdMox()
+        spy = (
+            mox.spy("git")
+            .passthrough()
+            .record(
+                tmp_path / "fixture.json",
+                scrubber=_TestScrubber(),
+            )
+        )
+        session = spy.recording_session
+        assert session is not None
+        session.record(
+            Invocation(command="git", args=["status"], stdin="", env={}),
+            Response(stdout="secret", stderr="", exit_code=0),
+        )
+        fixture = session.finalize()
+        assert fixture.recordings[0].stdout == "<scrubbed>"
+
+    def test_record_forwards_env_allowlist(self, tmp_path: Path) -> None:
+        """record() passes env_allowlist so allowed keys appear in recordings."""
+        from cmd_mox.ipc import Invocation, Response
+
+        mox = CmdMox()
+        spy = (
+            mox.spy("git")
+            .passthrough()
+            .record(
+                tmp_path / "fixture.json",
+                env_allowlist=["GIT_AUTHOR_NAME", "GIT_DIR"],
+            )
+        )
+        session = spy.recording_session
+        assert session is not None
+        session.record(
+            Invocation(
+                command="git",
+                args=["status"],
+                stdin="",
+                env={
+                    "GIT_AUTHOR_NAME": "Tester",
+                    "GIT_DIR": ".git",
+                    "PATH": "/usr/bin",
+                },
+            ),
+            Response(stdout="ok", stderr="", exit_code=0),
+        )
+        fixture = session.finalize()
+        env = fixture.recordings[0].env_subset
+        assert "GIT_AUTHOR_NAME" in env
+        assert "GIT_DIR" in env
+
+    def test_record_accepts_string_path(self, tmp_path: Path) -> None:
+        """record() accepts a string path and converts it to Path."""
+        mox = CmdMox()
+        path_str = str(tmp_path / "fixture.json")
+        spy = mox.spy("git").passthrough().record(path_str)
+        session = spy.recording_session
+        assert session is not None
+        assert session.fixture_path == tmp_path / "fixture.json"
+
+
+class TestHasRecordingSession:
+    """Tests for the has_recording_session property."""
+
+    def test_false_by_default(self) -> None:
+        """has_recording_session is False when no session is attached."""
+        mox = CmdMox()
+        spy = mox.spy("git")
+        assert spy.has_recording_session is False
+
+    def test_true_after_record(self, tmp_path: Path) -> None:
+        """has_recording_session is True after record() is called."""
+        mox = CmdMox()
+        spy = mox.spy("git").passthrough().record(tmp_path / "fixture.json")
+        assert spy.has_recording_session is True
+
+
+class TestRecordingSessionProperty:
+    """Tests for the recording_session read-only property."""
+
+    def test_none_by_default(self) -> None:
+        """recording_session is None when no session is attached."""
+        mox = CmdMox()
+        spy = mox.spy("git")
+        assert spy.recording_session is None
+
+    def test_returns_session_after_record(self, tmp_path: Path) -> None:
+        """recording_session returns the RecordingSession after record()."""
+        mox = CmdMox()
+        spy = mox.spy("git").passthrough().record(tmp_path / "fixture.json")
+        assert spy.recording_session is not None
+        assert isinstance(spy.recording_session, RecordingSession)

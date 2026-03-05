@@ -52,6 +52,17 @@ class TestRecordingSessionLifecycle:
         session.start()
         assert session._started_at is not None
 
+    def test_is_started_false_before_start(self, tmp_path: Path) -> None:
+        """is_started is False before start() is called."""
+        session = RecordingSession(tmp_path / "out.json")
+        assert session.is_started is False
+
+    def test_is_started_true_after_start(self, tmp_path: Path) -> None:
+        """is_started is True after start() is called."""
+        session = RecordingSession(tmp_path / "out.json")
+        session.start()
+        assert session.is_started is True
+
     def test_record_before_start_raises(self, tmp_path: Path) -> None:
         """Calling record() before start() raises LifecycleError."""
         session = RecordingSession(tmp_path / "out.json")
@@ -269,3 +280,30 @@ class TestRecordingSessionDurationValidation:
         session.start()
         with pytest.raises(ValueError, match="non-negative"):
             session.record(_make_invocation(), _make_response(), duration_ms=-1)
+
+
+class TestRecordingSessionThreadSafety:
+    """Tests for RecordingSession thread safety."""
+
+    def test_concurrent_record_produces_unique_sequences(self, tmp_path: Path) -> None:
+        """Concurrent record() calls must assign unique sequence numbers."""
+        import threading
+
+        session = RecordingSession(tmp_path / "out.json")
+        session.start()
+
+        barrier = threading.Barrier(10)
+
+        def _record() -> None:
+            barrier.wait()
+            session.record(_make_invocation(), _make_response())
+
+        threads = [threading.Thread(target=_record) for _ in range(10)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+
+        assert len(session._recordings) == 10
+        sequences = sorted(r.sequence for r in session._recordings)
+        assert sequences == list(range(10))

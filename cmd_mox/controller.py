@@ -310,7 +310,21 @@ class CmdMox:
         try:
             self._run_verifiers()
         finally:
-            self._finalize_verification()
+            # Quiesce the IPC server first so in-flight passthrough
+            # completions cannot race with recording session finalization.
+            # Both finalizers must always run; surface the first error.
+            first_error: BaseException | None = None
+            try:
+                self._finalize_verification()
+            except BaseException as exc:  # noqa: BLE001
+                first_error = exc
+            try:
+                self._finalize_recording_sessions()
+            except BaseException as exc:  # noqa: BLE001
+                if first_error is None:
+                    first_error = exc
+            if first_error is not None:
+                raise first_error
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -603,6 +617,12 @@ class CmdMox:
         UnexpectedCommandVerifier().verify(self.journal, self._doubles)
         OrderVerifier(self._ordered).verify(self.journal)
         CountVerifier().verify(expectations, inv_map)
+
+    def _finalize_recording_sessions(self) -> None:
+        """Finalize all active recording sessions and persist fixtures."""
+        for double in self._doubles.values():
+            if double._recording_session is not None:
+                double._recording_session.finalize()
 
     def _finalize_verification(self) -> None:
         """Stop the server, clean up the environment, and update phase."""

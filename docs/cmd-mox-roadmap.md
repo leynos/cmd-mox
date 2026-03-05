@@ -235,12 +235,13 @@ supports deterministic replay without external dependencies. See
   subset filtering.
 - [x] 12.1.2. Implement `FixtureFile` with JSON serialisation, versioned schema
   (`1.0`), and migration support.
-- [ ] 12.1.3. Add `.record()` to `CommandDouble` with validation that
+- [x] 12.1.3. Add `.record()` to `CommandDouble` with validation that
   passthrough mode is enabled and support for custom scrubber and allowlist
   parameters.
-- [ ] 12.1.4. Integrate recording into `PassthroughCoordinator.finalize_result()`
+- [x] 12.1.4. Integrate recording into
+      `PassthroughCoordinator.finalize_result()`
   with optional recording session wiring.
-- [ ] 12.1.5. Add unit tests for recording lifecycle, serialisation roundtrips,
+- [x] 12.1.5. Add unit tests for recording lifecycle, serialisation roundtrips,
   and environment filtering.
 
 ### 12.2. Replay infrastructure
@@ -308,14 +309,14 @@ supports deterministic replay without external dependencies. See
 
 This phase introduces native `cmdmox-mock` launcher support to reduce fragility
 from shell and `.cmd` wrappers while preserving existing IPC protocol and
-record-replay-verify semantics. See
-`python-native-command-mocking-design.md` section 8.12.
+record-replay-verify semantics. See `python-native-command-mocking-design.md`
+section 8.12.
 
 ### 13.1. Rust workspace and build foundation
 
 - [ ] 13.1.1. Introduce Cuprum-style Rust structure with `rust/Cargo.toml`
-  workspace root, `rust/cmdmox-mock/` binary crate, and `rust/Makefile`
-  targets for native build, test, lint, and format checks.
+  workspace root, `rust/cmdmox-mock/` binary crate, and `rust/Makefile` targets
+  for native build, test, lint, and format checks.
 - [ ] 13.1.2. Add Python-side backend probing utilities in
   `cmd_mox/_rust_mock_backend.py`, including resolved binary discovery.
 - [ ] 13.1.3. Differentiate probe failures explicitly (missing binary versus

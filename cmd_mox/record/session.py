@@ -10,6 +10,7 @@ Lifecycle: ``start()`` -> ``record()`` (one or more) -> ``finalize()``.
 from __future__ import annotations
 
 import datetime as dt
+import threading
 import typing as t
 from pathlib import Path
 
@@ -59,6 +60,7 @@ class RecordingSession:
         )
 
         self._recordings: list[RecordedInvocation] = []
+        self._lock = threading.Lock()
         self._started_at: dt.datetime | None = None
         self._finalized: bool = False
         self._fixture_file: FixtureFile | None = None
@@ -67,6 +69,11 @@ class RecordingSession:
     def fixture_path(self) -> Path:
         """The destination path for the fixture JSON file."""
         return self._fixture_path
+
+    @property
+    def is_started(self) -> bool:
+        """Return ``True`` if the session has been started."""
+        return self._started_at is not None
 
     def start(self) -> None:
         """Begin the recording session.
@@ -83,6 +90,9 @@ class RecordingSession:
 
     def _validate_record_preconditions(self, duration_ms: int) -> None:
         """Validate preconditions before recording an invocation.
+
+        Must be called while holding ``self._lock`` so that the
+        ``_finalized`` check and subsequent append are atomic.
 
         Parameters
         ----------
@@ -131,35 +141,39 @@ class RecordingSession:
         ValueError
             If *duration_ms* is negative.
         """
-        self._validate_record_preconditions(duration_ms)
+        # Lifecycle validation and append are inside the same critical
+        # section so a concurrent finalize() cannot snapshot _recordings
+        # between the _finalized check and the append.
+        with self._lock:
+            self._validate_record_preconditions(duration_ms)
 
-        # Skip if command filter is set and this command is not in it.
-        if self._command_filter and invocation.command not in self._command_filter:
-            return
+            # Skip if command filter is set and this command is not in it.
+            if self._command_filter and invocation.command not in self._command_filter:
+                return
 
-        env_subset = filter_env_subset(
-            invocation.env,
-            command=invocation.command,
-            allowlist=self._env_allowlist,
-        )
+            env_subset = filter_env_subset(
+                invocation.env,
+                command=invocation.command,
+                allowlist=self._env_allowlist,
+            )
 
-        recording = RecordedInvocation(
-            sequence=len(self._recordings),
-            command=invocation.command,
-            args=list(invocation.args),
-            stdin=invocation.stdin,
-            env_subset=env_subset,
-            stdout=response.stdout,
-            stderr=response.stderr,
-            exit_code=response.exit_code,
-            timestamp=dt.datetime.now(dt.UTC).isoformat(),
-            duration_ms=duration_ms,
-        )
+            recording = RecordedInvocation(
+                sequence=len(self._recordings),
+                command=invocation.command,
+                args=list(invocation.args),
+                stdin=invocation.stdin,
+                env_subset=env_subset,
+                stdout=response.stdout,
+                stderr=response.stderr,
+                exit_code=response.exit_code,
+                timestamp=dt.datetime.now(dt.UTC).isoformat(),
+                duration_ms=duration_ms,
+            )
 
-        if self._scrubber is not None:
-            recording = self._scrubber.scrub(recording)
+            if self._scrubber is not None:
+                recording = self._scrubber.scrub(recording)
 
-        self._recordings.append(recording)
+            self._recordings.append(recording)
 
     def finalize(self) -> FixtureFile:
         """Finalize the session and persist the fixture to disk.
@@ -175,14 +189,16 @@ class RecordingSession:
         if self._fixture_file is not None:
             return self._fixture_file
 
-        metadata = FixtureMetadata.create()
-        fixture = FixtureFile(
-            version=FixtureFile.SCHEMA_VERSION,
-            metadata=metadata,
-            recordings=list(self._recordings),
-            scrubbing_rules=[],
-        )
+        with self._lock:
+            metadata = FixtureMetadata.create()
+            fixture = FixtureFile(
+                version=FixtureFile.SCHEMA_VERSION,
+                metadata=metadata,
+                recordings=list(self._recordings),
+                scrubbing_rules=[],
+            )
+            self._finalized = True
+
         fixture.save(self._fixture_path)
-        self._finalized = True
         self._fixture_file = fixture
         return fixture
