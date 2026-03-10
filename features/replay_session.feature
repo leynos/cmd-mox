@@ -29,7 +29,7 @@ Feature: Replay session loads fixtures and matches invocations
     Then the replay match result is None
 
   Scenario: fuzzy mode ignores stdin and env differences
-    Given a fixture file with a recording of "git" with args "status" and stdin "input" and env "GIT_DIR" equals ".git"
+    Given a fixture file with a recording of "git status" and stdin "input" and env "GIT_DIR=.git"
     And a replay session targeting that fixture in fuzzy mode
     When the replay session is loaded
     And a replay invocation of "git" with args "status" with different stdin and env is matched

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import json
 import typing as t
 
@@ -16,26 +17,34 @@ if t.TYPE_CHECKING:
     from pathlib import Path
 
 
+@dc.dataclass
+class RecordedInvocationSpec:
+    """Optional overrides for building a RecordedInvocation."""
+
+    stdin: str = ""
+    env_subset: dict[str, str] = dc.field(default_factory=dict)
+    stdout: str = "ok\n"
+    stderr: str = ""
+    exit_code: int = 0
+    sequence: int = 0
+
+
 def _make_recorded_invocation(
     command: str = "git",
     args: list[str] | None = None,
-    stdin: str = "",
-    env_subset: dict[str, str] | None = None,
-    stdout: str = "ok\n",
-    stderr: str = "",
-    exit_code: int = 0,
-    sequence: int = 0,
+    spec: RecordedInvocationSpec | None = None,
 ) -> RecordedInvocation:
     """Build a RecordedInvocation with sensible defaults."""
+    s = spec or RecordedInvocationSpec()
     return RecordedInvocation(
-        sequence=sequence,
+        sequence=s.sequence,
         command=command,
         args=args or ["status"],
-        stdin=stdin,
-        env_subset=env_subset or {},
-        stdout=stdout,
-        stderr=stderr,
-        exit_code=exit_code,
+        stdin=s.stdin,
+        env_subset=s.env_subset,
+        stdout=s.stdout,
+        stderr=s.stderr,
+        exit_code=s.exit_code,
         timestamp="2026-01-15T10:30:00+00:00",
         duration_ms=0,
     )
@@ -182,7 +191,9 @@ class TestReplaySessionStrictMatch:
     def test_match_exact_invocation_returns_response(self, tmp_path: Path) -> None:
         """Exact match returns a Response with correct stdout/stderr/exit_code."""
         rec = _make_recorded_invocation(
-            stdout="branch: main\n", stderr="warn\n", exit_code=1
+            spec=RecordedInvocationSpec(
+                stdout="branch: main\n", stderr="warn\n", exit_code=1
+            )
         )
         path = _make_fixture_file(tmp_path, [rec])
 
@@ -216,7 +227,9 @@ class TestReplaySessionStrictMatch:
 
     def test_match_wrong_stdin_returns_none(self, tmp_path: Path) -> None:
         """Matching command and args but different stdin returns None in strict mode."""
-        rec = _make_recorded_invocation(stdin="expected input")
+        rec = _make_recorded_invocation(
+            spec=RecordedInvocationSpec(stdin="expected input")
+        )
         path = _make_fixture_file(tmp_path, [rec])
 
         session = ReplaySession(path)
@@ -227,7 +240,9 @@ class TestReplaySessionStrictMatch:
 
     def test_match_wrong_env_returns_none(self, tmp_path: Path) -> None:
         """Matching command and args but env_subset mismatch returns None."""
-        rec = _make_recorded_invocation(env_subset={"GIT_DIR": ".git"})
+        rec = _make_recorded_invocation(
+            spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"})
+        )
         path = _make_fixture_file(tmp_path, [rec])
 
         session = ReplaySession(path)
@@ -239,7 +254,9 @@ class TestReplaySessionStrictMatch:
 
     def test_match_env_subset_semantics(self, tmp_path: Path) -> None:
         """Extra env keys in invocation do not prevent matching."""
-        rec = _make_recorded_invocation(env_subset={"GIT_DIR": ".git"})
+        rec = _make_recorded_invocation(
+            spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"})
+        )
         path = _make_fixture_file(tmp_path, [rec])
 
         session = ReplaySession(path)
@@ -257,7 +274,9 @@ class TestReplaySessionFuzzyMatch:
 
     def test_fuzzy_match_ignores_stdin(self, tmp_path: Path) -> None:
         """In fuzzy mode, stdin differences do not prevent matching."""
-        rec = _make_recorded_invocation(stdin="recorded input")
+        rec = _make_recorded_invocation(
+            spec=RecordedInvocationSpec(stdin="recorded input")
+        )
         path = _make_fixture_file(tmp_path, [rec])
 
         session = ReplaySession(path, strict_matching=False)
@@ -268,7 +287,9 @@ class TestReplaySessionFuzzyMatch:
 
     def test_fuzzy_match_ignores_env(self, tmp_path: Path) -> None:
         """In fuzzy mode, env differences do not prevent matching."""
-        rec = _make_recorded_invocation(env_subset={"GIT_DIR": ".git"})
+        rec = _make_recorded_invocation(
+            spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"})
+        )
         path = _make_fixture_file(tmp_path, [rec])
 
         session = ReplaySession(path, strict_matching=False)
@@ -324,8 +345,12 @@ class TestReplaySessionConsumption:
     ) -> None:
         """Two identical recordings are consumed one at a time."""
         recs = [
-            _make_recorded_invocation(sequence=0, stdout="first\n"),
-            _make_recorded_invocation(sequence=1, stdout="second\n"),
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(sequence=0, stdout="first\n")
+            ),
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(sequence=1, stdout="second\n")
+            ),
         ]
         path = _make_fixture_file(tmp_path, recs)
 
@@ -420,7 +445,9 @@ class TestReplaySessionThreadSafety:
 
         n_threads = 10
         recs = [
-            _make_recorded_invocation(sequence=i, stdout=f"out-{i}\n")
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(sequence=i, stdout=f"out-{i}\n")
+            )
             for i in range(n_threads)
         ]
         path = _make_fixture_file(tmp_path, recs)

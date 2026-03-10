@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import typing as t
 
 import pytest
@@ -16,20 +17,28 @@ if t.TYPE_CHECKING:
     from pathlib import Path
 
 
+@dc.dataclass
+class RecordingSpec:
+    """Optional overrides for building a RecordedInvocation."""
+
+    sequence: int = 0
+    stdin: str = ""
+    env_subset: dict[str, str] = dc.field(default_factory=dict)
+
+
 def _build_recording(
     command: str,
     args: list[str],
-    sequence: int = 0,
-    stdin: str = "",
-    env_subset: dict[str, str] | None = None,
+    spec: RecordingSpec | None = None,
 ) -> RecordedInvocation:
     """Build a RecordedInvocation with sensible defaults."""
+    s = spec or RecordingSpec()
     return RecordedInvocation(
-        sequence=sequence,
+        sequence=s.sequence,
         command=command,
         args=args,
-        stdin=stdin,
-        env_subset=env_subset or {},
+        stdin=s.stdin,
+        env_subset=s.env_subset,
         stdout="ok\n",
         stderr="",
         exit_code=0,
@@ -75,27 +84,32 @@ def fixture_with_single_recording(tmp_path: Path, cmd: str, args: str) -> Path:
 )
 def fixture_with_n_recordings(tmp_path: Path, count: int, cmd: str, args: str) -> Path:
     """Create a fixture file with *count* identical recordings."""
-    recs = [_build_recording(cmd, args.split(), sequence=i) for i in range(count)]
+    recs = [
+        _build_recording(cmd, args.split(), RecordingSpec(sequence=i))
+        for i in range(count)
+    ]
     return _save_fixture(tmp_path, recs)
 
 
 @given(
     parsers.parse(
-        'a fixture file with a recording of "{cmd}" with args "{args}"'
-        ' and stdin "{stdin}" and env "{key}" equals "{value}"'
+        'a fixture file with a recording of "{invocation}"'
+        ' and stdin "{stdin}" and env "{env_kv}"'
     ),
     target_fixture="replay_fixture_path",
 )
 def fixture_with_stdin_and_env(
     tmp_path: Path,
-    cmd: str,
-    args: str,
+    invocation: str,
     stdin: str,
-    key: str,
-    value: str,
+    env_kv: str,
 ) -> Path:
     """Create a fixture file with specific stdin and env_subset."""
-    rec = _build_recording(cmd, args.split(), stdin=stdin, env_subset={key: value})
+    cmd, *args = invocation.split()
+    key, _, value = env_kv.partition("=")
+    rec = _build_recording(
+        cmd, args, RecordingSpec(stdin=stdin, env_subset={key: value})
+    )
     return _save_fixture(tmp_path, [rec])
 
 

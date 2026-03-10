@@ -103,8 +103,8 @@ succeed. `docs/usage-guide.md` documents the replay session API.
 ## Surprises & discoveries
 
 - The `_make_fixture_file` helper used `recordings or [default]` which
-  treated an empty list as falsy, creating a fixture with one recording
-  instead of zero. Fixed with explicit `is None` check.
+  treated an empty list as falsy, creating a fixture with one recording instead
+  of zero. Fixed with explicit `is None` check.
 - BDD step definitions using `parsers.parse` receive escape sequences like
   `\n` as literal two-character strings. Required
   `.encode("utf-8").decode("unicode_escape")` to decode the expected value.
