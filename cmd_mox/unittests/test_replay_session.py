@@ -456,7 +456,7 @@ class TestReplaySessionThreadSafety:
         session.load()
 
         barrier = threading.Barrier(n_threads)
-        results: list[Response | None] = [None] * n_threads
+        results = t.cast("list[Response | None]", [None] * n_threads)
 
         def _match(idx: int) -> None:
             barrier.wait()
