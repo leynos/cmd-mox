@@ -195,16 +195,16 @@ class ReplaySession:
         with self._lock:
             unconsumed_indices = set(range(len(fixture.recordings))) - self._consumed
 
-        if not unconsumed_indices:
-            return
+            if not unconsumed_indices:
+                return
 
-        details: list[str] = []
-        for idx in sorted(unconsumed_indices):
-            rec = fixture.recordings[idx]
-            details.append(f"  [{idx}] {rec.command} {' '.join(rec.args)}")
+            details: list[str] = []
+            for idx in sorted(unconsumed_indices):
+                rec = fixture.recordings[idx]
+                details.append(f"  [{idx}] {rec.command} {' '.join(rec.args)}")
 
-        msg = (
-            f"Not all fixture recordings were consumed during replay "
-            f"({len(unconsumed_indices)} unconsumed):\n" + "\n".join(details)
-        )
-        raise VerificationError(msg)
+            msg = (
+                f"Not all fixture recordings were consumed during replay "
+                f"({len(unconsumed_indices)} unconsumed):\n" + "\n".join(details)
+            )
+            raise VerificationError(msg)

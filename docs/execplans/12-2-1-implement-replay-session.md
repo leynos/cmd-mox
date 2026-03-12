@@ -24,7 +24,8 @@ Two matching modes are supported: strict (command + args + stdin + env_subset
 must all match) and fuzzy (only command + args need match).
 
 Observable success: new unit tests in
-`cmd_mox/unittests/test_replay_session.py` and new BDD scenarios in
+`cmd_mox/unittests/test_replay_session.py` and new behaviour-driven development
+(BDD) scenarios in
 `features/replay_session.feature` all pass. `make test`, `make lint`,
 `make check-fmt`, `make typecheck`, `make markdownlint`, and `make nixie` all
 succeed. `docs/usage-guide.md` documents the replay session API.
@@ -41,7 +42,8 @@ succeed. `docs/usage-guide.md` documents the replay session API.
   `RecordingSession`.
 - Unit tests colocated in `cmd_mox/unittests/`; BDD features in `features/`;
   step defs in `tests/steps/`; BDD runners in `tests/test_*_bdd.py`.
-- Tests written before implementation (AGENTS.md TDD workflow).
+- Tests written before implementation (AGENTS.md test-driven development (TDD)
+  workflow).
 - Existing tests must not break.
 - No modifications to `CommandDouble`, `CmdMox`, `PassthroughCoordinator`, or
   `_make_response()` in this plan. Those are roadmap items 12.2.3, 12.2.4, and

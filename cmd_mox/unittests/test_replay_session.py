@@ -39,7 +39,7 @@ def _make_recorded_invocation(
     return RecordedInvocation(
         sequence=s.sequence,
         command=command,
-        args=args or ["status"],
+        args=["status"] if args is None else args,
         stdin=s.stdin,
         env_subset=s.env_subset,
         stdout=s.stdout,
@@ -77,7 +77,7 @@ def _make_invocation(
     """Build an Invocation with sensible defaults."""
     return Invocation(
         command=command,
-        args=args or ["status"],
+        args=["status"] if args is None else args,
         stdin=stdin,
         env=env or {},
     )
@@ -127,6 +127,26 @@ class TestReplaySessionLoad:
         session = ReplaySession(path)
         session.load()
         assert isinstance(session._fixture, FixtureFile)
+
+    def test_load_rejects_unsupported_version(self, tmp_path: Path) -> None:
+        """load() raises ValueError for an unsupported future schema version."""
+        data = {
+            "version": "99.0",
+            "metadata": {
+                "created_at": "2026-01-15T10:30:00Z",
+                "cmdmox_version": "0.1.0",
+                "platform": "linux",
+                "python_version": "3.13.0",
+            },
+            "recordings": [],
+            "scrubbing_rules": [],
+        }
+        path = tmp_path / "future_fixture.json"
+        path.write_text(json.dumps(data, indent=2) + "\n")
+
+        session = ReplaySession(path)
+        with pytest.raises(ValueError, match=r"99\.0"):
+            session.load()
 
     def test_load_validates_schema(self, tmp_path: Path) -> None:
         """load() handles schema migration for older versions."""
@@ -486,4 +506,24 @@ class TestReplaySessionAllowUnmatched:
         session.load()
 
         # Do not consume any recordings.
+        session.verify_all_consumed()  # should not raise
+
+    def test_allow_unmatched_verify_passes_with_partial_consumption(
+        self, tmp_path: Path
+    ) -> None:
+        """When allow_unmatched=True, verify does not raise if some are unconsumed."""
+        recs = [
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(sequence=0, stdout="first\n")
+            ),
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(sequence=1, stdout="second\n")
+            ),
+        ]
+        path = _make_fixture_file(tmp_path, recs)
+        session = ReplaySession(path, allow_unmatched=True)
+        session.load()
+
+        # Consume only the first recording, leave the second unconsumed.
+        session.match(_make_invocation())
         session.verify_all_consumed()  # should not raise

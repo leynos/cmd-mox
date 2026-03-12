@@ -205,10 +205,8 @@ def replay_result_is_none(replay_match_result: Response | None) -> None:
 
 @then("all replay recordings are consumed")
 def all_recordings_consumed(replay_session: ReplaySession) -> None:
-    """Assert that all recording indices are in the consumed set."""
-    assert replay_session._fixture is not None
-    expected = set(range(len(replay_session._fixture.recordings)))
-    assert replay_session._consumed == expected
+    """Assert that all recordings have been consumed."""
+    replay_session.verify_all_consumed()
 
 
 @then("replay verify_all_consumed does not raise")
