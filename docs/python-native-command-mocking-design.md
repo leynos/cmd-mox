@@ -2728,6 +2728,50 @@ fakes may not carry the attribute.
   verifiers run but before environment teardown, ensuring fixture files are
   persisted even if verification raises
 
+#### 9.10.10 ReplaySession module placement
+
+**Decision:** Place `ReplaySession` in a dedicated `cmd_mox/record/replay.py`
+module rather than alongside `RecordingSession` in `session.py`.
+
+**Rationale:**
+
+- Each session type has distinct responsibilities and lifecycle semantics:
+  `RecordingSession` captures and persists, `ReplaySession` loads and matches
+- Separate modules improve readability and avoid a growing monolithic file
+- The public import path via `cmd_mox/record/__init__.py` is unaffected; both
+  classes are exported from the package root
+
+#### 9.10.11 Matching logic inside ReplaySession
+
+**Decision:** Implement matching logic as private methods inside
+`ReplaySession` (`_matches_strict`, `_matches_fuzzy`) rather than as a separate
+`InvocationMatcher` class.
+
+**Rationale:**
+
+- `InvocationMatcher` is a dedicated roadmap item (12.2.2) and may introduce
+  scoring heuristics, best-fit selection, and configurable match dimensions
+- For the initial `ReplaySession` (12.2.1), simple first-unconsumed-match
+  logic suffices and keeps the implementation self-contained
+- When 12.2.2 is implemented, the matching methods can be extracted into
+  `InvocationMatcher` without changing the `ReplaySession` public API
+  (`match()` delegates internally)
+
+#### 9.10.12 Env_subset matching semantics
+
+**Decision:** Use subset containment for `env_subset` matching during replay:
+every key-value pair in the recorded `env_subset` must be present in the
+invocation `env`, but extra keys in the live environment are allowed.
+
+**Rationale:**
+
+- A recorded `env_subset` captures only the relevant environment variables at
+  recording time; the live `Invocation.env` contains the full process
+  environment
+- Requiring exact equality would always fail because the live env has keys not
+  present in `env_subset`
+- This mirrors how `.with_env()` matching works elsewhere in CmdMox
+
 ### 9.11 Versioning and Forward Compatibility
 
 #### 9.11.1 Schema Versioning

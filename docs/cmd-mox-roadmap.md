@@ -246,7 +246,7 @@ supports deterministic replay without external dependencies. See
 
 ### 12.2. Replay infrastructure
 
-- [ ] 12.2.1. Implement `ReplaySession` with fixture loading, schema validation,
+- [x] 12.2.1. Implement `ReplaySession` with fixture loading, schema validation,
   consumed-record tracking, and strict and fuzzy modes.
 - [ ] 12.2.2. Implement `InvocationMatcher` with strict matching, fuzzy
   matching, and best-fit score selection.
