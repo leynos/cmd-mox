@@ -114,6 +114,55 @@ def fixture_with_stdin_and_env(
 
 
 @given(
+    parsers.parse(
+        'a fixture file with two "{invocation}" recordings '
+        "with different env specificity"
+    ),
+    target_fixture="replay_fixture_path",
+)
+def fixture_with_env_specificity(tmp_path: Path, invocation: str) -> Path:
+    """Create a fixture with two recordings: one generic, one with env_subset."""
+    cmd, *args = invocation.split()
+    recs = [
+        # Generic recording with no env_subset
+        _build_recording(
+            cmd,
+            args,
+            RecordingSpec(sequence=0, env_subset={}, stdin=""),
+        ),
+        # Specific recording with env_subset
+        _build_recording(
+            cmd,
+            args,
+            RecordingSpec(sequence=1, env_subset={"FOO": "bar"}, stdin=""),
+        ),
+    ]
+    # Change stdout to distinguish them
+    recs[0] = dc.replace(recs[0], stdout="generic\n")
+    recs[1] = dc.replace(recs[1], stdout="specific\n")
+    return _save_fixture(tmp_path, recs)
+
+
+@given(
+    parsers.parse(
+        'a fixture file with two "{invocation}" recordings with different stdin'
+    ),
+    target_fixture="replay_fixture_path",
+)
+def fixture_with_different_stdin(tmp_path: Path, invocation: str) -> Path:
+    """Create a fixture with two recordings: different stdin values."""
+    cmd, *args = invocation.split()
+    recs = [
+        _build_recording(cmd, args, RecordingSpec(sequence=0, stdin="other")),
+        _build_recording(cmd, args, RecordingSpec(sequence=1, stdin="hello")),
+    ]
+    # Change stdout to distinguish them
+    recs[0] = dc.replace(recs[0], stdout="wrong\n")
+    recs[1] = dc.replace(recs[1], stdout="right\n")
+    return _save_fixture(tmp_path, recs)
+
+
+@given(
     "a replay session targeting that fixture in strict mode",
     target_fixture="replay_session",
 )
@@ -184,6 +233,37 @@ def match_replay_with_different_stdin_env(
     return replay_session.match(inv)
 
 
+@when(
+    parsers.parse(
+        'a replay invocation of "{invocation}" with env "{env_kv}" is matched'
+    ),
+    target_fixture="replay_match_result",
+)
+def match_replay_with_env(
+    replay_session: ReplaySession, invocation: str, env_kv: str
+) -> Response | None:
+    """Match an invocation with specific environment."""
+    cmd, *args = invocation.split()
+    key, _, value = env_kv.partition("=")
+    inv = Invocation(command=cmd, args=args, stdin="", env={key: value, "EXTRA": "val"})
+    return replay_session.match(inv)
+
+
+@when(
+    parsers.parse(
+        'a replay invocation of "{invocation}" with stdin "{stdin}" is matched'
+    ),
+    target_fixture="replay_match_result",
+)
+def match_replay_with_stdin(
+    replay_session: ReplaySession, invocation: str, stdin: str
+) -> Response | None:
+    """Match an invocation with specific stdin."""
+    cmd, *args = invocation.split()
+    inv = Invocation(command=cmd, args=args, stdin=stdin, env={})
+    return replay_session.match(inv)
+
+
 # -- Then steps ---------------------------------------------------------------
 
 
@@ -220,3 +300,29 @@ def verify_raises(replay_session: ReplaySession) -> None:
     """Assert that verify_all_consumed() raises VerificationError."""
     with pytest.raises(VerificationError):
         replay_session.verify_all_consumed()
+
+
+@then("the replay match result is the more specific recording")
+def replay_result_is_specific(replay_match_result: Response | None) -> None:
+    """Assert the match result is the recording with env_subset."""
+    assert replay_match_result is not None
+    assert replay_match_result.stdout == "specific\n"
+
+
+@then("the generic recording remains unconsumed")
+def generic_recording_unconsumed(replay_session: ReplaySession) -> None:
+    """Assert that index 0 (generic recording) was not consumed."""
+    assert 0 not in replay_session._consumed
+
+
+@then("the replay match result is the recording with matching stdin")
+def replay_result_matches_stdin(replay_match_result: Response | None) -> None:
+    """Assert the match result is the recording with matching stdin."""
+    assert replay_match_result is not None
+    assert replay_match_result.stdout == "right\n"
+
+
+@then("the other recording remains unconsumed")
+def other_recording_unconsumed(replay_session: ReplaySession) -> None:
+    """Assert that index 0 (the other recording) was not consumed."""
+    assert 0 not in replay_session._consumed

@@ -40,3 +40,19 @@ Feature: Replay session loads fixtures and matches invocations
     And a replay session targeting that fixture in strict mode
     When the replay session is loaded
     Then replay verify_all_consumed raises VerificationError
+
+  Scenario: strict mode best-fit prefers more specific env_subset
+    Given a fixture file with two "git status" recordings with different env specificity
+    And a replay session targeting that fixture in strict mode
+    When the replay session is loaded
+    And a replay invocation of "git status" with env "FOO=bar" is matched
+    Then the replay match result is the more specific recording
+    And the generic recording remains unconsumed
+
+  Scenario: fuzzy mode best-fit prefers matching stdin
+    Given a fixture file with two "git status" recordings with different stdin
+    And a replay session targeting that fixture in fuzzy mode
+    When the replay session is loaded
+    And a replay invocation of "git status" with stdin "hello" is matched
+    Then the replay match result is the recording with matching stdin
+    And the other recording remains unconsumed

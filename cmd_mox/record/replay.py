@@ -19,13 +19,13 @@ import typing as t
 from cmd_mox.errors import LifecycleError, VerificationError
 
 from .fixture import FixtureFile
+from .matching import InvocationMatcher
 
 if t.TYPE_CHECKING:
     from pathlib import Path
 
     from cmd_mox.ipc import Invocation, Response
 
-    from .fixture import RecordedInvocation
 
 
 class ReplaySession:
@@ -59,6 +59,11 @@ class ReplaySession:
         self._fixture: FixtureFile | None = None
         self._consumed: set[int] = set()
         self._lock = threading.Lock()
+        self._matcher = InvocationMatcher(
+            strict=strict_matching,
+            match_env=True,
+            match_stdin=True,
+        )
 
     # -- Properties -----------------------------------------------------------
 
@@ -103,45 +108,17 @@ class ReplaySession:
             raise LifecycleError(msg)
         return self._fixture
 
-    # -- Matching (private) ---------------------------------------------------
-
-    def _matches_strict(
-        self,
-        invocation: Invocation,
-        recording: RecordedInvocation,
-    ) -> bool:
-        """Check strict-mode match: command + args + stdin + env_subset."""
-        if invocation.command != recording.command:
-            return False
-        if invocation.args != recording.args:
-            return False
-        if invocation.stdin != recording.stdin:
-            return False
-        # Subset containment: every key-value in env_subset must appear
-        # in the invocation env.  Extra keys in the invocation are fine.
-        for key, value in recording.env_subset.items():
-            if invocation.env.get(key) != value:
-                return False
-        return True
-
-    def _matches_fuzzy(
-        self,
-        invocation: Invocation,
-        recording: RecordedInvocation,
-    ) -> bool:
-        """Check fuzzy-mode match: command + args only."""
-        if invocation.command != recording.command:
-            return False
-        return invocation.args == recording.args
-
     # -- Public API -----------------------------------------------------------
 
     def match(self, invocation: Invocation) -> Response | None:
-        """Find the first unconsumed recording matching *invocation*.
+        """Find the best-fit unconsumed recording matching *invocation*.
 
         When a match is found, the recording is marked as consumed and
         a ``Response`` is returned.  When no match is found, returns
         ``None``.
+
+        The matcher uses a lexicographic scoring approach to select the
+        most appropriate recording when multiple candidates qualify.
 
         Parameters
         ----------
@@ -159,22 +136,25 @@ class ReplaySession:
             If the fixture has not been loaded.
         """
         fixture = self._ensure_loaded()
-        matcher = self._matches_strict if self._strict_matching else self._matches_fuzzy
 
         with self._lock:
-            for idx, recording in enumerate(fixture.recordings):
-                if idx in self._consumed:
-                    continue
-                if matcher(invocation, recording):
-                    self._consumed.add(idx)
-                    from cmd_mox.ipc import Response as _Response
+            idx = self._matcher.find_match(
+                invocation, fixture.recordings, self._consumed
+            )
 
-                    return _Response(
-                        stdout=recording.stdout,
-                        stderr=recording.stderr,
-                        exit_code=recording.exit_code,
-                    )
-        return None
+            if idx is None:
+                return None
+
+            self._consumed.add(idx)
+            recording = fixture.recordings[idx]
+
+            from cmd_mox.ipc import Response as _Response
+
+            return _Response(
+                stdout=recording.stdout,
+                stderr=recording.stderr,
+                exit_code=recording.exit_code,
+            )
 
     def verify_all_consumed(self) -> None:
         """Verify that all recordings were consumed during replay.

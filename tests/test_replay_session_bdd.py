@@ -49,3 +49,19 @@ def test_fuzzy_mode_ignores_stdin_env() -> None:
 )
 def test_verify_raises_unconsumed() -> None:
     """verify_all_consumed raises VerificationError when unconsumed."""
+
+
+@scenario(
+    str(FEATURES_DIR / "replay_session.feature"),
+    "strict mode best-fit prefers more specific env_subset",
+)
+def test_strict_best_fit_env_specificity() -> None:
+    """Strict mode selects the recording with more specific env_subset."""
+
+
+@scenario(
+    str(FEATURES_DIR / "replay_session.feature"),
+    "fuzzy mode best-fit prefers matching stdin",
+)
+def test_fuzzy_best_fit_stdin() -> None:
+    """Fuzzy mode selects the recording with matching stdin."""

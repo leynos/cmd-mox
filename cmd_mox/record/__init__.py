@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .env_filter import filter_env_subset
 from .fixture import FixtureFile, FixtureMetadata, RecordedInvocation
+from .matching import InvocationMatcher
 from .replay import ReplaySession
 from .scrubber import Scrubber, ScrubbingRule, ScrubbingRuleDict
 from .session import RecordingSession
@@ -11,6 +12,7 @@ from .session import RecordingSession
 __all__ = [
     "FixtureFile",
     "FixtureMetadata",
+    "InvocationMatcher",
     "RecordedInvocation",
     "RecordingSession",
     "ReplaySession",

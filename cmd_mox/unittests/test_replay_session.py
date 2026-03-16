@@ -527,3 +527,57 @@ class TestReplaySessionAllowUnmatched:
         # Consume only the first recording, leave the second unconsumed.
         session.match(_make_invocation())
         session.verify_all_consumed()  # should not raise
+
+
+class TestReplaySessionMatcherDelegation:
+    """Tests for ReplaySession delegating to InvocationMatcher."""
+
+    def test_replay_session_uses_matcher_for_best_fit(self, tmp_path: Path) -> None:
+        """ReplaySession uses InvocationMatcher to select best-fit recording."""
+        # Two recordings with same command+args, different env specificity
+        recs = [
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(
+                    sequence=0, env_subset={}, stdout="generic\n"
+                )
+            ),
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(
+                    sequence=1, env_subset={"FOO": "bar"}, stdout="specific\n"
+                )
+            ),
+        ]
+        path = _make_fixture_file(tmp_path, recs)
+
+        session = ReplaySession(path, strict_matching=True)
+        session.load()
+
+        inv = _make_invocation(env={"FOO": "bar", "EXTRA": "val"})
+        result = session.match(inv)
+
+        # Should select the more specific recording (index 1)
+        assert result is not None
+        assert result.stdout == "specific\n"
+
+    def test_replay_session_fuzzy_mode_best_fit(self, tmp_path: Path) -> None:
+        """ReplaySession in fuzzy mode selects best-fit based on stdin."""
+        # Two recordings with same command+args, different stdin
+        recs = [
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(sequence=0, stdin="other", stdout="wrong\n")
+            ),
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(sequence=1, stdin="hello", stdout="right\n")
+            ),
+        ]
+        path = _make_fixture_file(tmp_path, recs)
+
+        session = ReplaySession(path, strict_matching=False)
+        session.load()
+
+        inv = _make_invocation(stdin="hello")
+        result = session.match(inv)
+
+        # Should select the recording with matching stdin (index 1)
+        assert result is not None
+        assert result.stdout == "right\n"

@@ -248,7 +248,7 @@ supports deterministic replay without external dependencies. See
 
 - [x] 12.2.1. Implement `ReplaySession` with fixture loading, schema validation,
   consumed-record tracking, and strict and fuzzy modes.
-- [ ] 12.2.2. Implement `InvocationMatcher` with strict matching, fuzzy
+- [x] 12.2.2. Implement `InvocationMatcher` with strict matching, fuzzy
   matching, and best-fit score selection.
 - [ ] 12.2.3. Add `.replay()` to `CommandDouble`, including passthrough
   incompatibility validation and strict-mode option.

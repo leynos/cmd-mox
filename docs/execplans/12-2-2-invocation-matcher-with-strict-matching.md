@@ -5,7 +5,7 @@ This ExecPlan (execution plan) is a living document. The sections
 `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
 proceeds.
 
-Status: DRAFT
+Status: COMPLETED
 
 ## Purpose / big picture
 
@@ -218,10 +218,53 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
 
 ## Outcomes & Retrospective
 
-This section will be updated during implementation. For the draft state, the
-only completed outcome is that the repository now has a self-contained ExecPlan
-for roadmap item `12.2.2`. No production code, tests, roadmap entries, or
-user-facing docs have been changed yet beyond this plan document.
+Implementation completed successfully. All objectives from the "Purpose / big
+picture" section have been met:
+
+1. **Created `InvocationMatcher` class**: New `cmd_mox/record/matching.py`
+   module with `InvocationMatcher` class that handles boolean matching and
+   best-fit selection using lexicographic scoring.
+
+2. **Best-fit selection**: The matcher selects the most appropriate recording
+   when multiple candidates qualify, using the scoring tuple
+   `(stdin_match, matching_env_pairs, env_subset_size, -sequence)`.
+
+3. **ReplaySession delegation**: `ReplaySession.match()` now delegates candidate
+   selection to `InvocationMatcher.find_match()`, keeping lifecycle, loading,
+   consumed tracking, and locking in `ReplaySession`.
+
+4. **Test coverage**: Added 18 unit tests in `test_invocation_matcher.py`,
+   2 integration tests in `test_replay_session.py`, and 2 BDD scenarios in
+   `replay_session.feature`. All tests pass.
+
+5. **Documentation updates**:
+   - Design doc section 9.5.5 updated with scoring details
+   - Design doc decision 9.10.13 added to capture extraction rationale
+   - Usage guide updated to explain best-fit selection for consumers
+   - Roadmap item 12.2.2 marked complete
+
+6. **Quality gates**: All gates pass with no regressions:
+   - `make markdownlint`: Project docs pass (third-party cache issue ignored)
+   - `make nixie`: All diagrams validated
+   - `make check-fmt`: All files formatted
+   - `make typecheck`: Zero diagnostics (ty 0.0.23)
+   - `make lint`: All checks passed (ruff)
+   - `make test`: 700 passed, 12 skipped (22 new tests)
+
+### Implementation notes
+
+- The scoring approach using a tuple proved clear and auditable. No need for
+  weighted integers or opaque magic numbers.
+- All existing `ReplaySession` tests continued to pass after refactoring,
+  confirming backward compatibility for non-ambiguous fixtures.
+- The delegation boundary worked well: `ReplaySession` owns state and lifecycle,
+  `InvocationMatcher` is a pure decision function.
+- `InvocationMatcher` is exported from `cmd_mox.record` for advanced use but
+  the primary user-facing API remains `ReplaySession.match()`.
+
+### Deviations from plan
+
+None. All stages (A through F) completed as specified in the ExecPlan.
 
 ## Repository orientation
 
