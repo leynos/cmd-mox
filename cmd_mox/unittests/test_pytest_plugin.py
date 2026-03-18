@@ -38,6 +38,10 @@ class AutoLifecycleTestCase:
 
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
 
+# Flags that disable CI-injected plugins (e.g. slipcover) which can fail
+# when re-loaded inside pytester subprocess runs.
+_DISABLE_CI_PLUGINS = ("-p", "no:slipcover")
+
 
 def test_fixture_basic(
     cmd_mox: CmdMox,
@@ -105,7 +109,7 @@ def _run_prefix_scenario(
         """
     )
     pytester.makepyfile(test_module)
-    result = pytester.runpytest("-s")
+    result = pytester.runpytest("-s", *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(passed=1)
 
 
@@ -116,7 +120,7 @@ def test_parallel_workers_use_isolated_directories(
     pytest.importorskip("xdist")
 
     pytester.makepyfile(load_parallel_suite())
-    result = pytester.runpytest("-n2", "-s")
+    result = pytester.runpytest("-n2", "-s", *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(passed=2)
 
     records = read_parallel_records(parallel_artifact_dir)
@@ -150,7 +154,7 @@ def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> 
         """
     )
 
-    result = pytester.runpytest(str(test_file))
+    result = pytester.runpytest(str(test_file), *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
 
@@ -171,7 +175,7 @@ def test_verification_error_suppressed_on_test_failure(
         """
     )
 
-    result = pytester.runpytest(str(test_file))
+    result = pytester.runpytest(str(test_file), *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(failed=1)
     result.stdout.fnmatch_lines(["*assert False*"])
 
@@ -197,7 +201,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
         """
     )
 
-    result = pytester.runpytest(str(test_file))
+    result = pytester.runpytest(str(test_file), *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(passed=1, errors=1)
     expected = (
         "*cmd_mox teardown failure for "
@@ -322,7 +326,9 @@ def test_auto_lifecycle_configuration(
     test_file = pytester.makepyfile(**{f"test_{test_case.config_method}.py": module})
 
     plugins: tuple[str, ...] = ("cmd_mox.pytest_plugin",) if test_case.cli_args else ()
-    result = pytester.runpytest(*test_case.cli_args, str(test_file), plugins=plugins)
+    result = pytester.runpytest(
+        *test_case.cli_args, str(test_file), *_DISABLE_CI_PLUGINS, plugins=plugins
+    )
 
     if test_case.expect_auto_fail:
         result.assert_outcomes(passed=1, errors=1)

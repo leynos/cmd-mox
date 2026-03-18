@@ -29,6 +29,16 @@ class RecordedInvocationSpec:
     sequence: int = 0
 
 
+@dc.dataclass
+class BestFitCase:
+    """Parametrize bundle for best-fit selection tests."""
+
+    strict_matching: bool
+    recs: list[RecordedInvocation]
+    invocation_kwargs: dict[str, t.Any]
+    expected_stdout: str
+
+
 def _make_recorded_invocation(
     command: str = "git",
     args: list[str] | None = None,
@@ -550,11 +560,11 @@ class TestReplaySessionMatcherDelegation:
     """Tests for ReplaySession delegating to InvocationMatcher."""
 
     @pytest.mark.parametrize(
-        ("strict_matching", "recs", "invocation_kwargs", "expected_stdout"),
+        "case",
         [
-            (
-                True,
-                [
+            BestFitCase(
+                strict_matching=True,
+                recs=[
                     _make_recorded_invocation(
                         spec=RecordedInvocationSpec(
                             sequence=0, env_subset={}, stdout="generic\n"
@@ -568,12 +578,12 @@ class TestReplaySessionMatcherDelegation:
                         )
                     ),
                 ],
-                {"env": {"FOO": "bar", "EXTRA": "val"}},
-                "specific\n",
+                invocation_kwargs={"env": {"FOO": "bar", "EXTRA": "val"}},
+                expected_stdout="specific\n",
             ),
-            (
-                False,
-                [
+            BestFitCase(
+                strict_matching=False,
+                recs=[
                     _make_recorded_invocation(
                         spec=RecordedInvocationSpec(
                             sequence=0, stdin="other", stdout="wrong\n"
@@ -585,8 +595,8 @@ class TestReplaySessionMatcherDelegation:
                         )
                     ),
                 ],
-                {"stdin": "hello"},
-                "right\n",
+                invocation_kwargs={"stdin": "hello"},
+                expected_stdout="right\n",
             ),
         ],
         ids=["strict_env_specificity", "fuzzy_stdin_best_fit"],
@@ -594,17 +604,14 @@ class TestReplaySessionMatcherDelegation:
     def test_replay_session_best_fit_selection(
         self,
         tmp_path: Path,
-        strict_matching: bool,  # noqa: FBT001
-        recs: list[RecordedInvocation],
-        invocation_kwargs: dict[str, t.Any],
-        expected_stdout: str,
+        case: BestFitCase,
     ) -> None:
         """ReplaySession selects the best-fit recording via InvocationMatcher."""
         result = _run_session_match(
             tmp_path,
-            recs,
-            _make_invocation(**invocation_kwargs),
-            strict_matching=strict_matching,
+            case.recs,
+            _make_invocation(**case.invocation_kwargs),
+            strict_matching=case.strict_matching,
         )
         assert result is not None
-        assert result.stdout == expected_stdout
+        assert result.stdout == case.expected_stdout
