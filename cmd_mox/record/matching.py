@@ -44,6 +44,19 @@ class InvocationMatcher:
         self._match_env = match_env
         self._match_stdin = match_stdin
 
+    def _strict_gates_pass(
+        self,
+        invocation: Invocation,
+        recording: RecordedInvocation,
+    ) -> bool:
+        """Check if strict-mode stdin and env_subset requirements pass."""
+        if self._match_stdin and invocation.stdin != recording.stdin:
+            return False
+        return not self._match_env or all(
+            invocation.env.get(key) == value
+            for key, value in recording.env_subset.items()
+        )
+
     def matches(
         self,
         invocation: Invocation,
@@ -72,17 +85,7 @@ class InvocationMatcher:
             return False
 
         # In strict mode, stdin and env_subset are mandatory gates
-        if self._strict:
-            if self._match_stdin and invocation.stdin != recording.stdin:
-                return False
-            if self._match_env:
-                # Subset containment: every key-value in env_subset must
-                # appear in the invocation env
-                for key, value in recording.env_subset.items():
-                    if invocation.env.get(key) != value:
-                        return False
-
-        return True
+        return not self._strict or self._strict_gates_pass(invocation, recording)
 
     def _compute_score(
         self,

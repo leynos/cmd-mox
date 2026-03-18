@@ -27,7 +27,6 @@ if t.TYPE_CHECKING:
     from cmd_mox.ipc import Invocation, Response
 
 
-
 class ReplaySession:
     """Replay recorded fixtures as mock responses.
 

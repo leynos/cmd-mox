@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import typing as t
+
+import pytest
 
 from cmd_mox.ipc import Invocation
 from cmd_mox.record.fixture import RecordedInvocation
@@ -213,43 +216,56 @@ class TestInvocationMatcherFindMatch:
         # Should prefer index 1 (more specific env_subset)
         assert result == 1
 
-    def test_strict_best_fit_prefers_exact_stdin_match(self) -> None:
-        """In strict mode, prefer exact stdin match over different stdin."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
-        inv = _make_invocation(stdin="hello")
-        recordings = [
-            # First has matching stdin
-            _make_recorded_invocation(
-                spec=RecordedInvocationSpec(sequence=0, stdin="hello", stdout="exact")
+    @pytest.mark.parametrize(
+        ("matcher_kwargs", "inv_kwargs", "rec_specs", "expected"),
+        [
+            pytest.param(
+                {"strict": True, "match_env": True, "match_stdin": True},
+                {"stdin": "hello"},
+                [
+                    RecordedInvocationSpec(sequence=0, stdin="hello", stdout="exact"),
+                    RecordedInvocationSpec(sequence=1, stdin="", stdout="empty"),
+                ],
+                0,
+                id="strict_prefers_exact_stdin",
             ),
-            # Second has empty stdin
-            _make_recorded_invocation(
-                spec=RecordedInvocationSpec(sequence=1, stdin="", stdout="empty")
+            pytest.param(
+                {"strict": False, "match_env": False, "match_stdin": False},
+                {"stdin": "payload"},
+                [
+                    RecordedInvocationSpec(sequence=0, stdin="other", stdout="wrong"),
+                    RecordedInvocationSpec(sequence=1, stdin="payload", stdout="right"),
+                ],
+                1,
+                id="fuzzy_prefers_matching_stdin",
             ),
-        ]
+            pytest.param(
+                {"strict": True, "match_env": True, "match_stdin": True},
+                {},
+                [
+                    RecordedInvocationSpec(sequence=0, stdout="first"),
+                    RecordedInvocationSpec(sequence=1, stdout="second"),
+                ],
+                0,
+                id="tie_breaking_prefers_earlier_index",
+            ),
+        ],
+    )
+    def test_find_match_best_fit_selection(
+        self,
+        matcher_kwargs: dict[str, t.Any],
+        inv_kwargs: dict[str, t.Any],
+        rec_specs: list[RecordedInvocationSpec],
+        expected: int | None,
+    ) -> None:
+        """Test best-fit selection across different matching scenarios."""
+        matcher = InvocationMatcher(**matcher_kwargs)
+        inv = _make_invocation(**inv_kwargs)
+        recordings = [_make_recorded_invocation(spec=s) for s in rec_specs]
         consumed = set[int]()
 
         result = matcher.find_match(inv, recordings, consumed)
-        # Should prefer index 0 (exact stdin match)
-        assert result == 0
-
-    def test_fuzzy_best_fit_prefers_matching_stdin(self) -> None:
-        """In fuzzy mode, prefer candidate with matching stdin."""
-        matcher = InvocationMatcher(strict=False, match_env=False, match_stdin=False)
-        inv = _make_invocation(stdin="payload")
-        recordings = [
-            _make_recorded_invocation(
-                spec=RecordedInvocationSpec(sequence=0, stdin="other", stdout="wrong")
-            ),
-            _make_recorded_invocation(
-                spec=RecordedInvocationSpec(sequence=1, stdin="payload", stdout="right")
-            ),
-        ]
-        consumed = set[int]()
-
-        result = matcher.find_match(inv, recordings, consumed)
-        # Should prefer index 1 (matching stdin)
-        assert result == 1
+        assert result == expected
 
     def test_fuzzy_best_fit_prefers_more_env_matches(self) -> None:
         """In fuzzy mode, prefer candidate with more matching env pairs."""
@@ -276,21 +292,3 @@ class TestInvocationMatcherFindMatch:
         result = matcher.find_match(inv, recordings, consumed)
         # Should prefer index 1 (more matching env pairs)
         assert result == 1
-
-    def test_deterministic_tie_breaking_prefers_earlier_index(self) -> None:
-        """When scores tie, prefer earlier fixture index."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
-        inv = _make_invocation()
-        recordings = [
-            _make_recorded_invocation(
-                spec=RecordedInvocationSpec(sequence=0, stdout="first")
-            ),
-            _make_recorded_invocation(
-                spec=RecordedInvocationSpec(sequence=1, stdout="second")
-            ),
-        ]
-        consumed = set[int]()
-
-        result = matcher.find_match(inv, recordings, consumed)
-        # Should prefer index 0 (earlier in fixture)
-        assert result == 0
