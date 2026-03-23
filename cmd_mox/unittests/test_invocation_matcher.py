@@ -194,49 +194,48 @@ class TestInvocationMatcherFindMatch:
         result = matcher.find_match(inv, recordings, consumed)
         assert result == 0
 
-    def test_strict_best_fit_prefers_matching_env_subset(self) -> None:
-        """In strict mode, prefer more specific env_subset."""
+    @pytest.mark.parametrize(
+        ("inv_env", "specific_env_subset", "expected"),
+        [
+            pytest.param(
+                {"FOO": "bar", "BAZ": "qux"},
+                {"FOO": "bar"},
+                1,
+                id="prefers_matching_env_subset",
+            ),
+            pytest.param(
+                {"FOO": "bar"},
+                {"FOO": "nope"},
+                0,
+                id="falls_back_to_generic_on_mismatch",
+            ),
+        ],
+    )
+    def test_strict_env_subset_selection(
+        self,
+        inv_env: dict[str, str],
+        specific_env_subset: dict[str, str],
+        expected: int,
+    ) -> None:
+        """Strict mode prefers specific env_subset; falls back on mismatch."""
         matcher = InvocationMatcher(strict=True)
-        inv = _make_invocation(env={"FOO": "bar", "BAZ": "qux"})
+        inv = _make_invocation(env=inv_env)
         recordings = [
-            # First recording has empty env_subset (less specific)
+            # Generic: empty env_subset, always matches in strict mode
             _make_recorded_invocation(
                 spec=RecordedInvocationSpec(sequence=0, env_subset={}, stdout="generic")
             ),
-            # Second recording has matching env_subset (more specific)
+            # Specific: env_subset may or may not match
             _make_recorded_invocation(
                 spec=RecordedInvocationSpec(
-                    sequence=1, env_subset={"FOO": "bar"}, stdout="specific"
+                    sequence=1, env_subset=specific_env_subset, stdout="specific"
                 )
             ),
         ]
         consumed = set[int]()
 
         result = matcher.find_match(inv, recordings, consumed)
-        # Should prefer index 1 (more specific env_subset)
-        assert result == 1
-
-    def test_strict_incompatible_env_subset_falls_back_to_generic(self) -> None:
-        """When the specific env_subset does not match, select the generic recording."""
-        matcher = InvocationMatcher(strict=True)
-        inv = _make_invocation(env={"FOO": "bar"})
-        recordings = [
-            # Generic: empty env_subset, matches everything
-            _make_recorded_invocation(
-                spec=RecordedInvocationSpec(sequence=0, env_subset={}, stdout="generic")
-            ),
-            # Specific: env_subset does NOT match the invocation
-            _make_recorded_invocation(
-                spec=RecordedInvocationSpec(
-                    sequence=1, env_subset={"FOO": "nope"}, stdout="specific"
-                )
-            ),
-        ]
-        consumed = set[int]()
-
-        result = matcher.find_match(inv, recordings, consumed)
-        # The specific recording is rejected (env mismatch); generic wins
-        assert result == 0
+        assert result == expected
 
     @pytest.mark.parametrize(
         ("matcher_kwargs", "inv_kwargs", "rec_specs", "expected"),
