@@ -65,7 +65,7 @@ class TestInvocationMatcherStrictMode:
 
     def test_exact_match_returns_true(self) -> None:
         """Exact match with command, args, stdin, env_subset returns True."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation(stdin="data", env={"FOO": "bar"})
         rec = _make_recorded_invocation(
             spec=RecordedInvocationSpec(stdin="data", env_subset={"FOO": "bar"})
@@ -75,7 +75,7 @@ class TestInvocationMatcherStrictMode:
 
     def test_command_mismatch_returns_false(self) -> None:
         """Different command returns False."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation(command="curl")
         rec = _make_recorded_invocation(command="git")
 
@@ -83,7 +83,7 @@ class TestInvocationMatcherStrictMode:
 
     def test_args_mismatch_returns_false(self) -> None:
         """Same command but different args returns False."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation(args=["pull"])
         rec = _make_recorded_invocation(args=["status"])
 
@@ -91,7 +91,7 @@ class TestInvocationMatcherStrictMode:
 
     def test_stdin_mismatch_returns_false(self) -> None:
         """Matching command+args but different stdin returns False in strict mode."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation(stdin="expected")
         rec = _make_recorded_invocation(spec=RecordedInvocationSpec(stdin="different"))
 
@@ -99,7 +99,7 @@ class TestInvocationMatcherStrictMode:
 
     def test_env_subset_mismatch_returns_false(self) -> None:
         """Env_subset key present but with wrong value returns False."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation(env={"GIT_DIR": "/other"})
         rec = _make_recorded_invocation(
             spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"})
@@ -109,7 +109,7 @@ class TestInvocationMatcherStrictMode:
 
     def test_env_subset_containment_semantics(self) -> None:
         """Extra env keys in invocation do not prevent matching."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation(env={"GIT_DIR": ".git", "EXTRA": "value"})
         rec = _make_recorded_invocation(
             spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"})
@@ -123,7 +123,7 @@ class TestInvocationMatcherFuzzyMode:
 
     def test_fuzzy_mode_ignores_stdin(self) -> None:
         """In fuzzy mode, stdin differences do not prevent matching."""
-        matcher = InvocationMatcher(strict=False, match_env=False, match_stdin=False)
+        matcher = InvocationMatcher(strict=False)
         inv = _make_invocation(stdin="different input")
         rec = _make_recorded_invocation(
             spec=RecordedInvocationSpec(stdin="recorded input")
@@ -133,7 +133,7 @@ class TestInvocationMatcherFuzzyMode:
 
     def test_fuzzy_mode_ignores_env(self) -> None:
         """In fuzzy mode, env differences do not prevent matching."""
-        matcher = InvocationMatcher(strict=False, match_env=False, match_stdin=False)
+        matcher = InvocationMatcher(strict=False)
         inv = _make_invocation(env={"FOO": "bar"})
         rec = _make_recorded_invocation(
             spec=RecordedInvocationSpec(env_subset={"FOO": "different"})
@@ -143,7 +143,7 @@ class TestInvocationMatcherFuzzyMode:
 
     def test_fuzzy_mode_still_requires_command_match(self) -> None:
         """Fuzzy mode still requires command equality."""
-        matcher = InvocationMatcher(strict=False, match_env=False, match_stdin=False)
+        matcher = InvocationMatcher(strict=False)
         inv = _make_invocation(command="curl")
         rec = _make_recorded_invocation(command="git")
 
@@ -151,7 +151,7 @@ class TestInvocationMatcherFuzzyMode:
 
     def test_fuzzy_mode_still_requires_args_match(self) -> None:
         """Fuzzy mode still requires args equality."""
-        matcher = InvocationMatcher(strict=False, match_env=False, match_stdin=False)
+        matcher = InvocationMatcher(strict=False)
         inv = _make_invocation(args=["pull"])
         rec = _make_recorded_invocation(args=["status"])
 
@@ -163,7 +163,7 @@ class TestInvocationMatcherFindMatch:
 
     def test_find_match_returns_none_when_no_candidates(self) -> None:
         """find_match returns None when no recordings match."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation(command="curl")
         recordings = [_make_recorded_invocation(command="git")]
         consumed = set[int]()
@@ -173,7 +173,7 @@ class TestInvocationMatcherFindMatch:
 
     def test_find_match_skips_consumed_indices(self) -> None:
         """find_match skips indices in the consumed set."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation()
         recordings = [
             _make_recorded_invocation(spec=RecordedInvocationSpec(sequence=0)),
@@ -186,7 +186,7 @@ class TestInvocationMatcherFindMatch:
 
     def test_find_match_returns_single_compatible_recording(self) -> None:
         """find_match returns index 0 when only one recording is compatible."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation()
         recordings = [_make_recorded_invocation()]
         consumed = set[int]()
@@ -196,7 +196,7 @@ class TestInvocationMatcherFindMatch:
 
     def test_strict_best_fit_prefers_matching_env_subset(self) -> None:
         """In strict mode, prefer more specific env_subset."""
-        matcher = InvocationMatcher(strict=True, match_env=True, match_stdin=True)
+        matcher = InvocationMatcher(strict=True)
         inv = _make_invocation(env={"FOO": "bar", "BAZ": "qux"})
         recordings = [
             # First recording has empty env_subset (less specific)
@@ -216,11 +216,33 @@ class TestInvocationMatcherFindMatch:
         # Should prefer index 1 (more specific env_subset)
         assert result == 1
 
+    def test_strict_incompatible_env_subset_falls_back_to_generic(self) -> None:
+        """When the specific env_subset does not match, select the generic recording."""
+        matcher = InvocationMatcher(strict=True)
+        inv = _make_invocation(env={"FOO": "bar"})
+        recordings = [
+            # Generic: empty env_subset, matches everything
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(sequence=0, env_subset={}, stdout="generic")
+            ),
+            # Specific: env_subset does NOT match the invocation
+            _make_recorded_invocation(
+                spec=RecordedInvocationSpec(
+                    sequence=1, env_subset={"FOO": "nope"}, stdout="specific"
+                )
+            ),
+        ]
+        consumed = set[int]()
+
+        result = matcher.find_match(inv, recordings, consumed)
+        # The specific recording is rejected (env mismatch); generic wins
+        assert result == 0
+
     @pytest.mark.parametrize(
         ("matcher_kwargs", "inv_kwargs", "rec_specs", "expected"),
         [
             pytest.param(
-                {"strict": True, "match_env": True, "match_stdin": True},
+                {"strict": True},
                 {"stdin": "hello"},
                 [
                     RecordedInvocationSpec(sequence=0, stdin="hello", stdout="exact"),
@@ -230,7 +252,7 @@ class TestInvocationMatcherFindMatch:
                 id="strict_prefers_exact_stdin",
             ),
             pytest.param(
-                {"strict": False, "match_env": False, "match_stdin": False},
+                {"strict": False},
                 {"stdin": "payload"},
                 [
                     RecordedInvocationSpec(sequence=0, stdin="other", stdout="wrong"),
@@ -240,14 +262,34 @@ class TestInvocationMatcherFindMatch:
                 id="fuzzy_prefers_matching_stdin",
             ),
             pytest.param(
-                {"strict": True, "match_env": True, "match_stdin": True},
+                {"strict": True},
                 {},
                 [
                     RecordedInvocationSpec(sequence=0, stdout="first"),
                     RecordedInvocationSpec(sequence=1, stdout="second"),
                 ],
                 0,
-                id="tie_breaking_prefers_earlier_index",
+                id="tie_breaking_prefers_earlier_sequence",
+            ),
+            pytest.param(
+                {"strict": False},
+                {"stdin": "mismatch", "env": {"K": "wrong"}},
+                [
+                    RecordedInvocationSpec(
+                        sequence=0,
+                        stdin="recorded",
+                        env_subset={"K": "v"},
+                        stdout="first",
+                    ),
+                    RecordedInvocationSpec(
+                        sequence=1,
+                        stdin="recorded",
+                        env_subset={"K": "v"},
+                        stdout="second",
+                    ),
+                ],
+                0,
+                id="fuzzy_with_differing_stdin_and_env_still_matches",
             ),
         ],
     )
@@ -269,7 +311,7 @@ class TestInvocationMatcherFindMatch:
 
     def test_fuzzy_best_fit_prefers_more_env_matches(self) -> None:
         """In fuzzy mode, prefer candidate with more matching env pairs."""
-        matcher = InvocationMatcher(strict=False, match_env=False, match_stdin=False)
+        matcher = InvocationMatcher(strict=False)
         inv = _make_invocation(env={"FOO": "bar", "BAZ": "qux"})
         recordings = [
             # First has 1 matching env pair

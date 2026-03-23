@@ -584,7 +584,7 @@ env_subset). When multiple recordings qualify, the matcher prefers the one with:
 
 1. More matching environment pairs
 2. Larger `env_subset` (indicating greater specificity)
-3. Earlier fixture position (if scores tie)
+3. Lower recording `sequence` value (if scores tie)
 
 **In fuzzy mode**, only command and args are required. Among qualifying
 recordings, the matcher prefers the one with:
@@ -592,12 +592,12 @@ recordings, the matcher prefers the one with:
 1. Exact stdin match (if stdin matches the invocation)
 2. More matching environment pairs
 3. Larger `env_subset`
-4. Earlier fixture position (if scores tie)
+4. Lower recording `sequence` value (if scores tie)
 
-This ensures that when you record the same command with different contexts (for
-example, `git status` with and without environment variables), replay will
-select the recording that best matches the live invocation rather than always
-consuming the first compatible entry.
+This ensures that when the same command is recorded with different contexts (for
+example, `git status` with and without environment variables), replay selects
+the recording that best matches the live invocation rather than always consuming
+the first compatible entry.
 
 ### Consumed-record tracking
 

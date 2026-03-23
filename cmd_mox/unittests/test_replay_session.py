@@ -368,13 +368,13 @@ class TestReplaySessionConsumption:
     """Tests for consumed-record tracking."""
 
     def test_match_marks_recording_as_consumed(self, tmp_path: Path) -> None:
-        """After a successful match, the recording index is in _consumed."""
+        """After a successful match, the recording index is consumed."""
         path = _make_fixture_file(tmp_path)
         session = ReplaySession(path)
         session.load()
 
         session.match(_make_invocation())
-        assert 0 in session._consumed
+        assert session.is_consumed(0)
 
     def test_consumed_recording_not_matched_again(self, tmp_path: Path) -> None:
         """A consumed recording is skipped on subsequent match() calls."""
@@ -516,7 +516,7 @@ class TestReplaySessionThreadSafety:
             th.join()
 
         # All recordings should be consumed exactly once.
-        assert len(session._consumed) == n_threads
+        assert session.consumed_count == n_threads
         non_none = [r for r in results if r is not None]
         assert len(non_none) == n_threads
 

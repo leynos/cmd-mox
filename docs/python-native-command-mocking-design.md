@@ -2177,11 +2177,9 @@ entries during replay using a best-fit selection approach:
 classDiagram
     class InvocationMatcher {
         - bool strict
-        - bool match_env
-        - bool match_stdin
         + matches(invocation: Invocation, recording: RecordedInvocation) bool
         + find_match(invocation: Invocation, recordings: list, consumed: set) int | None
-        - _compute_score(invocation: Invocation, recording: RecordedInvocation) tuple
+        - _env_match_stats(invocation: Invocation, recording: RecordedInvocation) tuple
     }
 ```
 
@@ -2196,14 +2194,15 @@ Matching modes:
 
 Best-fit scoring:
 
-The matcher computes a lexicographic score tuple `(stdin_match, matching_env_pairs,
-env_subset_size, -sequence)` for each compatible recording and selects the
-highest-scoring candidate. This ensures deterministic selection that prioritizes:
+The matcher computes a stats tuple `(stdin_match, matching_env_pairs,
+env_subset_size)` for each compatible recording and selects the highest-scoring
+candidate. When two candidates have identical stats, the one with the lower
+`sequence` value wins. This ensures deterministic selection that prioritises:
 
 1. Exact stdin match (True > False)
 2. Number of matching environment pairs (higher is better)
 3. Size of env_subset (higher indicates more specificity)
-4. Fixture order (earlier index wins on tie)
+4. Lower recording `sequence` value (tie-breaker)
 
 #### 9.5.6 Record Module Class Relationships
 
@@ -2791,10 +2790,10 @@ invocation `env`, but extra keys in the live environment are allowed.
 #### 9.10.13 InvocationMatcher extraction and best-fit scoring
 
 **Decision:** Extract matching logic from `ReplaySession` into a dedicated
-`InvocationMatcher` class with deterministic best-fit selection. Use
-lexicographic scoring `(stdin_match, matching_env_pairs, env_subset_size,
--sequence)` to select the most appropriate recording when multiple candidates
-qualify.
+`InvocationMatcher` class with deterministic best-fit selection. Use a
+lexicographic stats tuple `(stdin_match, matching_env_pairs, env_subset_size)`
+to rank candidates, with lower `sequence` as an explicit tie-breaker, to select
+the most appropriate recording when multiple candidates qualify.
 
 **Rationale:**
 
@@ -2803,12 +2802,12 @@ qualify.
 - First-match semantics (roadmap 12.2.1) were simple but could select the wrong
   recording when fixtures contain multiple entries with the same command and
   args
-- Lexicographic scoring provides a clear, auditable ranking that prioritizes
+- Lexicographic scoring provides a clear, auditable ranking that prioritises
   stdin exactness, then environment specificity
-- Using a tuple instead of weighted integers keeps the ranking logic transparent
-  and debuggable
-- Deterministic tie-breaking (prefer earlier fixture index) ensures repeatable
-  replay behavior
+- Using a stats tuple instead of weighted integers keeps the ranking logic
+  transparent and debuggable
+- Deterministic tie-breaking (prefer lower recording `sequence` value) ensures
+  repeatable replay behaviour
 
 **Alternatives considered:**
 

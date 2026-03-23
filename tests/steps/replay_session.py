@@ -312,7 +312,7 @@ def replay_result_is_specific(replay_match_result: Response | None) -> None:
 @then("the generic recording remains unconsumed")
 def generic_recording_unconsumed(replay_session: ReplaySession) -> None:
     """Assert that index 0 (generic recording) was not consumed."""
-    assert 0 not in replay_session._consumed
+    assert not replay_session.is_consumed(0)
 
 
 @then("the replay match result is the recording with matching stdin")
@@ -325,4 +325,4 @@ def replay_result_matches_stdin(replay_match_result: Response | None) -> None:
 @then("the other recording remains unconsumed")
 def other_recording_unconsumed(replay_session: ReplaySession) -> None:
     """Assert that index 0 (the other recording) was not consumed."""
-    assert 0 not in replay_session._consumed
+    assert not replay_session.is_consumed(0)

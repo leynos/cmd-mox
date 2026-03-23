@@ -58,11 +58,7 @@ class ReplaySession:
         self._fixture: FixtureFile | None = None
         self._consumed: set[int] = set()
         self._lock = threading.Lock()
-        self._matcher = InvocationMatcher(
-            strict=strict_matching,
-            match_env=True,
-            match_stdin=True,
-        )
+        self._matcher = InvocationMatcher(strict=strict_matching)
 
     # -- Properties -----------------------------------------------------------
 
@@ -80,6 +76,28 @@ class ReplaySession:
     def allow_unmatched(self) -> bool:
         """Whether unconsumed recordings are tolerated during verification."""
         return self._allow_unmatched
+
+    @property
+    def consumed_count(self) -> int:
+        """The number of recordings that have been consumed so far."""
+        with self._lock:
+            return len(self._consumed)
+
+    def is_consumed(self, index: int) -> bool:
+        """Check whether the recording at *index* has been consumed.
+
+        Parameters
+        ----------
+        index : int
+            The zero-based index of the recording in the fixture.
+
+        Returns
+        -------
+        bool
+            ``True`` if the recording at *index* has been consumed.
+        """
+        with self._lock:
+            return index in self._consumed
 
     # -- Lifecycle ------------------------------------------------------------
 

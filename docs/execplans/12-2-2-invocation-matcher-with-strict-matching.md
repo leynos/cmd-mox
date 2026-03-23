@@ -72,7 +72,8 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
 
 ## Constraints
 
-- Follow the repository TDD workflow from `AGENTS.md`: change tests first,
+- Follow the repository test-driven development (TDD) workflow from
+  `AGENTS.md`: change tests first,
   observe failure, then implement code, then rerun the full suite.
 - Keep the existing `ReplaySession` public API unchanged:
   `__init__(fixture_path, *, strict_matching=True, allow_unmatched=False)`,
@@ -113,7 +114,8 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
   deterministically without introducing a new public option. The draft below
   proposes exact scoring semantics; if that proves incompatible with existing
   tests or expectations, confirm direction with the user before proceeding.
-- Testing tolerance: stop and escalate if the new BDD coverage would require a
+- Testing tolerance: stop and escalate if the new behaviour-driven development
+  (BDD) coverage would require a
   large new step-library abstraction instead of a small extension to the
   existing replay-session feature files and step definitions.
 - Quality-gate tolerance: if any of `make markdownlint`, `make nixie`,
@@ -374,8 +376,7 @@ guessing about hidden state.
 
 Implementation outline:
 
-1. Add constructor flags matching the design doc:
-   `strict`, `match_env`, and `match_stdin`.
+1. Add a `strict` constructor flag matching the design doc.
 2. Implement `matches(invocation, recording) -> bool` as a pure predicate.
    This method should not inspect the consumed set.
 3. Add a private helper that computes a comparable candidate key for a
@@ -384,7 +385,7 @@ Implementation outline:
 4. Implement `find_match(invocation, recordings, consumed) -> int | None`.
    Iterate the fixture in list order, skip indices in `consumed`, filter with
    `matches()`, compute candidate keys, and return the index with the best key.
-   On a score tie, keep the earlier list index.
+   On a score tie, prefer the recording with the lower `sequence` value.
 
 The initial matcher should stay entirely free of threading concerns. The
 consumed set is read-only input here; `ReplaySession` will continue to protect
