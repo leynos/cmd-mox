@@ -97,9 +97,6 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
   `features/`, `tests/steps/`, and `tests/test_*_bdd.py`.
 - Any documentation change must use sentence-case headings and follow the
   documentation style already present in `docs/`.
-- Because this turn is for planning only, this ExecPlan remains in `DRAFT`
-  state and no implementation should begin until the user explicitly approves
-  the plan.
 
 ## Tolerances
 
