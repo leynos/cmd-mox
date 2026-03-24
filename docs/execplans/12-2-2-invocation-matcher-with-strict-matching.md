@@ -137,8 +137,8 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
   integer weights. Mitigation: use a lexicographic score tuple whose fields map
   directly to user-visible concepts.
 - Risk: deterministic tie-breaking matters for repeated or duplicate fixture
-  recordings. Mitigation: when scores tie, prefer the earliest unconsumed
-  recording by fixture order.
+  recordings. Mitigation: when scores tie, prefer the recording with the lower
+  `sequence` value.
 - Risk: docs currently say replay uses the "first unconsumed recording that
   matches". That statement will become false after this feature. Mitigation:
   update the replay-session usage guide text in the same change as the code.
@@ -149,19 +149,19 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
   ExecPlan, and the current `ReplaySession` implementation.
 - [x] Draft this ExecPlan in
   `docs/execplans/12-2-2-invocation-matcher-with-strict-matching.md`.
-- [ ] Get explicit user approval for this plan.
-- [ ] Add or update unit tests for `InvocationMatcher` and `ReplaySession`
+- [x] Get explicit user approval for this plan.
+- [x] Add or update unit tests for `InvocationMatcher` and `ReplaySession`
   before touching implementation code.
-- [ ] Add or update `pytest-bdd` behavioural coverage for ambiguous replay
+- [x] Add or update `pytest-bdd` behavioural coverage for ambiguous replay
   fixtures and best-fit consumption.
-- [ ] Implement `cmd_mox/record/matching.py` and refactor
+- [x] Implement `cmd_mox/record/matching.py` and refactor
   `cmd_mox/record/replay.py` to delegate matching.
-- [ ] Update `docs/python-native-command-mocking-design.md` with final
+- [x] Update `docs/python-native-command-mocking-design.md` with final
   extraction and scoring decisions.
-- [ ] Update `docs/usage-guide.md` to explain replay best-fit semantics for
+- [x] Update `docs/usage-guide.md` to explain replay best-fit semantics for
   consumers.
-- [ ] Mark roadmap item `12.2.2` done in `docs/cmd-mox-roadmap.md`.
-- [ ] Run all quality gates and attach the resulting evidence to this document
+- [x] Mark roadmap item `12.2.2` done in `docs/cmd-mox-roadmap.md`.
+- [x] Run all quality gates and attach the resulting evidence to this document
   if the plan later moves into execution.
 
 ## Surprises & Discoveries
@@ -180,43 +180,40 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
 
 ## Decision Log
 
-- Proposed decision: create a new internal module
-  `cmd_mox/record/matching.py` containing `InvocationMatcher`. This matches the
-  design doc's `matching.py` module layout and keeps replay-selection logic out
-  of `cmd_mox/record/replay.py`.
+- Decision: create a new internal module `cmd_mox/record/matching.py`
+  containing `InvocationMatcher`. This matches the design doc's `matching.py`
+  module layout and keeps replay-selection logic out of
+  `cmd_mox/record/replay.py`.
 
-- Proposed decision: keep `InvocationMatcher` out of the top-level public API
-  for now. The user-visible contract remains `ReplaySession.match()`. If the
-  code exports the class from `cmd_mox.record`, document it as an advanced
-  record-module utility rather than a stable primary entrypoint.
+- Decision: keep `InvocationMatcher` out of the top-level public API for now.
+  The user-visible contract remains `ReplaySession.match()`. The class is
+  exported from `cmd_mox.record` as an advanced record-module utility rather
+  than a stable primary entrypoint.
 
-- Proposed decision: use boolean compatibility plus lexicographic scoring
-  rather than opaque weighted sums.
-  The draft scoring rule is:
+- Decision: use boolean compatibility plus lexicographic scoring rather than
+  opaque weighted sums.
+  The scoring rule is:
   `command` and `args` are mandatory gates in both modes.
   In strict mode, `stdin` equality and full `env_subset` containment are also
   mandatory gates.
-  Among remaining candidates, higher specificity wins by comparing:
-  exact `stdin` match, number of matching `env_subset` pairs, size of
-  `env_subset`, then fixture order.
+  Among remaining candidates, higher specificity wins by comparing the stats
+  tuple `(stdin_match, matching_env_pairs, env_subset_size)`.
   In fuzzy mode, `stdin` and environment no longer disqualify candidates, but
   they still influence the score using the same ranking dimensions.
 
-- Proposed decision: when two candidates produce the same score, choose the
-  earliest unconsumed fixture entry rather than the lowest `sequence` value
-  parsed from JSON. In well-formed fixtures those should agree, but fixture
-  list order is the actual replay traversal order and is easier for a novice to
-  inspect.
+- Decision: when two candidates produce the same stats tuple, choose the
+  recording with the lower `sequence` value. The `sequence` field corresponds
+  to fixture list order in well-formed fixtures and provides a deterministic,
+  auditable tie-breaker.
 
-- Proposed decision: keep `ReplaySession.verify_all_consumed()` unchanged.
+- Decision: keep `ReplaySession.verify_all_consumed()` unchanged.
   `InvocationMatcher` only selects candidates; it does not participate in
   verification or error formatting.
 
-- Open question to confirm during approval: whether fuzzy-mode scoring should
-  treat an exact `stdin` match as more important than environment specificity,
-  or whether environment should win first. This draft assumes `stdin` wins
-  first because it usually captures the command payload more directly than the
-  environment does.
+- Decision (resolved): fuzzy-mode scoring treats an exact `stdin` match as
+  more important than environment specificity. `stdin` wins first because it
+  usually captures the command payload more directly than the environment
+  does.
 
 ## Outcomes & Retrospective
 
@@ -228,8 +225,9 @@ picture" section have been met:
    best-fit selection using lexicographic scoring.
 
 2. **Best-fit selection**: The matcher selects the most appropriate recording
-   when multiple candidates qualify, using the scoring tuple
-   `(stdin_match, matching_env_pairs, env_subset_size, -sequence)`.
+   when multiple candidates qualify, using the stats tuple
+   `(stdin_match, matching_env_pairs, env_subset_size)` with an explicit
+   tie-breaker on lower `sequence` value.
 
 3. **ReplaySession delegation**: `ReplaySession.match()` now delegates candidate
    selection to `InvocationMatcher.find_match()`, keeping lifecycle, loading,

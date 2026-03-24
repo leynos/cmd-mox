@@ -29,13 +29,22 @@ class RecordedInvocationSpec:
     sequence: int = 0
 
 
-@dc.dataclass
+class InvocationKwargs(t.TypedDict, total=False):
+    """Keyword arguments accepted by ``_make_invocation``."""
+
+    command: str
+    args: list[str] | None
+    stdin: str
+    env: dict[str, str] | None
+
+
+@dc.dataclass(slots=True)
 class BestFitCase:
     """Parametrize bundle for best-fit selection tests."""
 
     strict_matching: bool
     recs: list[RecordedInvocation]
-    invocation_kwargs: dict[str, t.Any]
+    invocation_kwargs: InvocationKwargs
     expected_stdout: str
 
 
@@ -334,7 +343,7 @@ class TestReplaySessionFuzzyMatch:
         self,
         tmp_path: Path,
         spec: RecordedInvocationSpec,
-        invocation_kwargs: dict[str, t.Any],
+        invocation_kwargs: InvocationKwargs,
     ) -> None:
         """In fuzzy mode, stdin and env differences do not prevent matching."""
         result = _run_session_match(
