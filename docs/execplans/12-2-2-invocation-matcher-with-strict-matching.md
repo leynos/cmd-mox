@@ -427,7 +427,7 @@ The wording must explain:
 2. Fuzzy mode still gates on command and args only.
 3. When multiple candidates qualify, CmdMox chooses the closest match
    deterministically.
-4. Ties resolve to the earliest remaining fixture entry.
+4. Ties resolve to the recording with the lowest `sequence` value.
 
 ### Stage F: Mark the roadmap and run the full quality gates
 
