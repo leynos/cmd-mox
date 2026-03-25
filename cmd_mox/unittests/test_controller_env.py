@@ -40,7 +40,7 @@ def test_mock_with_env_rejects_non_string_key() -> None:
     mox = CmdMox()
 
     with pytest.raises(TypeError, match="Environment variable name must be str"):
-        mox.mock("envcmd").with_env({42: "value"})  # type: ignore[arg-type]
+        mox.mock("envcmd").with_env({42: "value"})  # type: ignore[arg-type, ty:invalid-argument-type]
 
 
 def test_invoke_handler_preserves_handler_env_override() -> None:

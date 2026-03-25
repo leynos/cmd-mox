@@ -2171,23 +2171,38 @@ Default scrubbing rules detect and redact:
 #### 9.5.5 InvocationMatcher
 
 The `InvocationMatcher` class handles matching incoming invocations to recorded
-entries during replay:
+entries during replay using a best-fit selection approach:
 
 ```mermaid
 classDiagram
     class InvocationMatcher {
         - bool strict
-        - bool match_env
-        - bool match_stdin
         + matches(invocation: Invocation, recording: RecordedInvocation) bool
         + find_match(invocation: Invocation, recordings: list, consumed: set) int | None
+        - _env_match_stats(invocation: Invocation, recording: RecordedInvocation) tuple
     }
 ```
 
 Matching modes:
 
-- **Strict:** Command, args, stdin, and env_subset must match exactly
-- **Fuzzy:** Command and args must match; stdin and env are optional
+- **Strict:** Command, args, stdin, and env_subset must match exactly for a
+  recording to qualify. When multiple recordings qualify, the matcher selects
+  the most specific one using a lexicographic score.
+- **Fuzzy:** Command and args must match; stdin and env are optional. When
+  multiple recordings qualify, the matcher prefers candidates with matching
+  stdin and more matching environment pairs.
+
+Best-fit scoring:
+
+The matcher computes a stats tuple `(stdin_match, matching_env_pairs,
+env_subset_size)` for each compatible recording and selects the highest-scoring
+candidate. When two candidates have identical stats, the one with the lower
+`sequence` value wins. This ensures deterministic selection that prioritises:
+
+1. Exact stdin match (True > False)
+2. Number of matching environment pairs (higher is better)
+3. Size of env_subset (higher indicates more specificity)
+4. Lower recording `sequence` value (tie-breaker)
 
 #### 9.5.6 Record Module Class Relationships
 
@@ -2771,6 +2786,39 @@ invocation `env`, but extra keys in the live environment are allowed.
 - Requiring exact equality would always fail because the live env has keys not
   present in `env_subset`
 - This mirrors how `.with_env()` matching works elsewhere in CmdMox
+
+#### 9.10.13 InvocationMatcher extraction and best-fit scoring
+
+**Decision:** Extract matching logic from `ReplaySession` into a dedicated
+`InvocationMatcher` class with deterministic best-fit selection. Use a
+lexicographic stats tuple `(stdin_match, matching_env_pairs, env_subset_size)`
+to rank candidates, with lower `sequence` as an explicit tie-breaker, to select
+the most appropriate recording when multiple candidates qualify.
+
+**Rationale:**
+
+- Separation of concerns: `ReplaySession` handles lifecycle, loading, consumed
+  tracking, and locking; `InvocationMatcher` handles candidate selection logic
+- First-match semantics (roadmap 12.2.1) were simple but could select the wrong
+  recording when fixtures contain multiple entries with the same command and
+  args
+- Lexicographic scoring provides a clear, auditable ranking that prioritises
+  stdin exactness, then environment specificity
+- Using a stats tuple instead of weighted integers keeps the ranking logic
+  transparent and debuggable
+- Deterministic tie-breaking (prefer lower recording `sequence` value) ensures
+  repeatable replay behaviour
+
+**Alternatives considered:**
+
+- **Weighted numeric score:** Rejected because it obscures the relative
+  importance of different matching dimensions and makes the selection logic
+  harder to explain
+- **Requiring unique command+args in fixtures:** Rejected because real-world
+  recordings often repeat commands with different inputs or environment contexts
+- **Exposing InvocationMatcher as a primary API:** Deferred. The class is
+  exported from `cmd_mox.record` for advanced use cases, but the primary
+  user-facing contract remains `ReplaySession.match()`
 
 ### 9.11 Versioning and Forward Compatibility
 

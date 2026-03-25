@@ -144,7 +144,7 @@ def pytest_runtest_makereport(
     """Record whether the test body failed for later teardown decisions."""
     del call
     outcome = yield
-    rep = outcome.get_result()
+    rep = t.cast("t.Any", outcome).get_result()
     if rep.when == "call":
         item.stash[STASH_CALL_FAILED] = rep.failed
 

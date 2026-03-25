@@ -544,9 +544,11 @@ if response is not None:
     print(response.stdout)  # the recorded stdout
 ```
 
-`match()` searches the loaded recordings in order, returning a `Response` built
-from the first unconsumed recording that matches. Each matched recording is
-marked as consumed and will not match again.
+`match()` searches the loaded recordings and returns a `Response` built from the
+best-fit unconsumed recording. When multiple recordings qualify, the matcher
+selects the most appropriate one deterministically based on stdin exactness and
+environment specificity. Each matched recording is marked as consumed and will
+not match again.
 
 ### Matching modes
 
@@ -571,6 +573,31 @@ fields contain non-deterministic values such as timestamps or UUIDs.
 session = ReplaySession("fixtures/git.json", strict_matching=False)
 session.load()
 ```
+
+### Best-fit selection
+
+When a fixture contains multiple recordings with the same command and arguments,
+the replay session selects the most appropriate match deterministically:
+
+**In strict mode**, all recordings must fully match (command, args, stdin, and
+env_subset). When multiple recordings qualify, the matcher prefers the one with:
+
+1. More matching environment pairs
+2. Larger `env_subset` (indicating greater specificity)
+3. Lower recording `sequence` value (if scores tie)
+
+**In fuzzy mode**, only command and args are required. Among qualifying
+recordings, the matcher prefers the one with:
+
+1. Exact stdin match (if stdin matches the invocation)
+2. More matching environment pairs
+3. Larger `env_subset`
+4. Lower recording `sequence` value (if scores tie)
+
+This ensures that when the same command is recorded with different contexts (for
+example, `git status` with and without environment variables), replay selects
+the recording that best matches the live invocation rather than always consuming
+the first compatible entry.
 
 ### Consumed-record tracking
 

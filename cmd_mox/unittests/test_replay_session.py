@@ -29,6 +29,25 @@ class RecordedInvocationSpec:
     sequence: int = 0
 
 
+class InvocationKwargs(t.TypedDict, total=False):
+    """Keyword arguments accepted by ``_make_invocation``."""
+
+    command: str
+    args: list[str] | None
+    stdin: str
+    env: dict[str, str] | None
+
+
+@dc.dataclass(slots=True)
+class BestFitCase:
+    """Parametrize bundle for best-fit selection tests."""
+
+    strict_matching: bool
+    recs: list[RecordedInvocation]
+    invocation_kwargs: InvocationKwargs
+    expected_stdout: str
+
+
 def _make_recorded_invocation(
     command: str = "git",
     args: list[str] | None = None,
@@ -81,6 +100,20 @@ def _make_invocation(
         stdin=stdin,
         env=env or {},
     )
+
+
+def _run_session_match(
+    tmp_path: Path,
+    recordings: list[RecordedInvocation],
+    invocation: Invocation,
+    *,
+    strict_matching: bool = True,
+) -> Response | None:
+    """Create a fixture, load a ReplaySession, and return match result."""
+    path = _make_fixture_file(tmp_path, recordings)
+    session = ReplaySession(path, strict_matching=strict_matching)
+    session.load()
+    return session.match(invocation)
 
 
 class TestReplaySessionConstruction:
@@ -292,30 +325,33 @@ class TestReplaySessionStrictMatch:
 class TestReplaySessionFuzzyMatch:
     """Tests for fuzzy matching mode."""
 
-    def test_fuzzy_match_ignores_stdin(self, tmp_path: Path) -> None:
-        """In fuzzy mode, stdin differences do not prevent matching."""
-        rec = _make_recorded_invocation(
-            spec=RecordedInvocationSpec(stdin="recorded input")
+    @pytest.mark.parametrize(
+        ("spec", "invocation_kwargs"),
+        [
+            (
+                RecordedInvocationSpec(stdin="recorded input"),
+                {"stdin": "different input"},
+            ),
+            (
+                RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
+                {"env": {"TOTALLY": "different"}},
+            ),
+        ],
+        ids=["ignores_stdin", "ignores_env"],
+    )
+    def test_fuzzy_match_ignores_context(
+        self,
+        tmp_path: Path,
+        spec: RecordedInvocationSpec,
+        invocation_kwargs: InvocationKwargs,
+    ) -> None:
+        """In fuzzy mode, stdin and env differences do not prevent matching."""
+        result = _run_session_match(
+            tmp_path,
+            [_make_recorded_invocation(spec=spec)],
+            _make_invocation(**invocation_kwargs),
+            strict_matching=False,
         )
-        path = _make_fixture_file(tmp_path, [rec])
-
-        session = ReplaySession(path, strict_matching=False)
-        session.load()
-
-        result = session.match(_make_invocation(stdin="different input"))
-        assert result is not None
-
-    def test_fuzzy_match_ignores_env(self, tmp_path: Path) -> None:
-        """In fuzzy mode, env differences do not prevent matching."""
-        rec = _make_recorded_invocation(
-            spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"})
-        )
-        path = _make_fixture_file(tmp_path, [rec])
-
-        session = ReplaySession(path, strict_matching=False)
-        session.load()
-
-        result = session.match(_make_invocation(env={"TOTALLY": "different"}))
         assert result is not None
 
     def test_fuzzy_match_still_requires_command(self, tmp_path: Path) -> None:
@@ -341,13 +377,13 @@ class TestReplaySessionConsumption:
     """Tests for consumed-record tracking."""
 
     def test_match_marks_recording_as_consumed(self, tmp_path: Path) -> None:
-        """After a successful match, the recording index is in _consumed."""
+        """After a successful match, the recording index is consumed."""
         path = _make_fixture_file(tmp_path)
         session = ReplaySession(path)
         session.load()
 
         session.match(_make_invocation())
-        assert 0 in session._consumed
+        assert session.is_consumed(0)
 
     def test_consumed_recording_not_matched_again(self, tmp_path: Path) -> None:
         """A consumed recording is skipped on subsequent match() calls."""
@@ -489,7 +525,7 @@ class TestReplaySessionThreadSafety:
             th.join()
 
         # All recordings should be consumed exactly once.
-        assert len(session._consumed) == n_threads
+        assert session.consumed_count == n_threads
         non_none = [r for r in results if r is not None]
         assert len(non_none) == n_threads
 
@@ -527,3 +563,64 @@ class TestReplaySessionAllowUnmatched:
         # Consume only the first recording, leave the second unconsumed.
         session.match(_make_invocation())
         session.verify_all_consumed()  # should not raise
+
+
+class TestReplaySessionMatcherDelegation:
+    """Tests for ReplaySession delegating to InvocationMatcher."""
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            BestFitCase(
+                strict_matching=True,
+                recs=[
+                    _make_recorded_invocation(
+                        spec=RecordedInvocationSpec(
+                            sequence=0, env_subset={}, stdout="generic\n"
+                        )
+                    ),
+                    _make_recorded_invocation(
+                        spec=RecordedInvocationSpec(
+                            sequence=1,
+                            env_subset={"FOO": "bar"},
+                            stdout="specific\n",
+                        )
+                    ),
+                ],
+                invocation_kwargs={"env": {"FOO": "bar", "EXTRA": "val"}},
+                expected_stdout="specific\n",
+            ),
+            BestFitCase(
+                strict_matching=False,
+                recs=[
+                    _make_recorded_invocation(
+                        spec=RecordedInvocationSpec(
+                            sequence=0, stdin="other", stdout="wrong\n"
+                        )
+                    ),
+                    _make_recorded_invocation(
+                        spec=RecordedInvocationSpec(
+                            sequence=1, stdin="hello", stdout="right\n"
+                        )
+                    ),
+                ],
+                invocation_kwargs={"stdin": "hello"},
+                expected_stdout="right\n",
+            ),
+        ],
+        ids=["strict_env_specificity", "fuzzy_stdin_best_fit"],
+    )
+    def test_replay_session_best_fit_selection(
+        self,
+        tmp_path: Path,
+        case: BestFitCase,
+    ) -> None:
+        """ReplaySession selects the best-fit recording via InvocationMatcher."""
+        result = _run_session_match(
+            tmp_path,
+            case.recs,
+            _make_invocation(**case.invocation_kwargs),
+            strict_matching=case.strict_matching,
+        )
+        assert result is not None
+        assert result.stdout == case.expected_stdout
