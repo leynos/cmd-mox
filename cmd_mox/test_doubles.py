@@ -69,7 +69,7 @@ class DoubleKind(enum.StrEnum):
     SPY = "spy"
 
 
-class CommandDouble(_ExpectationProxy):  # type: ignore[misc]  # runtime proxy; satisfies typing-only protocol
+class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-base]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
 
     T_Kind = DoubleKind

@@ -129,7 +129,7 @@ class InvocationMatcher:
         """
         best_idx: int | None = None
         best_stats: tuple[bool, int, int] | None = None
-        best_sequence: int | None = None
+        best_sequence: int = -1
 
         for idx, recording in enumerate(recordings):
             if idx in consumed:
@@ -144,7 +144,7 @@ class InvocationMatcher:
                 best_idx = idx
                 best_stats = stats
                 best_sequence = recording.sequence
-            elif stats == best_stats and recording.sequence < best_sequence:  # type: ignore[operator]
+            elif stats == best_stats and recording.sequence < best_sequence:
                 best_idx = idx
                 best_sequence = recording.sequence
 

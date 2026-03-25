@@ -94,7 +94,7 @@ def test_regex_matches_and_repr() -> None:
 def test_is_a_edge_cases(value: object, *, expected: bool) -> None:
     """IsA handles unexpected value types gracefully."""
     matcher = IsA(int)
-    assert matcher(value) is expected  # type: ignore[arg-type]
+    assert matcher(value) is expected  # type: ignore[arg-type, ty:invalid-argument-type]
 
 
 def test_regex_invalid_pattern_raises() -> None:
@@ -108,7 +108,7 @@ def test_regex_non_string_input(value: object) -> None:
     """Regex matcher raises TypeError for non-string values."""
     matcher = Regex(r"^foo\d$")
     with pytest.raises(TypeError):
-        matcher(value)  # type: ignore[arg-type]
+        matcher(value)  # type: ignore[arg-type, ty:invalid-argument-type]
 
 
 def test_predicate_matches_and_repr() -> None:

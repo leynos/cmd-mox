@@ -29,7 +29,7 @@ class _FakeWin32File(Win32FileProtocol):
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
-        return response  # type: ignore[return-value]
+        return response  # type: ignore[return-value, ty:invalid-return-type]
 
     def WriteFile(self, handle: object, payload: bytes) -> None:  # noqa: N802
         self.writes.append((handle, payload))
@@ -129,7 +129,7 @@ def test_named_pipe_handler_uses_shared_helpers(
     dummy_outer = object()
     state = _NamedPipeState(
         pipe_name="pipe",
-        outer=dummy_outer,  # type: ignore[arg-type]
+        outer=dummy_outer,  # type: ignore[arg-type, ty:invalid-argument-type]
         accept_timeout=0.1,
     )
     state._client_threads.add(threading.current_thread())

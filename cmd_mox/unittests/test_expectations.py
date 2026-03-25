@@ -108,7 +108,7 @@ def test_with_env_rejects_non_string_keys() -> None:
     """with_env() should reject non-string keys and values."""
     expectation = Expectation("cmd")
     with pytest.raises(TypeError, match="name must be str"):
-        expectation.with_env({42: "value"})  # type: ignore[arg-type]
+        expectation.with_env({42: "value"})  # type: ignore[arg-type, ty:invalid-argument-type]
 
 
 def test_with_env_rejects_empty_key() -> None:
@@ -122,7 +122,7 @@ def test_with_env_rejects_non_string_values() -> None:
     """with_env() should reject non-string values."""
     expectation = Expectation("cmd")
     with pytest.raises(TypeError, match="value must be str"):
-        expectation.with_env({"VAR": 7})  # type: ignore[arg-type]
+        expectation.with_env({"VAR": 7})  # type: ignore[arg-type, ty:invalid-argument-type]
 
 
 def test_any_order_expectations_allow_flexible_sequence(
@@ -352,7 +352,7 @@ class TestStdinMatching:
         type constraints.  It exercises the defensive fallback branch.
         """
         exp = Expectation("cmd")
-        exp.stdin = 42  # type: ignore[assignment]
+        exp.stdin = 42  # type: ignore[assignment, ty:invalid-assignment]
         inv = Invocation(command="cmd", args=[], stdin="hello", env={})
         assert exp.matches(inv) is False
         reason = exp.explain_mismatch(inv)
