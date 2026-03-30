@@ -55,29 +55,19 @@ class TestReplayFluentAPI:
 
         assert result is spy
 
-    def test_replay_defaults_to_strict_matching(self, tmp_path: Path) -> None:
-        """replay() enables strict matching by default."""
-        mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
-
-        spy = mox.spy("git").replay(fixture_path)
-
-        session = spy.replay_session
-        assert session is not None
-        assert session.strict_matching is True
-
-    def test_replay_accepts_strict_false_for_fuzzy_matching(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(("strict", "expected"), [(True, True), (False, False)])
+    def test_replay_configures_matching_mode(
+        self, tmp_path: Path, strict: bool, expected: bool
     ) -> None:
-        """replay(strict=False) configures fuzzy matching."""
+        """replay() configures strict or fuzzy matching."""
         mox = CmdMox()
         fixture_path = _write_fixture(tmp_path)
 
-        spy = mox.spy("git").replay(fixture_path, strict=False)
+        spy = mox.spy("git").replay(fixture_path, strict=strict)
 
         session = spy.replay_session
         assert session is not None
-        assert session.strict_matching is False
+        assert session.strict_matching is expected
 
     def test_replay_accepts_string_path(self, tmp_path: Path) -> None:
         """replay() accepts a string path and converts it to Path."""
