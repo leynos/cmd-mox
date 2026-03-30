@@ -5,7 +5,7 @@ This ExecPlan (execution plan) is a living document. The sections
 `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
 proceeds.
 
-Status: DRAFT
+Status: COMPLETE
 
 ## Purpose / big picture
 
@@ -171,14 +171,14 @@ plus replay-specific tests and documentation.
   recording tests to establish the actual implementation seam.
 - [x] Drafted this ExecPlan in
   `docs/execplans/12-2-3-add-replay-to-command-double.md`.
-- [ ] Obtain explicit user approval for this plan before implementation.
-- [ ] Add or update unit tests for `CommandDouble.replay()` before editing
+- [x] Obtain explicit user approval for this plan before implementation.
+- [x] Add or update unit tests for `CommandDouble.replay()` before editing
   production code.
-- [ ] Add or update `pytest-bdd` scenarios covering the replay fluent API
+- [x] Add or update `pytest-bdd` scenarios covering the replay fluent API
   contract before editing production code.
-- [ ] Implement the replay session attachment API on `CommandDouble`.
-- [ ] Update the design doc, usage guide, and roadmap.
-- [ ] Run all required quality gates and capture the results in the plan if it
+- [x] Implement the replay session attachment API on `CommandDouble`.
+- [x] Update the design doc, usage guide, and roadmap.
+- [x] Run all required quality gates and capture the results in the plan if it
   moves into execution.
 
 ## Surprises & Discoveries
@@ -197,6 +197,9 @@ plus replay-specific tests and documentation.
 - `docs/usage-guide.md` currently explains `ReplaySession` directly but does
   not document a fluent `.replay()` method on doubles, which means this task
   has real user-facing documentation impact.
+- `make markdownlint` scans `.uv-cache/` by default through the repo-wide
+  `**/*.md` glob, so the markdownlint config needed an explicit `.uv-cache/**`
+  ignore to avoid third-party package READMEs failing the gate.
 
 ## Decision Log
 
@@ -407,7 +410,18 @@ The feature is complete when all of the following are true:
 
 ## Outcomes & Retrospective
 
-This section is intentionally blank during draft phase. When implementation is
-complete, replace this paragraph with a concise record of what shipped, what
-changed from the original plan, which risks materialised, and the final gate
-results.
+- Shipped `CommandDouble.replay(fixture_path, *, strict=True)` with eager
+  `ReplaySession.load()` during configuration, plus public read-only
+  `has_replay_session` and `replay_session` helpers.
+- Landed focused unit and behavioural coverage for fluent chaining, strict vs
+  fuzzy mode, eager fixture validation, duplicate attachment rejection,
+  passthrough incompatibility, and the current spy-only scope.
+- Updated the usage guide, design document, and roadmap so the written contract
+  matches the shipped API.
+- Quality gates:
+  - `make markdownlint`: passed
+  - `make nixie`: passed
+  - `make check-fmt`: passed
+  - `make typecheck`: passed
+  - `make lint`: passed
+  - `make test`: passed (`720 passed, 12 skipped`)

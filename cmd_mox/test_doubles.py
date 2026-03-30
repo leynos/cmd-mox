@@ -16,6 +16,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing-only import
 if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from pathlib import Path
 
+    from .record.replay import ReplaySession
     from .record.scrubber import Scrubber
     from .record.session import RecordingSession
 
@@ -76,6 +77,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     __slots__ = (
         "_recording_session",
+        "_replay_session",
         "controller",
         "expectation",
         "handler",
@@ -95,6 +97,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         self.invocations: list[Invocation] = []
         self.passthrough_mode = False
         self.expectation = Expectation(name)
+        self._replay_session: ReplaySession | None = None
         self._recording_session: RecordingSession | None = None
 
     def returns(self, stdout: str = "", stderr: str = "", exit_code: int = 0) -> Self:
@@ -230,6 +233,35 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         self._recording_session.start()
         return self
 
+    def replay(
+        self,
+        fixture_path: str | Path,
+        *,
+        strict: bool = True,
+    ) -> Self:
+        """Attach and eagerly load a replay fixture for a spy."""
+        if self.kind is not DoubleKind.SPY:
+            msg = "replay() is only valid for spies"
+            raise ValueError(msg)
+        if self.passthrough_mode:
+            msg = "replay() cannot be combined with passthrough()"
+            raise ValueError(msg)
+        if self._replay_session is not None:
+            msg = "replay() already called; finalize the existing session first"
+            raise RuntimeError(msg)
+
+        from pathlib import Path as _Path
+
+        from .record.replay import ReplaySession as _ReplaySession
+
+        replay_session = _ReplaySession(
+            fixture_path=_Path(fixture_path),
+            strict_matching=strict,
+        )
+        replay_session.load()
+        self._replay_session = replay_session
+        return self
+
     @property
     def has_recording_session(self) -> bool:
         """Return ``True`` if a recording session is attached."""
@@ -239,6 +271,16 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def recording_session(self) -> RecordingSession | None:
         """Return the attached recording session, or ``None``."""
         return self._recording_session
+
+    @property
+    def has_replay_session(self) -> bool:
+        """Return ``True`` if a replay session is attached."""
+        return self._replay_session is not None
+
+    @property
+    def replay_session(self) -> ReplaySession | None:
+        """Return the attached replay session, or ``None``."""
+        return self._replay_session
 
     # ------------------------------------------------------------------
     # Matching helpers

@@ -2335,8 +2335,8 @@ spy = cmd_mox.spy("aws").passthrough().record(
 # Replaying from a recorded fixture
 spy = cmd_mox.spy("git").replay("fixtures/git_clone.json")
 
-# Strict replay (fail on any unmatched invocation)
-spy = cmd_mox.spy("git").replay("fixtures/git_clone.json", strict=True)
+# Fuzzy replay (match on command + args only)
+spy = cmd_mox.spy("git").replay("fixtures/git_clone.json", strict=False)
 ```
 
 #### 9.6.2 Table 3: Record Mode API Methods
@@ -2346,7 +2346,7 @@ spy = cmd_mox.spy("git").replay("fixtures/git_clone.json", strict=True)
 | Method                                      | Purpose                             | Example                                           |
 | ------------------------------------------- | ----------------------------------- | ------------------------------------------------- |
 | `.record(path, *, scrubber, env_allowlist)` | Enable recording on passthrough spy | `.record("fixtures/git.json")`                    |
-| `.replay(path, *, strict)`                  | Load fixture and replay responses   | `.replay("fixtures/git.json")`                    |
+| `.replay(path, *, strict)`                  | Load fixture and replay responses on a spy | `.replay("fixtures/git.json")`             |
 | `Scrubber()`                                | Create scrubber with default rules  | `Scrubber()`                                      |
 | `Scrubber.add_rule(rule)`                   | Add custom scrubbing rule           | `scrubber.add_rule(rule)`                         |
 | `ScrubbingRule(pattern, replacement)`       | Define a scrubbing pattern          | `ScrubbingRule(r"token=\S+", "token=<REDACTED>")` |
@@ -2488,14 +2488,28 @@ class CommandDouble:
         strict: bool = True,
     ) -> Self:
         """Load a fixture and replay recorded responses."""
+        if self.kind is not DoubleKind.SPY:
+            raise ValueError("replay() is only valid for spies")
         if self.passthrough_mode:
             raise ValueError("replay() cannot be combined with passthrough()")
+        if self._replay_session is not None:
+            raise RuntimeError(
+                "replay() already called; finalize the existing session first"
+            )
         self._replay_session = ReplaySession(
             fixture_path=Path(fixture_path),
             strict_matching=strict,
         )
         self._replay_session.load()
         return self
+
+    @property
+    def has_replay_session(self) -> bool:
+        return self._replay_session is not None
+
+    @property
+    def replay_session(self) -> ReplaySession | None:
+        return self._replay_session
 ```
 
 #### 9.8.3 Controller Integration
@@ -2819,6 +2833,32 @@ the most appropriate recording when multiple candidates qualify.
 - **Exposing InvocationMatcher as a primary API:** Deferred. The class is
   exported from `cmd_mox.record` for advanced use cases, but the primary
   user-facing contract remains `ReplaySession.match()`
+
+#### 9.10.14 `CommandDouble.replay()` scope and eager loading
+
+**Decision:** Implement `CommandDouble.replay()` as a spy-only fluent API that
+constructs and immediately loads a `ReplaySession`, and expose the attached
+session through read-only `has_replay_session` and `replay_session`
+properties.
+
+**Rationale:**
+
+- Eager loading surfaces missing files, malformed fixtures, and schema errors
+  during test setup, which is earlier and easier to diagnose than deferring
+  them until command execution
+- Restricting `.replay()` to spies avoids mixing replay-backed responses with
+  mock and stub semantics before roadmap items `12.2.4` and `12.2.5` complete
+  controller integration and replay verification
+- Mirroring the recording accessors gives tests and documentation a public way
+  to inspect replay attachment without reaching into private slots
+
+**Alternatives considered:**
+
+- **Allow replay on all double kinds:** Deferred because, without controller
+  integration, that broadens the public contract faster than the roadmap stage
+  justifies
+- **Lazy loading on first command invocation:** Rejected because it delays
+  validation and makes fixture problems harder to localise
 
 ### 9.11 Versioning and Forward Compatibility
 
