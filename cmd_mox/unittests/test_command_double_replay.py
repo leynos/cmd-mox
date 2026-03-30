@@ -55,13 +55,18 @@ class TestReplayFluentAPI:
 
         assert result is spy
 
-    @pytest.mark.parametrize(("strict", "expected"), [(True, True), (False, False)])
+    @pytest.mark.parametrize(
+        "mode_case",
+        [(True, True), (False, False)],
+        ids=["strict", "fuzzy"],
+    )
     def test_replay_configures_matching_mode(
-        self, tmp_path: Path, strict: bool, expected: bool
+        self, tmp_path: Path, mode_case: tuple[bool, bool]
     ) -> None:
         """replay() configures strict or fuzzy matching."""
         mox = CmdMox()
         fixture_path = _write_fixture(tmp_path)
+        strict, expected = mode_case
 
         spy = mox.spy("git").replay(fixture_path, strict=strict)
 
