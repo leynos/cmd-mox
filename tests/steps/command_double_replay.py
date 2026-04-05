@@ -69,23 +69,24 @@ def spy_with_passthrough(mox: CmdMox) -> CommandDouble:
     return mox.spy("git").passthrough()
 
 
+def _call_replay_with_strict(
+    mox: CmdMox, fixture_path: Path, *, strict: bool
+) -> CommandDouble:
+    """Attach a replay session to a git spy with the specified strict mode."""
+    return mox.spy("git").replay(fixture_path, strict=strict)
+
+
+def _assert_strict_matching(spy_after_replay: CommandDouble, *, expected: bool) -> None:
+    """Assert that the replay session has the expected strict_matching setting."""
+    session = spy_after_replay.replay_session
+    assert session is not None
+    assert session.strict_matching is expected
+
+
 @when('replay is called on a "git" spy', target_fixture="spy_after_replay")
 def call_replay(mox: CmdMox, fixture_path: Path) -> CommandDouble:
-    """Attach a strict replay session to a spy.
-
-    Parameters
-    ----------
-    mox : CmdMox
-        The controller instance to create the spy from.
-    fixture_path : Path
-        Path to the replay fixture file.
-
-    Returns
-    -------
-    CommandDouble
-        A git spy with a strict replay session attached.
-    """
-    return mox.spy("git").replay(fixture_path)
+    """Attach a strict replay session to a spy."""
+    return _call_replay_with_strict(mox, fixture_path, strict=True)
 
 
 @when(
@@ -93,21 +94,8 @@ def call_replay(mox: CmdMox, fixture_path: Path) -> CommandDouble:
     target_fixture="spy_after_replay",
 )
 def call_replay_fuzzy(mox: CmdMox, fixture_path: Path) -> CommandDouble:
-    """Attach a fuzzy replay session to a spy.
-
-    Parameters
-    ----------
-    mox : CmdMox
-        The controller instance to create the spy from.
-    fixture_path : Path
-        Path to the replay fixture file.
-
-    Returns
-    -------
-    CommandDouble
-        A git spy with a fuzzy replay session attached.
-    """
-    return mox.spy("git").replay(fixture_path, strict=False)
+    """Attach a fuzzy replay session to a spy."""
+    return _call_replay_with_strict(mox, fixture_path, strict=False)
 
 
 @when("replay is combined with passthrough it raises ValueError")
@@ -161,27 +149,11 @@ def replay_session_is_loaded(spy_after_replay: CommandDouble) -> None:
 
 @then("the replay session uses strict matching")
 def replay_session_uses_strict_matching(spy_after_replay: CommandDouble) -> None:
-    """Assert strict matching is enabled by default.
-
-    Parameters
-    ----------
-    spy_after_replay : CommandDouble
-        A spy with a replay session.
-    """
-    session = spy_after_replay.replay_session
-    assert session is not None
-    assert session.strict_matching is True
+    """Assert strict matching is enabled by default."""
+    _assert_strict_matching(spy_after_replay, expected=True)
 
 
 @then("the replay session uses fuzzy matching")
 def replay_session_uses_fuzzy_matching(spy_after_replay: CommandDouble) -> None:
-    """Assert fuzzy matching is enabled when strict=False.
-
-    Parameters
-    ----------
-    spy_after_replay : CommandDouble
-        A spy with a replay session configured for fuzzy matching.
-    """
-    session = spy_after_replay.replay_session
-    assert session is not None
-    assert session.strict_matching is False
+    """Assert fuzzy matching is enabled when strict=False."""
+    _assert_strict_matching(spy_after_replay, expected=False)
