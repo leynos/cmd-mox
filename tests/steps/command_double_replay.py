@@ -9,38 +9,12 @@ from pytest_bdd import given, then, when
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation
-from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
+from tests.helpers.fixtures import write_minimal_replay_fixture
 
 if t.TYPE_CHECKING:
     from pathlib import Path
 
     from cmd_mox.test_doubles import CommandDouble
-
-
-def _write_fixture(tmp_path: Path) -> Path:
-    """Write a minimal valid replay fixture and return its path."""
-    fixture = FixtureFile(
-        version=FixtureFile.SCHEMA_VERSION,
-        metadata=FixtureMetadata.create(),
-        recordings=[
-            RecordedInvocation(
-                sequence=0,
-                command="git",
-                args=["status"],
-                stdin="",
-                env_subset={},
-                stdout="ok\n",
-                stderr="",
-                exit_code=0,
-                timestamp="2026-01-15T10:30:00+00:00",
-                duration_ms=0,
-            )
-        ],
-        scrubbing_rules=[],
-    )
-    path = tmp_path / "fixture.json"
-    fixture.save(path)
-    return path
 
 
 @given("a CmdMox controller", target_fixture="mox")
@@ -52,7 +26,7 @@ def create_controller() -> CmdMox:
 @given('a replay fixture for "git"', target_fixture="fixture_path")
 def replay_fixture(tmp_path: Path) -> Path:
     """Create a replay fixture file for the git command."""
-    return _write_fixture(tmp_path)
+    return write_minimal_replay_fixture(tmp_path)
 
 
 @given('a "git" spy with passthrough enabled', target_fixture="spy")

@@ -461,7 +461,7 @@ persisted to the fixture file when `verify()` is called. When
 automatically on exit. If `verify_on_exit=False`, fixtures are **not** written
 unless you call `verify()` explicitly.
 
-### Replay parameters
+### Record parameters
 
 The `record()` method accepts optional parameters for controlling what is
 recorded:
@@ -493,7 +493,7 @@ spy = cmd_mox.spy("aws").passthrough().record(
 - **`env_allowlist`** (`list[str] | None`): environment variable keys to always
   include in recordings, in addition to the default command-specific prefixes.
 
-### Replay validation
+### Record validation
 
 Calling `record()` without first calling `passthrough()` raises `ValueError`:
 

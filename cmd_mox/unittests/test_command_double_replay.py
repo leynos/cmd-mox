@@ -9,37 +9,11 @@ import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation
-from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.replay import ReplaySession
+from tests.helpers.fixtures import write_minimal_replay_fixture
 
 if t.TYPE_CHECKING:
     from pathlib import Path
-
-
-def _write_fixture(tmp_path: Path, filename: str = "fixture.json") -> Path:
-    """Write a minimal valid replay fixture and return its path."""
-    fixture = FixtureFile(
-        version=FixtureFile.SCHEMA_VERSION,
-        metadata=FixtureMetadata.create(),
-        recordings=[
-            RecordedInvocation(
-                sequence=0,
-                command="git",
-                args=["status"],
-                stdin="",
-                env_subset={},
-                stdout="ok\n",
-                stderr="",
-                exit_code=0,
-                timestamp="2026-01-15T10:30:00+00:00",
-                duration_ms=0,
-            )
-        ],
-        scrubbing_rules=[],
-    )
-    path = tmp_path / filename
-    fixture.save(path)
-    return path
 
 
 class TestReplayFluentAPI:
@@ -48,7 +22,7 @@ class TestReplayFluentAPI:
     def test_replay_returns_self(self, tmp_path: Path) -> None:
         """replay() returns the same CommandDouble instance for chaining."""
         mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
+        fixture_path = write_minimal_replay_fixture(tmp_path)
 
         spy = mox.spy("git")
         result = spy.replay(fixture_path)
@@ -65,7 +39,7 @@ class TestReplayFluentAPI:
     ) -> None:
         """replay() configures strict or fuzzy matching."""
         mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
+        fixture_path = write_minimal_replay_fixture(tmp_path)
         strict, expected = mode_case
 
         spy = mox.spy("git").replay(fixture_path, strict=strict)
@@ -77,7 +51,7 @@ class TestReplayFluentAPI:
     def test_replay_accepts_string_path(self, tmp_path: Path) -> None:
         """replay() accepts a string path and converts it to Path."""
         mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
+        fixture_path = write_minimal_replay_fixture(tmp_path)
 
         spy = mox.spy("git").replay(str(fixture_path))
 
@@ -88,7 +62,7 @@ class TestReplayFluentAPI:
     def test_replay_loads_session_immediately(self, tmp_path: Path) -> None:
         """replay() loads the fixture eagerly during configuration."""
         mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
+        fixture_path = write_minimal_replay_fixture(tmp_path)
 
         spy = mox.spy("git").replay(fixture_path)
 
@@ -131,16 +105,24 @@ class TestReplayFluentAPI:
     def test_replay_rejects_passthrough_combination(self, tmp_path: Path) -> None:
         """replay() rejects passthrough because the behaviours conflict."""
         mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
+        fixture_path = write_minimal_replay_fixture(tmp_path)
 
         with pytest.raises(ValueError, match=r"replay.*passthrough"):
             mox.spy("git").passthrough().replay(fixture_path)
 
+    def test_passthrough_rejects_replay_combination(self, tmp_path: Path) -> None:
+        """passthrough() rejects replay because the behaviours conflict."""
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+
+        with pytest.raises(ValueError, match=r"passthrough.*replay"):
+            mox.spy("git").replay(fixture_path).passthrough()
+
     def test_replay_raises_when_session_already_attached(self, tmp_path: Path) -> None:
         """replay() rejects attaching a second replay session."""
         mox = CmdMox()
-        first = _write_fixture(tmp_path, "first.json")
-        second = _write_fixture(tmp_path, "second.json")
+        first = write_minimal_replay_fixture(tmp_path, "first.json")
+        second = write_minimal_replay_fixture(tmp_path, "second.json")
 
         spy = mox.spy("git").replay(first)
 
@@ -151,7 +133,7 @@ class TestReplayFluentAPI:
     def test_replay_is_only_valid_for_spies(self, kind: str, tmp_path: Path) -> None:
         """replay() is limited to spies until controller integration lands."""
         mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
+        fixture_path = write_minimal_replay_fixture(tmp_path)
 
         with pytest.raises(ValueError, match=r"replay.*only valid for spies"):
             getattr(mox, kind)("git").replay(fixture_path)
@@ -169,7 +151,7 @@ class TestHasReplaySession:
     def test_true_after_replay(self, tmp_path: Path) -> None:
         """has_replay_session is True after replay() is called."""
         mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
+        fixture_path = write_minimal_replay_fixture(tmp_path)
 
         assert mox.spy("git").replay(fixture_path).has_replay_session is True
 
@@ -186,7 +168,7 @@ class TestReplaySessionProperty:
     def test_returns_session_after_replay(self, tmp_path: Path) -> None:
         """replay_session returns the ReplaySession after replay()."""
         mox = CmdMox()
-        fixture_path = _write_fixture(tmp_path)
+        fixture_path = write_minimal_replay_fixture(tmp_path)
 
         session = mox.spy("git").replay(fixture_path).replay_session
 

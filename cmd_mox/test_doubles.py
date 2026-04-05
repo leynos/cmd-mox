@@ -189,6 +189,9 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         if self.kind is not DoubleKind.SPY:
             msg = "passthrough() is only valid for spies"
             raise ValueError(msg)
+        if self._replay_session is not None:
+            msg = "passthrough() cannot be combined with replay()"
+            raise ValueError(msg)
         self.passthrough_mode = True
         return self
 
