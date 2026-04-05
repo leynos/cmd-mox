@@ -68,8 +68,9 @@ class TestReplayFluentAPI:
 
         session = spy.replay_session
         assert session is not None
-        assert session.match(
-            Invocation(command="git", args=["status"], stdin="", env={})
+        assert (
+            session.match(Invocation(command="git", args=["status"], stdin="", env={}))
+            is not None
         )
 
     def test_replay_raises_for_missing_fixture(self, tmp_path: Path) -> None:
