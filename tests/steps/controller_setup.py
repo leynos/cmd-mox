@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import typing as t
 from pathlib import Path
 
 import pytest
@@ -28,18 +29,47 @@ _ERROR_TYPES: dict[str, type[VerificationError]] = {
 
 
 @given("a CmdMox controller", target_fixture="mox")
-def create_controller() -> CmdMox:
-    """Create a fresh CmdMox instance."""
-    return CmdMox()
+def create_controller() -> t.Generator[CmdMox, None, None]:
+    """Create a fresh CmdMox instance with proper cleanup.
+
+    Yields
+    ------
+    CmdMox
+        A fresh controller instance that will be cleaned up after the test.
+    """
+    mox = CmdMox()
+    try:
+        yield mox
+    finally:
+        # Ensure cleanup even if the test raises
+        if mox._entered:
+            mox.__exit__(None, None, None)
 
 
 @given(
     parsers.cfparse("a CmdMox controller with max journal size {size:d}"),
     target_fixture="mox",
 )
-def create_controller_with_limit(size: int) -> CmdMox:
-    """Create a CmdMox instance with bounded journal."""
-    return CmdMox(max_journal_entries=size)
+def create_controller_with_limit(size: int) -> t.Generator[CmdMox, None, None]:
+    """Create a CmdMox instance with bounded journal and proper cleanup.
+
+    Parameters
+    ----------
+    size : int
+        Maximum number of journal entries to retain.
+
+    Yields
+    ------
+    CmdMox
+        A controller instance with the specified journal size limit.
+    """
+    mox = CmdMox(max_journal_entries=size)
+    try:
+        yield mox
+    finally:
+        # Ensure cleanup even if the test raises
+        if mox._entered:
+            mox.__exit__(None, None, None)
 
 
 @given(
