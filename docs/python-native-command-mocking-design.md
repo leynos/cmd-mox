@@ -2194,10 +2194,11 @@ Matching modes:
 
 Best-fit scoring:
 
-The matcher computes a stats tuple `(stdin_match, matching_env_pairs,
-env_subset_size)` for each compatible recording and selects the highest-scoring
-candidate. When two candidates have identical stats, the one with the lower
-`sequence` value wins. This ensures deterministic selection that prioritises:
+The matcher computes a stats tuple
+`(stdin_match, matching_env_pairs, env_subset_size)` for each compatible
+recording and selects the highest-scoring candidate. When two candidates have
+identical stats, the one with the lower `sequence` value wins. This ensures
+deterministic selection that prioritises:
 
 1. Exact stdin match (True > False)
 2. Number of matching environment pairs (higher is better)
@@ -2343,13 +2344,13 @@ spy = cmd_mox.spy("git").replay("fixtures/git_clone.json", strict=False)
 
 <!-- markdownlint-disable MD013 -->
 
-| Method                                      | Purpose                             | Example                                           |
-| ------------------------------------------- | ----------------------------------- | ------------------------------------------------- |
-| `.record(path, *, scrubber, env_allowlist)` | Enable recording on passthrough spy | `.record("fixtures/git.json")`                    |
-| `.replay(path, *, strict)`                  | Load fixture and replay responses on a spy | `.replay("fixtures/git.json")`             |
-| `Scrubber()`                                | Create scrubber with default rules  | `Scrubber()`                                      |
-| `Scrubber.add_rule(rule)`                   | Add custom scrubbing rule           | `scrubber.add_rule(rule)`                         |
-| `ScrubbingRule(pattern, replacement)`       | Define a scrubbing pattern          | `ScrubbingRule(r"token=\S+", "token=<REDACTED>")` |
+| Method                                      | Purpose                                    | Example                                           |
+| ------------------------------------------- | ------------------------------------------ | ------------------------------------------------- |
+| `.record(path, *, scrubber, env_allowlist)` | Enable recording on passthrough spy        | `.record("fixtures/git.json")`                    |
+| `.replay(path, *, strict)`                  | Load fixture and replay responses on a spy | `.replay("fixtures/git.json")`                    |
+| `Scrubber()`                                | Create scrubber with default rules         | `Scrubber()`                                      |
+| `Scrubber.add_rule(rule)`                   | Add custom scrubbing rule                  | `scrubber.add_rule(rule)`                         |
+| `ScrubbingRule(pattern, replacement)`       | Define a scrubbing pattern                 | `ScrubbingRule(r"token=\S+", "token=<REDACTED>")` |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2523,32 +2524,24 @@ class CmdMox:
         double = self._doubles.get(invocation.command)
 
         # Check for replay session before other strategies
-        if double and double._replay_session:
-            matched = double._replay_session.match(invocation)
+        if double and double.replay_session:
+            matched = double.replay_session.match(invocation)
             if matched:
+                double.invocations.append(invocation)
                 return matched
-            if double._replay_session.strict_matching:
+            if double.replay_session.strict_matching:
                 raise UnexpectedCommandError(
-                    f"No fixture recording matches: {invocation}"
+                    f"No fixture recording matches: {invocation.command}"
                 )
+            return self._response_for_regular(double, invocation)
 
         # Fall through to existing logic
         return self._make_response_original(invocation)
-
-    def verify(self) -> None:
-        """Extended verification including replay consumption checks."""
-        # ... existing verification ...
-
-        # Verify all replay recordings were consumed
-        for name, double in self._doubles.items():
-            if double._replay_session:
-                double._replay_session.verify_all_consumed()
-
-        # Finalize any active recording sessions
-        for name, double in self._doubles.items():
-            if double._recording_session and not double._recording_session._finalized:
-                double._recording_session.finalize()
 ```
+
+Replay integration in `_make_response()` is intentionally separate from replay
+consumption verification in `verify()`. The former is roadmap item `12.2.4`;
+the latter remains `12.2.5`.
 
 ### 9.9 Security Considerations
 
@@ -2838,8 +2831,7 @@ the most appropriate recording when multiple candidates qualify.
 
 **Decision:** Implement `CommandDouble.replay()` as a spy-only fluent API that
 constructs and immediately loads a `ReplaySession`, and expose the attached
-session through read-only `has_replay_session` and `replay_session`
-properties.
+session through read-only `has_replay_session` and `replay_session` properties.
 
 **Rationale:**
 
@@ -2859,6 +2851,35 @@ properties.
   justifies
 - **Lazy loading on first command invocation:** Rejected because it delays
   validation and makes fixture problems harder to localise
+
+#### 9.10.15 Replay-backed controller dispatch and strict-miss handling
+
+**Decision:** When a spy has an attached replay session,
+`CmdMox._make_response()` consults that replay session before the spy's normal
+response or handler path. Matched replay invocations are recorded in the spy
+history, strict misses raise `UnexpectedCommandError` immediately, and fuzzy
+misses fall back to the spy's configured behaviour.
+
+**Rationale:**
+
+- Replay fixtures are intended to drive live command execution, not merely to
+  be attached as inert configuration on the double
+- Recording matched replay invocations in `spy.invocations` keeps spy
+  assertions and journal inspection consistent with the existing non-replay spy
+  behaviour
+- Raising immediately on strict mismatches surfaces the failure at the exact
+  invocation that violated the fixture contract
+- Allowing fuzzy mismatches to fall back keeps fuzzy replay additive and useful
+  for partial-fixture scenarios
+
+**Alternatives considered:**
+
+- **Delay strict replay failures until `verify()`:** Rejected because that
+  hides the failing invocation behind later verification work and weakens the
+  strict replay contract
+- **Treat fuzzy replay as all-or-nothing:** Rejected because it makes fuzzy
+  replay much less useful for tests that only fixture a subset of command
+  variants
 
 ### 9.11 Versioning and Forward Compatibility
 

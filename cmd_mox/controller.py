@@ -414,6 +414,27 @@ class CmdMox:
             double.invocations.append(invocation)
         return resp
 
+    def _response_for_replay(
+        self, double: CommandDouble, invocation: Invocation
+    ) -> Response:
+        """Handle a replay-backed invocation before normal spy behaviour."""
+        replay_session = double.replay_session
+        if replay_session is None:
+            msg = "Replay response requested without an attached replay session"
+            raise RuntimeError(msg)
+
+        if matched := replay_session.match(invocation):
+            if double.is_recording:
+                double.invocations.append(invocation)
+            return matched
+
+        if replay_session.strict_matching:
+            invocation_text = " ".join([invocation.command, *invocation.args]).strip()
+            msg = f"No fixture recording matches: {invocation_text}"
+            raise UnexpectedCommandError(msg)
+
+        return self._response_for_regular(double, invocation)
+
     def _select_response_strategy(
         self, double: CommandDouble | None
     ) -> _ResponseStrategy:
@@ -427,6 +448,12 @@ class CmdMox:
     def _make_response(self, invocation: Invocation) -> Response:
         """Build the response for an invocation using the appropriate strategy."""
         double = self._doubles.get(invocation.command)
+
+        if double is not None and double.replay_session is not None:
+            resp = self._response_for_replay(double, invocation)
+            invocation.apply(resp)
+            return resp
+
         strategy = self._select_response_strategy(double)
 
         if strategy is _ResponseStrategy.MISSING_DOUBLE:

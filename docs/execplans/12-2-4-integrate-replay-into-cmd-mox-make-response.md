@@ -5,13 +5,13 @@ This ExecPlan (execution plan) is a living document. The sections
 `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
 proceeds.
 
-Status: DRAFT
+Status: COMPLETE
 
 ## Purpose / big picture
 
 Roadmap item `12.2.4` is the first point where replay fixtures stop being
-configuration-only and start affecting live command execution. `12.2.3`
-already lets a test author write
+configuration-only and start affecting live command execution. `12.2.3` already
+lets a test author write
 `cmd_mox.spy("git").replay("fixtures/git_clone.json")`, but the controller
 still ignores the attached `ReplaySession` and continues using the spy's normal
 response or handler. This task wires replay into
@@ -169,7 +169,8 @@ unconsumed recordings. That verification work is explicitly out of scope here.
   the user-visible behaviour level.
 - Risk: `12.2.5` will later add `verify_all_consumed()` calls. Mitigation:
   avoid any implementation shortcuts in `12.2.4` that would make replay
-  sessions look "consumed" without actually going through `ReplaySession.match()`.
+  sessions look "consumed" without actually going through
+  `ReplaySession.match()`.
 
 ## Progress
 
@@ -179,14 +180,14 @@ unconsumed recordings. That verification work is explicitly out of scope here.
   and controller BDD scaffolding.
 - [x] Draft this ExecPlan in
   `docs/execplans/12-2-4-integrate-replay-into-cmd-mox-make-response.md`.
-- [ ] Obtain explicit user approval for this plan before implementation.
-- [ ] Add or update unit tests for controller replay integration before
+- [x] Obtain explicit user approval for this plan before implementation.
+- [x] Add or update unit tests for controller replay integration before
   touching production code.
-- [ ] Add or update `pytest-bdd` scenarios that exercise replay-backed command
+- [x] Add or update `pytest-bdd` scenarios that exercise replay-backed command
   execution behaviour.
-- [ ] Implement replay-aware response selection in `cmd_mox/controller.py`.
-- [ ] Update the design doc, usage guide, and roadmap.
-- [ ] Run all required quality gates and record the results in this document if
+- [x] Implement replay-aware response selection in `cmd_mox/controller.py`.
+- [x] Update the design doc, usage guide, and roadmap.
+- [x] Run all required quality gates and record the results in this document if
   the plan moves into execution.
 
 ## Surprises & Discoveries
@@ -208,6 +209,10 @@ unconsumed recordings. That verification work is explicitly out of scope here.
 - The design doc already sketches the desired `_make_response()` replay branch,
   but it does not explicitly call out spy invocation-history bookkeeping. This
   plan makes that requirement explicit.
+- Focused red-phase test runs need
+  `UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools`
+  `uv run pytest ...` rather than plain `pytest`, because the repo does not put
+  the virtualenv binaries directly on `PATH`.
 
 ## Decision Log
 
@@ -239,6 +244,11 @@ unconsumed recordings. That verification work is explicitly out of scope here.
   any comment updates needed to clarify that replay-consumption verification is
   still pending in `12.2.5`.
 
+- Decision: keep replay handling as a dedicated helper branch in
+  `cmd_mox/controller.py` rather than extending `_ResponseStrategy`. Replay is
+  an overlay on top of the existing regular path, and the helper keeps the diff
+  small while still making the precedence rules explicit.
+
 ## Plan of work
 
 ### Stage A: Write failing unit tests first
@@ -264,9 +274,9 @@ Write tests that cover at least these behaviours:
    `.returns(...)` or `.runs(...)` response.
 8. A double without replay continues using the existing behaviour unchanged.
 
-Use `tests/helpers/fixtures.py` where possible for valid fixture creation. Add a
-small purpose-built fixture helper only if the existing `git status` fixture is
-too narrow for the new controller cases.
+Use `tests/helpers/fixtures.py` where possible for valid fixture creation. Add
+a small purpose-built fixture helper only if the existing `git status` fixture
+is too narrow for the new controller cases.
 
 Run the focused unit tests before implementation and confirm they fail:
 
@@ -298,10 +308,10 @@ Cover at least these scenarios:
    during `verify()`.
 
 Keep the BDD assertions consumer-facing. For example, a success-path scenario
-should drive a real shimmed command and assert on its stdout and the spy/journal
-state. For the strict-mismatch scenario, it is acceptable for the step to
-exercise the controller directly if that is the most stable way to assert the
-timing and error type without expanding the IPC protocol.
+should drive a real shimmed command and assert on its stdout and the
+spy/journal state. For the strict-mismatch scenario, it is acceptable for the
+step to exercise the controller directly if that is the most stable way to
+assert the timing and error type without expanding the IPC protocol.
 
 Run the focused behavioural coverage before implementation and confirm failure:
 
@@ -429,7 +439,57 @@ The implementation is complete when all of the following are true:
 
 ## Outcomes & Retrospective
 
-This section is intentionally blank during the draft phase. When implementation
-completes, replace this note with a concise summary of what shipped, which tests
-proved it, which quality gates passed, and what follow-on work remains for
-`12.2.5`.
+Implementation completed successfully.
+
+What shipped:
+
+1. `CmdMox._make_response()` now consults an attached replay session before the
+   normal spy response/handler path.
+2. Matched replay invocations are recorded in `double.invocations`, and
+   `_handle_invocation()` continues to record them in the controller journal.
+3. Strict replay mismatches now raise `UnexpectedCommandError` immediately with
+   a `"No fixture recording matches: ..."` message.
+4. Fuzzy replay mismatches now fall back to the spy's configured
+   response/handler path instead of raising.
+5. The usage guide, design doc, roadmap, and this ExecPlan were updated to
+   reflect the final behaviour.
+
+Evidence:
+
+- New unit coverage in `cmd_mox/unittests/test_controller_replay.py`
+  exercises replay precedence, handler bypass, spy/journal bookkeeping, strict
+  mismatch failure, and fuzzy fallback.
+- New behavioural scenarios in `features/controller.feature` and
+  `tests/steps/controller_replay.py` exercise replay-backed command execution,
+  strict invocation-time failure, and fuzzy fallback behaviour.
+- Focused green runs:
+
+  ```plaintext
+  5 passed in 0.04s
+  6 passed, 28 deselected in 1.89s
+  ```
+
+- Full quality gates passed:
+
+  ```plaintext
+  make markdownlint
+  Summary: 0 error(s)
+
+  make nixie
+  All diagrams validated successfully
+
+  make check-fmt
+  133 files already formatted
+
+  make typecheck
+  All checks passed!
+
+  make lint
+  All checks passed!
+
+  make test
+  729 passed, 12 skipped
+  ```
+
+Follow-on work remains in roadmap item `12.2.5`, which will extend
+`CmdMox.verify()` to report unconsumed replay recordings.
