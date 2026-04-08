@@ -53,7 +53,7 @@ class Expectation:
     name: str
     args: list[str] | None = None
     match_args: list[t.Callable[[str], bool]] | None = None
-    stdin: str | t.Callable[[str], bool] | None = None
+    stdin: str | t.Callable[[str], t.Any] | None = None
     env: dict[str, str] = dc.field(default_factory=dict)
     count: int = 1
     ordered: bool = False
@@ -68,8 +68,11 @@ class Expectation:
         self.match_args = list(matchers)
         return self
 
-    def with_stdin(self, data: str | t.Callable[[str], bool]) -> Expectation:
-        """Expect ``stdin`` to equal ``data`` or satisfy a predicate."""
+    def with_stdin(self, data: str | t.Callable[[str], t.Any]) -> Expectation:
+        """Expect ``stdin`` to equal ``data`` or satisfy a predicate.
+
+        The predicate's return value will be coerced to bool.
+        """
         self.stdin = data
         return self
 

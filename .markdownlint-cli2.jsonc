@@ -1,5 +1,9 @@
 {
-  "ignores": [".rules/**", "docs/python-native-command-mocking-design.md"],
+  "ignores": [
+    ".rules/**",
+    ".uv-cache/**",
+    "docs/python-native-command-mocking-design.md"
+  ],
   "config": {
     "MD013": false
   }

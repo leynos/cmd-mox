@@ -16,9 +16,21 @@ if t.TYPE_CHECKING:
 
 
 @given("a CmdMox controller", target_fixture="mox")
-def create_controller() -> CmdMox:
-    """Create a fresh CmdMox controller."""
-    return CmdMox()
+def create_controller() -> t.Generator[CmdMox, None, None]:
+    """Create a fresh CmdMox controller with proper cleanup.
+
+    Yields
+    ------
+    CmdMox
+        A fresh controller instance that will be cleaned up after the test.
+    """
+    mox = CmdMox()
+    try:
+        yield mox
+    finally:
+        # Ensure cleanup even if the test raises
+        if mox._entered:
+            mox.__exit__(None, None, None)
 
 
 @given('a spy for "git" with passthrough enabled', target_fixture="spy")

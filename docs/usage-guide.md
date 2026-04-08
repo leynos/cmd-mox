@@ -461,7 +461,7 @@ persisted to the fixture file when `verify()` is called. When
 automatically on exit. If `verify_on_exit=False`, fixtures are **not** written
 unless you call `verify()` explicitly.
 
-### Parameters
+### Record parameters
 
 The `record()` method accepts optional parameters for controlling what is
 recorded:
@@ -493,7 +493,7 @@ spy = cmd_mox.spy("aws").passthrough().record(
 - **`env_allowlist`** (`list[str] | None`): environment variable keys to always
   include in recordings, in addition to the default command-specific prefixes.
 
-### Validation
+### Record validation
 
 Calling `record()` without first calling `passthrough()` raises `ValueError`:
 
@@ -509,6 +509,45 @@ captures real command interactions to fixture files, replay loads those
 fixtures and uses them to respond to invocations without executing real
 commands. This enables fast, deterministic tests from previously captured
 interactions.
+
+## Automatic replay with `.replay()`
+
+The `CommandDouble.replay()` fluent method attaches a loaded replay fixture to
+a spy during test setup. This keeps fixture validation close to the test code
+that declares the double:
+
+```python
+def test_git_clone(cmd_mox):
+    spy = cmd_mox.spy("git").replay("fixtures/git_clone.json")
+    # ... run code that invokes git ...
+```
+
+Calling `.replay()` loads the fixture immediately. Missing files, malformed
+JSON, and schema-version errors therefore fail the test during setup rather
+than later during command execution.
+
+### Parameters
+
+- **`fixture_path`** (`str | Path`): path to the JSON fixture file to load.
+- **`strict`** (`bool`): when `True` (default), replay uses strict matching.
+  When `False`, replay uses fuzzy matching.
+
+### Validation
+
+The `.replay()` fluent API is currently limited to spies. It also cannot be
+combined with passthrough mode because the two behaviours conflict:
+
+```python
+# This raises ValueError: "replay() is only valid for spies"
+cmd_mox.mock("git").replay("fixtures/git.json")
+
+# This raises ValueError: "replay() cannot be combined with passthrough()"
+cmd_mox.spy("git").passthrough().replay("fixtures/git.json")
+```
+
+Calling `.replay()` more than once on the same double raises `RuntimeError`.
+The attached session is available via the read-only `replay_session` property,
+and `has_replay_session` reports whether a session has been attached.
 
 ### Creating and loading a replay session
 

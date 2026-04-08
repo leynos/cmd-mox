@@ -250,7 +250,7 @@ supports deterministic replay without external dependencies. See
   consumed-record tracking, and strict and fuzzy modes.
 - [x] 12.2.2. Implement `InvocationMatcher` with strict matching, fuzzy
   matching, and best-fit score selection.
-- [ ] 12.2.3. Add `.replay()` to `CommandDouble`, including passthrough
+- [x] 12.2.3. Add `.replay()` to `CommandDouble`, including passthrough
   incompatibility validation and strict-mode option.
 - [ ] 12.2.4. Integrate replay into `CmdMox._make_response()` and raise
   `UnexpectedCommandError` for unmatched strict replay invocations.
