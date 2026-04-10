@@ -359,6 +359,15 @@ class CmdMox:
     ) -> Response:
         """Run ``double``'s handler within its expectation environment."""
         overrides = self._apply_expectation_env(double, invocation)
+        return self._invoke_handler_with_overrides(double, invocation, overrides)
+
+    def _invoke_handler_with_overrides(
+        self,
+        double: CommandDouble,
+        invocation: Invocation,
+        overrides: dict[str, str],
+    ) -> Response:
+        """Run ``double``'s handler with prevalidated expectation overrides."""
         resp = self._execute_handler(double, invocation, overrides)
         self._finalize_response_env(resp, overrides)
         return resp
@@ -406,10 +415,20 @@ class CmdMox:
         return Response(stdout=invocation.command)
 
     def _response_for_regular(
-        self, double: CommandDouble, invocation: Invocation
+        self,
+        double: CommandDouble,
+        invocation: Invocation,
+        overrides: dict[str, str] | None = None,
     ) -> Response:
         """Handle a non-passthrough invocation with optional recording."""
-        resp = self._invoke_handler(double, invocation)
+        applied_overrides = (
+            self._apply_expectation_env(double, invocation)
+            if overrides is None
+            else overrides
+        )
+        resp = self._invoke_handler_with_overrides(
+            double, invocation, applied_overrides
+        )
         if double.is_recording:
             double.invocations.append(invocation)
         return resp
@@ -423,9 +442,11 @@ class CmdMox:
             msg = "Replay response requested without an attached replay session"
             raise RuntimeError(msg)
 
+        overrides = self._apply_expectation_env(double, invocation)
+
         if matched := replay_session.match(invocation):
-            if double.is_recording:
-                double.invocations.append(invocation)
+            self._finalize_response_env(matched, overrides)
+            double.invocations.append(invocation)
             return matched
 
         if replay_session.strict_matching:
@@ -433,7 +454,7 @@ class CmdMox:
             msg = f"No fixture recording matches: {invocation_text}"
             raise UnexpectedCommandError(msg)
 
-        return self._response_for_regular(double, invocation)
+        return self._response_for_regular(double, invocation, overrides)
 
     def _select_response_strategy(
         self, double: CommandDouble | None
@@ -451,25 +472,23 @@ class CmdMox:
 
         if double is not None and double.replay_session is not None:
             resp = self._response_for_replay(double, invocation)
-            invocation.apply(resp)
-            return resp
-
-        strategy = self._select_response_strategy(double)
-
-        if strategy is _ResponseStrategy.MISSING_DOUBLE:
-            resp = self._response_for_missing_double(invocation)
         else:
-            if double is None:
-                msg = "Unexpected response strategy/double combination"
-                raise RuntimeError(msg)
-            match strategy:
-                case _ResponseStrategy.PASSTHROUGH:
-                    resp = self._prepare_passthrough(double, invocation)
-                case _ResponseStrategy.REGULAR:
-                    resp = self._response_for_regular(double, invocation)
-                case _:
-                    msg = f"Unhandled response strategy: {strategy}"
+            strategy = self._select_response_strategy(double)
+
+            if strategy is _ResponseStrategy.MISSING_DOUBLE:
+                resp = self._response_for_missing_double(invocation)
+            else:
+                if double is None:
+                    msg = "Unexpected response strategy/double combination"
                     raise RuntimeError(msg)
+                match strategy:
+                    case _ResponseStrategy.PASSTHROUGH:
+                        resp = self._prepare_passthrough(double, invocation)
+                    case _ResponseStrategy.REGULAR:
+                        resp = self._response_for_regular(double, invocation)
+                    case _:
+                        msg = f"Unhandled response strategy: {strategy}"
+                        raise RuntimeError(msg)
 
         invocation.apply(resp)
         return resp

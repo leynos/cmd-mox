@@ -69,9 +69,6 @@ set -o pipefail
 make test 2>&1 | tee /tmp/12-2-4-test.log
 ```
 
-This plan is draft-only. Implementation must not begin until the user
-explicitly approves it.
-
 ## Repository orientation
 
 The implementation seam is concentrated in the controller, but the surrounding
@@ -136,8 +133,9 @@ unconsumed recordings. That verification work is explicitly out of scope here.
   `CmdMox.verify()` beyond comments or helper extraction. That is `12.2.5`.
 - Controller tolerance: stop and escalate if replay integration cannot be
   implemented with a focused controller change plus tests and docs. If the work
-  starts pulling in IPC protocol changes, shim protocol changes, or fixture
-  schema changes, confirm direction before proceeding.
+  starts pulling in inter-process communication (IPC) protocol changes, shim
+  protocol changes, or fixture schema changes, confirm direction before
+  proceeding.
 - Error-surface tolerance: unit tests should assert the exact
   `UnexpectedCommandError` type in-process. Behavioural tests should verify the
   user-visible failure mode exposed by the current transport. If surfacing the

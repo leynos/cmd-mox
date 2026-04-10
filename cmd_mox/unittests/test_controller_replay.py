@@ -51,6 +51,43 @@ class TestControllerReplayIntegration:
         assert response.stdout == "ok\n"
         assert handler_calls == []
 
+    def test_replay_match_applies_expectation_env_to_invocation_and_response(
+        self, tmp_path: Path
+    ) -> None:
+        """Replay matches should still apply expectation env semantics."""
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        spy = mox.spy("git").with_env({"EXPECT_ENV": "VALUE"}).replay(fixture_path)
+        invocation = Invocation(command="git", args=["status"], stdin="", env={})
+
+        response = mox._handle_invocation(invocation)
+
+        assert response.stdout == "ok\n"
+        assert response.env["EXPECT_ENV"] == "VALUE"
+        assert invocation.env["EXPECT_ENV"] == "VALUE"
+        assert spy.invocations == [invocation]
+        assert list(mox.journal) == [invocation]
+
+    def test_replay_match_rejects_conflicting_expectation_env(
+        self, tmp_path: Path
+    ) -> None:
+        """Replay matches should reject conflicting invocation environment."""
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        spy = mox.spy("git").with_env({"EXPECT_ENV": "VALUE"}).replay(fixture_path)
+        invocation = Invocation(
+            command="git",
+            args=["status"],
+            stdin="",
+            env={"EXPECT_ENV": "DIFF"},
+        )
+
+        with pytest.raises(UnexpectedCommandError, match="conflicting environment"):
+            mox._handle_invocation(invocation)
+
+        assert spy.invocations == []
+        assert len(mox.journal) == 0
+
     def test_handle_invocation_records_replay_match_in_spy_and_journal(
         self, tmp_path: Path
     ) -> None:
@@ -96,5 +133,27 @@ class TestControllerReplayIntegration:
         response = mox._handle_invocation(invocation)
 
         assert response.stdout == "fallback"
+        assert spy.invocations == [invocation]
+        assert list(mox.journal) == [invocation]
+
+    def test_fuzzy_replay_mismatch_falls_back_to_dynamic_handler(
+        self, tmp_path: Path
+    ) -> None:
+        """Fuzzy replay should fall back to the spy handler when no match exists."""
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        handler_calls: list[Invocation] = []
+
+        def handler(invocation: Invocation) -> Response:
+            handler_calls.append(invocation)
+            return Response(stdout="handler-fallback", stderr="", exit_code=0)
+
+        spy = mox.spy("git").runs(handler).replay(fixture_path, strict=False)
+        invocation = Invocation(command="git", args=["commit"], stdin="", env={})
+
+        response = mox._handle_invocation(invocation)
+
+        assert handler_calls == [invocation]
+        assert response.stdout == "handler-fallback"
         assert spy.invocations == [invocation]
         assert list(mox.journal) == [invocation]

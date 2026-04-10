@@ -96,6 +96,15 @@ def test_replay_backed_spy_serves_recorded_response() -> None:
 
 @scenario(
     str(FEATURES_DIR / "controller.feature"),
+    "replay-backed spy applies expectation environment",
+)
+def test_replay_backed_spy_applies_expectation_environment() -> None:
+    """Replay-backed spies should still enforce and record expectation env."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
     "strict replay mismatch fails during invocation handling",
 )
 def test_strict_replay_mismatch_fails_during_invocation_handling() -> None:

@@ -83,6 +83,17 @@ Feature: CmdMox basic functionality
     Then the spy "git" should record 1 invocation
     And the journal should contain 1 invocation of "git"
 
+  Scenario: replay-backed spy applies expectation environment
+    Given a CmdMox controller
+    And a git replay fixture exists
+    And the command "git" is spied with that replay fixture
+    And the command "git" requires env var "EXPECT_ENV"="VALUE"
+    When I replay the controller
+    And I run the command "git" with arguments "status"
+    Then the output should be "ok"
+    When I verify the controller
+    Then the journal entry for "git" should record arguments "status" stdin "<empty>" env var "EXPECT_ENV"="VALUE"
+
   Scenario: strict replay mismatch fails during invocation handling
     Given a CmdMox controller
     And a git replay fixture exists
