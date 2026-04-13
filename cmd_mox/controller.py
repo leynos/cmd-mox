@@ -466,6 +466,23 @@ class CmdMox:
             return _ResponseStrategy.PASSTHROUGH
         return _ResponseStrategy.REGULAR
 
+    def _resolve_response(
+        self, double: CommandDouble | None, invocation: Invocation
+    ) -> Response:
+        """Resolve the response for non-replay invocation paths."""
+        if double is None:
+            return self._response_for_missing_double(invocation)
+
+        strategy = self._select_response_strategy(double)
+        match strategy:
+            case _ResponseStrategy.PASSTHROUGH:
+                return self._prepare_passthrough(double, invocation)
+            case _ResponseStrategy.REGULAR:
+                return self._response_for_regular(double, invocation)
+            case _:
+                msg = f"Unhandled response strategy: {strategy}"
+                raise RuntimeError(msg)
+
     def _make_response(self, invocation: Invocation) -> Response:
         """Build the response for an invocation using the appropriate strategy."""
         double = self._doubles.get(invocation.command)
@@ -473,22 +490,7 @@ class CmdMox:
         if double is not None and double.replay_session is not None:
             resp = self._response_for_replay(double, invocation)
         else:
-            strategy = self._select_response_strategy(double)
-
-            if strategy is _ResponseStrategy.MISSING_DOUBLE:
-                resp = self._response_for_missing_double(invocation)
-            else:
-                if double is None:
-                    msg = "Unexpected response strategy/double combination"
-                    raise RuntimeError(msg)
-                match strategy:
-                    case _ResponseStrategy.PASSTHROUGH:
-                        resp = self._prepare_passthrough(double, invocation)
-                    case _ResponseStrategy.REGULAR:
-                        resp = self._response_for_regular(double, invocation)
-                    case _:
-                        msg = f"Unhandled response strategy: {strategy}"
-                        raise RuntimeError(msg)
+            resp = self._resolve_response(double, invocation)
 
         invocation.apply(resp)
         return resp
