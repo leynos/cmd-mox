@@ -526,6 +526,12 @@ Calling `.replay()` loads the fixture immediately. Missing files, malformed
 JSON, and schema-version errors therefore fail the test during setup rather
 than later during command execution.
 
+Once replay mode is active on the controller, CmdMox consults the attached
+replay session before the spy's normal `.returns(...)` or `.runs(...)`
+behaviour. When a fixture recording matches, the recorded `stdout`, `stderr`,
+and exit code are returned, and the invocation still appears in both
+`spy.invocations` and `cmd_mox.journal`.
+
 ### Parameters
 
 - **`fixture_path`** (`str | Path`): path to the JSON fixture file to load.
@@ -548,6 +554,11 @@ cmd_mox.spy("git").passthrough().replay("fixtures/git.json")
 Calling `.replay()` more than once on the same double raises `RuntimeError`.
 The attached session is available via the read-only `replay_session` property,
 and `has_replay_session` reports whether a session has been attached.
+
+If strict replay is enabled and no fixture recording matches the live
+invocation, CmdMox raises `UnexpectedCommandError` immediately during command
+handling. If fuzzy replay is enabled and no fixture recording matches, CmdMox
+falls back to the spy's configured response or handler instead of raising.
 
 ### Creating and loading a replay session
 
@@ -583,11 +594,11 @@ if response is not None:
     print(response.stdout)  # the recorded stdout
 ```
 
-`match()` searches the loaded recordings and returns a `Response` built from the
-best-fit unconsumed recording. When multiple recordings qualify, the matcher
-selects the most appropriate one deterministically based on stdin exactness and
-environment specificity. Each matched recording is marked as consumed and will
-not match again.
+`match()` searches the loaded recordings and returns a `Response` built from
+the best-fit unconsumed recording. When multiple recordings qualify, the
+matcher selects the most appropriate one deterministically based on stdin
+exactness and environment specificity. Each matched recording is marked as
+consumed and will not match again.
 
 ### Matching modes
 
@@ -615,8 +626,9 @@ session.load()
 
 ### Best-fit selection
 
-When a fixture contains multiple recordings with the same command and arguments,
-the replay session selects the most appropriate match deterministically:
+When a fixture contains multiple recordings with the same command and
+arguments, the replay session selects the most appropriate match
+deterministically:
 
 **In strict mode**, all recordings must fully match (command, args, stdin, and
 env_subset). When multiple recordings qualify, the matcher prefers the one with:
@@ -633,10 +645,10 @@ recordings, the matcher prefers the one with:
 3. Larger `env_subset`
 4. Lower recording `sequence` value (if scores tie)
 
-This ensures that when the same command is recorded with different contexts (for
-example, `git status` with and without environment variables), replay selects
-the recording that best matches the live invocation rather than always consuming
-the first compatible entry.
+This ensures that when the same command is recorded with different contexts
+(for example, `git status` with and without environment variables), replay
+selects the recording that best matches the live invocation rather than always
+consuming the first compatible entry.
 
 ### Consumed-record tracking
 

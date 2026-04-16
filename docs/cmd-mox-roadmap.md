@@ -252,7 +252,7 @@ supports deterministic replay without external dependencies. See
   matching, and best-fit score selection.
 - [x] 12.2.3. Add `.replay()` to `CommandDouble`, including passthrough
   incompatibility validation and strict-mode option.
-- [ ] 12.2.4. Integrate replay into `CmdMox._make_response()` and raise
+- [x] 12.2.4. Integrate replay into `CmdMox._make_response()` and raise
   `UnexpectedCommandError` for unmatched strict replay invocations.
 - [ ] 12.2.5. Extend `CmdMox.verify()` to report unconsumed recordings.
 - [ ] 12.2.6. Add unit tests for fixture loading, matcher behaviour, and

@@ -85,6 +85,42 @@ def test_spy_records_invocation() -> None:
     pass
 
 
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "replay-backed spy serves recorded response",
+)
+def test_replay_backed_spy_serves_recorded_response() -> None:
+    """Replay-backed spies should return fixture responses at runtime."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "replay-backed spy applies expectation environment",
+)
+def test_replay_backed_spy_applies_expectation_environment() -> None:
+    """Replay-backed spies should still enforce and record expectation env."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "strict replay mismatch fails during invocation handling",
+)
+def test_strict_replay_mismatch_fails_during_invocation_handling() -> None:
+    """Strict replay mismatches should fail at invocation time."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "fuzzy replay mismatch falls back to spy response",
+)
+def test_fuzzy_replay_mismatch_falls_back_to_spy_response() -> None:
+    """Fuzzy replay should fall back to the spy's configured response."""
+    pass
+
+
 @scenario(str(FEATURES_DIR / "controller.feature"), "spy assertion helpers")
 def test_spy_assertion_helpers() -> None:
     """Spy exposes assert_called helpers."""
