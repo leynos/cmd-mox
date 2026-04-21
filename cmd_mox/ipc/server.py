@@ -481,6 +481,8 @@ class _InnerServer(_BaseUnixServer):
 class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
     """Windows named pipe variant of :class:`IPCServer`."""
 
+    _pipe_name: str
+
     def __init__(
         self,
         socket_path: Path,
