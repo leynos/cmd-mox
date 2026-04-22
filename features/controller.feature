@@ -94,6 +94,14 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal entry for "git" should record arguments "status" stdin "<empty>" env var "EXPECT_ENV"="VALUE"
 
+  Scenario: replay-backed spy fails verification when fixture recordings remain unused
+    Given a CmdMox controller
+    And a git replay fixture exists
+    And the command "git" is spied with that replay fixture
+    When I replay the controller
+    And I verify the controller expecting an VerificationError
+    Then the verification error message should contain "Not all fixture recordings were consumed during replay"
+
   Scenario: strict replay mismatch fails during invocation handling
     Given a CmdMox controller
     And a git replay fixture exists
@@ -103,15 +111,16 @@ Feature: CmdMox basic functionality
     And the spy "git" should record 0 invocation
     And the journal should contain 0 invocation of "git"
 
-  Scenario: fuzzy replay mismatch falls back to spy response
+  Scenario: fuzzy replay mismatch falls back to spy response before verify-time failure
     Given a CmdMox controller
     And a git replay fixture exists
     And the command "git" is spied with fuzzy replay and fallback "fallback"
     When I replay the controller
     And I run the command "git" with arguments "commit"
     Then the output should be "fallback"
-    When I verify the controller
-    Then the spy "git" should record 1 invocation
+    When I verify the controller expecting an VerificationError
+    Then the verification error message should contain "Not all fixture recordings were consumed during replay"
+    And the spy "git" should record 1 invocation
     And the journal should contain 1 invocation of "git"
 
   Scenario: spy assertion helpers

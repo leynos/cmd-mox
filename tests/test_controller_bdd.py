@@ -105,6 +105,15 @@ def test_replay_backed_spy_applies_expectation_environment() -> None:
 
 @scenario(
     str(FEATURES_DIR / "controller.feature"),
+    "replay-backed spy fails verification when fixture recordings remain unused",
+)
+def test_replay_backed_spy_fails_verification_with_unused_fixture() -> None:
+    """Replay-backed spies should fail verification if fixture entries are unused."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
     "strict replay mismatch fails during invocation handling",
 )
 def test_strict_replay_mismatch_fails_during_invocation_handling() -> None:
@@ -114,10 +123,10 @@ def test_strict_replay_mismatch_fails_during_invocation_handling() -> None:
 
 @scenario(
     str(FEATURES_DIR / "controller.feature"),
-    "fuzzy replay mismatch falls back to spy response",
+    "fuzzy replay mismatch falls back to spy response before verify-time failure",
 )
-def test_fuzzy_replay_mismatch_falls_back_to_spy_response() -> None:
-    """Fuzzy replay should fall back to the spy's configured response."""
+def test_fuzzy_replay_mismatch_falls_back_before_verify_failure() -> None:
+    """Fuzzy replay falls back at runtime, then fails verification if unused."""
     pass
 
 

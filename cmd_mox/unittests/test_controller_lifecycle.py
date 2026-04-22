@@ -8,16 +8,18 @@ import pytest
 
 from cmd_mox.controller import CmdMox, Phase
 from cmd_mox.environment import EnvironmentManager
-from cmd_mox.errors import LifecycleError
+from cmd_mox.errors import LifecycleError, VerificationError
 from cmd_mox.unittests._env_helpers import (
     require_shim_dir,
     require_socket_path,
 )
+from tests.helpers.fixtures import write_minimal_replay_fixture
 
 pytestmark = pytest.mark.requires_unix_sockets
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
+    from pathlib import Path
 
 
 def test_cmdmox_replay_verify_out_of_order(
@@ -157,6 +159,27 @@ def test_verify_cleans_up_when_recording_finalize_raises(
         mox.verify()
 
     # Mandatory cleanup must have happened despite the OSError.
+    assert EnvironmentManager.get_active_manager() is None
+    assert not mox._entered
+    assert mox.phase is Phase.VERIFY
+
+
+def test_verify_cleans_up_when_replay_consumption_verification_raises(
+    tmp_path: Path,
+) -> None:
+    """Replay verification failures must not skip controller teardown."""
+    mox = CmdMox()
+    fixture_path = write_minimal_replay_fixture(tmp_path)
+    mox.spy("git").replay(fixture_path)
+    mox.__enter__()
+    mox.replay()
+
+    with pytest.raises(
+        VerificationError,
+        match="Not all fixture recordings were consumed during replay",
+    ):
+        mox.verify()
+
     assert EnvironmentManager.get_active_manager() is None
     assert not mox._entered
     assert mox.phase is Phase.VERIFY

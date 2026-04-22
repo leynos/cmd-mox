@@ -665,6 +665,14 @@ class CmdMox:
         UnexpectedCommandVerifier().verify(self.journal, self._doubles)
         OrderVerifier(self._ordered).verify(self.journal)
         CountVerifier().verify(expectations, inv_map)
+        self._verify_replay_sessions_consumed()
+
+    def _verify_replay_sessions_consumed(self) -> None:
+        """Verify attached replay sessions did not leave fixture entries unused."""
+        for double in self._doubles.values():
+            replay_session = double.replay_session
+            if replay_session is not None:
+                replay_session.verify_all_consumed()
 
     def _finalize_recording_sessions(self) -> None:
         """Finalize all active recording sessions and persist fixtures."""

@@ -5,7 +5,7 @@ This ExecPlan (execution plan) is a living document. The sections
 `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
 proceeds.
 
-Status: DRAFT
+Status: COMPLETE
 
 ## Purpose / big picture
 
@@ -218,25 +218,31 @@ The implementer should keep these references open while executing the plan:
   and the current controller and replay-session seams.
 - [x] Drafted this ExecPlan in
   `docs/execplans/12-2-5-extend-cmd-mox-verify-to-report-unconsumed-recordings.md`.
-- [ ] Obtain explicit user approval for this plan before implementation.
-- [ ] Add or update unit tests for replay-consumption verification before
+- [x] User approved implementation by requesting execution of this plan.
+- [x] Add or update unit tests for replay-consumption verification before
   touching production code.
-- [ ] Add or update `pytest-bdd` scenarios covering the verify-time failure
+- [x] Add or update `pytest-bdd` scenarios covering the verify-time failure
   before touching production code.
-- [ ] Implement controller-side replay-consumption verification in
+- [x] Implement controller-side replay-consumption verification in
   `cmd_mox/controller.py`.
-- [ ] Update the design doc, usage guide, and roadmap.
-- [ ] Run all required quality gates and record the results in this document if
-  the plan moves into execution.
+- [x] Update the design doc, usage guide, and roadmap.
+- [x] Run all required quality gates and record the results in this document.
 
 ## Surprises & Discoveries
 
 - `ReplaySession.verify_all_consumed()` already exists and already formats the
   exact `VerificationError` message this roadmap item needs. The missing work
   is controller integration, not replay-engine design.
+- `CmdMox._run_verifiers()` is the narrowest safe insertion point. Extending it
+  preserves the existing `verify()` cleanup structure, which already guarantees
+  both finalisers run and that the first failure wins.
 - `CmdMox.verify()` currently runs replay teardown before recording-session
   finalisation, but replay-consumption verification is absent entirely. The
   implementation must add the check without regressing cleanup.
+- Existing fuzzy replay fallback behaviour remains unchanged at invocation time,
+  but `verify()` now fails afterwards if the fallback path left the fixture
+  recording unused. The affected BDD scenario had to move from verify-success
+  to verify-failure expectations.
 - Existing BDD infrastructure already supports
   `When I verify the controller expecting an VerificationError` and
   `Then the verification error message should contain "..."`, so this feature
@@ -248,6 +254,14 @@ The implementer should keep these references open while executing the plan:
   `UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools uv run pytest ...` rather than
   plain `pytest`, because the repo does not put the test runner directly on
   `PATH`.
+- Red-phase confirmation:
+  - `cmd_mox/unittests/test_controller_replay.py::TestControllerReplayVerification.test_verify_raises_when_replay_fixture_has_unconsumed_recordings`
+    failed with `Failed: DID NOT RAISE <class 'cmd_mox.errors.VerificationError'>`.
+  - `cmd_mox/unittests/test_controller_lifecycle.py::test_verify_cleans_up_when_replay_consumption_verification_raises`
+    failed with the same missing-error assertion.
+  - `tests/test_controller_bdd.py::test_replay_backed_spy_fails_verification_when_fixture_recordings_remain_unused`
+    failed in `verify_controller_expect_error()` with the same missing-error
+    assertion.
 
 ## Decision Log
 
@@ -262,6 +276,17 @@ The implementer should keep these references open while executing the plan:
   `allow_unmatched=True` branch and the diagnostic message shape. Rationale:
   this avoids semantic drift between direct `ReplaySession` usage and
   controller-driven replay.
+
+- Decision: integrate replay-consumption verification into
+  `CmdMox._run_verifiers()` rather than adding a separate top-level verification
+  phase in `CmdMox.verify()`. Rationale: the check is semantically part of
+  verification, and this placement preserves the existing teardown and
+  error-precedence behaviour with the smallest controller change.
+
+- Decision: keep fuzzy replay fallback behaviour at invocation time and surface
+  incomplete fixture consumption only during `verify()`. Rationale: runtime
+  fallback remains useful for additive replay scenarios, while verify-time
+  enforcement still prevents silent partial-fixture tests.
 
 - Decision: preserve the current public API. `12.2.5` should not add new
   fluent options to `.replay()` or new replay configuration objects. Rationale:
@@ -436,7 +461,40 @@ summary to `Outcomes & Retrospective`, and only then mark roadmap item
 
 ## Outcomes & Retrospective
 
-This section is intentionally blank during draft phase. When implementation is
-complete, replace this note with a concise summary of what shipped, what tests
-proved it, which documentation changed, and any lessons that should shape later
-replay work such as roadmap item `12.2.6`.
+`CmdMox.verify()` now enforces full replay-fixture consumption by calling a new
+controller helper, `_verify_replay_sessions_consumed()`, from
+`CmdMox._run_verifiers()`. That helper iterates attached replay sessions via
+the existing `CommandDouble.replay_session` property and delegates the actual
+check to `ReplaySession.verify_all_consumed()`, preserving the existing
+cleanup-first `finally` behaviour in `verify()`.
+
+The shipped test coverage proves both behaviour and cleanup:
+
+- Focused red/green coverage was added in
+  `cmd_mox/unittests/test_controller_replay.py`,
+  `cmd_mox/unittests/test_controller_lifecycle.py`,
+  `features/controller.feature`, and `tests/test_controller_bdd.py`.
+- The new tests cover verify-time failure for unused recordings, successful
+  verification after full consumption, the direct `allow_unmatched=True`
+  opt-out path, and cleanup after replay-consumption verification raises.
+- An existing fuzzy replay BDD scenario was updated to reflect the final
+  contract: fuzzy mismatch still falls back at invocation time, then
+  `verify()` raises if the fixture recording remained unused.
+
+Documentation was updated in `docs/usage-guide.md` and
+`docs/python-native-command-mocking-design.md`, and roadmap item `12.2.5` is
+now marked complete in `docs/cmd-mox-roadmap.md`.
+
+Final gate results:
+
+- `make markdownlint`: passed
+- `make nixie`: passed
+- `make check-fmt`: passed
+- `make typecheck`: passed
+- `make lint`: passed
+- `make test`: passed (`738 passed, 12 skipped`)
+
+Lesson for follow-on replay work: fuzzy replay is now explicitly a two-stage
+contract. Invocation-time matching may be permissive, but verify-time fixture
+consumption remains strict unless a caller opts into `allow_unmatched=True`
+through direct `ReplaySession` construction.

@@ -254,7 +254,7 @@ supports deterministic replay without external dependencies. See
   incompatibility validation and strict-mode option.
 - [x] 12.2.4. Integrate replay into `CmdMox._make_response()` and raise
   `UnexpectedCommandError` for unmatched strict replay invocations.
-- [ ] 12.2.5. Extend `CmdMox.verify()` to report unconsumed recordings.
+- [x] 12.2.5. Extend `CmdMox.verify()` to report unconsumed recordings.
 - [ ] 12.2.6. Add unit tests for fixture loading, matcher behaviour, and
   consumption tracking.
 
