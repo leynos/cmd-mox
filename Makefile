@@ -1,10 +1,11 @@
 NIXIE ?= nixie
 MDFORMAT_ALL ?= mdformat-all
-TOOLS = $(MDFORMAT_ALL) $(NIXIE) uv
+UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
+TOOLS = $(MDFORMAT_ALL) $(NIXIE) $(UV)
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
-RUFF = $(UV_ENV) uv run ruff
-TY = $(UV_ENV) uv tool run ty
+RUFF = $(UV_ENV) $(UV) run ruff
+TY = $(UV_ENV) $(UV) tool run ty
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
         markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
@@ -14,10 +15,10 @@ TY = $(UV_ENV) uv tool run ty
 all: build check-fmt test typecheck
 
 .venv: pyproject.toml
-	$(UV_ENV) uv venv --clear
+	$(UV_ENV) $(UV) venv --clear
 
-build: uv .venv ## Build virtual-env and install deps
-	$(UV_ENV) uv sync --group dev
+build: $(UV) .venv ## Build virtual-env and install deps
+	$(UV_ENV) $(UV) sync --group dev
 
 build-release: ## Build artefacts (sdist & wheel)
 	python -m build --sdist --wheel
@@ -36,7 +37,7 @@ define ensure_tool
 endef
 
 define ensure_tool_venv
-	$(UV_ENV) uv run which $(1) >/dev/null 2>&1 || { \
+	$(UV_ENV) $(UV) run which $(1) >/dev/null 2>&1 || { \
 	  printf "Error: '%s' is required in the virtualenv, but is not installed\n" "$(1)" >&2; \
 	  exit 1; \
 	}
@@ -80,11 +81,11 @@ markdownlint: ## Lint Markdown files
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
 
-test: build uv $(VENV_TOOLS) ## Run tests
-	$(UV_ENV) uv run pytest -v -n auto
+test: build $(UV) $(VENV_TOOLS) ## Run tests
+	$(UV_ENV) $(UV) run pytest -v -n auto
 
-windows-smoke: build uv $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
-	$(UV_ENV) uv run pytest -v \
+windows-smoke: build $(UV) $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
+	$(UV_ENV) $(UV) run pytest -v \
 	tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	--log-file=windows-ipc.log \
