@@ -139,30 +139,22 @@ The implementer should keep these references open while executing the plan:
 
 ## Constraints
 
-- This file is a draft only. Do not implement the feature until the user gives
-  explicit approval for this ExecPlan.
-- Follow the repository test-driven development workflow from `AGENTS.md`:
-  update tests first, confirm they fail, then implement the production change,
-  then rerun focused tests and the full quality gates.
-- Keep the roadmap boundary intact. `12.2.5` only extends controller
-  verification to report unconsumed replay recordings. Do not change fixture
-  schema, matching rules, replay attachment API, or strict-versus-fuzzy runtime
-  matching behaviour.
-- Reuse `ReplaySession.verify_all_consumed()` as the single source of truth for
-  consumption checks. Do not reimplement unconsumed-recording detection inside
-  `CmdMox`.
+- The completed implementation kept the roadmap boundary intact. `12.2.5`
+  only extends controller verification to report unconsumed replay recordings;
+  fixture schema, matching rules, replay attachment API, and
+  strict-versus-fuzzy runtime matching behaviour remain unchanged.
+- `ReplaySession.verify_all_consumed()` remains the single source of truth for
+  consumption checks, and `CmdMox` delegates unconsumed-recording detection to
+  that API.
 - Preserve existing cleanup guarantees in `CmdMox.verify()`: IPC teardown and
   recording-session finalisation must still run even if replay-consumption
   verification fails.
-- Do not add new dependencies.
-- Keep unit tests under `cmd_mox/unittests/` and behavioural tests under
-  `features/`, `tests/steps/`, and `tests/test_*_bdd.py`.
-- Update consumer-facing docs in `docs/usage-guide.md` and record any final
-  design decisions in `docs/python-native-command-mocking-design.md`.
-- Mark roadmap item `12.2.5` done only after implementation is complete and
-  all required quality gates succeed. Do not mark it done during this planning
-  turn.
-- Required gates for feature completion are `make markdownlint`, `make nixie`,
+- The test and documentation updates stayed within the existing project
+  layout: unit tests under `cmd_mox/unittests/`, behavioural tests under
+  `features/`, `tests/steps/`, and `tests/test_*_bdd.py`, consumer-facing docs
+  in `docs/usage-guide.md`, and design notes in
+  `docs/python-native-command-mocking-design.md`.
+- The completed feature passed `make markdownlint`, `make nixie`,
   `make check-fmt`, `make typecheck`, `make lint`, and `make test`.
 
 ## Tolerances
@@ -297,10 +289,10 @@ The implementer should keep these references open while executing the plan:
   the unconsumed-path failure. Rationale: the feature needs behavioural
   coverage, but the happy path is already exercised end-to-end.
 
-- Decision: do not mark `docs/cmd-mox-roadmap.md` item `12.2.5` done until the
-  implementation is approved, merged into the working tree, and all required
-  quality gates pass. Rationale: drafting the plan alone is not feature
-  completion.
+- Decision: mark `docs/cmd-mox-roadmap.md` item `12.2.5` done after the
+  implementation landed in the working tree and all required quality gates
+  passed. Rationale: the roadmap status now reflects completed, verified
+  feature work rather than the earlier planning draft.
 
 ## Plan of work
 
@@ -414,11 +406,11 @@ Update the documentation immediately after the code and tests settle:
     replay-backed spies and point readers to `allow_unmatched=True` in the
     direct `ReplaySession` section when tolerant verification is desired.
 - `docs/cmd-mox-roadmap.md`
-  - change `12.2.5` from unchecked to checked only after code, tests, and
-    quality gates are complete.
+  - mark `12.2.5` checked to reflect the completed implementation and passing
+    quality gates.
 
-If implementation reveals a stronger or narrower design rule than this draft
-states, record it in `Decision Log` before closing the work.
+The final design rules discovered during implementation are recorded in
+`Decision Log`.
 
 ### Stage E: Run the full quality gates
 
@@ -455,9 +447,9 @@ set -o pipefail
 make test 2>&1 | tee /tmp/12-2-5-test.log
 ```
 
-Once all six commands succeed, update `Progress`, add the final verification
-summary to `Outcomes & Retrospective`, and only then mark roadmap item
-`12.2.5` done.
+All six commands succeeded, `Progress` records completion, `Outcomes &
+Retrospective` captures the final verification summary, and roadmap item
+`12.2.5` is marked done.
 
 ## Outcomes & Retrospective
 
