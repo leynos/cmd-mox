@@ -1,9 +1,10 @@
-MDLINT ?= markdownlint-cli2
 NIXIE ?= nixie
 MDFORMAT_ALL ?= mdformat-all
-TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) $(NIXIE) uv
+TOOLS = $(MDFORMAT_ALL) $(NIXIE) uv
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
+RUFF = $(UV_ENV) uv run ruff
+TY = $(UV_ENV) uv tool run ty
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
         markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
@@ -53,24 +54,28 @@ $(VENV_TOOLS): ## Verify required CLI tools in venv
 	$(call ensure_tool_venv,$@)
 endif
 
-fmt: ruff $(MDFORMAT_ALL) ## Format sources
-	ruff format
-	ruff check --select I --fix
+fmt: build $(MDFORMAT_ALL) ## Format sources
+	$(RUFF) format
+	$(RUFF) check --select I --fix
 	$(MDFORMAT_ALL)
 
-check-fmt: ruff ## Verify formatting
-	ruff format --check
+check-fmt: build ## Verify formatting
+	$(RUFF) format --check
 	# mdformat-all doesn't currently do checking
 
-lint: ruff ## Run linters
-	ruff check
+lint: build ## Run linters
+	$(RUFF) check
 
-typecheck: build ty ## Run typechecking
-	ty --version
-	ty check
+typecheck: build ## Run typechecking
+	$(TY) --version
+	$(TY) check
 
-markdownlint: $(MDLINT) ## Lint Markdown files
-	$(MDLINT) '**/*.md'
+markdownlint: ## Lint Markdown files
+	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
+	  markdownlint-cli2 '**/*.md'; \
+	else \
+	  npx --yes markdownlint-cli2 '**/*.md'; \
+	fi
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
