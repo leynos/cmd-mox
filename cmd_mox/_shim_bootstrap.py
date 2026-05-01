@@ -14,14 +14,32 @@ if t.TYPE_CHECKING:
     from types import ModuleType
 
 _BOOTSTRAP_DONE = False
+_INITIAL_SYS_PATH = tuple(sys.path)
+_INITIAL_STDLIB_PATH = sysconfig.get_path("stdlib")
 
 
 def _get_stdlib_path() -> str | None:
     """Return the stdlib path, guarding against missing or invalid configs."""
     try:
         return sysconfig.get_path("stdlib")
-    except (KeyError, OSError, ValueError, TypeError):
-        return None
+    except (AttributeError, ImportError, KeyError, OSError, ValueError, TypeError):
+        original_sys_path = sys.path
+        try:
+            sys.path = list(_INITIAL_SYS_PATH)
+            importlib.invalidate_caches()
+            return sysconfig.get_path("stdlib")
+        except (
+            AttributeError,
+            ImportError,
+            KeyError,
+            OSError,
+            ValueError,
+            TypeError,
+        ):
+            return _INITIAL_STDLIB_PATH
+        finally:
+            sys.path = original_sys_path
+            importlib.invalidate_caches()
 
 
 def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | None:

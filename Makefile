@@ -5,7 +5,7 @@ TOOLS = $(MDFORMAT_ALL) $(NIXIE) $(UV)
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 RUFF = $(UV_ENV) $(UV) run ruff
-TY = $(UV_ENV) $(UV) tool run ty
+TY = $(UV_ENV) $(UV) run ty
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
         markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
@@ -55,10 +55,14 @@ $(VENV_TOOLS): ## Verify required CLI tools in venv
 	$(call ensure_tool_venv,$@)
 endif
 
-fmt: build $(MDFORMAT_ALL) ## Format sources
+fmt: build ## Format sources
 	$(RUFF) format
 	$(RUFF) check --select I --fix
-	$(MDFORMAT_ALL)
+	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
+	  markdownlint-cli2 --fix '**/*.md'; \
+	else \
+	  npx --yes markdownlint-cli2@0.22.1 --fix '**/*.md'; \
+	fi
 
 check-fmt: build ## Verify formatting
 	$(RUFF) format --check
@@ -75,7 +79,7 @@ markdownlint: ## Lint Markdown files
 	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
 	  markdownlint-cli2 '**/*.md'; \
 	else \
-	  npx --yes markdownlint-cli2 '**/*.md'; \
+	  npx --yes markdownlint-cli2@0.22.1 '**/*.md'; \
 	fi
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams

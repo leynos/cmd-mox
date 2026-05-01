@@ -32,7 +32,7 @@ Observable success after implementation:
    successfully.
 3. The implementation reuses `ReplaySession.verify_all_consumed()` rather than
    duplicating consumption logic inside the controller.
-4. `CmdMox.verify()` still tears down the IPC server and finalises recording
+4. `CmdMox.verify()` still tears down the IPC server and finalizes recording
    sessions even when replay-consumption verification fails.
 5. Unit tests written with `pytest` fail before the code change and pass after
    it.
@@ -100,11 +100,11 @@ exists:
     home for controller-level replay-verification tests.
 - `cmd_mox/unittests/test_controller_lifecycle.py`
   - already covers the rule that `verify()` must still clean up when later
-    finalisation steps raise.
+    finalization steps raise.
 - `features/controller.feature`, `tests/test_controller_bdd.py`,
   `tests/steps/controller_setup.py`, and `tests/steps/controller_replay.py`
-  already provide controller-level behavioural coverage and reusable
-  step definitions for verify-time errors.
+  already provide controller-level behavioural coverage and reusable step
+  definitions for verify-time errors.
 - `docs/python-native-command-mocking-design.md`
   - already says that `verify()` should call
     `ReplaySession.verify_all_consumed()`, but it does not yet pin down the
@@ -147,7 +147,7 @@ The implementer should keep these references open while executing the plan:
   consumption checks, and `CmdMox` delegates unconsumed-recording detection to
   that API.
 - Preserve existing cleanup guarantees in `CmdMox.verify()`: IPC teardown and
-  recording-session finalisation must still run even if replay-consumption
+  recording-session finalization must still run even if replay-consumption
   verification fails.
 - The test and documentation updates stayed within the existing project
   layout: unit tests under `cmd_mox/unittests/`, behavioural tests under
@@ -164,8 +164,7 @@ The implementer should keep these references open while executing the plan:
   changes. Those belong to other roadmap items.
 - Ordering tolerance: stop and escalate if replay-consumption verification
   cannot be added with a focused controller helper or a small extension to
-  `_run_verifiers()`. This item should not require a wide controller
-  refactor.
+  `_run_verifiers()`. This item should not require a wide controller refactor.
 - Error-precedence tolerance: preserve the current broad `verify()` error
   contract unless tests prove a regression. Do not opportunistically redesign
   how earlier verification errors interact with later cleanup errors without
@@ -186,7 +185,7 @@ The implementer should keep these references open while executing the plan:
   happen before the verification check. Mitigation: write an ordering-focused
   unit test before changing controller code.
 - Risk: the controller already has one cleanup regression test for recording
-  finalisation errors, but not for replay-verification failures. Mitigation:
+  finalization errors, but not for replay-verification failures. Mitigation:
   add a red-phase test that proves environment cleanup still happens when
   replay verification raises.
 - Risk: `.replay()` does not expose `allow_unmatched`, so there is no fluent
@@ -227,12 +226,12 @@ The implementer should keep these references open while executing the plan:
   is controller integration, not replay-engine design.
 - `CmdMox._run_verifiers()` is the narrowest safe insertion point. Extending it
   preserves the existing `verify()` cleanup structure, which already guarantees
-  both finalisers run and that the first failure wins.
+  both finalizers run and that the first failure wins.
 - `CmdMox.verify()` currently runs replay teardown before recording-session
-  finalisation, but replay-consumption verification is absent entirely. The
+  finalization, but replay-consumption verification is absent entirely. The
   implementation must add the check without regressing cleanup.
 - Existing fuzzy replay fallback behaviour remains unchanged at invocation time,
-  but `verify()` now fails afterwards if the fallback path left the fixture
+  but `verify()` now fails afterward if the fallback path left the fixture
   recording unused. The affected BDD scenario had to move from verify-success
   to verify-failure expectations.
 - Existing BDD infrastructure already supports
@@ -260,7 +259,7 @@ The implementer should keep these references open while executing the plan:
 - Decision: verify replay consumption in the controller by calling
   `ReplaySession.verify_all_consumed()` for each attached replay session after
   the existing mock/order/unexpected-command verifiers and before teardown
-  finalisers. Rationale: this keeps replay consumption as part of verification
+  finalizers. Rationale: this keeps replay consumption as part of verification
   rather than cleanup, while still letting the existing `finally` block run.
 
 - Decision: keep `ReplaySession.verify_all_consumed()` as the single source of
@@ -270,9 +269,9 @@ The implementer should keep these references open while executing the plan:
   controller-driven replay.
 
 - Decision: integrate replay-consumption verification into
-  `CmdMox._run_verifiers()` rather than adding a separate top-level verification
-  phase in `CmdMox.verify()`. Rationale: the check is semantically part of
-  verification, and this placement preserves the existing teardown and
+  `CmdMox._run_verifiers()` rather than adding a separate top-level
+  verification phase in `CmdMox.verify()`. Rationale: the check is semantically
+  part of verification, and this placement preserves the existing teardown and
   error-precedence behaviour with the smallest controller change.
 
 - Decision: keep fuzzy replay fallback behaviour at invocation time and surface
@@ -299,9 +298,9 @@ The implementer should keep these references open while executing the plan:
 ### Stage A: Add failing unit tests first
 
 Extend `cmd_mox/unittests/test_controller_replay.py` with controller-level
-verification tests that demonstrate the missing behaviour before production code
-changes. Keep these tests focused on user-visible controller outcomes, not on
-private replay-session internals.
+verification tests that demonstrate the missing behaviour before production
+code changes. Keep these tests focused on user-visible controller outcomes, not
+on private replay-session internals.
 
 Add at least these unit tests:
 
@@ -374,7 +373,7 @@ Preferred shape:
 2. For each double whose `replay_session` property is not `None`, call
    `replay_session.verify_all_consumed()`.
 3. Call that helper from `CmdMox.verify()` after `_run_verifiers()` succeeds
-   and before entering the `finally` block's teardown finalisers, or fold it
+   and before entering the `finally` block's teardown finalizers, or fold it
    into `_run_verifiers()` if that is measurably cleaner. Either placement is
    acceptable so long as cleanup still runs on failure and the plan’s tests
    pass.
@@ -447,9 +446,9 @@ set -o pipefail
 make test 2>&1 | tee /tmp/12-2-5-test.log
 ```
 
-All six commands succeeded, `Progress` records completion, `Outcomes &
-Retrospective` captures the final verification summary, and roadmap item
-`12.2.5` is marked done.
+All six commands succeeded, `Progress` records completion,
+`Outcomes & Retrospective` captures the final verification summary, and roadmap
+item `12.2.5` is marked done.
 
 ## Outcomes & Retrospective
 
@@ -470,8 +469,8 @@ The shipped test coverage proves both behaviour and cleanup:
   verification after full consumption, the direct `allow_unmatched=True`
   opt-out path, and cleanup after replay-consumption verification raises.
 - An existing fuzzy replay BDD scenario was updated to reflect the final
-  contract: fuzzy mismatch still falls back at invocation time, then
-  `verify()` raises if the fixture recording remained unused.
+  contract: fuzzy mismatch still falls back at invocation time, then `verify()`
+  raises if the fixture recording remained unused.
 
 Documentation was updated in `docs/usage-guide.md` and
 `docs/python-native-command-mocking-design.md`, and roadmap item `12.2.5` is
