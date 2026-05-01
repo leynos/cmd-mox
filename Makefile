@@ -66,7 +66,11 @@ fmt: build ## Format sources
 
 check-fmt: build ## Verify formatting
 	$(RUFF) format --check
-	# mdformat-all doesn't currently do checking
+	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
+	  markdownlint-cli2 '**/*.md'; \
+	else \
+	  npx --yes markdownlint-cli2@0.22.1 '**/*.md'; \
+	fi
 
 lint: build ## Run linters
 	$(RUFF) check

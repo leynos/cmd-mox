@@ -15,31 +15,33 @@ if t.TYPE_CHECKING:
 
 _BOOTSTRAP_DONE = False
 _INITIAL_SYS_PATH = tuple(sys.path)
-_INITIAL_STDLIB_PATH = sysconfig.get_path("stdlib")
+
+
+def _try_get_stdlib_path() -> str | None:
+    """Return the configured stdlib path, or ``None`` if config lookup fails."""
+    try:
+        return sysconfig.get_path("stdlib")
+    except (AttributeError, ImportError, KeyError, OSError, ValueError, TypeError):
+        return None
+
+
+_INITIAL_STDLIB_PATH = _try_get_stdlib_path()
 
 
 def _get_stdlib_path() -> str | None:
     """Return the stdlib path, guarding against missing or invalid configs."""
+    stdlib_path = _try_get_stdlib_path()
+    if stdlib_path is not None:
+        return stdlib_path
+
+    original_sys_path = sys.path
     try:
-        return sysconfig.get_path("stdlib")
-    except (AttributeError, ImportError, KeyError, OSError, ValueError, TypeError):
-        original_sys_path = sys.path
-        try:
-            sys.path = list(_INITIAL_SYS_PATH)
-            importlib.invalidate_caches()
-            return sysconfig.get_path("stdlib")
-        except (
-            AttributeError,
-            ImportError,
-            KeyError,
-            OSError,
-            ValueError,
-            TypeError,
-        ):
-            return _INITIAL_STDLIB_PATH
-        finally:
-            sys.path = original_sys_path
-            importlib.invalidate_caches()
+        sys.path = list(_INITIAL_SYS_PATH)
+        importlib.invalidate_caches()
+        return _try_get_stdlib_path() or _INITIAL_STDLIB_PATH
+    finally:
+        sys.path = original_sys_path
+        importlib.invalidate_caches()
 
 
 def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | None:
