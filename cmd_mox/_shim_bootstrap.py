@@ -28,20 +28,27 @@ def _try_get_stdlib_path() -> str | None:
 _INITIAL_STDLIB_PATH = _try_get_stdlib_path()
 
 
+@contextlib.contextmanager
+def _temporary_sys_path(entries: tuple[str, ...]) -> t.Iterator[None]:
+    """Temporarily replace ``sys.path`` while keeping import caches coherent."""
+    original_sys_path = sys.path
+    sys.path = list(entries)
+    importlib.invalidate_caches()
+    try:
+        yield
+    finally:
+        sys.path = original_sys_path
+        importlib.invalidate_caches()
+
+
 def _get_stdlib_path() -> str | None:
     """Return the stdlib path, guarding against missing or invalid configs."""
     stdlib_path = _try_get_stdlib_path()
     if stdlib_path is not None:
         return stdlib_path
 
-    original_sys_path = sys.path
-    try:
-        sys.path = list(_INITIAL_SYS_PATH)
-        importlib.invalidate_caches()
+    with _temporary_sys_path(_INITIAL_SYS_PATH):
         return _try_get_stdlib_path() or _INITIAL_STDLIB_PATH
-    finally:
-        sys.path = original_sys_path
-        importlib.invalidate_caches()
 
 
 def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | None:

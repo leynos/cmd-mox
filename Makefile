@@ -8,7 +8,7 @@ RUFF = $(UV_ENV) $(UV) run ruff
 TY = $(UV_ENV) $(UV) run ty
 
 .PHONY: help all clean build build-release lint fmt check-fmt \
-        markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
+        markdownlint markdownlint-run nixie test typecheck $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
 
@@ -58,18 +58,17 @@ endif
 fmt: build ## Format sources
 	$(RUFF) format
 	$(RUFF) check --select I --fix
-	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
-	  markdownlint-cli2 --fix '**/*.md'; \
-	else \
-	  npx --yes markdownlint-cli2@0.22.1 --fix '**/*.md'; \
-	fi
+	$(MAKE) markdownlint-run MDARGS="--fix"
 
 check-fmt: build ## Verify formatting
 	$(RUFF) format --check
+	$(MAKE) markdownlint-run
+
+markdownlint-run: ## Run markdownlint-cli2 with pinned fallback
 	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
-	  markdownlint-cli2 '**/*.md'; \
+	  markdownlint-cli2 $(MDARGS) '**/*.md'; \
 	else \
-	  npx --yes markdownlint-cli2@0.22.1 '**/*.md'; \
+	  npx --yes markdownlint-cli2@0.22.1 $(MDARGS) '**/*.md'; \
 	fi
 
 lint: build ## Run linters
@@ -80,11 +79,7 @@ typecheck: build ## Run typechecking
 	$(TY) check
 
 markdownlint: ## Lint Markdown files
-	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
-	  markdownlint-cli2 '**/*.md'; \
-	else \
-	  npx --yes markdownlint-cli2@0.22.1 '**/*.md'; \
-	fi
+	$(MAKE) markdownlint-run
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
