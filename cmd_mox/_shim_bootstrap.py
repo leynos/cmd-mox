@@ -106,8 +106,10 @@ def bootstrap_shim_path() -> None:
             sys.path.remove(entry)
             removed.append(entry)
     sys.path_importer_cache.clear()
-    std_platform = _load_stdlib_platform()
-    sys.modules["platform"] = std_platform
-    for entry in reversed(removed):
-        sys.path.insert(0, entry)
+    try:
+        std_platform = _load_stdlib_platform()
+        sys.modules["platform"] = std_platform
+    finally:
+        for entry in reversed(removed):
+            sys.path.insert(0, entry)
     _BOOTSTRAP_DONE = True
