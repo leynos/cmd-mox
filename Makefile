@@ -6,9 +6,15 @@ VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 RUFF = $(UV_ENV) $(UV) run ruff
 TY = $(UV_ENV) $(UV) run ty
+WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
+	tests/test_windows_support_bdd.py \
+	--log-file=windows-ipc.log \
+	--log-file-level=DEBUG \
+	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
-.PHONY: help all clean build build-release lint fmt check-fmt \
-        markdownlint markdownlint-run nixie test typecheck $(TOOLS) $(VENV_TOOLS)
+.PHONY: help all clean build build-release lint fmt check-fmt
+.PHONY: markdownlint markdownlint-run nixie test typecheck
+.PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
 
@@ -88,12 +94,7 @@ test: build $(UV) $(VENV_TOOLS) ## Run tests
 	$(UV_ENV) $(UV) run pytest -v -n auto
 
 windows-smoke: build $(UV) $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
-	$(UV_ENV) $(UV) run pytest -v \
-	tests/test_windows_environment.py \
-	tests/test_windows_support_bdd.py \
-	--log-file=windows-ipc.log \
-	--log-file-level=DEBUG \
-	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+	$(UV_ENV) $(UV) run pytest -v $(WINDOWS_SMOKE_ARGS)
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \

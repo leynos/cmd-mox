@@ -33,8 +33,8 @@ def _temporary_sys_path(entries: tuple[str, ...]) -> t.Iterator[None]:
     """Temporarily replace ``sys.path`` while keeping import caches coherent."""
     original_sys_path = sys.path
     sys.path = list(entries)
-    importlib.invalidate_caches()
     try:
+        importlib.invalidate_caches()
         yield
     finally:
         sys.path = original_sys_path
