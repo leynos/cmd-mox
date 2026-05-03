@@ -19,6 +19,7 @@ dev = [
     "pytest",
 	"pytest-xdist",
     "ruff",
+    "ty",
     "pytest-timeout",
     "pytest-bdd",
     "parse_type",

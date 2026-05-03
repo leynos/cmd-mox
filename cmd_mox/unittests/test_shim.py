@@ -420,6 +420,29 @@ def test_bootstrap_shim_path_prefers_stdlib_platform(
         sys.modules.pop("platform", None)
 
 
+def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bootstrapping should restore removed entries when platform loading fails."""
+    from cmd_mox import _shim_bootstrap
+
+    original_path = ["__editable__dummy", "/usr/lib/python3.12"]
+    monkeypatch.setattr(_shim_bootstrap, "_BOOTSTRAP_DONE", False)
+    monkeypatch.setattr(sys, "path", list(original_path))
+
+    def raise_runtime_error() -> t.NoReturn:
+        msg = "platform load failed"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(_shim_bootstrap, "_load_stdlib_platform", raise_runtime_error)
+
+    with pytest.raises(RuntimeError, match="platform load failed"):
+        _shim_bootstrap.bootstrap_shim_path()
+
+    assert sys.path == original_path
+    assert not _shim_bootstrap._BOOTSTRAP_DONE
+
+
 @pytest.mark.parametrize(
     ("factory", "expected_exit", "expected_message"),
     [

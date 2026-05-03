@@ -2541,7 +2541,40 @@ class CmdMox:
 
 Replay integration in `_make_response()` is intentionally separate from replay
 consumption verification in `verify()`. The former is roadmap item `12.2.4`;
-the latter remains `12.2.5`.
+the latter is implemented by extending the existing verifier pass rather than
+the teardown path:
+
+```python
+class CmdMox:
+    def _run_verifiers(self) -> None:
+        """Execute mock, order, and replay-consumption verification."""
+        expectations = {n: d.expectation for n, d in self.mocks.items()}
+        inv_map = {n: d.invocations for n, d in self.mocks.items()}
+
+        UnexpectedCommandVerifier().verify(self.journal, self._doubles)
+        OrderVerifier(self._ordered).verify(self.journal)
+        CountVerifier().verify(expectations, inv_map)
+        self._verify_replay_sessions_consumed()
+
+    def _verify_replay_sessions_consumed(self) -> None:
+        """Fail verify() when any attached replay fixture is left unused."""
+        for double in self._doubles.values():
+            replay_session = double.replay_session
+            if replay_session is not None:
+                replay_session.verify_all_consumed()
+```
+
+This ordering keeps replay completeness as part of verification rather than
+cleanup. `verify()` still enters its existing `finally` block afterwards, so
+IPC teardown and recording-session finalization run even when
+`verify_all_consumed()` raises `VerificationError`.
+
+One subtle consequence is that fuzzy replay remains additive at invocation
+time but not at verification time. A fuzzy mismatch can fall back to the spy's
+configured handler or canned response, yet `verify()` still fails later if the
+fixture recording was never consumed. Tests that intentionally use only part of
+a fixture must construct `ReplaySession(..., allow_unmatched=True)` directly
+rather than relying on `.replay()`.
 
 ### 9.9 Security Considerations
 
@@ -2870,7 +2903,9 @@ misses fall back to the spy's configured behaviour.
 - Raising immediately on strict mismatches surfaces the failure at the exact
   invocation that violated the fixture contract
 - Allowing fuzzy mismatches to fall back keeps fuzzy replay additive and useful
-  for partial-fixture scenarios
+  for invocation-time partial-fixture scenarios, while verify-time consumption
+  checks still catch unused recordings unless `allow_unmatched=True` is used
+  with a direct `ReplaySession`
 
 **Alternatives considered:**
 

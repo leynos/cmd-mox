@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import typing as t
 
 import pytest
 
 from cmd_mox.controller import CmdMox
-from cmd_mox.errors import UnexpectedCommandError
+from cmd_mox.errors import UnexpectedCommandError, VerificationError
 from cmd_mox.ipc import Invocation, Response
-from tests.helpers.fixtures import write_minimal_replay_fixture
+from cmd_mox.record.fixture import RecordedInvocation
+from cmd_mox.record.replay import ReplaySession
+from tests.helpers.fixtures import write_minimal_replay_fixture, write_replay_fixture
 
 if t.TYPE_CHECKING:
     from pathlib import Path
@@ -157,3 +160,84 @@ class TestControllerReplayIntegration:
         assert response.stdout == "handler-fallback"
         assert spy.invocations == [invocation]
         assert list(mox.journal) == [invocation]
+
+
+class TestControllerReplayVerification:
+    """Replay-backed controller verification should enforce fixture consumption."""
+
+    def test_verify_raises_when_replay_fixture_has_unconsumed_recordings(
+        self, tmp_path: Path
+    ) -> None:
+        """Controller verification should fail when replay entries remain unused."""
+        mox = CmdMox()
+        fixture_path = write_replay_fixture(
+            tmp_path,
+            [
+                RecordedInvocation(
+                    sequence=0,
+                    command="git",
+                    args=["status"],
+                    stdin="",
+                    env_subset={},
+                    stdout="ok\n",
+                    stderr="",
+                    exit_code=0,
+                    timestamp=dt.datetime.now(dt.UTC).isoformat(),
+                    duration_ms=0,
+                ),
+                RecordedInvocation(
+                    sequence=1,
+                    command="git",
+                    args=["commit"],
+                    stdin="",
+                    env_subset={},
+                    stdout="committed\n",
+                    stderr="",
+                    exit_code=0,
+                    timestamp=dt.datetime.now(dt.UTC).isoformat(),
+                    duration_ms=1,
+                ),
+            ],
+        )
+        mox.spy("git").replay(fixture_path)
+        invocation = Invocation(command="git", args=["status"], stdin="", env={})
+
+        with mox:
+            mox.replay()
+            mox._handle_invocation(invocation)
+            with pytest.raises(
+                VerificationError,
+                match="Not all fixture recordings were consumed during replay",
+            ):
+                mox.verify()
+
+    def test_verify_passes_when_replay_fixture_is_fully_consumed(
+        self, tmp_path: Path
+    ) -> None:
+        """Controller verification should succeed once all replay entries are used."""
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        mox.spy("git").replay(fixture_path)
+        invocation = Invocation(command="git", args=["status"], stdin="", env={})
+
+        with mox:
+            mox.replay()
+            mox._handle_invocation(invocation)
+            mox.verify()
+
+    def test_verify_skips_unconsumed_check_when_replay_allows_unmatched(
+        self, tmp_path: Path
+    ) -> None:
+        """Controllers should respect direct ReplaySession allow_unmatched opt-out."""
+        mox = CmdMox()
+        spy = mox.spy("git")
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        replay_session = ReplaySession(fixture_path, allow_unmatched=True)
+        replay_session.load()
+        # The fluent API does not expose allow_unmatched; inject the direct
+        # session to assert controller verification honours the lower-level opt-out.
+        spy._replay_session = replay_session
+
+        with mox:
+            mox.replay()
+            mox.verify()

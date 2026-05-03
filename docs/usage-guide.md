@@ -559,6 +559,10 @@ If strict replay is enabled and no fixture recording matches the live
 invocation, CmdMox raises `UnexpectedCommandError` immediately during command
 handling. If fuzzy replay is enabled and no fixture recording matches, CmdMox
 falls back to the spy's configured response or handler instead of raising.
+Either way, `CmdMox.verify()` later calls `verify_all_consumed()` for every
+attached replay session. Any fixture entries left unused at verify time raise
+`VerificationError` unless the session was created directly with
+`allow_unmatched=True`.
 
 ### Creating and loading a replay session
 
@@ -665,10 +669,15 @@ session.verify_all_consumed()
 
 `verify_all_consumed()` raises `VerificationError` if any recording was not
 consumed, listing the unconsumed recordings by index, command, and arguments.
+`CmdMox.verify()` applies the same check automatically to replay-backed spies,
+so attaching a fixture through `.replay()` means tests must consume every
+recording before verification completes.
 
 When `allow_unmatched=True`, `verify_all_consumed()` always succeeds regardless
 of how many recordings remain unconsumed. This is useful for fixtures that
-contain more recordings than a specific test exercises.
+contain more recordings than a specific test exercises. The fluent
+`.replay()` helper does not expose this opt-out; use `ReplaySession`
+directly when partial-consumption verification is the intended behaviour.
 
 ## Pipelines and shell syntax
 

@@ -112,7 +112,7 @@ def test_replay_detects_environment_loss(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_require_env_attrs_rejects_missing_environment() -> None:
     """_require_env_attrs surfaces the default missing environment message."""
     mox = CmdMox()
-    mox.environment = None
+    mox.environment = t.cast("EnvironmentManager", None)
     with pytest.raises(
         MissingEnvironmentError, match="Replay environment is not ready"
     ):

@@ -14,14 +14,41 @@ if t.TYPE_CHECKING:
     from types import ModuleType
 
 _BOOTSTRAP_DONE = False
+_INITIAL_SYS_PATH = tuple(sys.path)
+
+
+def _try_get_stdlib_path() -> str | None:
+    """Return the configured stdlib path, or ``None`` if config lookup fails."""
+    try:
+        return sysconfig.get_path("stdlib")
+    except (AttributeError, ImportError, KeyError, OSError, ValueError, TypeError):
+        return None
+
+
+_INITIAL_STDLIB_PATH = _try_get_stdlib_path()
+
+
+@contextlib.contextmanager
+def _temporary_sys_path(entries: tuple[str, ...]) -> t.Iterator[None]:
+    """Temporarily replace ``sys.path`` while keeping import caches coherent."""
+    original_sys_path = sys.path
+    sys.path = list(entries)
+    try:
+        importlib.invalidate_caches()
+        yield
+    finally:
+        sys.path = original_sys_path
+        importlib.invalidate_caches()
 
 
 def _get_stdlib_path() -> str | None:
     """Return the stdlib path, guarding against missing or invalid configs."""
-    try:
-        return sysconfig.get_path("stdlib")
-    except (KeyError, OSError, ValueError, TypeError):
-        return None
+    stdlib_path = _try_get_stdlib_path()
+    if stdlib_path is not None:
+        return stdlib_path
+
+    with _temporary_sys_path(_INITIAL_SYS_PATH):
+        return _try_get_stdlib_path() or _INITIAL_STDLIB_PATH
 
 
 def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | None:
@@ -74,13 +101,15 @@ def bootstrap_shim_path() -> None:
 
     package_dir = Path(__file__).resolve().parent
     removed: list[str] = []
-    for entry in list(sys.path):
-        if _should_remove_path_entry(entry, package_dir):
-            sys.path.remove(entry)
-            removed.append(entry)
-    sys.path_importer_cache.clear()
-    std_platform = _load_stdlib_platform()
-    sys.modules["platform"] = std_platform
-    for entry in reversed(removed):
-        sys.path.insert(0, entry)
+    try:
+        for entry in list(sys.path):
+            if _should_remove_path_entry(entry, package_dir):
+                sys.path.remove(entry)
+                removed.append(entry)
+        sys.path_importer_cache.clear()
+        std_platform = _load_stdlib_platform()
+        sys.modules["platform"] = std_platform
+    finally:
+        for entry in reversed(removed):
+            sys.path.insert(0, entry)
     _BOOTSTRAP_DONE = True

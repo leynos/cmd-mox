@@ -1,22 +1,30 @@
-MDLINT ?= markdownlint-cli2
 NIXIE ?= nixie
 MDFORMAT_ALL ?= mdformat-all
-TOOLS = $(MDFORMAT_ALL) ruff ty $(MDLINT) $(NIXIE) uv
+UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
+TOOLS = $(MDFORMAT_ALL) $(NIXIE) $(UV)
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
+RUFF = $(UV_ENV) $(UV) run ruff
+TY = $(UV_ENV) $(UV) run ty
+WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
+	tests/test_windows_support_bdd.py \
+	--log-file=windows-ipc.log \
+	--log-file-level=DEBUG \
+	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
-.PHONY: help all clean build build-release lint fmt check-fmt \
-        markdownlint nixie test typecheck $(TOOLS) $(VENV_TOOLS)
+.PHONY: help all clean build build-release lint fmt check-fmt
+.PHONY: markdownlint markdownlint-run nixie test typecheck
+.PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
 
 all: build check-fmt test typecheck
 
 .venv: pyproject.toml
-	$(UV_ENV) uv venv --clear
+	$(UV_ENV) $(UV) venv --clear
 
-build: uv .venv ## Build virtual-env and install deps
-	$(UV_ENV) uv sync --group dev
+build: $(UV) .venv ## Build virtual-env and install deps
+	$(UV_ENV) $(UV) sync --group dev
 
 build-release: ## Build artefacts (sdist & wheel)
 	python -m build --sdist --wheel
@@ -35,7 +43,7 @@ define ensure_tool
 endef
 
 define ensure_tool_venv
-	$(UV_ENV) uv run which $(1) >/dev/null 2>&1 || { \
+	$(UV_ENV) $(UV) run which $(1) >/dev/null 2>&1 || { \
 	  printf "Error: '%s' is required in the virtualenv, but is not installed\n" "$(1)" >&2; \
 	  exit 1; \
 	}
@@ -53,38 +61,40 @@ $(VENV_TOOLS): ## Verify required CLI tools in venv
 	$(call ensure_tool_venv,$@)
 endif
 
-fmt: ruff $(MDFORMAT_ALL) ## Format sources
-	ruff format
-	ruff check --select I --fix
-	$(MDFORMAT_ALL)
+fmt: build ## Format sources
+	$(RUFF) format
+	$(RUFF) check --select I --fix
+	$(MAKE) markdownlint-run MDARGS="--fix"
 
-check-fmt: ruff ## Verify formatting
-	ruff format --check
-	# mdformat-all doesn't currently do checking
+check-fmt: build ## Verify formatting
+	$(RUFF) format --check
+	$(MAKE) markdownlint-run
 
-lint: ruff ## Run linters
-	ruff check
+markdownlint-run: ## Run markdownlint-cli2 with pinned fallback
+	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
+	  markdownlint-cli2 $(MDARGS) '**/*.md'; \
+	else \
+	  npx --yes markdownlint-cli2@0.22.1 $(MDARGS) '**/*.md'; \
+	fi
 
-typecheck: build ty ## Run typechecking
-	ty --version
-	ty check
+lint: build ## Run linters
+	$(RUFF) check
 
-markdownlint: $(MDLINT) ## Lint Markdown files
-	$(MDLINT) '**/*.md'
+typecheck: build ## Run typechecking
+	$(TY) --version
+	$(TY) check
+
+markdownlint: ## Lint Markdown files
+	$(MAKE) markdownlint-run
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
 
-test: build uv $(VENV_TOOLS) ## Run tests
-	$(UV_ENV) uv run pytest -v -n auto
+test: build $(UV) $(VENV_TOOLS) ## Run tests
+	$(UV_ENV) $(UV) run pytest -v -n auto
 
-windows-smoke: build uv $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
-	$(UV_ENV) uv run pytest -v \
-	tests/test_windows_environment.py \
-	tests/test_windows_support_bdd.py \
-	--log-file=windows-ipc.log \
-	--log-file-level=DEBUG \
-	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+windows-smoke: build $(UV) $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
+	$(UV_ENV) $(UV) run pytest -v $(WINDOWS_SMOKE_ARGS)
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
