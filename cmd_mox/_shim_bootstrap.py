@@ -101,12 +101,12 @@ def bootstrap_shim_path() -> None:
 
     package_dir = Path(__file__).resolve().parent
     removed: list[str] = []
-    for entry in list(sys.path):
-        if _should_remove_path_entry(entry, package_dir):
-            sys.path.remove(entry)
-            removed.append(entry)
-    sys.path_importer_cache.clear()
     try:
+        for entry in list(sys.path):
+            if _should_remove_path_entry(entry, package_dir):
+                sys.path.remove(entry)
+                removed.append(entry)
+        sys.path_importer_cache.clear()
         std_platform = _load_stdlib_platform()
         sys.modules["platform"] = std_platform
     finally:
