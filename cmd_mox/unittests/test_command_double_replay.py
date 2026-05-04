@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import typing as t
 
@@ -47,6 +48,24 @@ class TestReplayFluentAPI:
         session = spy.replay_session
         assert session is not None
         assert session.strict_matching is expected
+
+    def test_replay_does_not_accept_allow_unmatched(self, tmp_path: Path) -> None:
+        """§9.8.3: partial fixtures use ReplaySession(..., allow_unmatched=True).
+
+        Not `.replay()`. This test guards against accidental exposure of
+        `allow_unmatched` on the fluent API.
+        """
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        spy = mox.spy("git")
+
+        public_params = inspect.signature(spy.replay).parameters
+        assert "allow_unmatched" not in public_params
+
+        # Dynamic kwargs assert runtime rejection without tripping static analysis.
+        disallowed_kw: dict[str, t.Any] = {"allow_unmatched": True}
+        with pytest.raises(TypeError, match=r"allow_unmatched"):
+            spy.replay(fixture_path, **disallowed_kw)
 
     def test_replay_accepts_string_path(self, tmp_path: Path) -> None:
         """replay() accepts a string path and converts it to Path."""
