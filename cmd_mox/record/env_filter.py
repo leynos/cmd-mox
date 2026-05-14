@@ -8,28 +8,26 @@ Section 9.9.2.
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 from cmd_mox.expectations import is_sensitive_recording_env_key
 
 # System-specific keys that are excluded by default.
-EXCLUDED_SYSTEM_KEYS: t.Final[frozenset[str]] = frozenset(
-    {
-        "PATH",
-        "HOME",
-        "USER",
-        "SHELL",
-        "SSH_AUTH_SOCK",
-        "GPG_AGENT_INFO",
-    }
-)
+EXCLUDED_SYSTEM_KEYS: typ.Final[frozenset[str]] = frozenset({
+    "PATH",
+    "HOME",
+    "USER",
+    "SHELL",
+    "SSH_AUTH_SOCK",
+    "GPG_AGENT_INFO",
+})
 
 # CmdMox internal keys that must never appear in fixtures.
-_CMOX_ENV_PREFIX: t.Final[str] = "CMOX_"
-_CMD_MOX_ENV_PREFIX: t.Final[str] = "CMD_MOX_"
+_CMOX_ENV_PREFIX: typ.Final[str] = "CMOX_"
+_CMD_MOX_ENV_PREFIX: typ.Final[str] = "CMD_MOX_"
 
 # Known command-specific prefixes: command name -> env var prefix.
-COMMAND_ENV_PREFIXES: t.Final[dict[str, str]] = {
+COMMAND_ENV_PREFIXES: typ.Final[dict[str, str]] = {
     "git": "GIT_",
     "aws": "AWS_",
     "docker": "DOCKER_",

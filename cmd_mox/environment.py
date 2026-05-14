@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import contextlib
 import functools
 import logging
 import os
 import tempfile
 import threading
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from . import _path_utils as path_utils
@@ -16,11 +17,11 @@ from ._validators import validate_positive_finite_timeout
 from .fs_retry import robust_rmtree
 
 IS_WINDOWS = path_utils.IS_WINDOWS
-_MAX_PATH_THRESHOLD: t.Final[int] = 240
+_MAX_PATH_THRESHOLD: typ.Final[int] = 240
 
 logger = logging.getLogger(__name__)
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import types
 
 CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
@@ -54,7 +55,7 @@ def _get_short_path(path: Path) -> Path | None:
     import ctypes
     from ctypes import wintypes
 
-    ctypes_module = t.cast("t.Any", ctypes)
+    ctypes_module = typ.cast("typ.Any", ctypes)
     kernel32 = ctypes_module.WinDLL("kernel32", use_last_error=True)
     get_short_path_name = kernel32.GetShortPathNameW
     get_short_path_name.argtypes = (
@@ -147,20 +148,20 @@ def ensure_dir_exists(
 
 type CleanupError = tuple[str, BaseException]
 
-P = t.ParamSpec("P")
-R = t.TypeVar("R")
+P = typ.ParamSpec("P")
+R = typ.TypeVar("R")
 
 
 def _collect_os_error(
     message: str,
-) -> t.Callable[
+) -> cabc.Callable[
     [
-        t.Callable[
-            t.Concatenate[EnvironmentManager, list[CleanupError], P],
+        cabc.Callable[
+            typ.Concatenate[EnvironmentManager, list[CleanupError], P],
             R,
         ]
     ],
-    t.Callable[t.Concatenate[EnvironmentManager, list[CleanupError], P], None],
+    cabc.Callable[typ.Concatenate[EnvironmentManager, list[CleanupError], P], None],
 ]:
     """Return a decorator that records ``OSError``s in ``cleanup_errors``.
 
@@ -170,8 +171,12 @@ def _collect_os_error(
     """
 
     def decorator(
-        func: t.Callable[t.Concatenate[EnvironmentManager, list[CleanupError], P], R],
-    ) -> t.Callable[t.Concatenate[EnvironmentManager, list[CleanupError], P], None]:
+        func: cabc.Callable[
+            typ.Concatenate[EnvironmentManager, list[CleanupError], P], R
+        ],
+    ) -> cabc.Callable[
+        typ.Concatenate[EnvironmentManager, list[CleanupError], P], None
+    ]:
         @functools.wraps(func)
         def wrapper(
             self: EnvironmentManager,
@@ -198,7 +203,7 @@ class EnvironmentManager:
     """
 
     # Track the active manager per thread to avoid cross-thread interference.
-    _state: t.ClassVar[threading.local] = threading.local()
+    _state: typ.ClassVar[threading.local] = threading.local()
 
     @classmethod
     def get_active_manager(cls) -> EnvironmentManager | None:
@@ -235,9 +240,10 @@ class EnvironmentManager:
         shim_dir = _maybe_shorten_windows_path(shim_dir)
         self.shim_dir = shim_dir
         self._created_dir = self.shim_dir
-        os.environ["PATH"] = os.pathsep.join(
-            [str(self.shim_dir), self._orig_env.get("PATH", "")]
-        )
+        os.environ["PATH"] = os.pathsep.join([
+            str(self.shim_dir),
+            self._orig_env.get("PATH", ""),
+        ])
         _ensure_windows_pathext(self._orig_env)
         self.socket_path = self.shim_dir / "ipc.sock"
         self.export_ipc_environment()
@@ -314,7 +320,7 @@ class EnvironmentManager:
             self._created_dir = None
             return
 
-        shim = t.cast("Path", self.shim_dir)  # helper ensures this is a Path
+        shim = typ.cast("Path", self.shim_dir)  # helper ensures this is a Path
         try:
             robust_rmtree(shim, logger=logger)
         finally:
@@ -362,7 +368,7 @@ class EnvironmentManager:
             msg = "timeout must be a real number"
             raise TypeError(msg)
 
-        override = t.cast("float", timeout)
+        override = typ.cast("float", timeout)
         self._validate_timeout(override)
         self.ipc_timeout = override
         return override
@@ -386,7 +392,7 @@ class EnvironmentManager:
 
 
 @contextlib.contextmanager
-def temporary_env(mapping: dict[str, str]) -> t.Iterator[None]:
+def temporary_env(mapping: dict[str, str]) -> cabc.Iterator[None]:
     """Temporarily apply environment variables from *mapping*."""
     orig_env = os.environ.copy()
     os.environ.update(mapping)

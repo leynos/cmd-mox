@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import subprocess
-import typing as t
+import typing as typ
 
 import pytest
 
 
 def run_subprocess(
-    args: t.Sequence[str],
-    **kwargs: t.Any,  # noqa: ANN401
+    args: cabc.Sequence[str],
+    **kwargs: typ.Any,  # noqa: ANN401
 ) -> subprocess.CompletedProcess[str]:
     """Run ``subprocess.run`` with common defaults for tests."""
     return subprocess.run(  # noqa: S603
@@ -19,6 +20,6 @@ def run_subprocess(
 
 
 @pytest.fixture(name="run")
-def run_fixture() -> t.Callable[..., subprocess.CompletedProcess[str]]:
+def run_fixture() -> cabc.Callable[..., subprocess.CompletedProcess[str]]:
     """Provide :func:`run_subprocess` as a fixture."""
     return run_subprocess

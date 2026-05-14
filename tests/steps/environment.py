@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-import typing as t
+import typing as typ
 
 from pytest_bdd import given, parsers, then, when
 
 from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from pathlib import Path
 
     import pytest

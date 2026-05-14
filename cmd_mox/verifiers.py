@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import typing as t
+import collections.abc as cabc
+import typing as typ
 from collections import defaultdict
 from textwrap import indent
 
@@ -10,7 +11,7 @@ from .errors import UnexpectedCommandError, UnfulfilledExpectationError
 from .expectations import SENSITIVE_ENV_KEY_TOKENS
 from .test_doubles import DoubleKind
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .controller import CommandDouble
     from .expectations import Expectation
     from .ipc import Invocation
@@ -29,7 +30,7 @@ def _mask_env_value(key: str, value: str | None) -> str | None:
         return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
 
 
-def _format_env(mapping: t.Mapping[str, str | None]) -> str:
+def _format_env(mapping: cabc.Mapping[str, str | None]) -> str:
     """Return a deterministic representation of environment values."""
     if not mapping:
         return "{}"
@@ -40,11 +41,11 @@ def _format_env(mapping: t.Mapping[str, str | None]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
-def _format_args(args: t.Sequence[str] | None) -> str:
+def _format_args(args: cabc.Sequence[str] | None) -> str:
     return "" if not args else ", ".join(repr(arg) for arg in args)
 
 
-def _format_matchers(matchers: t.Sequence[t.Callable[[str], bool]] | None) -> str:
+def _format_matchers(matchers: cabc.Sequence[cabc.Callable[[str], bool]] | None) -> str:
     return "" if not matchers else ", ".join(repr(matcher) for matcher in matchers)
 
 
@@ -89,7 +90,7 @@ def _describe_expectation(exp: Expectation, *, include_count: bool = False) -> s
 def _describe_invocation(
     inv: Invocation,
     *,
-    focus_env: t.Iterable[str] | None = None,
+    focus_env: cabc.Iterable[str] | None = None,
     include_stdin: bool = False,
 ) -> str:
     """Return a readable representation of *inv*."""
@@ -103,9 +104,9 @@ def _describe_invocation(
 
 
 def _describe_invocations(
-    invocations: t.Sequence[Invocation],
+    invocations: cabc.Sequence[Invocation],
     *,
-    focus_env: t.Iterable[str] | None = None,
+    focus_env: cabc.Iterable[str] | None = None,
     include_stdin: bool = False,
 ) -> str:
     if not invocations:
@@ -116,7 +117,7 @@ def _describe_invocations(
     )
 
 
-def _numbered(entries: t.Sequence[str], *, start: int = 1) -> str:
+def _numbered(entries: cabc.Sequence[str], *, start: int = 1) -> str:
     if not entries:
         return "(none)"
     lines: list[str] = []
@@ -136,7 +137,7 @@ def _format_sections(title: str, sections: list[tuple[str, str]]) -> str:
     return "\n".join(parts)
 
 
-def _list_expected_commands(doubles: t.Mapping[str, CommandDouble]) -> str:
+def _list_expected_commands(doubles: cabc.Mapping[str, CommandDouble]) -> str:
     """Return a readable list of registered, invokable commands.
 
     Commands registered as stubs are omitted because they are not validated as
@@ -157,8 +158,8 @@ class UnexpectedCommandVerifier:
 
     def verify(
         self,
-        journal: t.Iterable[Invocation],
-        doubles: t.Mapping[str, CommandDouble],
+        journal: cabc.Iterable[Invocation],
+        doubles: cabc.Mapping[str, CommandDouble],
     ) -> None:
         """Raise if *journal* contains calls not matching registered doubles."""
         mock_counts: dict[str, int] = defaultdict(int)
@@ -168,7 +169,7 @@ class UnexpectedCommandVerifier:
     def _process_single_invocation(
         self,
         inv: Invocation,
-        doubles: t.Mapping[str, CommandDouble],
+        doubles: cabc.Mapping[str, CommandDouble],
         mock_counts: dict[str, int],
     ) -> None:
         dbl = doubles.get(inv.command)
@@ -212,7 +213,7 @@ class UnexpectedCommandVerifier:
     def _raise_unregistered_command_error(
         self,
         inv: Invocation,
-        doubles: t.Mapping[str, CommandDouble],
+        doubles: cabc.Mapping[str, CommandDouble],
     ) -> None:
         msg = _format_sections(
             "Unexpected command invocation.",
@@ -281,7 +282,7 @@ class OrderVerifier:
         self._current_expected_descriptions: list[str] = []
         self._current_actual_descriptions: list[str] = []
 
-    def verify(self, journal: t.Iterable[Invocation]) -> None:
+    def verify(self, journal: cabc.Iterable[Invocation]) -> None:
         """Ensure ordered expectations appear in order within *journal*."""
         ordered_seq = self._build_ordered_sequence()
         if not ordered_seq:
@@ -298,7 +299,7 @@ class OrderVerifier:
 
     def _get_relevant_invocations(
         self,
-        journal: t.Iterable[Invocation],
+        journal: cabc.Iterable[Invocation],
         ordered_seq: list[Expectation],
     ) -> list[Invocation]:
         # Ignore invocations that do not satisfy any ordered expectation so
@@ -412,25 +413,23 @@ class OrderVerifier:
         actual_inv: Invocation,
         reason: str,
     ) -> None:
-        mismatch = "\n".join(
-            [
-                f"position {index + 1}",
-                "expected:\n"
-                + indent(
-                    _describe_expectation(exp),
-                    "  ",
+        mismatch = "\n".join([
+            f"position {index + 1}",
+            "expected:\n"
+            + indent(
+                _describe_expectation(exp),
+                "  ",
+            ),
+            "actual:\n"
+            + indent(
+                _describe_invocation(
+                    actual_inv,
+                    focus_env=exp.env.keys(),
+                    include_stdin=exp.stdin is not None,
                 ),
-                "actual:\n"
-                + indent(
-                    _describe_invocation(
-                        actual_inv,
-                        focus_env=exp.env.keys(),
-                        include_stdin=exp.stdin is not None,
-                    ),
-                    "  ",
-                ),
-            ]
-        )
+                "  ",
+            ),
+        ])
         msg = _format_sections(
             "Ordered expectation violated.",
             [
@@ -454,8 +453,8 @@ class CountVerifier:
 
     def verify(
         self,
-        expectations: t.Mapping[str, Expectation],
-        invocations: t.Mapping[str, list[Invocation]],
+        expectations: cabc.Mapping[str, Expectation],
+        invocations: cabc.Mapping[str, list[Invocation]],
     ) -> None:
         """Validate invocation counts against ``expectations``."""
         for name, exp in expectations.items():

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 import pytest
 
 from cmd_mox.ipc import Invocation, PassthroughResult
 from cmd_mox.passthrough import PassthroughConfig, PassthroughCoordinator
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.test_doubles import CommandDouble
 
 
@@ -30,7 +30,7 @@ def _make_invocation(command: str = "echo") -> Invocation:
 def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     """Coordinator should record invocations until results arrive."""
     coordinator = PassthroughCoordinator()
-    double = t.cast("CommandDouble", _FakeDouble({"PATH": "/usr/bin"}))
+    double = typ.cast("CommandDouble", _FakeDouble({"PATH": "/usr/bin"}))
     invocation = _make_invocation()
 
     config = PassthroughConfig(lookup_path="/usr/bin", timeout=2.0)
@@ -68,7 +68,7 @@ def test_prepare_request_extra_env_behavior(
 ) -> None:
     """Extra env should extend and override expectation env as needed."""
     coordinator = PassthroughCoordinator()
-    double = t.cast("CommandDouble", _FakeDouble(initial_env))
+    double = typ.cast("CommandDouble", _FakeDouble(initial_env))
     invocation = _make_invocation()
 
     config = PassthroughConfig(
@@ -86,7 +86,7 @@ def test_prepare_request_extra_env_behavior(
 def test_finalize_result_returns_response_and_clears() -> None:
     """Finalisation should return stored data and clear pending state."""
     coordinator = PassthroughCoordinator()
-    double = t.cast("CommandDouble", _FakeDouble({"EXTRA": "1"}))
+    double = typ.cast("CommandDouble", _FakeDouble({"EXTRA": "1"}))
     invocation = _make_invocation("tool")
     invocation.env.update({"EXTRA": "1"})
     config = PassthroughConfig(lookup_path="/opt/bin", timeout=1.0)
@@ -138,7 +138,7 @@ def test_expired_requests_are_pruned(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("cmd_mox.passthrough.time.monotonic", fake_monotonic)
 
     coordinator = PassthroughCoordinator(cleanup_ttl=5.0)
-    double = t.cast("CommandDouble", _FakeDouble({}))
+    double = typ.cast("CommandDouble", _FakeDouble({}))
     invocation = _make_invocation("slow")
     config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
     directive = coordinator.prepare_request(double, invocation, config)

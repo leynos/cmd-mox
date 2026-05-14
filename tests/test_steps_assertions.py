@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 import pytest
 
 from cmd_mox.controller import CmdMox
 from tests.steps.assertions import check_shim_suffix
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from pathlib import Path
 
 

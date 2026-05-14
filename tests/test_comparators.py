@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import re
-import typing as t
+import typing as typ
 from types import SimpleNamespace
 
 import pytest
@@ -35,9 +36,9 @@ from cmd_mox.verifiers import UnexpectedCommandVerifier
     ],
 )
 def test_matchers_match_and_repr(
-    matcher: t.Callable[[t.Any], bool],
-    good: t.Any,  # noqa: ANN401
-    bad: t.Any,  # noqa: ANN401
+    matcher: cabc.Callable[[typ.Any], bool],
+    good: typ.Any,  # noqa: ANN401
+    bad: typ.Any,  # noqa: ANN401
     expected_repr: str,
 ) -> None:
     """Matchers evaluate values and provide helpful reprs."""
@@ -61,7 +62,7 @@ def test_is_a_repr_with_custom_type() -> None:
 
 def _mock_double(expectation: Expectation) -> CommandDouble:
     """Return a typed mock CommandDouble stub exposing the provided expectation."""
-    return t.cast(
+    return typ.cast(
         "CommandDouble",
         SimpleNamespace(
             expectation=expectation,

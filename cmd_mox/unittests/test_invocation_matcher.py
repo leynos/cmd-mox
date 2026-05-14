@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -294,8 +294,8 @@ class TestInvocationMatcherFindMatch:
     )
     def test_find_match_best_fit_selection(
         self,
-        matcher_kwargs: dict[str, t.Any],
-        inv_kwargs: dict[str, t.Any],
+        matcher_kwargs: dict[str, typ.Any],
+        inv_kwargs: dict[str, typ.Any],
         rec_specs: list[RecordedInvocationSpec],
         expected: int | None,
     ) -> None:

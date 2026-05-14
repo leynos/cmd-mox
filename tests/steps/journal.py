@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 from pytest_bdd import parsers, then
 
@@ -18,7 +18,7 @@ from tests.helpers.parameters import (
     resolve_empty_placeholder,
 )
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
 
 
@@ -104,7 +104,10 @@ def _check_journal_entry_result_impl(
 ) -> None:
     """Validate journal entry records command results."""
     expectation = JournalEntryExpectation(
-        cmd=cmd, stdout=output.stdout, stderr=output.stderr, exit_code=output.exit_code
+        cmd=cmd,
+        stdout=output.stdout,
+        stderr=output.stderr,
+        exit_code=output.exit_code,
     )
     verify_journal_entry_details(mox, expectation)
 

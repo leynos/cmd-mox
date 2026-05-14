@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import threading
 import types
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from cmd_mox.ipc.client import RetryConfig, _send_pipe_request
 from cmd_mox.ipc.server import _NamedPipeState
 from cmd_mox.ipc.windows import Win32FileProtocol, read_pipe_message
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     import pytest
 
 
@@ -58,7 +58,9 @@ def test_read_pipe_message_logs_unexpected_status(
     assert any("Unexpected ReadFile status" in rec.message for rec in caplog.records)
 
 
-def test_send_pipe_request_uses_shared_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_send_pipe_request_uses_shared_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Client request path should delegate to shared pipe helpers."""
     writes: list[tuple[object, bytes, object]] = []
     handle = object()

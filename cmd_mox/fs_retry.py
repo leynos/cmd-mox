@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import dataclasses as dc
 import logging
 import os
 import shutil
 import time
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from . import _path_utils as path_utils
@@ -95,7 +96,7 @@ def _log_retry_attempt(
     )
 
 
-def _chmod_items(root: Path, items: t.Sequence[os.PathLike[str] | str]) -> None:
+def _chmod_items(root: Path, items: cabc.Sequence[os.PathLike[str] | str]) -> None:
     """Apply chmod 0o777 to non-symlink items in a directory."""
     for name in items:
         candidate = root / name
@@ -121,7 +122,7 @@ def _path_is_missing(path: Path, exc: OSError) -> bool:
 
 def _handle_rmtree_final_failure(
     path: Path, attempts: int, exc: OSError, logger: logging.Logger
-) -> t.NoReturn:
+) -> typ.NoReturn:
     """Handle final rmtree failure by logging and raising RobustRmtreeError."""
     logger.warning(
         "Failed to remove temporary directory %s after %d attempts",
@@ -139,8 +140,8 @@ def _log_rmtree_success(path: Path, logger: logging.Logger) -> None:
 def _handle_unlink_failure(
     path: Path,
     exc: Exception,
-    exc_factory: t.Callable[[Path, Exception], Exception] | None,
-) -> t.NoReturn:
+    exc_factory: cabc.Callable[[Path, Exception], Exception] | None,
+) -> typ.NoReturn:
     """Handle final unlink failure by raising the appropriate exception."""
     if exc_factory is not None:
         raise exc_factory(path, exc) from exc
@@ -152,7 +153,7 @@ def retry_unlink(
     *,
     config: RetryConfig = DEFAULT_UNLINK_RETRY,
     logger: logging.Logger | None = None,
-    exc_factory: t.Callable[[Path, Exception], Exception] | None = None,
+    exc_factory: cabc.Callable[[Path, Exception], Exception] | None = None,
 ) -> None:
     """
     Unlink *path* with retries for transient filesystem errors.

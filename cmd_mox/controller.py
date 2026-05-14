@@ -6,7 +6,7 @@ import dataclasses as dc
 import enum
 import logging
 import os
-import typing as t
+import typing as typ
 from collections import deque
 from pathlib import Path
 
@@ -30,7 +30,7 @@ from .shimgen import create_shim_symlinks
 from .test_doubles import CommandDouble, DoubleKind
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     import types
 
     from .expectations import Expectation

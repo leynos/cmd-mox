@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import socket
 import tempfile
-import typing as t
 from pathlib import Path
 
 import pytest
@@ -67,7 +67,7 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(autouse=True)
-def reset_environment_manager_state() -> t.Generator[None, None, None]:
+def reset_environment_manager_state() -> cabc.Generator[None, None, None]:
     """Ensure clean state for ``EnvironmentManager`` between tests."""
     cmd_mox.environment.EnvironmentManager.reset_active_manager()
     yield

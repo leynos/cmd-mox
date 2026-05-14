@@ -5,17 +5,17 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import typing as t
+import typing as typ
 
-WINDOWS_PIPE_PREFIX: t.Final[str] = r"\\.\pipe\cmdmox-"
-PIPE_CHUNK_SIZE: t.Final[int] = 64 * 1024
-ERROR_BROKEN_PIPE: t.Final[int] = 109
-ERROR_PIPE_BUSY: t.Final[int] = 231
-ERROR_NO_DATA: t.Final[int] = 232
-ERROR_MORE_DATA: t.Final[int] = 234
-ERROR_PIPE_CONNECTED: t.Final[int] = 535
-ERROR_OPERATION_ABORTED: t.Final[int] = 995
-ERROR_FILE_NOT_FOUND: t.Final[int] = 2
+WINDOWS_PIPE_PREFIX: typ.Final[str] = r"\\.\pipe\cmdmox-"
+PIPE_CHUNK_SIZE: typ.Final[int] = 64 * 1024
+ERROR_BROKEN_PIPE: typ.Final[int] = 109
+ERROR_PIPE_BUSY: typ.Final[int] = 231
+ERROR_NO_DATA: typ.Final[int] = 232
+ERROR_MORE_DATA: typ.Final[int] = 234
+ERROR_PIPE_CONNECTED: typ.Final[int] = 535
+ERROR_OPERATION_ABORTED: typ.Final[int] = 995
+ERROR_FILE_NOT_FOUND: typ.Final[int] = 2
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +26,13 @@ class _PyWinError(Exception):
     winerror: int
 
 
-class _PyWinTypes(t.Protocol):
+class _PyWinTypes(typ.Protocol):
     """Interface capturing pywintypes' error attribute."""
 
     error: type[_PyWinError]
 
 
-class _Win32File(t.Protocol):
+class _Win32File(typ.Protocol):
     """Subset of win32file methods used by IPC helpers."""
 
     def ReadFile(  # noqa: N802 - mirrors pywin32 API casing
@@ -107,22 +107,20 @@ def write_pipe_payload(
     win32file.FlushFileBuffers(handle)
 
 
-__all__ = sorted(
-    [
-        "ERROR_BROKEN_PIPE",
-        "ERROR_FILE_NOT_FOUND",
-        "ERROR_MORE_DATA",
-        "ERROR_NO_DATA",
-        "ERROR_OPERATION_ABORTED",
-        "ERROR_PIPE_BUSY",
-        "ERROR_PIPE_CONNECTED",
-        "PIPE_CHUNK_SIZE",
-        "PyWinErrorProtocol",
-        "PyWinTypesProtocol",
-        "WINDOWS_PIPE_PREFIX",
-        "Win32FileProtocol",
-        "derive_pipe_name",
-        "read_pipe_message",
-        "write_pipe_payload",
-    ]
-)
+__all__ = sorted([
+    "ERROR_BROKEN_PIPE",
+    "ERROR_FILE_NOT_FOUND",
+    "ERROR_MORE_DATA",
+    "ERROR_NO_DATA",
+    "ERROR_OPERATION_ABORTED",
+    "ERROR_PIPE_BUSY",
+    "ERROR_PIPE_CONNECTED",
+    "PIPE_CHUNK_SIZE",
+    "PyWinErrorProtocol",
+    "PyWinTypesProtocol",
+    "WINDOWS_PIPE_PREFIX",
+    "Win32FileProtocol",
+    "derive_pipe_name",
+    "read_pipe_message",
+    "write_pipe_payload",
+])

@@ -5,12 +5,12 @@ from __future__ import annotations
 import dataclasses as dc
 import threading
 import time
-import typing as t
+import typing as typ
 import uuid
 
 from .ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from .test_doubles import CommandDouble
 
 

@@ -8,13 +8,13 @@ the XII-C roadmap item; this module provides the stable type contract.
 from __future__ import annotations
 
 import dataclasses as dc
-import typing as t
+import typing as typ
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from .fixture import RecordedInvocation
 
 
-class ScrubbingRuleDict(t.TypedDict):
+class ScrubbingRuleDict(typ.TypedDict):
     """Typed dictionary shape for serialized scrubbing rules."""
 
     pattern: str
@@ -54,8 +54,8 @@ class ScrubbingRule:
         )
 
 
-@t.runtime_checkable
-class Scrubber(t.Protocol):
+@typ.runtime_checkable
+class Scrubber(typ.Protocol):
     """Protocol for scrubbing sensitive data from recorded invocations."""
 
     def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:

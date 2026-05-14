@@ -6,7 +6,7 @@ import importlib
 import io
 import os
 import sys
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -15,7 +15,7 @@ from cmd_mox.ipc import Invocation, Response
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - import used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - import used only for typing
     from pathlib import Path
 
 
@@ -76,12 +76,12 @@ def test_main_reports_invocation_details(
     assert out.err == "err"
     assert os.environ["EXTRA"] == "42"
 
-    invocation = t.cast("Invocation", captured["invocation"])
+    invocation = typ.cast("Invocation", captured["invocation"])
     assert invocation.command == "git"
     assert invocation.args == ["status", "--short"]
     assert invocation.stdin == "payload"
     assert invocation.env.get("SAMPLE") == "value"
-    timeout = t.cast("float", captured["timeout"])
+    timeout = typ.cast("float", captured["timeout"])
     assert timeout == pytest.approx(5.0)
 
 

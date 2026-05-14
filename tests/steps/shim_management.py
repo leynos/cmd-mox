@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import os
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from pytest_bdd import parsers, then, when
 
 from cmd_mox.environment import EnvironmentManager
 
-type ReplayInterruptionMapping = t.Mapping[str, Path | EnvironmentManager | None]
+type ReplayInterruptionMapping = cabc.Mapping[str, Path | EnvironmentManager | None]
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
 
 
@@ -61,7 +62,7 @@ def check_shim_dir_cleaned(
     replay_interruption_state: ReplayInterruptionMapping,
 ) -> None:
     """Assert the temporary shim directory no longer exists."""
-    shim_dir = t.cast("Path", replay_interruption_state["shim_dir"])
+    shim_dir = typ.cast("Path", replay_interruption_state["shim_dir"])
     assert not shim_dir.exists()
     assert replay_interruption_state["manager_active"] is None
 
@@ -71,5 +72,5 @@ def check_socket_cleaned(
     replay_interruption_state: ReplayInterruptionMapping,
 ) -> None:
     """Assert the IPC socket path no longer exists."""
-    socket_path = t.cast("Path", replay_interruption_state["socket_path"])
+    socket_path = typ.cast("Path", replay_interruption_state["socket_path"])
     assert not socket_path.exists()

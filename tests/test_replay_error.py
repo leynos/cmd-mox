@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-import typing as t
+import typing as typ
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from types import TracebackType
 
 import pytest
@@ -36,7 +36,7 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
         called.append((exc_type, exc, tb))
         orig_exit(self, exc_type, exc, tb)
 
-    def boom(*_args: object, **_kwargs: object) -> t.NoReturn:
+    def boom(*_args: object, **_kwargs: object) -> typ.NoReturn:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(CmdMox, "__exit__", fake_exit)

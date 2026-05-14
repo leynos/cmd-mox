@@ -1,11 +1,17 @@
 NIXIE ?= nixie
 MDFORMAT_ALL ?= mdformat-all
 UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
-TOOLS = $(MDFORMAT_ALL) $(NIXIE) $(UV)
+TOOLS = $(MDFORMAT_ALL) $(UV)
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 RUFF = $(UV_ENV) $(UV) run ruff
 TY = $(UV_ENV) $(UV) run ty
+PYLINT_PYTHON ?= pypy
+PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
+PYLINT_PYPY_SHIM_REF ?= 726d09f968b4d729ee4b29c71fc732e744854f3b
+PYLINT_PYPY_SHIM = git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)
+PYLINT_BASELINE_DISABLE = no-else-return,unnecessary-ellipsis,too-many-lines,too-many-arguments,too-many-positional-arguments,subprocess-run-check,use-implicit-booleaness-not-comparison-to-string,unnecessary-dunder-call,use-implicit-booleaness-not-comparison
+PYLINT = $(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	--log-file=windows-ipc.log \
@@ -79,6 +85,7 @@ markdownlint-run: ## Run markdownlint-cli2 with pinned fallback
 
 lint: build ## Run linters
 	$(RUFF) check
+	$(PYLINT) $(PYLINT_TARGETS)
 
 typecheck: build ## Run typechecking
 	$(TY) --version

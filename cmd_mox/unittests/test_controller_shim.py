@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import typing as t
+import collections.abc as cabc
+import typing as typ
 
 import pytest
 
@@ -19,7 +20,7 @@ pytestmark = [
     ),
 ]
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
     from pathlib import Path
 
@@ -33,7 +34,9 @@ class _ShimSymlinkSpy:
     def __init__(self) -> None:
         self.calls: list[tuple[Path, tuple[str, ...]]] = []
 
-    def __call__(self, directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+    def __call__(
+        self, directory: Path, commands: cabc.Iterable[str]
+    ) -> dict[str, Path]:
         recorded = tuple(commands)
         self.calls.append((directory, recorded))
         return {name: directory / name for name in recorded}
@@ -52,7 +55,7 @@ def shim_symlink_spy(monkeypatch: pytest.MonkeyPatch) -> _ShimSymlinkSpy:
 
 
 def test_cmdmox_nonstubbed_command_behavior(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Invoking a non-stubbed command returns name but fails verification."""
     mox = CmdMox()
@@ -96,7 +99,7 @@ def test_ensure_shim_during_replay_propagates_symlink_failure(
     mox.__enter__()
     mox.replay()
 
-    def _boom(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+    def _boom(directory: Path, commands: cabc.Iterable[str]) -> dict[str, Path]:
         raise RuntimeError(_SYMLINK_FAILURE_MESSAGE)
 
     monkeypatch.setattr(controller, "create_shim_symlinks", _boom)
@@ -241,7 +244,7 @@ def test_register_command_propagates_shim_creation_failure(
     mox.__enter__()
     mox.replay()
 
-    def _boom(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+    def _boom(directory: Path, commands: cabc.Iterable[str]) -> dict[str, Path]:
         raise PermissionError
 
     monkeypatch.setattr(controller, "create_shim_symlinks", _boom)
@@ -252,7 +255,9 @@ def test_register_command_propagates_shim_creation_failure(
     mox.__exit__(None, None, None)
 
 
-def test_register_command_skips_existing_shim(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_command_skips_existing_shim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """register_command avoids recreating an existing shim."""
     mox = CmdMox()
     mox.__enter__()
@@ -265,7 +270,7 @@ def test_register_command_skips_existing_shim(monkeypatch: pytest.MonkeyPatch) -
 
     called = False
 
-    def _fail(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+    def _fail(directory: Path, commands: cabc.Iterable[str]) -> dict[str, Path]:
         nonlocal called
         called = True
         return {name: directory / name for name in commands}

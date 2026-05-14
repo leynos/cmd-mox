@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import threading
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from cmd_mox.errors import LifecycleError
@@ -19,7 +19,7 @@ from cmd_mox.errors import LifecycleError
 from .env_filter import filter_env_subset
 from .fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from cmd_mox.ipc import Invocation, Response
 
     from .scrubber import Scrubber

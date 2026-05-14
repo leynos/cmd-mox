@@ -14,14 +14,14 @@ Lifecycle: ``__init__()`` -> ``load()`` -> ``match()`` (zero or more) ->
 from __future__ import annotations
 
 import threading
-import typing as t
+import typing as typ
 
 from cmd_mox.errors import LifecycleError, VerificationError
 
 from .fixture import FixtureFile
 from .matching import InvocationMatcher
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
     from cmd_mox.ipc import Invocation, Response

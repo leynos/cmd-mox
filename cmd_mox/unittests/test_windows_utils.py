@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -50,7 +50,7 @@ class _FakeWinError(PyWinErrorProtocol):
 
 
 class _FakeWin32File(Win32FileProtocol):
-    def __init__(self, responses: list[t.Any]) -> None:
+    def __init__(self, responses: list[typ.Any]) -> None:
         self._responses = list(responses)
         self.read_sizes: list[int] = []
         self.writes: list[tuple[object, bytes]] = []
@@ -66,7 +66,7 @@ class _FakeWin32File(Win32FileProtocol):
         response = self._responses.pop(0)
         if isinstance(response, Exception):
             raise response
-        return t.cast("tuple[int, bytes]", response)
+        return typ.cast("tuple[int, bytes]", response)
 
     def WriteFile(  # noqa: N802 - mirror pywin32 API casing for realism
         self, handle: object, payload: bytes
@@ -85,12 +85,10 @@ class _FakePyWinTypes(PyWinTypesProtocol):
 
 def test_read_pipe_message_collects_chunks_until_complete() -> None:
     """Chunked reads should concatenate data until completion marker."""
-    win32file = _FakeWin32File(
-        [
-            (windows.ERROR_MORE_DATA, b"hello "),
-            (0, b"world"),
-        ]
-    )
+    win32file = _FakeWin32File([
+        (windows.ERROR_MORE_DATA, b"hello "),
+        (0, b"world"),
+    ])
 
     payload = windows.read_pipe_message(
         object(),
@@ -104,12 +102,10 @@ def test_read_pipe_message_collects_chunks_until_complete() -> None:
 
 def test_read_pipe_message_returns_partial_on_broken_pipe() -> None:
     """Broken pipes should return any data received before disconnect."""
-    win32file = _FakeWin32File(
-        [
-            (windows.ERROR_MORE_DATA, b"partial"),
-            _FakeWinError(windows.ERROR_BROKEN_PIPE),
-        ]
-    )
+    win32file = _FakeWin32File([
+        (windows.ERROR_MORE_DATA, b"partial"),
+        _FakeWinError(windows.ERROR_BROKEN_PIPE),
+    ])
 
     payload = windows.read_pipe_message(
         object(),

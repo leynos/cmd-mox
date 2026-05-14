@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import typing as t
+import typing as typ
 
 from pytest_bdd import parsers, then, when
 
@@ -24,7 +24,7 @@ from tests.helpers.parameters import (
     resolve_empty_placeholder,
 )
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
 
 

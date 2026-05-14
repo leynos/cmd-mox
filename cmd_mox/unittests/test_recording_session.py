@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -12,7 +12,7 @@ from cmd_mox.ipc import Invocation, Response
 from cmd_mox.record.fixture import FixtureFile, RecordedInvocation
 from cmd_mox.record.session import RecordingSession
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 

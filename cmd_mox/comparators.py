@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import re
-import typing as t
+import typing as typ
 
 
 class _ReprMixin:
@@ -21,7 +22,7 @@ class _ReprMixin:
         return f"{self.__class__.__name__}({attrs})"
 
 
-class Comparator(t.Protocol):
+class Comparator(typ.Protocol):
     """Callable returning ``True`` when a value matches."""
 
     def __call__(self, value: str) -> bool:
@@ -89,7 +90,7 @@ class StartsWith(_ReprMixin):
 class Predicate(_ReprMixin):
     """Use a custom ``func`` to determine a match."""
 
-    def __init__(self, func: t.Callable[[str], t.Any]) -> None:
+    def __init__(self, func: cabc.Callable[[str], typ.Any]) -> None:
         """Create a predicate that evaluates ``func`` and coerces to bool."""
         self.func = func
 

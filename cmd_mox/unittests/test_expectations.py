@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import os
-import typing as t
+import typing as typ
 
 # These tests invoke shim binaries with `shell=False` so the command
 # strings are not interpreted by the shell. The paths come from the
@@ -23,13 +24,13 @@ from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
     from pathlib import Path
 
 
 def test_mock_with_args_and_order(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Mocks require specific arguments and call order."""
     mox = CmdMox()
@@ -50,7 +51,7 @@ def test_mock_with_args_and_order(
 
 
 def test_mock_argument_mismatch(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Verification fails when arguments differ from expectation."""
     mox = CmdMox()
@@ -66,7 +67,7 @@ def test_mock_argument_mismatch(
 
 
 def test_with_matching_args_and_stdin(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Regular expressions and stdin matching are supported."""
     mox = CmdMox()
@@ -85,7 +86,7 @@ def test_with_matching_args_and_stdin(
 
 
 def test_with_env_injection(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Environment variables provided via with_env() are applied."""
     mox = CmdMox()
@@ -126,7 +127,7 @@ def test_with_env_rejects_non_string_values() -> None:
 
 
 def test_any_order_expectations_allow_flexible_sequence(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Expectations marked any_order() should not enforce call ordering."""
     mox = CmdMox()
@@ -146,7 +147,7 @@ def test_any_order_expectations_allow_flexible_sequence(
 
 
 def test_multiple_any_order_expectations_do_not_enforce_order(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Unordered expectations remain unordered when combined."""
     with CmdMox() as mox:
@@ -172,10 +173,10 @@ def test_multiple_any_order_expectations_do_not_enforce_order(
 
 
 def _test_expectation_failure_helper(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
-    mock_configurator: t.Callable[[CmdMox], None],
-    execution_strategy: t.Callable[
-        [t.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+    mock_configurator: cabc.Callable[[CmdMox], None],
+    execution_strategy: cabc.Callable[
+        [cabc.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
     ],
     expected_exception: type[Exception] = UnfulfilledExpectationError,
 ) -> None:
@@ -194,7 +195,7 @@ def _test_expectation_failure_helper(
 
 
 def test_expectation_times_alias(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Expectation.times() and times_called() behave interchangeably."""
     exp = Expectation("foo").times(3)
@@ -288,10 +289,10 @@ def test_expectation_times_alias(
     ],
 )
 def test_expectation_failures(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
-    mock_configurator: t.Callable[[CmdMox], None],
-    execution_strategy: t.Callable[
-        [t.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+    mock_configurator: cabc.Callable[[CmdMox], None],
+    execution_strategy: cabc.Callable[
+        [cabc.Callable[..., subprocess.CompletedProcess[str]], dict[str, Path]], None
     ],
     expected_exception: type[Exception],
 ) -> None:

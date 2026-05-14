@@ -1,9 +1,10 @@
 """Tests for spy assertion helpers."""
 
+import collections.abc as cabc
 import dataclasses as dc
 import os
 import subprocess
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -41,7 +42,7 @@ class TestSpyAssertions:
     # ------------------------------------------------------------------
     def _create_spy_and_run_command(
         self,
-        run: t.Callable[..., subprocess.CompletedProcess[str]],
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
         config: SpyCommandConfig | None = None,
     ) -> tuple[CmdMox, CommandDouble]:
         """Return a ``(mox, spy)`` pair after running a command.
@@ -98,7 +99,7 @@ class TestSpyAssertions:
 
     # ------------------------------------------------------------------
     def test_spy_assert_called_and_called_with(
-        self, run: t.Callable[..., subprocess.CompletedProcess[str]]
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
     ) -> None:
         """Spy exposes assert helpers mirroring unittest.mock."""
         _, spy = self._create_spy_and_run_command(
@@ -109,7 +110,7 @@ class TestSpyAssertions:
 
     # ------------------------------------------------------------------
     def test_spy_assert_called_with_env(
-        self, run: t.Callable[..., subprocess.CompletedProcess[str]]
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
     ) -> None:
         """assert_called_with validates the environment mapping."""
         _, spy = self._create_spy_and_run_command(
@@ -165,7 +166,7 @@ class TestSpyAssertions:
 
     # ------------------------------------------------------------------
     def test_spy_assert_called_with_partial_args(
-        self, run: t.Callable[..., subprocess.CompletedProcess[str]]
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
     ) -> None:
         """assert_called_with fails for subset or superset of args."""
         _, spy = self._create_spy_and_run_command(
@@ -226,7 +227,7 @@ class TestSpyAssertions:
         assert spy._get_last_invocation() is invocation
 
     # ------------------------------------------------------------------
-    ASSERTION_FAILURE_SCENARIOS: t.ClassVar[list[dict[str, t.Any]]] = [
+    ASSERTION_FAILURE_SCENARIOS: typ.ClassVar[list[dict[str, typ.Any]]] = [
         {
             "name": "spy_assert_called_with_mismatched_args",
             "setup": lambda self, run: self._create_spy_and_run_command(
@@ -307,8 +308,8 @@ class TestSpyAssertions:
     )
     def test_spy_assertion_failures(
         self,
-        run: t.Callable[..., subprocess.CompletedProcess[str]],
-        scenario: dict[str, t.Any],
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+        scenario: dict[str, typ.Any],
     ) -> None:
         """Check that mismatches raise ``AssertionError`` with expected message."""
         spy = scenario["setup"](self, run)

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import typing as t
+import collections.abc as cabc
+import typing as typ
 
 import pytest
 
@@ -12,12 +13,12 @@ from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 
 
 def test_unexpected_invocation_message_includes_diff(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Mismatched arguments surface in the verification error message."""
     mox = CmdMox()
@@ -38,7 +39,7 @@ def test_unexpected_invocation_message_includes_diff(
 
 
 def test_unfulfilled_expectation_message_includes_counts(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Unfulfilled expectations report expected and observed call counts."""
     mox = CmdMox()
@@ -59,7 +60,7 @@ def test_unfulfilled_expectation_message_includes_counts(
 
 
 def test_order_violation_reports_first_mismatch(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Ordered expectations report the first mismatching position."""
     mox = CmdMox()
@@ -85,7 +86,7 @@ def test_order_violation_reports_first_mismatch(
 
 
 def test_extra_invocation_reports_count(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Extra invocations report the observed call count."""
     mox = CmdMox()

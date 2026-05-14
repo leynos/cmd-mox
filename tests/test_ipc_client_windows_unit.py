@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import pathlib
 import threading
 import types
-import typing as t
 
 import pytest
 
@@ -166,7 +166,10 @@ def test_send_pipe_request_closes_handle_on_timeout(
     call_count = {"value": 0}
 
     def fake_run(
-        func: t.Callable[[], object], *, deadline: float, cancel: t.Callable[[], None]
+        func: cabc.Callable[[], object],
+        *,
+        deadline: float,
+        cancel: cabc.Callable[[], None],
     ) -> object:
         del func, deadline
         call_count["value"] += 1

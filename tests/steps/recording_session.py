@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import sys
-import typing as t
+import typing as typ
 
 from pytest_bdd import given, parsers, then, when
 
@@ -13,7 +13,7 @@ from cmd_mox.ipc import Invocation, Response
 from cmd_mox.record.fixture import FixtureFile
 from cmd_mox.record.session import RecordingSession
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 

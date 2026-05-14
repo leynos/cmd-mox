@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import subprocess
-import typing as t
+import typing as typ
 
 from examples._utils import resolve_command
 
 pytest_plugins = ("cmd_mox.pytest_plugin",)
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
     from cmd_mox.ipc import Invocation
 

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import dataclasses as dc
 import textwrap
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -17,7 +18,7 @@ pytestmark = pytest.mark.requires_unix_sockets
 
 LifecyclePhase = plugin_utils.LifecyclePhase
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
     from pathlib import Path
 
@@ -45,7 +46,7 @@ _DISABLE_CI_PLUGINS = ("-p", "no:slipcover")
 
 def test_fixture_basic(
     cmd_mox: CmdMox,
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Fixture yields a CmdMox instance and cleans up."""
     cmd_mox.stub("hello").returns(stdout="hi")
@@ -277,13 +278,11 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
                 config_method="fixture_param_dict",
                 ini_setting="cmd_mox_auto_lifecycle = false",
                 cli_args=(),
-                test_decorator="\n".join(
-                    [
-                        "@pytest.mark.parametrize(",
-                        '    "cmd_mox", [{"auto_lifecycle": True}], indirect=True',
-                        ")",
-                    ]
-                ),
+                test_decorator="\n".join([
+                    "@pytest.mark.parametrize(",
+                    '    "cmd_mox", [{"auto_lifecycle": True}], indirect=True',
+                    ")",
+                ]),
                 expected_phase=LifecyclePhase.REPLAY,
                 expect_auto_fail=False,
             ),

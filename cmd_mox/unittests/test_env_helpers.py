@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -14,7 +14,7 @@ from cmd_mox.unittests._env_helpers import (
 )
 from cmd_mox.unittests.conftest import run_subprocess
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing helper
+if typ.TYPE_CHECKING:  # pragma: no cover - typing helper
     from pathlib import Path
 
 

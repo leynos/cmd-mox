@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-import typing as t
+import collections.abc as cabc
+import typing as typ
 
 import pytest
 from pytest_bdd import given, then, when
 
 from cmd_mox.controller import CmdMox
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
     from cmd_mox.test_doubles import CommandDouble
 
 
 @given("a CmdMox controller", target_fixture="mox")
-def create_controller() -> t.Generator[CmdMox, None, None]:
+def create_controller() -> cabc.Generator[CmdMox, None, None]:
     """Create a fresh CmdMox controller with proper cleanup.
 
     Yields

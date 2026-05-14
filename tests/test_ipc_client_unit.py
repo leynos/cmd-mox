@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pathlib
 import socket
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -104,10 +104,10 @@ def test_connect_unix_with_retries_raises_after_exhaustion(
 def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     """invoke_server should send invocation requests with the expected kind."""
     invocation = Invocation(command="cmd", args=[], stdin="", env={})
-    captured: dict[str, t.Any] = {}
+    captured: dict[str, typ.Any] = {}
 
     def fake_send(
-        kind: str, data: dict[str, t.Any], timeout: float, retry: RetryConfig | None
+        kind: str, data: dict[str, typ.Any], timeout: float, retry: RetryConfig | None
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data
@@ -128,10 +128,10 @@ def test_report_passthrough_result_uses_named_kind(
 ) -> None:
     """report_passthrough_result should send responses with the expected kind."""
     result = PassthroughResult(invocation_id="1", stdout="", stderr="", exit_code=0)
-    captured: dict[str, t.Any] = {}
+    captured: dict[str, typ.Any] = {}
 
     def fake_send(
-        kind: str, data: dict[str, t.Any], timeout: float, retry: RetryConfig | None
+        kind: str, data: dict[str, typ.Any], timeout: float, retry: RetryConfig | None
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data

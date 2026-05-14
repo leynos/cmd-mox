@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import dataclasses as dc
 import logging
-import typing as t
+import typing as typ
 
 from cmd_mox.expectations import is_sensitive_recording_env_key
 
 logger = logging.getLogger(__name__)
 
-_REPR_FIELD_LIMIT: t.Final[int] = 256
+_REPR_FIELD_LIMIT: typ.Final[int] = 256
 
 
 def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:
@@ -32,9 +32,9 @@ class Invocation:
     exit_code: int = 0
     invocation_id: str | None = None
 
-    def to_dict(self) -> dict[str, t.Any]:
+    def to_dict(self) -> dict[str, typ.Any]:
         """Return a JSON-serializable mapping of this invocation."""
-        payload: dict[str, t.Any] = {
+        payload: dict[str, typ.Any] = {
             "command": self.command,
             "args": list(self.args),
             "stdin": self.stdin,
@@ -84,7 +84,7 @@ class PassthroughRequest:
     extra_env: dict[str, str] = dc.field(default_factory=dict)
     timeout: float = 30.0
 
-    def to_dict(self) -> dict[str, t.Any]:
+    def to_dict(self) -> dict[str, typ.Any]:
         """Return a JSON-serialisable mapping of this request."""
         return {
             "invocation_id": self.invocation_id,
@@ -103,7 +103,7 @@ class PassthroughResult:
     stderr: str
     exit_code: int
 
-    def to_dict(self) -> dict[str, t.Any]:
+    def to_dict(self) -> dict[str, typ.Any]:
         """Return a JSON-serialisable mapping of this result."""
         return {
             "invocation_id": self.invocation_id,
@@ -113,7 +113,9 @@ class PassthroughResult:
         }
 
 
-def _build_passthrough_request(payload: dict[str, t.Any]) -> PassthroughRequest | None:
+def _build_passthrough_request(
+    payload: dict[str, typ.Any],
+) -> PassthroughRequest | None:
     """Convert *payload* into a :class:`PassthroughRequest` when possible."""
     try:
         invocation_id = str(payload["invocation_id"])
@@ -152,9 +154,9 @@ class Response:
     env: dict[str, str] = dc.field(default_factory=dict)
     passthrough: PassthroughRequest | None = None
 
-    def to_dict(self) -> dict[str, t.Any]:
+    def to_dict(self) -> dict[str, typ.Any]:
         """Return a JSON-serializable mapping of this response."""
-        data: dict[str, t.Any] = {
+        data: dict[str, typ.Any] = {
             "stdout": self.stdout,
             "stderr": self.stderr,
             "exit_code": self.exit_code,
@@ -165,7 +167,7 @@ class Response:
         return data
 
     @classmethod
-    def from_payload(cls, payload: dict[str, t.Any]) -> Response:
+    def from_payload(cls, payload: dict[str, typ.Any]) -> Response:
         """Construct a :class:`Response` from a JSON payload."""
         passthrough_payload = payload.get("passthrough")
         passthrough: PassthroughRequest | None = None

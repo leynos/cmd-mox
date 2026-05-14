@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import os
 import subprocess
-import typing as t
+import typing as typ
 
 import pytest
 
 pytest_plugins = ("cmd_mox.pytest_plugin",)
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
 
 pytestmark = pytest.mark.skipif(
