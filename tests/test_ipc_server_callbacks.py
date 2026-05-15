@@ -27,6 +27,10 @@ from cmd_mox.ipc import (
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+type _RequestPayload = dict[
+    str, str | int | float | bool | list[str] | dict[str, str] | None
+]
+
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -260,11 +264,15 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
 )
 def test_parse_payload_returns_handler_metadata(
     kind: str,
-    payload: dict[str, typ.Any],
-    expected_validator: cabc.Callable[..., typ.Any],
-    expected_processor: cabc.Callable[..., typ.Any],
+    payload: _RequestPayload,
+    expected_validator: server._RequestValidator,
+    expected_processor: server._RequestProcessor,
 ) -> None:
-    """Parsed requests should carry handler metadata for pipeline steps."""
+    """Parsed requests should carry handler metadata for pipeline steps.
+
+    The processor type is the server's heterogeneous request-handler union:
+    invocation and passthrough processors accept different parsed objects.
+    """
     raw = json.dumps({"kind": kind, **payload}).encode()
 
     parsed = server._parse_payload(raw)
@@ -311,7 +319,7 @@ def test_request_pipeline_validation_failure_returns_none(
     """Validation failures should short-circuit dispatch."""
     calls: list[Invocation] = []
 
-    def failing_validator(_payload: dict[str, typ.Any]) -> Invocation | None:
+    def failing_validator(_payload: _RequestPayload) -> Invocation | None:
         return None
 
     def spy_processor(

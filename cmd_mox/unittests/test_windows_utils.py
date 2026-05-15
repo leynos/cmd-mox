@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pathlib
-import typing as typ
 
 import pytest
 
@@ -14,6 +13,8 @@ from cmd_mox.ipc.windows import (
     Win32FileProtocol,
     derive_pipe_name,
 )
+
+type _FakeReadResponse = tuple[int, bytes] | bytes | str | Exception
 
 
 def test_derive_pipe_name_is_deterministic(tmp_path: pathlib.Path) -> None:
@@ -50,7 +51,9 @@ class _FakeWinError(PyWinErrorProtocol):
 
 
 class _FakeWin32File(Win32FileProtocol):
-    def __init__(self, responses: list[typ.Any]) -> None:
+    def __init__(self, responses: list[_FakeReadResponse]) -> None:
+        # Fake reads accept raw payloads, decoded text, explicit pywin32-style
+        # tuples, or exceptions to exercise error paths.
         self._responses = list(responses)
         self.read_sizes: list[int] = []
         self.writes: list[tuple[object, bytes]] = []
@@ -66,7 +69,11 @@ class _FakeWin32File(Win32FileProtocol):
         response = self._responses.pop(0)
         if isinstance(response, Exception):
             raise response
-        return typ.cast("tuple[int, bytes]", response)
+        if isinstance(response, bytes):
+            return (0, response)
+        if isinstance(response, str):
+            return (0, response.encode("utf-8"))
+        return response
 
     def WriteFile(  # noqa: N802 - mirror pywin32 API casing for realism
         self, handle: object, payload: bytes

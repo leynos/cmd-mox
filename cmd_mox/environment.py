@@ -31,6 +31,39 @@ CMOX_REAL_COMMAND_ENV_PREFIX = "CMOX_REAL_COMMAND_"
 _UNSET_TIMEOUT = object()
 
 
+class _UnicodeBuffer(typ.Protocol):
+    """Small surface used from ``ctypes.create_unicode_buffer``."""
+
+    value: str
+
+
+class _Win32Function(typ.Protocol):
+    """Callable Win32 function pointer with configurable ctypes metadata."""
+
+    argtypes: tuple[object, ...]
+    restype: object
+
+    def __call__(self, path: str, buffer: _UnicodeBuffer, size: int) -> int: ...
+
+
+class _Kernel32(typ.Protocol):
+    """Subset of ``kernel32`` needed to resolve short Windows paths."""
+
+    GetShortPathNameW: _Win32Function
+
+
+class _CtypesModule(typ.Protocol):
+    """Typed subset of ``ctypes`` used by the Windows path-shortening helper."""
+
+    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32: ...  # noqa: N802
+
+    def get_last_error(self) -> int: ...
+
+    def FormatError(self, code: int) -> str: ...  # noqa: N802
+
+    def create_unicode_buffer(self, init_or_size: int) -> _UnicodeBuffer: ...
+
+
 def _path_identity(path: Path | None) -> str | None:
     """Return a comparable representation of *path*, or ``None`` if unset."""
     return None if path is None else path_utils.normalize_path(path)
@@ -55,7 +88,7 @@ def _get_short_path(path: Path) -> Path | None:
     import ctypes
     from ctypes import wintypes
 
-    ctypes_module = typ.cast("typ.Any", ctypes)
+    ctypes_module = typ.cast("_CtypesModule", ctypes)
     kernel32 = ctypes_module.WinDLL("kernel32", use_last_error=True)
     get_short_path_name = kernel32.GetShortPathNameW
     get_short_path_name.argtypes = (
@@ -71,7 +104,7 @@ def _get_short_path(path: Path) -> Path | None:
     buffer_len = max(len(raw) + 1, 260)
 
     while True:
-        buffer = ctypes.create_unicode_buffer(buffer_len)
+        buffer = ctypes_module.create_unicode_buffer(buffer_len)
         result = get_short_path_name(raw, buffer, buffer_len)
         if result == 0:
             error = ctypes_module.get_last_error()

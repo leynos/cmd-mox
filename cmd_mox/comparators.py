@@ -90,7 +90,7 @@ class StartsWith(_ReprMixin):
 class Predicate(_ReprMixin):
     """Use a custom ``func`` to determine a match."""
 
-    def __init__(self, func: cabc.Callable[[str], typ.Any]) -> None:
+    def __init__(self, func: cabc.Callable[[str], object]) -> None:
         """Create a predicate that evaluates ``func`` and coerces to bool."""
         self.func = func
 

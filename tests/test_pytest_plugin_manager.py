@@ -75,6 +75,13 @@ class _StubNode:
         self.sections.append((when, key, content))
 
 
+class _RequestKwargs(typ.TypedDict, total=False):
+    """Keyword arguments forwarded into ``_StubRequest``."""
+
+    node: _StubNode
+    param: dict[str, bool]
+
+
 class _StubRequest:
     """Minimal fixture request exposing ``config``/``node``/``param``."""
 
@@ -300,7 +307,7 @@ def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
     ],
 )
 def test_enter_cmd_mox_auto_lifecycle_overrides(
-    monkeypatch: pytest.MonkeyPatch, request_kwargs: dict[str, typ.Any]
+    monkeypatch: pytest.MonkeyPatch, request_kwargs: _RequestKwargs
 ) -> None:
     """Marker and fixture parameter overrides disable automatic replay."""
     request = _StubRequest(config=_StubConfig(), **request_kwargs)

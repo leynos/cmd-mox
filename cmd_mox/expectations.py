@@ -54,7 +54,7 @@ class Expectation:
     name: str
     args: list[str] | None = None
     match_args: list[cabc.Callable[[str], bool]] | None = None
-    stdin: str | cabc.Callable[[str], typ.Any] | None = None
+    stdin: str | cabc.Callable[[str], object] | None = None
     env: dict[str, str] = dc.field(default_factory=dict)
     count: int = 1
     ordered: bool = False
@@ -69,7 +69,7 @@ class Expectation:
         self.match_args = list(matchers)
         return self
 
-    def with_stdin(self, data: str | cabc.Callable[[str], typ.Any]) -> Expectation:
+    def with_stdin(self, data: str | cabc.Callable[[str], object]) -> Expectation:
         """Expect ``stdin`` to equal ``data`` or satisfy a predicate.
 
         The predicate's return value will be coerced to bool.
