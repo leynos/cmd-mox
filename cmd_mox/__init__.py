@@ -6,7 +6,6 @@ documentation (`https://github.com/leynos/cmd-mox/blob/main/docs/contents.md`).
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import importlib
 import typing as typ
 
@@ -33,32 +32,32 @@ from .shimgen import SHIM_PATH, create_shim_symlinks
 from .test_doubles import CommandDouble, MockCommand, SpyCommand, StubCommand
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from types import ModuleType as _ModuleType
 else:  # pragma: no cover - typing fallback only
     _ModuleType = type(importlib)
 
-type _CmdMoxFixture = cabc.Callable[..., object]
-
-_CMD_MOX_FIXTURE_PYTEST_REQUIRED_MESSAGE: typ.Final[str] = (
-    "cmd_mox_fixture requires pytest; install 'pytest' to use the fixture."
-)
-
 
 @typ.overload
-def __getattr__(name: typ.Literal["cmd_mox_fixture"]) -> _CmdMoxFixture: ...
+def __getattr__(
+    name: typ.Literal["cmd_mox_fixture"],
+) -> cabc.Callable[..., object]: ...
 
 
 @typ.overload
 def __getattr__(name: str) -> _ModuleType: ...
 
 
-def __getattr__(name: str) -> _ModuleType | _CmdMoxFixture:
+def __getattr__(name: str) -> _ModuleType | cabc.Callable[..., object]:
     """Lazily import optional dependencies when requested."""
     if name == "cmd_mox_fixture":
         try:
             from .pytest_plugin import cmd_mox as _cmd_mox_fixture
         except ModuleNotFoundError as exc:  # pytest optional at runtime
-            raise RuntimeError(_CMD_MOX_FIXTURE_PYTEST_REQUIRED_MESSAGE) from exc
+            msg = (
+                "cmd_mox_fixture requires pytest; install 'pytest' to use the fixture."
+            )
+            raise RuntimeError(msg) from exc
         globals()[name] = _cmd_mox_fixture
         return _cmd_mox_fixture
 

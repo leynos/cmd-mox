@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import typing as typ
 
 import pytest
@@ -38,7 +39,7 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert response.passthrough is not None
     assert response.passthrough.lookup_path == "/usr/bin"
-    assert response.passthrough.timeout == 2.0
+    assert math.isclose(response.passthrough.timeout, 2.0)
     assert response.passthrough.extra_env == {"PATH": "/usr/bin"}
     assert response.env == {"PATH": "/usr/bin"}
     assert coordinator.has_pending(invocation.invocation_id or "")

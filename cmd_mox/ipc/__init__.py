@@ -1,6 +1,5 @@
 """Public interface for IPC server/client helpers."""
 
-from . import client as _client
 from .client import (
     DEFAULT_CONNECT_BACKOFF,
     DEFAULT_CONNECT_JITTER,
@@ -10,6 +9,7 @@ from .client import (
     RetryStrategy,
     calculate_retry_delay,
     invoke_server,
+    random,
     report_passthrough_result,
     retry_with_backoff,
 )
@@ -27,8 +27,6 @@ from .server import (
     NamedPipeServer,
     TimeoutConfig,
 )
-
-random = _client.random
 
 __all__ = [
     "DEFAULT_CONNECT_BACKOFF",

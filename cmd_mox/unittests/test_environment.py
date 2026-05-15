@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import collections.abc as cabc
 import logging
+import math
 import os
 import stat
 import threading
@@ -129,7 +130,8 @@ def test_export_ipc_environment_sets_timeout() -> None:
     with EnvironmentManager() as env:
         env.export_ipc_environment(timeout=2.5)
         assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "2.5"
-        assert env.ipc_timeout == 2.5
+        assert env.ipc_timeout is not None
+        assert math.isclose(env.ipc_timeout, 2.5)
 
 
 @pytest.mark.parametrize("invalid", [0, -1, -0.1, float("nan"), float("inf")])
@@ -157,7 +159,8 @@ def test_export_ipc_environment_reuses_previous_timeout() -> None:
         env.export_ipc_environment(timeout=3.25)
         env.export_ipc_environment()
         assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "3.25"
-        assert env.ipc_timeout == 3.25
+        assert env.ipc_timeout is not None
+        assert math.isclose(env.ipc_timeout, 3.25)
 
 
 def test_export_ipc_environment_clears_missing_timeout(

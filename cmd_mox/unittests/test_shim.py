@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections.abc as cabc
+import math
 import os
 import sys
 import typing as typ
@@ -264,7 +265,7 @@ def test_execute_invocation_returns_response_without_passthrough(
 
     assert result is expected
     assert calls["invocation"] is invocation
-    assert calls["timeout"] == 1.5
+    assert math.isclose(calls["timeout"], 1.5)
 
 
 def test_execute_invocation_processes_passthrough(
@@ -288,7 +289,7 @@ def test_execute_invocation_processes_passthrough(
     def fake_passthrough(inv: Invocation, resp: Response, timeout: float) -> Response:
         assert inv is invocation
         assert resp is intermediate
-        assert timeout == 2.0
+        assert math.isclose(timeout, 2.0)
         return final
 
     monkeypatch.setattr(shim, "_handle_passthrough", fake_passthrough)
