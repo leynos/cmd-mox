@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from cmd_mox.unittests._env_helpers import (
@@ -16,7 +16,7 @@ from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
 pytest_plugins = ("cmd_mox.pytest_plugin",)
 
-if t.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
+if typ.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from cmd_mox.controller import CmdMox
 
 

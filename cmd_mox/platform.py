@@ -6,22 +6,23 @@ lets both the pytest plug-in and external test suites react consistently.
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import os
 import sys
-import typing as t
+import typing as typ
 
 # ``pytester``-driven tests set this override to emulate alternative platforms
 # (for example Windows) without needing to spawn a different OS.
-PLATFORM_OVERRIDE_ENV: t.Final[str] = "CMD_MOX_PLATFORM_OVERRIDE"
+PLATFORM_OVERRIDE_ENV: typ.Final[str] = "CMD_MOX_PLATFORM_OVERRIDE"
 
 # Map ``sys.platform`` prefixes to user-facing skip reasons. Only Windows is
 # unsupported today, but the structure keeps future additions focused here.
 # Each entry pairs the prefix (as reported by ``sys.platform``) with the
 # human-readable skip reason to surface to pytest users. Prefixes should match
 # the start of ``sys.platform`` (e.g. ``"win"`` for ``"win32"``).
-_UNSUPPORTED_PLATFORMS: t.Final[tuple[tuple[str, str], ...]] = ()
+_UNSUPPORTED_PLATFORMS: typ.Final[tuple[tuple[str, str], ...]] = ()
 
-_PYTEST_REQUIRED_MESSAGE: t.Final[str] = (
+_PYTEST_REQUIRED_MESSAGE: typ.Final[str] = (
     "pytest is required to automatically skip unsupported platforms. "
     "Install it with 'pip install pytest' or only call skip_if_unsupported within "
     "pytest."
@@ -120,7 +121,7 @@ def skip_if_unsupported(
     except ModuleNotFoundError as exc:  # pragma: no cover - pytest is a test dep
         raise RuntimeError(_PYTEST_REQUIRED_MESSAGE) from exc
 
-    skip = t.cast("t.Callable[[str], t.NoReturn]", pytest.skip)
+    skip = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.skip)
     skip(skip_reason)  # ty misreads @_with_exception
 
 

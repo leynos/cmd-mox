@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 import pytest
 
 from cmd_mox.controller import CmdMox
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.ipc import Invocation
 
 from tests.helpers.controller import (

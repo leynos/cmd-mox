@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 from tests.helpers import controller
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     import pytest
 
 

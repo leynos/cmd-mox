@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -30,4 +30,4 @@ def test_validate_positive_finite_timeout_rejects_invalid_values(value: float) -
 def test_validate_positive_finite_timeout_rejects_invalid_types(value: object) -> None:
     """Non-real inputs should raise TypeError before numeric checks."""
     with pytest.raises(TypeError):
-        validate_positive_finite_timeout(t.cast("float", value))
+        validate_positive_finite_timeout(typ.cast("float", value))

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import logging
 import os
 import sys
-import typing as t
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
@@ -54,7 +54,7 @@ def _validate_command_name(name: str) -> None:
     """Validate *name* is a safe command filename."""
     error_msg = f"Invalid command name: {name!r}"
 
-    validators: list[t.Callable[[str, str], None]] = [
+    validators: list[cabc.Callable[[str, str], None]] = [
         _validate_not_empty,
         _validate_not_dot_directories,
         _validate_no_path_separators,
@@ -173,7 +173,9 @@ def _create_shim_for_command(directory: Path, name: str) -> Path:
     return _create_posix_symlink(directory, name)
 
 
-def create_shim_symlinks(directory: Path, commands: t.Iterable[str]) -> dict[str, Path]:
+def create_shim_symlinks(
+    directory: Path, commands: cabc.Iterable[str]
+) -> dict[str, Path]:
     """Create shims for the given commands in *directory*.
 
     Parameters

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -14,7 +14,7 @@ from cmd_mox.record.fixture import RecordedInvocation
 from cmd_mox.record.replay import ReplaySession
 from tests.helpers.fixtures import write_minimal_replay_fixture, write_replay_fixture
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 

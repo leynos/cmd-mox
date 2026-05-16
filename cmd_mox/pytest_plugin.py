@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import logging
 import os
 import re
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -139,12 +140,12 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(
-    item: pytest.Item, call: pytest.CallInfo[t.Any]
-) -> t.Generator[None, None, None]:
+    item: pytest.Item, call: pytest.CallInfo[typ.Any]
+) -> cabc.Generator[None, None, None]:
     """Record whether the test body failed for later teardown decisions."""
     del call
     outcome = yield
-    rep = t.cast("t.Any", outcome).get_result()
+    rep = typ.cast("typ.Any", outcome).get_result()
     if rep.when == "call":
         item.stash[STASH_CALL_FAILED] = rep.failed
 
@@ -254,7 +255,7 @@ class _CmdMoxManager:
                     f"{type(err).__name__}: {err}",
                 )
         message = _format_teardown_failure(errors, nodeid=self._nodeid)
-        fail = t.cast("t.Callable[[str], t.NoReturn]", pytest.fail)
+        fail = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.fail)
         fail(message)  # ty misreads @_with_exception
 
     def _auto_lifecycle_enabled(self) -> bool:
@@ -344,7 +345,7 @@ class _CmdMoxManager:
 
 
 @pytest.fixture
-def cmd_mox(request: pytest.FixtureRequest) -> t.Generator[CmdMox, None, None]:
+def cmd_mox(request: pytest.FixtureRequest) -> cabc.Generator[CmdMox, None, None]:
     """Provide a :class:`CmdMox` instance with environment active."""
     skip_if_unsupported()
 

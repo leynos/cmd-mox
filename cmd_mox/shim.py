@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import importlib.util
 import json
 import math
 import os
 import sys
-import typing as t
 from pathlib import Path
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -19,7 +19,7 @@ if str(_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PACKAGE_ROOT))
 
 
-def _load_bootstrap_from_file() -> t.Callable[[], None]:
+def _load_bootstrap_from_file() -> cabc.Callable[[], None]:
     """Load bootstrap helper without importing the package ``__init__``."""
     bootstrap_path = Path(__file__).resolve().with_name("_shim_bootstrap.py")
     spec = importlib.util.spec_from_file_location(

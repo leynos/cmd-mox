@@ -3,7 +3,7 @@
 import os
 import socket
 import threading
-import typing as t
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -150,17 +150,17 @@ def test_invoke_server_exhausts_retries(
 def test_invoke_server_validates_params(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    kwargs: dict[str, t.Any],
+    kwargs: dict[str, typ.Any],
     match: str,
 ) -> None:
     """Client rejects invalid retry configuration."""
     socket_path = tmp_path / "ipc.sock"
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
-    timeout = t.cast("float", kwargs.get("timeout", 1.0))
-    retries = t.cast("int", kwargs.get("retries", 1))
-    backoff = t.cast("float", kwargs.get("backoff", 0.0))
-    jitter = t.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER))
+    timeout = typ.cast("float", kwargs.get("timeout", 1.0))
+    retries = typ.cast("int", kwargs.get("retries", 1))
+    backoff = typ.cast("float", kwargs.get("backoff", 0.0))
+    jitter = typ.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER))
     with pytest.raises(ValueError, match=match):
         invoke_server(
             invocation,

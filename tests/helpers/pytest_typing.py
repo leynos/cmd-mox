@@ -8,12 +8,13 @@ signature via ``typing.cast``.
 
 from __future__ import annotations
 
-import typing as t
+import collections.abc as cabc
+import typing as typ
 
 import pytest
 
 
-def pytest_skip(reason: str) -> t.NoReturn:
+def pytest_skip(reason: str) -> typ.NoReturn:
     """Invoke ``pytest.skip`` via a typed cast so ``ty`` sees ``NoReturn``.
 
     Parameters
@@ -26,11 +27,11 @@ def pytest_skip(reason: str) -> t.NoReturn:
     pytest.skip.Exception
         Always raised; the function never returns normally.
     """
-    skip = t.cast("t.Callable[[str], t.NoReturn]", pytest.skip)
+    skip = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.skip)
     skip(reason)
 
 
-def pytest_fail(reason: str) -> t.NoReturn:
+def pytest_fail(reason: str) -> typ.NoReturn:
     """Invoke ``pytest.fail`` via a typed cast so ``ty`` sees ``NoReturn``.
 
     Parameters
@@ -43,5 +44,5 @@ def pytest_fail(reason: str) -> t.NoReturn:
     pytest.fail.Exception
         Always raised; the function never returns normally.
     """
-    fail = t.cast("t.Callable[[str], t.NoReturn]", pytest.fail)
+    fail = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.fail)
     fail(reason)

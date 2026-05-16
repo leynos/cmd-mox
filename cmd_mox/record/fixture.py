@@ -7,26 +7,27 @@ deserialization, and file I/O.
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import copy
 import dataclasses as dc
 import datetime as dt
 import importlib.metadata
 import json
 import sys
-import typing as t
+import typing as typ
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 from .scrubber import ScrubbingRule, ScrubbingRuleDict
 
-_SCHEMA_VERSION: t.Final[str] = "1.0"
+_SCHEMA_VERSION: typ.Final[str] = "1.0"
 
 # ---------------------------------------------------------------------------
 # Schema version parsing and migration
 # ---------------------------------------------------------------------------
 
-type _MigrationFn = t.Callable[[dict[str, t.Any]], dict[str, t.Any]]
+type _MigrationFn = cabc.Callable[[dict[str, typ.Any]], dict[str, typ.Any]]
 
 
 def _parse_version(version_str: str) -> tuple[int, int]:
@@ -62,7 +63,7 @@ def _parse_version(version_str: str) -> tuple[int, int]:
     return (major, minor)
 
 
-def _migrate_v0_to_v1(data: dict[str, t.Any]) -> dict[str, t.Any]:
+def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
     """Migrate a v0.x fixture dict to v1.0 format.
 
     The v0.x schema is hypothetical (v1.0 is the first release).  This
@@ -81,7 +82,7 @@ _MIGRATIONS: dict[int, tuple[tuple[int, int], _MigrationFn]] = {
 }
 
 
-def _normalize_version_field(data: dict[str, t.Any]) -> None:
+def _normalize_version_field(data: dict[str, typ.Any]) -> None:
     """Ensure *data* has a valid ``version`` field, mutating in-place.
 
     A missing ``version`` key is treated as ``"0.0"`` (legacy fixture
@@ -90,7 +91,7 @@ def _normalize_version_field(data: dict[str, t.Any]) -> None:
 
     Parameters
     ----------
-    data : dict[str, t.Any]
+    data : dict[str, typ.Any]
         The raw fixture dict whose ``version`` field will be validated
         and, if absent, set to ``"0.0"``.
 
@@ -138,15 +139,15 @@ def _check_version_compatibility(
 
 
 def _execute_migration_chain(
-    data: dict[str, t.Any],
+    data: dict[str, typ.Any],
     file_ver: tuple[int, int],
     current: tuple[int, int],
-) -> dict[str, t.Any]:
+) -> dict[str, typ.Any]:
     """Chain migrations until the major versions match.
 
     Parameters
     ----------
-    data : dict[str, t.Any]
+    data : dict[str, typ.Any]
         The fixture dict to migrate.  Each migration function receives
         and returns a dict, so successive calls are chained.
     file_ver : tuple[int, int]
@@ -156,7 +157,7 @@ def _execute_migration_chain(
 
     Returns
     -------
-    dict[str, t.Any]
+    dict[str, typ.Any]
         The fixture dict after all applicable migrations have been
         applied.
 
@@ -187,7 +188,7 @@ def _execute_migration_chain(
     return data
 
 
-def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
+def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
     """Apply chained migrations to bring *data* up to the current schema.
 
     The input dict is deep-copied so the caller's original is never
@@ -196,12 +197,12 @@ def _apply_migrations(data: dict[str, t.Any]) -> dict[str, t.Any]:
 
     Parameters
     ----------
-    data : dict[str, t.Any]
+    data : dict[str, typ.Any]
         The raw fixture dict, potentially at an older schema version.
 
     Returns
     -------
-    dict[str, t.Any]
+    dict[str, typ.Any]
         The fixture dict migrated to the current schema version.
 
     Raises
@@ -248,7 +249,7 @@ class RecordedInvocation:
     timestamp: str
     duration_ms: int
 
-    def to_dict(self) -> dict[str, t.Any]:
+    def to_dict(self) -> dict[str, typ.Any]:
         """Return a JSON-serializable mapping matching the v1.0 schema."""
         return {
             "sequence": self.sequence,
@@ -264,7 +265,7 @@ class RecordedInvocation:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, t.Any]) -> RecordedInvocation:
+    def from_dict(cls, data: dict[str, typ.Any]) -> RecordedInvocation:
         """Construct from a JSON-compatible mapping."""
         return cls(
             sequence=int(data["sequence"]),
@@ -291,9 +292,9 @@ class FixtureMetadata:
     test_module: str | None = None
     test_function: str | None = None
 
-    def to_dict(self) -> dict[str, t.Any]:
+    def to_dict(self) -> dict[str, typ.Any]:
         """Return a JSON-serializable mapping."""
-        d: dict[str, t.Any] = {
+        d: dict[str, typ.Any] = {
             "created_at": self.created_at,
             "cmdmox_version": self.cmdmox_version,
             "platform": self.platform,
@@ -306,7 +307,7 @@ class FixtureMetadata:
         return d
 
     @classmethod
-    def from_dict(cls, data: dict[str, t.Any]) -> FixtureMetadata:
+    def from_dict(cls, data: dict[str, typ.Any]) -> FixtureMetadata:
         """Construct from a JSON-compatible mapping."""
         raw_module = data.get("test_module")
         raw_function = data.get("test_function")
@@ -341,14 +342,14 @@ class FixtureMetadata:
 class FixtureFile:
     """A complete fixture file with metadata, recordings, and scrubbing rules."""
 
-    SCHEMA_VERSION: t.ClassVar[str] = _SCHEMA_VERSION
+    SCHEMA_VERSION: typ.ClassVar[str] = _SCHEMA_VERSION
 
     version: str
     metadata: FixtureMetadata
     recordings: list[RecordedInvocation]
     scrubbing_rules: list[ScrubbingRule]
 
-    def to_dict(self) -> dict[str, t.Any]:
+    def to_dict(self) -> dict[str, typ.Any]:
         """Return a JSON-serializable mapping matching the v1.0 schema."""
         return {
             "version": self.version,
@@ -358,7 +359,7 @@ class FixtureFile:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, t.Any]) -> FixtureFile:
+    def from_dict(cls, data: dict[str, typ.Any]) -> FixtureFile:
         """Construct from a JSON-compatible mapping.
 
         Older schema versions are migrated forward automatically.  Minor
@@ -373,7 +374,7 @@ class FixtureFile:
                 RecordedInvocation.from_dict(r) for r in data.get("recordings", [])
             ],
             scrubbing_rules=[
-                ScrubbingRule.from_dict(t.cast("ScrubbingRuleDict", r))
+                ScrubbingRule.from_dict(typ.cast("ScrubbingRuleDict", r))
                 for r in data.get("scrubbing_rules", [])
             ],
         )

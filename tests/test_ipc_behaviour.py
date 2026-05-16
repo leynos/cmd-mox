@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -15,7 +15,7 @@ from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
+if typ.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from pathlib import Path
 
 

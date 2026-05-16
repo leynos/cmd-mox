@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import textwrap
-import typing as t
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -12,7 +12,7 @@ from pytest_bdd import given, scenario, then, when
 
 from tests.helpers.pytest_plugin import load_parallel_suite, read_parallel_records
 
-if t.TYPE_CHECKING:  # pragma: no cover - used for type checking only
+if typ.TYPE_CHECKING:  # pragma: no cover - used for type checking only
     from _pytest.pytester import Pytester, RunResult
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shlex
-import typing as t
+import typing as typ
 
 import pytest
 from pytest_bdd import given, parsers, then, when
@@ -12,7 +12,7 @@ from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.ipc import Invocation
 from tests.helpers.fixtures import write_minimal_replay_fixture
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
     from cmd_mox.controller import CmdMox

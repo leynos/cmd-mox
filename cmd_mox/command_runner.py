@@ -5,13 +5,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from .environment import CMOX_REAL_COMMAND_ENV_PREFIX
 from .ipc import Invocation, Response
 
-if t.TYPE_CHECKING:  # pragma: no cover - used for type hints
+if typ.TYPE_CHECKING:  # pragma: no cover - used for type hints
     from .environment import EnvironmentManager
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
-import typing as t
+import typing as typ
 
 from pytest_bdd import given, parsers
 
@@ -18,7 +18,7 @@ from tests.helpers.parameters import (
     resolve_empty_placeholder,
 )
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import pytest
 
     from cmd_mox.controller import CmdMox

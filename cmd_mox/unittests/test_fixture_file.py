@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 import sys
-import typing as t
+import typing as typ
 
 import pytest
 
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.scrubber import ScrubbingRule
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 

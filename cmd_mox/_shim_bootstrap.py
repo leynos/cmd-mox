@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import contextlib
 import importlib
 import importlib.util as importlib_util
 import sys
 import sysconfig
-import typing as t
+import typing as typ
 from pathlib import Path
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from types import ModuleType
 
 _BOOTSTRAP_DONE = False
@@ -29,7 +30,7 @@ _INITIAL_STDLIB_PATH = _try_get_stdlib_path()
 
 
 @contextlib.contextmanager
-def _temporary_sys_path(entries: tuple[str, ...]) -> t.Iterator[None]:
+def _temporary_sys_path(entries: tuple[str, ...]) -> cabc.Iterator[None]:
     """Temporarily replace ``sys.path`` while keeping import caches coherent."""
     original_sys_path = sys.path
     sys.path = list(entries)

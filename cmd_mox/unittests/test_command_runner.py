@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import subprocess
-import typing as t
-from dataclasses import dataclass  # noqa: ICN003
+import typing as typ
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -19,7 +19,7 @@ from cmd_mox.command_runner import (
 from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX, EnvironmentManager
 from cmd_mox.ipc import Invocation, Response
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
 
 
@@ -241,7 +241,7 @@ def test_resolve_command_with_override_reports_errors(tmp_path: Path) -> None:
 class ExecuteExceptionScenario:
     """Bundle execute_command exception expectations for parametrized tests."""
 
-    factory: t.Callable[[], Exception]
+    factory: cabc.Callable[[], Exception]
     command: str
     exit_code: int
     stderr: str

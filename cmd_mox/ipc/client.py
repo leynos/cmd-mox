@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import contextlib
 import dataclasses as dc
 import importlib
@@ -12,7 +13,7 @@ import random
 import socket
 import threading
 import time
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
@@ -34,7 +35,7 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     _Win32File = Win32FileProtocol
     _PyWinTypes = PyWinTypesProtocol
 
@@ -53,17 +54,17 @@ if path_utils.IS_WINDOWS:  # pragma: win32-only
         msg = "pywin32 is required for Windows named pipe support"
         raise RuntimeError(msg) from exc
 else:  # pragma: no cover - satisfies type-checkers on non-Windows hosts
-    pywintypes = t.cast("t.Any", None)
-    win32file = t.cast("t.Any", None)
-    win32pipe = t.cast("t.Any", None)
+    pywintypes = typ.cast("typ.Any", None)
+    win32file = typ.cast("typ.Any", None)
+    win32pipe = typ.cast("typ.Any", None)
 
-DEFAULT_CONNECT_RETRIES: t.Final[int] = 3
-DEFAULT_CONNECT_BACKOFF: t.Final[float] = 0.05
-DEFAULT_CONNECT_JITTER: t.Final[float] = 0.2
-MIN_RETRY_SLEEP: t.Final[float] = 0.001
-IO_CANCEL_GRACE: t.Final[float] = 0.05
+DEFAULT_CONNECT_RETRIES: typ.Final[int] = 3
+DEFAULT_CONNECT_BACKOFF: typ.Final[float] = 0.05
+DEFAULT_CONNECT_JITTER: typ.Final[float] = 0.2
+MIN_RETRY_SLEEP: typ.Final[float] = 0.001
+IO_CANCEL_GRACE: typ.Final[float] = 0.05
 
-_SENTINEL: t.Final[object] = object()
+_SENTINEL: typ.Final[object] = object()
 
 
 @dc.dataclass(slots=True)
@@ -90,9 +91,9 @@ class RetryConfig:
 class RetryStrategy:
     """Hooks for logging and gating retry behaviour."""
 
-    on_failure: t.Callable[[int, Exception], None] | None = None
-    should_retry: t.Callable[[Exception, int, int], bool] | None = None
-    sleep: t.Callable[[float], None] = time.sleep
+    on_failure: cabc.Callable[[int, Exception], None] | None = None
+    should_retry: cabc.Callable[[Exception, int, int], bool] | None = None
+    sleep: cabc.Callable[[float], None] = time.sleep
 
 
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
@@ -142,7 +143,7 @@ def _handle_retry_failure(
 
 
 def retry_with_backoff[T](
-    func: t.Callable[[int], T],
+    func: cabc.Callable[[int], T],
     *,
     retry_config: RetryConfig,
     strategy: RetryStrategy | None = None,
@@ -219,7 +220,7 @@ class _HandleCloser:
 
 
 def _validate_initial_deadline(
-    deadline: float, cancel: t.Callable[[], None], thread: threading.Thread
+    deadline: float, cancel: cabc.Callable[[], None], thread: threading.Thread
 ) -> float:
     """Validate the deadline and return remaining time.
 
@@ -234,7 +235,7 @@ def _validate_initial_deadline(
 
 
 def _join_with_timeout_and_cancel(
-    thread: threading.Thread, remaining: float, cancel: t.Callable[[], None]
+    thread: threading.Thread, remaining: float, cancel: cabc.Callable[[], None]
 ) -> None:
     """Join the thread with timeout; cancel and raise if still alive."""
     thread.join(remaining)
@@ -245,10 +246,10 @@ def _join_with_timeout_and_cancel(
         raise TimeoutError(msg)
 
 
-def _extract_outcome(outcome: dict[str, t.Any]) -> object:
+def _extract_outcome(outcome: dict[str, typ.Any]) -> object:
     """Extract the result from the outcome dict, raising any stored error."""
     if (error := outcome.get("error")) is not None:
-        raise t.cast("BaseException", error)
+        raise typ.cast("BaseException", error)
     value = outcome.get("value", _SENTINEL)
     if value is _SENTINEL:
         value = None
@@ -256,13 +257,13 @@ def _extract_outcome(outcome: dict[str, t.Any]) -> object:
 
 
 def _run_blocking_io[T](
-    func: t.Callable[[], T],
+    func: cabc.Callable[[], T],
     *,
     deadline: float,
-    cancel: t.Callable[[], None],
+    cancel: cabc.Callable[[], None],
 ) -> T:
     """Execute *func* on a worker thread until completion or timeout."""
-    outcome: dict[str, t.Any] = {"value": _SENTINEL}
+    outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
     def _target() -> None:
         try:
@@ -279,7 +280,7 @@ def _run_blocking_io[T](
 
     remaining = _validate_initial_deadline(deadline, cancel, thread)
     _join_with_timeout_and_cancel(thread, remaining, cancel)
-    return t.cast("T", _extract_outcome(outcome))
+    return typ.cast("T", _extract_outcome(outcome))
 
 
 def _connect_unix_with_retries(
@@ -392,7 +393,7 @@ def _create_pipe_handle(pipe_name: str) -> object:
     )
     win32pipe.SetNamedPipeHandleState(
         handle,
-        t.cast("int", getattr(win32pipe, "PIPE_READMODE_MESSAGE", 2)),
+        typ.cast("int", getattr(win32pipe, "PIPE_READMODE_MESSAGE", 2)),
         None,
         None,
     )
@@ -458,7 +459,7 @@ def _send_pipe_request(
     try:
         _run_blocking_io(
             lambda: write_pipe_payload(
-                handle, payload, win32file=t.cast("Win32FileProtocol", win32file)
+                handle, payload, win32file=typ.cast("Win32FileProtocol", win32file)
             ),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
@@ -466,8 +467,8 @@ def _send_pipe_request(
         return _run_blocking_io(
             lambda: read_pipe_message(
                 handle,
-                win32file=t.cast("Win32FileProtocol", win32file),
-                pywintypes=t.cast("PyWinTypesProtocol", pywintypes),
+                win32file=typ.cast("Win32FileProtocol", win32file),
+                pywintypes=typ.cast("PyWinTypesProtocol", pywintypes),
                 chunk_size=PIPE_CHUNK_SIZE,
             ),
             deadline=_compute_deadline(timeout),
@@ -479,7 +480,7 @@ def _send_pipe_request(
 
 def _send_request(
     kind: str,
-    data: dict[str, t.Any],
+    data: dict[str, typ.Any],
     timeout: float,
     retry_config: RetryConfig | None,
 ) -> Response:

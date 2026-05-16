@@ -2,30 +2,31 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import enum
-import typing as t
+import typing as typ
 
 from .expectations import Expectation
 from .ipc import Invocation, Response
 
-Self = t.Self
+Self = typ.Self
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing-only import
+if typ.TYPE_CHECKING:  # pragma: no cover - typing-only import
     from .controller import CmdMox
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from pathlib import Path
 
     from .record.replay import ReplaySession
     from .record.scrubber import Scrubber
     from .record.session import RecordingSession
 
-    class _ExpectationProtocol(t.Protocol):
+    class _ExpectationProtocol(typ.Protocol):
         def with_args(self, *args: str) -> Self: ...
 
-        def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self: ...
+        def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Self: ...
 
-        def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self: ...
+        def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> Self: ...
 
         def with_env(self, mapping: dict[str, str]) -> Self: ...
 
@@ -41,10 +42,10 @@ if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
 else:
 
     class _ExpectationType:  # pragma: no cover - runtime placeholder
-        def __getattr__(self, name: str) -> t.Callable[..., t.NoReturn]:
+        def __getattr__(self, name: str) -> cabc.Callable[..., typ.NoReturn]:
             """Raise NotImplementedError for any method access."""
 
-            def _method(*args: object, **kwargs: object) -> t.NoReturn:
+            def _method(*args: object, **kwargs: object) -> typ.NoReturn:
                 raise NotImplementedError(f"{name} is typing-only")
 
             return _method
@@ -93,7 +94,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         self.kind: DoubleKind = kind
         self.controller = controller  # CmdMox instance
         self.response = Response()
-        self.handler: t.Callable[[Invocation], Response] | None = None
+        self.handler: cabc.Callable[[Invocation], Response] | None = None
         self.invocations: list[Invocation] = []
         self.passthrough_mode = False
         self.expectation = Expectation(name)
@@ -108,7 +109,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     def runs(
         self,
-        handler: t.Callable[[Invocation], tuple[str, str, int] | Response],
+        handler: cabc.Callable[[Invocation], tuple[str, str, int] | Response],
     ) -> Self:
         """Use *handler* to generate responses dynamically."""
 
@@ -147,12 +148,12 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         self.expectation.with_args(*args)
         return self
 
-    def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Self:
+    def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Self:
         """Validate arguments using matcher predicates."""
         self.expectation.with_matching_args(*matchers)
         return self
 
-    def with_stdin(self, data: str | t.Callable[[str], bool]) -> Self:
+    def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> Self:
         """Expect the given stdin ``data`` or matcher."""
         self.expectation.with_stdin(data)
         return self

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import os
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -14,12 +15,12 @@ from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
 
 
 def test_mock_with_env_static_response(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Mocks with env overrides should verify when caller omits variables."""
     key = "EXPECT_ENV"
@@ -139,7 +140,7 @@ def test_cmdmox_environment_cleanup_on_exception(
 
 
 def test_context_manager_restores_env_on_exception(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Context manager restores environment even if an exception occurs."""
 

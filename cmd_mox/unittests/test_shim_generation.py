@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import os
 import pathlib
 import stat
 import sys
 import tempfile
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -29,7 +30,7 @@ from cmd_mox.shimgen import (
     _validate_not_empty,
 )
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing helpers only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing helpers only
     import subprocess
 
     from cmd_mox.fs_retry import RetryConfig
@@ -110,7 +111,7 @@ def test_validate_command_uniqueness_respects_platform(
 @pytest.mark.requires_unix_sockets
 @pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink execution only")
 def test_create_shim_symlinks_and_execution(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """POSIX shims execute the shared shim and expose the command name."""
     commands = ["git", "curl"]
@@ -340,7 +341,7 @@ def test_create_shim_symlinks_detects_case_insensitive_duplicates(
     ],
 )
 def test_validators_raise_error(
-    validator: t.Callable[[str, str], None], bad_name: str
+    validator: cabc.Callable[[str, str], None], bad_name: str
 ) -> None:
     """Each validator rejects bad input."""
     with pytest.raises(ValueError, match="error"):

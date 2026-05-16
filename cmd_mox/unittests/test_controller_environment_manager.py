@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import typing as t
+import collections.abc as cabc
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -65,7 +66,9 @@ def test_cmdmox_replay_reports_all_missing_attrs(
     mox.__exit__(None, None, None)
 
 
-def test_verify_missing_environment_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verify_missing_environment_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """verify() fails when environment attributes are missing."""
     mox = CmdMox(
         verify_on_exit=False
@@ -112,7 +115,7 @@ def test_replay_detects_environment_loss(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_require_env_attrs_rejects_missing_environment() -> None:
     """_require_env_attrs surfaces the default missing environment message."""
     mox = CmdMox()
-    mox.environment = t.cast("EnvironmentManager", None)
+    mox.environment = typ.cast("EnvironmentManager", None)
     with pytest.raises(
         MissingEnvironmentError, match="Replay environment is not ready"
     ):
@@ -185,7 +188,7 @@ def test_validate_replay_environment_success(tmp_path: Path) -> None:
     ids=["file_instead_of_directory", "missing_on_disk"],
 )
 def test_replay_fails_when_shim_dir_is_invalid(
-    setup_invalid_path: t.Callable[[Path], Path], expected_error: str
+    setup_invalid_path: cabc.Callable[[Path], Path], expected_error: str
 ) -> None:
     """Replay rejects shim_dir paths that are not usable directories."""
     mox = CmdMox()

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
-import typing as t
+import typing as typ
 
 from .models import Invocation, PassthroughResult
 
 logger = logging.getLogger(__name__)
 
 
-def parse_json_safely(data: bytes) -> dict[str, t.Any] | None:
+def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
     """Return a JSON object parsed from *data* or ``None`` on failure."""
     try:
         payload = json.loads(data.decode("utf-8"))
@@ -19,10 +19,10 @@ def parse_json_safely(data: bytes) -> dict[str, t.Any] | None:
         return None
     if not isinstance(payload, dict):
         return None
-    return t.cast("dict[str, t.Any]", payload)
+    return typ.cast("dict[str, typ.Any]", payload)
 
 
-def validate_invocation_payload(payload: dict[str, t.Any]) -> Invocation | None:
+def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | None:
     """Return an :class:`Invocation` if *payload* has the required fields."""
     try:
         return Invocation(**payload)
@@ -32,7 +32,7 @@ def validate_invocation_payload(payload: dict[str, t.Any]) -> Invocation | None:
 
 
 def validate_passthrough_payload(
-    payload: dict[str, t.Any],
+    payload: dict[str, typ.Any],
 ) -> PassthroughResult | None:
     """Return a :class:`PassthroughResult` for passthrough result payloads."""
     try:

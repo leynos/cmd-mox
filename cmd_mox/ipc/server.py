@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import collections.abc as cabc
 import contextlib
 import dataclasses as dc
 import importlib
@@ -11,7 +12,7 @@ import logging
 import socketserver
 import threading
 import time
-import typing as t
+import typing as typ
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
@@ -35,7 +36,7 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     _Win32File = Win32FileProtocol
     _PyWinTypes = PyWinTypesProtocol
 
@@ -57,7 +58,7 @@ def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
             msg = "Unix domain socket servers are unavailable on Windows"
             raise RuntimeError(msg)
 
-    return t.cast("type[socketserver.BaseServer]", _UnsupportedUnixServer)
+    return typ.cast("type[socketserver.BaseServer]", _UnsupportedUnixServer)
 
 
 def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
@@ -65,7 +66,7 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
         return _create_unsupported_unix_server()
     threading_server = getattr(socketserver, "ThreadingUnixStreamServer", None)
     if threading_server is not None:
-        return t.cast("type[socketserver.BaseServer]", threading_server)
+        return typ.cast("type[socketserver.BaseServer]", threading_server)
     unix_server = getattr(socketserver, "UnixStreamServer", None)
     if unix_server is not None:
 
@@ -77,12 +78,12 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
 
             pass
 
-        return t.cast("type[socketserver.BaseServer]", _ThreadingUnixCompat)
+        return typ.cast("type[socketserver.BaseServer]", _ThreadingUnixCompat)
     msg = "Unix domain socket servers are not supported on this platform"
     raise RuntimeError(msg)
 
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from types import TracebackType
 
     _BaseUnixServer = socketserver.ThreadingUnixStreamServer
@@ -99,26 +100,26 @@ if path_utils.IS_WINDOWS:  # pragma: win32-only
         msg = "pywin32 is required for Windows named pipe support"
         raise RuntimeError(msg) from exc
 else:  # pragma: no cover - non-Windows fallback for type-checkers
-    pywintypes = t.cast("t.Any", None)
-    win32file = t.cast("t.Any", None)
-    win32pipe = t.cast("t.Any", None)
+    pywintypes = typ.cast("typ.Any", None)
+    win32file = typ.cast("typ.Any", None)
+    win32pipe = typ.cast("typ.Any", None)
 
 logger = logging.getLogger(__name__)
 
-type _RequestValidator = t.Callable[
-    [dict[str, t.Any]], Invocation | PassthroughResult | None
+type _RequestValidator = cabc.Callable[
+    [dict[str, typ.Any]], Invocation | PassthroughResult | None
 ]
 
 
 def _process_invocation(
-    server: _BaseIPCServer[t.Any], invocation: Invocation
+    server: _BaseIPCServer[typ.Any], invocation: Invocation
 ) -> Response:
     """Invoke :meth:`IPCServer.handle_invocation` for *invocation*."""
     return server.handle_invocation(invocation)
 
 
 def _process_passthrough_result(
-    server: _BaseIPCServer[t.Any], result: PassthroughResult
+    server: _BaseIPCServer[typ.Any], result: PassthroughResult
 ) -> Response:
     """Invoke :meth:`IPCServer.handle_passthrough_result` for *result*."""
     return server.handle_passthrough_result(result)
@@ -140,7 +141,7 @@ class _ServerLifecycle[BackendT](abc.ABC):
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
-    def __enter__(self) -> t.Self:
+    def __enter__(self) -> typ.Self:
         self.start()
         return self
 
@@ -211,8 +212,8 @@ class _ServerLifecycle[BackendT](abc.ABC):
 class IPCHandlers:
     """Optional callbacks customising :class:`BaseIPCServer` behaviour."""
 
-    handler: t.Callable[[Invocation], Response] | None = None
-    passthrough_handler: t.Callable[[PassthroughResult], Response] | None = None
+    handler: cabc.Callable[[Invocation], Response] | None = None
+    passthrough_handler: cabc.Callable[[PassthroughResult], Response] | None = None
 
 
 @dc.dataclass(slots=True)
@@ -248,11 +249,12 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
 
     def _dispatch[DispatchArg: (Invocation, PassthroughResult)](
         self,
-        handler: t.Callable[[DispatchArg], Response] | None,
+        handler: cabc.Callable[[DispatchArg], Response] | None,
         argument: DispatchArg,
         *,
-        default: t.Callable[[DispatchArg], Response],
-        error_builder: t.Callable[[DispatchArg, Exception], RuntimeError] | None = None,
+        default: cabc.Callable[[DispatchArg], Response],
+        error_builder: cabc.Callable[[DispatchArg, Exception], RuntimeError]
+        | None = None,
     ) -> Response:
         """Invoke *handler* when provided, otherwise fall back to *default*."""
         if handler is None:
@@ -341,8 +343,8 @@ class CallbackIPCServer(IPCServer):
     def __init__(
         self,
         socket_path: Path,
-        handler: t.Callable[[Invocation], Response],
-        passthrough_handler: t.Callable[[PassthroughResult], Response],
+        handler: cabc.Callable[[Invocation], Response],
+        passthrough_handler: cabc.Callable[[PassthroughResult], Response],
         *,
         timeouts: TimeoutConfig | None = None,
     ) -> None:
@@ -359,7 +361,7 @@ class CallbackIPCServer(IPCServer):
         )
 
 
-type _RequestProcessor = t.Callable[[_BaseIPCServer[t.Any], t.Any], Response]
+type _RequestProcessor = cabc.Callable[[_BaseIPCServer[typ.Any], typ.Any], Response]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
     KIND_INVOCATION: (validate_invocation_payload, _process_invocation),
@@ -374,7 +376,7 @@ _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
 class ParsedRequest:
     """Parsed request containing payload and dispatch metadata."""
 
-    payload: dict[str, t.Any]
+    payload: dict[str, typ.Any]
     kind: str
     validator: _RequestValidator
     processor: _RequestProcessor
@@ -384,7 +386,7 @@ class ParsedRequest:
         return self.validator(self.payload)
 
 
-def _decode_payload(raw: bytes) -> dict[str, t.Any] | None:
+def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
     """Decode raw request bytes into a mapping, logging malformed input once."""
     payload = parse_json_safely(raw)
     if payload is not None:
@@ -426,7 +428,7 @@ def _encode_response(response: Response) -> bytes:
     return json.dumps(response.to_dict()).encode("utf-8")
 
 
-def _request_pipeline(server: _BaseIPCServer[t.Any], raw: bytes) -> bytes | None:
+def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
     """Parse, validate, dispatch, and encode an IPC request in order."""
     parsed = _parse_payload(raw)
     if parsed is None:
@@ -440,12 +442,12 @@ def _request_pipeline(server: _BaseIPCServer[t.Any], raw: bytes) -> bytes | None
     return _encode_response(response)
 
 
-def _process_raw_request(server: _BaseIPCServer[t.Any], raw: bytes) -> bytes | None:
+def _process_raw_request(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
     return _request_pipeline(server, raw)
 
 
 def _execute_request(
-    server: _BaseIPCServer[t.Any], processor: _RequestProcessor, obj: object
+    server: _BaseIPCServer[typ.Any], processor: _RequestProcessor, obj: object
 ) -> Response:
     try:
         return processor(server, obj)
@@ -539,8 +541,8 @@ class CallbackNamedPipeServer(NamedPipeServer):
     def __init__(
         self,
         socket_path: Path,
-        handler: t.Callable[[Invocation], Response],
-        passthrough_handler: t.Callable[[PassthroughResult], Response],
+        handler: cabc.Callable[[Invocation], Response],
+        passthrough_handler: cabc.Callable[[PassthroughResult], Response],
         *,
         timeouts: TimeoutConfig | None = None,
     ) -> None:
@@ -719,7 +721,7 @@ class _NamedPipeState:
                 write_pipe_payload(
                     handle,
                     response_bytes,
-                    win32file=t.cast("Win32FileProtocol", win32file),
+                    win32file=typ.cast("Win32FileProtocol", win32file),
                 )
         except pywintypes.error as exc:
             if exc.winerror not in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
@@ -734,8 +736,8 @@ class _NamedPipeState:
     def _read_request(self, handle: object) -> bytes | None:
         return read_pipe_message(
             handle,
-            win32file=t.cast("Win32FileProtocol", win32file),
-            pywintypes=t.cast("PyWinTypesProtocol", pywintypes),
+            win32file=typ.cast("Win32FileProtocol", win32file),
+            pywintypes=typ.cast("PyWinTypesProtocol", pywintypes),
             chunk_size=PIPE_CHUNK_SIZE,
         )
 

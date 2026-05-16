@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import textwrap
-import typing as t
-from dataclasses import dataclass  # noqa: ICN003
+import typing as typ
+from dataclasses import dataclass
 
 import pytest
 
@@ -14,7 +14,7 @@ from cmd_mox.controller import Phase
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.pytest_plugin import STASH_CALL_FAILED, _CmdMoxManager
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 _VERIFY_ERROR_MESSAGE = "verify boom"
@@ -73,6 +73,13 @@ class _StubNode:
 
     def add_report_section(self, when: str, key: str, content: str) -> None:
         self.sections.append((when, key, content))
+
+
+class _RequestKwargs(typ.TypedDict, total=False):
+    """Keyword arguments forwarded into ``_StubRequest``."""
+
+    node: _StubNode
+    param: dict[str, bool]
 
 
 class _StubRequest:
@@ -164,10 +171,10 @@ def _make_manager(
         # Keep signature compatible with real CmdMox; forward kwargs to stub.
         behavior_config = StubMoxBehaviorConfig(
             verify_on_exit=verify_on_exit,
-            raise_on_exit=t.cast("bool", stub_kwargs.get("raise_on_exit", False)),
-            raise_on_verify=t.cast("bool", stub_kwargs.get("raise_on_verify", False)),
+            raise_on_exit=typ.cast("bool", stub_kwargs.get("raise_on_exit", False)),
+            raise_on_verify=typ.cast("bool", stub_kwargs.get("raise_on_verify", False)),
         )
-        phase = t.cast("Phase", stub_kwargs.get("phase", Phase.REPLAY))
+        phase = typ.cast("Phase", stub_kwargs.get("phase", Phase.REPLAY))
         return _StubMox(
             phase=phase,
             behavior=behavior_config,
@@ -175,7 +182,7 @@ def _make_manager(
         )
 
     monkeypatch.setattr(pytest_plugin, "CmdMox", _factory)
-    manager = _CmdMoxManager(t.cast("pytest.FixtureRequest", request))
+    manager = _CmdMoxManager(typ.cast("pytest.FixtureRequest", request))
     assert isinstance(manager.mox, _StubMox)
     return manager
 
@@ -281,7 +288,7 @@ def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
 
     manager.enter()
 
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     assert stub.enter_calls == 1
     assert stub.replay_calls == 1
 
@@ -300,7 +307,7 @@ def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
     ],
 )
 def test_enter_cmd_mox_auto_lifecycle_overrides(
-    monkeypatch: pytest.MonkeyPatch, request_kwargs: dict[str, t.Any]
+    monkeypatch: pytest.MonkeyPatch, request_kwargs: _RequestKwargs
 ) -> None:
     """Marker and fixture parameter overrides disable automatic replay."""
     request = _StubRequest(config=_StubConfig(), **request_kwargs)
@@ -310,7 +317,7 @@ def test_enter_cmd_mox_auto_lifecycle_overrides(
 
     manager.enter()
 
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     assert stub.enter_calls == 1
     assert stub.replay_calls == 0
 
@@ -323,7 +330,7 @@ def test_exit_cmd_mox_verifies_when_needed(monkeypatch: pytest.MonkeyPatch) -> N
     manager.enter()
     manager.exit(body_failed=False)
 
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     assert stub.verify_calls == 1
     assert stub.exit_calls == [(None, None, None)]
 
@@ -336,7 +343,7 @@ def test_exit_cmd_mox_skips_verification_when_phase_not_replay(
     manager = _make_manager(monkeypatch, request)
 
     manager.enter()
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     stub.phase = Phase.VERIFY
 
     manager.exit(body_failed=False)
@@ -355,7 +362,7 @@ def test_exit_cmd_mox_records_verify_error_when_test_failed(
     manager.enter()
     manager.exit(body_failed=True)
 
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     assert stub.verify_calls == 1
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
@@ -377,7 +384,7 @@ def test_exit_cmd_mox_records_verify_error_when_call_stage_failed(
     # Should not raise; error is suppressed and recorded as a teardown section.
     manager.exit(body_failed=False)
 
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     assert stub.verify_calls == 1
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
@@ -402,7 +409,7 @@ def test_enter_cmd_mox_param_override_precedes_marker(
 
     manager.enter()
 
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     assert stub.enter_calls == 1
     assert stub.replay_calls == 0
 
@@ -521,7 +528,7 @@ def test_exit_cmd_mox_is_idempotent_without_enter(
 
     manager.exit(body_failed=False)
 
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     assert stub.exit_calls == []
 
 
@@ -538,5 +545,5 @@ def test_exit_cmd_mox_is_idempotent_after_teardown(
     # A second exit should be a no-op and not trigger additional cleanup.
     manager.exit(body_failed=False)
 
-    stub = t.cast("_StubMox", manager.mox)
+    stub = typ.cast("_StubMox", manager.mox)
     assert len(stub.exit_calls) == 1

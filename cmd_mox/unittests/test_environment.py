@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import logging
+import math
 import os
 import stat
 import threading
-import typing as t
-from dataclasses import dataclass  # noqa: ICN003
+import typing as typ
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,7 +31,7 @@ from cmd_mox.unittests._env_helpers import (
     require_socket_path,
 )
 
-type CleanupCallable = t.Callable[[list[envmod.CleanupError]], None]
+type CleanupCallable = cabc.Callable[[list[envmod.CleanupError]], None]
 
 
 def test_environment_manager_modifies_and_restores() -> None:
@@ -128,7 +130,8 @@ def test_export_ipc_environment_sets_timeout() -> None:
     with EnvironmentManager() as env:
         env.export_ipc_environment(timeout=2.5)
         assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "2.5"
-        assert env.ipc_timeout == 2.5
+        assert env.ipc_timeout is not None
+        assert math.isclose(env.ipc_timeout, 2.5)
 
 
 @pytest.mark.parametrize("invalid", [0, -1, -0.1, float("nan"), float("inf")])
@@ -147,7 +150,7 @@ def test_export_ipc_environment_rejects_invalid_timeout(invalid: float) -> None:
 def test_export_ipc_environment_invalid_timeout_type(invalid_type: object) -> None:
     """Invalid timeout types should propagate TypeError."""
     with EnvironmentManager() as env, pytest.raises(TypeError):
-        env.export_ipc_environment(timeout=t.cast("float", invalid_type))
+        env.export_ipc_environment(timeout=typ.cast("float", invalid_type))
 
 
 def test_export_ipc_environment_reuses_previous_timeout() -> None:
@@ -156,7 +159,8 @@ def test_export_ipc_environment_reuses_previous_timeout() -> None:
         env.export_ipc_environment(timeout=3.25)
         env.export_ipc_environment()
         assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "3.25"
-        assert env.ipc_timeout == 3.25
+        assert env.ipc_timeout is not None
+        assert math.isclose(env.ipc_timeout, 3.25)
 
 
 def test_export_ipc_environment_clears_missing_timeout(
@@ -342,7 +346,10 @@ def test_environment_manager_cleanup_error_basic() -> None:
     with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Cleanup failed")
 
-        with pytest.raises(RuntimeError, match="Cleanup failed"), EnvironmentManager():
+        with (
+            pytest.raises(RuntimeError, match="Cleanup failed"),
+            EnvironmentManager(),
+        ):
             pass
 
     # Environment should still be restored despite cleanup failure
@@ -357,7 +364,10 @@ def test_environment_manager_cleanup_robust_error() -> None:
     with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
         mock_rmtree.side_effect = failure
 
-        with pytest.raises(RuntimeError, match="Cleanup failed"), EnvironmentManager():
+        with (
+            pytest.raises(RuntimeError, match="Cleanup failed"),
+            EnvironmentManager(),
+        ):
             pass
 
     assert os.environ == original_env

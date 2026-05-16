@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import typing as t
+import collections.abc as cabc
+import typing as typ
 
 import pytest
 
@@ -12,7 +13,7 @@ from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
 
 
@@ -35,9 +36,9 @@ def _response_handler(invocation: Invocation) -> Response:
 )
 def test_stub_runs_handler(
     cmd: str,
-    handler: t.Callable[[Invocation], Response | tuple[str, str, int]],
+    handler: cabc.Callable[[Invocation], Response | tuple[str, str, int]],
     expected: str,
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Stub runs a dynamic handler when invoked."""
     mox = CmdMox()

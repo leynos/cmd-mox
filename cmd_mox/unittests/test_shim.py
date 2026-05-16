@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
+import math
 import os
 import sys
-import typing as t
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -35,7 +37,9 @@ def test_resolve_command_name_prefers_env(monkeypatch: pytest.MonkeyPatch) -> No
     assert shim._resolve_command_name() == "shim-alias"
 
 
-def test_resolve_command_name_defaults_to_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_command_name_defaults_to_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Fallback to ``sys.argv`` when no override is provided."""
     monkeypatch.delenv(CMOX_SHIM_COMMAND_ENV, raising=False)
     monkeypatch.setattr(sys, "argv", ["/usr/local/bin/cmd-mock"])
@@ -239,7 +243,7 @@ def test_execute_invocation_returns_response_without_passthrough(
     )
     expected = Response(stdout="ok", stderr="", exit_code=0)
 
-    calls: dict[str, t.Any] = {}
+    calls: dict[str, typ.Any] = {}
 
     def fake_invoke(inv: Invocation, timeout: float) -> Response:
         calls["invocation"] = inv
@@ -248,7 +252,7 @@ def test_execute_invocation_returns_response_without_passthrough(
 
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
 
-    def fail_passthrough(*_args: object, **_kwargs: object) -> t.NoReturn:
+    def fail_passthrough(*_args: object, **_kwargs: object) -> typ.NoReturn:
         return pytest_fail("passthrough handler should not run")
 
     monkeypatch.setattr(
@@ -261,7 +265,7 @@ def test_execute_invocation_returns_response_without_passthrough(
 
     assert result is expected
     assert calls["invocation"] is invocation
-    assert calls["timeout"] == 1.5
+    assert math.isclose(calls["timeout"], 1.5)
 
 
 def test_execute_invocation_processes_passthrough(
@@ -285,7 +289,7 @@ def test_execute_invocation_processes_passthrough(
     def fake_passthrough(inv: Invocation, resp: Response, timeout: float) -> Response:
         assert inv is invocation
         assert resp is intermediate
-        assert timeout == 2.0
+        assert math.isclose(timeout, 2.0)
         return final
 
     monkeypatch.setattr(shim, "_handle_passthrough", fake_passthrough)
@@ -303,7 +307,7 @@ def test_execute_invocation_surfaces_ipc_errors(
         command="cmd", args=[], stdin="", env={}, invocation_id="abc"
     )
 
-    def raise_error(*_: object, **__: object) -> t.NoReturn:
+    def raise_error(*_: object, **__: object) -> typ.NoReturn:
         raise OSError("boom")
 
     monkeypatch.setattr(shim, "invoke_server", raise_error)
@@ -405,7 +409,7 @@ def test_bootstrap_shim_path_prefers_stdlib_platform(
     monkeypatch.setattr(_shim_bootstrap, "_BOOTSTRAP_DONE", False)
 
     original_platform = sys.modules.pop("platform", None)
-    fake_platform = t.cast("t.Any", importlib.import_module("platform"))
+    fake_platform = typ.cast("typ.Any", importlib.import_module("platform"))
     assert fake_platform.MARKER == "fake"
 
     _shim_bootstrap.bootstrap_shim_path()
@@ -430,7 +434,7 @@ def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
     monkeypatch.setattr(_shim_bootstrap, "_BOOTSTRAP_DONE", False)
     monkeypatch.setattr(sys, "path", list(original_path))
 
-    def raise_runtime_error() -> t.NoReturn:
+    def raise_runtime_error() -> typ.NoReturn:
         msg = "platform load failed"
         raise RuntimeError(msg)
 
@@ -465,7 +469,7 @@ def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
 )
 def test_validate_override_path_reports_missing_or_invalid_targets(
     tmp_path: Path,
-    factory: t.Callable[[Path], Path],
+    factory: cabc.Callable[[Path], Path],
     expected_exit: int,
     expected_message: str,
 ) -> None:

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 import pytest
 
 import cmd_mox.platform as platform
 from tests.helpers.pytest_typing import pytest_fail
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for type hints
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for type hints
     from _pytest.pytester import Pytester
 
 
@@ -36,7 +36,9 @@ def test_override_env_forces_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     assert platform.unsupported_reason() == "forced block"
 
 
-def test_override_env_handles_unknown_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_override_env_handles_unknown_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Unknown overrides should fall back to the default platform logic."""
     monkeypatch.delenv(platform.PLATFORM_OVERRIDE_ENV, raising=False)
     unknown_platform = "unknown-os"

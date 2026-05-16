@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import shlex
-import typing as t
+import typing as typ
 
 from pytest_bdd import parsers, then
 
 from tests.helpers.parameters import decode_placeholders
 from tests.steps.shim_management import _require_replay_shim_dir
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
 
     from cmd_mox.controller import CmdMox

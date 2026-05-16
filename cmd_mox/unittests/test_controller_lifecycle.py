@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import typing as t
+import collections.abc as cabc
+import typing as typ
 
 import pytest
 
@@ -17,13 +18,13 @@ from tests.helpers.fixtures import write_minimal_replay_fixture
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
     from pathlib import Path
 
 
 def test_cmdmox_replay_verify_out_of_order(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Replay is idempotent in replay phase and strict elsewhere."""
     mox = CmdMox()
@@ -68,7 +69,7 @@ def test_require_phase_mismatch() -> None:
 
 
 def test_context_manager_auto_verify(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Exiting the context automatically calls verify."""
     mox = CmdMox()

@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import dataclasses as dc
 import re
-import typing as t
+import typing as typ
 
-SENSITIVE_ENV_KEY_TOKENS: t.Final[tuple[str, ...]] = (
+SENSITIVE_ENV_KEY_TOKENS: typ.Final[tuple[str, ...]] = (
     "secret",
     "token",
     "api_key",
     "password",
 )
 # Pre-normalize tokens once for case-insensitive checks
-_SENSITIVE_TOKENS: t.Final[tuple[str, ...]] = tuple(
+_SENSITIVE_TOKENS: typ.Final[tuple[str, ...]] = tuple(
     tok.casefold() for tok in SENSITIVE_ENV_KEY_TOKENS
 )
 
 # Comprehensive regex for secret-bearing env key segments.  Matches KEY,
 # TOKEN, SECRET, PASSWORD, CREDENTIALS, PASS, and PWD as word segments
 # delimited by underscores, hyphens, or string boundaries.
-_SECRET_ENV_KEY_RE: t.Final[re.Pattern[str]] = re.compile(
+_SECRET_ENV_KEY_RE: typ.Final[re.Pattern[str]] = re.compile(
     r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?"
     r"|PASS(?:WORD)?|PWD)(?=[_-]|\d|$)"
 )
@@ -42,7 +43,7 @@ def is_sensitive_recording_env_key(key: str) -> bool:
     return _is_sensitive_env_key(key) or bool(_SECRET_ENV_KEY_RE.search(key))
 
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .ipc import Invocation
 
 
@@ -52,8 +53,8 @@ class Expectation:
 
     name: str
     args: list[str] | None = None
-    match_args: list[t.Callable[[str], bool]] | None = None
-    stdin: str | t.Callable[[str], t.Any] | None = None
+    match_args: list[cabc.Callable[[str], bool]] | None = None
+    stdin: str | cabc.Callable[[str], object] | None = None
     env: dict[str, str] = dc.field(default_factory=dict)
     count: int = 1
     ordered: bool = False
@@ -63,12 +64,12 @@ class Expectation:
         self.args = list(args)
         return self
 
-    def with_matching_args(self, *matchers: t.Callable[[str], bool]) -> Expectation:
+    def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Expectation:
         """Use callables in ``matchers`` to validate each argument."""
         self.match_args = list(matchers)
         return self
 
-    def with_stdin(self, data: str | t.Callable[[str], t.Any]) -> Expectation:
+    def with_stdin(self, data: str | cabc.Callable[[str], object]) -> Expectation:
         """Expect ``stdin`` to equal ``data`` or satisfy a predicate.
 
         The predicate's return value will be coerced to bool.

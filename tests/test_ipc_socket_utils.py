@@ -79,7 +79,9 @@ def test_wait_for_socket_times_out(tmp_path: pathlib.Path) -> None:
         wait_for_socket(tmp_path / "missing.sock", timeout=0.1)
 
 
-def test_wait_for_socket_retries_until_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_for_socket_retries_until_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The polling loop should retry after transient connection failures."""
     attempts: list[int] = [0]
 

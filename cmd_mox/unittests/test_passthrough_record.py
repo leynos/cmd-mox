@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
 import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation, PassthroughResult
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.requires_unix_sockets

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import contextlib
 import os
-import typing as t
 from pathlib import Path
 
 import pytest
@@ -29,7 +29,7 @@ _ERROR_TYPES: dict[str, type[VerificationError]] = {
 
 
 @given("a CmdMox controller", target_fixture="mox")
-def create_controller() -> t.Generator[CmdMox, None, None]:
+def create_controller() -> cabc.Generator[CmdMox, None, None]:
     """Create a fresh CmdMox instance with proper cleanup.
 
     Yields
@@ -50,7 +50,7 @@ def create_controller() -> t.Generator[CmdMox, None, None]:
     parsers.cfparse("a CmdMox controller with max journal size {size:d}"),
     target_fixture="mox",
 )
-def create_controller_with_limit(size: int) -> t.Generator[CmdMox, None, None]:
+def create_controller_with_limit(size: int) -> cabc.Generator[CmdMox, None, None]:
     """Create a CmdMox instance with bounded journal and proper cleanup.
 
     Parameters

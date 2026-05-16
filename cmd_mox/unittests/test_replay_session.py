@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import json
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -13,7 +13,7 @@ from cmd_mox.ipc import Invocation, Response
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.replay import ReplaySession
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 
@@ -29,7 +29,7 @@ class RecordedInvocationSpec:
     sequence: int = 0
 
 
-class InvocationKwargs(t.TypedDict, total=False):
+class InvocationKwargs(typ.TypedDict, total=False):
     """Keyword arguments accepted by ``_make_invocation``."""
 
     command: str
@@ -512,7 +512,7 @@ class TestReplaySessionThreadSafety:
         session.load()
 
         barrier = threading.Barrier(n_threads)
-        results = t.cast("list[Response | None]", [None] * n_threads)
+        results = typ.cast("list[Response | None]", [None] * n_threads)
 
         def _match(idx: int) -> None:
             barrier.wait()

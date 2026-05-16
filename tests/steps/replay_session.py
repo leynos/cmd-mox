@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
-import typing as t
+import typing as typ
 
 import pytest
 from pytest_bdd import given, parsers, then, when
@@ -13,7 +13,7 @@ from cmd_mox.ipc import Invocation, Response
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.replay import ReplaySession
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -16,7 +16,7 @@ from cmd_mox.errors import (
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.environment import EnvironmentManager
 
 
@@ -29,7 +29,7 @@ _ERROR_TYPES: dict[str, type[VerificationError]] = {
 }
 
 
-class ReplayInterruptionState(t.TypedDict):
+class ReplayInterruptionState(typ.TypedDict):
     """Capture cleanup details after replay fails to start."""
 
     shim_dir: Path

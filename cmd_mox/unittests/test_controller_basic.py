@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import os
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -13,12 +14,12 @@ from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
 
-if t.TYPE_CHECKING:  # pragma: no cover - typing only
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
 
 
 def test_cmdmox_stub_records_invocation(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Stubbed command returns configured output and journal records call."""
     original_path = os.environ["PATH"]
@@ -78,7 +79,7 @@ def test_double_kind_mismatch() -> None:
 
 
 def test_mock_and_spy_invocations(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Mock and spy commands record calls and verify correctly."""
     mox = CmdMox()
@@ -103,7 +104,7 @@ def test_mock_and_spy_invocations(
 
 
 def test_invocation_order_multiple_calls(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Multiple calls are recorded in order."""
     mox = CmdMox()

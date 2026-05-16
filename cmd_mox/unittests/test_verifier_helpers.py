@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import types
-import typing as t
+import typing as typ
 
 import cmd_mox.verifiers as v
 from cmd_mox.expectations import Expectation
@@ -13,7 +13,7 @@ from cmd_mox.test_doubles import CommandDouble, DoubleKind
 
 def _double(kind: DoubleKind) -> CommandDouble:
     """Return a typed, minimal CommandDouble stub for formatting tests."""
-    return t.cast("CommandDouble", types.SimpleNamespace(kind=kind))
+    return typ.cast("CommandDouble", types.SimpleNamespace(kind=kind))
 
 
 def test_mask_env_value_redacts_sensitive_keys() -> None:

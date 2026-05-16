@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import json
 import threading
-import typing as t
-from dataclasses import dataclass  # noqa: ICN003
+import typing as typ
+from dataclasses import dataclass
 
 import pytest
 
@@ -23,8 +24,12 @@ from cmd_mox.ipc import (
     report_passthrough_result,
 )
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
+
+type _RequestPayload = dict[
+    str, str | int | float | bool | list[str] | dict[str, str] | None
+]
 
 
 pytestmark = pytest.mark.requires_unix_sockets
@@ -40,7 +45,7 @@ class TimeoutTestCase:
 
 
 @pytest.fixture
-def echo_handler() -> t.Callable[[Invocation], Response]:
+def echo_handler() -> cabc.Callable[[Invocation], Response]:
     """Return a handler that echoes the command name."""
 
     def handler(invocation: Invocation) -> Response:
@@ -50,7 +55,7 @@ def echo_handler() -> t.Callable[[Invocation], Response]:
 
 
 @pytest.fixture
-def passthrough_handler() -> t.Callable[[PassthroughResult], Response]:
+def passthrough_handler() -> cabc.Callable[[PassthroughResult], Response]:
     """Return a handler that returns a fixed passthrough response."""
 
     def handler(_result: PassthroughResult) -> Response:
@@ -148,7 +153,7 @@ def test_ipcserver_default_passthrough_error(
 def test_ipcserver_passthrough_handler(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    echo_handler: t.Callable[[Invocation], Response],
+    echo_handler: cabc.Callable[[Invocation], Response],
 ) -> None:
     """IPCServer should delegate passthrough results when a handler is provided."""
     socket_path = tmp_path / "ipc.sock"
@@ -259,11 +264,15 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
 )
 def test_parse_payload_returns_handler_metadata(
     kind: str,
-    payload: dict[str, t.Any],
-    expected_validator: t.Callable[..., t.Any],
-    expected_processor: t.Callable[..., t.Any],
+    payload: _RequestPayload,
+    expected_validator: server._RequestValidator,
+    expected_processor: server._RequestProcessor,
 ) -> None:
-    """Parsed requests should carry handler metadata for pipeline steps."""
+    """Parsed requests should carry handler metadata for pipeline steps.
+
+    The processor type is the server's heterogeneous request-handler union:
+    invocation and passthrough processors accept different parsed objects.
+    """
     raw = json.dumps({"kind": kind, **payload}).encode()
 
     parsed = server._parse_payload(raw)
@@ -288,15 +297,13 @@ def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
         handlers=IPCHandlers(handler=handler),
     )
 
-    raw = json.dumps(
-        {
-            "kind": server.KIND_INVOCATION,
-            "command": "echo",
-            "args": [],
-            "stdin": "",
-            "env": {},
-        }
-    ).encode()
+    raw = json.dumps({
+        "kind": server.KIND_INVOCATION,
+        "command": "echo",
+        "args": [],
+        "stdin": "",
+        "env": {},
+    }).encode()
 
     response_bytes = server._request_pipeline(ipc_server, raw)
 
@@ -312,7 +319,7 @@ def test_request_pipeline_validation_failure_returns_none(
     """Validation failures should short-circuit dispatch."""
     calls: list[Invocation] = []
 
-    def failing_validator(_payload: dict[str, t.Any]) -> Invocation | None:
+    def failing_validator(_payload: _RequestPayload) -> Invocation | None:
         return None
 
     def spy_processor(
@@ -328,15 +335,13 @@ def test_request_pipeline_validation_failure_returns_none(
     )
 
     ipc_server = IPCServer(tmp_path / "ipc.sock")
-    raw = json.dumps(
-        {
-            "kind": server.KIND_INVOCATION,
-            "command": "echo",
-            "args": [],
-            "stdin": "",
-            "env": {},
-        }
-    ).encode()
+    raw = json.dumps({
+        "kind": server.KIND_INVOCATION,
+        "command": "echo",
+        "args": [],
+        "stdin": "",
+        "env": {},
+    }).encode()
 
     response_bytes = server._request_pipeline(ipc_server, raw)
 
@@ -464,8 +469,8 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
 )
 def test_callback_ipcserver_timeout_config(
     tmp_path: Path,
-    echo_handler: t.Callable[[Invocation], Response],
-    passthrough_handler: t.Callable[[PassthroughResult], Response],
+    echo_handler: cabc.Callable[[Invocation], Response],
+    passthrough_handler: cabc.Callable[[PassthroughResult], Response],
     test_case: TimeoutTestCase,
 ) -> None:
     """CallbackIPCServer should handle TimeoutConfig correctly."""

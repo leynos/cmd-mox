@@ -12,9 +12,9 @@ candidates score equally, the one with the lower ``sequence`` value wins.
 
 from __future__ import annotations
 
-import typing as t
+import typing as typ
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from cmd_mox.ipc import Invocation
 
     from .fixture import RecordedInvocation

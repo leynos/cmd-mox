@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
-import typing as t
+import typing as typ
 
 import pytest
 
@@ -13,7 +13,7 @@ from cmd_mox.ipc import Invocation
 from cmd_mox.record.replay import ReplaySession
 from tests.helpers.fixtures import write_minimal_replay_fixture
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
 
@@ -63,7 +63,7 @@ class TestReplayFluentAPI:
         assert "allow_unmatched" not in public_params
 
         # Dynamic kwargs assert runtime rejection without tripping static analysis.
-        disallowed_kw: dict[str, t.Any] = {"allow_unmatched": True}
+        disallowed_kw: dict[str, typ.Any] = {"allow_unmatched": True}
         with pytest.raises(TypeError, match=r"allow_unmatched"):
             spy.replay(fixture_path, **disallowed_kw)
 
@@ -103,19 +103,17 @@ class TestReplayFluentAPI:
         """replay() surfaces fixture schema errors during setup."""
         bad_fixture = tmp_path / "fixture.json"
         bad_fixture.write_text(
-            json.dumps(
-                {
-                    "version": "99.0",
-                    "metadata": {
-                        "created_at": "2026-01-15T10:30:00Z",
-                        "cmdmox_version": "0.1.0",
-                        "platform": "linux",
-                        "python_version": "3.13.0",
-                    },
-                    "recordings": [],
-                    "scrubbing_rules": [],
-                }
-            )
+            json.dumps({
+                "version": "99.0",
+                "metadata": {
+                    "created_at": "2026-01-15T10:30:00Z",
+                    "cmdmox_version": "0.1.0",
+                    "platform": "linux",
+                    "python_version": "3.13.0",
+                },
+                "recordings": [],
+                "scrubbing_rules": [],
+            })
         )
         mox = CmdMox()
 

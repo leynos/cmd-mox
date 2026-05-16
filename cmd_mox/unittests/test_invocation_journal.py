@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import ast
+import collections.abc as cabc
 import dataclasses as dc
 import os
 import subprocess
-import typing as t
+import typing as typ
 
-if t.TYPE_CHECKING:
+if typ.TYPE_CHECKING:
     from pathlib import Path
 
     from cmd_mox import EnvironmentManager
@@ -28,7 +29,7 @@ from tests.helpers.controller import (
 pytestmark = pytest.mark.requires_unix_sockets
 
 
-class StubReturns(t.TypedDict, total=False):
+class StubReturns(typ.TypedDict, total=False):
     """Optional stub return values."""
 
     stdout: str
@@ -38,7 +39,7 @@ class StubReturns(t.TypedDict, total=False):
 
 def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
     """Return shim path for a command; requires prior mox.replay()."""
-    env = t.cast("EnvironmentManager", getattr(obj, "environment", obj))
+    env = typ.cast("EnvironmentManager", getattr(obj, "environment", obj))
     shim_dir = env.shim_dir
     assert shim_dir is not None, (
         "shim_dir is None; did you forget to call mox.replay()?"
@@ -195,7 +196,7 @@ def test_journal_records_failed_invocation_raises_still_journaled() -> None:
 
 
 def test_journal_env_is_deep_copied(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Captured env is isolated from later mutations."""
@@ -227,7 +228,7 @@ def test_journal_pruning_invalid_maxlen(invalid_maxlen: int) -> None:
     ],
 )
 def test_journal_pruning(
-    run: t.Callable[..., subprocess.CompletedProcess[str]],
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
     maxlen: int | None,
     expected: list[list[str]],
 ) -> None:

@@ -9,13 +9,13 @@ import os
 import shlex
 import shutil
 import subprocess
-import typing as t
+import typing as typ
 
 from tests.helpers.parameters import decode_placeholders
 
 RUN_TIMEOUT_SECONDS = 30
 
-if t.TYPE_CHECKING:  # pragma: no cover - used only for typing
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.controller import CmdMox
     from cmd_mox.ipc import Invocation
 
