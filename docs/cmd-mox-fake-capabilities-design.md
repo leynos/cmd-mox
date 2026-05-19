@@ -183,11 +183,11 @@ Required behaviour:
 - Re-raise unrelated filesystem errors immediately.
 - Release the lock in a `finally` block.
 
-The POSIX backend can use `fcntl.flock`. The Windows backend can use an
-internal implementation around `msvcrt.locking` or a small dependency such as
-`portalocker` if implementation proves that standard-library locking is too
-limited. The public design requirement is the timeout and error contract, not
-the backend mechanism.
+The POSIX backend can use the `fcntl.flock()` function. The Windows backend
+can use an internal implementation around `msvcrt.locking` or a small
+dependency such as `portalocker` if implementation proves that
+standard-library locking is too limited. The public design requirement is the
+timeout and error contract, not the backend mechanism.
 
 `LockTimeoutError` should carry the lock path and timeout value. It may inherit
 from `TimeoutError` so generic timeout handling still works, but callers that
@@ -255,6 +255,10 @@ Required behaviour:
 - Match exact argv tuples by default.
 - Optionally support prefix matches for commands where flags and operands
   follow a fixed subcommand prefix.
+- Enforce `router.command(..., arity=N)` before handler dispatch when arity is
+  set. The `uninstall_tool` example with `arity=3` requires exactly three argv
+  elements; mismatches should produce the same deterministic route error path
+  as other router validation failures.
 - Produce deterministic errors for no match and ambiguous match.
 - Pass the original `Invocation` to the selected handler.
 - Return `Response` or the same tuple shape already accepted by `.runs(...)`.
