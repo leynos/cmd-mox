@@ -368,6 +368,141 @@ section 8.12.
   Linux, macOS, and Windows CI, no open severity-1 regressions, and release
   notes containing rollback instructions via `CMOX_SHIM_BACKEND`.
 
+## 14. Stateful fake capabilities
+
+Idea: if CmdMox provides durable JSON persistence and a small state-store
+toolkit before higher-level fake helpers, realistic package-manager,
+cloud-CLI, `git`, `docker`, and `kubectl` fakes can share one correctness
+boundary instead of copying ad hoc filesystem code.
+
+This phase turns patterns from production-like fake commands into reusable
+CmdMox building blocks. Atomic persistence and locking come first because they
+protect fixtures and shared state. Routing and filesystem side-effect helpers
+follow as ergonomics for `.runs(...)` handlers. See
+`cmd-mox-fake-capabilities-design.md`.
+
+### 14.1. Harden JSON fixture persistence
+
+This step answers whether CmdMox can make fixture writes durable without
+changing the public record/replay API. The outcome informs every later helper
+that writes JSON state. See `cmd-mox-fake-capabilities-design.md` §§Problem,
+Goals, and Atomic JSON persistence.
+
+- [ ] 14.1.1. Implement internal
+  `atomic_write_json(path, payload, mode=0o600)` for fixture and state files.
+  - Use same-directory temporary files, explicit UTF-8 JSON serialization,
+    file flush, file `fsync`, `os.replace`, parent-directory `fsync` where
+    supported, and temporary-file cleanup on failure.
+  - Success: interrupted or failing writes preserve the previous complete JSON
+    file, and successful writes leave owner-restricted files on POSIX.
+- [ ] 14.1.2. Route `FixtureFile.save()` through `atomic_write_json(...)`
+  without changing `FixtureFile.load()` or the fixture schema.
+  - Requires 14.1.1.
+  - See `python-native-command-mocking-design.md` §9.5.3 and
+    `cmd-mox-fake-capabilities-design.md` §Atomic JSON persistence.
+  - Success: existing record-mode fixture round-trips still pass, and new
+    failure-injection tests prove old fixture contents survive failed writes.
+
+### 14.2. Add a reusable lock-with-timeout utility
+
+This step answers whether CmdMox can coordinate cooperating file-backed
+writers under parallel test execution. The outcome is the concurrency contract
+for the state-store helper. See `cmd-mox-fake-capabilities-design.md` §Lock
+with timeout.
+
+- [ ] 14.2.1. Implement an internal lock-file context manager with timeout
+  semantics and restricted lock-file permissions.
+  - Retry only contention errors, raise timeout-specific diagnostics when the
+    deadline expires, and re-raise unrelated filesystem errors immediately.
+  - Success: tests cover successful acquisition, contention timeout, immediate
+    non-contention failure, and release after exceptions.
+- [ ] 14.2.2. Provide POSIX and Windows-compatible lock backends or document a
+  deliberately scoped platform limitation before exposing the helper.
+  - Requires 14.2.1.
+  - Success: the helper has explicit backend coverage in CI or a documented
+    fallback path that keeps existing Windows support intact.
+
+### 14.3. Provide file-backed state for dynamic command doubles
+
+This step answers whether `.runs(...)` handlers can model state across command
+invocations without each project reimplementing JSON persistence. The outcome
+unlocks realistic fakes for install/list/uninstall, create/read/delete, and
+login/logout command families. See `cmd-mox-fake-capabilities-design.md`
+§File-backed state store.
+
+- [ ] 14.3.1. Implement `JsonStateStore` with missing-file initialization,
+  locked transactions, JSON corruption diagnostics, and atomic writeback.
+  - Requires 14.1.1 and 14.2.1.
+  - Keep state schema caller-owned and separate from record/replay fixture
+    schema.
+  - Success: concurrent transactions using the helper do not lose updates when
+    mutating disjoint keys.
+- [ ] 14.3.2. Add package-manager-style examples that model install, list, and
+  uninstall operations through `.runs(...)` plus `JsonStateStore`.
+  - Requires 14.3.1.
+  - See `python-native-command-mocking-design.md` §2.4 and
+    `cmd-mox-fake-capabilities-design.md` §§File-backed state store and
+    Roadmap impact.
+  - Success: examples demonstrate state mutation, read-only listing, and no-op
+    uninstall without using private test globals.
+
+### 14.4. Reduce argv protocol boilerplate
+
+This step answers whether CmdMox should provide a small routing helper or rely
+on examples alone. The outcome determines how much protocol-simulator
+ergonomics belong in core. See `cmd-mox-fake-capabilities-design.md`
+§Subcommand router helper.
+
+- [ ] 14.4.1. Implement or explicitly reject `SubcommandRouter` after a
+  prototype against the package-manager example.
+  - Requires 14.3.2.
+  - If accepted, support exact matches, prefix matches, deterministic missing
+    route errors, deterministic ambiguous route errors, and normal `.runs(...)`
+    return values.
+  - Success: the chosen path removes duplicated argv dispatch from examples or
+    records why examples are sufficient.
+- [ ] 14.4.2. Document `.runs(...)` handler patterns for argv-driven command
+  fakes even if `SubcommandRouter` remains optional or deferred.
+  - Requires 14.4.1.
+  - Success: users can implement `tool list`, `tool install`, and
+    `tool uninstall`-style fakes from documentation alone.
+
+### 14.5. Add filesystem side-effect helpers
+
+This step answers whether common side effects can be expressed safely without
+a side-effect framework. The outcome gives stateful fakes a supported way to
+create observable files and executable shims. See
+`cmd-mox-fake-capabilities-design.md` §Filesystem side-effect helpers.
+
+- [ ] 14.5.1. Implement helper functions for atomic text-file writes and
+  executable-file writes with explicit permissions.
+  - Requires 14.1.1.
+  - Success: helpers create parent directories, preserve file contents on
+    failed writes, and apply executable bits on POSIX.
+- [ ] 14.5.2. Add an executable-shim side-effect example that creates a command
+  installed by a fake package manager.
+  - Requires 14.5.1.
+  - Success: an example fake creates an executable side effect that a later
+    subprocess invocation can resolve through `PATH`.
+
+### 14.6. Documentation and adoption
+
+This step answers whether the helpers are understandable as a small toolkit
+rather than a second mocking framework. The outcome informs whether any helper
+should graduate from internal utility to documented public API.
+
+- [ ] 14.6.1. Update usage and developer documentation with security,
+  portability, and cleanup guidance for file-backed fake state.
+  - Requires steps 14.1-14.5.
+  - See `cmd-mox-fake-capabilities-design.md` §§Security and portability, and
+    Verification strategy.
+- [ ] 14.6.2. Add regression and behavioural coverage for the full stateful
+  fake workflow under serial and parallel test execution.
+  - Requires steps 14.1-14.5.
+  - Success: the suite exercises fixture recording, state-store mutation,
+    router dispatch, and executable side effects without leaking files between
+    tests.
+
 ## Legend
 
 - Each unchecked box represents an implementable, trackable unit suitable for
