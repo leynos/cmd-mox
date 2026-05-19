@@ -298,7 +298,7 @@ The phase should prioritize:
 
 [^1]:
     `fake-uv.py` in `dev-env-rocky`,
-    <https://raw.githubusercontent.com/leynos/dev-env-rocky/refs/heads/issue-30-uv-tools-role-resolve-outstanding-pr-21-review-findings/ansible/roles/uv_tools/molecule/rocky10/files/fake-uv.py>.
+    <https://raw.githubusercontent.com/leynos/dev-env-rocky/refs/heads/main/ansible/roles/uv_tools/molecule/rocky10/files/fake-uv.py>.
 
 [^2]:
     Python `os.replace` and `os.fsync` documentation,
