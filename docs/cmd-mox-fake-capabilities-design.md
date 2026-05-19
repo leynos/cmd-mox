@@ -20,6 +20,24 @@ helper. The second slice introduces a reusable file-backed state store that
 `.runs(...)` handlers can use. Routing and side-effect helpers come later
 because they reduce boilerplate rather than protecting persisted data.
 
+## Stability policy
+
+This design separates implementation helpers from future public APIs:
+
+- `atomic_write_json(...)`, `file_lock(...)`, and any platform-specific lock
+  backend are internal helpers. They may move between private modules without
+  deprecation as long as documented CmdMox behaviour remains intact.
+- `JsonStateStore`, `SubcommandRouter`, and filesystem side-effect helpers are
+  candidate public APIs. They should first ship as explicitly provisional
+  exports or documented examples. They become stable only after the usage guide
+  names them as public API and assigns compatibility guarantees.
+- Exception classes named in this design are stable once exported from the
+  public package namespace. Internal call sites may still wrap or chain lower
+  level operating-system exceptions.
+
+The roadmap therefore treats documentation and adoption as a graduation step:
+helpers are not public merely because they exist in the implementation.
+
 ## Problem
 
 `FixtureFile.save()` currently creates parent directories and writes JSON with
@@ -63,8 +81,9 @@ fake command through independent process boundaries.
 
 The `fake-uv.py` fixture demonstrates the target behaviour: state mutations are
 guarded by a sibling lock file, writes go through a `0o600` temporary file,
-the temporary file is flushed and `fsync`ed, `os.replace(...)` installs the new
-state, and the parent directory is `fsync`ed after replacement.[^1]
+the temporary file is flushed and `fsync` is called on it,
+`os.replace(...)` installs the new state, and `fsync` is called on the parent
+directory after replacement.[^1]
 
 Python documents `os.replace(...)` as an atomic replacement on POSIX when the
 source and destination are on the same filesystem, and documents the need to
@@ -128,6 +147,19 @@ to a dictionary and passing the destination path. `FixtureFile.load()` can
 remain a plain JSON read because atomic replacement means readers either see
 the old complete file or the new complete file.
 
+### Persistence exceptions
+
+`atomic_write_json(...)` should raise `AtomicWriteError` when the helper cannot
+complete a durable write. The exception should include the target path and
+chain the original exception with `raise ... from ...`. It should not hide
+whether the root cause was JSON serialization, temporary-file creation,
+`fsync`, replacement, or parent-directory synchronization.
+
+Callers that only need ordinary failure handling can treat `AtomicWriteError`
+as an `OSError`-like persistence failure. Callers that need to preserve an old
+fixture can catch `AtomicWriteError` specifically and report that the previous
+target file should still be complete when replacement did not occur.
+
 ### Failure semantics
 
 The old target file must remain in place when serialization, flush, `fsync`, or
@@ -135,11 +167,6 @@ replacement fails before `os.replace(...)` succeeds. Once replacement succeeds,
 a later parent-directory `fsync` failure should be reported to the caller
 because durability is uncertain, but the helper must not try to roll back the
 target file.
-
-The helper should expose a narrow exception type only if implementation shows
-callers need to distinguish persistence failures from ordinary `OSError`.
-Until then, preserving the original exception type keeps diagnostics close to
-the operating-system failure.
 
 ## Lock with timeout
 
@@ -152,14 +179,20 @@ Required behaviour:
 - Create the lock file with restricted permissions (`0o600`) when possible.
 - Retry only contention errors (`EACCES`, `EAGAIN`, and `EWOULDBLOCK` on
   POSIX; equivalent transient lock errors on Windows).
-- Raise `TimeoutError` or a CmdMox-specific subclass when the timeout expires.
+- Raise `LockTimeoutError` when the timeout expires.
 - Re-raise unrelated filesystem errors immediately.
 - Release the lock in a `finally` block.
 
 The POSIX backend can use `fcntl.flock`. The Windows backend can use an
-internal implementation or a small dependency if implementation proves that
-standard-library locking is too limited. The public design requirement is the
-timeout and error contract, not the backend mechanism.
+internal implementation around `msvcrt.locking` or a small dependency such as
+`portalocker` if implementation proves that standard-library locking is too
+limited. The public design requirement is the timeout and error contract, not
+the backend mechanism.
+
+`LockTimeoutError` should carry the lock path and timeout value. It may inherit
+from `TimeoutError` so generic timeout handling still works, but callers that
+need to distinguish lock contention from IPC timeouts can catch the CmdMox
+exception directly.
 
 ## File-backed state store
 
@@ -181,7 +214,7 @@ def fake_uv(invocation):
 The transaction context loads the current state under the lock, yields a
 mutable object, and writes the new state only when the transaction marks itself
 dirty. The simplest form can treat every successful transaction as dirty. A
-later optimisation can expose explicit `read()` and `update(updater)` methods
+later optimization can expose explicit `read()` and `update(updater)` methods
 to avoid writing after read-only operations.
 
 Required behaviour:
@@ -258,6 +291,22 @@ Windows cannot express POSIX mode bits exactly. The implementation should still
 accept the `mode` parameter for API consistency, apply what the platform can
 honour, and document any weaker guarantees. Tests should assert observable
 permissions on POSIX and observable behaviour on Windows.
+
+Expected Windows behaviour:
+
+- `mode=0o600` is best-effort. The helper should avoid making files executable
+  or world-writable, but it must document that it does not rewrite Access
+  Control Lists (ACLs) to emulate POSIX owner-only permissions.
+- Executable side-effect helpers should create `.cmd`, `.bat`, `.exe`, or
+  extensionless files according to the caller's requested path. They should
+  not treat POSIX execute bits as meaningful on Windows.
+- Directory synchronization after `os.replace(...)` may be skipped when the
+  platform cannot open or flush a directory handle through supported APIs.
+  Skipping must be explicit in code and covered by a Windows-specific test or
+  documented capability flag.
+- The first Windows lock backend should either use `msvcrt.locking` with a
+  documented lock-byte convention or use `portalocker`. The implementation
+  must not silently downgrade to an unlocked state store.
 
 Locks are advisory. CmdMox can coordinate cooperating writers, including its
 own fixture and state helpers, but it cannot stop unrelated processes from

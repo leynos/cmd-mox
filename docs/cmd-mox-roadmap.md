@@ -494,7 +494,7 @@ should graduate from internal utility to documented public API.
 - [ ] 14.6.1. Update usage and developer documentation with security,
   portability, and cleanup guidance for file-backed fake state.
   - Requires steps 14.1-14.5.
-  - See `cmd-mox-fake-capabilities-design.md` §§Security and portability and
+  - See `cmd-mox-fake-capabilities-design.md` §§Security and portability, and
     Verification strategy.
 - [ ] 14.6.2. Add regression and behavioural coverage for the full stateful
   fake workflow under serial and parallel test execution.
