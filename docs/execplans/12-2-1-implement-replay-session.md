@@ -30,7 +30,7 @@ Observable success: new unit tests in
 `make check-fmt`, `make typecheck`, `make markdownlint`, and `make nixie` all
 succeed. `docs/usage-guide.md` documents the replay session API.
 `docs/python-native-command-mocking-design.md` records design decisions. The
-12.2.1 roadmap checkbox in `docs/cmd-mox-roadmap.md` is marked done.
+12.2.1 roadmap checkbox in `docs/roadmap.md` is marked done.
 
 ## Constraints
 
@@ -98,7 +98,7 @@ succeed. `docs/usage-guide.md` documents the replay session API.
 - [x] Update `docs/usage-guide.md` with replay session documentation.
 - [x] Record design decisions in
   `docs/python-native-command-mocking-design.md`.
-- [x] Mark 12.2.1 as done in `docs/cmd-mox-roadmap.md`.
+- [x] Mark 12.2.1 as done in `docs/roadmap.md`.
 - [x] Run full quality gates. Fix any issues.
 - [x] Update ExecPlan to COMPLETE.
 
@@ -198,7 +198,7 @@ The change is accepted when:
   diagnostics).
 - `make markdownlint`, `make nixie` pass.
 - `docs/usage-guide.md` contains a "Replay sessions" section with examples.
-- `docs/cmd-mox-roadmap.md` item 12.2.1 is marked `[x]`.
+- `docs/roadmap.md` item 12.2.1 is marked `[x]`.
 - `docs/python-native-command-mocking-design.md` contains new design
   decisions.
 - Fixture loading correctly handles v1.0 and migrated older versions.

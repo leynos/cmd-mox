@@ -29,7 +29,7 @@ After this change a developer can observe the following behaviour:
   functions that chain together (e.g. v0 -> v1 -> v2).
 
 This completes the final unchecked roadmap item under XII-A in
-`docs/cmd-mox-roadmap.md`:
+`docs/roadmap.md`:
 
 ```plaintext
 - [ ] Schema migration support for forward compatibility
@@ -165,7 +165,7 @@ All acceptance criteria met:
 - `make check-fmt`: All checks passed.
 - `make typecheck`: 0 diagnostics (ty 0.0.19).
 - `make markdownlint`: 0 errors.
-- `docs/cmd-mox-roadmap.md`: "Schema migration support" checkbox marked `[x]`.
+- `docs/roadmap.md`: "Schema migration support" checkbox marked `[x]`.
 - `docs/usage-guide.md`: Contains "Schema versioning and migration" subsection.
 - `docs/python-native-command-mocking-design.md`: Decision 9.10.8 added.
 - Existing roundtrip tests (`test_save_and_load`, `test_from_dict_roundtrip`)
@@ -207,7 +207,7 @@ supporting models. This plan adds the final XII-A item: schema migration.
 - `tests/test_recording_session_bdd.py` (36 lines) -- Scenario wiring.
 - `docs/usage-guide.md` -- User-facing docs; "Recording sessions" section at
   lines 339-434.
-- `docs/cmd-mox-roadmap.md` -- Roadmap; unchecked item at line 242.
+- `docs/roadmap.md` -- Roadmap; unchecked item at line 242.
 - `docs/python-native-command-mocking-design.md` -- Design spec; Section 9.11
   covers versioning and forward compatibility.
 
@@ -335,7 +335,7 @@ Fix any issues found. Re-run all gates after fixes.
 
 ### Stage E: Documentation updates
 
-1. `docs/cmd-mox-roadmap.md` line 242: change `[ ]` to `[x]` for "Schema
+1. `docs/roadmap.md` line 242: change `[ ]` to `[x]` for "Schema
    migration support for forward compatibility".
 
 2. `docs/usage-guide.md`: add a "Schema versioning and migration" subsection
@@ -371,7 +371,7 @@ All commands run from `/home/user/project`.
    `from_dict()`.
 8. Run `make test` -- all tests pass.
 9. Run `make check-fmt && make typecheck && make lint` -- all pass.
-10. Edit `docs/cmd-mox-roadmap.md`: mark checkbox done.
+10. Edit `docs/roadmap.md`: mark checkbox done.
 11. Edit `docs/usage-guide.md`: add migration subsection.
 12. Edit `docs/python-native-command-mocking-design.md`: add decision entry.
 13. Run `make markdownlint`.
@@ -395,7 +395,7 @@ The change is accepted when all of the following hold:
 - `make check-fmt` passes.
 - `make typecheck` produces 0 diagnostics (matching current baseline).
 - `make markdownlint` passes for edited markdown files.
-- `docs/cmd-mox-roadmap.md` line 242 shows `[x]`.
+- `docs/roadmap.md` line 242 shows `[x]`.
 - `docs/usage-guide.md` contains "Schema versioning and migration" subsection.
 - Existing fixture roundtrip tests (`test_save_and_load`,
   `test_from_dict_roundtrip`) still pass unchanged.
@@ -435,7 +435,7 @@ No state machines or filesystem mutations beyond JSON file I/O are involved.
 - `features/recording_session.feature` -- add migration BDD scenario.
 - `tests/steps/recording_session.py` -- add step definitions.
 - `tests/test_recording_session_bdd.py` -- wire new scenario.
-- `docs/cmd-mox-roadmap.md` -- mark checkbox done.
+- `docs/roadmap.md` -- mark checkbox done.
 - `docs/usage-guide.md` -- add migration subsection.
 - `docs/python-native-command-mocking-design.md` -- add design decision.
 

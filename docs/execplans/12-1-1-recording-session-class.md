@@ -115,7 +115,7 @@ done.
 - [x] (2026-02-25) Record design decisions in design document. 3 decisions added
   (9.10.5, 9.10.6, 9.10.7).
 - [x] (2026-02-25) Mark XII-A roadmap items as done in
-  `docs/cmd-mox-roadmap.md`.
+  `docs/roadmap.md`.
 - [x] (2026-02-25) Run full quality gates. All pass (typecheck: 2 pre-existing
   diagnostics in `expectations.py`, not from this change).
 
@@ -184,7 +184,7 @@ All acceptance criteria met:
 - `make markdownlint`: 0 errors.
 - `docs/usage-guide.md`: Contains "Recording sessions (fixture capture)"
   section with lifecycle docs and code examples.
-- `docs/cmd-mox-roadmap.md`: XII-A sub-items marked `[x]`.
+- `docs/roadmap.md`: XII-A sub-items marked `[x]`.
 - Fixture JSON roundtrip verified by `test_from_dict_roundtrip` and
   `test_save_and_load` tests.
 - Environment filtering verified by 8 unit tests and 1 BDD scenario.
@@ -225,7 +225,7 @@ follows a record-replay-verify lifecycle.
 - `cmd_mox/__init__.py` -- Public API surface.
 - `docs/python-native-command-mocking-design.md` Section IX -- Normative spec
   for Record Mode.
-- `docs/cmd-mox-roadmap.md` -- Roadmap with XII-A checkboxes.
+- `docs/roadmap.md` -- Roadmap with XII-A checkboxes.
 - `docs/usage-guide.md` -- User-facing documentation.
 
 ### Existing test patterns
@@ -296,7 +296,7 @@ Run all quality gates and fix any issues.
 17. Run BDD tests -- confirm green.
 18. Update `docs/usage-guide.md` with recording session section.
 19. Update `docs/python-native-command-mocking-design.md` with decisions.
-20. Mark XII-A sub-items done in `docs/cmd-mox-roadmap.md`.
+20. Mark XII-A sub-items done in `docs/roadmap.md`.
 21. Run full quality gates: `make check-fmt`, `make typecheck`, `make lint`,
     `make test`, `make markdownlint`.
 22. Fix any issues, re-run gates.
@@ -314,7 +314,7 @@ The change is accepted when all of the following are true:
   baseline.
 - `docs/usage-guide.md` contains a "Recording sessions" section with example
   code.
-- `docs/cmd-mox-roadmap.md` XII-A "RecordingSession" sub-items are checked.
+- `docs/roadmap.md` XII-A "RecordingSession" sub-items are checked.
 - Fixture JSON roundtrip: `FixtureFile.from_dict(fixture.to_dict())` produces
   an equivalent object.
 - Fixture file written to disk is valid JSON matching the v1.0 schema.
@@ -352,7 +352,7 @@ If a quality gate fails:
 
 - `docs/usage-guide.md` -- new "Recording sessions" section
 - `docs/python-native-command-mocking-design.md` -- design decisions added
-- `docs/cmd-mox-roadmap.md` -- XII-A checkboxes marked done
+- `docs/roadmap.md` -- XII-A checkboxes marked done
 - `docs/execplans/7-1-1-recording-session-class.md` -- this plan (created)
 
 ## Interfaces and Dependencies

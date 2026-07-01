@@ -503,7 +503,8 @@ should graduate from internal utility to documented public API.
     router dispatch, and executable side effects without leaking files between
     tests.
 
-## Legend
+<!-- markdownlint-disable-next-line MD036 -->
+**Legend**
 
 - Each unchecked box represents an implementable, trackable unit suitable for
   project management tools.

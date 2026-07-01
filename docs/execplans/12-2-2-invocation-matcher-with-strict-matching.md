@@ -37,7 +37,7 @@ Observable success after implementation:
    changes which recording is consumed.
 6. `docs/python-native-command-mocking-design.md` records the final scoring and
    tie-break decisions, `docs/usage-guide.md` explains the replay-selection
-   semantics for consumers, and `docs/cmd-mox-roadmap.md` marks `12.2.2` done.
+   semantics for consumers, and `docs/roadmap.md` marks `12.2.2` done.
 7. The full quality gates pass:
 
 ```bash
@@ -157,7 +157,7 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
   extraction and scoring decisions.
 - [x] Update `docs/usage-guide.md` to explain replay best-fit semantics for
   consumers.
-- [x] Mark roadmap item `12.2.2` done in `docs/cmd-mox-roadmap.md`.
+- [x] Mark roadmap item `12.2.2` done in `docs/roadmap.md`.
 - [x] Run all quality gates and attach the resulting evidence to this document
   if the plan later moves into execution.
 
@@ -281,7 +281,7 @@ replay behaviour and the documentation that must change:
   design-decision log.
 - `docs/usage-guide.md`: replay-session consumer documentation that still
   describes first-match selection.
-- `docs/cmd-mox-roadmap.md`: checkbox for `12.2.2`.
+- `docs/roadmap.md`: checkbox for `12.2.2`.
 
 The current `ReplaySession.match()` implementation is small: it loads the
 fixture, chooses either `_matches_strict` or `_matches_fuzzy`, iterates the
@@ -433,7 +433,7 @@ The wording must explain:
 
 Only after code, tests, and docs are complete:
 
-1. Mark `12.2.2` as done in `docs/cmd-mox-roadmap.md`.
+1. Mark `12.2.2` as done in `docs/roadmap.md`.
 2. Run the full repository gates with `tee` and `set -o pipefail` exactly as
    required by `AGENTS.md`.
 3. Review the captured logs rather than trusting truncated terminal output.
@@ -457,7 +457,7 @@ The implementation is complete only when all of the following are true:
    decisions and matches the shipped behaviour.
 6. `docs/usage-guide.md` accurately describes replay selection semantics for
    consumers.
-7. `docs/cmd-mox-roadmap.md` marks `12.2.2` as complete.
+7. `docs/roadmap.md` marks `12.2.2` as complete.
 8. The following commands all succeed, with logs captured for review:
 
 ```bash

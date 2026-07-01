@@ -99,7 +99,7 @@ disk. New unit tests in `cmd_mox/unittests/test_command_double_record.py` and
   skipped.
 - [x] (2026-03-01) Update `docs/usage-guide.md` with `.record()` fluent API
   documentation.
-- [x] (2026-03-01) Update `docs/cmd-mox-roadmap.md` — mark XII-A items done.
+- [x] (2026-03-01) Update `docs/roadmap.md` — mark XII-A items done.
 - [x] (2026-03-01) Update `docs/python-native-command-mocking-design.md` — add
   decision 9.10.9.
 - [x] (2026-03-01) Run full quality gates and fix any issues.
@@ -166,7 +166,7 @@ All acceptance criteria met:
 - `make nixie`: All diagrams validated.
 - `docs/usage-guide.md`: Contains "Automatic recording with `.record()`"
   section with fluent API docs and examples.
-- `docs/cmd-mox-roadmap.md`: XII-A items all marked `[x]`.
+- `docs/roadmap.md`: XII-A items all marked `[x]`.
 - `docs/python-native-command-mocking-design.md`: Decision 9.10.9 added.
 - Fluent API validated: `spy("git").passthrough().record(path)` creates a
   started session; `spy("git").record(path)` raises `ValueError`.
@@ -232,7 +232,7 @@ lifecycle.
 - `docs/python-native-command-mocking-design.md` Section 9.8.2 — Normative
   spec for `CommandDouble.record()` method signature.
 
-- `docs/cmd-mox-roadmap.md` lines 244-259 — XII-A checklist items to mark
+- `docs/roadmap.md` lines 244-259 — XII-A checklist items to mark
   done.
 
 - `docs/usage-guide.md` lines 339-443 — Existing "Recording sessions" section
@@ -312,7 +312,7 @@ Go/no-go: all tests pass (both existing and new).
 Update `docs/usage-guide.md` with new subsection documenting the `.record()`
 fluent API.
 
-Update `docs/cmd-mox-roadmap.md` to mark remaining XII-A items as done.
+Update `docs/roadmap.md` to mark remaining XII-A items as done.
 
 Update `docs/python-native-command-mocking-design.md` with decision 9.10.9.
 
@@ -337,7 +337,7 @@ Run `make check-fmt`, `make typecheck`, `make lint`, `make test`,
     call from `verify()`.
 11. Run `make test` — confirm all tests pass.
 12. Update `docs/usage-guide.md`.
-13. Update `docs/cmd-mox-roadmap.md`.
+13. Update `docs/roadmap.md`.
 14. Update `docs/python-native-command-mocking-design.md`.
 15. Run `make check-fmt && make typecheck && make lint && make test`.
 16. Fix any issues, re-run gates.
@@ -355,7 +355,7 @@ The change is accepted when all of the following are true:
   baseline (currently 0).
 - `docs/usage-guide.md` contains a section documenting the `.record()` fluent
   API with example code.
-- `docs/cmd-mox-roadmap.md` XII-A items are all checked.
+- `docs/roadmap.md` XII-A items are all checked.
 - `docs/python-native-command-mocking-design.md` contains decision 9.10.9.
 - `spy("git").passthrough().record(path)` creates a started
   `RecordingSession`; `spy("git").record(path)` raises `ValueError`.
@@ -387,7 +387,7 @@ then re-run all gates before marking complete.
 - `cmd_mox/controller.py` — add `_finalize_recording_sessions()` and call from
   `verify()`
 - `docs/usage-guide.md` — new subsection for `.record()` API
-- `docs/cmd-mox-roadmap.md` — mark XII-A items done
+- `docs/roadmap.md` — mark XII-A items done
 - `docs/python-native-command-mocking-design.md` — add decision 9.10.9
 
 ## Interfaces and Dependencies

@@ -98,7 +98,7 @@ CmdMox documentation lives in `docs/usage-guide.md` (user-facing API guidance)
 and `docs/python-native-command-mocking-design.md` (design rationale and
 feature mappings, including a shellmock-to-CmdMox table). The documentation
 index is `docs/contents.md`. The roadmap entry for this work is under "VIII.
-Documentation, Examples & Usability" in `docs/cmd-mox-roadmap.md`.
+Documentation, Examples & Usability" in `docs/roadmap.md`.
 
 Shellmock is a shell-script-based command mocking tool. CmdMox provides similar
 behaviour with Python shims and a record-replay-verify workflow.
