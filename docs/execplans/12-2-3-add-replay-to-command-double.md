@@ -40,7 +40,7 @@ Observable success after implementation:
    fluent API contract for replay-enabled doubles.
 6. `docs/python-native-command-mocking-design.md` records the final API
    decisions, `docs/usage-guide.md` explains the consumer-facing behaviour, and
-   `docs/cmd-mox-roadmap.md` marks `12.2.3` done.
+   `docs/roadmap.md` marks `12.2.3` done.
 7. The full quality gates pass:
 
 ```bash
@@ -336,7 +336,7 @@ Update `docs/usage-guide.md` to describe the consumer-facing behaviour:
 
 ### Stage E: Mark the roadmap item complete
 
-Once the code, tests, and docs are done, update `docs/cmd-mox-roadmap.md` to
+Once the code, tests, and docs are done, update `docs/roadmap.md` to
 change:
 
 ```plaintext
@@ -404,7 +404,7 @@ The feature is complete when all of the following are true:
 8. `docs/python-native-command-mocking-design.md` captures the final design
    decisions.
 9. `docs/usage-guide.md` describes the user-visible replay behaviour.
-10. `docs/cmd-mox-roadmap.md` marks `12.2.3` done.
+10. `docs/roadmap.md` marks `12.2.3` done.
 11. `make markdownlint`, `make nixie`, `make check-fmt`, `make typecheck`,
     `make lint`, and `make test` all pass.
 

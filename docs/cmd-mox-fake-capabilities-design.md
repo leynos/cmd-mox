@@ -4,7 +4,7 @@ Status: Draft
 Audience: CmdMox maintainers and contributors  
 Companion documents:
 [`python-native-command-mocking-design.md`](./python-native-command-mocking-design.md),
-[`cmd-mox-roadmap.md`](./cmd-mox-roadmap.md)
+[`roadmap.md`](./roadmap.md)
 
 This design extends CmdMox with reusable helpers for realistic command fakes.
 The immediate trigger is the `fake-uv.py` fixture used by

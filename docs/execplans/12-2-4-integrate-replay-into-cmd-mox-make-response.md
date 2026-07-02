@@ -36,7 +36,7 @@ The user-visible behaviour after implementation is:
    replay flow.
 7. `docs/python-native-command-mocking-design.md` records the final controller
    integration decision, `docs/usage-guide.md` explains the new runtime
-   behaviour, and `docs/cmd-mox-roadmap.md` marks `12.2.4` done.
+   behaviour, and `docs/roadmap.md` marks `12.2.4` done.
 8. The full quality gates pass:
 
 ```bash
@@ -373,7 +373,7 @@ In `docs/usage-guide.md`:
 3. Document the fuzzy fallback behaviour explicitly so consumers know replay is
    best-effort in fuzzy mode.
 
-In `docs/cmd-mox-roadmap.md`:
+In `docs/roadmap.md`:
 
 1. Change `12.2.4` from `[ ]` to `[x]` only after the implementation and all
    gates succeed.
@@ -431,7 +431,7 @@ The implementation is complete when all of the following are true:
    consumers.
 7. `docs/python-native-command-mocking-design.md` records the final controller
    integration decision.
-8. `docs/cmd-mox-roadmap.md` marks `12.2.4` done.
+8. `docs/roadmap.md` marks `12.2.4` done.
 9. `make markdownlint`, `make nixie`, `make check-fmt`, `make typecheck`,
    `make lint`, and `make test` all pass.
 

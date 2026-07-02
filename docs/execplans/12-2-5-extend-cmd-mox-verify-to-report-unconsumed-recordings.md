@@ -40,7 +40,7 @@ Observable success after implementation:
    verify-time failure.
 7. `docs/python-native-command-mocking-design.md` records the final ordering
    and error-surface decision, `docs/usage-guide.md` explains the new
-   verify-time behaviour for replay fixtures, and `docs/cmd-mox-roadmap.md`
+   verify-time behaviour for replay fixtures, and `docs/roadmap.md`
    marks `12.2.5` done after the feature lands.
 8. The full quality gates pass:
 
@@ -125,7 +125,7 @@ The neighbouring roadmap items matter here:
 The implementer should keep these references open while executing the plan:
 
 - Docs:
-  - `docs/cmd-mox-roadmap.md`
+  - `docs/roadmap.md`
   - `docs/python-native-command-mocking-design.md`, especially Section IX,
     `9.5.2`, and `9.8.3`
   - `docs/usage-guide.md`, especially the replay-session and `.replay()`
@@ -288,7 +288,7 @@ The implementer should keep these references open while executing the plan:
   the unconsumed-path failure. Rationale: the feature needs behavioural
   coverage, but the happy path is already exercised end-to-end.
 
-- Decision: mark `docs/cmd-mox-roadmap.md` item `12.2.5` done after the
+- Decision: mark `docs/roadmap.md` item `12.2.5` done after the
   implementation landed in the working tree and all required quality gates
   passed. Rationale: the roadmap status now reflects completed, verified
   feature work rather than the earlier planning draft.
@@ -404,7 +404,7 @@ Update the documentation immediately after the code and tests settle:
   - explain that `CmdMox.verify()` now enforces full fixture consumption for
     replay-backed spies and point readers to `allow_unmatched=True` in the
     direct `ReplaySession` section when tolerant verification is desired.
-- `docs/cmd-mox-roadmap.md`
+- `docs/roadmap.md`
   - mark `12.2.5` checked to reflect the completed implementation and passing
     quality gates.
 
@@ -474,7 +474,7 @@ The shipped test coverage proves both behaviour and cleanup:
 
 Documentation was updated in `docs/usage-guide.md` and
 `docs/python-native-command-mocking-design.md`, and roadmap item `12.2.5` is
-now marked complete in `docs/cmd-mox-roadmap.md`.
+now marked complete in `docs/roadmap.md`.
 
 Final gate results:
 
