@@ -17,12 +17,13 @@ Repository = "https://github.com/leynos/cmd-mox"
 [dependency-groups]
 dev = [
     "pytest",
-	"pytest-xdist",
+    "pytest-xdist",
     "ruff",
     "ty",
     "pytest-timeout",
     "pytest-bdd",
     "parse_type",
+    "pyyaml>=6.0.3",
 ]
 
 [tool.ruff]
@@ -329,6 +330,26 @@ enable = [
 [tool.pytest.ini_options]
 # Tests automatically killed after seconds elapsed
 timeout = 30
+
+[tool.mutmut]
+# Flat layout: the package lives at the repository root.
+source_paths = ["cmd_mox/"]
+# The suite is split between tests/ and the in-package unit tests.
+pytest_add_cli_args_test_selection = ["tests/", "cmd_mox/unittests/"]
+runner = "python -m pytest -x -q --no-header -p no:cacheprovider"
+# cmd_mox/unittests/ is test scaffolding shipped inside the package.
+# shim.py and _shim_bootstrap.py execute only inside spawned shim
+# subprocesses, outside mutmut's in-process test attribution, so their
+# mutants would be unattributable noise.
+do_not_mutate = [
+    "cmd_mox/unittests/*",
+    "cmd_mox/shim.py",
+    "cmd_mox/_shim_bootstrap.py",
+]
+# mutmut runs pytest from mutants/; copy the assets tests resolve
+# relative to the repository root (shared fixtures, BDD feature files,
+# and the documentation exercised by the docs scenarios).
+also_copy = ["conftest.py", "features/", "docs/"]
 
 [tool.uv]
 package = true
