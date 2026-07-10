@@ -233,7 +233,7 @@ supports deterministic replay without external dependencies. See
 - [x] 12.1.1. Implement `RecordingSession` with fixture persistence,
   session lifecycle management, fixture metadata generation, and environment
   subset filtering.
-- [x] 12.1.2. Implement `FixtureFile` with JSON serialisation, versioned schema
+- [x] 12.1.2. Implement `FixtureFile` with JSON serialization, versioned schema
   (`1.0`), and migration support.
 - [x] 12.1.3. Add `.record()` to `CommandDouble` with validation that
   passthrough mode is enabled and support for custom scrubber and allowlist
@@ -241,7 +241,7 @@ supports deterministic replay without external dependencies. See
 - [x] 12.1.4. Integrate recording into
       `PassthroughCoordinator.finalize_result()`
   with optional recording session wiring.
-- [x] 12.1.5. Add unit tests for recording lifecycle, serialisation roundtrips,
+- [x] 12.1.5. Add unit tests for recording lifecycle, serialization roundtrips,
   and environment filtering.
 
 ### 12.2. Replay infrastructure
@@ -290,7 +290,7 @@ supports deterministic replay without external dependencies. See
 - [ ] 12.5.2. Implement `cmdmox replay` with fixture selection and strict mode.
 - [ ] 12.5.3. Implement `cmdmox generate-test` to emit pytest tests from
   recorded fixtures.
-- [ ] 12.5.4. Implement `cmdmox scrub` for post-hoc fixture sanitisation.
+- [ ] 12.5.4. Implement `cmdmox scrub` for post-hoc fixture sanitization.
 - [ ] 12.5.5. Implement `cmdmox validate` for schema and corruption checks,
   including glob support.
 

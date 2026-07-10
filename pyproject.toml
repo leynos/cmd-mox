@@ -330,6 +330,7 @@ enable = [
 [tool.pytest.ini_options]
 # Tests automatically killed after seconds elapsed
 timeout = 30
+testpaths = ["cmd_mox/unittests", "examples", "scripts/tests", "tests"]
 
 [tool.mutmut]
 # Flat layout: the package lives at the repository root.

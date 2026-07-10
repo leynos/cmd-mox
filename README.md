@@ -20,6 +20,9 @@ If you've ever mocked `curl` with `cat`, this library is your penance.
 
 For detailed instructions, see [docs/usage-guide.md](docs/usage-guide.md).
 
+Contributors can run `make spelling` to check maintained Markdown against the
+shared en-GB-oxendict policy. The same pinned gate runs in pull-request linting.
+
 **Platform support:** Linux, macOS, and Windows. CmdMox emits POSIX symlink
 shims on Unix-like systems and `.cmd` launchers backed by named pipes on
 Windows, so the same tests and fixtures run across all three platforms.

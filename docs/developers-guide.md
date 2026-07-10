@@ -58,6 +58,18 @@ Do not bypass `make lint` for normal validation. Running the target keeps the
 Ruff and Pylint tiers ordered consistently with CI and preserves the shared
 `uv` cache configuration.
 
+## Spelling policy
+
+The lint and Markdown gates run a pinned `typos` release with British English
+and Oxford `-ize` conventions. Before checking maintained Markdown, the
+generator refreshes the shared estate dictionary into an untracked local cache
+only when the authority is newer and merges `typos.local.toml`. The generated
+`typos.toml` is reviewed and committed so a clean network-restricted checkout
+can still enforce the last known-good policy.
+
+Add repository-only proper names or quoted upstream terms to
+`typos.local.toml`; never edit generated entries in `typos.toml` by hand.
+
 ## Episodic lint policy
 
 CmdMox imports its lint posture from

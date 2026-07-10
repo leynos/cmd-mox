@@ -180,7 +180,7 @@ All acceptance criteria met:
   while still supporting recording.
 - Net new files: 6. Net modified existing files: 6 (including the pre-existing
   fixture file fixup). Well within the 10-file tolerance.
-- The implementation is minimal: 3 source file edits totaling ~40 lines of
+- The implementation is minimal: 3 source file edits totalling ~40 lines of
   production code. The bulk of the work was tests and documentation.
 - Post-merge fix: the original `verify()` placed
   `_finalize_recording_sessions()` and `_finalize_verification()` sequentially

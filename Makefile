@@ -6,6 +6,8 @@ VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 RUFF = $(UV_ENV) $(UV) run ruff
 TY = $(UV_ENV) $(UV) run ty
+TYPOS_VERSION ?= 1.48.0
+TYPOS := $(UV) tool run typos@$(TYPOS_VERSION)
 PYLINT_PYTHON ?= pypy
 PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
 PYLINT_PYPY_SHIM_REF ?= 726d09f968b4d729ee4b29c71fc732e744854f3b
@@ -19,7 +21,7 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 .PHONY: help all clean build build-release lint fmt check-fmt
-.PHONY: markdownlint markdownlint-run nixie test typecheck
+.PHONY: markdownlint markdownlint-run nixie spelling test typecheck
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
@@ -39,6 +41,7 @@ clean: ## Remove build artifacts
 	rm -rf build dist *.egg-info \
 	  .mypy_cache .pytest_cache .coverage coverage.* \
 	  lcov.info htmlcov .venv
+	rm -f .typos-oxendict-base.json .typos-oxendict-base.toml
 	find . -type d -name '__pycache__' -print0 | xargs -0 -r rm -rf
 
 define ensure_tool
@@ -86,6 +89,7 @@ markdownlint-run: ## Run markdownlint-cli2 with pinned fallback
 lint: build ## Run linters
 	$(RUFF) check
 	$(PYLINT) $(PYLINT_TARGETS)
+	+$(MAKE) spelling
 
 typecheck: build ## Run typechecking
 	$(TY) --version
@@ -93,6 +97,12 @@ typecheck: build ## Run typechecking
 
 markdownlint: ## Lint Markdown files
 	$(MAKE) markdownlint-run
+	+$(MAKE) spelling
+
+spelling: ## Enforce en-GB-oxendict spelling in Markdown prose
+	@$(UV) run scripts/generate_typos_config.py
+	@find . -type f -name '*.md' -not -path './.venv/*' -print0 | \
+		xargs -0 -r $(TYPOS) --config typos.toml --force-exclude
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
