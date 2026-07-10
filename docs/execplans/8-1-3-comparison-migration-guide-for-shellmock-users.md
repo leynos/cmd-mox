@@ -196,5 +196,5 @@ and use existing CmdMox APIs from `docs/usage-guide.md` and
 ## Revision note (required when editing an ExecPlan)
 
 Updated the plan to COMPLETE status, recorded implementation progress, and
-summarised outcomes after creating the migration guide, linking it in the docs
+summarized outcomes after creating the migration guide, linking it in the docs
 index and usage guide, and running the required lint and Mermaid validations.

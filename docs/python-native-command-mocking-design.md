@@ -6,7 +6,7 @@ This document presents the technical design for `CmdMox`, a Python library for
 stubbing, mocking, and spying on external commands in Unix-like environments.
 The primary objective is to provide a robust, ergonomic, and Python-native
 alternative to shell-based testing frameworks like BATS and `shellmock`. The
-design prioritizes a fluent API modeled on the PyMox framework, combined with a
+design prioritizes a fluent API modelled on the PyMox framework, combined with a
 powerful and reliable command interception mechanism. This section establishes
 the core principles and architectural philosophy that underpin the library's
 design.
@@ -22,7 +22,7 @@ explicitness about a system's interactions with its dependencies.
 1. **Record Phase:** In this initial phase, the developer uses the `CmdMox` API
    to declaratively define a set of expectations. An expectation is a precise
    description of a single external command invocation, including the command
-   name, its arguments, expected standard input, and the behavior it should
+   name, its arguments, expected standard input, and the behaviour it should
    exhibit (e.g., its `stdout`, `stderr`, and exit code). This is the setup
    portion of the test, where the "script" for the test doubles is written.
 
@@ -31,7 +31,7 @@ explicitness about a system's interactions with its dependencies.
    component under test is executed. Any attempt to invoke an external command
    is intercepted by `CmdMox`. The framework consults the recorded expectations
    to find one that matches the actual invocation. If a match is found,
-   `CmdMox` provides the specified behavior. If no match is found, it is
+   `CmdMox` provides the specified behaviour. If no match is found, it is
    treated as an unexpected interaction, which will cause the test to fail
    during the final phase.
 
@@ -81,7 +81,7 @@ The process works as follows:
   find the `CmdMox`-generated shim in the temporary directory before it finds
   the real system command in a standard location like `/usr/bin/git`.
 
-- This shim then becomes the entry point for the mocked behavior.
+- This shim then becomes the entry point for the mocked behaviour.
 
 - Upon test completion (or failure), the `PATH` variable is restored to its
   original state, and the temporary directory and all its shims are removed,
@@ -130,7 +130,7 @@ context of external commands.
   interaction.
 
 - **Mock:** A mock is a "verifiable" replacement for a command. Like a stub, it
-  provides a defined behavior. However, a mock also carries a set of strict
+  provides a defined behaviour. However, a mock also carries a set of strict
   expectations about how it must be invoked. These expectations can include the
   exact arguments, the number of times it should be called, and the order of
   invocation relative to other mocks. The `verify()` phase of the test will
@@ -140,7 +140,7 @@ context of external commands.
 
 - **Spy:** A spy is an "observational" test double. A spy wraps a command to
   record all invocations made to it, including arguments, `stdin`, and
-  environment variables. A spy can either be configured with a stubbed behavior
+  environment variables. A spy can either be configured with a stubbed behaviour
   or it can "passthrough" and execute the real underlying command. After the
   test run, the developer can inspect the spy's recorded history to make
   assertions about how the command was used. This provides a more flexible,
@@ -231,14 +231,14 @@ variables are set up. By default `__exit__` invokes :meth:`verify`, stopping
 any running server and restoring the original environment. This behaviour can
 be disabled via `CmdMox(verify_on_exit=False)` when manual control is required.
 
-On Windows the manager also normalises the shim directory path before
+On Windows the manager also normalizes the shim directory path before
 publishing it inside `PATH`. Extremely deep worktrees can exceed the historical
 `MAX_PATH` limit, so the manager requests the filesystem's short (8.3) alias
 whenever the expanded path approaches that threshold. Comparisons performed
-during teardown normalise casing via `ntpath.normcase`, ensuring that
+during teardown normalize casing via `ntpath.normcase`, ensuring that
 reassigning `environment.shim_dir` with a differently cased string still points
 at the same directory and allows `__exit__` to clean up after itself. PATH
-filtering and passthrough spies reuse the same normalisation routines so a
+filtering and passthrough spies reuse the same normalization routines so a
 single shim directory never appears twice just because its casing changed.
 
 ### 2.3 Creating Test Doubles: `mox.mock()`, `mox.stub()`, and `mox.spy()`
@@ -274,7 +274,7 @@ and mocks) or merely observational (spies). It also governs how
 ### 2.4 The Fluent API for Defining Expectations
 
 The core of the library's ergonomic design lies in its fluent, chainable API
-for defining the behavior and expectations of test doubles. This DSL allows
+for defining the behaviour and expectations of test doubles. This DSL allows
 developers to write clear, readable, and expressive test setups, drawing direct
 inspiration from PyMox's method-chaining style.
 
@@ -301,7 +301,7 @@ given `stdout` and `stderr` to the corresponding streams and exit with the
 provided `exit_code`.
 
 - `.runs(handler: Callable)`**:** Provides a powerful mechanism for dynamic
-  behavior. The `handler` is a Python callable that will be executed by the
+  behaviour. The `handler` is a Python callable that will be executed by the
   `CmdMox` framework when the mock is invoked. The callable receives a
   structured `Invocation` object containing details of the call (args, `stdin`,
   env). The handler must return a tuple of `(stdout, stderr, exit_code)` using
@@ -317,7 +317,7 @@ provided `exit_code`.
 - `.in_order()`**:** Marks this expectation as part of a default, strictly
   ordered group. Invocations must occur in the order they were recorded. An
   `.any_order()` modifier can be provided for expectations where the calling
-  order is not significant, mirroring PyMox's behavior.
+  order is not significant, mirroring PyMox's behaviour.
 
 Implementation note: the concrete implementation stores the expected call count
 in a `count` attribute but exposes a `times()` convenience method to match the
@@ -334,13 +334,13 @@ disable MD013 -->
 | shellmock Feature (from)                    | Proposed CmdMox API Equivalent                     |
 | ------------------------------------------- | -------------------------------------------------- |
 | Mock an executable cmd                      | mock_cmd = mox.mock('cmd')                         |
-| Define behavior for specific args (--match) | mock_cmd.with_args('arg1', 'arg2')                 |
+| Define behaviour for specific args (--match) | mock_cmd.with_args('arg1', 'arg2')                 |
 | Define exit code (--status \<exit_code>)    | mock_cmd.returns(exit_code=\<exit_code>)           |
 | Define stdout (--output \<string>)          | mock_cmd.returns(stdout=\<string>)                 |
 | Partial argument matching (--type partial)  | mock_cmd.with_matching_args(Contains('arg'))       |
 | Regex argument matching (--type regex)      | mock_cmd.with_matching_args(Regex(r'--file=\\S+')) |
 | Match on stdin (--match-stdin)              | mock_cmd.with_stdin('some input')                  |
-| Custom behavior (--exec \<command>)         | mock_cmd.runs(lambda inv: ('output', b'', 0))      |
+| Custom behaviour (--exec \<command>)         | mock_cmd.runs(lambda inv: ('output', b'', 0))      |
 | Verify calls (shellmock_verify)             | mox.verify()                                       |
 <!-- markdownlint-enable MD013 -->
 
@@ -364,14 +364,14 @@ sequenceDiagram
   Fixture->>CmdMox: __enter__(verify_on_exit=False, env_prefix=worker_prefix)
   alt auto_lifecycle enabled
     Fixture->>CmdMox: replay()
-    Note right of CmdMox #DDF2E9: Phase → REPLAY
+    Note right of CmdMox: Phase → REPLAY
   end
   Pytest-->>Runner: run test body
   Runner->>Pytest: test completes
   Pytest->>Fixture: pytest_runtest_makereport
   alt auto_lifecycle enabled and eligible
     Fixture->>CmdMox: verify()
-    Note right of CmdMox #E8F5E9: Phase → VERIFY
+    Note right of CmdMox: Phase → VERIFY
     Fixture->>Pytest: attach verification outcome to report
   else skip/failed
     Note over Fixture: verification suppressed or recorded differently
@@ -497,7 +497,7 @@ duplicate command names whose casing only differs, ensuring shim files cannot
 trample each other on NTFS. When shims are regenerated from Linux or macOS the
 launcher still uses CRLF delimiters so the resulting `.cmd` remains byte-for-
 byte identical to the Windows-generated variant. At runtime the shared shim
-script further normalises Windows argv by repeatedly collapsing doubled carets
+script further normalizes Windows argv by repeatedly collapsing doubled carets
 (`^^`) into single carets. This intentionally lossy step counteracts the
 multi-layer escaping performed by `cmd.exe` so the IPC payload reflects the
 user's intended text instead of the intermediate batch form.
@@ -525,7 +525,7 @@ sequenceDiagram
 The communication between the main test process (hosting the `CmdMox`
 controller) and the numerous, short-lived shim processes is the most critical
 architectural element of `CmdMox`. The design moves away from the fragile,
-file- based communication methods used by shell-based tools in favor of a
+file- based communication methods used by shell-based tools in favour of a
 modern, robust IPC bus.
 
 This IPC bus will be implemented using a Unix domain socket, which provides a
@@ -644,7 +644,7 @@ reasonable timeouts (default: 5.0s). Callers can pass an `IPCHandlers`
 dataclass to provide invocation and passthrough callbacks when constructing the
 server, removing the need to subclass for custom behaviour. The
 `CallbackIPCServer` compatibility wrapper forwards a `TimeoutConfig` dataclass
-so callers can continue to customise startup and accept timeouts without
+so callers can continue to customize startup and accept timeouts without
 exceeding the four-argument limit. On Windows hosts the controller constructs a
 `NamedPipeServer`, which shares the same handler plumbing but uses
 `win32pipe`/`win32file` (via `pywin32`) to host a duplex named pipe that
@@ -763,7 +763,7 @@ sequenceDiagram
     end
 ```
 
-The relationships between the Windows transport helpers are summarised below.
+The relationships between the Windows transport helpers are summarized below.
 
 ```mermaid
 erDiagram
@@ -862,7 +862,7 @@ the following process:
    invoked. The shim connects to the IPC server and reports its invocation.
 
 4. **Response:** The IPC server looks up `grep` in its stub configurations. It
-   finds the defined behavior and sends a JSON response like
+   finds the defined behaviour and sends a JSON response like
    `{'stdout': 'match', 'stderr': '', 'exit_code': 0}` back to the shim.
 
 5. **Execution:** The shim receives this payload, prints "match" to its
@@ -879,7 +879,7 @@ the following process:
 
 ### 4.2 Advanced Stubs: Callable Handlers
 
-To support dynamic or stateful behavior, `CmdMox` allows stubs to be configured
+To support dynamic or stateful behaviour, `CmdMox` allows stubs to be configured
 with a callable handler via the `.runs()` method, for example:
 `mox.stub('date').runs(my_date_handler)`.
 
@@ -1226,7 +1226,7 @@ process substitution (`<()`).
 Therefore, the design explicitly states that `CmdMox` mocks the *tools*, not
 the *shell* that glues them together. When a user needs to test a script that
 contains a command like `grep foo file.txt | sort -r`, the test is not on the
-pipeline itself, but on the behavior of `grep` and `sort`.
+pipeline itself, but on the behaviour of `grep` and `sort`.
 
 The user would test this by executing the full command line (e.g., via
 `subprocess.run(..., shell=True)`) and setting up mocks for each individual
@@ -1321,7 +1321,7 @@ Language (DSL) used to build expectations.
 | .with_stdin(data)                   | Specifies expected stdin content. Can use strings or comparators. | .with_stdin(Contains('payload'))                    |
 | .with_env(vars)                     | Specifies environment variables for the command's context.        | .with_env({'API_KEY': 'secret'})                    |
 | .returns(stdout, stderr, exit_code) | Defines the static output and exit code of the mocked command.    | .returns(stdout=b'OK', exit_code=0)                 |
-| .runs(handler)                      | Provides a callable for dynamic, stateful behavior.               | .runs(my_handler_func)                              |
+| .runs(handler)                      | Provides a callable for dynamic, stateful behaviour.               | .runs(my_handler_func)                              |
 | .times(count)                       | Sets the expected number of times the command will be called.     | .times(2)                                           |
 | .in_order()                         | Marks this expectation as part of an ordered sequence.            | .in_order()                                         |
 | .any_order()                        | Explicitly opts out of ordered verification.                      | .any_order()                                        |
@@ -1567,7 +1567,7 @@ cyclomatic complexity without altering behaviour.
 The controller's `replay()` and `verify()` methods were likewise broken down
 into dedicated helper functions such as `_check_replay_preconditions` and
 `_finalize_verification`. This keeps the high-level workflow clear while
-localising error handling and environment cleanup details.
+localizing error handling and environment cleanup details.
 
 ### 8.6 Design Decisions for `SpyCommand`
 
@@ -2198,7 +2198,7 @@ The matcher computes a stats tuple
 `(stdin_match, matching_env_pairs, env_subset_size)` for each compatible
 recording and selects the highest-scoring candidate. When two candidates have
 identical stats, the one with the lower `sequence` value wins. This ensures
-deterministic selection that prioritises:
+deterministic selection that prioritizes:
 
 1. Exact stdin match (True > False)
 2. Number of matching environment pairs (higher is better)
@@ -2842,7 +2842,7 @@ the most appropriate recording when multiple candidates qualify.
 - First-match semantics (roadmap 12.2.1) were simple but could select the wrong
   recording when fixtures contain multiple entries with the same command and
   args
-- Lexicographic scoring provides a clear, auditable ranking that prioritises
+- Lexicographic scoring provides a clear, auditable ranking that prioritizes
   stdin exactness, then environment specificity
 - Using a stats tuple instead of weighted integers keeps the ranking logic
   transparent and debuggable
@@ -2883,7 +2883,7 @@ session through read-only `has_replay_session` and `replay_session` properties.
   integration, that broadens the public contract faster than the roadmap stage
   justifies
 - **Lazy loading on first command invocation:** Rejected because it delays
-  validation and makes fixture problems harder to localise
+  validation and makes fixture problems harder to localize
 
 #### 9.10.15 Replay-backed controller dispatch and strict-miss handling
 

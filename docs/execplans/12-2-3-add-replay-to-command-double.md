@@ -87,7 +87,7 @@ The missing piece is the fluent attachment point on the double:
 - `cmd_mox/test_doubles.py` currently implements `.passthrough()` and
   `.record()`, carries `_recording_session` in `__slots__`, and exposes
   `has_recording_session` / `recording_session`.
-- `cmd_mox/controller.py` already finalises recording sessions, but it does not
+- `cmd_mox/controller.py` already finalizes recording sessions, but it does not
   yet consult replay sessions in `_make_response()` or verify replay
   consumption. That omission is expected at this roadmap stage.
 - Existing tests for the neighbouring feature live in
@@ -243,7 +243,7 @@ Write unit tests that cover at least the following behaviours:
 2. The default `strict` value is `True`.
 3. Passing `strict=False` creates a replay session configured for fuzzy
    matching.
-4. String paths are accepted and normalised to `Path`.
+4. String paths are accepted and normalized to `Path`.
 5. The attached replay session is loaded eagerly.
 6. Missing fixture files and invalid fixture data raise from `.replay()`
    immediately.
@@ -294,7 +294,7 @@ Implementation steps:
 
 1. Extend the TYPE_CHECKING imports to include `ReplaySession`.
 2. Add `_replay_session` to `CommandDouble.__slots__`.
-3. Initialise `self._replay_session` to `None` in `__init__()`.
+3. Initialize `self._replay_session` to `None` in `__init__()`.
 4. Add `replay(self, fixture_path, *, strict=True) -> Self`.
 5. Inside `replay()`, validate the intended constraints:
    - replay is not allowed when passthrough mode is already enabled

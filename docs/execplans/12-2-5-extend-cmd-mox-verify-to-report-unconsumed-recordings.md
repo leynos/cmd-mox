@@ -231,7 +231,7 @@ The implementer should keep these references open while executing the plan:
   finalization, but replay-consumption verification is absent entirely. The
   implementation must add the check without regressing cleanup.
 - Existing fuzzy replay fallback behaviour remains unchanged at invocation time,
-  but `verify()` now fails afterward if the fallback path left the fixture
+  but `verify()` now fails afterwards if the fallback path left the fixture
   recording unused. The affected BDD scenario had to move from verify-success
   to verify-failure expectations.
 - Existing BDD infrastructure already supports

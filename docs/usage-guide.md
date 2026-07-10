@@ -46,7 +46,7 @@ interpreter and forward all arguments to the shared `shim.py`, so no additional
 wrappers or entry points are required.
 
 When CmdMox enters replay mode on Windows it ensures `.CMD` is present in the
-effective `PATHEXT` value, even if developers customised their shell to omit
+effective `PATHEXT` value, even if developers customized their shell to omit
 the extension. The generated launchers always emit CRLF line endings and escape
 carets/percent signs so the Windows command processor parses them consistently
 with native batch scripts, even when arguments or installation paths include
@@ -60,7 +60,7 @@ repeated carets will therefore reach the server with a single literal caret.
 Deeply nested workspaces can easily exceed the traditional `MAX_PATH` limit on
 Windows. The environment manager now asks the filesystem for a short (8.3)
 alias whenever the shim directory path would overflow the limit, ensuring shims
-remain invokable while still cleaning up the real directory afterwards. PATH
+remain invocable while still cleaning up the real directory afterwards. PATH
 filtering honours the underlying filesystem semantics too, so variations in
 casing no longer leave behind duplicate entries when passthrough spies merge
 their lookup paths.
@@ -788,7 +788,7 @@ the full table of methods and examples.
 
 Most projects interact with the IPC server through `CmdMox`, but advanced
 scenarios can instantiate `cmd_mox.ipc.IPCServer` themselves. The server
-accepts optional callbacks so invocation handling can be customised without
+accepts optional callbacks so invocation handling can be customized without
 subclassing:
 
 ```python
@@ -810,7 +810,7 @@ On Windows the transport can be forced explicitly by swapping `IPCServer` for
 :class:`NamedPipeServer`; `CmdMox` selects it automatically based on
 ``os.name``.
 
-Projects that rely on :class:`CallbackIPCServer` can still customise startup
+Projects that rely on :class:`CallbackIPCServer` can still customize startup
 and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
 
 ```python
