@@ -33,7 +33,7 @@ jobs:
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
 
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
+        uses: leynos/shared-actions/.github/actions/generate-coverage@8c8e8a38f1f9a783ba7e25ba2c0f9bfda5bf2cb3
         with:
           output-path: coverage.xml
           format: cobertura
