@@ -433,7 +433,7 @@ sequenceDiagram
   raises a detailed `VerificationError`. The error messages will be designed
   for maximum debuggability, providing a clear "diff" between the expected and
   actual interactions, similar to the highly-regarded error reporting of PyMox.
-  Finally, it orchestrates the cleanup of all test artifacts, including
+  Finally, it orchestrates the cleanup of all test artefacts, including
   restoring the `PATH`.
 
 ## III. Architectural Blueprint: Inside `CmdMox`
@@ -463,18 +463,18 @@ steps:
 1. Create a temporary directory with a unique, process-safe name (e.g.,
    `/tmp/cmdmox-pytest-worker-1-pid-12345`).
 
-2. Resolve the active launcher artifact (`shim.py` or `cmdmox-mock[.exe]`) from
+2. Resolve the active launcher artefact (`shim.py` or `cmdmox-mock[.exe]`) from
    the selected backend.
 
 3. For each unique command name being mocked (e.g., `git`, `curl`), create a
    lightweight filesystem entry in the temporary directory that points to the
-   launcher artifact.
+   launcher artefact.
    - POSIX: symlink `git -> <launcher>`.
    - Windows Python backend: generate `git.cmd` wrapper targeting `shim.py`.
    - Windows Rust backend: create `git.exe` hardlink/copy to
      `cmdmox-mock.exe`.
 
-4. Ensure the launcher artifact is executable.
+4. Ensure the launcher artefact is executable.
 
 5. The launcher determines which command it impersonates from its invocation
    name (`argv[0]`).
@@ -811,7 +811,7 @@ approach avoids disrupting other threads that might rely on the environment
 remaining mostly stable.
 
 This rigorous management ensures that each test runs in a perfectly isolated
-environment and leaves no artifacts behind, a critical requirement for a
+environment and leaves no artefacts behind, a critical requirement for a
 reliable testing framework.
 
 `CmdMox` enforces this guarantee even when replay aborts unexpectedly. The

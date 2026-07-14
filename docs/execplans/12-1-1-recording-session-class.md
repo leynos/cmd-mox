@@ -332,7 +332,7 @@ If a quality gate fails:
 - Re-run the failing gate.
 - Then re-run all gates before marking complete.
 
-## Artifacts and Notes
+## Artefacts and Notes
 
 ### New files created
 
