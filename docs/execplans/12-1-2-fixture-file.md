@@ -420,7 +420,7 @@ no-op for v1.0 data, so existing save/load roundtrips are unchanged.
 If a step fails partway, rerunning `make test` after fixing the issue is safe.
 No state machines or filesystem mutations beyond JSON file I/O are involved.
 
-## Artifacts and notes
+## Artefacts and notes
 
 ### Files to create
 

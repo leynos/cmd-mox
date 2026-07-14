@@ -22,5 +22,5 @@ make typecheck
 make test
 ```
 
-This keeps `uv` caches on the same filesystem as the build artifacts and avoids
+This keeps `uv` caches on the same filesystem as the build artefacts and avoids
 cross-device linking issues under WSL.

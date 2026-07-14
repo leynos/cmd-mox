@@ -177,7 +177,7 @@ The documentation edits are safe to re-run. If linting fails, fix the reported
 Markdown issues and re-run the commands. If the guide content needs adjustment,
 edit the single guide file and re-run linting.
 
-## Artifacts and Notes
+## Artefacts and Notes
 
 Expected linting transcripts (examples only):
 

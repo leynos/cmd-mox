@@ -369,7 +369,7 @@ deleted.
 If a quality gate fails: fix only the reported issue, re-run the failing gate,
 then re-run all gates before marking complete.
 
-## Artifacts and Notes
+## Artefacts and Notes
 
 ### New files created
 
