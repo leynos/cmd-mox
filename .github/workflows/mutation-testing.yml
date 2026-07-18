@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # OIDC workflow-source resolution
-    uses: leynos/shared-actions/.github/workflows/mutation-mutmut.yml@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
+    uses: leynos/shared-actions/.github/workflows/mutation-mutmut.yml@9f788dad94c848e3bbddfb90f9e80b6742b7390c
     with:
       # Flat layout: mutable source lives under cmd_mox/, not src/.
       paths: "cmd_mox/"
