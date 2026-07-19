@@ -2,6 +2,9 @@
 
 # 🕵️‍♀️ CmdMox – Python-native command mocking so you never have to write another shell test again
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](
+https://deepwiki.com/leynos/cmd-mox)
+
 <!-- markdownlint-enable MD013 -->
 
 Replace your flaky bats tests, your brittle log-parsing hacks, and that one
