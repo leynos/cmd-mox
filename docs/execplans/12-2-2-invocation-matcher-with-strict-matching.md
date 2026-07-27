@@ -1,9 +1,8 @@
 # Implement `InvocationMatcher` with strict, fuzzy, and best-fit replay selection
 
-This ExecPlan (execution plan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This ExecPlan (execution plan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETED
 
@@ -73,8 +72,8 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
 ## Constraints
 
 - Follow the repository test-driven development (TDD) workflow from
-  `AGENTS.md`: change tests first,
-  observe failure, then implement code, then rerun the full suite.
+  `AGENTS.md`: change tests first, observe failure, then implement code, then
+  rerun the full suite.
 - Keep the existing `ReplaySession` public API unchanged:
   `__init__(fixture_path, *, strict_matching=True, allow_unmatched=False)`,
   `load()`, `match()`, and `verify_all_consumed()`.
@@ -112,12 +111,12 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
   proposes exact scoring semantics; if that proves incompatible with existing
   tests or expectations, confirm direction with the user before proceeding.
 - Testing tolerance: stop and escalate if the new behaviour-driven development
-  (BDD) coverage would require a
-  large new step-library abstraction instead of a small extension to the
-  existing replay-session feature files and step definitions.
+  (BDD) coverage would require a large new step-library abstraction instead of
+  a small extension to the existing replay-session feature files and step
+  definitions.
 - Quality-gate tolerance: if any of `make markdownlint`, `make nixie`,
-  `make check-fmt`, `make typecheck`, `make lint`, or `make test` fails after
-  3 focused fix attempts, capture the failing command and log path in
+  `make check-fmt`, `make typecheck`, `make lint`, or `make test` fails after 3
+  focused fix attempts, capture the failing command and log path in
   `Surprises & Discoveries`, then pause for guidance.
 
 ## Risks
@@ -188,15 +187,13 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
   than a stable primary entrypoint.
 
 - Decision: use boolean compatibility plus lexicographic scoring rather than
-  opaque weighted sums.
-  The scoring rule is:
-  `command` and `args` are mandatory gates in both modes.
-  In strict mode, `stdin` equality and full `env_subset` containment are also
-  mandatory gates.
-  Among remaining candidates, higher specificity wins by comparing the stats
-  tuple `(stdin_match, matching_env_pairs, env_subset_size)`.
-  In fuzzy mode, `stdin` and environment no longer disqualify candidates, but
-  they still influence the score using the same ranking dimensions.
+  opaque weighted sums. The scoring rule is: `command` and `args` are mandatory
+  gates in both modes. In strict mode, `stdin` equality and full `env_subset`
+  containment are also mandatory gates. Among remaining candidates, higher
+  specificity wins by comparing the stats tuple
+  `(stdin_match, matching_env_pairs, env_subset_size)`. In fuzzy mode, `stdin`
+  and environment no longer disqualify candidates, but they still influence the
+  score using the same ranking dimensions.
 
 - Decision: when two candidates produce the same stats tuple, choose the
   recording with the lower `sequence` value. The `sequence` field corresponds
@@ -209,8 +206,7 @@ make test 2>&1 | tee /tmp/12-2-2-test.log
 
 - Decision (resolved): fuzzy-mode scoring treats an exact `stdin` match as
   more important than environment specificity. `stdin` wins first because it
-  usually captures the command payload more directly than the environment
-  does.
+  usually captures the command payload more directly than the environment does.
 
 ## Outcomes & Retrospective
 
@@ -275,8 +271,8 @@ replay behaviour and the documentation that must change:
   coverage. Extend this file or split out matcher-specific tests if it becomes
   too large to navigate.
 - `features/replay_session.feature`,
-  `tests/steps/replay_session.py`, and
-  `tests/test_replay_session_bdd.py`: existing behavioural tests for replay.
+  `tests/steps/replay_session.py`, and `tests/test_replay_session_bdd.py`:
+  existing behavioural tests for replay.
 - `docs/python-native-command-mocking-design.md`: normative design text and
   design-decision log.
 - `docs/usage-guide.md`: replay-session consumer documentation that still
@@ -285,10 +281,10 @@ replay behaviour and the documentation that must change:
 
 The current `ReplaySession.match()` implementation is small: it loads the
 fixture, chooses either `_matches_strict` or `_matches_fuzzy`, iterates the
-recordings in order under a lock, skips consumed indices, marks the first
-match as consumed, and returns a `Response`. `InvocationMatcher` should take
-over the candidate-selection part of that method, leaving fixture loading,
-locking, response construction, and consumed tracking in `ReplaySession`.
+recordings in order under a lock, skips consumed indices, marks the first match
+as consumed, and returns a `Response`. `InvocationMatcher` should take over the
+candidate-selection part of that method, leaving fixture loading, locking,
+response construction, and consumed tracking in `ReplaySession`.
 
 ## Plan of work
 
@@ -352,8 +348,8 @@ Add at least two scenarios:
 2. Fuzzy-mode replay chooses the closest candidate when `stdin` or environment
    differs between recordings but command and args are the same.
 
-Make the scenario observable by asserting the returned `stdout` and then
-calling `verify_all_consumed()` or checking that the expected recording remains
+Make the scenario observable by asserting the returned `stdout` and then calling
+`verify_all_consumed()` or checking that the expected recording remains
 unconsumed. The red-phase behavioural run should fail before implementation.
 
 Suggested red-phase command:
@@ -365,9 +361,9 @@ pytest tests/test_replay_session_bdd.py 2>&1 | tee /tmp/12-2-2-red-bdd.log
 
 ### Stage C: Implement `InvocationMatcher`
 
-Create `cmd_mox/record/matching.py` and add the new class. Keep the class
-small and explicit. A novice should be able to read it top to bottom without
-guessing about hidden state.
+Create `cmd_mox/record/matching.py` and add the new class. Keep the class small
+and explicit. A novice should be able to read it top to bottom without guessing
+about hidden state.
 
 Implementation outline:
 

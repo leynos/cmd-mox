@@ -7,12 +7,12 @@ Companion documents:
 [`roadmap.md`](./roadmap.md)
 
 This design extends CmdMox with reusable helpers for realistic command fakes.
-The immediate trigger is the `fake-uv.py` fixture used by
-`dev-env-rocky`, which combines durable JSON state writes, file-backed command
-state, advisory locking, subcommand dispatch, and filesystem side effects in a
-single command double.[^1] CmdMox already has the `.runs(...)` hook needed to
-express that behaviour, but each test suite must currently rebuild the
-infrastructure around it.
+The immediate trigger is the `fake-uv.py` fixture used by `dev-env-rocky`,
+which combines durable JSON state writes, file-backed command state, advisory
+locking, subcommand dispatch, and filesystem side effects in a single command
+double.[^1] CmdMox already has the `.runs(...)` hook needed to express that
+behaviour, but each test suite must currently rebuild the infrastructure around
+it.
 
 The design keeps the public command-double model intact. The first delivery
 slice hardens fixture persistence with an internal `atomic_write_json(...)`
@@ -42,8 +42,8 @@ helpers are not public merely because they exist in the implementation.
 
 `FixtureFile.save()` currently creates parent directories and writes JSON with
 `Path.write_text(...)`. That is easy to understand but weak under interrupted
-writes, parallel test activity, and permission-sensitive fixture directories.
-A partial write can leave a fixture unreadable, and the write path does not set
+writes, parallel test activity, and permission-sensitive fixture directories. A
+partial write can leave a fixture unreadable, and the write path does not set
 an explicit file mode.
 
 Stateful command fakes expose the same weakness. Package managers, cloud
@@ -80,10 +80,10 @@ fake command through independent process boundaries.
 ## Prior art and constraints
 
 The `fake-uv.py` fixture demonstrates the target behaviour: state mutations are
-guarded by a sibling lock file, writes go through a `0o600` temporary file,
-the temporary file is flushed and `fsync` is called on it,
-`os.replace(...)` installs the new state, and `fsync` is called on the parent
-directory after replacement.[^1]
+guarded by a sibling lock file, writes go through a `0o600` temporary file, the
+temporary file is flushed and `fsync` is called on it, `os.replace(...)`
+installs the new state, and `fsync` is called on the parent directory after
+replacement.[^1]
 
 Python documents `os.replace(...)` as an atomic replacement on POSIX when the
 source and destination are on the same filesystem, and documents the need to
@@ -100,8 +100,8 @@ backend.
 CmdMox already contains retry-oriented filesystem helpers in
 `cmd_mox.fs_retry`, and record mode already persists fixtures through
 `FixtureFile.save()`. The new persistence helpers should live beside those
-internal filesystem utilities, while state-store and router helpers should
-stay separate from the record/replay fixture schema.
+internal filesystem utilities, while state-store and router helpers should stay
+separate from the record/replay fixture schema.
 
 ## Architecture
 
@@ -118,9 +118,9 @@ The fake-capabilities extension has five components:
 - Filesystem side-effect helpers: optional functions for creating files,
   executable scripts, and command shims as part of fake command behaviour.
 
-The dependency direction is deliberate. The state store depends on the lock
-and atomic JSON helper. The router and side-effect helpers may use the state
-store, but the state store does not know about command routing.
+The dependency direction is deliberate. The state store depends on the lock and
+atomic JSON helper. The router and side-effect helpers may use the state store,
+but the state store does not know about command routing.
 
 ## Atomic JSON persistence
 
@@ -132,8 +132,9 @@ consistent formatting.
 Required behaviour:
 
 - Create `path.parent` before opening the temporary file.
-- Open the temporary file with `os.open(..., O_CREAT | O_TRUNC | O_WRONLY,
-  mode)` and call `os.fchmod(...)` where available.
+- Open the temporary file with
+  `os.open(..., O_CREAT | O_TRUNC | O_WRONLY, mode)` and call `os.fchmod(...)`
+  where available.
 - Serialize JSON with deterministic key ordering when the payload is a plain
   mapping, plus a trailing newline for Git-friendly diffs.
 - Flush the buffered file object and call `os.fsync(...)` before replacement.
@@ -183,11 +184,11 @@ Required behaviour:
 - Re-raise unrelated filesystem errors immediately.
 - Release the lock in a `finally` block.
 
-The POSIX backend can use the `fcntl.flock()` function. The Windows backend
-can use an internal implementation around `msvcrt.locking` or a small
-dependency such as `portalocker` if implementation proves that
-standard-library locking is too limited. The public design requirement is the
-timeout and error contract, not the backend mechanism.
+The POSIX backend can use the `fcntl.flock()` function. The Windows backend can
+use an internal implementation around `msvcrt.locking` or a small dependency
+such as `portalocker` if implementation proves that standard-library locking is
+too limited. The public design requirement is the timeout and error contract,
+not the backend mechanism.
 
 `LockTimeoutError` should carry the lock path and timeout value. It may inherit
 from `TimeoutError` so generic timeout handling still works, but callers that
@@ -236,8 +237,8 @@ fixtures harder to review.
 
 ## Subcommand router helper
 
-`SubcommandRouter` reduces boilerplate for argv-driven protocol simulators.
-The helper should be opt-in and composable with `.runs(...)`.
+`SubcommandRouter` reduces boilerplate for argv-driven protocol simulators. The
+helper should be opt-in and composable with `.runs(...)`.
 
 Proposed API shape:
 
@@ -302,15 +303,15 @@ Expected Windows behaviour:
   or world-writable, but it must document that it does not rewrite Access
   Control Lists (ACLs) to emulate POSIX owner-only permissions.
 - Executable side-effect helpers should create `.cmd`, `.bat`, `.exe`, or
-  extensionless files according to the caller's requested path. They should
-  not treat POSIX execute bits as meaningful on Windows.
+  extensionless files according to the caller's requested path. They should not
+  treat POSIX execute bits as meaningful on Windows.
 - Directory synchronization after `os.replace(...)` may be skipped when the
   platform cannot open or flush a directory handle through supported APIs.
   Skipping must be explicit in code and covered by a Windows-specific test or
   documented capability flag.
 - The first Windows lock backend should either use `msvcrt.locking` with a
-  documented lock-byte convention or use `portalocker`. The implementation
-  must not silently downgrade to an unlocked state store.
+  documented lock-byte convention or use `portalocker`. The implementation must
+  not silently downgrade to an unlocked state store.
 
 Locks are advisory. CmdMox can coordinate cooperating writers, including its
 own fixture and state helpers, but it cannot stop unrelated processes from

@@ -6,10 +6,10 @@ This document presents the technical design for `CmdMox`, a Python library for
 stubbing, mocking, and spying on external commands in Unix-like environments.
 The primary objective is to provide a robust, ergonomic, and Python-native
 alternative to shell-based testing frameworks like BATS and `shellmock`. The
-design prioritizes a fluent API modelled on the PyMox framework, combined with a
-powerful and reliable command interception mechanism. This section establishes
-the core principles and architectural philosophy that underpin the library's
-design.
+design prioritizes a fluent API modelled on the PyMox framework, combined with
+a powerful and reliable command interception mechanism. This section
+establishes the core principles and architectural philosophy that underpin the
+library's design.
 
 ### 1.1 The "Record-Replay-Verify" Paradigm for External Processes
 
@@ -76,10 +76,10 @@ The process works as follows:
   environment variable of the test process.
 
 - When the code under test attempts to execute a command like `git`, the
-  operating system's standard library functions for finding executables (such
-  as `execvp`) search the directories listed in `PATH` in order. The OS will
-  find the `CmdMox`-generated shim in the temporary directory before it finds
-  the real system command in a standard location like `/usr/bin/git`.
+  operating system's standard library functions for finding executables (such as
+  `execvp`) search the directories listed in `PATH` in order. The OS will find
+  the `CmdMox`-generated shim in the temporary directory before it finds the
+  real system command in a standard location like `/usr/bin/git`.
 
 - This shim then becomes the entry point for the mocked behaviour.
 
@@ -140,10 +140,10 @@ context of external commands.
 
 - **Spy:** A spy is an "observational" test double. A spy wraps a command to
   record all invocations made to it, including arguments, `stdin`, and
-  environment variables. A spy can either be configured with a stubbed behaviour
-  or it can "passthrough" and execute the real underlying command. After the
-  test run, the developer can inspect the spy's recorded history to make
-  assertions about how the command was used. This provides a more flexible,
+  environment variables. A spy can either be configured with a stubbed
+  behaviour or it can "passthrough" and execute the real underlying command.
+  After the test run, the developer can inspect the spy's recorded history to
+  make assertions about how the command was used. This provides a more flexible,
   `assert`-based verification style, similar to the functionality found in
   tools like `bash_placebo`, and is useful when the exact sequence or number of
   calls is not known beforehand or is not the primary subject of the test.
@@ -291,8 +291,8 @@ inspiration from PyMox's method-chaining style.
 
 <!-- markdownlint-disable MD013 -->
 
-- `.returns(stdout: Union[str, bytes] = b'', stderr: Union[str, bytes] = b'',
-  exit_code: int = 0)`**:**
+- `.returns(stdout: Union[str, bytes] = b'', stderr: Union[str, bytes] = b'', exit_code: int = 0)`
+  **:**
 
 <!-- markdownlint-enable MD013 -->
 
@@ -331,17 +331,17 @@ API equivalents, demonstrating complete functional parity.
 **Table 1:** `shellmock` **to** `CmdMox` **Feature Mapping** <!-- markdownlint-
 disable MD013 -->
 
-| shellmock Feature (from)                    | Proposed CmdMox API Equivalent                     |
-| ------------------------------------------- | -------------------------------------------------- |
-| Mock an executable cmd                      | mock_cmd = mox.mock('cmd')                         |
+| shellmock Feature (from)                     | Proposed CmdMox API Equivalent                     |
+| -------------------------------------------- | -------------------------------------------------- |
+| Mock an executable cmd                       | mock_cmd = mox.mock('cmd')                         |
 | Define behaviour for specific args (--match) | mock_cmd.with_args('arg1', 'arg2')                 |
-| Define exit code (--status \<exit_code>)    | mock_cmd.returns(exit_code=\<exit_code>)           |
-| Define stdout (--output \<string>)          | mock_cmd.returns(stdout=\<string>)                 |
-| Partial argument matching (--type partial)  | mock_cmd.with_matching_args(Contains('arg'))       |
-| Regex argument matching (--type regex)      | mock_cmd.with_matching_args(Regex(r'--file=\\S+')) |
-| Match on stdin (--match-stdin)              | mock_cmd.with_stdin('some input')                  |
+| Define exit code (--status \<exit_code>)     | mock_cmd.returns(exit_code=\<exit_code>)           |
+| Define stdout (--output \<string>)           | mock_cmd.returns(stdout=\<string>)                 |
+| Partial argument matching (--type partial)   | mock_cmd.with_matching_args(Contains('arg'))       |
+| Regex argument matching (--type regex)       | mock_cmd.with_matching_args(Regex(r'--file=\\S+')) |
+| Match on stdin (--match-stdin)               | mock_cmd.with_stdin('some input')                  |
 | Custom behaviour (--exec \<command>)         | mock_cmd.runs(lambda inv: ('output', b'', 0))      |
-| Verify calls (shellmock_verify)             | mox.verify()                                       |
+| Verify calls (shellmock_verify)              | mox.verify()                                       |
 <!-- markdownlint-enable MD013 -->
 
 ### 2.5 The Lifecycle in Practice: `replay()` and `verify()`
@@ -487,8 +487,8 @@ For the Python backend on Windows, the generator writes lightweight `.cmd`
 launchers that shell out to `shim.py`. The launchers use CRLF delimiters for
 native compatibility and CmdMox amends `PATHEXT` during replay so the command
 processor will resolve the batch wrappers even on hosts where the extension was
-removed from the user environment. See :class:`EnvironmentManager` in
-:mod:`cmd_mox.environment` for the Windows-specific `PATHEXT` management logic.
+removed from the user environment. See :class:`EnvironmentManager` in :mod:
+`cmd_mox.environment` for the Windows-specific `PATHEXT` management logic.
 
 The batch template also doubles percent signs and carets so Windows-specific
 metacharacters survive the hand-off to Python, even when user arguments contain
@@ -646,23 +646,22 @@ server, removing the need to subclass for custom behaviour. The
 `CallbackIPCServer` compatibility wrapper forwards a `TimeoutConfig` dataclass
 so callers can continue to customize startup and accept timeouts without
 exceeding the four-argument limit. On Windows hosts the controller constructs a
-`NamedPipeServer`, which shares the same handler plumbing but uses
-`win32pipe`/`win32file` (via `pywin32`) to host a duplex named pipe that
-mirrors the Unix socket behaviour. The named pipe name is derived from the
-logical socket path, so shims can keep filtering the shim directory out of
-``PATH`` without needing Windows-specific logic. The server attaches the
-corresponding response data (`stdout`, `stderr`, `exit_code`) to the
-`Invocation` before appending it to the journal. On Unix systems the server
-cleans up the socket on shutdown to prevent stale sockets from interfering with
-subsequent tests, while the Windows transport simply closes the pipe handles.
-The timeout is configurable via
-:data:`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
+`NamedPipeServer`, which shares the same handler plumbing but uses `win32pipe`/
+`win32file` (via `pywin32`) to host a duplex named pipe that mirrors the Unix
+socket behaviour. The named pipe name is derived from the logical socket path,
+so shims can keep filtering the shim directory out of ``PATH`` without needing
+Windows-specific logic. The server attaches the corresponding response data
+(`stdout`, `stderr`, `exit_code`) to the `Invocation` before appending it to
+the journal. On Unix systems the server cleans up the socket on shutdown to
+prevent stale sockets from interfering with subsequent tests, while the Windows
+transport simply closes the pipe handles. The timeout is configurable via :data:
+`cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 
-When `IPCServer.start()` executes inside an active
-:class:`~cmd_mox.environment.EnvironmentManager`, the manager exports both the
-socket and timeout environment variables automatically. This keeps tests and
-shim workflows from having to patch :mod:`os.environ` manually when they rely
-on the higher-level context manager.
+When `IPCServer.start()` executes inside an active :class:
+`~cmd_mox.environment.EnvironmentManager`, the manager exports both the socket
+and timeout environment variables automatically. This keeps tests and shim
+workflows from having to patch :mod:`os.environ` manually when they rely on the
+higher-level context manager.
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
@@ -879,8 +878,8 @@ the following process:
 
 ### 4.2 Advanced Stubs: Callable Handlers
 
-To support dynamic or stateful behaviour, `CmdMox` allows stubs to be configured
-with a callable handler via the `.runs()` method, for example:
+To support dynamic or stateful behaviour, `CmdMox` allows stubs to be
+configured with a callable handler via the `.runs()` method, for example:
 `mox.stub('date').runs(my_date_handler)`.
 
 The implementation of this feature leverages the IPC architecture:
@@ -1321,7 +1320,7 @@ Language (DSL) used to build expectations.
 | .with_stdin(data)                   | Specifies expected stdin content. Can use strings or comparators. | .with_stdin(Contains('payload'))                    |
 | .with_env(vars)                     | Specifies environment variables for the command's context.        | .with_env({'API_KEY': 'secret'})                    |
 | .returns(stdout, stderr, exit_code) | Defines the static output and exit code of the mocked command.    | .returns(stdout=b'OK', exit_code=0)                 |
-| .runs(handler)                      | Provides a callable for dynamic, stateful behaviour.               | .runs(my_handler_func)                              |
+| .runs(handler)                      | Provides a callable for dynamic, stateful behaviour.              | .runs(my_handler_func)                              |
 | .times(count)                       | Sets the expected number of times the command will be called.     | .times(2)                                           |
 | .in_order()                         | Marks this expectation as part of an ordered sequence.            | .in_order()                                         |
 | .any_order()                        | Explicitly opts out of ordered verification.                      | .any_order()                                        |
@@ -1365,9 +1364,9 @@ Darwin environments, several avenues for future expansion exist.
 - **Windows Support:** CmdMox now provides first-class Windows support. The IPC
   layer retains Unix domain sockets where available and augments the startup
   handshake so Windows clients can detect readiness even though no filesystem
-  socket appears. Shim generation is backend-dependent: the Python backend
-  emits `.cmd` launchers that shell out to the active Python interpreter and
-  invoke `shim.py`, while the Rust backend emits `*.exe` launchers backed by
+  socket appears. Shim generation is backend-dependent: the Python backend emits
+  `.cmd` launchers that shell out to the active Python interpreter and invoke
+  `shim.py`, while the Rust backend emits `*.exe` launchers backed by
   `cmdmox-mock.exe`. Both backends preserve argument quoting and inherit the
   test process environment. Environment management reuses the existing
   `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`, and restores
@@ -1510,9 +1509,9 @@ VerificationError <|-- UnfulfilledExpectationError
 
 ### 8.4 Design Decisions for the Pytest Plugin
 
-The plugin exposes a `cmd_mox` fixture that yields a ready-to-use
-:class:`CmdMox` instance.  The fixture enters the :class:`EnvironmentManager`
-before yielding and always exits it afterwards to guarantee environment cleanup.
+The plugin exposes a `cmd_mox` fixture that yields a ready-to-use :class:
+`CmdMox` instance.  The fixture enters the :class:`EnvironmentManager` before
+yielding and always exits it afterwards to guarantee environment cleanup.
 
 To support `pytest-xdist` each fixture instance incorporates the worker ID into
 the temporary directory prefix.  The prefix takes the form
@@ -1599,9 +1598,9 @@ Both mocks and spies maintain an `invocations` list. A convenience property
 
 ### 8.7 Design Decisions for Comparator Matching
 
-Comparator helpers such as :class:`Any`, :class:`IsA`, :class:`Regex`,
-:class:`Contains`, :class:`StartsWith`, and :class:`Predicate` are implemented
-as simple callables. Each inherits a lightweight `_ReprMixin` so failing tests
+Comparator helpers such as :class:`Any`, :class:`IsA`, :class:`Regex`, :class:
+`Contains`, :class:`StartsWith`, and :class:`Predicate` are implemented as
+simple callables. Each inherits a lightweight `_ReprMixin` so failing tests
 display meaningful values. `Expectation.with_matching_args` accepts callables
 of the form `Callable[[str], bool]` and requires one comparator per positional
 argument. The matcher result is interpreted as truthy. This keeps the matching
@@ -2569,8 +2568,8 @@ cleanup. `verify()` still enters its existing `finally` block afterwards, so
 IPC teardown and recording-session finalization run even when
 `verify_all_consumed()` raises `VerificationError`.
 
-One subtle consequence is that fuzzy replay remains additive at invocation
-time but not at verification time. A fuzzy mismatch can fall back to the spy's
+One subtle consequence is that fuzzy replay remains additive at invocation time
+but not at verification time. A fuzzy mismatch can fall back to the spy's
 configured handler or canned response, yet `verify()` still fails later if the
 fixture recording was never consumed. Tests that intentionally use only part of
 a fixture must construct `ReplaySession(..., allow_unmatched=True)` directly
@@ -2798,8 +2797,8 @@ module rather than alongside `RecordingSession` in `session.py`.
 
 #### 9.10.11 Matching logic inside ReplaySession
 
-**Decision:** Implement matching logic as private methods inside
-`ReplaySession` (`_matches_strict`, `_matches_fuzzy`) rather than as a separate
+**Decision:** Implement matching logic as private methods inside `ReplaySession`
+(`_matches_strict`, `_matches_fuzzy`) rather than as a separate
 `InvocationMatcher` class.
 
 **Rationale:**

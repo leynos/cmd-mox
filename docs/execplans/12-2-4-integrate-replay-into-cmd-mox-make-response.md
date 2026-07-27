@@ -1,9 +1,8 @@
 # Integrate replay into `CmdMox._make_response()`
 
-This ExecPlan (execution plan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This ExecPlan (execution plan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
@@ -208,9 +207,9 @@ unconsumed recordings. That verification work is explicitly out of scope here.
   but it does not explicitly call out spy invocation-history bookkeeping. This
   plan makes that requirement explicit.
 - Focused red-phase test runs need
-  `UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools`
-  `uv run pytest ...` rather than plain `pytest`, because the repo does not put
-  the virtualenv binaries directly on `PATH`.
+  `UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools` `uv run pytest ...` rather
+  than plain `pytest`, because the repo does not put the virtualenv binaries
+  directly on `PATH`.
 
 ## Decision Log
 

@@ -1,9 +1,8 @@
 # Add `.replay()` to `CommandDouble`
 
-This ExecPlan (execution plan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This ExecPlan (execution plan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
@@ -320,9 +319,9 @@ illustrative sections match the shipped behaviour. At minimum:
 2. Update Section `9.8.2` if the final implementation adds public replay query
    helpers or spy-only validation.
 3. Add a new numbered decision under Section `9.10` recording any non-obvious
-   choices made while implementing `.replay()`, especially:
-   eager loading, spy-only scope if retained, and whether public replay-session
-   accessors were added.
+   choices made while implementing `.replay()`, especially: eager loading,
+   spy-only scope if retained, and whether public replay-session accessors were
+   added.
 
 Update `docs/usage-guide.md` to describe the consumer-facing behaviour:
 
@@ -336,8 +335,7 @@ Update `docs/usage-guide.md` to describe the consumer-facing behaviour:
 
 ### Stage E: Mark the roadmap item complete
 
-Once the code, tests, and docs are done, update `docs/roadmap.md` to
-change:
+Once the code, tests, and docs are done, update `docs/roadmap.md` to change:
 
 ```plaintext
 - [ ] 12.2.3. Add `.replay()` to `CommandDouble`, including passthrough

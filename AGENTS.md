@@ -134,11 +134,11 @@ When implementing changes, adhere to the following testing procedures:
 
 ## Python Development Guidelines
 
-The spelling configuration is generated from the shared estate dictionary.
-Put narrow repository-specific terms in `typos.local.toml`; do not edit
+The spelling configuration is generated from the shared estate dictionary. Put
+narrow repository-specific terms in `typos.local.toml`; do not edit
 `typos.toml` by hand. The generator refreshes its untracked base cache only
-when the authority is newer and retains the reviewed tracked configuration
-when a clean checkout cannot reach the authority.
+when the authority is newer and retains the reviewed tracked configuration when
+a clean checkout cannot reach the authority.
 
 For Python development, refer to the detailed guidelines in the `.rules/`
 directory:

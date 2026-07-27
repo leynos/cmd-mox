@@ -1,9 +1,8 @@
 # Add `.record()` Method to CommandDouble
 
-This ExecPlan (execution plan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This ExecPlan (execution plan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
@@ -77,9 +76,9 @@ disk. New unit tests in `cmd_mox/unittests/test_command_double_record.py` and
 - Risk: Thread safety in `PassthroughCoordinator.finalize_result()` — the
   recording call happens after releasing the lock. Severity: low. Likelihood:
   low. Mitigation: The recording session's `record()` method operates on
-  per-double state that is not shared across threads. The double is removed
-  from `_pending` atomically, so no concurrent finalization of the same
-  invocation is possible.
+  per-double state that is not shared across threads. The double is removed from
+  `_pending` atomically, so no concurrent finalization of the same invocation
+  is possible.
 
 ## Progress
 
@@ -117,9 +116,9 @@ disk. New unit tests in `cmd_mox/unittests/test_command_double_record.py` and
 
 - Observation: The `make fmt` command reformatted a pre-existing file
   (`docs/execplans/7-1-2-fixture-file.md`), causing an MD032 markdown lint
-  error where a line starting with a dash was merged into a paragraph.
-  Evidence: `markdownlint-cli2` reported MD032 on line 443 of the file. Impact:
-  Fixed by rewording the affected paragraph to avoid leading dash.
+  error where a line starting with a dash was merged into a paragraph. Evidence:
+  `markdownlint-cli2` reported MD032 on line 443 of the file. Impact: Fixed by
+  rewording the affected paragraph to avoid leading dash.
 
 ## Decision Log
 
@@ -186,8 +185,8 @@ All acceptance criteria met:
   `_finalize_recording_sessions()` and `_finalize_verification()` sequentially
   in the same `finally` block. If recording finalization raised (e.g.,
   `OSError` from an unwritable fixture path), `_finalize_verification()` was
-  skipped, leaking IPC server state and environment mutations. Fixed by
-  wrapping `_finalize_recording_sessions()` in its own `try/except` so
+  skipped, leaking IPC server state and environment mutations. Fixed by wrapping
+  `_finalize_recording_sessions()` in its own `try/except` so
   `_finalize_verification()` always runs. A `threading.Lock` was also added to
   `RecordingSession.record()` to serialize concurrent sequence assignment from
   multiple IPC threads.

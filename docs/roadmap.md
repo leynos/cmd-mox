@@ -371,9 +371,9 @@ section 8.12.
 ## 14. Stateful fake capabilities
 
 Idea: if CmdMox provides durable JSON persistence and a small state-store
-toolkit before higher-level fake helpers, realistic package-manager,
-cloud-CLI, `git`, `docker`, and `kubectl` fakes can share one correctness
-boundary instead of copying ad hoc filesystem code.
+toolkit before higher-level fake helpers, realistic package-manager, cloud-CLI,
+`git`, `docker`, and `kubectl` fakes can share one correctness boundary instead
+of copying ad hoc filesystem code.
 
 This phase turns patterns from production-like fake commands into reusable
 CmdMox building blocks. Atomic persistence and locking come first because they
@@ -405,10 +405,10 @@ Goals, and Atomic JSON persistence.
 
 ### 14.2. Add a reusable lock-with-timeout utility
 
-This step answers whether CmdMox can coordinate cooperating file-backed
-writers under parallel test execution. The outcome is the concurrency contract
-for the state-store helper. See `cmd-mox-fake-capabilities-design.md` §Lock
-with timeout.
+This step answers whether CmdMox can coordinate cooperating file-backed writers
+under parallel test execution. The outcome is the concurrency contract for the
+state-store helper. See `cmd-mox-fake-capabilities-design.md` §Lock with
+timeout.
 
 - [ ] 14.2.1. Implement an internal lock-file context manager with timeout
   semantics and restricted lock-file permissions.
@@ -469,8 +469,8 @@ ergonomics belong in core. See `cmd-mox-fake-capabilities-design.md`
 
 ### 14.5. Add filesystem side-effect helpers
 
-This step answers whether common side effects can be expressed safely without
-a side-effect framework. The outcome gives stateful fakes a supported way to
+This step answers whether common side effects can be expressed safely without a
+side-effect framework. The outcome gives stateful fakes a supported way to
 create observable files and executable shims. See
 `cmd-mox-fake-capabilities-design.md` §Filesystem side-effect helpers.
 

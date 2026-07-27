@@ -1,9 +1,8 @@
 # Extend `CmdMox.verify()` to report unconsumed recordings
 
-This ExecPlan (execution plan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This ExecPlan (execution plan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
@@ -40,8 +39,8 @@ Observable success after implementation:
    verify-time failure.
 7. `docs/python-native-command-mocking-design.md` records the final ordering
    and error-surface decision, `docs/usage-guide.md` explains the new
-   verify-time behaviour for replay fixtures, and `docs/roadmap.md`
-   marks `12.2.5` done after the feature lands.
+   verify-time behaviour for replay fixtures, and `docs/roadmap.md` marks
+   `12.2.5` done after the feature lands.
 8. The full quality gates pass:
 
 ```bash

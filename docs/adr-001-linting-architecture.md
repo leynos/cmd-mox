@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted. CmdMox uses Ruff as the first lint tier and PyPy-backed Pylint as
-the second lint tier.
+Accepted. CmdMox uses Ruff as the first lint tier and PyPy-backed Pylint as the
+second lint tier.
 
 ## Date
 
@@ -53,13 +53,13 @@ Running Ruff first and then invoking Pylint through `uv tool run --python pypy`
 and `pylint-pypy-shim` matches Episodic, keeps the second tier isolated, and
 allows the shim revision to be pinned independently of CmdMox dependencies.
 
-| Topic | Ruff only | Ordinary Pylint | PyPy-backed shim |
-| --- | --- | --- | --- |
-| Speed | Fastest | Slower | Slower second tier |
-| Coverage | Broad, but not complete | Broader than Ruff alone | Broader than Ruff alone |
-| Episodic alignment | Partial | Partial | Strong |
-| Runtime isolation | Simple | Coupled to project venv | Isolated through `uv tool run` |
-| Reproducibility | Project lockfile | Project lockfile | Pinned shim revision |
+| Topic              | Ruff only               | Ordinary Pylint         | PyPy-backed shim               |
+| ------------------ | ----------------------- | ----------------------- | ------------------------------ |
+| Speed              | Fastest                 | Slower                  | Slower second tier             |
+| Coverage           | Broad, but not complete | Broader than Ruff alone | Broader than Ruff alone        |
+| Episodic alignment | Partial                 | Partial                 | Strong                         |
+| Runtime isolation  | Simple                  | Coupled to project venv | Isolated through `uv tool run` |
+| Reproducibility    | Project lockfile        | Project lockfile        | Pinned shim revision           |
 
 _Table 1: Linting architecture options._
 

@@ -73,7 +73,7 @@ endif
 fmt: build ## Format sources
 	$(RUFF) format
 	$(RUFF) check --select I --fix
-	$(MAKE) markdownlint-run MDARGS="--fix"
+	$(MDFORMAT_ALL)
 
 check-fmt: build ## Verify formatting
 	$(RUFF) format --check

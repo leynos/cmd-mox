@@ -1,17 +1,16 @@
 # Implement ReplaySession with fixture loading, schema validation, consumed-record tracking, and strict and fuzzy modes
 
-This ExecPlan (execution plan) is a living document. The sections
-`Constraints`, `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`,
-`Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work
-proceeds.
+This ExecPlan (execution plan) is a living document. The sections `Constraints`,
+`Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
+and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
 ## Purpose / big picture
 
 Roadmap item 12.2.1 introduces the `ReplaySession` class to the cmd-mox record
-module. This is the replay counterpart to the existing `RecordingSession`:
-while `RecordingSession` captures passthrough invocations to fixture files,
+module. This is the replay counterpart to the existing `RecordingSession`: while
+`RecordingSession` captures passthrough invocations to fixture files,
 `ReplaySession` loads those fixtures and uses them to respond to command
 invocations without executing real commands. This bridges realistic integration
 testing (passthrough) and fast, deterministic unit testing (mocked responses
@@ -25,12 +24,11 @@ must all match) and fuzzy (only command + args need match).
 
 Observable success: new unit tests in
 `cmd_mox/unittests/test_replay_session.py` and new behaviour-driven development
-(BDD) scenarios in
-`features/replay_session.feature` all pass. `make test`, `make lint`,
-`make check-fmt`, `make typecheck`, `make markdownlint`, and `make nixie` all
-succeed. `docs/usage-guide.md` documents the replay session API.
-`docs/python-native-command-mocking-design.md` records design decisions. The
-12.2.1 roadmap checkbox in `docs/roadmap.md` is marked done.
+(BDD) scenarios in `features/replay_session.feature` all pass. `make test`,
+`make lint`, `make check-fmt`, `make typecheck`, `make markdownlint`, and
+`make nixie` all succeed. `docs/usage-guide.md` documents the replay session
+API. `docs/python-native-command-mocking-design.md` records design decisions.
+The 12.2.1 roadmap checkbox in `docs/roadmap.md` is marked done.
 
 ## Constraints
 

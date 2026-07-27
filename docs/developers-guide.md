@@ -12,8 +12,8 @@ CmdMox uses a two-tier linting pipeline. Run it with:
 make lint
 ```
 
-The `lint` target first builds the development environment through `make build`.
-It then runs the two lint tiers in order:
+The `lint` target first builds the development environment through
+`make build`. It then runs the two lint tiers in order:
 
 1. `ruff check`
 2. PyPy-backed Pylint through `pylint-pypy-shim`
@@ -35,15 +35,15 @@ The `Makefile` exposes the lint runner through variables so developers and
 Continuous Integration (CI) jobs can override the runtime without editing
 project files.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `RUFF` | `$(UV_ENV) $(UV) run ruff` | Runs the Ruff command inside the `uv` environment. |
-| `PYLINT_PYTHON` | `pypy` | Selects the Python interpreter used by `uv tool run` for Pylint. |
-| `PYLINT_TARGETS` | `cmd_mox conftest.py examples tests` | Lists the directories and files linted by Pylint. |
-| `PYLINT_PYPY_SHIM_REF` | `726d09f968b4d729ee4b29c71fc732e744854f3b` | Pins the shim repository revision. |
-| `PYLINT_PYPY_SHIM` | `git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)` | Identifies the shim package used by `uv tool run`. |
-| `PYLINT_BASELINE_DISABLE` | Existing cmd-mox baseline | Temporarily disables legacy Pylint findings while keeping the second tier active. |
-| `PYLINT` | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy-backed Pylint command. |
+| Variable                  | Default                                                                                                                            | Purpose                                                                           |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `RUFF`                    | `$(UV_ENV) $(UV) run ruff`                                                                                                         | Runs the Ruff command inside the `uv` environment.                                |
+| `PYLINT_PYTHON`           | `pypy`                                                                                                                             | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
+| `PYLINT_TARGETS`          | `cmd_mox conftest.py examples tests`                                                                                               | Lists the directories and files linted by Pylint.                                 |
+| `PYLINT_PYPY_SHIM_REF`    | `726d09f968b4d729ee4b29c71fc732e744854f3b`                                                                                         | Pins the shim repository revision.                                                |
+| `PYLINT_PYPY_SHIM`        | `git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)`                                                       | Identifies the shim package used by `uv tool run`.                                |
+| `PYLINT_BASELINE_DISABLE` | Existing cmd-mox baseline                                                                                                          | Temporarily disables legacy Pylint findings while keeping the second tier active. |
+| `PYLINT`                  | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy-backed Pylint command.                                       |
 
 _Table 1: Makefile variables for the lint pipeline._
 
@@ -122,9 +122,9 @@ Most lint policy lives in `pyproject.toml`.
 - `[tool.pylint.design]` aligns Pylint design thresholds with the Ruff policy
   while keeping a wider legacy allowance where needed.
 - `[tool.pylint."messages control"]` disables all messages by default, then
-  enables only the selected second-tier checks. It also disables
-  `syntax-error` because the managed PyPy runtime can parse a narrower grammar
-  than the project source uses for modern type-alias syntax.
+  enables only the selected second-tier checks. It also disables `syntax-error`
+  because the managed PyPy runtime can parse a narrower grammar than the
+  project source uses for modern type-alias syntax.
 
 The `Makefile` currently supplies `PYLINT_BASELINE_DISABLE` in addition to the
 `pyproject.toml` tables. That split is intentional: `pyproject.toml` documents
@@ -146,15 +146,15 @@ fixed immediately or recorded as a visible baseline.
 
 ## Workflow pins and Dependabot
 
-Dependabot owns the upgrade of GitHub Actions and reusable workflows,
-including calls into `leynos/shared-actions`. Contract tests that assert a
-caller's exact commit SHA create a lockstep dependency: every time Dependabot
-opens a bump PR, the test fails until a human edits the pinned constant to
-match. That defeats the purpose of automated dependency updates and turns a
-routine bump into a manual chore.
+Dependabot owns the upgrade of GitHub Actions and reusable workflows, including
+calls into `leynos/shared-actions`. Contract tests that assert a caller's exact
+commit SHA create a lockstep dependency: every time Dependabot opens a bump PR,
+the test fails until a human edits the pinned constant to match. That defeats
+the purpose of automated dependency updates and turns a routine bump into a
+manual chore.
 
-Contract tests may still verify the _shape_ of a reusable-workflow caller.
-They must not verify the specific SHA value.
+Contract tests may still verify the _shape_ of a reusable-workflow caller. They
+must not verify the specific SHA value.
 
 - Do assert the workflow references the correct reusable workflow path.
 - Do assert the ref is pinned to a full 40-character commit SHA, not a
