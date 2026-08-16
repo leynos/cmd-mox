@@ -27,15 +27,17 @@ from cmd_mox.ipc import (
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+    from syrupy.assertion import SnapshotAssertion
+
 type _RequestPayload = dict[
     str, str | int | float | bool | list[str] | dict[str, str] | None
 ]
 
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
-@dataclass
+@dataclass(slots=True)
 class TimeoutTestCase:
     """Test case configuration for timeout validation."""
 
@@ -76,9 +78,9 @@ def test_ipcserver_default_invocation_behaviour(
         invocation = Invocation(command="cmd", args=["--flag"], stdin="", env={})
         response = invoke_server(invocation, timeout=1.0)
 
-    assert response.stdout == "cmd"
-    assert response.stderr == ""
-    assert response.exit_code == 0
+    assert response.stdout == "cmd", "Assertion failed"
+    assert response.stderr == "", "Assertion failed"
+    assert response.exit_code == 0, "Assertion failed"
 
 
 @pytest.mark.usefixtures("tmp_path")
@@ -99,11 +101,11 @@ def test_ipcserver_invocation_handler(
         invocation = Invocation(command="cmd", args=["--flag"], stdin="", env={})
         response = invoke_server(invocation, timeout=1.0)
 
-    assert seen
-    assert seen[0].command == "cmd"
-    assert response.stdout == "handled"
-    assert response.stderr == "err"
-    assert response.exit_code == 2
+    assert seen, "Assertion failed"
+    assert seen[0].command == "cmd", "Assertion failed"
+    assert response.stdout == "handled", "Assertion failed"
+    assert response.stderr == "err", "Assertion failed"
+    assert response.exit_code == 2, "Assertion failed"
 
 
 @pytest.mark.usefixtures("tmp_path")
@@ -122,9 +124,9 @@ def test_ipcserver_handler_exception(
         invocation = Invocation(command="cmd", args=[], stdin="", env={})
         response = invoke_server(invocation, timeout=1.0)
 
-    assert response.exit_code == 1
-    assert "handler failed" in response.stderr
-    assert response.stdout == ""
+    assert response.exit_code == 1, "Assertion failed"
+    assert "handler failed" in response.stderr, "Assertion failed"
+    assert response.stdout == "", "Assertion failed"
 
 
 @pytest.mark.usefixtures("tmp_path")
@@ -144,9 +146,9 @@ def test_ipcserver_default_passthrough_error(
         )
         response = report_passthrough_result(result, timeout=1.0)
 
-    assert response.exit_code == 1
-    assert "Unhandled passthrough result for 123" in response.stderr
-    assert response.stdout == ""
+    assert response.exit_code == 1, "Assertion failed"
+    assert "Unhandled passthrough result for 123" in response.stderr, "Assertion failed"
+    assert response.stdout == "", "Assertion failed"
 
 
 @pytest.mark.usefixtures("tmp_path")
@@ -180,10 +182,10 @@ def test_ipcserver_passthrough_handler(
         )
         response = report_passthrough_result(result, timeout=1.0)
 
-    assert seen
-    assert seen[0].invocation_id == "123"
-    assert response.stdout == "passthrough"
-    assert response.exit_code == 5
+    assert seen, "Assertion failed"
+    assert seen[0].invocation_id == "123", "Assertion failed"
+    assert response.stdout == "passthrough", "Assertion failed"
+    assert response.exit_code == 5, "Assertion failed"
 
 
 def test_handle_invocation_default(tmp_path: Path) -> None:
@@ -193,9 +195,9 @@ def test_handle_invocation_default(tmp_path: Path) -> None:
 
     response = server.handle_invocation(invocation)
 
-    assert response.stdout == "cmd"
-    assert response.stderr == ""
-    assert response.exit_code == 0
+    assert response.stdout == "cmd", "Assertion failed"
+    assert response.stderr == "", "Assertion failed"
+    assert response.exit_code == 0, "Assertion failed"
 
 
 def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
@@ -214,10 +216,10 @@ def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
 
     response = server.handle_invocation(invocation)
 
-    assert [item.command for item in seen] == ["cmd"]
-    assert response.stdout == "handled"
-    assert response.stderr == "err"
-    assert response.exit_code == 3
+    assert [item.command for item in seen] == ["cmd"], "Assertion failed"
+    assert response.stdout == "handled", "Assertion failed"
+    assert response.stderr == "err", "Assertion failed"
+    assert response.exit_code == 3, "Assertion failed"
 
 
 def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) -> None:
@@ -226,8 +228,8 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
 
     result = server._parse_payload(b"\xff\xfe")
 
-    assert result is None
-    assert "malformed JSON" in caplog.text
+    assert result is None, "Assertion failed"
+    assert "malformed JSON" in caplog.text, "Assertion failed"
 
 
 @pytest.mark.parametrize(
@@ -247,7 +249,7 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
                 "exit_code": 2,
             },
             server.validate_passthrough_payload,
-            server._process_passthrough_result,
+            server._BaseIPCServer.handle_passthrough_result,
         ),
         (
             server.KIND_INVOCATION,
@@ -258,7 +260,7 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
                 "env": {},
             },
             server.validate_invocation_payload,
-            server._process_invocation,
+            server._BaseIPCServer.handle_invocation,
         ),
     ],
 )
@@ -277,11 +279,11 @@ def test_parse_payload_returns_handler_metadata(
 
     parsed = server._parse_payload(raw)
 
-    assert parsed is not None
-    assert parsed.kind == kind
-    assert parsed.validator is expected_validator
-    assert parsed.processor is expected_processor
-    assert parsed.payload == payload
+    assert parsed is not None, "Assertion failed"
+    assert parsed.kind == kind, "Assertion failed"
+    assert parsed.validator is expected_validator, "Assertion failed"
+    assert parsed.processor is expected_processor, "Assertion failed"
+    assert parsed.payload == payload, "Assertion failed"
 
 
 def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
@@ -307,10 +309,12 @@ def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
 
     response_bytes = server._request_pipeline(ipc_server, raw)
 
-    assert response_bytes is not None
-    assert handled == ["echo"]
+    assert response_bytes is not None, "Assertion failed"
+    assert handled == ["echo"], "Assertion failed"
     payload = json.loads(response_bytes.decode("utf-8"))
-    assert payload == {"stdout": "ok", "stderr": "", "exit_code": 0, "env": {}}
+    assert payload == {"stdout": "ok", "stderr": "", "exit_code": 0, "env": {}}, (
+        "Assertion failed"
+    )
 
 
 def test_request_pipeline_validation_failure_returns_none(
@@ -345,8 +349,8 @@ def test_request_pipeline_validation_failure_returns_none(
 
     response_bytes = server._request_pipeline(ipc_server, raw)
 
-    assert response_bytes is None
-    assert calls == []
+    assert response_bytes is None, "Assertion failed"
+    assert calls == [], "Assertion failed"
 
 
 def test_decode_payload_rejects_non_mapping(caplog: pytest.LogCaptureFixture) -> None:
@@ -355,23 +359,20 @@ def test_decode_payload_rejects_non_mapping(caplog: pytest.LogCaptureFixture) ->
 
     result = server._decode_payload(json.dumps([1, 2, 3]).encode())
 
-    assert result is None
-    assert "IPC payload not a dict" in caplog.text
+    assert result is None, "Assertion failed"
+    assert "IPC payload not a dict" in caplog.text, "Assertion failed"
 
 
-def test_encode_response_serialises_response_fields() -> None:
+def test_encode_response_serialises_response_fields(
+    snapshot: SnapshotAssertion,
+) -> None:
     """Response encoding should produce JSON bytes matching the model."""
     response = Response(stdout="out", stderr="err", exit_code=5, env={"KEY": "VAL"})
 
     encoded = server._encode_response(response)
     payload = json.loads(encoded.decode("utf-8"))
 
-    assert payload == {
-        "stdout": "out",
-        "stderr": "err",
-        "exit_code": 5,
-        "env": {"KEY": "VAL"},
-    }
+    assert payload == snapshot, "Encoded IPC response payload changed"
 
 
 def test_request_pipeline_rejects_unknown_kind(
@@ -386,8 +387,8 @@ def test_request_pipeline_rejects_unknown_kind(
         json.dumps({"kind": "mystery"}).encode(),
     )
 
-    assert response is None
-    assert "Unknown IPC payload kind" in caplog.text
+    assert response is None, "Assertion failed"
+    assert "Unknown IPC payload kind" in caplog.text, "Assertion failed"
 
 
 def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
@@ -443,7 +444,7 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
     ) as excinfo:
         server.handle_passthrough_result(result)
 
-    assert isinstance(excinfo.value.__cause__, ValueError)
+    assert isinstance(excinfo.value.__cause__, ValueError), "Assertion failed"
 
 
 @pytest.mark.parametrize(
@@ -481,8 +482,10 @@ def test_callback_ipcserver_timeout_config(
         timeouts=test_case.timeouts_arg,
     )
 
-    assert server.timeout == test_case.expected_timeout
-    assert server.accept_timeout == test_case.expected_accept_timeout
+    assert server.timeout == test_case.expected_timeout, "Assertion failed"
+    assert server.accept_timeout == test_case.expected_accept_timeout, (
+        "Assertion failed"
+    )
 
 
 def test_timeout_config_validation() -> None:

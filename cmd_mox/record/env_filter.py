@@ -98,6 +98,11 @@ def filter_env_subset(
         Additional keys to always include regardless of other rules.
     explicit_keys : list[str] | None
         Keys explicitly requested via ``.with_env()``; always included.
+
+    Returns
+    -------
+    dict[str, str]
+        The keys that are safe and relevant to persist in a fixture.
     """
     allow = set(allowlist or [])
     explicit = set(explicit_keys or [])

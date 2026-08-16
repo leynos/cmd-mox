@@ -26,7 +26,7 @@ def test_stub_returns_canned_stdout(cmd_mox: CmdMox) -> None:
         shell=False,
     )
 
-    assert result.stdout == "world"
+    assert result.stdout == "world", "Assertion failed"
 
 
 def test_stub_runs_dynamic_handler(cmd_mox: CmdMox) -> None:
@@ -47,4 +47,4 @@ def test_stub_runs_dynamic_handler(cmd_mox: CmdMox) -> None:
         shell=False,
     )
 
-    assert result.stdout == "hi CmdMox"
+    assert result.stdout == "hi CmdMox", "Assertion failed"

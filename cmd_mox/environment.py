@@ -16,7 +16,6 @@ from . import _path_utils as path_utils
 from ._validators import validate_positive_finite_timeout
 from .fs_retry import robust_rmtree
 
-IS_WINDOWS = path_utils.IS_WINDOWS
 _MAX_PATH_THRESHOLD: typ.Final[int] = 240
 
 logger = logging.getLogger(__name__)
@@ -55,11 +54,11 @@ class _Kernel32(typ.Protocol):
 class _CtypesModule(typ.Protocol):
     """Typed subset of ``ctypes`` used by the Windows path-shortening helper."""
 
-    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32: ...  # noqa: N802
+    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32: ...  # noqa: N802 - the protocol mirrors the external Windows API casing
 
     def get_last_error(self) -> int: ...
 
-    def FormatError(self, code: int) -> str: ...  # noqa: N802
+    def FormatError(self, code: int) -> str: ...  # noqa: N802 - the protocol mirrors the external Windows API casing
 
     def create_unicode_buffer(self, init_or_size: int) -> _UnicodeBuffer: ...
 
@@ -164,6 +163,11 @@ def ensure_dir_exists(
 
     Normalises path validation so callers raise consistent, descriptive errors
     when environment directories disappear or are misconfigured.
+
+    Returns
+    -------
+    Path
+        The resolved existing directory.
     """
     if path is None:
         msg = missing_message or f"{name} is missing"
@@ -201,6 +205,11 @@ def _collect_os_error(
     The decorated function is expected to take ``(self, cleanup_errors)`` and
     should raise ``OSError`` on failure. Any such exception is captured and the
     formatted message appended to ``cleanup_errors``.
+
+    Returns
+    -------
+    collections.abc.Callable
+        A decorator that converts ``OSError`` failures into cleanup records.
     """
 
     def decorator(
@@ -393,6 +402,16 @@ class EnvironmentManager:
         The helper isolates the branching necessary to honour explicit
         overrides, fall back to the previously configured value, and surface
         invalid types consistently with other validation paths.
+
+        Returns
+        -------
+        float | None
+            The configured timeout, or ``None`` when IPC timeouts are disabled.
+
+        Raises
+        ------
+        TypeError
+            If ``timeout`` is neither a real number nor the unset sentinel.
         """
         if timeout is _UNSET_TIMEOUT:
             return self.ipc_timeout

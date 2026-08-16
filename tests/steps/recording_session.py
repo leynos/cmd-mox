@@ -84,57 +84,57 @@ def finalize_session(session: RecordingSession) -> FixtureFile:
 @then("the fixture file exists on disk")
 def fixture_file_exists(session: RecordingSession) -> None:
     """Assert that the fixture file was written to disk."""
-    assert session.fixture_path.exists()
+    assert session.fixture_path.exists(), "Assertion failed"
 
 
 @then(parsers.re(r"the fixture contains (?P<count>\d+) recordings?"))
 def fixture_has_n_recordings(fixture: FixtureFile, count: str) -> None:
     """Assert the fixture contains exactly *count* recordings."""
-    assert len(fixture.recordings) == int(count)
+    assert len(fixture.recordings) == int(count), "Assertion failed"
 
 
 @then(parsers.parse('the recording command is "{cmd}"'))
 def recording_command_is(fixture: FixtureFile, cmd: str) -> None:
     """Assert the first recording's command matches *cmd*."""
-    assert fixture.recordings[0].command == cmd
+    assert fixture.recordings[0].command == cmd, "Assertion failed"
 
 
 @then(parsers.parse('the recording args are "{args}"'))
 def recording_args_are(fixture: FixtureFile, args: str) -> None:
     """Assert the first recording's args match *args*."""
-    assert fixture.recordings[0].args == args.split()
+    assert fixture.recordings[0].args == args.split(), "Assertion failed"
 
 
 @then(parsers.parse('the fixture env_subset does not contain "{key}"'))
 def env_subset_excludes(fixture: FixtureFile, key: str) -> None:
     """Assert the first recording's env_subset excludes *key*."""
-    assert key not in fixture.recordings[0].env_subset
+    assert key not in fixture.recordings[0].env_subset, "Assertion failed"
 
 
 @then(parsers.parse('the fixture env_subset contains "{key}"'))
 def env_subset_includes(fixture: FixtureFile, key: str) -> None:
     """Assert the first recording's env_subset includes *key*."""
-    assert key in fixture.recordings[0].env_subset
+    assert key in fixture.recordings[0].env_subset, "Assertion failed"
 
 
 @then("the fixture metadata contains the current platform")
 def metadata_has_platform(fixture: FixtureFile) -> None:
     """Assert fixture metadata platform matches the current platform."""
-    assert fixture.metadata.platform == sys.platform
+    assert fixture.metadata.platform == sys.platform, "Assertion failed"
 
 
 @then("the fixture metadata contains a valid ISO8601 timestamp")
 def metadata_has_timestamp(fixture: FixtureFile) -> None:
     """Assert fixture metadata contains a valid, parseable ISO8601 timestamp."""
-    assert fixture.metadata.created_at
+    assert fixture.metadata.created_at, "Assertion failed"
     parsed = dt.datetime.fromisoformat(fixture.metadata.created_at)
-    assert isinstance(parsed, dt.datetime)
+    assert isinstance(parsed, dt.datetime), "Assertion failed"
 
 
 @then("the fixture metadata contains the Python version")
 def metadata_has_python_version(fixture: FixtureFile) -> None:
     """Assert fixture metadata python_version matches the current runtime."""
-    assert fixture.metadata.python_version == sys.version
+    assert fixture.metadata.python_version == sys.version, "Assertion failed"
 
 
 # -- Steps for fixture migration scenario ------------------------------------
@@ -181,17 +181,17 @@ def load_fixture_file(fixture_path: Path) -> FixtureFile:
 @then(parsers.parse('the loaded fixture has version "{version}"'))
 def loaded_fixture_has_version(loaded_fixture: FixtureFile, version: str) -> None:
     """Assert the loaded fixture's version matches."""
-    assert loaded_fixture.version == version
+    assert loaded_fixture.version == version, "Assertion failed"
 
 
 @then(parsers.re(r"the loaded fixture contains (?P<count>\d+) recordings?"))
 def loaded_fixture_has_n_recordings(loaded_fixture: FixtureFile, count: str) -> None:
     """Assert the loaded fixture contains exactly *count* recordings."""
-    assert len(loaded_fixture.recordings) == int(count)
+    assert len(loaded_fixture.recordings) == int(count), "Assertion failed"
 
 
 @then("the loaded fixture metadata is preserved")
 def loaded_fixture_metadata_preserved(loaded_fixture: FixtureFile) -> None:
     """Assert key metadata fields survive migration unchanged."""
-    assert loaded_fixture.metadata.cmdmox_version == "0.1.0"
-    assert loaded_fixture.metadata.platform == sys.platform
+    assert loaded_fixture.metadata.cmdmox_version == "0.1.0", "Assertion failed"
+    assert loaded_fixture.metadata.platform == sys.platform, "Assertion failed"

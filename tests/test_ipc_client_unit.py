@@ -82,8 +82,8 @@ def test_connect_unix_with_retries_eventually_succeeds(
         tmp_path / "ipc.sock", timeout=0.1, retry_config=retry_config
     )
 
-    assert isinstance(sock, _FakeSocket)
-    assert _FakeSocket.attempts == 2
+    assert isinstance(sock, _FakeSocket), "Assertion failed"
+    assert _FakeSocket.attempts == 2, "Assertion failed"
 
 
 def test_connect_unix_with_retries_raises_after_exhaustion(
@@ -98,7 +98,7 @@ def test_connect_unix_with_retries_raises_after_exhaustion(
         _connect_unix_with_retries(
             tmp_path / "ipc.sock", timeout=0.1, retry_config=retry_config
         )
-    assert _AlwaysFailSocket.attempts == 2
+    assert _AlwaysFailSocket.attempts == 2, "Assertion failed"
 
 
 def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,16 +111,16 @@ def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data
-        assert retry is None
+        assert retry is None, "Assertion failed"
         return Response(stdout="ok")
 
     monkeypatch.setattr("cmd_mox.ipc.client._send_request", fake_send)
 
     response = invoke_server(invocation, timeout=1.0, retry_config=None)
 
-    assert response.stdout == "ok"
-    assert captured["kind"] == KIND_INVOCATION
-    assert captured["data"] == invocation.to_dict()
+    assert response.stdout == "ok", "Assertion failed"
+    assert captured["kind"] == KIND_INVOCATION, "Assertion failed"
+    assert captured["data"] == invocation.to_dict(), "Assertion failed"
 
 
 def test_report_passthrough_result_uses_named_kind(
@@ -141,5 +141,5 @@ def test_report_passthrough_result_uses_named_kind(
 
     report_passthrough_result(result, timeout=1.0)
 
-    assert captured["kind"] == KIND_PASSTHROUGH_RESULT
-    assert captured["data"] == result.to_dict()
+    assert captured["kind"] == KIND_PASSTHROUGH_RESULT, "Assertion failed"
+    assert captured["data"] == result.to_dict(), "Assertion failed"

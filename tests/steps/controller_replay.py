@@ -68,4 +68,4 @@ def invocation_error_contains(
     invocation_error: UnexpectedCommandError, text: str
 ) -> None:
     """Assert the captured invocation error contains *text*."""
-    assert text in str(invocation_error)
+    assert text in str(invocation_error), "Assertion failed"

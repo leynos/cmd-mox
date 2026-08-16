@@ -174,12 +174,6 @@ def retry_unlink(
         Factory to create custom exception on final failure. If None, re-raises
         the original exception.
 
-    Raises
-    ------
-    PermissionError, OSError
-        When all retry attempts are exhausted (if exc_factory is None).
-    Exception
-        Custom exception from exc_factory (if provided).
     """
     if not path.exists():
         return
@@ -188,7 +182,7 @@ def retry_unlink(
     for attempt in range(config.max_attempts):
         try:
             path.unlink()
-            return  # noqa: TRY300
+            return  # noqa: TRY300 - the successful retry path must exit the loop immediately
         except FileNotFoundError:
             return
         except (PermissionError, OSError) as exc:
@@ -222,10 +216,6 @@ def robust_rmtree(
     logger : logging.Logger | None, optional
         Logger for retry attempts and outcomes. Defaults to module logger.
 
-    Raises
-    ------
-    RobustRmtreeError
-        When all retry attempts are exhausted, wrapping the last OSError encountered.
     """
     if not path.exists():
         return

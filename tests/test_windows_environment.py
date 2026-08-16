@@ -27,9 +27,9 @@ def test_environment_manager_injects_cmd_into_pathext(
 
     with EnvironmentManager():
         pathext = os.environ["PATHEXT"]
-        assert ".CMD" in _collect_pathext(pathext)
+        assert ".CMD" in _collect_pathext(pathext), "Assertion failed"
 
-    assert os.environ["PATHEXT"] == ".COM;.EXE"
+    assert os.environ["PATHEXT"] == ".COM;.EXE", "Assertion failed"
 
 
 def test_environment_manager_handles_empty_pathext(
@@ -40,9 +40,9 @@ def test_environment_manager_handles_empty_pathext(
 
     with EnvironmentManager():
         pathext = os.environ["PATHEXT"]
-        assert ".CMD" in _collect_pathext(pathext)
+        assert ".CMD" in _collect_pathext(pathext), "Assertion failed"
 
-    assert os.environ["PATHEXT"] == ""
+    assert os.environ["PATHEXT"] == "", "Assertion failed"
 
 
 def test_environment_manager_handles_missing_pathext(
@@ -53,9 +53,9 @@ def test_environment_manager_handles_missing_pathext(
 
     with EnvironmentManager():
         pathext = os.environ.get("PATHEXT", "")
-        assert ".CMD" in _collect_pathext(pathext)
+        assert ".CMD" in _collect_pathext(pathext), "Assertion failed"
 
-    assert "PATHEXT" not in os.environ
+    assert "PATHEXT" not in os.environ, "Assertion failed"
 
 
 def test_ensure_windows_pathext_appends_missing_extension(
@@ -68,8 +68,8 @@ def test_ensure_windows_pathext_appends_missing_extension(
     _ensure_windows_pathext(original)
 
     pathext = os.environ["PATHEXT"]
-    assert _collect_pathext(pathext) == {".COM", ".EXE", ".CMD"}
-    assert original["PATHEXT"] == ".COM;.EXE"
+    assert _collect_pathext(pathext) == {".COM", ".EXE", ".CMD"}, "Assertion failed"
+    assert original["PATHEXT"] == ".COM;.EXE", "Assertion failed"
 
 
 def test_ensure_windows_pathext_is_idempotent(
@@ -82,7 +82,7 @@ def test_ensure_windows_pathext_is_idempotent(
     _ensure_windows_pathext(original)
 
     pathext = os.environ["PATHEXT"]
-    assert pathext == ".COM;.EXE;.CMD"
+    assert pathext == ".COM;.EXE;.CMD", "Assertion failed"
 
 
 def test_ensure_windows_pathext_populates_default_when_missing(
@@ -95,28 +95,28 @@ def test_ensure_windows_pathext_populates_default_when_missing(
     _ensure_windows_pathext(original)
 
     pathext = os.environ.get("PATHEXT", "")
-    assert ".CMD" in _collect_pathext(pathext)
-    assert "PATHEXT" not in original
+    assert ".CMD" in _collect_pathext(pathext), "Assertion failed"
+    assert "PATHEXT" not in original, "Assertion failed"
 
 
 def test_create_windows_shim_emits_batch_launcher() -> None:
     """Windows shims are emitted as CRLF-delimited batch launchers."""
     with EnvironmentManager() as env:
-        assert env.shim_dir is not None
+        assert env.shim_dir is not None, "Assertion failed"
         create_shim_symlinks(env.shim_dir, ["cmd-mock"])
 
         shim_path = Path(env.shim_dir) / "cmd-mock.cmd"
-        assert shim_path.exists()
+        assert shim_path.exists(), "Assertion failed"
         contents = shim_path.read_bytes()
-        assert contents.startswith(b"@echo off\r\n")
-        assert b'set "CMOX_SHIM_COMMAND=%~n0"\r\n' in contents
-        assert contents.endswith(b"%*\r\n")
+        assert contents.startswith(b"@echo off\r\n"), "Assertion failed"
+        assert b'set "CMOX_SHIM_COMMAND=%~n0"\r\n' in contents, "Assertion failed"
+        assert contents.endswith(b"%*\r\n"), "Assertion failed"
 
 
 def test_environment_manager_accepts_case_tweaked_shim_dir() -> None:
     """Cleanup should work even if shim_dir casing changes mid-test."""
     with EnvironmentManager() as env:
-        assert env.shim_dir is not None
+        assert env.shim_dir is not None, "Assertion failed"
         original = Path(env.shim_dir)
         env.shim_dir = Path(str(env.shim_dir).upper())
-    assert not original.exists()
+    assert not original.exists(), "Assertion failed"

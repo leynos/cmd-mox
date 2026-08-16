@@ -33,8 +33,8 @@ def test_mock_enforces_args_and_call_count(cmd_mox: CmdMox) -> None:
         shell=False,
     )
 
-    assert first.stdout == "ok"
-    assert second.stdout == "ok"
+    assert first.stdout == "ok", "Assertion failed"
+    assert second.stdout == "ok", "Assertion failed"
 
 
 def test_mock_with_matching_args(cmd_mox: CmdMox) -> None:
@@ -51,4 +51,4 @@ def test_mock_with_matching_args(cmd_mox: CmdMox) -> None:
         shell=False,
     )
 
-    assert result.stdout == "fetched"
+    assert result.stdout == "fetched", "Assertion failed"

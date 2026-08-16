@@ -149,7 +149,7 @@ def replay_controller_interrupt(mox: CmdMox) -> dict[str, object]:
     assert env.socket_path is not None, "Replay environment was not initialised"
     shim_dir = Path(env.shim_dir)
     socket_path = Path(env.socket_path)
-    assert shim_dir.exists()
+    assert shim_dir.exists(), "Assertion failed"
 
     with pytest.raises(KeyboardInterrupt):
         mox.replay()

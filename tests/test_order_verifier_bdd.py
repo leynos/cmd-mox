@@ -105,7 +105,7 @@ def validate_order(
 @then("the ordered verification should succeed")
 def assert_order_success(verification_context: dict[str, Exception | None]) -> None:
     """Assert that the verification completed without raising."""
-    assert verification_context.get("error") is None
+    assert verification_context.get("error") is None, "Assertion failed"
 
 
 @scenario(

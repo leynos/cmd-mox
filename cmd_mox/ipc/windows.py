@@ -59,6 +59,11 @@ def derive_pipe_name(identifier: os.PathLike[str] | str) -> str:
     The helper hashes the identifier to ensure the resulting pipe name is both
     unique per shim directory and compatible with Windows' ``PIPE`` naming
     rules and maximum length constraints.
+
+    Returns
+    -------
+    str
+        The deterministic Windows named-pipe path.
     """
     raw_value = os.fspath(identifier)
     digest = hashlib.sha256(raw_value.encode("utf-8")).hexdigest()
@@ -80,6 +85,11 @@ def read_pipe_message(
     while the message continues. We loop until the status indicates completion
     or the peer disappears (``ERROR_BROKEN_PIPE``), returning whatever data was
     received so callers can decide how to handle disconnects.
+
+    Returns
+    -------
+    bytes
+        The complete message, or the received prefix after a peer disconnect.
     """
     chunks: list[bytes] = []
     while True:

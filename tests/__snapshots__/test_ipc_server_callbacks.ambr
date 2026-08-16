@@ -1,0 +1,11 @@
+# serializer version: 1
+# name: test_encode_response_serialises_response_fields
+  dict({
+    'env': dict({
+      'KEY': 'VAL',
+    }),
+    'exit_code': 5,
+    'stderr': 'err',
+    'stdout': 'out',
+  })
+# ---

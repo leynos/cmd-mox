@@ -17,6 +17,11 @@ def extract_marked_block(text: str, *, name: str) -> str:
     -------
     str
         The substring between the start and end markers.
+
+    Raises
+    ------
+    ValueError
+        If either marker is missing, repeated, or out of order.
     """
     start_marker = f"<!-- {name}:start -->"
     end_marker = f"<!-- {name}:end -->"

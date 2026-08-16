@@ -17,7 +17,7 @@ if typ.TYPE_CHECKING:
     from pathlib import Path
 
 
-@dc.dataclass
+@dc.dataclass(slots=True)
 class RecordingSpec:
     """Optional overrides for building a RecordedInvocation."""
 
@@ -270,17 +270,17 @@ def match_replay_with_stdin(
 @then(parsers.parse('the replay match result is a response with stdout "{stdout}"'))
 def replay_result_has_stdout(replay_match_result: Response | None, stdout: str) -> None:
     """Assert the match result is a Response with expected stdout."""
-    assert replay_match_result is not None
-    assert isinstance(replay_match_result, Response)
+    assert replay_match_result is not None, "Assertion failed"
+    assert isinstance(replay_match_result, Response), "Assertion failed"
     # Gherkin passes escape sequences as literal characters.
     expected = stdout.encode("utf-8").decode("unicode_escape")
-    assert replay_match_result.stdout == expected
+    assert replay_match_result.stdout == expected, "Assertion failed"
 
 
 @then("the replay match result is None")
 def replay_result_is_none(replay_match_result: Response | None) -> None:
     """Assert the match result is None."""
-    assert replay_match_result is None
+    assert replay_match_result is None, "Assertion failed"
 
 
 @then("all replay recordings are consumed")
@@ -305,24 +305,24 @@ def verify_raises(replay_session: ReplaySession) -> None:
 @then("the replay match result is the more specific recording")
 def replay_result_is_specific(replay_match_result: Response | None) -> None:
     """Assert the match result is the recording with env_subset."""
-    assert replay_match_result is not None
-    assert replay_match_result.stdout == "specific\n"
+    assert replay_match_result is not None, "Assertion failed"
+    assert replay_match_result.stdout == "specific\n", "Assertion failed"
 
 
 @then("the generic recording remains unconsumed")
 def generic_recording_unconsumed(replay_session: ReplaySession) -> None:
     """Assert that index 0 (generic recording) was not consumed."""
-    assert not replay_session.is_consumed(0)
+    assert not replay_session.is_consumed(0), "Assertion failed"
 
 
 @then("the replay match result is the recording with matching stdin")
 def replay_result_matches_stdin(replay_match_result: Response | None) -> None:
     """Assert the match result is the recording with matching stdin."""
-    assert replay_match_result is not None
-    assert replay_match_result.stdout == "right\n"
+    assert replay_match_result is not None, "Assertion failed"
+    assert replay_match_result.stdout == "right\n", "Assertion failed"
 
 
 @then("the other recording remains unconsumed")
 def other_recording_unconsumed(replay_session: ReplaySession) -> None:
     """Assert that index 0 (the other recording) was not consumed."""
-    assert not replay_session.is_consumed(0)
+    assert not replay_session.is_consumed(0), "Assertion failed"

@@ -11,7 +11,7 @@ import pytest
 
 from cmd_mox.ipc.socket_utils import cleanup_stale_socket, wait_for_socket
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
 def test_cleanup_stale_socket_noop_for_missing_path(tmp_path: pathlib.Path) -> None:
@@ -26,11 +26,11 @@ def test_cleanup_stale_socket_removes_unbound_file(tmp_path: pathlib.Path) -> No
     server.bind(str(socket_path))
     server.close()
 
-    assert socket_path.exists()
+    assert socket_path.exists(), "Assertion failed"
 
     cleanup_stale_socket(socket_path)
 
-    assert not socket_path.exists()
+    assert not socket_path.exists(), "Assertion failed"
 
 
 def test_cleanup_stale_socket_refuses_active_socket(tmp_path: pathlib.Path) -> None:
@@ -43,7 +43,7 @@ def test_cleanup_stale_socket_refuses_active_socket(tmp_path: pathlib.Path) -> N
     try:
         with pytest.raises(RuntimeError, match="still in use"):
             cleanup_stale_socket(socket_path)
-        assert socket_path.exists()
+        assert socket_path.exists(), "Assertion failed"
     finally:
         server.close()
         if socket_path.exists():
@@ -111,4 +111,4 @@ def test_wait_for_socket_retries_until_success(
     monkeypatch.setattr("cmd_mox.ipc.socket_utils.time.sleep", lambda _duration: None)
 
     wait_for_socket(pathlib.Path("fake.sock"), timeout=0.1)
-    assert attempts[0] == 3
+    assert attempts[0] == 3, "Assertion failed"

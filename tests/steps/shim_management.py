@@ -39,15 +39,15 @@ def break_shim_symlink(mox: CmdMox, cmd: str) -> None:
                 removed = True
         assert removed, f"No shim for {cmd!r} found under {shim_dir}"
         for ext in (".cmd", ".bat", ".exe"):
-            assert not (shim_dir / f"{cmd}{ext}").exists()
+            assert not (shim_dir / f"{cmd}{ext}").exists(), "Assertion failed"
         return
 
     shim_path = shim_dir / cmd
     missing_target = shim_path.with_name(f"{cmd}-missing-target")
     shim_path.unlink(missing_ok=True)
     shim_path.symlink_to(missing_target)
-    assert shim_path.is_symlink()
-    assert not shim_path.exists()
+    assert shim_path.is_symlink(), "Assertion failed"
+    assert not shim_path.exists(), "Assertion failed"
 
 
 @when(parsers.cfparse('I register the command "{cmd}" during replay'))
@@ -63,8 +63,8 @@ def check_shim_dir_cleaned(
 ) -> None:
     """Assert the temporary shim directory no longer exists."""
     shim_dir = typ.cast("Path", replay_interruption_state["shim_dir"])
-    assert not shim_dir.exists()
-    assert replay_interruption_state["manager_active"] is None
+    assert not shim_dir.exists(), "Assertion failed"
+    assert replay_interruption_state["manager_active"] is None, "Assertion failed"
 
 
 @then("the IPC socket should be cleaned up after interruption")
@@ -73,4 +73,4 @@ def check_socket_cleaned(
 ) -> None:
     """Assert the IPC socket path no longer exists."""
     socket_path = typ.cast("Path", replay_interruption_state["socket_path"])
-    assert not socket_path.exists()
+    assert not socket_path.exists(), "Assertion failed"

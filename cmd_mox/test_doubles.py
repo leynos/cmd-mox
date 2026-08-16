@@ -9,8 +9,6 @@ import typing as typ
 from .expectations import Expectation
 from .ipc import Invocation, Response
 
-Self = typ.Self
-
 if typ.TYPE_CHECKING:  # pragma: no cover - typing-only import
     from .controller import CmdMox
 
@@ -22,21 +20,23 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .record.session import RecordingSession
 
     class _ExpectationProtocol(typ.Protocol):
-        def with_args(self, *args: str) -> Self: ...
+        def with_args(self, *args: str) -> typ.Self: ...
 
-        def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Self: ...
+        def with_matching_args(
+            self, *matchers: cabc.Callable[[str], bool]
+        ) -> typ.Self: ...
 
-        def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> Self: ...
+        def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> typ.Self: ...
 
-        def with_env(self, mapping: dict[str, str]) -> Self: ...
+        def with_env(self, mapping: dict[str, str]) -> typ.Self: ...
 
-        def times(self, count: int) -> Self: ...
+        def times(self, count: int) -> typ.Self: ...
 
-        def times_called(self, count: int) -> Self: ...
+        def times_called(self, count: int) -> typ.Self: ...
 
-        def in_order(self) -> Self: ...
+        def in_order(self) -> typ.Self: ...
 
-        def any_order(self) -> Self: ...
+        def any_order(self) -> typ.Self: ...
 
     _ExpectationType = _ExpectationProtocol
 else:
@@ -56,6 +56,11 @@ def _create_expectation_proxy() -> type:
 
     Typing builds see a :class:`typing.Protocol`; runtime receives a lightweight
     class that raises when accessed directly.
+
+    Returns
+    -------
+    type
+        The lightweight runtime expectation proxy type.
     """
     return _ExpectationType
 
@@ -101,7 +106,9 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         self._replay_session: ReplaySession | None = None
         self._recording_session: RecordingSession | None = None
 
-    def returns(self, stdout: str = "", stderr: str = "", exit_code: int = 0) -> Self:
+    def returns(
+        self, stdout: str = "", stderr: str = "", exit_code: int = 0
+    ) -> typ.Self:
         """Set the static response and return ``self``."""
         self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
         self.handler = None
@@ -110,7 +117,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def runs(
         self,
         handler: cabc.Callable[[Invocation], tuple[str, str, int] | Response],
-    ) -> Self:
+    ) -> typ.Self:
         """Use *handler* to generate responses dynamically."""
 
         def _wrap(invocation: Invocation) -> Response:
@@ -143,49 +150,49 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         if self.expectation in self.controller._ordered:
             self.controller._ordered.remove(self.expectation)
 
-    def with_args(self, *args: str) -> Self:
+    def with_args(self, *args: str) -> typ.Self:
         """Require the command be invoked with *args*."""
         self.expectation.with_args(*args)
         return self
 
-    def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Self:
+    def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> typ.Self:
         """Validate arguments using matcher predicates."""
         self.expectation.with_matching_args(*matchers)
         return self
 
-    def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> Self:
+    def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> typ.Self:
         """Expect the given stdin ``data`` or matcher."""
         self.expectation.with_stdin(data)
         return self
 
-    def with_env(self, mapping: dict[str, str]) -> Self:
+    def with_env(self, mapping: dict[str, str]) -> typ.Self:
         """Expect the provided environment mapping."""
         self.expectation.with_env(mapping)
         return self
 
-    def times(self, count: int) -> Self:
+    def times(self, count: int) -> typ.Self:
         """Require the command be invoked exactly ``count`` times."""
         self.expectation.times(count)
         return self
 
-    def times_called(self, count: int) -> Self:
+    def times_called(self, count: int) -> typ.Self:
         """Verify the spy was called ``count`` times."""
         self.expectation.times_called(count)
         return self
 
-    def in_order(self) -> Self:
+    def in_order(self) -> typ.Self:
         """Mark this expectation as ordered."""
         self.expectation.in_order()
         self._ensure_in_order()
         return self
 
-    def any_order(self) -> Self:
+    def any_order(self) -> typ.Self:
         """Mark this expectation as unordered."""
         self.expectation.any_order()
         self._ensure_any_order()
         return self
 
-    def passthrough(self) -> Self:
+    def passthrough(self) -> typ.Self:
         """Execute the real command while recording invocations."""
         if self.kind is not DoubleKind.SPY:
             msg = "passthrough() is only valid for spies"
@@ -202,7 +209,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         *,
         scrubber: Scrubber | None = None,
         env_allowlist: list[str] | None = None,
-    ) -> Self:
+    ) -> typ.Self:
         """Enable recording of passthrough invocations to a fixture file.
 
         Must be called after :meth:`passthrough`. Creates and starts a
@@ -217,6 +224,18 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             Optional scrubber for sanitizing recordings before persistence.
         env_allowlist:
             Environment variable keys to always include in recordings.
+
+        Returns
+        -------
+        typ.Self
+            This double, allowing further fluent configuration.
+
+        Raises
+        ------
+        ValueError
+            If passthrough mode is not enabled.
+        RuntimeError
+            If a recording session already exists.
         """
         if not self.passthrough_mode:
             msg = "record() requires passthrough(); call it first"
@@ -242,7 +261,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         fixture_path: str | Path,
         *,
         strict: bool = True,
-    ) -> Self:
+    ) -> typ.Self:
         """Attach and eagerly load a replay fixture for a spy."""
         if self.kind is not DoubleKind.SPY:
             msg = "replay() is only valid for spies"
@@ -291,6 +310,8 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     # ------------------------------------------------------------------
     def matches(self, invocation: Invocation) -> bool:
         """Return ``True`` if *invocation* satisfies the expectation."""
+        if invocation.command != self.name:
+            return False
         return self.expectation.matches(invocation)
 
     @property
@@ -365,6 +386,11 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
         The *label* provides contextual information for the error message,
         yielding a consistent formatting across different validations.
+
+        Raises
+        ------
+        AssertionError
+            If ``actual`` and ``expected`` differ.
         """
         if actual != expected:
             msg = f"{self.name!r} called with {label} {actual!r}, expected {expected!r}"

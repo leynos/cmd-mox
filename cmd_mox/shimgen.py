@@ -13,7 +13,6 @@ from cmd_mox.environment import ensure_dir_exists
 from cmd_mox.fs_retry import DEFAULT_UNLINK_RETRY, retry_unlink
 
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
-LAUNCHER_RETRY = DEFAULT_UNLINK_RETRY
 logger = logging.getLogger(__name__)
 
 
@@ -121,7 +120,7 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
     _validate_launcher_path(launcher)
     retry_unlink(
         launcher,
-        config=LAUNCHER_RETRY,
+        config=DEFAULT_UNLINK_RETRY,
         logger=logger,
         exc_factory=_launcher_unlink_error,
     )
@@ -184,6 +183,11 @@ def create_shim_symlinks(
         Directory where shims will be created. It must already exist.
     commands:
         Command names (e.g. "git", "curl") for which to create shims.
+
+    Returns
+    -------
+    dict[str, Path]
+        The created shim path for each requested command.
     """
     _validate_shim_directory(directory)
     _ensure_shim_template_ready(SHIM_PATH)

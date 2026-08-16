@@ -14,7 +14,7 @@ if typ.TYPE_CHECKING:
     from .test_doubles import CommandDouble
 
 
-@dc.dataclass
+@dc.dataclass(slots=True)
 class PassthroughConfig:
     """Configuration for passthrough request preparation."""
 

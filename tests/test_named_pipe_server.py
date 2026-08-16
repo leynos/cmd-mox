@@ -26,7 +26,7 @@ def test_named_pipe_server_roundtrip(
         monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
         invocation = Invocation(command="whoami", args=[], stdin="", env={})
         response = invoke_server(invocation, timeout=1.0)
-        assert response.stdout == "whoami"
+        assert response.stdout == "whoami", "Assertion failed"
 
 
 def test_named_pipe_server_exports_environment() -> None:
@@ -35,10 +35,12 @@ def test_named_pipe_server_exports_environment() -> None:
     original_timeout = os.environ.get(CMOX_IPC_TIMEOUT_ENV)
 
     with EnvironmentManager() as env:
-        assert env.socket_path is not None
+        assert env.socket_path is not None, "Assertion failed"
         with NamedPipeServer(env.socket_path, timeout=1.5):
-            assert os.environ[CMOX_IPC_SOCKET_ENV] == str(env.socket_path)
-            assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "1.5"
+            assert os.environ[CMOX_IPC_SOCKET_ENV] == str(env.socket_path), (
+                "Assertion failed"
+            )
+            assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "1.5", "Assertion failed"
 
-    assert os.environ.get(CMOX_IPC_SOCKET_ENV) == original_socket
-    assert os.environ.get(CMOX_IPC_TIMEOUT_ENV) == original_timeout
+    assert os.environ.get(CMOX_IPC_SOCKET_ENV) == original_socket, "Assertion failed"
+    assert os.environ.get(CMOX_IPC_TIMEOUT_ENV) == original_timeout, "Assertion failed"

@@ -14,7 +14,7 @@ from cmd_mox.errors import (
     VerificationError,
 )
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from cmd_mox.environment import EnvironmentManager

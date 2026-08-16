@@ -38,11 +38,11 @@ class _StubConfig:
         self._ini = ini
 
     def getoption(self, name: str) -> bool | None:
-        assert name == "cmd_mox_auto_lifecycle"
+        assert name == "cmd_mox_auto_lifecycle", "Assertion failed"
         return self._cli
 
     def getini(self, name: str) -> bool:
-        assert name == "cmd_mox_auto_lifecycle"
+        assert name == "cmd_mox_auto_lifecycle", "Assertion failed"
         return self._ini
 
 
@@ -183,7 +183,7 @@ def _make_manager(
 
     monkeypatch.setattr(pytest_plugin, "CmdMox", _factory)
     manager = _CmdMoxManager(typ.cast("pytest.FixtureRequest", request))
-    assert isinstance(manager.mox, _StubMox)
+    assert isinstance(manager.mox, _StubMox), "Assertion failed"
     return manager
 
 
@@ -234,8 +234,8 @@ def test_worker_prefix_generation(
     manager = _make_manager(monkeypatch, request)
 
     env = manager.mox.environment
-    assert isinstance(env, EnvironmentManager)
-    assert env._prefix.startswith(expected_prefix)
+    assert isinstance(env, EnvironmentManager), "Assertion failed"
+    assert env._prefix.startswith(expected_prefix), "Assertion failed"
 
 
 def test_cmd_mox_fixture_restores_path_on_replay_failure(
@@ -274,11 +274,11 @@ def test_cmd_mox_fixture_restores_path_on_replay_failure(
     result = pytester.runpytest_inprocess()
     result.assert_outcomes(errors=1)
 
-    assert dump_path.exists()
+    assert dump_path.exists(), "Assertion failed"
     recorded_path = dump_path.read_text().strip()
-    assert recorded_path != original_path
-    assert "cmdmox-" in recorded_path
-    assert os.environ.get("PATH", "") == original_path
+    assert recorded_path != original_path, "Assertion failed"
+    assert "cmdmox-" in recorded_path, "Assertion failed"
+    assert os.environ.get("PATH", "") == original_path, "Assertion failed"
 
 
 def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -289,8 +289,8 @@ def test_enter_cmd_mox_replays_when_enabled(monkeypatch: pytest.MonkeyPatch) -> 
     manager.enter()
 
     stub = typ.cast("_StubMox", manager.mox)
-    assert stub.enter_calls == 1
-    assert stub.replay_calls == 1
+    assert stub.enter_calls == 1, "Assertion failed"
+    assert stub.replay_calls == 1, "Assertion failed"
 
 
 @pytest.mark.parametrize(
@@ -313,13 +313,13 @@ def test_enter_cmd_mox_auto_lifecycle_overrides(
     request = _StubRequest(config=_StubConfig(), **request_kwargs)
     manager = _make_manager(monkeypatch, request)
 
-    assert not manager.auto_lifecycle
+    assert not manager.auto_lifecycle, "Assertion failed"
 
     manager.enter()
 
     stub = typ.cast("_StubMox", manager.mox)
-    assert stub.enter_calls == 1
-    assert stub.replay_calls == 0
+    assert stub.enter_calls == 1, "Assertion failed"
+    assert stub.replay_calls == 0, "Assertion failed"
 
 
 def test_exit_cmd_mox_verifies_when_needed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -331,8 +331,8 @@ def test_exit_cmd_mox_verifies_when_needed(monkeypatch: pytest.MonkeyPatch) -> N
     manager.exit(body_failed=False)
 
     stub = typ.cast("_StubMox", manager.mox)
-    assert stub.verify_calls == 1
-    assert stub.exit_calls == [(None, None, None)]
+    assert stub.verify_calls == 1, "Assertion failed"
+    assert stub.exit_calls == [(None, None, None)], "Assertion failed"
 
 
 def test_exit_cmd_mox_skips_verification_when_phase_not_replay(
@@ -348,7 +348,7 @@ def test_exit_cmd_mox_skips_verification_when_phase_not_replay(
 
     manager.exit(body_failed=False)
 
-    assert stub.verify_calls == 0
+    assert stub.verify_calls == 0, "Assertion failed"
 
 
 def test_exit_cmd_mox_records_verify_error_when_test_failed(
@@ -363,10 +363,10 @@ def test_exit_cmd_mox_records_verify_error_when_test_failed(
     manager.exit(body_failed=True)
 
     stub = typ.cast("_StubMox", manager.mox)
-    assert stub.verify_calls == 1
+    assert stub.verify_calls == 1, "Assertion failed"
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
-    ]
+    ], "Assertion failed"
 
 
 def test_exit_cmd_mox_records_verify_error_when_call_stage_failed(
@@ -385,12 +385,12 @@ def test_exit_cmd_mox_records_verify_error_when_call_stage_failed(
     manager.exit(body_failed=False)
 
     stub = typ.cast("_StubMox", manager.mox)
-    assert stub.verify_calls == 1
+    assert stub.verify_calls == 1, "Assertion failed"
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
-    ]
+    ], "Assertion failed"
     # Stash flag is consumed and cleared
-    assert STASH_CALL_FAILED not in node.stash
+    assert STASH_CALL_FAILED not in node.stash, "Assertion failed"
 
 
 def test_enter_cmd_mox_param_override_precedes_marker(
@@ -405,13 +405,13 @@ def test_enter_cmd_mox_param_override_precedes_marker(
     )
     manager = _make_manager(monkeypatch, request)
 
-    assert not manager.auto_lifecycle
+    assert not manager.auto_lifecycle, "Assertion failed"
 
     manager.enter()
 
     stub = typ.cast("_StubMox", manager.mox)
-    assert stub.enter_calls == 1
-    assert stub.replay_calls == 0
+    assert stub.enter_calls == 1, "Assertion failed"
+    assert stub.replay_calls == 0, "Assertion failed"
 
 
 @pytest.mark.parametrize("mode", ["explicit-node", "request-node"])
@@ -435,10 +435,12 @@ def test_exit_cmd_mox_cleanup_error_handling(
         manager.exit(body_failed=True)
 
     message = str(excinfo.value)
-    assert "cmd_mox fixture cleanup failed" in message
-    assert node.nodeid in message
-    assert "OSError: exit boom" in message
-    assert node.sections == [("teardown", "cmd_mox cleanup", "OSError: exit boom")]
+    assert "cmd_mox fixture cleanup failed" in message, "Assertion failed"
+    assert node.nodeid in message, "Assertion failed"
+    assert "OSError: exit boom" in message, "Assertion failed"
+    assert node.sections == [("teardown", "cmd_mox cleanup", "OSError: exit boom")], (
+        "Assertion failed"
+    )
 
 
 def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
@@ -455,10 +457,10 @@ def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
         manager.exit(body_failed=False)
 
     expected = f"cmd_mox verification for {node.nodeid} RuntimeError: verify boom"
-    assert expected in str(excinfo.value)
+    assert expected in str(excinfo.value), "Assertion failed"
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
-    ]
+    ], "Assertion failed"
 
 
 def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
@@ -477,12 +479,14 @@ def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
         manager.exit(body_failed=False)
 
     message = str(excinfo.value)
-    assert "verification RuntimeError: verify boom" in message
-    assert f"cleanup for {node.nodeid} OSError: exit boom" in message
+    assert "verification RuntimeError: verify boom" in message, "Assertion failed"
+    assert f"cleanup for {node.nodeid} OSError: exit boom" in message, (
+        "Assertion failed"
+    )
     assert node.sections == [
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom"),
         ("teardown", "cmd_mox cleanup", "OSError: exit boom"),
-    ]
+    ], "Assertion failed"
 
 
 def test_exit_cmd_mox_logs_verification_context(
@@ -499,7 +503,7 @@ def test_exit_cmd_mox_logs_verification_context(
         manager.exit(body_failed=False)
 
     message = f"cmd_mox verification failed for {request.node.nodeid}"
-    assert message in caplog.text
+    assert message in caplog.text, "Assertion failed"
 
 
 def test_exit_cmd_mox_logs_cleanup_context(
@@ -516,7 +520,7 @@ def test_exit_cmd_mox_logs_cleanup_context(
         manager.exit(body_failed=False)
 
     message = f"Error during cmd_mox fixture cleanup for {request.node.nodeid}"
-    assert message in caplog.text
+    assert message in caplog.text, "Assertion failed"
 
 
 def test_exit_cmd_mox_is_idempotent_without_enter(
@@ -529,7 +533,7 @@ def test_exit_cmd_mox_is_idempotent_without_enter(
     manager.exit(body_failed=False)
 
     stub = typ.cast("_StubMox", manager.mox)
-    assert stub.exit_calls == []
+    assert stub.exit_calls == [], "Assertion failed"
 
 
 def test_exit_cmd_mox_is_idempotent_after_teardown(
@@ -546,4 +550,4 @@ def test_exit_cmd_mox_is_idempotent_after_teardown(
     manager.exit(body_failed=False)
 
     stub = typ.cast("_StubMox", manager.mox)
-    assert len(stub.exit_calls) == 1
+    assert len(stub.exit_calls) == 1, "Assertion failed"

@@ -92,6 +92,16 @@ def generate_lifecycle_test_module(
     :class:`LifecyclePhase.AUTO_FAIL` has the same effect regardless of
     ``expect_auto_fail``,
     allowing callers to assert the pure auto-fail module layout.
+
+    Returns
+    -------
+    str
+        A complete pytest module implementing the selected lifecycle scenario.
+
+    Raises
+    ------
+    ValueError
+        If ``expected_phase`` does not name a known lifecycle phase.
     """
     try:
         normalized_phase = LifecyclePhase(expected_phase)

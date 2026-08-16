@@ -40,6 +40,11 @@ class CommandRunner:
         * ``126`` - command found but not executable or execution failed
           (e.g., permission denied)
         * ``124`` - execution timed out
+
+        Returns
+        -------
+        Response
+            The command result, including the applied environment overrides.
         """
         env = self._prepare_environment(extra_env, invocation.env)
         merged_path = env.get(

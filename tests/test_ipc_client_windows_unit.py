@@ -72,8 +72,8 @@ def test_connect_pipe_with_retries_eventually_succeeds(
         retry_config=RetryConfig(retries=3, backoff=0.0, jitter=0.0),
     )
 
-    assert handle == "HANDLE"
-    assert attempts["count"] == 2
+    assert handle == "HANDLE", "Assertion failed"
+    assert attempts["count"] == 2, "Assertion failed"
 
 
 def test_connect_pipe_with_retries_raises_after_non_retryable_error(
@@ -132,9 +132,9 @@ def test_send_pipe_request_writes_and_reads(monkeypatch: pytest.MonkeyPatch) -> 
         retry_config=RetryConfig(),
     )
 
-    assert response == b"{}"
-    assert handle_log == ["{}"]
-    assert fake_handle.closed is True
+    assert response == b"{}", "Assertion failed"
+    assert handle_log == ["{}"], "Assertion failed"
+    assert fake_handle.closed is True, "Assertion failed"
 
 
 def test_send_pipe_request_closes_handle_on_timeout(
@@ -186,8 +186,8 @@ def test_send_pipe_request_closes_handle_on_timeout(
             retry_config=RetryConfig(),
         )
 
-    assert call_count["value"] == 1
-    assert fake_handle.closed is True
+    assert call_count["value"] == 1, "Assertion failed"
+    assert fake_handle.closed is True, "Assertion failed"
 
 
 def test_run_blocking_io_times_out_and_invokes_cancel(
@@ -212,4 +212,4 @@ def test_run_blocking_io_times_out_and_invokes_cancel(
     with pytest.raises(TimeoutError):
         client._run_blocking_io(long_running, deadline=1.0, cancel=cancel)
 
-    assert cancel_calls == ["called"]
+    assert cancel_calls == ["called"], "Assertion failed"

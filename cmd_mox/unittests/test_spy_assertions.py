@@ -49,6 +49,11 @@ class TestSpyAssertions:
 
         This helper performs the full mox lifecycle and executes the command
         with the provided arguments, stdin, and environment.
+
+        Returns
+        -------
+        tuple[CmdMox, CommandDouble]
+            The configured controller and its executed spy.
         """
         if config is None:
             config = SpyCommandConfig()

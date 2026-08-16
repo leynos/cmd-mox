@@ -39,6 +39,11 @@ def is_sensitive_recording_env_key(key: str) -> bool:
     Combines the substring-based check from :func:`_is_sensitive_env_key` with
     a regex that catches word-segment patterns such as ``GITHUB_KEY`` or
     ``DB_PWD``.
+
+    Returns
+    -------
+    bool
+        Whether recordings should redact the environment variable's value.
     """
     return _is_sensitive_env_key(key) or bool(_SECRET_ENV_KEY_RE.search(key))
 
@@ -73,6 +78,11 @@ class Expectation:
         """Expect ``stdin`` to equal ``data`` or satisfy a predicate.
 
         The predicate's return value will be coerced to bool.
+
+        Returns
+        -------
+        Expectation
+            This expectation, allowing further fluent configuration.
         """
         self.stdin = data
         return self
@@ -102,7 +112,8 @@ class Expectation:
 
     def times(self, count: int) -> Expectation:
         """Alias for :meth:`times_called` matching the fluent DSL."""
-        return self.times_called(count)
+        self.count = count
+        return self
 
     def in_order(self) -> Expectation:
         """Mark this expectation as ordered relative to others."""
@@ -145,11 +156,11 @@ class Expectation:
             return False
         if len(args) != len(matchers):
             return False
-        for arg, matcher in zip(args, matchers):  # noqa: B905
+        for arg, matcher in zip(args, matchers):  # noqa: B905 - paired values have already been validated for matching arity
             try:
                 if not matcher(arg):
                     return False
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 - this boundary intentionally converts arbitrary callback failures
                 return False
         return True
 
@@ -188,11 +199,11 @@ class Expectation:
                 f"expected {len(self.match_args)} args but got {len(invocation.args)}"
             )
         for i, (arg, matcher) in enumerate(
-            zip(invocation.args, self.match_args),  # noqa: B905
+            zip(invocation.args, self.match_args),  # noqa: B905 - paired values have already been validated for matching arity
         ):
             try:
                 ok = bool(matcher(arg))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - this boundary intentionally converts arbitrary callback failures
                 return (
                     f"arg[{i}] predicate {matcher!r} raised "
                     f"{exc.__class__.__name__}: {exc}"
@@ -213,7 +224,7 @@ class Expectation:
             return f"stdin expectation {self.stdin!r} is not str or callable"
         try:
             ok = bool(self.stdin(invocation.stdin))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - this boundary intentionally converts arbitrary callback failures
             return (
                 f"stdin predicate {self.stdin!r} raised {exc.__class__.__name__}: {exc}"
             )
@@ -243,7 +254,7 @@ class Expectation:
         if callable(self.stdin):
             try:
                 return bool(self.stdin(invocation.stdin))
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 - this boundary intentionally converts arbitrary callback failures
                 return False
         return False
 

@@ -17,7 +17,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used for type checking only
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
 @scenario(str(FEATURES_DIR / "pytest_plugin.feature"), "cmd_mox fixture basic usage")
@@ -108,18 +108,18 @@ def assert_parallel_isolation(
     """Assert that shim directories and sockets are unique per worker."""
     parallel_result.assert_outcomes(passed=2)
     records = read_parallel_records(parallel_suite.artifact_dir)
-    assert len(records) == 2
-    assert {record.label for record in records} == {"alpha", "beta"}
+    assert len(records) == 2, "Assertion failed"
+    assert {record.label for record in records} == {"alpha", "beta"}, "Assertion failed"
 
     shim_dirs = {record.shim_dir for record in records}
     sockets = {record.socket for record in records}
     workers = {record.worker for record in records}
 
-    assert len(shim_dirs) == len(records)
-    assert len(sockets) == len(records)
-    assert len(workers) == len(records)
+    assert len(shim_dirs) == len(records), "Assertion failed"
+    assert len(sockets) == len(records), "Assertion failed"
+    assert len(workers) == len(records), "Assertion failed"
 
     for record in records:
-        assert record.socket.parent == record.shim_dir
-        assert not record.shim_dir.exists()
-        assert not record.socket.exists()
+        assert record.socket.parent == record.shim_dir, "Assertion failed"
+        assert not record.shim_dir.exists(), "Assertion failed"
+        assert not record.socket.exists(), "Assertion failed"

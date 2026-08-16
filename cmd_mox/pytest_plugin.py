@@ -264,6 +264,11 @@ class _CmdMoxManager:
         The fixture parameter provides the most granular override, followed by
         a ``@pytest.mark.cmd_mox`` marker, the command-line option, and finally
         the ``pytest.ini`` default.
+
+        Returns
+        -------
+        bool
+            Whether the plugin should manage the controller lifecycle.
         """
         param_value = self._param_override()
         if param_value is not None:
@@ -291,24 +296,26 @@ class _CmdMoxManager:
     def _param_override(self) -> bool | None:
         """Return fixture parameter override for auto lifecycle if present."""
         param = getattr(self.request, "param", None)
-        if param is None:
-            return None
-        if isinstance(param, dict):
-            if "auto_lifecycle" in param:
-                return bool(param["auto_lifecycle"])
-            keys = list(param.keys())
-            msg = (
-                "cmd_mox fixture param dict must contain 'auto_lifecycle' key, "
-                f"got keys: {keys}"
-            )
-            raise TypeError(msg)
-        if isinstance(param, bool):
-            return param
-        msg = (
-            "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key, "
-            f"got {type(param).__name__}"
-        )
-        raise TypeError(msg)
+        match param:
+            case None:
+                return None
+            case dict() as parameter if "auto_lifecycle" in parameter:
+                return bool(parameter["auto_lifecycle"])
+            case dict() as parameter:
+                keys = list(parameter.keys())
+                msg = (
+                    "cmd_mox fixture param dict must contain 'auto_lifecycle' key, "
+                    f"got keys: {keys}"
+                )
+                raise TypeError(msg)
+            case bool():
+                return param
+            case _:
+                msg = (
+                    "cmd_mox fixture param must be a bool or dict with "
+                    f"'auto_lifecycle' key, got {type(param).__name__}"
+                )
+                raise TypeError(msg)
 
     def _verify_if_needed(self) -> Exception | None:
         """Run :meth:`CmdMox.verify` when auto lifecycle is active."""

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import cmd_mox.shim as shim
+from cmd_mox.command_runner import validate_override_path as _validate_override_path
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
@@ -25,7 +26,6 @@ from cmd_mox.shim import (
     _merge_passthrough_path,
     _resolve_passthrough_target,
     _validate_environment,
-    _validate_override_path,
     _write_response,
 )
 from tests.helpers.pytest_typing import pytest_fail, pytest_skip

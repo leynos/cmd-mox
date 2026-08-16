@@ -24,7 +24,7 @@ def test_escape_batch_args_is_noop_on_posix(monkeypatch: pytest.MonkeyPatch) -> 
     """Non-Windows platforms should return argv unchanged."""
     _set_posix(monkeypatch)
     argv = ["build.cmd", "arg^1"]
-    assert controller.escape_windows_batch_args(argv) == argv
+    assert controller.escape_windows_batch_args(argv) == argv, "Assertion failed"
 
 
 def test_escape_batch_args_for_cmd_extension(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -34,7 +34,7 @@ def test_escape_batch_args_for_cmd_extension(monkeypatch: pytest.MonkeyPatch) ->
 
     escaped = controller.escape_windows_batch_args(argv)
 
-    assert escaped == ["build.cmd", "arg^^^^1", "safe"]
+    assert escaped == ["build.cmd", "arg^^^^1", "safe"], "Assertion failed"
 
 
 def test_escape_batch_args_resolves_pathext(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,7 +45,7 @@ def test_escape_batch_args_resolves_pathext(monkeypatch: pytest.MonkeyPatch) -> 
 
     escaped = controller.escape_windows_batch_args(argv)
 
-    assert escaped == ["builder", "^^^^caret"]
+    assert escaped == ["builder", "^^^^caret"], "Assertion failed"
 
 
 def test_escape_batch_args_missing_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,7 +56,7 @@ def test_escape_batch_args_missing_on_path(monkeypatch: pytest.MonkeyPatch) -> N
 
     escaped = controller.escape_windows_batch_args(argv)
 
-    assert escaped == ["builder", "^caret"]
+    assert escaped == ["builder", "^caret"], "Assertion failed"
 
 
 def test_escape_batch_args_ignores_non_batch_resolution(
@@ -69,7 +69,7 @@ def test_escape_batch_args_ignores_non_batch_resolution(
 
     escaped = controller.escape_windows_batch_args(argv)
 
-    assert escaped == argv
+    assert escaped == argv, "Assertion failed"
 
 
 def test_escape_batch_args_preserves_percent_and_empty(
@@ -81,4 +81,4 @@ def test_escape_batch_args_preserves_percent_and_empty(
 
     escaped = controller.escape_windows_batch_args(argv)
 
-    assert escaped == ["build.cmd", "%PATH%", ""]
+    assert escaped == ["build.cmd", "%PATH%", ""], "Assertion failed"

@@ -32,6 +32,6 @@ def test_passthrough_spy_executes_real_command(
         shell=False,
     )
 
-    assert result.stdout.strip() == "hello"
-    assert spy.call_count == 1
+    assert result.stdout.strip() == "hello", "Assertion failed"
+    assert spy.call_count == 1, "Assertion failed"
     spy.assert_called_with("-c", "print('hello')")

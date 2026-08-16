@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Generic command shim for CmdMox."""
 
+# ruff: noqa: I001 - shim bootstrap must precede package imports
+
 from __future__ import annotations
 
 import collections.abc as cabc
@@ -43,19 +45,18 @@ if __name__ == "__main__":
 else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
 
-from cmd_mox import _path_utils as path_utils  # noqa: E402
-from cmd_mox.command_runner import (  # noqa: E402
+from cmd_mox import _path_utils as path_utils  # noqa: E402 - shim bootstrap configures sys.path before package imports
+from cmd_mox.command_runner import (  # noqa: E402 - shim bootstrap configures sys.path before package imports
     execute_command,
     prepare_environment,
     resolve_command_with_override,
-    validate_override_path,
 )
-from cmd_mox.environment import (  # noqa: E402
+from cmd_mox.environment import (  # noqa: E402 - shim bootstrap configures sys.path before package imports
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
     CMOX_REAL_COMMAND_ENV_PREFIX,
 )
-from cmd_mox.ipc import (  # noqa: E402
+from cmd_mox.ipc import (  # noqa: E402 - shim bootstrap configures sys.path before package imports
     Invocation,
     PassthroughRequest,
     PassthroughResult,
@@ -65,9 +66,6 @@ from cmd_mox.ipc import (  # noqa: E402
 )
 
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
-
-# Backwards compatibility alias retained for tests exercising shim helpers.
-_validate_override_path = validate_override_path
 
 
 def _normalize_windows_arg(arg: str) -> str:

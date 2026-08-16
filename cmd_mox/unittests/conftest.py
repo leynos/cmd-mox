@@ -11,10 +11,10 @@ import pytest
 
 def run_subprocess(
     args: cabc.Sequence[str],
-    **kwargs: typ.Any,  # noqa: ANN401
+    **kwargs: typ.Any,  # noqa: ANN401 - test cases deliberately accept values of multiple runtime types
 ) -> subprocess.CompletedProcess[str]:
     """Run ``subprocess.run`` with common defaults for tests."""
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
         args, capture_output=True, text=True, check=True, **kwargs
     )
 

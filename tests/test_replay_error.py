@@ -13,7 +13,7 @@ import pytest
 import cmd_mox.controller as controller
 from cmd_mox import CmdMox
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
 def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,10 +45,10 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(RuntimeError):
         mox.replay()
 
-    assert called == [(None, None, None)]
-    assert mox._server is None
-    assert not mox._entered
-    assert os.environ == pre_env
+    assert called == [(None, None, None)], "Assertion failed"
+    assert mox._server is None, "Assertion failed"
+    assert not mox._entered, "Assertion failed"
+    assert os.environ == pre_env, "Assertion failed"
 
 
 def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,9 +84,9 @@ def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
         trigger()
 
     exc_type, exc, tb = called[0]
-    assert exc_type is BoomError
-    assert isinstance(exc, BoomError)
-    assert tb is not None
-    assert mox._server is None
-    assert not mox._entered
-    assert os.environ == pre_env
+    assert exc_type is BoomError, "Assertion failed"
+    assert isinstance(exc, BoomError), "Assertion failed"
+    assert tb is not None, "Assertion failed"
+    assert mox._server is None, "Assertion failed"
+    assert not mox._entered, "Assertion failed"
+    assert os.environ == pre_env, "Assertion failed"

@@ -22,7 +22,7 @@ class _FakeWin32File(Win32FileProtocol):
         self.flushes: list[object] = []
         self.closes: list[object] = []
 
-    def ReadFile(self, handle: object, chunk_size: int) -> tuple[int, bytes]:  # noqa: N802
+    def ReadFile(self, handle: object, chunk_size: int) -> tuple[int, bytes]:  # noqa: N802 - the protocol mirrors the external Windows API casing
         if not self.responses:
             msg = "No response configured"
             raise AssertionError(msg)
@@ -31,10 +31,10 @@ class _FakeWin32File(Win32FileProtocol):
             raise response
         return response  # type: ignore[return-value, ty:invalid-return-type]
 
-    def WriteFile(self, handle: object, payload: bytes) -> None:  # noqa: N802
+    def WriteFile(self, handle: object, payload: bytes) -> None:  # noqa: N802 - the protocol mirrors the external Windows API casing
         self.writes.append((handle, payload))
 
-    def FlushFileBuffers(self, handle: object) -> None:  # noqa: N802
+    def FlushFileBuffers(self, handle: object) -> None:  # noqa: N802 - the protocol mirrors the external Windows API casing
         self.flushes.append(handle)
 
     def CloseHandle(self, handle: object) -> None:  # noqa: N802 - helper
@@ -117,12 +117,12 @@ def test_named_pipe_handler_uses_shared_helpers(
         return b"processed"
 
     class _FakeWin32File:
-        def CloseHandle(self, h: object) -> None:  # noqa: N802
+        def CloseHandle(self, h: object) -> None:  # noqa: N802 - the protocol mirrors the external Windows API casing
             closes.append(h)
 
     class _FakeWin32Pipe:
         @staticmethod
-        def DisconnectNamedPipe(_handle: object) -> None:  # noqa: N802
+        def DisconnectNamedPipe(_handle: object) -> None:  # noqa: N802 - the protocol mirrors the external Windows API casing
             return None
 
     class _FakePyWinTypes:
@@ -138,7 +138,7 @@ def test_named_pipe_handler_uses_shared_helpers(
 
     monkeypatch.setattr("cmd_mox.ipc.server.read_pipe_message", fake_read)
     monkeypatch.setattr("cmd_mox.ipc.server.write_pipe_payload", fake_write)
-    monkeypatch.setattr("cmd_mox.ipc.server._process_raw_request", fake_process)
+    monkeypatch.setattr("cmd_mox.ipc.server._request_pipeline", fake_process)
     monkeypatch.setattr("cmd_mox.ipc.server.win32file", _FakeWin32File())
     monkeypatch.setattr("cmd_mox.ipc.server.win32pipe", _FakeWin32Pipe())
     monkeypatch.setattr("cmd_mox.ipc.server.pywintypes", _FakePyWinTypes())

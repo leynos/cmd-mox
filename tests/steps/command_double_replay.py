@@ -80,8 +80,8 @@ def _call_replay_with_strict(
 def _assert_strict_matching(spy_after_replay: CommandDouble, *, expected: bool) -> None:
     """Assert that the replay session has the expected strict_matching setting."""
     session = spy_after_replay.replay_session
-    assert session is not None
-    assert session.strict_matching is expected
+    assert session is not None, "Assertion failed"
+    assert session.strict_matching is expected, "Assertion failed"
 
 
 @when('replay is called on a "git" spy', target_fixture="spy_after_replay")
@@ -110,10 +110,6 @@ def call_replay_with_passthrough_raises(spy: CommandDouble, fixture_path: Path) 
     fixture_path : Path
         Path to the replay fixture file.
 
-    Raises
-    ------
-    ValueError
-        When replay is called on a spy with passthrough enabled.
     """
     with pytest.raises(ValueError, match=r"replay.*passthrough"):
         spy.replay(fixture_path)
@@ -128,7 +124,7 @@ def spy_has_replay_session(spy_after_replay: CommandDouble) -> None:
     spy_after_replay : CommandDouble
         A spy with a replay session.
     """
-    assert spy_after_replay.has_replay_session is True
+    assert spy_after_replay.has_replay_session is True, "Assertion failed"
 
 
 @then("the replay session is loaded")
@@ -141,11 +137,11 @@ def replay_session_is_loaded(spy_after_replay: CommandDouble) -> None:
         A spy with a replay session.
     """
     session = spy_after_replay.replay_session
-    assert session is not None
+    assert session is not None, "Assertion failed"
     assert (
         session.match(Invocation(command="git", args=["status"], stdin="", env={}))
         is not None
-    )
+    ), "Assertion failed"
 
 
 @then("the replay session uses strict matching")

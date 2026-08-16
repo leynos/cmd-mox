@@ -54,7 +54,7 @@ def _record(cmd_mox: CmdMox, label: str) -> None:
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == label  # noqa: S101 - executed as a pytest test
+    assert result.stdout.strip() == label, "Assertion failed"  # noqa: S101 - executed as a pytest test
 
 
 def test_alpha(cmd_mox: CmdMox) -> None:

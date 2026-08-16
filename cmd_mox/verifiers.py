@@ -142,6 +142,11 @@ def _list_expected_commands(doubles: cabc.Mapping[str, CommandDouble]) -> str:
 
     Commands registered as stubs are omitted because they are not validated as
     part of unexpected-invocation checks.
+
+    Returns
+    -------
+    str
+        A comma-separated representation of the expected commands.
     """
     names = sorted(
         name for name, dbl in doubles.items() if dbl.kind is not DoubleKind.STUB

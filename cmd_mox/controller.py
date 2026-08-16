@@ -10,9 +10,9 @@ import typing as typ
 from collections import deque
 from pathlib import Path
 
+from . import _path_utils
 from .command_runner import CommandRunner
 from .environment import (
-    IS_WINDOWS,
     EnvironmentManager,
     ensure_dir_exists,
     temporary_env,
@@ -84,6 +84,11 @@ class CmdMox:
         environment:
             Optional :class:`EnvironmentManager` instance used to prepare shim and
             PATH state. When omitted a fresh manager is created automatically.
+
+        Raises
+        ------
+        ValueError
+            If ``max_journal_entries`` is not positive.
         """
         self.environment = (
             environment if environment is not None else EnvironmentManager()
@@ -193,7 +198,7 @@ class CmdMox:
         verify_error: Exception | None = None
         try:
             self.verify()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:  # noqa: BLE001 - this boundary intentionally converts arbitrary callback failures
             # pragma: no cover - verification failed
             verify_error = err
         if exc_type is None and verify_error is not None:
@@ -316,11 +321,11 @@ class CmdMox:
             first_error: BaseException | None = None
             try:
                 self._finalize_verification()
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001 - this boundary intentionally converts arbitrary callback failures
                 first_error = exc
             try:
                 self._finalize_recording_sessions()
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001 - this boundary intentionally converts arbitrary callback failures
                 if first_error is None:
                     first_error = exc
             if first_error is not None:
@@ -514,6 +519,11 @@ class CmdMox:
         final merging into an effective execution environment happens
         downstream when the shim consumes the resulting
         :class:`~cmd_mox.ipc.PassthroughRequest`.
+
+        Returns
+        -------
+        Response
+            Instructions that make the shim execute the passthrough command.
         """
         overrides = self._apply_expectation_env(double, invocation)
         lookup_path = self.environment.original_environment.get(
@@ -640,7 +650,9 @@ class CmdMox:
             raise MissingEnvironmentError(msg)
         shim_dir, socket_path = self._validate_replay_environment()
         create_shim_symlinks(shim_dir, self._commands)
-        server_factory = CallbackNamedPipeServer if IS_WINDOWS else CallbackIPCServer
+        server_factory = (
+            CallbackNamedPipeServer if _path_utils.IS_WINDOWS else CallbackIPCServer
+        )
         self._server = server_factory(
             socket_path,
             self._handle_invocation,

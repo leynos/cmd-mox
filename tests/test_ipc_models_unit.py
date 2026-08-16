@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import typing as typ
 
 import pytest
 
@@ -12,8 +13,11 @@ from cmd_mox.ipc.models import (
     Response,
 )
 
+if typ.TYPE_CHECKING:
+    from syrupy.assertion import SnapshotAssertion
 
-def test_invocation_to_dict_round_trip() -> None:
+
+def test_invocation_to_dict_round_trip(snapshot: SnapshotAssertion) -> None:
     """Invocation serialisation should be lossless for supported fields."""
     invocation = Invocation(
         command="cmd",
@@ -26,18 +30,7 @@ def test_invocation_to_dict_round_trip() -> None:
         invocation_id="abc",
     )
 
-    payload = invocation.to_dict()
-
-    assert payload == {
-        "command": "cmd",
-        "args": ["--flag"],
-        "stdin": "input",
-        "env": {"FOO": "1"},
-        "stdout": "out",
-        "stderr": "err",
-        "exit_code": 2,
-        "invocation_id": "abc",
-    }
+    assert invocation.to_dict() == snapshot, "Invocation payload changed"
 
 
 def test_passthrough_request_to_dict_includes_defaults() -> None:
@@ -52,14 +45,14 @@ def test_passthrough_request_to_dict_includes_defaults() -> None:
         "lookup_path": "/bin/echo",
         "extra_env": {},
         "timeout": 30.0,
-    }
+    }, "Assertion failed"
 
 
 def test_response_from_payload_warns_on_invalid_env(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Response.from_payload should warn when env is not a mapping."""
-    assert isinstance(caplog, pytest.LogCaptureFixture)
+    assert isinstance(caplog, pytest.LogCaptureFixture), "Assertion failed"
     payload = {
         "stdout": "out",
         "stderr": "",
@@ -70,13 +63,13 @@ def test_response_from_payload_warns_on_invalid_env(
     with caplog.at_level("WARNING", logger="cmd_mox.ipc.models"):
         response = Response.from_payload(payload)
 
-    assert response.env == {}
+    assert response.env == {}, "Assertion failed"
     assert any(
         "Payload 'env' is not a dict" in record.message for record in caplog.records
-    )
+    ), "Assertion failed"
 
 
-def test_response_serialises_passthrough() -> None:
+def test_response_serialises_passthrough(snapshot: SnapshotAssertion) -> None:
     """Responses should serialise passthrough requests when present."""
     request = PassthroughRequest(
         invocation_id="123",
@@ -86,20 +79,9 @@ def test_response_serialises_passthrough() -> None:
     )
     response = Response(stdout="", stderr="", exit_code=0, passthrough=request)
 
-    payload = response.to_dict()
-
-    assert json.loads(json.dumps(payload)) == {
-        "stdout": "",
-        "stderr": "",
-        "exit_code": 0,
-        "env": {},
-        "passthrough": {
-            "invocation_id": "123",
-            "lookup_path": "/bin/echo",
-            "extra_env": {"A": "1"},
-            "timeout": 4.2,
-        },
-    }
+    assert json.loads(json.dumps(response.to_dict())) == snapshot, (
+        "Passthrough response payload changed"
+    )
 
 
 def test_invocation_apply_updates_result_fields() -> None:
@@ -109,6 +91,6 @@ def test_invocation_apply_updates_result_fields() -> None:
 
     invocation.apply(response)
 
-    assert invocation.stdout == "new"
-    assert invocation.stderr == "err"
-    assert invocation.exit_code == 5
+    assert invocation.stdout == "new", "Assertion failed"
+    assert invocation.stderr == "err", "Assertion failed"
+    assert invocation.exit_code == 5, "Assertion failed"

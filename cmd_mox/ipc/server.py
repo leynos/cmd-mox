@@ -36,10 +36,6 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
-if typ.TYPE_CHECKING:
-    _Win32File = Win32FileProtocol
-    _PyWinTypes = PyWinTypesProtocol
-
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import (
     parse_json_safely,
@@ -84,9 +80,8 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
 
 
 if typ.TYPE_CHECKING:
+    from socketserver import ThreadingUnixStreamServer as _BaseUnixServer
     from types import TracebackType
-
-    _BaseUnixServer = socketserver.ThreadingUnixStreamServer
 else:
     _BaseUnixServer = _resolve_unix_server_base()
 
@@ -109,20 +104,6 @@ logger = logging.getLogger(__name__)
 type _RequestValidator = cabc.Callable[
     [dict[str, typ.Any]], Invocation | PassthroughResult | None
 ]
-
-
-def _process_invocation(
-    server: _BaseIPCServer[typ.Any], invocation: Invocation
-) -> Response:
-    """Invoke :meth:`IPCServer.handle_invocation` for *invocation*."""
-    return server.handle_invocation(invocation)
-
-
-def _process_passthrough_result(
-    server: _BaseIPCServer[typ.Any], result: PassthroughResult
-) -> Response:
-    """Invoke :meth:`IPCServer.handle_passthrough_result` for *result*."""
-    return server.handle_passthrough_result(result)
 
 
 class _ServerLifecycle[BackendT](abc.ABC):
@@ -184,19 +165,19 @@ class _ServerLifecycle[BackendT](abc.ABC):
     @abc.abstractmethod
     def _create_backend(self) -> tuple[BackendT, threading.Thread]: ...
 
-    def _prepare_backend_start(self) -> None:  # noqa: B027
+    def _prepare_backend_start(self) -> None:  # noqa: B027 - base lifecycle hook intentionally has no default implementation
         """Perform any setup required before starting the backend server."""
 
-    def _export_environment(self) -> None:  # noqa: B027
+    def _export_environment(self) -> None:  # noqa: B027 - base lifecycle hook intentionally has no default implementation
         """Export environment variables for client processes."""
 
     def _start_backend_thread(self, thread: threading.Thread) -> None:
         thread.start()
 
-    def _wait_until_ready(self) -> None:  # noqa: B027
+    def _wait_until_ready(self) -> None:  # noqa: B027 - base lifecycle hook intentionally has no default implementation
         """Wait for the backend server to be ready to accept connections."""
 
-    def _stop_backend(self, server: BackendT | None) -> None:  # noqa: B027
+    def _stop_backend(self, server: BackendT | None) -> None:  # noqa: B027 - base lifecycle hook intentionally has no default implementation
         """Stop the backend server instance."""
 
     def _join_backend_thread(self, thread: threading.Thread | None) -> None:
@@ -204,7 +185,7 @@ class _ServerLifecycle[BackendT](abc.ABC):
             return
         thread.join(self.timeout)
 
-    def _post_stop_cleanup(self) -> None:  # noqa: B027
+    def _post_stop_cleanup(self) -> None:  # noqa: B027 - base lifecycle hook intentionally has no default implementation
         """Perform cleanup after the backend server has stopped."""
 
 
@@ -364,10 +345,10 @@ class CallbackIPCServer(IPCServer):
 type _RequestProcessor = cabc.Callable[[_BaseIPCServer[typ.Any], typ.Any], Response]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
-    KIND_INVOCATION: (validate_invocation_payload, _process_invocation),
+    KIND_INVOCATION: (validate_invocation_payload, _BaseIPCServer.handle_invocation),
     KIND_PASSTHROUGH_RESULT: (
         validate_passthrough_payload,
-        _process_passthrough_result,
+        _BaseIPCServer.handle_passthrough_result,
     ),
 }
 
@@ -442,10 +423,6 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
     return _encode_response(response)
 
 
-def _process_raw_request(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
-    return _request_pipeline(server, raw)
-
-
 def _execute_request(
     server: _BaseIPCServer[typ.Any], processor: _RequestProcessor, obj: object
 ) -> Response:
@@ -464,7 +441,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
 
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
         raw = self.rfile.read()
-        response_bytes = _process_raw_request(self.server.outer, raw)  # type: ignore[attr-defined, ty:unresolved-attribute]
+        response_bytes = _request_pipeline(self.server.outer, raw)  # type: ignore[attr-defined, ty:unresolved-attribute]
         if response_bytes is None:
             return
         self.wfile.write(response_bytes)
@@ -626,6 +603,11 @@ class _NamedPipeState:
         """Calculate remaining time until deadline.
 
         Returns None if deadline has passed, otherwise remaining seconds.
+
+        Returns
+        -------
+        float | None
+            The remaining seconds, or ``None`` when the deadline has passed.
         """
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -638,6 +620,11 @@ class _NamedPipeState:
         """Join a thread respecting the deadline.
 
         Returns True if join attempted, False if deadline expired before join.
+
+        Returns
+        -------
+        bool
+            Whether the thread could be joined before the deadline.
         """
         remaining = self._calculate_remaining_time(deadline)
         if remaining is None:
@@ -651,6 +638,11 @@ class _NamedPipeState:
         """Join all threads respecting the deadline.
 
         Returns True if all threads were processed, False if deadline expired.
+
+        Returns
+        -------
+        bool
+            Whether every thread could be joined before the deadline.
         """
         for thread in threads:
             if not self._join_thread_with_deadline(thread, deadline):
@@ -716,7 +708,7 @@ class _NamedPipeState:
             raw = self._read_request(handle)
             if raw is None:
                 return
-            response_bytes = _process_raw_request(self.outer, raw)
+            response_bytes = _request_pipeline(self.outer, raw)
             if response_bytes is not None:
                 write_pipe_payload(
                     handle,

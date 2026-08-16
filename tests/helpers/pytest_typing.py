@@ -22,10 +22,6 @@ def pytest_skip(reason: str) -> typ.NoReturn:
     reason : str
         The skip reason forwarded to ``pytest.skip``.
 
-    Raises
-    ------
-    pytest.skip.Exception
-        Always raised; the function never returns normally.
     """
     skip = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.skip)
     skip(reason)
@@ -39,10 +35,6 @@ def pytest_fail(reason: str) -> typ.NoReturn:
     reason : str
         The failure reason forwarded to ``pytest.fail``.
 
-    Raises
-    ------
-    pytest.fail.Exception
-        Always raised; the function never returns normally.
     """
     fail = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.fail)
     fail(reason)

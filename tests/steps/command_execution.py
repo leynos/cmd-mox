@@ -55,9 +55,14 @@ def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
         Command invocation, including arguments.
     check : bool
         When True, raise :class:`CalledProcessError` for non-zero exits.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
     """
     argv = escape_windows_batch_args(argv)
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
         argv,
         capture_output=True,
         text=True,
@@ -114,7 +119,7 @@ def run_shell_command(
 ) -> subprocess.CompletedProcess[str]:
     """Run *command_line* with shell parsing enabled (e.g., pipelines)."""
     decoded = decode_placeholders(command_line)
-    return subprocess.run(  # noqa: S602
+    return subprocess.run(  # noqa: S602 - the example intentionally exercises shell pipeline behaviour
         decoded,
         capture_output=True,
         text=True,
@@ -174,7 +179,7 @@ def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess
     with mox:
         mox.replay()
         result = _run([_resolve_command(cmd)], check=True)
-    assert os.environ == original_env
+    assert os.environ == original_env, "Assertion failed"
     return result
 
 
@@ -232,4 +237,4 @@ def run_shim_sequence(sequence: str) -> subprocess.CompletedProcess[str]:
         """
     )
     argv = [sys.executable, "-c", script, *commands]
-    return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603
+    return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603 - the test executes a command path prepared by the test harness

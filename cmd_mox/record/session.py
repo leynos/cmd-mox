@@ -104,7 +104,7 @@ class RecordingSession:
         LifecycleError
             If the session has not been started or has been finalized.
         ValueError
-            If *duration_ms* is negative.
+            If ``duration_ms`` is negative.
         """
         if self._started_at is None:
             msg = "Recording session has not been started; call start() first"
@@ -134,12 +134,6 @@ class RecordingSession:
         duration_ms : int
             Wall-clock execution time in milliseconds (default ``0``).
 
-        Raises
-        ------
-        LifecycleError
-            If the session has not been started or has been finalized.
-        ValueError
-            If *duration_ms* is negative.
         """
         # Lifecycle validation and append are inside the same critical
         # section so a concurrent finalize() cannot snapshot _recordings

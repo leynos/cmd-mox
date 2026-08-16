@@ -31,19 +31,19 @@ def check_shim_suffix(mox: CmdMox, cmd: str, suffix: str) -> None:
 @then(parsers.cfparse('the output should be "{text}"'))
 def check_output(result: subprocess.CompletedProcess[str], text: str) -> None:
     """Ensure the command output matches."""
-    assert result.stdout.strip() == text
+    assert result.stdout.strip() == text, "Assertion failed"
 
 
 @then(parsers.cfparse("the exit code should be {code:d}"))
 def check_exit_code(result: subprocess.CompletedProcess[str], code: int) -> None:
     """Assert the process exit code equals *code*."""
-    assert result.returncode == code
+    assert result.returncode == code, "Assertion failed"
 
 
 @then(parsers.cfparse('the stderr should contain "{text}"'))
 def check_stderr(result: subprocess.CompletedProcess[str], text: str) -> None:
     """Ensure standard error output contains *text*."""
-    assert text in result.stderr
+    assert text in result.stderr, "Assertion failed"
 
 
 @then(parsers.cfparse('the verification error message should contain "{text}"'))
@@ -51,13 +51,13 @@ def verification_error_contains(
     verification_error: VerificationError, text: str
 ) -> None:
     """Assert the captured verification error contains *text*."""
-    assert text in str(verification_error)
+    assert text in str(verification_error), "Assertion failed"
 
 
 @then(parsers.cfparse('the replay error message should contain "{text}"'))
 def replay_error_contains(replay_error: MissingEnvironmentError, text: str) -> None:
     """Assert the captured replay error contains *text*."""
-    assert text in str(replay_error)
+    assert text in str(replay_error), "Assertion failed"
 
 
 @then(parsers.cfparse('the verification error message should not contain "{text}"'))
@@ -65,7 +65,7 @@ def verification_error_excludes(
     verification_error: VerificationError, text: str
 ) -> None:
     """Assert the captured verification error omits *text*."""
-    assert text not in str(verification_error)
+    assert text not in str(verification_error), "Assertion failed"
 
 
 @then(parsers.cfparse('the spy "{cmd}" should record {count:d} invocation'))
@@ -73,7 +73,7 @@ def check_spy(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the spy recorded the invocation."""
     assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
     spy = mox.spies[cmd]
-    assert len(spy.invocations) == count
+    assert len(spy.invocations) == count, "Assertion failed"
 
 
 @then(parsers.cfparse('the spy "{cmd}" call count should be {count:d}'))
@@ -81,7 +81,7 @@ def check_spy_call_count(mox: CmdMox, cmd: str, count: int) -> None:
     """Assert ``SpyCommand.call_count`` equals *count*."""
     assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
     spy = mox.spies[cmd]
-    assert spy.call_count == count
+    assert spy.call_count == count, "Assertion failed"
 
 
 @then(parsers.cfparse('the spy "{cmd}" should have been called'))
@@ -113,4 +113,4 @@ def check_mock(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the mock recorded the invocation."""
     assert cmd in mox.mocks, f"Mock for command '{cmd}' not found"
     mock = mox.mocks[cmd]
-    assert len(mock.invocations) == count
+    assert len(mock.invocations) == count, "Assertion failed"

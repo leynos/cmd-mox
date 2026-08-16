@@ -13,7 +13,7 @@ import pytest
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.ipc import Invocation, Response
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 if typ.TYPE_CHECKING:  # pragma: no cover - import used only for typing
     from pathlib import Path
@@ -68,21 +68,21 @@ def test_main_reports_invocation_details(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    assert isinstance(excinfo.value, SystemExit)
-    assert excinfo.value.code == 7
+    assert isinstance(excinfo.value, SystemExit), "Assertion failed"
+    assert excinfo.value.code == 7, "Assertion failed"
 
     out = capsys.readouterr()
-    assert out.out == "out"
-    assert out.err == "err"
-    assert os.environ["EXTRA"] == "42"
+    assert out.out == "out", "Assertion failed"
+    assert out.err == "err", "Assertion failed"
+    assert os.environ["EXTRA"] == "42", "Assertion failed"
 
     invocation = typ.cast("Invocation", captured["invocation"])
-    assert invocation.command == "git"
-    assert invocation.args == ["status", "--short"]
-    assert invocation.stdin == "payload"
-    assert invocation.env.get("SAMPLE") == "value"
+    assert invocation.command == "git", "Assertion failed"
+    assert invocation.args == ["status", "--short"], "Assertion failed"
+    assert invocation.stdin == "payload", "Assertion failed"
+    assert invocation.env.get("SAMPLE") == "value", "Assertion failed"
     timeout = typ.cast("float", captured["timeout"])
-    assert timeout == pytest.approx(5.0)
+    assert timeout == pytest.approx(5.0), "Assertion failed"
 
 
 def test_main_skips_interactive_stdin(
@@ -109,10 +109,10 @@ def test_main_skips_interactive_stdin(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    assert excinfo.value.code == 0
+    assert excinfo.value.code == 0, "Assertion failed"
     invocation = captured["invocation"]
-    assert invocation.stdin == ""
-    assert not interactive.read_called
+    assert invocation.stdin == "", "Assertion failed"
+    assert not interactive.read_called, "Assertion failed"
 
 
 def test_main_honours_custom_timeout(
@@ -138,11 +138,11 @@ def test_main_honours_custom_timeout(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    assert excinfo.value.code == 0
-    assert captured["timeout"] == pytest.approx(1.75)
+    assert excinfo.value.code == 0, "Assertion failed"
+    assert captured["timeout"] == pytest.approx(1.75), "Assertion failed"
     out = capsys.readouterr()
-    assert out.out == "custom"
-    assert out.err == ""
+    assert out.out == "custom", "Assertion failed"
+    assert out.err == "", "Assertion failed"
 
 
 def test_main_requires_socket_env(
@@ -159,9 +159,9 @@ def test_main_requires_socket_env(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    assert excinfo.value.code == 1
+    assert excinfo.value.code == 1, "Assertion failed"
     out = capsys.readouterr()
-    assert "IPC socket not specified" in out.err
+    assert "IPC socket not specified" in out.err, "Assertion failed"
 
 
 @pytest.mark.parametrize("raw_timeout", ["NaN", "0", "-1"])
@@ -182,6 +182,6 @@ def test_main_rejects_invalid_timeout(
     with pytest.raises(SystemExit) as excinfo:
         shim.main()
 
-    assert excinfo.value.code == 1
+    assert excinfo.value.code == 1, "Assertion failed"
     out = capsys.readouterr()
-    assert f"invalid timeout: '{raw_timeout}'" in out.err
+    assert f"invalid timeout: '{raw_timeout}'" in out.err, "Assertion failed"

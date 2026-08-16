@@ -228,8 +228,7 @@ def test_create_windows_shim_uses_shared_retry_config(
 
     shimgen.create_shim_symlinks(tmp_path, ["git"])
 
-    assert calls == [(launcher, shimgen.LAUNCHER_RETRY)]
-    assert shimgen.LAUNCHER_RETRY is shimgen.DEFAULT_UNLINK_RETRY
+    assert calls == [(launcher, shimgen.DEFAULT_UNLINK_RETRY)]
 
 
 def test_create_windows_shim_retry_failure_message(

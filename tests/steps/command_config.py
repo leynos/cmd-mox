@@ -59,7 +59,7 @@ def stub_runs(mox: CmdMox, cmd: str) -> None:
     """Configure a stub with a dynamic handler."""
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
-        assert invocation.command == cmd
+        assert invocation.command == cmd, "Assertion failed"
         return ("handled", "", 0)
 
     mox.stub(cmd).runs(handler)

@@ -108,10 +108,6 @@ class ReplaySession:
         ------
         LifecycleError
             If the fixture has already been loaded.
-        FileNotFoundError
-            If the fixture file does not exist.
-        ValueError
-            If the fixture file has an incompatible schema version.
         """
         if self._fixture is not None:
             msg = "Fixture already loaded; load() may only be called once"
@@ -147,10 +143,6 @@ class ReplaySession:
         Response | None
             A ``Response`` built from the matched recording, or ``None``.
 
-        Raises
-        ------
-        LifecycleError
-            If the fixture has not been loaded.
         """
         fixture = self._ensure_loaded()
 
@@ -178,8 +170,6 @@ class ReplaySession:
 
         Raises
         ------
-        LifecycleError
-            If the fixture has not been loaded.
         VerificationError
             If any recordings were not consumed and
             ``allow_unmatched`` is ``False``.

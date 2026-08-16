@@ -1,0 +1,34 @@
+# serializer version: 1
+# name: test_invocation_to_dict_round_trip
+  dict({
+    'args': list([
+      '--flag',
+    ]),
+    'command': 'cmd',
+    'env': dict({
+      'FOO': '1',
+    }),
+    'exit_code': 2,
+    'invocation_id': 'abc',
+    'stderr': 'err',
+    'stdin': 'input',
+    'stdout': 'out',
+  })
+# ---
+# name: test_response_serialises_passthrough
+  dict({
+    'env': dict({
+    }),
+    'exit_code': 0,
+    'passthrough': dict({
+      'extra_env': dict({
+        'A': '1',
+      }),
+      'invocation_id': '123',
+      'lookup_path': '/bin/echo',
+      'timeout': 4.2,
+    }),
+    'stderr': '',
+    'stdout': '',
+  })
+# ---

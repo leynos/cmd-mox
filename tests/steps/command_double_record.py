@@ -62,12 +62,12 @@ def call_record_raises(spy: CommandDouble, tmp_path: Path) -> None:
 @then("the spy has a recording session attached")
 def spy_has_session(spy_after_record: CommandDouble) -> None:
     """Assert the spy has a recording session attached."""
-    assert spy_after_record.has_recording_session is True
+    assert spy_after_record.has_recording_session is True, "Assertion failed"
 
 
 @then("the recording session is started")
 def session_is_started(spy_after_record: CommandDouble) -> None:
     """Assert the recording session has been started."""
     session = spy_after_record.recording_session
-    assert session is not None
-    assert session.is_started is True
+    assert session is not None, "Assertion failed"
+    assert session.is_started is True, "Assertion failed"

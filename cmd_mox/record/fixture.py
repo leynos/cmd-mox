@@ -69,6 +69,11 @@ def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
     The v0.x schema is hypothetical (v1.0 is the first release).  This
     migration exists to exercise the pipeline and serve as a template for
     future migrations.
+
+    Returns
+    -------
+    dict[str, typing.Any]
+        The input mapping with its schema version set to ``1.0``.
     """
     data["version"] = "1.0"
     return data
@@ -205,10 +210,6 @@ def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
     dict[str, typ.Any]
         The fixture dict migrated to the current schema version.
 
-    Raises
-    ------
-    ValueError
-        If the version is incompatible and no migration path exists.
     """
     data = copy.deepcopy(data)  # deep copy to avoid mutating the caller's dict
 
@@ -365,6 +366,11 @@ class FixtureFile:
         Older schema versions are migrated forward automatically.  Minor
         version differences within the same major version are tolerated
         because unknown fields are ignored.
+
+        Returns
+        -------
+        FixtureFile
+            The parsed fixture with its data migrated to the current schema.
         """
         data = _apply_migrations(data)
         return cls(

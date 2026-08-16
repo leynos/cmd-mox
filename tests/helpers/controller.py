@@ -1,6 +1,6 @@
 """Shared helpers for controller tests."""
 
-# ruff: noqa: S101
+# ruff: noqa: S101 - assertion helpers make BDD failures concise and local
 
 from __future__ import annotations
 
@@ -53,6 +53,11 @@ def _should_escape_batch_args(command_path: str) -> bool:
     one layer of caret escaping before our shim sees the arguments. We need to
     double carets whenever the resolved target is a batch file, even if the
     caller omitted the extension and relies on ``PATHEXT`` to find the shim.
+
+    Returns
+    -------
+    bool
+        Whether the command path invokes a Windows batch script.
     """
     if os.name != "nt":
         return False
@@ -75,6 +80,11 @@ def escape_windows_batch_args(argv: list[str]) -> list[str]:
     Note: batch parsing happens twice for our shim flow (once when invoking the
     launcher and again when the launcher expands ``%*``). To preserve a literal
     caret in the final Python argv we must therefore quadruple it up-front.
+
+    Returns
+    -------
+    list[str]
+        The original arguments, with batch-file carets escaped when necessary.
     """
     if not argv or not _should_escape_batch_args(argv[0]):
         return argv
@@ -91,7 +101,7 @@ def _execute_command_with_params(
     decoded_args = decode_placeholders(params.args)
     argv = [params.cmd, *shlex.split(decoded_args)]
     argv = escape_windows_batch_args(argv)
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
         argv,
         input=params.stdin,
         capture_output=True,
@@ -159,17 +169,19 @@ def _validate_journal_entry_environment(
         )
 
 
-def _verify_journal_entry_with_expectation(
-    mox: CmdMox, expectation: JournalEntryExpectation
-) -> None:
-    """Assert journal entry for *expectation.cmd* matches provided expectation."""
-    inv = _find_matching_journal_entry(mox, expectation)
-    _validate_journal_entry_fields(inv, expectation)
-    _validate_journal_entry_environment(inv, expectation)
-
-
 def verify_journal_entry_details(
     mox: CmdMox, expectation: JournalEntryExpectation
 ) -> None:
-    """Public helper to verify journal entry details."""
-    _verify_journal_entry_with_expectation(mox, expectation)
+    """Assert that the latest matching journal entry meets an expectation.
+
+    Parameters
+    ----------
+    mox
+        Controller whose journal is inspected.
+    expectation
+        Expected command and optional invocation details.
+
+    """
+    inv = _find_matching_journal_entry(mox, expectation)
+    _validate_journal_entry_fields(inv, expectation)
+    _validate_journal_entry_environment(inv, expectation)

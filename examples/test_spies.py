@@ -25,7 +25,7 @@ def test_spy_records_invocations_for_assertions(cmd_mox: CmdMox) -> None:
         shell=False,
     )
 
-    assert result.stdout == "tester"
-    assert spy.call_count == 1
+    assert result.stdout == "tester", "Assertion failed"
+    assert spy.call_count == 1, "Assertion failed"
     spy.assert_called()
     spy.assert_called_with()

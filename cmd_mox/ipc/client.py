@@ -35,10 +35,6 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
-if typ.TYPE_CHECKING:
-    _Win32File = Win32FileProtocol
-    _PyWinTypes = PyWinTypesProtocol
-
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
@@ -100,6 +96,11 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     """Return the sleep delay for a 0-based *attempt*.
 
     Never shorter than :data:`MIN_RETRY_SLEEP`.
+
+    Returns
+    -------
+    float
+        The bounded, optionally jittered retry delay in seconds.
     """
     delay = backoff * (attempt + 1)
     if jitter:
@@ -125,6 +126,11 @@ def _handle_retry_failure(
     """Process a failure from a retry attempt and return the backoff delay.
 
     Raises *exc* when no further retries should be attempted.
+
+    Returns
+    -------
+    float
+        The delay before the next retry attempt.
     """
     if context.strategy.on_failure is not None:
         context.strategy.on_failure(context.attempt, exc)
@@ -158,6 +164,16 @@ def retry_with_backoff[T](
     ``retry_config.jitter`` using :func:`calculate_retry_delay`, and the wait
     is performed via ``strategy.sleep`` (defaulting to :func:`time.sleep` when
     *strategy* is ``None``).
+
+    Returns
+    -------
+    T
+        The value returned by the first successful invocation of ``func``.
+
+    Raises
+    ------
+    RuntimeError
+        If the retry loop terminates without returning or propagating a failure.
     """
     max_attempts = retry_config.retries
     strat = strategy if strategy is not None else RetryStrategy()
@@ -225,6 +241,16 @@ def _validate_initial_deadline(
     """Validate the deadline and return remaining time.
 
     If already expired, cancel the operation and raise TimeoutError.
+
+    Returns
+    -------
+    float
+        The positive time remaining before the operation's deadline.
+
+    Raises
+    ------
+    TimeoutError
+        If the deadline has already passed.
     """
     try:
         return _remaining_time(deadline)
@@ -420,9 +446,6 @@ def _connect_pipe_with_retries(
             exc,
         )
 
-    def should_retry(exc: Exception, attempt: int, max_attempts: int) -> bool:
-        return _should_retry_pipe_error(exc, attempt, max_attempts)
-
     def sleep(delay: float) -> None:
         _wait_for_pipe_availability(
             pipe_name_str,
@@ -435,7 +458,7 @@ def _connect_pipe_with_retries(
         retry_config=retry_config,
         strategy=RetryStrategy(
             on_failure=log_failure,
-            should_retry=should_retry,
+            should_retry=_should_retry_pipe_error,
             sleep=sleep,
         ),
     )
@@ -459,7 +482,9 @@ def _send_pipe_request(
     try:
         _run_blocking_io(
             lambda: write_pipe_payload(
-                handle, payload, win32file=typ.cast("Win32FileProtocol", win32file)
+                handle,
+                payload,
+                win32file=typ.cast("Win32FileProtocol", win32file),
             ),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
@@ -508,6 +533,11 @@ def invoke_server(
     Unix clients rely on ``socket.settimeout`` so the kernel enforces the
     limit, while Windows clients cooperatively track the deadline and close
     the named pipe if any step exceeds *timeout*, raising ``TimeoutError``.
+
+    Returns
+    -------
+    Response
+        The IPC server's response to the invocation.
     """
     return _send_request(KIND_INVOCATION, invocation.to_dict(), timeout, retry_config)
 
@@ -522,6 +552,11 @@ def report_passthrough_result(
     Timeout handling mirrors :func:`invoke_server`: Unix sockets enforce the
     limit per system call, and Windows callers rely on cooperative deadlines
     that cancel the named pipe when *timeout* expires.
+
+    Returns
+    -------
+    Response
+        The IPC server's acknowledgement of the passthrough result.
     """
     return _send_request(
         KIND_PASSTHROUGH_RESULT,
