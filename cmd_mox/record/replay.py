@@ -108,7 +108,11 @@ class ReplaySession:
         ------
         LifecycleError
             If the fixture has already been loaded.
-        """
+        FileNotFoundError
+            If the fixture file does not exist.
+        ValueError
+            If the fixture data is incompatible with the supported schema.
+        """  # noqa: DOC502 - FixtureFile.load propagates these caller-visible failures.
         if self._fixture is not None:
             msg = "Fixture already loaded; load() may only be called once"
             raise LifecycleError(msg)
