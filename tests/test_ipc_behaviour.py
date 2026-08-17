@@ -32,6 +32,19 @@ def _run_shim(
     )
 
 
+def _run_unserved_shim(
+    env: EnvironmentManager, command: str
+) -> subprocess.CompletedProcess[str]:
+    """Execute *command* through a shim without an available IPC server."""
+    assert env.shim_dir is not None, "Assertion failed"
+    create_shim_symlinks(env.shim_dir, [command])
+    return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
+        [_shim_cmd_path(env, command)],
+        capture_output=True,
+        text=True,
+    )
+
+
 def _invoke_command_via_ipc(
     env: EnvironmentManager,
     command: str,
@@ -73,16 +86,9 @@ def test_ipc_server_exports_custom_timeout() -> None:
 
 def test_shim_errors_when_socket_unset() -> None:
     """Shim prints an error if IPC socket env var is missing."""
-    commands = ["bar"]
     with EnvironmentManager() as env:
-        assert env.shim_dir is not None, "Assertion failed"
-        create_shim_symlinks(env.shim_dir, commands)
         os.environ.pop(CMOX_IPC_SOCKET_ENV, None)
-        result = subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
-            [str(_shim_cmd_path(env, "bar"))],
-            capture_output=True,
-            text=True,
-        )
+        result = _run_unserved_shim(env, "bar")
         assert result.stdout == "", "Assertion failed"
         assert result.stderr.strip() == "IPC socket not specified", "Assertion failed"
         assert result.returncode == 1, "Assertion failed"
@@ -90,17 +96,10 @@ def test_shim_errors_when_socket_unset() -> None:
 
 def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Shim prints an error if timeout env var is invalid."""
-    commands = ["baz"]
     with EnvironmentManager() as env:
-        assert env.shim_dir is not None, "Assertion failed"
-        create_shim_symlinks(env.shim_dir, commands)
         monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "dummy")
         monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "nan")
-        result = subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
-            [str(_shim_cmd_path(env, "baz"))],
-            capture_output=True,
-            text=True,
-        )
+        result = _run_unserved_shim(env, "baz")
         assert result.stdout == "", "Assertion failed"
         assert "invalid timeout: 'nan'" in result.stderr, "Assertion failed"
         assert result.returncode == 1, "Assertion failed"
