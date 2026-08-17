@@ -342,13 +342,13 @@ class CallbackIPCServer(IPCServer):
         )
 
 
-type _RequestProcessor = cabc.Callable[[_BaseIPCServer[typ.Any], typ.Any], Response]
+type _RequestProcessor = typ.Literal["handle_invocation", "handle_passthrough_result"]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
-    KIND_INVOCATION: (validate_invocation_payload, _BaseIPCServer.handle_invocation),
+    KIND_INVOCATION: (validate_invocation_payload, "handle_invocation"),
     KIND_PASSTHROUGH_RESULT: (
         validate_passthrough_payload,
-        _BaseIPCServer.handle_passthrough_result,
+        "handle_passthrough_result",
     ),
 }
 
@@ -423,11 +423,30 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
     return _encode_response(response)
 
 
+def _raise_invalid_request_dispatch(
+    processor: _RequestProcessor, obj: Invocation | PassthroughResult
+) -> typ.NoReturn:
+    """Raise when the request registry maps a validator to the wrong hook."""
+    msg = (
+        "Request processor "
+        f"{processor!r} does not match validated payload {type(obj).__name__}"
+    )
+    raise TypeError(msg)
+
+
 def _execute_request(
-    server: _BaseIPCServer[typ.Any], processor: _RequestProcessor, obj: object
+    server: _BaseIPCServer[typ.Any],
+    processor: _RequestProcessor,
+    obj: Invocation | PassthroughResult,
 ) -> Response:
     try:
-        return processor(server, obj)
+        match processor, obj:
+            case "handle_invocation", Invocation() as invocation:
+                return server.handle_invocation(invocation)
+            case "handle_passthrough_result", PassthroughResult() as result:
+                return server.handle_passthrough_result(result)
+            case _:
+                return _raise_invalid_request_dispatch(processor, obj)
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception as exc:  # pragma: no cover - defensive logging

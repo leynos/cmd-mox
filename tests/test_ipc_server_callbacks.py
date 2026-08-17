@@ -37,6 +37,18 @@ type _RequestPayload = dict[
 pytestmark = [pytest.mark.requires_unix_sockets]
 
 
+class _OverridingIPCServer(IPCServer):
+    """IPC server whose hook overrides prove request dispatch remains virtual."""
+
+    def handle_invocation(self, invocation: Invocation) -> Response:
+        """Return a response that identifies the overridden invocation hook."""
+        return Response(stdout=f"override:{invocation.command}")
+
+    def handle_passthrough_result(self, result: PassthroughResult) -> Response:
+        """Return a response that identifies the overridden passthrough hook."""
+        return Response(stdout=f"override:{result.invocation_id}")
+
+
 @dataclass(slots=True)
 class TimeoutTestCase:
     """Test case configuration for timeout validation."""
@@ -249,7 +261,7 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
                 "exit_code": 2,
             },
             server.validate_passthrough_payload,
-            server._BaseIPCServer.handle_passthrough_result,
+            "handle_passthrough_result",
         ),
         (
             server.KIND_INVOCATION,
@@ -260,7 +272,7 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
                 "env": {},
             },
             server.validate_invocation_payload,
-            server._BaseIPCServer.handle_invocation,
+            "handle_invocation",
         ),
     ],
 )
@@ -268,12 +280,11 @@ def test_parse_payload_returns_handler_metadata(
     kind: str,
     payload: _RequestPayload,
     expected_validator: server._RequestValidator,
-    expected_processor: server._RequestProcessor,
+    expected_processor: str,
 ) -> None:
     """Parsed requests should carry handler metadata for pipeline steps.
 
-    The processor type is the server's heterogeneous request-handler union:
-    invocation and passthrough processors accept different parsed objects.
+    The processor identifies the public server hook selected after validation.
     """
     raw = json.dumps({"kind": kind, **payload}).encode()
 
@@ -315,6 +326,46 @@ def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
     assert payload == {"stdout": "ok", "stderr": "", "exit_code": 0, "env": {}}, (
         "Assertion failed"
     )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_stdout"),
+    [
+        (
+            {
+                "kind": server.KIND_INVOCATION,
+                "command": "echo",
+                "args": [],
+                "stdin": "",
+                "env": {},
+            },
+            "override:echo",
+        ),
+        (
+            {
+                "kind": server.KIND_PASSTHROUGH_RESULT,
+                "invocation_id": "abc",
+                "stdout": "",
+                "stderr": "",
+                "exit_code": 0,
+            },
+            "override:abc",
+        ),
+    ],
+)
+def test_request_pipeline_dispatches_to_overridden_handlers(
+    tmp_path: Path,
+    payload: _RequestPayload,
+    expected_stdout: str,
+) -> None:
+    """Network request dispatch should honour overridden public handler hooks."""
+    ipc_server = _OverridingIPCServer(tmp_path / "ipc.sock")
+
+    response_bytes = server._request_pipeline(ipc_server, json.dumps(payload).encode())
+
+    assert response_bytes is not None, "Request pipeline did not return a response"
+    response = json.loads(response_bytes.decode("utf-8"))
+    assert response["stdout"] == expected_stdout, "Override was bypassed by dispatch"
 
 
 def test_request_pipeline_validation_failure_returns_none(
