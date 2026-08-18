@@ -468,6 +468,13 @@ class FixtureFile:
         -------
         FixtureFile
             Parsed and migrated fixture.
-        """
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``path`` does not exist.
+        ValueError
+            If the fixture is not valid JSON or fails schema validation.
+        """  # noqa: DOC502 - pathlib and JSON/schema parsing propagate these caller-visible failures.
         data = json.loads(path.read_text())
         return cls.from_dict(data)

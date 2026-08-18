@@ -399,11 +399,14 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
         Raises
         ------
+        FileNotFoundError
+            If the replay fixture does not exist.
         ValueError
-            If this double is not a spy or is configured for passthrough.
+            If this double is not a spy, is configured for passthrough, or
+            the replay fixture is invalid.
         RuntimeError
             If a replay session already exists.
-        """
+        """  # noqa: DOC502 - ReplaySession.load propagates fixture-load failures.
         if self.kind is not DoubleKind.SPY:
             msg = "replay() is only valid for spies"
             raise ValueError(msg)

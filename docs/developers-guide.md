@@ -69,6 +69,31 @@ Do not bypass `make lint` for normal validation. Running the target keeps the
 Ruff, PyPy Pylint, DF12 Pylint, and snapshot-leak tiers ordered consistently
 with CI and preserves the shared `uv` cache configuration.
 
+## Snapshot testing
+
+The development dependency group includes
+[syrupy](https://github.com/syrupy-project/syrupy), which provides the
+`snapshot` fixture used by the IPC model and server callback tests. These tests
+compare serialized payloads with the tracked `.ambr` files in
+`tests/__snapshots__`.
+
+Run the snapshot tests with the normal test command:
+
+```bash
+uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py
+```
+
+When an intentional payload change requires new expected output, update the
+snapshots explicitly and review the resulting `.ambr` diff:
+
+```bash
+uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py \
+  --snapshot-update
+```
+
+Run the focused tests again without `--snapshot-update` before committing so
+that the committed snapshots are verified rather than rewritten.
+
 ## Spelling policy
 
 The lint and Markdown gates run a pinned `typos` release with British English
