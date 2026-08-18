@@ -178,7 +178,12 @@ class ReplaySession:
         Response | None
             A ``Response`` built from the matched recording, or ``None``.
 
-        """
+        Raises
+        ------
+        LifecycleError
+            If :meth:`load` has not been called successfully.
+
+        """  # noqa: DOC502 - _ensure_loaded propagates this caller-visible failure.
         fixture = self._ensure_loaded()
 
         with self._lock:
@@ -205,10 +210,12 @@ class ReplaySession:
 
         Raises
         ------
+        LifecycleError
+            If :meth:`load` has not been called successfully.
         VerificationError
             If any recordings were not consumed and
             ``allow_unmatched`` is ``False``.
-        """
+        """  # noqa: DOC502 - _ensure_loaded propagates this caller-visible failure.
         fixture = self._ensure_loaded()
 
         if self._allow_unmatched:

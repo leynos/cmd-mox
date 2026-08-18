@@ -180,7 +180,14 @@ def retry_unlink(
         Factory to create custom exception on final failure. If None, re-raises
         the original exception.
 
-    """
+    Raises
+    ------
+    PermissionError, OSError
+        When all retry attempts are exhausted (if ``exc_factory`` is ``None``).
+    Exception
+        Custom exception from ``exc_factory`` (if provided).
+
+    """  # noqa: DOC502 - _handle_unlink_failure propagates the documented terminal failures.
     if not path.exists():
         return
 
@@ -222,7 +229,13 @@ def robust_rmtree(
     logger : logging.Logger | None, optional
         Logger for retry attempts and outcomes. Defaults to module logger.
 
-    """
+    Raises
+    ------
+    RobustRmtreeError
+        When all retry attempts are exhausted, wrapping the last ``OSError``
+        encountered.
+
+    """  # noqa: DOC502 - _handle_rmtree_final_failure propagates the documented terminal failure.
     if not path.exists():
         return
 
