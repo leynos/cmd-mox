@@ -28,7 +28,7 @@ _SECRET_ENV_KEY_RE: typ.Final[re.Pattern[str]] = re.compile(
 
 
 def _is_sensitive_env_key(key: str) -> bool:
-    """Return True if key likely holds secret material (substring match)."""
+    """Return True if key likely holds secret material (substring match)."""  # noqa: DOC201
     k = key.casefold()
     return any(tkn in k for tkn in _SENSITIVE_TOKENS)
 
@@ -65,12 +65,24 @@ class Expectation:
     ordered: bool = False
 
     def with_args(self, *args: str) -> Expectation:
-        """Require ``args`` to match exactly."""
+        """Require ``args`` to match exactly.
+
+        Returns
+        -------
+        Expectation
+            This expectation, allowing further fluent configuration.
+        """
         self.args = list(args)
         return self
 
     def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Expectation:
-        """Use callables in ``matchers`` to validate each argument."""
+        """Use callables in ``matchers`` to validate each argument.
+
+        Returns
+        -------
+        Expectation
+            This expectation, allowing further fluent configuration.
+        """
         self.match_args = list(matchers)
         return self
 
@@ -88,7 +100,20 @@ class Expectation:
         return self
 
     def with_env(self, mapping: dict[str, str]) -> Expectation:
-        """Require environment variables in ``mapping``."""
+        """Require environment variables in ``mapping``.
+
+        Returns
+        -------
+        Expectation
+            This expectation, allowing further fluent configuration.
+
+        Raises
+        ------
+        TypeError
+            If a key or value is not a string.
+        ValueError
+            If a key is empty.
+        """
         for key, value in mapping.items():
             if not isinstance(key, str):
                 msg = f"Environment variable name must be str, got {type(key).__name__}"
@@ -106,27 +131,57 @@ class Expectation:
         return self
 
     def times_called(self, count: int) -> Expectation:
-        """Set the required invocation count to ``count``."""
+        """Set the required invocation count to ``count``.
+
+        Returns
+        -------
+        Expectation
+            This expectation, allowing further fluent configuration.
+        """
         self.count = count
         return self
 
     def times(self, count: int) -> Expectation:
-        """Alias for :meth:`times_called` matching the fluent DSL."""
+        """Alias for :meth:`times_called` matching the fluent DSL.
+
+        Returns
+        -------
+        Expectation
+            This expectation, allowing further fluent configuration.
+        """
         self.count = count
         return self
 
     def in_order(self) -> Expectation:
-        """Mark this expectation as ordered relative to others."""
+        """Mark this expectation as ordered relative to others.
+
+        Returns
+        -------
+        Expectation
+            This expectation, allowing further fluent configuration.
+        """
         self.ordered = True
         return self
 
     def any_order(self) -> Expectation:
-        """Allow this expectation to occur in any order."""
+        """Allow this expectation to occur in any order.
+
+        Returns
+        -------
+        Expectation
+            This expectation, allowing further fluent configuration.
+        """
         self.ordered = False
         return self
 
     def matches(self, invocation: Invocation) -> bool:
-        """Return ``True`` if *invocation* satisfies this expectation."""
+        """Return ``True`` if *invocation* satisfies this expectation.
+
+        Returns
+        -------
+        bool
+            Whether command, arguments, stdin, and environment all match.
+        """
         return (
             self._matches_command(invocation)
             and self._matches_args(invocation)
@@ -135,11 +190,11 @@ class Expectation:
         )
 
     def _matches_command(self, invocation: Invocation) -> bool:
-        """Return ``True`` if the command name matches."""
+        """Return ``True`` if the command name matches."""  # noqa: DOC201
         return invocation.command == self.name
 
     def _matches_args(self, invocation: Invocation) -> bool:
-        """Validate positional arguments."""
+        """Validate positional arguments."""  # noqa: DOC201
         if self.args is not None and invocation.args != self.args:
             return False
         if self.match_args is not None:
@@ -147,7 +202,7 @@ class Expectation:
         return True
 
     def _validate_matchers(self, args: list[str]) -> bool:
-        """Return ``True`` if ``args`` satisfy ``match_args`` validators."""
+        """Return ``True`` if ``args`` satisfy ``match_args`` validators."""  # noqa: DOC201
         matchers = self.match_args
         if matchers is None:
             # Defensive fallback: callers ensure ``match_args`` is set before
@@ -165,7 +220,13 @@ class Expectation:
         return True
 
     def explain_mismatch(self, invocation: Invocation) -> str:
-        """Return a reason why ``invocation`` failed to match."""
+        """Return a reason why ``invocation`` failed to match.
+
+        Returns
+        -------
+        str
+            A human-readable explanation of the first mismatch found.
+        """
         for checker in (
             self._explain_command_mismatch,
             self._explain_args_mismatch,
@@ -179,19 +240,19 @@ class Expectation:
         return "args, stdin, or env mismatch"
 
     def _explain_command_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if the command name differs."""
+        """Return a message if the command name differs."""  # noqa: DOC201
         if self._matches_command(invocation):
             return None
         return f"command {invocation.command!r} != {self.name!r}"
 
     def _explain_args_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if explicit args do not match."""
+        """Return a message if explicit args do not match."""  # noqa: DOC201
         if self.args is None or invocation.args == self.args:
             return None
         return f"arguments {invocation.args!r} != {self.args!r}"
 
     def _explain_match_args_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message when matcher-based args fail."""
+        """Return a message when matcher-based args fail."""  # noqa: DOC201
         if self.match_args is None:
             return None
         if len(invocation.args) != len(self.match_args):
@@ -213,7 +274,7 @@ class Expectation:
         return None
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if stdin fails to satisfy the expectation."""
+        """Return a message if stdin fails to satisfy the expectation."""  # noqa: DOC201
         if self.stdin is None:
             return None
         if isinstance(self.stdin, str):
@@ -233,7 +294,7 @@ class Expectation:
         return None
 
     def _explain_env_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if an env variable mismatch is found."""
+        """Return a message if an env variable mismatch is found."""  # noqa: DOC201
         if not self.env:
             return None
         for key, value in self.env.items():
@@ -246,7 +307,7 @@ class Expectation:
         return None
 
     def _matches_stdin(self, invocation: Invocation) -> bool:
-        """Check stdin data or predicate."""
+        """Check stdin data or predicate."""  # noqa: DOC201
         if self.stdin is None:
             return True
         if isinstance(self.stdin, str):
@@ -259,5 +320,5 @@ class Expectation:
         return False
 
     def _matches_env(self, invocation: Invocation) -> bool:
-        """Verify required environment variables."""
+        """Verify required environment variables."""  # noqa: DOC201
         return all(invocation.env.get(key) == value for key, value in self.env.items())

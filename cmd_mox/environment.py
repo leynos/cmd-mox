@@ -64,12 +64,12 @@ class _CtypesModule(typ.Protocol):
 
 
 def _path_identity(path: Path | None) -> str | None:
-    """Return a comparable representation of *path*, or ``None`` if unset."""
+    """Return a comparable representation of *path*, or ``None`` if unset."""  # noqa: DOC201
     return None if path is None else path_utils.normalize_path(path)
 
 
 def _should_shorten_path(raw_path: Path) -> bool:
-    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""
+    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""  # noqa: DOC201
     return (
         len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD
         if path_utils.IS_WINDOWS
@@ -78,7 +78,7 @@ def _should_shorten_path(raw_path: Path) -> bool:
 
 
 def _get_short_path(path: Path) -> Path | None:
-    """Return the short (8.3) variant for *path*, or ``None`` if unavailable."""
+    """Return the short (8.3) variant for *path*, or ``None`` if unavailable."""  # noqa: DOC201, DOC501
     if not path_utils.IS_WINDOWS:
         return None
 
@@ -121,7 +121,7 @@ def _get_short_path(path: Path) -> Path | None:
 
 
 def _maybe_shorten_windows_path(path: Path) -> Path:
-    """Return a MAX_PATH-safe variant of *path* when running on Windows."""
+    """Return a MAX_PATH-safe variant of *path* when running on Windows."""  # noqa: DOC201
     if not path_utils.IS_WINDOWS or not _should_shorten_path(path):
         return path
 
@@ -249,7 +249,13 @@ class EnvironmentManager:
 
     @classmethod
     def get_active_manager(cls) -> EnvironmentManager | None:
-        """Return the active manager for the current thread, if any."""
+        """Return the active manager for the current thread, if any.
+
+        Returns
+        -------
+        EnvironmentManager or None
+            The manager active in the current thread.
+        """
         return getattr(cls._state, "active_manager", None)
 
     @classmethod
@@ -271,7 +277,18 @@ class EnvironmentManager:
         self._prefix = prefix
 
     def __enter__(self) -> EnvironmentManager:
-        """Set up the temporary environment."""
+        """Set up the temporary environment.
+
+        Returns
+        -------
+        EnvironmentManager
+            This manager instance.
+
+        Raises
+        ------
+        RuntimeError
+            If another manager is already active in the current thread.
+        """
         cls = type(self)
         if self._orig_env is not None or cls.get_active_manager() is not None:
             msg = "EnvironmentManager cannot be nested"
@@ -310,7 +327,7 @@ class EnvironmentManager:
     def _restore_original_environment(
         self, _cleanup_errors: list[CleanupError]
     ) -> None:
-        """Return the process environment to its original state."""
+        """Return the process environment to its original state."""  # noqa: DOC501
         if self._orig_env is not None:
             _restore_env(self._orig_env)
             if path_utils.IS_WINDOWS:
@@ -326,7 +343,7 @@ class EnvironmentManager:
         type(self).reset_active_manager()
 
     def _should_skip_directory_removal(self) -> bool:
-        """Return ``True`` if no matching temporary directory remains."""
+        """Return ``True`` if no matching temporary directory remains."""  # noqa: DOC201
         shim = self.shim_dir
         created = self._created_dir
         if created is None or shim is None:
@@ -336,7 +353,7 @@ class EnvironmentManager:
         return not shim.exists()
 
     def _has_mismatched_directories(self) -> bool:
-        """Check if the created directory differs from the current shim directory."""
+        """Check if the created directory differs from the current shim directory."""  # noqa: DOC201
         created = self._created_dir
         shim = self.shim_dir
         if created is None or shim is None:
@@ -373,7 +390,7 @@ class EnvironmentManager:
         cleanup_errors: list[CleanupError],
         exc_type: type[BaseException] | None,
     ) -> None:
-        """Log and potentially raise aggregated cleanup errors."""
+        """Log and potentially raise aggregated cleanup errors."""  # noqa: DOC501
         if cleanup_errors:
             messages = [msg for msg, _ in cleanup_errors]
             error_msg = "; ".join(messages)
@@ -428,7 +445,13 @@ class EnvironmentManager:
     def export_ipc_environment(
         self, *, timeout: float | object = _UNSET_TIMEOUT
     ) -> None:
-        """Expose IPC configuration variables for active shims."""
+        """Expose IPC configuration variables for active shims.
+
+        Raises
+        ------
+        RuntimeError
+            If called before the manager has entered its environment.
+        """
         if self.socket_path is None:
             msg = "Cannot export IPC settings before entering the environment"
             raise RuntimeError(msg)

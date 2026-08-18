@@ -34,7 +34,13 @@ class Any(_ReprMixin):
     """Match any value."""
 
     def __call__(self, value: str) -> bool:
-        """Return ``True`` for any input."""
+        """Return ``True`` for any input.
+
+        Returns
+        -------
+        bool
+            Always ``True``.
+        """
         return True
 
 
@@ -45,7 +51,13 @@ class IsA(_ReprMixin):
         self.typ = typ
 
     def __call__(self, value: str) -> bool:
-        """Return ``True`` when ``value`` converts to ``typ``."""
+        """Return ``True`` when ``value`` converts to ``typ``.
+
+        Returns
+        -------
+        bool
+            Whether conversion succeeds.
+        """
         try:
             self.typ(value)
         except Exception:  # noqa: BLE001 - conversion may fail
@@ -61,7 +73,13 @@ class Regex(_ReprMixin):
         self._pattern = re.compile(pattern)
 
     def __call__(self, value: str) -> bool:
-        """Return ``True`` if the regex matches *value*."""
+        """Return ``True`` if the regex matches *value*.
+
+        Returns
+        -------
+        bool
+            Whether the configured pattern matches *value*.
+        """
         return bool(self._pattern.search(value))
 
 
@@ -72,7 +90,13 @@ class Contains(_ReprMixin):
         self.substring = substring
 
     def __call__(self, value: str) -> bool:
-        """Return ``True`` if ``substring`` is in *value*."""
+        """Return ``True`` if ``substring`` is in *value*.
+
+        Returns
+        -------
+        bool
+            Whether *value* contains the configured substring.
+        """
         return self.substring in value
 
 
@@ -83,7 +107,13 @@ class StartsWith(_ReprMixin):
         self.prefix = prefix
 
     def __call__(self, value: str) -> bool:
-        """Return ``True`` if *value* starts with ``prefix``."""
+        """Return ``True`` if *value* starts with ``prefix``.
+
+        Returns
+        -------
+        bool
+            Whether *value* starts with the configured prefix.
+        """
         return value.startswith(self.prefix)
 
 
@@ -95,7 +125,13 @@ class Predicate(_ReprMixin):
         self.func = func
 
     def __call__(self, value: str) -> bool:
-        """Return ``True`` if ``func(value)`` is truthy."""
+        """Return ``True`` if ``func(value)`` is truthy.
+
+        Returns
+        -------
+        bool
+            The predicate result coerced to ``bool``.
+        """
         return bool(self.func(value))
 
 

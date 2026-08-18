@@ -38,7 +38,13 @@ class RetryConfig:
     retry_delay: float
 
     def __post_init__(self) -> None:
-        """Validate retry configuration values."""
+        """Validate retry configuration values.
+
+        Raises
+        ------
+        ValueError
+            If the attempt count is less than one or the delay is negative.
+        """
         if self.max_attempts < 1:
             msg = "max_attempts must be >= 1"
             raise ValueError(msg)
@@ -116,14 +122,14 @@ def _fix_windows_permissions(path: Path) -> None:
 
 
 def _path_is_missing(path: Path, exc: OSError) -> bool:
-    """Check if the path is missing (either exception indicates or actual check)."""
+    """Check if the path is missing (from the exception or filesystem)."""  # noqa: DOC201
     return isinstance(exc, FileNotFoundError) or not path.exists()
 
 
 def _handle_rmtree_final_failure(
     path: Path, attempts: int, exc: OSError, logger: logging.Logger
 ) -> typ.NoReturn:
-    """Handle final rmtree failure by logging and raising RobustRmtreeError."""
+    """Handle final rmtree failure by logging and raising RobustRmtreeError."""  # noqa: DOC501
     logger.warning(
         "Failed to remove temporary directory %s after %d attempts",
         path,

@@ -135,7 +135,13 @@ class _ServerLifecycle[BackendT](abc.ABC):
         self.stop()
 
     def start(self) -> None:
-        """Start the backend transport."""
+        """Start the backend transport.
+
+        Raises
+        ------
+        RuntimeError
+            If the backend has already been started.
+        """
         with self._lock:
             if self._thread:
                 msg = "IPC server already started"
@@ -237,7 +243,7 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         error_builder: cabc.Callable[[DispatchArg, Exception], RuntimeError]
         | None = None,
     ) -> Response:
-        """Invoke *handler* when provided, otherwise fall back to *default*."""
+        """Invoke *handler* when provided, otherwise fall back to *default*."""  # noqa: DOC201, DOC501
         if handler is None:
             return default(argument)
         if error_builder is None:
@@ -251,12 +257,12 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
 
     @staticmethod
     def _default_invocation_response(invocation: Invocation) -> Response:
-        """Echo the command name when no handler overrides the behaviour."""
+        """Echo the command name when no handler overrides the behaviour."""  # noqa: DOC201
         return Response(stdout=invocation.command)
 
     @staticmethod
     def _raise_unhandled_passthrough(result: PassthroughResult) -> Response:
-        """Raise when passthrough results lack a configured handler."""
+        """Raise when passthrough results lack a configured handler."""  # noqa: DOC501
         msg = f"Unhandled passthrough result for {result.invocation_id}"
         raise RuntimeError(msg)
 
@@ -264,7 +270,7 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
     def _build_passthrough_error(
         result: PassthroughResult, exc: Exception
     ) -> RuntimeError:
-        """Create the wrapped passthrough error surfaced to callers."""
+        """Create the wrapped passthrough error surfaced to callers."""  # noqa: DOC201
         msg = f"Exception in passthrough handler for {result.invocation_id}: {exc}"
         return RuntimeError(msg)
 
@@ -274,7 +280,13 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
             env_mgr.export_ipc_environment(timeout=self.timeout)
 
     def handle_invocation(self, invocation: Invocation) -> Response:
-        """Process invocations using the configured handler when available."""
+        """Process invocations using the configured handler when available.
+
+        Returns
+        -------
+        Response
+            The configured handler's response or the default echo response.
+        """
         return self._dispatch(
             self._handler,
             invocation,
@@ -282,7 +294,13 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         )
 
     def handle_passthrough_result(self, result: PassthroughResult) -> Response:
-        """Handle passthrough results via the configured callback when provided."""
+        """Handle passthrough results via the configured callback when provided.
+
+        Returns
+        -------
+        Response
+            The callback's acknowledgement response.
+        """
         return self._dispatch(
             self._passthrough_handler,
             result,
@@ -363,12 +381,18 @@ class ParsedRequest:
     processor: _RequestProcessor
 
     def validate(self) -> Invocation | PassthroughResult | None:
-        """Run the validator associated with this request payload."""
+        """Run the validator associated with this request payload.
+
+        Returns
+        -------
+        Invocation, PassthroughResult, or None
+            The validated request object, or ``None`` for invalid payloads.
+        """
         return self.validator(self.payload)
 
 
 def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
-    """Decode raw request bytes into a mapping, logging malformed input once."""
+    """Decode raw request bytes into a mapping, logging malformed input once."""  # noqa: DOC201
     payload = parse_json_safely(raw)
     if payload is not None:
         return payload
@@ -410,7 +434,7 @@ def _encode_response(response: Response) -> bytes:
 
 
 def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
-    """Parse, validate, dispatch, and encode an IPC request in order."""
+    """Parse, validate, dispatch, and encode an IPC request in order."""  # noqa: DOC201
     parsed = _parse_payload(raw)
     if parsed is None:
         return None
@@ -426,7 +450,7 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
 def _raise_invalid_request_dispatch(
     processor: _RequestProcessor, obj: Invocation | PassthroughResult
 ) -> typ.NoReturn:
-    """Raise when the request registry maps a validator to the wrong hook."""
+    """Raise when the request registry maps a validator to the wrong hook."""  # noqa: DOC501
     msg = (
         "Request processor "
         f"{processor!r} does not match validated payload {type(obj).__name__}"
@@ -573,7 +597,7 @@ class _NamedPipeState:
         self._client_lock = threading.Lock()
 
     def _try_connect_pipe(self, handle: object) -> tuple[bool, bool]:
-        """Attempt to connect *handle* to the named pipe."""
+        """Attempt to connect *handle* to the named pipe."""  # noqa: DOC201
         try:
             win32pipe.ConnectNamedPipe(handle, None)
         except pywintypes.error as exc:
@@ -583,7 +607,7 @@ class _NamedPipeState:
     def _handle_connection_error(
         self, exc: object, handle: object
     ) -> tuple[bool, bool]:
-        """Return control-flow decisions for a failed connection attempt."""
+        """Return control-flow decisions for a failed connection attempt."""  # noqa: DOC201
         winerror = getattr(exc, "winerror", None)
         if winerror is None:
             logger.exception("Named pipe connect failed")
@@ -614,7 +638,7 @@ class _NamedPipeState:
         thread.start()
 
     def _get_active_threads(self) -> list[threading.Thread]:
-        """Get a snapshot of active client threads."""
+        """Get a snapshot of active client threads."""  # noqa: DOC201
         with self._client_lock:
             return list(self._client_threads)
 

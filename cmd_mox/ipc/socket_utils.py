@@ -12,7 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
-    """Remove a pre-existing socket when no server is listening."""
+    """Remove a pre-existing socket when no server is listening.
+
+    Raises
+    ------
+    RuntimeError
+        If an active server is still listening on *socket_path*.
+    """
     socket_path = pathlib.Path(socket_path)
     address = str(socket_path)
     with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
@@ -32,7 +38,7 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
 
 
 def _try_socket_connection(address: str, timeout: float) -> bool:
-    """Attempt to connect to *address* within *timeout* seconds."""
+    """Attempt to connect to *address* within *timeout* seconds."""  # noqa: DOC201
     with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
         probe.settimeout(timeout)
         try:
@@ -43,7 +49,7 @@ def _try_socket_connection(address: str, timeout: float) -> bool:
 
 
 def _poll_socket_until_ready(socket_path: pathlib.Path, timeout: float) -> None:
-    """Poll a Unix domain socket until it accepts connections within timeout."""
+    """Poll a Unix domain socket until it accepts connections within timeout."""  # noqa: DOC501
     deadline = time.monotonic() + timeout
     wait_time = 0.001
     address = str(socket_path)
