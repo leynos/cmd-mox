@@ -48,7 +48,18 @@ class PassthroughCoordinator:
         self._cleanup_ttl = cleanup_ttl
 
     def _expiry_deadline(self, timeout: float) -> float:
-        """Return the monotonic deadline for a passthrough invocation."""
+        """Return the monotonic deadline for a passthrough invocation.
+
+        Parameters
+        ----------
+        timeout : float
+            Per-invocation timeout in seconds.
+
+        Returns
+        -------
+        float
+            The monotonic-clock deadline after the configured cleanup TTL.
+        """
         ttl = max(timeout, self._cleanup_ttl)
         return time.monotonic() + ttl
 
@@ -69,7 +80,22 @@ class PassthroughCoordinator:
         invocation: Invocation,
         config: PassthroughConfig,
     ) -> Response:
-        """Record passthrough intent and return instructions for shim."""
+        """Record passthrough intent and return instructions for shim.
+
+        Parameters
+        ----------
+        double : CommandDouble
+            Spy double that owns the passthrough request.
+        invocation : Invocation
+            Invocation to retain until the shim reports its result.
+        config : PassthroughConfig
+            Lookup path, timeout, and environment additions for the request.
+
+        Returns
+        -------
+        Response
+            IPC response containing the passthrough instructions.
+        """
         invocation_id = invocation.invocation_id or uuid.uuid4().hex
         invocation.invocation_id = invocation_id
 
@@ -106,7 +132,23 @@ class PassthroughCoordinator:
     def finalize_result(
         self, result: PassthroughResult
     ) -> tuple[CommandDouble, Invocation, Response]:
-        """Finalize passthrough and return (double, invocation, response)."""
+        """Finalize passthrough and return its double, invocation, and response.
+
+        Parameters
+        ----------
+        result : PassthroughResult
+            Result reported by the real command process.
+
+        Returns
+        -------
+        tuple[CommandDouble, Invocation, Response]
+            The owning double, updated invocation, and response delivered to it.
+
+        Raises
+        ------
+        RuntimeError
+            If the result does not correspond to a pending request.
+        """
         with self._lock:
             self._prune_expired_locked()
             entry = self._pending.pop(result.invocation_id, None)
@@ -131,13 +173,30 @@ class PassthroughCoordinator:
         return double, invocation, resp
 
     def has_pending(self, invocation_id: str) -> bool:
-        """Return ``True`` if *invocation_id* is awaiting passthrough results."""
+        """Return whether *invocation_id* awaits a passthrough result.
+
+        Parameters
+        ----------
+        invocation_id : str
+            Identifier assigned to the pending invocation.
+
+        Returns
+        -------
+        bool
+            ``True`` when the invocation is still pending.
+        """
         with self._lock:
             self._prune_expired_locked()
             return invocation_id in self._pending
 
     def pending_count(self) -> int:
-        """Return the number of outstanding passthrough invocations."""
+        """Return the number of outstanding passthrough invocations.
+
+        Returns
+        -------
+        int
+            Number of non-expired requests awaiting results.
+        """
         with self._lock:
             self._prune_expired_locked()
             return len(self._pending)

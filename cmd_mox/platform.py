@@ -30,12 +30,35 @@ _PYTEST_REQUIRED_MESSAGE: typ.Final[str] = (
 
 
 def _normalize_platform(platform: str) -> str:
-    """Return a lowercase version of *platform* suitable for prefix checks."""
+    """Return a normalised platform name suitable for prefix checks.
+
+    Parameters
+    ----------
+    platform : str
+        Platform identifier to trim and case-fold.
+
+    Returns
+    -------
+    str
+        The lower-case, whitespace-trimmed identifier.
+    """
     return platform.strip().lower()
 
 
 def _current_platform(platform: str | None = None) -> str:
-    """Return the effective platform name, honouring test overrides."""
+    """Return the effective platform name, honouring test overrides.
+
+    Parameters
+    ----------
+    platform : str, optional
+        Explicit platform identifier. If omitted, use the environment override
+        or the running interpreter's platform.
+
+    Returns
+    -------
+    str
+        Normalised platform identifier used by support checks.
+    """
     if platform:
         return _normalize_platform(platform)
 

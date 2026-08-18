@@ -35,7 +35,13 @@ class ScrubbingRule:
     description: str = ""
 
     def to_dict(self) -> ScrubbingRuleDict:
-        """Return a JSON-serializable mapping."""
+        """Return a JSON-serializable mapping.
+
+        Returns
+        -------
+        ScrubbingRuleDict
+            Serialized scrubbing rule fields.
+        """
         return ScrubbingRuleDict(
             pattern=self.pattern,
             replacement=self.replacement,
@@ -45,7 +51,18 @@ class ScrubbingRule:
 
     @classmethod
     def from_dict(cls, data: ScrubbingRuleDict) -> ScrubbingRule:
-        """Construct a rule from a JSON-compatible mapping."""
+        """Construct a rule from a JSON-compatible mapping.
+
+        Parameters
+        ----------
+        data : ScrubbingRuleDict
+            Serialized scrubbing rule fields.
+
+        Returns
+        -------
+        ScrubbingRule
+            Parsed scrubbing rule.
+        """
         return cls(
             pattern=str(data["pattern"]),
             replacement=str(data["replacement"]),

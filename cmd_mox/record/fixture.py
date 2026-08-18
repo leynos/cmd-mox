@@ -228,7 +228,13 @@ def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
 
 
 def _cmdmox_version() -> str:
-    """Return the installed cmd-mox version, or ``"unknown"``."""
+    """Return the installed cmd-mox version, or ``"unknown"``.
+
+    Returns
+    -------
+    str
+        Installed distribution version, or ``"unknown"`` when unavailable.
+    """
     try:
         return importlib.metadata.version("cmd-mox")
     except importlib.metadata.PackageNotFoundError:
@@ -251,7 +257,13 @@ class RecordedInvocation:
     duration_ms: int
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping matching the v1.0 schema."""
+        """Return a JSON-serializable mapping matching the v1.0 schema.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            Serialized invocation fields.
+        """
         return {
             "sequence": self.sequence,
             "command": self.command,
@@ -267,7 +279,18 @@ class RecordedInvocation:
 
     @classmethod
     def from_dict(cls, data: dict[str, typ.Any]) -> RecordedInvocation:
-        """Construct from a JSON-compatible mapping."""
+        """Construct an invocation from a JSON-compatible mapping.
+
+        Parameters
+        ----------
+        data : dict[str, typing.Any]
+            Mapping containing serialized invocation fields.
+
+        Returns
+        -------
+        RecordedInvocation
+            Parsed invocation model.
+        """
         return cls(
             sequence=int(data["sequence"]),
             command=str(data["command"]),
@@ -294,7 +317,13 @@ class FixtureMetadata:
     test_function: str | None = None
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping."""
+        """Return a JSON-serializable mapping.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            Serialized metadata fields.
+        """
         d: dict[str, typ.Any] = {
             "created_at": self.created_at,
             "cmdmox_version": self.cmdmox_version,
@@ -309,7 +338,18 @@ class FixtureMetadata:
 
     @classmethod
     def from_dict(cls, data: dict[str, typ.Any]) -> FixtureMetadata:
-        """Construct from a JSON-compatible mapping."""
+        """Construct metadata from a JSON-compatible mapping.
+
+        Parameters
+        ----------
+        data : dict[str, typing.Any]
+            Mapping containing serialized metadata fields.
+
+        Returns
+        -------
+        FixtureMetadata
+            Parsed metadata model.
+        """
         raw_module = data.get("test_module")
         raw_function = data.get("test_function")
         return cls(
@@ -328,7 +368,20 @@ class FixtureMetadata:
         test_module: str | None = None,
         test_function: str | None = None,
     ) -> FixtureMetadata:
-        """Auto-populate metadata from the current runtime environment."""
+        """Auto-populate metadata from the current runtime environment.
+
+        Parameters
+        ----------
+        test_module : str or None
+            Optional test module name to record.
+        test_function : str or None
+            Optional test function name to record.
+
+        Returns
+        -------
+        FixtureMetadata
+            Metadata populated from the current process.
+        """
         return cls(
             created_at=dt.datetime.now(dt.UTC).isoformat(),
             cmdmox_version=_cmdmox_version(),
@@ -351,7 +404,13 @@ class FixtureFile:
     scrubbing_rules: list[ScrubbingRule]
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping matching the v1.0 schema."""
+        """Return a JSON-serializable mapping matching the v1.0 schema.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            Serialized fixture fields.
+        """
         return {
             "version": self.version,
             "metadata": self.metadata.to_dict(),
@@ -386,12 +445,29 @@ class FixtureFile:
         )
 
     def save(self, path: Path) -> None:
-        """Write this fixture to *path* as JSON, creating directories as needed."""
+        """Write this fixture to *path* as JSON, creating directories as needed.
+
+        Parameters
+        ----------
+        path : pathlib.Path
+            Destination JSON path.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
 
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
-        """Load a fixture from a JSON file at *path*."""
+        """Load a fixture from a JSON file at *path*.
+
+        Parameters
+        ----------
+        path : pathlib.Path
+            JSON fixture path to read.
+
+        Returns
+        -------
+        FixtureFile
+            Parsed and migrated fixture.
+        """
         data = json.loads(path.read_text())
         return cls.from_dict(data)

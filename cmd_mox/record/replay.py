@@ -64,22 +64,46 @@ class ReplaySession:
 
     @property
     def fixture_path(self) -> Path:
-        """The path to the fixture JSON file."""
+        """Return the path to the fixture JSON file.
+
+        Returns
+        -------
+        pathlib.Path
+            Fixture path configured for this session.
+        """
         return self._fixture_path
 
     @property
     def strict_matching(self) -> bool:
-        """Whether strict matching mode is enabled."""
+        """Return whether strict matching mode is enabled.
+
+        Returns
+        -------
+        bool
+            ``True`` when stdin and environment must also match.
+        """
         return self._strict_matching
 
     @property
     def allow_unmatched(self) -> bool:
-        """Whether unconsumed recordings are tolerated during verification."""
+        """Return whether unconsumed recordings are tolerated.
+
+        Returns
+        -------
+        bool
+            ``True`` when verification permits unmatched recordings.
+        """
         return self._allow_unmatched
 
     @property
     def consumed_count(self) -> int:
-        """The number of recordings that have been consumed so far."""
+        """Return the number of recordings consumed so far.
+
+        Returns
+        -------
+        int
+            Number of consumed fixture recordings.
+        """
         with self._lock:
             return len(self._consumed)
 
@@ -108,18 +132,25 @@ class ReplaySession:
         ------
         LifecycleError
             If the fixture has already been loaded.
-        FileNotFoundError
-            If the fixture file does not exist.
-        ValueError
-            If the fixture data is incompatible with the supported schema.
-        """  # noqa: DOC502 - FixtureFile.load propagates these caller-visible failures.
+        """
         if self._fixture is not None:
             msg = "Fixture already loaded; load() may only be called once"
             raise LifecycleError(msg)
         self._fixture = FixtureFile.load(self._fixture_path)
 
     def _ensure_loaded(self) -> FixtureFile:
-        """Return the loaded fixture, raising if not yet loaded."""
+        """Return the loaded fixture, raising if not yet loaded.
+
+        Returns
+        -------
+        FixtureFile
+            Fixture loaded by :meth:`load`.
+
+        Raises
+        ------
+        LifecycleError
+            If :meth:`load` has not been called successfully.
+        """
         if self._fixture is None:
             msg = "Fixture not loaded; call load() first"
             raise LifecycleError(msg)

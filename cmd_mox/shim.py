@@ -22,7 +22,18 @@ if str(_PACKAGE_ROOT) not in sys.path:
 
 
 def _load_bootstrap_from_file() -> cabc.Callable[[], None]:
-    """Load bootstrap helper without importing the package ``__init__``."""
+    """Load bootstrap helper without importing the package ``__init__``.
+
+    Returns
+    -------
+    collections.abc.Callable[[], None]
+        Bootstrap function that prepares the shim import path.
+
+    Raises
+    ------
+    RuntimeError
+        If the bootstrap module cannot be loaded.
+    """
     bootstrap_path = Path(__file__).resolve().with_name("_shim_bootstrap.py")
     spec = importlib.util.spec_from_file_location(
         "cmd_mox._shim_bootstrap", bootstrap_path
@@ -69,6 +80,18 @@ CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
 
 
 def _normalize_windows_arg(arg: str) -> str:
+    """Collapse doubled Windows batch carets in a command argument.
+
+    Parameters
+    ----------
+    arg : str
+        Argument as received after batch-file processing.
+
+    Returns
+    -------
+    str
+        Argument with redundant caret escaping removed on Windows.
+    """
     if not path_utils.IS_WINDOWS or "^^" not in arg:
         return arg
 
@@ -80,13 +103,32 @@ def _normalize_windows_arg(arg: str) -> str:
 
 
 def _resolve_command_name() -> str:
+    """Return the shim command name from the environment or executable path.
+
+    Returns
+    -------
+    str
+        Command name used to identify the invocation.
+    """
     if from_env := os.environ.get(CMOX_SHIM_COMMAND_ENV):
         return from_env
     return Path(sys.argv[0]).name
 
 
 def _validate_environment() -> float:
-    """Validate required environment variables and return timeout."""
+    """Validate required environment variables and return the timeout.
+
+    Returns
+    -------
+    float
+        Positive finite IPC timeout in seconds.
+
+    Raises
+    ------
+    ValueError
+        If the configured timeout is not positive and finite. The caller
+        converts this validation failure to a process exit.
+    """
     if os.environ.get(CMOX_IPC_SOCKET_ENV) is None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)
@@ -104,7 +146,18 @@ def _validate_environment() -> float:
 
 
 def _create_invocation(cmd_name: str) -> Invocation:
-    """Create an Invocation from command-line arguments and stdin."""
+    """Create an invocation from command-line arguments and stdin.
+
+    Parameters
+    ----------
+    cmd_name : str
+        Command name associated with the shim process.
+
+    Returns
+    -------
+    Invocation
+        Invocation containing arguments, stdin, and a copied environment.
+    """
     import uuid
 
     stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
@@ -122,7 +175,20 @@ def _create_invocation(cmd_name: str) -> Invocation:
 
 
 def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
-    """Execute invocation via IPC, handling passthrough if needed."""
+    """Execute an invocation via IPC, handling passthrough if needed.
+
+    Parameters
+    ----------
+    invocation : Invocation
+        Invocation to send to the IPC server.
+    timeout : float
+        IPC timeout in seconds.
+
+    Returns
+    -------
+    Response
+        Response returned by the server or passthrough command.
+    """
     try:
         response = invoke_server(invocation, timeout=timeout)
     except (
@@ -161,7 +227,22 @@ def main() -> None:
 def _handle_passthrough(
     invocation: Invocation, response: Response, timeout: float
 ) -> Response:
-    """Execute the real command and report its outcome back to the server."""
+    """Execute the real command and report its outcome to the server.
+
+    Parameters
+    ----------
+    invocation : Invocation
+        Original invocation to execute.
+    response : Response
+        Server response containing the passthrough directive.
+    timeout : float
+        IPC timeout in seconds.
+
+    Returns
+    -------
+    Response
+        Response returned after the real command's result is reported.
+    """
     directive = response.passthrough
     if directive is None:  # pragma: no cover - defensive guard
         return response
@@ -177,13 +258,32 @@ def _handle_passthrough(
 
 
 def _shim_directory_from_env() -> Path | None:
-    """Return the shim directory recorded in the IPC socket variable, if any."""
+    """Return the shim directory recorded in the IPC socket variable, if any.
+
+    Returns
+    -------
+    pathlib.Path or None
+        Parent directory of the configured socket, or ``None`` when unset.
+    """
     socket_path = os.environ.get(CMOX_IPC_SOCKET_ENV)
     return Path(socket_path).parent if socket_path else None
 
 
 def _merge_passthrough_path(env_path: str | None, lookup_path: str) -> str:
-    """Combine PATH values while filtering the shim directory and duplicates."""
+    """Combine PATH values while filtering the shim directory and duplicates.
+
+    Parameters
+    ----------
+    env_path : str or None
+        PATH value returned by the server environment preparation.
+    lookup_path : str
+        Fallback search path supplied by the passthrough directive.
+
+    Returns
+    -------
+    str
+        De-duplicated search path excluding the shim directory.
+    """
     shim_dir = _shim_directory_from_env()
     return _build_search_path(env_path, lookup_path, shim_dir)
 
@@ -193,7 +293,22 @@ def _build_search_path(
     lookup_path: str,
     shim_dir: Path | None,
 ) -> str:
-    """Build a search PATH excluding the shim directory."""
+    """Build a search PATH excluding the shim directory.
+
+    Parameters
+    ----------
+    merged_path : str or None
+        Existing PATH entries to prepend.
+    lookup_path : str
+        Additional lookup entries.
+    shim_dir : pathlib.Path or None
+        Directory to exclude from the resulting search path.
+
+    Returns
+    -------
+    str
+        Ordered, de-duplicated path entries separated for the host platform.
+    """
     shim_identity = (
         path_utils.normalize_path_string(os.fspath(shim_dir))
         if shim_dir is not None
@@ -225,7 +340,22 @@ def _build_search_path(
 def _resolve_passthrough_target(
     invocation: Invocation, directive: PassthroughRequest, env: dict[str, str]
 ) -> Path | Response:
-    """Determine the executable path to use for passthrough execution."""
+    """Determine the executable path to use for passthrough execution.
+
+    Parameters
+    ----------
+    invocation : Invocation
+        Invocation whose command should be resolved.
+    directive : PassthroughRequest
+        Lookup path and passthrough settings from the server.
+    env : dict[str, str]
+        Environment used for command lookup.
+
+    Returns
+    -------
+    pathlib.Path or Response
+        Resolved executable path, or an error response when resolution fails.
+    """
     search_path = env.get("PATH", directive.lookup_path)
     return resolve_command_with_override(
         invocation.command,
@@ -237,7 +367,20 @@ def _resolve_passthrough_target(
 def _run_real_command(
     invocation: Invocation, directive: PassthroughRequest
 ) -> Response:
-    """Resolve and execute the real command as instructed by *directive*."""
+    """Resolve and execute the real command as instructed by *directive*.
+
+    Parameters
+    ----------
+    invocation : Invocation
+        Invocation to pass to the real command.
+    directive : PassthroughRequest
+        Lookup path, environment, and timeout settings.
+
+    Returns
+    -------
+    Response
+        Real command result or a response describing resolution failure.
+    """
     env = prepare_environment(
         directive.lookup_path, directive.extra_env, invocation.env
     )
