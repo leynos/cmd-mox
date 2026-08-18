@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Generic command shim for CmdMox."""
 
-# ruff: noqa: I001 - shim bootstrap must precede package imports
-
 from __future__ import annotations
 
 import collections.abc as cabc
@@ -56,7 +54,7 @@ if __name__ == "__main__":
 else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
 
-from cmd_mox import _path_utils as path_utils  # noqa: E402 - shim bootstrap configures sys.path before package imports
+from cmd_mox import _path_utils as path_utils  # noqa: E402, I001 - shim bootstrap configures sys.path before package imports
 from cmd_mox.command_runner import (  # noqa: E402 - shim bootstrap configures sys.path before package imports
     execute_command,
     prepare_environment,

@@ -25,7 +25,7 @@ class MissingParallelArtifactDirError(RuntimeError):
 
 
 def _artifact_dir() -> Path:
-    """Return the directory for recording worker metadata."""
+    """Return the directory for recording worker metadata."""  # noqa: DOC201, DOC501 - test artifact helper; contract and missing-config failure are local
     try:
         root = Path(os.environ["CMD_MOX_PARALLEL_ARTIFACT_DIR"])
     except KeyError as exc:  # pragma: no cover - defensive guard for template misuse

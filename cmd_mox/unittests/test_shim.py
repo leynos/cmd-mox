@@ -483,7 +483,13 @@ def test_validate_override_path_reports_missing_or_invalid_targets(
 
 
 def _make_directory_symlink(tmp_path: Path) -> Path:
-    """Return a symlink to a directory for override validation tests."""
+    """Return a symlink to a directory for override validation tests.
+
+    Returns
+    -------
+    pathlib.Path
+        The symlink path created for the test.
+    """
     target_dir = tmp_path / "target"
     target_dir.mkdir()
     symlink = tmp_path / "dir-link"

@@ -108,7 +108,7 @@ def invalidate_environment(monkeypatch: pytest.MonkeyPatch, mox: CmdMox) -> None
 
 @when("I replay the controller", target_fixture="mox_stack")
 def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
-    """Enter replay mode within a context manager."""
+    """Enter replay mode within a context manager."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     stack = contextlib.ExitStack()
     stack.enter_context(mox)
     mox.replay()
@@ -127,7 +127,7 @@ def replay_controller_again(mox: CmdMox, mox_stack: contextlib.ExitStack) -> Non
     target_fixture="replay_error",
 )
 def replay_controller_missing_env(mox: CmdMox) -> MissingEnvironmentError:
-    """Attempt replay expecting :class:`MissingEnvironmentError`."""
+    """Attempt replay expecting :class:`MissingEnvironmentError`."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     with contextlib.ExitStack() as stack:
         stack.enter_context(mox)
         with pytest.raises(MissingEnvironmentError) as excinfo:
@@ -140,7 +140,7 @@ def replay_controller_missing_env(mox: CmdMox) -> MissingEnvironmentError:
     target_fixture="replay_interruption_state",
 )
 def replay_controller_interrupt(mox: CmdMox) -> dict[str, object]:
-    """Run replay() and capture cleanup details when startup aborts."""
+    """Run replay() and capture cleanup details when startup aborts."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     env = mox.environment
     assert env is not None, "Replay environment was not initialised"
 
@@ -177,7 +177,7 @@ def verify_controller(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
 def verify_controller_expect_error(
     mox: CmdMox, mox_stack: contextlib.ExitStack, error_name: str
 ) -> VerificationError:
-    """Invoke verification expecting a specific error type."""
+    """Invoke verification expecting a specific error type."""  # noqa: DOC201, DOC501 - BDD error helper; contract and failure are scenario-local
     error_type = _ERROR_TYPES.get(error_name)
     if error_type is None:  # pragma: no cover - invalid feature configuration
         msg = f"Unknown verification error type: {error_name}"

@@ -374,7 +374,13 @@ def test_environment_manager_cleanup_robust_error() -> None:
 
 
 def test_environment_manager_cleanup_error_during_exception() -> None:
-    """Test cleanup errors are logged but don't mask original exceptions."""
+    """Test cleanup errors are logged but don't mask original exceptions.
+
+    Raises
+    ------
+    ValueError
+        The original exception raised while the environment is active.
+    """
     original_env = os.environ.copy()
 
     with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
@@ -471,7 +477,18 @@ class CleanupScenario:
 def _prepare_cleanup_scenario(
     scenario: CleanupScenario, tmp_path: Path, mgr: EnvironmentManager
 ) -> tuple[Path | None, Path | None]:
-    """Configure *mgr* to emulate *scenario* and return relevant paths."""
+    """Configure *mgr* to emulate *scenario* and return relevant paths.
+
+    Returns
+    -------
+    tuple[pathlib.Path | None, pathlib.Path | None]
+        The created directory and any replacement directory.
+
+    Raises
+    ------
+    AssertionError
+        If *scenario* names an unsupported cleanup case.
+    """
     match scenario.name:
         case "uninitialized":
             mgr._created_dir = None
@@ -518,7 +535,13 @@ def test_cleanup_temporary_directory_skip_logic(
     scenario: CleanupScenario,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify cleanup skips or removes directories for each scenario."""
+    """Verify cleanup skips or removes directories for each scenario.
+
+    Raises
+    ------
+    AssertionError
+        If the parametrised scenario name is unsupported.
+    """
     mgr = EnvironmentManager()
     created, replacement = _prepare_cleanup_scenario(scenario, tmp_path, mgr)
 

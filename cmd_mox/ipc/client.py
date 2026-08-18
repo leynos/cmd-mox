@@ -199,12 +199,12 @@ def retry_with_backoff[T](
 
 
 def _compute_deadline(timeout: float) -> float:
-    """Return the absolute deadline for *timeout* seconds from now."""  # noqa: DOC201
+    """Return the absolute deadline for *timeout* seconds from now."""  # noqa: DOC201 - private timing helper has an obvious float return
     return time.monotonic() + timeout
 
 
 def _remaining_time(deadline: float) -> float:
-    """Return the seconds remaining before *deadline* expires."""  # noqa: DOC201, DOC501
+    """Return the seconds remaining before *deadline* expires."""  # noqa: DOC201, DOC501 - private timing helper has an obvious float result and raises only on local expiry
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         msg = "IPC client operation timed out"
@@ -263,7 +263,7 @@ def _validate_initial_deadline(
 def _join_with_timeout_and_cancel(
     thread: threading.Thread, remaining: float, cancel: cabc.Callable[[], None]
 ) -> None:
-    """Join the thread with timeout; cancel and raise if still alive."""  # noqa: DOC501
+    """Join the thread with timeout; cancel and raise if still alive."""  # noqa: DOC501 - private cancellation hook raises only its local timeout signal
     thread.join(remaining)
     if thread.is_alive():
         cancel()
@@ -273,7 +273,7 @@ def _join_with_timeout_and_cancel(
 
 
 def _extract_outcome(outcome: dict[str, typ.Any]) -> object:
-    """Extract the result from the outcome dict, raising any stored error."""  # noqa: DOC201, DOC501
+    """Extract the result from the outcome dict, raising any stored error."""  # noqa: DOC201, DOC501 - private thread handoff uses stored exceptions as internal control flow
     if (error := outcome.get("error")) is not None:
         raise typ.cast("BaseException", error)
     value = outcome.get("value", _SENTINEL)
@@ -288,7 +288,7 @@ def _run_blocking_io[T](
     deadline: float,
     cancel: cabc.Callable[[], None],
 ) -> T:
-    """Execute *func* on a worker thread until completion or timeout."""  # noqa: DOC201
+    """Execute *func* on a worker thread until completion or timeout."""  # noqa: DOC201 - private thread helper's generic result is defined by its type parameter
     outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
     def _target() -> None:
@@ -314,7 +314,7 @@ def _connect_unix_with_retries(
     timeout: float,
     retry_config: RetryConfig,
 ) -> socket.socket:
-    """Connect to *sock_path* retrying on :class:`OSError`."""  # noqa: DOC201
+    """Connect to *sock_path* retrying on :class:`OSError`."""  # noqa: DOC201 - private transport helper has an obvious socket return
     retry_config.validate(timeout)
     address = str(sock_path)
 
@@ -345,7 +345,7 @@ def _connect_unix_with_retries(
 
 
 def _get_validated_socket_path() -> Path:
-    """Fetch the IPC socket path from the environment."""  # noqa: DOC201, DOC501
+    """Fetch the IPC socket path from the environment."""  # noqa: DOC201, DOC501 - private configuration lookup has an obvious path result and local missing-setting error
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
     if sock is None:
         msg = f"{CMOX_IPC_SOCKET_ENV} is not set"
@@ -354,7 +354,7 @@ def _get_validated_socket_path() -> Path:
 
 
 def _read_all(sock: socket.socket) -> bytes:
-    """Read all data from *sock* until EOF."""  # noqa: DOC201
+    """Read all data from *sock* until EOF."""  # noqa: DOC201 - private transport helper has an obvious bytes return
     chunks = []
     while chunk := sock.recv(1024):
         chunks.append(chunk)
@@ -382,7 +382,7 @@ def _decode_response(raw: bytes) -> Response:
 
 
 def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> bool:
-    """Return True when *exc* represents a retryable pipe error."""  # noqa: DOC201
+    """Return True when *exc* represents a retryable pipe error."""  # noqa: DOC201 - private retry predicate is fully described by its summary
     winerror = getattr(exc, "winerror", None)
     if winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
         return False
@@ -407,7 +407,7 @@ def _wait_for_pipe_availability(
 
 
 def _create_pipe_handle(pipe_name: str) -> object:
-    """Create and configure a handle for *pipe_name*."""  # noqa: DOC201
+    """Create and configure a handle for *pipe_name*."""  # noqa: DOC201 - private Win32 helper's opaque handle type is clear from its annotation
     handle = win32file.CreateFile(
         pipe_name,
         win32file.GENERIC_READ | win32file.GENERIC_WRITE,
@@ -509,7 +509,7 @@ def _send_request(
     timeout: float,
     retry_config: RetryConfig | None,
 ) -> Response:
-    """Send a JSON request of *kind* to the IPC server."""  # noqa: DOC201
+    """Send a JSON request of *kind* to the IPC server."""  # noqa: DOC201 - private transport helper has an obvious response return
     retry = retry_config or RetryConfig()
     sock_path = _get_validated_socket_path()
     payload = dict(data)

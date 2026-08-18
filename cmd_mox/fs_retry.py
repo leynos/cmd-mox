@@ -122,14 +122,14 @@ def _fix_windows_permissions(path: Path) -> None:
 
 
 def _path_is_missing(path: Path, exc: OSError) -> bool:
-    """Check if the path is missing (from the exception or filesystem)."""  # noqa: DOC201
+    """Check if the path is missing (from the exception or filesystem)."""  # noqa: DOC201 - private retry predicate is fully described by its summary
     return isinstance(exc, FileNotFoundError) or not path.exists()
 
 
 def _handle_rmtree_final_failure(
     path: Path, attempts: int, exc: OSError, logger: logging.Logger
 ) -> typ.NoReturn:
-    """Handle final rmtree failure by logging and raising RobustRmtreeError."""  # noqa: DOC501
+    """Handle final rmtree failure by logging and raising RobustRmtreeError."""  # noqa: DOC501 - private retry hook raises only its local terminal error
     logger.warning(
         "Failed to remove temporary directory %s after %d attempts",
         path,

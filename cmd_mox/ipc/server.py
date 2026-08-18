@@ -243,7 +243,7 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         error_builder: cabc.Callable[[DispatchArg, Exception], RuntimeError]
         | None = None,
     ) -> Response:
-        """Invoke *handler* when provided, otherwise fall back to *default*."""  # noqa: DOC201, DOC501
+        """Invoke *handler* when provided, otherwise fall back to *default*."""  # noqa: DOC201, DOC501 - private dispatch helper has a clear response type and wraps callback failures locally
         if handler is None:
             return default(argument)
         if error_builder is None:
@@ -257,12 +257,12 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
 
     @staticmethod
     def _default_invocation_response(invocation: Invocation) -> Response:
-        """Echo the command name when no handler overrides the behaviour."""  # noqa: DOC201
+        """Echo the command name when no handler overrides the behaviour."""  # noqa: DOC201 - private default handler has an obvious response return
         return Response(stdout=invocation.command)
 
     @staticmethod
     def _raise_unhandled_passthrough(result: PassthroughResult) -> Response:
-        """Raise when passthrough results lack a configured handler."""  # noqa: DOC501
+        """Raise when passthrough results lack a configured handler."""  # noqa: DOC501 - private default handler raises only for an unhandled internal dispatch
         msg = f"Unhandled passthrough result for {result.invocation_id}"
         raise RuntimeError(msg)
 
@@ -270,7 +270,7 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
     def _build_passthrough_error(
         result: PassthroughResult, exc: Exception
     ) -> RuntimeError:
-        """Create the wrapped passthrough error surfaced to callers."""  # noqa: DOC201
+        """Create the wrapped passthrough error surfaced to callers."""  # noqa: DOC201 - private error adapter has an obvious RuntimeError return
         msg = f"Exception in passthrough handler for {result.invocation_id}: {exc}"
         return RuntimeError(msg)
 
@@ -392,7 +392,7 @@ class ParsedRequest:
 
 
 def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
-    """Decode raw request bytes into a mapping, logging malformed input once."""  # noqa: DOC201
+    """Decode raw request bytes into a mapping, logging malformed input once."""  # noqa: DOC201 - private wire parser has an obvious optional mapping return
     payload = parse_json_safely(raw)
     if payload is not None:
         return payload
@@ -418,8 +418,7 @@ def _parse_payload(raw: bytes) -> ParsedRequest | None:
         logger.error("Unknown IPC payload kind: %r", kind)
         return None
 
-    body = payload.copy()
-    body.pop("kind", None)
+    body = {key: value for key, value in payload.items() if key != "kind"}
     validator, processor = handler_entry
     return ParsedRequest(
         payload=body,
@@ -434,7 +433,7 @@ def _encode_response(response: Response) -> bytes:
 
 
 def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
-    """Parse, validate, dispatch, and encode an IPC request in order."""  # noqa: DOC201
+    """Parse, validate, dispatch, and encode an IPC request in order."""  # noqa: DOC201 - private wire pipeline has an obvious optional bytes return
     parsed = _parse_payload(raw)
     if parsed is None:
         return None
@@ -443,18 +442,15 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
     if obj is None:
         return None
 
-    response = _execute_request(server, parsed.processor, obj)
-    return _encode_response(response)
+    return _encode_response(_execute_request(server, parsed.processor, obj))
 
 
 def _raise_invalid_request_dispatch(
     processor: _RequestProcessor, obj: Invocation | PassthroughResult
 ) -> typ.NoReturn:
-    """Raise when the request registry maps a validator to the wrong hook."""  # noqa: DOC501
-    msg = (
-        "Request processor "
-        f"{processor!r} does not match validated payload {type(obj).__name__}"
-    )
+    """Raise when the request registry maps a validator to the wrong hook."""  # noqa: DOC501 - private registry guard raises only for an internal wiring invariant
+    msg = f"Request processor {processor!r} does not match validated "
+    msg += f"payload {type(obj).__name__}"
     raise TypeError(msg)
 
 
@@ -588,8 +584,7 @@ class _NamedPipeState:
         outer: _BaseIPCServer[_NamedPipeState],
         accept_timeout: float,
     ) -> None:
-        self.pipe_name = pipe_name
-        self.outer = outer
+        self.pipe_name, self.outer = pipe_name, outer
         self.accept_timeout = accept_timeout
         self.stop_event = threading.Event()
         self.ready_event = threading.Event()
@@ -597,7 +592,7 @@ class _NamedPipeState:
         self._client_lock = threading.Lock()
 
     def _try_connect_pipe(self, handle: object) -> tuple[bool, bool]:
-        """Attempt to connect *handle* to the named pipe."""  # noqa: DOC201
+        """Attempt to connect *handle* to the named pipe."""  # noqa: DOC201 - private pipe helper's tuple result is defined by its local state machine
         try:
             win32pipe.ConnectNamedPipe(handle, None)
         except pywintypes.error as exc:
@@ -607,7 +602,7 @@ class _NamedPipeState:
     def _handle_connection_error(
         self, exc: object, handle: object
     ) -> tuple[bool, bool]:
-        """Return control-flow decisions for a failed connection attempt."""  # noqa: DOC201
+        """Return control-flow decisions for a failed connection attempt."""  # noqa: DOC201 - private pipe helper's tuple result is defined by its local state machine
         winerror = getattr(exc, "winerror", None)
         if winerror is None:
             logger.exception("Named pipe connect failed")
@@ -638,7 +633,7 @@ class _NamedPipeState:
         thread.start()
 
     def _get_active_threads(self) -> list[threading.Thread]:
-        """Get a snapshot of active client threads."""  # noqa: DOC201
+        """Get a snapshot of active client threads."""  # noqa: DOC201 - private thread accessor has an obvious list return
         with self._client_lock:
             return list(self._client_threads)
 

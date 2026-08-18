@@ -134,7 +134,14 @@ class RecordingSession:
         duration_ms : int
             Wall-clock execution time in milliseconds (default ``0``).
 
-        """
+        Raises
+        ------
+        LifecycleError
+            If the session has not been started or has been finalized.
+        ValueError
+            If ``duration_ms`` is negative.
+
+        """  # noqa: DOC502 - _validate_record_preconditions propagates these caller-visible failures.
         # Lifecycle validation and append are inside the same critical
         # section so a concurrent finalize() cannot snapshot _recordings
         # between the _finalized check and the append.

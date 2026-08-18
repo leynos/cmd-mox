@@ -22,7 +22,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 def _run_shim(
     env: EnvironmentManager, command: str
 ) -> subprocess.CompletedProcess[str]:
-    """Execute *command* through its generated shim."""
+    """Execute *command* through its generated shim."""  # noqa: DOC201 - test helper; return contract is test-local
     shim_path = _shim_cmd_path(env, command)
     return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
         [str(shim_path)],
@@ -35,7 +35,7 @@ def _run_shim(
 def _run_unserved_shim(
     env: EnvironmentManager, command: str
 ) -> subprocess.CompletedProcess[str]:
-    """Execute *command* through a shim without an available IPC server."""
+    """Execute *command* through a shim without an available IPC server."""  # noqa: DOC201 - test helper; return contract is test-local
     assert env.shim_dir is not None, "Assertion failed"
     create_shim_symlinks(env.shim_dir, [command])
     return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
@@ -51,7 +51,7 @@ def _invoke_command_via_ipc(
     *,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Start an IPC server and run *command* through its shim."""
+    """Start an IPC server and run *command* through its shim."""  # noqa: DOC201 - test helper; return contract is test-local
     assert env.shim_dir is not None, "Assertion failed"
     socket_path = env.socket_path
     assert socket_path is not None, "Assertion failed"

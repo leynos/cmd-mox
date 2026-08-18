@@ -29,7 +29,13 @@ def _make_recorded_invocation(
     args: list[str] | None = None,
     spec: RecordedInvocationSpec | None = None,
 ) -> RecordedInvocation:
-    """Build a RecordedInvocation with sensible defaults."""
+    """Build a RecordedInvocation with sensible defaults.
+
+    Returns
+    -------
+    RecordedInvocation
+        The recorded invocation populated from *spec* and the supplied values.
+    """
     s = spec or RecordedInvocationSpec()
     return RecordedInvocation(
         sequence=s.sequence,
@@ -51,7 +57,13 @@ def _make_invocation(
     stdin: str = "",
     env: dict[str, str] | None = None,
 ) -> Invocation:
-    """Build an Invocation with sensible defaults."""
+    """Build an Invocation with sensible defaults.
+
+    Returns
+    -------
+    Invocation
+        The invocation populated from the supplied values.
+    """
     return Invocation(
         command=command,
         args=["status"] if args is None else args,

@@ -36,7 +36,7 @@ def set_env_var(monkeypatch: pytest.MonkeyPatch, var: str, val: str) -> None:
 
 @then(parsers.cfparse('PATHEXT should include "{extension}"'))
 def pathext_should_include(extension: str) -> None:
-    """Assert that PATHEXT contains *extension* (case-insensitive)."""
+    """Assert that PATHEXT contains *extension* (case-insensitive)."""  # noqa: DOC501 - BDD assertion step; failure is scenario-local
     pathext = os.environ.get("PATHEXT", "")
     entries = {
         item.strip().upper() for item in pathext.split(os.pathsep) if item.strip()
@@ -48,7 +48,7 @@ def pathext_should_include(extension: str) -> None:
 
 @then(parsers.cfparse('PATHEXT should equal "{expected}"'))
 def pathext_should_equal(expected: str) -> None:
-    """Assert PATHEXT exactly matches *expected*."""
+    """Assert PATHEXT exactly matches *expected*."""  # noqa: DOC501 - BDD assertion step; failure is scenario-local
     value = os.environ.get("PATHEXT")
     if value != expected:
         msg = f"PATHEXT {value!r} != {expected!r}"

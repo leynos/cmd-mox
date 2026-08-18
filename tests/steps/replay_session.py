@@ -31,7 +31,7 @@ def _build_recording(
     args: list[str],
     spec: RecordingSpec | None = None,
 ) -> RecordedInvocation:
-    """Build a RecordedInvocation with sensible defaults."""
+    """Build a RecordedInvocation with sensible defaults."""  # noqa: DOC201 - BDD helper; return contract is scenario-local
     s = spec or RecordingSpec()
     return RecordedInvocation(
         sequence=s.sequence,
@@ -51,7 +51,7 @@ def _save_fixture(
     tmp_path: Path,
     recordings: list[RecordedInvocation],
 ) -> Path:
-    """Persist a fixture file and return its path."""
+    """Persist a fixture file and return its path."""  # noqa: DOC201 - BDD helper; return contract is scenario-local
     fixture = FixtureFile(
         version=FixtureFile.SCHEMA_VERSION,
         metadata=FixtureMetadata.create(),
@@ -71,7 +71,7 @@ def _save_fixture(
     target_fixture="replay_fixture_path",
 )
 def fixture_with_single_recording(tmp_path: Path, cmd: str, args: str) -> Path:
-    """Create a fixture file with a single recording."""
+    """Create a fixture file with a single recording."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     rec = _build_recording(cmd, args.split())
     return _save_fixture(tmp_path, [rec])
 
@@ -83,7 +83,7 @@ def fixture_with_single_recording(tmp_path: Path, cmd: str, args: str) -> Path:
     target_fixture="replay_fixture_path",
 )
 def fixture_with_n_recordings(tmp_path: Path, count: int, cmd: str, args: str) -> Path:
-    """Create a fixture file with *count* identical recordings."""
+    """Create a fixture file with *count* identical recordings."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     recs = [
         _build_recording(cmd, args.split(), RecordingSpec(sequence=i))
         for i in range(count)
@@ -104,7 +104,7 @@ def fixture_with_stdin_and_env(
     stdin: str,
     env_kv: str,
 ) -> Path:
-    """Create a fixture file with specific stdin and env_subset."""
+    """Create a fixture file with specific stdin and env_subset."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     cmd, *args = invocation.split()
     key, _, value = env_kv.partition("=")
     rec = _build_recording(
@@ -121,7 +121,7 @@ def fixture_with_stdin_and_env(
     target_fixture="replay_fixture_path",
 )
 def fixture_with_env_specificity(tmp_path: Path, invocation: str) -> Path:
-    """Create a fixture with two recordings: one generic, one with env_subset."""
+    """Create a fixture with two recordings: one generic, one with env_subset."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     cmd, *args = invocation.split()
     recs = [
         # Generic recording with no env_subset
@@ -150,7 +150,7 @@ def fixture_with_env_specificity(tmp_path: Path, invocation: str) -> Path:
     target_fixture="replay_fixture_path",
 )
 def fixture_with_different_stdin(tmp_path: Path, invocation: str) -> Path:
-    """Create a fixture with two recordings: different stdin values."""
+    """Create a fixture with two recordings: different stdin values."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     cmd, *args = invocation.split()
     recs = [
         _build_recording(cmd, args, RecordingSpec(sequence=0, stdin="other")),
@@ -167,7 +167,7 @@ def fixture_with_different_stdin(tmp_path: Path, invocation: str) -> Path:
     target_fixture="replay_session",
 )
 def replay_session_strict(replay_fixture_path: Path) -> ReplaySession:
-    """Create a strict-mode ReplaySession."""
+    """Create a strict-mode ReplaySession."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     return ReplaySession(replay_fixture_path, strict_matching=True)
 
 
@@ -176,7 +176,7 @@ def replay_session_strict(replay_fixture_path: Path) -> ReplaySession:
     target_fixture="replay_session",
 )
 def replay_session_fuzzy(replay_fixture_path: Path) -> ReplaySession:
-    """Create a fuzzy-mode ReplaySession."""
+    """Create a fuzzy-mode ReplaySession."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     return ReplaySession(replay_fixture_path, strict_matching=False)
 
 
@@ -196,7 +196,7 @@ def load_replay_session(replay_session: ReplaySession) -> None:
 def match_replay_invocation(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match an invocation against the replay session."""
+    """Match an invocation against the replay session."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     inv = Invocation(command=cmd, args=args.split(), stdin="", env={})
     return replay_session.match(inv)
 
@@ -208,7 +208,7 @@ def match_replay_invocation(
 def match_replay_invocation_again(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match a second invocation against the replay session."""
+    """Match a second invocation against the replay session."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     inv = Invocation(command=cmd, args=args.split(), stdin="", env={})
     return replay_session.match(inv)
 
@@ -223,7 +223,7 @@ def match_replay_invocation_again(
 def match_replay_with_different_stdin_env(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match an invocation with deliberately different stdin and env."""
+    """Match an invocation with deliberately different stdin and env."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     inv = Invocation(
         command=cmd,
         args=args.split(),
@@ -242,7 +242,7 @@ def match_replay_with_different_stdin_env(
 def match_replay_with_env(
     replay_session: ReplaySession, invocation: str, env_kv: str
 ) -> Response | None:
-    """Match an invocation with specific environment."""
+    """Match an invocation with specific environment."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     cmd, *args = invocation.split()
     key, _, value = env_kv.partition("=")
     inv = Invocation(command=cmd, args=args, stdin="", env={key: value, "EXTRA": "val"})
@@ -258,7 +258,7 @@ def match_replay_with_env(
 def match_replay_with_stdin(
     replay_session: ReplaySession, invocation: str, stdin: str
 ) -> Response | None:
-    """Match an invocation with specific stdin."""
+    """Match an invocation with specific stdin."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     cmd, *args = invocation.split()
     inv = Invocation(command=cmd, args=args, stdin=stdin, env={})
     return replay_session.match(inv)

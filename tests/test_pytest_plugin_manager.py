@@ -161,7 +161,7 @@ def _make_manager(
     request: _StubRequest,
     **stub_kwargs: object,
 ) -> _CmdMoxManager:
-    """Instantiate a manager while substituting the CmdMox dependency."""
+    """Instantiate a manager while substituting the CmdMox dependency."""  # noqa: DOC201 - test factory; return contract is test-local
 
     def _factory(
         *,

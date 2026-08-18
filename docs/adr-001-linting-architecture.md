@@ -31,7 +31,7 @@ after Ruff.
 - Keep existing CmdMox lint debt visible without forcing unrelated refactors
   into the lint architecture change.
 - Pin the shim revision so lint execution is reproducible.
-- Keep DF12 checker policy independent from the temporary PyPy baseline.
+- Keep DF12 checker policy independent of the temporary PyPy baseline.
 
 ## Options considered
 

@@ -44,7 +44,13 @@ class CommandTestScenario:
     stderr: str
 
     def get_which_result_for_file_creation(self) -> str:
-        """Return ``which_result`` when a file should be created."""
+        """Return ``which_result`` when a file should be created.
+
+        Returns
+        -------
+        str
+            The command path returned by ``which``.
+        """
         assert self.create_file
         assert self.which_result is not None
         return self.which_result
@@ -52,7 +58,13 @@ class CommandTestScenario:
 
 @pytest.fixture
 def runner() -> cabc.Iterator[CommandRunner]:
-    """Return a :class:`CommandRunner` with a managed environment."""
+    """Return a :class:`CommandRunner` with a managed environment.
+
+    Yields
+    ------
+    CommandRunner
+        A command runner backed by the managed test environment.
+    """
     env_mgr = EnvironmentManager()
     env_mgr.__enter__()
     yield CommandRunner(env_mgr)

@@ -16,25 +16,25 @@ FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
 @pytest.fixture
 def ordered_expectations() -> list[Expectation]:
-    """Collect expectations that must appear in order."""
+    """Collect expectations that must appear in order."""  # noqa: DOC201 - pytest fixture; return contract is scenario-local
     return []
 
 
 @pytest.fixture
 def unordered_expectations() -> list[Expectation]:
-    """Collect expectations that are not part of the ordered sequence."""
+    """Collect expectations that are not part of the ordered sequence."""  # noqa: DOC201 - pytest fixture; return contract is scenario-local
     return []
 
 
 @pytest.fixture
 def journal() -> list[Invocation]:
-    """Accumulate recorded invocations for verification."""
+    """Accumulate recorded invocations for verification."""  # noqa: DOC201 - pytest fixture; return contract is scenario-local
     return []
 
 
 @pytest.fixture
 def verification_context() -> dict[str, Exception | None]:
-    """Store verification outcomes for assertions."""
+    """Store verification outcomes for assertions."""  # noqa: DOC201 - pytest fixture; return contract is scenario-local
     return {}
 
 

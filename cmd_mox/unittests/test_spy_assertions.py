@@ -82,7 +82,13 @@ class TestSpyAssertions:
         stdin: str,
         env: dict[str, str],
     ) -> CommandDouble:
-        """Create a spy pre-populated with a single invocation."""
+        """Create a spy pre-populated with a single invocation.
+
+        Returns
+        -------
+        CommandDouble
+            The spy containing the supplied invocation.
+        """
         mox = CmdMox()
         spy = mox.spy(cmd)
         invocation = Invocation(cmd, args, stdin, env)

@@ -198,13 +198,13 @@ install your project. A "modern" convention is to specify `setuptools>=64.0`
 
 ```toml
 [build-system]
-requires = ["setuptools>=64.0", "wheel"]
+requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
 ```
 
 - **`requires`:** A list of packages needed at build time. For editable installs
-  in `uv`, you need at least `setuptools>=64.0` and `wheel`. (Python
-  Packaging[^4], Astral Docs[^7])
+  in `uv`, you need at least `setuptools>=64.0`. (Python Packaging[^4], Astral
+  Docs[^7])
 - **`build-backend`:** The entry point for your build backend.
   `setuptools.build_meta` is the PEP 517-compliant backend for setuptools.
   (Python Packaging[^4], Astral Docs[^7])
@@ -284,7 +284,7 @@ docs = [
 mycli = "my_project.cli:main"
 
 [build-system]
-requires = ["setuptools>=64.0", "wheel"]
+requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]
@@ -320,9 +320,8 @@ package = true
 
 4. **Build System:**
 
-   - `setuptools>=64.0` plus `wheel` ensures both legacy and editable installs
-     work. ✱ Newer versions of setuptools support PEP 660 editable installs
-     without a `setup.py` stub. (Python Packaging[^4], Astral Docs[^7])
+   - `setuptools>=64.0` supports PEP 660 editable installs without a
+     `setup.py` stub. (Python Packaging[^4], Astral Docs[^7])
    - `build-backend = "setuptools.build_meta"` tells `uv` how to compile your
      package. (Python Packaging[^4], Astral Docs[^7])
 
@@ -374,7 +373,7 @@ A "modern" `pyproject.toml` for an Astral `uv` project should:
   `[dependency-groups]` (the `dev` group installs by default).
 - Define any CLI or GUI entry points under `[project.scripts]` or
   `[project.gui-scripts]`.
-- Declare a PEP 517 `[build-system]` (e.g. `setuptools>=64.0`, `wheel`,
+- Declare a PEP 517 `[build-system]` (e.g. `setuptools>=64.0`,
   `setuptools.build_meta`) to support editable installs, or omit it and rely on
   `tool.uv.package = true`.
 - Include a `[tool.uv]` section, at minimum `package = true` if you want `uv` to

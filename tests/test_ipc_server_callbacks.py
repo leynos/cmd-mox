@@ -41,11 +41,11 @@ class _OverridingIPCServer(IPCServer):
     """IPC server whose hook overrides prove request dispatch remains virtual."""
 
     def handle_invocation(self, invocation: Invocation) -> Response:
-        """Return a response that identifies the overridden invocation hook."""
+        """Return a response that identifies the overridden invocation hook."""  # noqa: DOC201 - test callback; return contract is test-local
         return Response(stdout=f"override:{invocation.command}")
 
     def handle_passthrough_result(self, result: PassthroughResult) -> Response:
-        """Return a response that identifies the overridden passthrough hook."""
+        """Return a response that identifies the overridden passthrough hook."""  # noqa: DOC201 - test callback; return contract is test-local
         return Response(stdout=f"override:{result.invocation_id}")
 
 
@@ -60,7 +60,7 @@ class TimeoutTestCase:
 
 @pytest.fixture
 def echo_handler() -> cabc.Callable[[Invocation], Response]:
-    """Return a handler that echoes the command name."""
+    """Return a handler that echoes the command name."""  # noqa: DOC201 - pytest fixture; return contract is test-local
 
     def handler(invocation: Invocation) -> Response:
         return Response(stdout=invocation.command)
@@ -70,7 +70,7 @@ def echo_handler() -> cabc.Callable[[Invocation], Response]:
 
 @pytest.fixture
 def passthrough_handler() -> cabc.Callable[[PassthroughResult], Response]:
-    """Return a handler that returns a fixed passthrough response."""
+    """Return a handler that returns a fixed passthrough response."""  # noqa: DOC201 - pytest fixture; return contract is test-local
 
     def handler(_result: PassthroughResult) -> Response:
         return Response(stdout="passthrough")
@@ -104,7 +104,7 @@ def test_ipcserver_invocation_handler(
     seen: list[Invocation] = []
 
     def handler(invocation: Invocation) -> Response:
-        """Record invocations and return a distinctive response."""
+        """Record invocations and return a distinctive response."""  # noqa: DOC201 - test callback; return contract is test-local
         seen.append(invocation)
         return Response(stdout="handled", stderr="err", exit_code=2)
 
@@ -174,7 +174,7 @@ def test_ipcserver_passthrough_handler(
     seen: list[PassthroughResult] = []
 
     def passthrough_handler(result: PassthroughResult) -> Response:
-        """Capture passthrough results and return a custom response."""
+        """Capture passthrough results and return a custom response."""  # noqa: DOC201 - test callback; return contract is test-local
         seen.append(result)
         return Response(stdout="passthrough", exit_code=5)
 

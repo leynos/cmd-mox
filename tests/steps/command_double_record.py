@@ -36,19 +36,19 @@ def create_controller() -> cabc.Generator[CmdMox, None, None]:
 
 @given('a spy for "git" with passthrough enabled', target_fixture="spy")
 def spy_with_passthrough(mox: CmdMox) -> CommandDouble:
-    """Create a spy with passthrough mode enabled."""
+    """Create a spy with passthrough mode enabled."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     return mox.spy("git").passthrough()
 
 
 @given('a spy for "git" without passthrough', target_fixture="spy")
 def spy_without_passthrough(mox: CmdMox) -> CommandDouble:
-    """Create a spy without passthrough mode."""
+    """Create a spy without passthrough mode."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     return mox.spy("git")
 
 
 @when("record is called with a fixture path", target_fixture="spy_after_record")
 def call_record(spy: CommandDouble, tmp_path: Path) -> CommandDouble:
-    """Call record() with a temporary fixture path."""
+    """Call record() with a temporary fixture path."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     return spy.record(tmp_path / "fixture.json")
 
 

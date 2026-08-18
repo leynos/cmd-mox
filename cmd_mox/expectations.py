@@ -28,7 +28,7 @@ _SECRET_ENV_KEY_RE: typ.Final[re.Pattern[str]] = re.compile(
 
 
 def _is_sensitive_env_key(key: str) -> bool:
-    """Return True if key likely holds secret material (substring match)."""  # noqa: DOC201
+    """Return True if key likely holds secret material (substring match)."""  # noqa: DOC201 - private redaction predicate is fully described by its summary
     k = key.casefold()
     return any(tkn in k for tkn in _SENSITIVE_TOKENS)
 
@@ -190,11 +190,11 @@ class Expectation:
         )
 
     def _matches_command(self, invocation: Invocation) -> bool:
-        """Return ``True`` if the command name matches."""  # noqa: DOC201
+        """Return ``True`` if the command name matches."""  # noqa: DOC201 - private matcher predicate has an obvious boolean result
         return invocation.command == self.name
 
     def _matches_args(self, invocation: Invocation) -> bool:
-        """Validate positional arguments."""  # noqa: DOC201
+        """Validate positional arguments."""  # noqa: DOC201 - private matcher predicate has an obvious boolean result
         if self.args is not None and invocation.args != self.args:
             return False
         if self.match_args is not None:
@@ -202,7 +202,7 @@ class Expectation:
         return True
 
     def _validate_matchers(self, args: list[str]) -> bool:
-        """Return ``True`` if ``args`` satisfy ``match_args`` validators."""  # noqa: DOC201
+        """Return ``True`` if ``args`` satisfy ``match_args`` validators."""  # noqa: DOC201 - private matcher predicate has an obvious boolean result
         matchers = self.match_args
         if matchers is None:
             # Defensive fallback: callers ensure ``match_args`` is set before
@@ -240,19 +240,19 @@ class Expectation:
         return "args, stdin, or env mismatch"
 
     def _explain_command_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if the command name differs."""  # noqa: DOC201
+        """Return a message if the command name differs."""  # noqa: DOC201 - private explanation helper has a self-evident optional string return
         if self._matches_command(invocation):
             return None
         return f"command {invocation.command!r} != {self.name!r}"
 
     def _explain_args_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if explicit args do not match."""  # noqa: DOC201
+        """Return a message if explicit args do not match."""  # noqa: DOC201 - private explanation helper has a self-evident optional string return
         if self.args is None or invocation.args == self.args:
             return None
         return f"arguments {invocation.args!r} != {self.args!r}"
 
     def _explain_match_args_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message when matcher-based args fail."""  # noqa: DOC201
+        """Return a message when matcher-based args fail."""  # noqa: DOC201 - private explanation helper has a self-evident optional string return
         if self.match_args is None:
             return None
         if len(invocation.args) != len(self.match_args):
@@ -274,7 +274,7 @@ class Expectation:
         return None
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if stdin fails to satisfy the expectation."""  # noqa: DOC201
+        """Return a message if stdin fails to satisfy the expectation."""  # noqa: DOC201 - private explanation helper has a self-evident optional string return
         if self.stdin is None:
             return None
         if isinstance(self.stdin, str):
@@ -294,7 +294,7 @@ class Expectation:
         return None
 
     def _explain_env_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if an env variable mismatch is found."""  # noqa: DOC201
+        """Return a message if an env variable mismatch is found."""  # noqa: DOC201 - private explanation helper has a self-evident optional string return
         if not self.env:
             return None
         for key, value in self.env.items():
@@ -307,7 +307,7 @@ class Expectation:
         return None
 
     def _matches_stdin(self, invocation: Invocation) -> bool:
-        """Check stdin data or predicate."""  # noqa: DOC201
+        """Check stdin data or predicate."""  # noqa: DOC201 - private matcher predicate has an obvious boolean result
         if self.stdin is None:
             return True
         if isinstance(self.stdin, str):
@@ -320,5 +320,5 @@ class Expectation:
         return False
 
     def _matches_env(self, invocation: Invocation) -> bool:
-        """Verify required environment variables."""  # noqa: DOC201
+        """Verify required environment variables."""  # noqa: DOC201 - private matcher predicate has an obvious boolean result
         return all(invocation.env.get(key) == value for key, value in self.env.items())

@@ -38,7 +38,13 @@ class StubReturns(typ.TypedDict, total=False):
 
 
 def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
-    """Return shim path for a command; requires prior mox.replay()."""
+    """Return shim path for a command; requires prior mox.replay().
+
+    Returns
+    -------
+    pathlib.Path
+        The path to the requested command shim.
+    """
     env = typ.cast("EnvironmentManager", getattr(obj, "environment", obj))
     shim_dir = env.shim_dir
     assert shim_dir is not None, (
@@ -64,7 +70,13 @@ def _setup_and_execute_command(
     stub_returns: StubReturns,
     params: CommandExecutionParams,
 ) -> subprocess.CompletedProcess[str]:
-    """Create a stub, run it once, and return the result."""
+    """Create a stub, run it once, and return the result.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The result of executing the generated command shim.
+    """
     mox.stub(stub_name).returns(**stub_returns)
     mox.replay()
     cmd_path = _shim_cmd_path(mox, stub_name)

@@ -29,7 +29,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 def _try_resolve_windows_cmd(cmd: str) -> str | None:
-    """Try to resolve a .cmd variant on Windows if not already a .cmd file."""
+    """Try to resolve a .cmd variant on Windows if not already a .cmd file."""  # noqa: DOC201 - test command helper; return contract is local
     if os.name != "nt":
         return None
     if cmd.lower().endswith(".cmd"):
@@ -38,7 +38,7 @@ def _try_resolve_windows_cmd(cmd: str) -> str | None:
 
 
 def _resolve_command(cmd: str) -> str:
-    """Return an executable path for *cmd*, respecting PATHEXT on Windows."""
+    """Return an executable path for *cmd*, respecting PATHEXT on Windows."""  # noqa: DOC201 - test command helper; return contract is local
     if resolved := shutil.which(cmd):
         return resolved
     if windows_cmd := _try_resolve_windows_cmd(cmd):
@@ -73,7 +73,7 @@ def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
 
 @when(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
 def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
-    """Invoke the stubbed command."""
+    """Invoke the stubbed command."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     resolved = _resolve_command(cmd)
     return _run([resolved], check=True)
 
@@ -82,7 +82,7 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
 def then_run_command(
     mox: CmdMox, cmd: str
 ) -> subprocess.CompletedProcess[str]:  # pragma: no cover - pytest-bdd glue
-    """Alias the 'When' step for scenarios that use Then/And."""
+    """Alias the 'When' step for scenarios that use Then/And."""  # noqa: DOC201 - BDD step alias; return contract is scenario-local
     return run_command(mox, cmd)
 
 
@@ -91,7 +91,7 @@ def then_run_command(
     target_fixture="result",
 )
 def run_command_failure(cmd: str) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* expecting a non-zero exit status."""
+    """Run *cmd* expecting a non-zero exit status."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     return _run([_resolve_command(cmd)], check=False)
 
 
@@ -104,7 +104,7 @@ def run_command_args(
     cmd: str,
     args: str,
 ) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* with additional arguments."""
+    """Run *cmd* with additional arguments."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     decoded = decode_placeholders(args)
     argv = [_resolve_command(cmd), *shlex.split(decoded)]
     return _run(argv, check=True)
@@ -117,7 +117,7 @@ def run_command_args(
 def run_shell_command(
     mox: CmdMox, command_line: str
 ) -> subprocess.CompletedProcess[str]:
-    """Run *command_line* with shell parsing enabled (e.g., pipelines)."""
+    """Run *command_line* with shell parsing enabled (e.g., pipelines)."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     decoded = decode_placeholders(command_line)
     return subprocess.run(  # noqa: S602 - the example intentionally exercises shell pipeline behaviour
         decoded,
@@ -134,7 +134,7 @@ def _run_command_args_stdin_env_impl(
     inputs: CommandInputs,
     env: EnvVar,
 ) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* using aggregated command inputs and environment."""
+    """Run *cmd* using aggregated command inputs and environment."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     params = CommandExecution(
         cmd=cmd,
         args=inputs.args,
@@ -160,7 +160,7 @@ def run_command_args_stdin_env(
     var: str,
     val: str,
 ) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
-    """Run *cmd* with arguments, stdin, and an environment variable."""
+    """Run *cmd* with arguments, stdin, and an environment variable."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     resolved_args = resolve_empty_placeholder(args)
     resolved_stdin = resolve_empty_placeholder(stdin)
     decoded_args = decode_placeholders(resolved_args)
@@ -174,7 +174,7 @@ def run_command_args_stdin_env(
     target_fixture="result",
 )
 def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* inside a ``with mox`` block and verify afterwards."""
+    """Run *cmd* inside a ``with mox`` block and verify afterwards."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     original_env = os.environ.copy()
     with mox:
         mox.replay()
@@ -188,7 +188,7 @@ def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess
     target_fixture="result",
 )
 def run_shim_sequence(sequence: str) -> subprocess.CompletedProcess[str]:
-    """Invoke a list of shim commands within a single Python process."""
+    """Invoke a list of shim commands within a single Python process."""  # noqa: DOC201 - BDD step; return contract is scenario-local
     commands = shlex.split(sequence)
     script = textwrap.dedent(
         """

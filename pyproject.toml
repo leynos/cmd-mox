@@ -185,11 +185,6 @@ typing = "typ"
 # Enforce NumPy docstring style
 convention = "numpy"
 
-[tool.ruff.lint.pydoclint]
-# Keep concise private-helper summaries while enforcing complete NumPy-style
-# contracts on substantive public docstrings.
-ignore-one-line-docstrings = true
-
 [tool.pylint.main]
 # Expand directory targets like cmd_mox and tests even when they are not
 # packages.

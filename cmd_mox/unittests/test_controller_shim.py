@@ -48,7 +48,13 @@ class _ShimSymlinkSpy:
 
 @pytest.fixture
 def shim_symlink_spy(monkeypatch: pytest.MonkeyPatch) -> _ShimSymlinkSpy:
-    """Redirect ``create_shim_symlinks`` to a spy for reuse across tests."""
+    """Redirect ``create_shim_symlinks`` to a spy for reuse across tests.
+
+    Returns
+    -------
+    _ShimSymlinkSpy
+        The spy installed as the shim creation function.
+    """
     spy = _ShimSymlinkSpy()
     monkeypatch.setattr(controller, "create_shim_symlinks", spy)
     return spy

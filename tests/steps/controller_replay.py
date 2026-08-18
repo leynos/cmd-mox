@@ -20,7 +20,7 @@ if typ.TYPE_CHECKING:
 
 @given("a git replay fixture exists", target_fixture="git_replay_fixture_path")
 def git_replay_fixture(tmp_path: Path) -> Path:
-    """Create a replay fixture containing ``git status`` -> ``ok``."""
+    """Create a replay fixture containing ``git status`` -> ``ok``."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
     return write_minimal_replay_fixture(tmp_path)
 
 
@@ -54,7 +54,7 @@ def spy_with_fuzzy_replay_and_fallback(
 def handle_invocation_expect_error(
     mox: CmdMox, cmd: str, args: str
 ) -> UnexpectedCommandError:
-    """Call ``_handle_invocation()`` directly and capture the strict replay error."""
+    """Call ``_handle_invocation()`` directly and capture the strict replay error."""  # noqa: DOC201 - BDD error helper; return contract is scenario-local
     invocation = Invocation(command=cmd, args=shlex.split(args), stdin="", env={})
 
     with pytest.raises(UnexpectedCommandError) as excinfo:

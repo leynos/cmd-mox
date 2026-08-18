@@ -41,7 +41,7 @@ _PLACEHOLDER_TOKENS: dict[str, str] = {
 
 
 def decode_placeholders(value: str) -> str:
-    """Expand user-facing placeholder tokens embedded in feature files."""
+    """Expand user-facing placeholder tokens embedded in feature files."""  # noqa: DOC201 - test-step helper; return contract is local
     result = value
     for token, replacement in _PLACEHOLDER_TOKENS.items():
         result = result.replace(token, replacement)
@@ -49,5 +49,5 @@ def decode_placeholders(value: str) -> str:
 
 
 def resolve_empty_placeholder(value: str) -> str:
-    """Resolve the special '<empty>' placeholder to an empty string."""
+    """Resolve the special '<empty>' placeholder to an empty string."""  # noqa: DOC201 - test-step helper; return contract is local
     return "" if value == "<empty>" else value

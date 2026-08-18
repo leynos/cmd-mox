@@ -13,7 +13,13 @@ def run_subprocess(
     args: cabc.Sequence[str],
     **kwargs: typ.Any,  # noqa: ANN401 - test cases deliberately accept values of multiple runtime types
 ) -> subprocess.CompletedProcess[str]:
-    """Run ``subprocess.run`` with common defaults for tests."""
+    """Run ``subprocess.run`` with common defaults for tests.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process returned by ``subprocess.run``.
+    """
     return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
         args, capture_output=True, text=True, check=True, **kwargs
     )
@@ -21,5 +27,11 @@ def run_subprocess(
 
 @pytest.fixture(name="run")
 def run_fixture() -> cabc.Callable[..., subprocess.CompletedProcess[str]]:
-    """Provide :func:`run_subprocess` as a fixture."""
+    """Provide :func:`run_subprocess` as a fixture.
+
+    Returns
+    -------
+    collections.abc.Callable
+        The subprocess helper used by tests.
+    """
     return run_subprocess

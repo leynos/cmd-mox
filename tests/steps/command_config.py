@@ -307,7 +307,7 @@ def stub_records_merged_env(
 
 @given(parsers.cfparse('the command "{cmd}" requires env var "{var}"="{val}"'))
 def command_requires_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
-    """Attach an environment requirement to an existing double."""
+    """Attach an environment requirement to an existing double."""  # noqa: DOC501 - BDD setup step; assertion failure is scenario-local
     for collection in (mox.mocks, mox.stubs, mox.spies):
         double = collection.get(cmd)
         if double is not None:

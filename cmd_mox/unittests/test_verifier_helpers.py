@@ -12,7 +12,13 @@ from cmd_mox.test_doubles import CommandDouble, DoubleKind
 
 
 def _double(kind: DoubleKind) -> CommandDouble:
-    """Return a typed, minimal CommandDouble stub for formatting tests."""
+    """Return a typed, minimal CommandDouble stub for formatting tests.
+
+    Returns
+    -------
+    CommandDouble
+        A minimal command double with the requested kind.
+    """
     return typ.cast("CommandDouble", types.SimpleNamespace(kind=kind))
 
 

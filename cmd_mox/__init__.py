@@ -49,7 +49,30 @@ def __getattr__(name: str) -> _ModuleType: ...
 
 
 def __getattr__(name: str) -> _ModuleType | cabc.Callable[..., object]:
-    """Lazily import optional dependencies when requested."""
+    """Lazily import optional dependencies when requested.
+
+    Parameters
+    ----------
+    name : str
+        Module attribute to resolve.
+
+    Returns
+    -------
+    types.ModuleType or collections.abc.Callable[..., object]
+        Imported submodule, or the ``cmd_mox`` pytest fixture callable when
+        ``name`` is ``"cmd_mox_fixture"``.
+
+    Raises
+    ------
+    AttributeError
+        If ``name`` does not identify a submodule in :mod:`cmd_mox`.
+    RuntimeError
+        If resolving ``"cmd_mox_fixture"`` fails because an optional
+        dependency of the pytest plugin is unavailable.
+    ModuleNotFoundError
+        If importing a requested submodule fails because a dependency other
+        than the requested module is unavailable.
+    """
     if name == "cmd_mox_fixture":
         try:
             from .pytest_plugin import cmd_mox as _cmd_mox_fixture

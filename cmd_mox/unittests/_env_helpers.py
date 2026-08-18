@@ -13,7 +13,18 @@ if typ.TYPE_CHECKING:
 
 
 def require_shim_dir(env: EnvironmentManager) -> Path:
-    """Return ``env.shim_dir`` when initialised or raise a helpful error."""
+    """Return ``env.shim_dir`` when initialised or raise a helpful error.
+
+    Returns
+    -------
+    pathlib.Path
+        The environment manager's shim directory.
+
+    Raises
+    ------
+    MissingEnvironmentError
+        If the environment manager has not been initialised.
+    """
     if env.shim_dir is None:
         msg = "Environment manager is not initialised; shim_dir is missing"
         raise MissingEnvironmentError(msg)
@@ -21,7 +32,18 @@ def require_shim_dir(env: EnvironmentManager) -> Path:
 
 
 def require_socket_path(env: EnvironmentManager) -> Path:
-    """Return ``env.socket_path`` when initialised or raise a helpful error."""
+    """Return ``env.socket_path`` when initialised or raise a helpful error.
+
+    Returns
+    -------
+    pathlib.Path
+        The environment manager's IPC socket path.
+
+    Raises
+    ------
+    MissingEnvironmentError
+        If the environment manager has not been initialised.
+    """
     if env.socket_path is None:
         msg = "Environment manager is not initialised; socket_path is missing"
         raise MissingEnvironmentError(msg)
