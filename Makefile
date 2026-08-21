@@ -27,6 +27,10 @@ DF12_PYTHON_LINTS_REF ?= 4cf41736cce2f7ba2778882a5c629c044568a0e5
 DF12_PYTHON_LINTS = git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)
 DF12_PYLINT = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' pylint
 AMBRLEAKS = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' ambrleaks
+SKYLOS_VERSION = 4.33.2
+SKYLOS = $(UV_ENV) $(UV) tool run --from 'skylos==$(SKYLOS_VERSION)' skylos \
+	--config-file pyproject.toml
+SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	tests/test_named_pipe_server.py \
@@ -112,6 +116,7 @@ lint: build ## Run linters
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
 	$(AMBRLEAKS) tests
+	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
 	+$(MAKE) spelling
 
 typecheck: build ## Run typechecking

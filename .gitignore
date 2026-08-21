@@ -212,6 +212,7 @@ target/
 .claude/
 .memdb/
 .grepai/
+.skylos/
 *.swp
 *.swo
 *~

@@ -90,7 +90,7 @@ jobs:
         with:
           globs: '**/*.md'
 
-      - name: Run ruff
+      - name: Run lint and dead-code detection
         if: matrix.run-windows-smoke == false
         run: make lint
 
