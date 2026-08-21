@@ -94,8 +94,10 @@ Verified runtime entry points are recorded with symbol type, fully qualified
 name, and reason under `[tool.skylos.dead_code.entrypoints]`. Exceptions that
 cannot describe an entry point are stored in both
 `[tool.skylos.whitelist].names` and `[tool.skylos.whitelist.documented]`, with
-a reason. This preserves a narrow, auditable distinction between real dead code
-and static-analysis limits.
+a caller-specific reason. Symbols are grouped only when the same runtime caller
+or lifecycle reaches all of them; separate records describe different callers.
+This preserves a narrow, auditable distinction between real dead code and
+static-analysis limits.
 
 ## Consequences
 

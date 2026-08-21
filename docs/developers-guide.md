@@ -74,10 +74,11 @@ verified. Remove confirmed dead code. For a confirmed false positive that
 cannot be represented as an ordinary static reference, add a precise typed
 entry-point rule to `[tool.skylos.dead_code.entrypoints]` or a named exception
 to `[tool.skylos.whitelist.documented]` in `pyproject.toml`. Every exception
-must name its verified runtime caller in its reason. Do not add unexplained
-exceptions or use the allow list to avoid a removal. The `--no-grep-verify`
-configuration is intentional: test references must not keep production symbols
-live in the blocking scan.
+must name its verified runtime caller in a caller-specific reason. Group
+symbols only when the same caller or lifecycle reaches all of them; otherwise,
+use separate entries. Do not add unexplained exceptions or use the allow list
+to avoid a removal. The `--no-grep-verify` configuration is intentional: test
+references must not keep production symbols live in the blocking scan.
 
 ## Spelling policy
 
