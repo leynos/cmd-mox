@@ -39,13 +39,7 @@ _TEST_BODIES: dict[LifecyclePhase, str] = {
 
 
 def _format_block(block: str, *, indent: int = 0) -> str:
-    """Return a dedented block optionally indented by ``indent`` spaces.
-
-    Returns
-    -------
-    str
-        The normalised block, with a trailing newline when non-empty.
-    """
+    """Return a dedented block optionally indented by ``indent`` spaces."""  # noqa: DOC201 - private module helper has an obvious str return
     normalized = textwrap.dedent(block).strip("\n")
     if not normalized:
         return ""
@@ -57,13 +51,7 @@ def _format_block(block: str, *, indent: int = 0) -> str:
 
 
 def _build_module_prefix(*, include_subprocess_helper: bool) -> str:
-    """Compose the module header and optional shim helper.
-
-    Returns
-    -------
-    str
-        The generated module prefix.
-    """
+    """Compose the module header and optional shim helper."""  # noqa: DOC201 - private module helper has an obvious str return
     header_lines = [
         "import pytest",
         "from cmd_mox.controller import Phase",

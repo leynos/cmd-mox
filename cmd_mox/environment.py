@@ -64,7 +64,7 @@ class _CtypesModule(typ.Protocol):
 
 
 def _path_identity(path: Path | None) -> str | None:
-    """Return a comparable representation of *path*, or ``None`` if unset."""  # noqa: DOC201 - private normalisation helper has an obvious optional string return
+    """Return a comparable representation of *path*, or ``None`` if unset."""  # noqa: DOC201 - private normalization helper has an obvious optional string return
     return None if path is None else path_utils.normalize_path(path)
 
 
@@ -161,7 +161,7 @@ def ensure_dir_exists(
 ) -> Path:
     """Return *path* as a ``Path`` when it refers to an existing directory.
 
-    Normalises path validation so callers raise consistent, descriptive errors
+    Normalizes path validation so callers raise consistent, descriptive errors
     when environment directories disappear or are misconfigured.
 
     Returns
@@ -287,7 +287,8 @@ class EnvironmentManager:
         Raises
         ------
         RuntimeError
-            If another manager is already active in the current thread.
+            If a manager is already active in the current thread, whether another
+            manager or re-entry of this instance before its context has exited.
         """
         cls = type(self)
         if self._orig_env is not None or cls.get_active_manager() is not None:

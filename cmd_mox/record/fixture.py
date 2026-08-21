@@ -64,17 +64,7 @@ def _parse_version(version_str: str) -> tuple[int, int]:
 
 
 def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-    """Migrate a v0.x fixture dict to v1.0 format.
-
-    The v0.x schema is hypothetical (v1.0 is the first release).  This
-    migration exists to exercise the pipeline and serve as a template for
-    future migrations.
-
-    Returns
-    -------
-    dict[str, typing.Any]
-        The input mapping with its schema version set to ``1.0``.
-    """
+    """Migrate a v0.x fixture dict to v1.0 format."""  # noqa: DOC201 - private migration helper has an obvious dict return
     data["version"] = "1.0"
     return data
 
@@ -194,23 +184,7 @@ def _execute_migration_chain(
 
 
 def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-    """Apply chained migrations to bring *data* up to the current schema.
-
-    The input dict is deep-copied so the caller's original is never
-    mutated.  A missing ``version`` key is treated as ``"0.0"`` (legacy
-    fixture predating the version field).
-
-    Parameters
-    ----------
-    data : dict[str, typ.Any]
-        The raw fixture dict, potentially at an older schema version.
-
-    Returns
-    -------
-    dict[str, typ.Any]
-        The fixture dict migrated to the current schema version.
-
-    """
+    """Apply chained migrations to bring *data* up to the current schema."""  # noqa: DOC201 - private migration helper has an obvious dict return
     data = copy.deepcopy(data)  # deep copy to avoid mutating the caller's dict
 
     _normalize_version_field(data)
@@ -228,13 +202,7 @@ def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
 
 
 def _cmdmox_version() -> str:
-    """Return the installed cmd-mox version, or ``"unknown"``.
-
-    Returns
-    -------
-    str
-        Installed distribution version, or ``"unknown"`` when unavailable.
-    """
+    """Return the installed cmd-mox version, or ``"unknown"``."""  # noqa: DOC201 - private version lookup has an obvious str return
     try:
         return importlib.metadata.version("cmd-mox")
     except importlib.metadata.PackageNotFoundError:
@@ -430,19 +398,28 @@ class FixtureFile:
         -------
         FixtureFile
             The parsed fixture with its data migrated to the current schema.
+
+        Raises
+        ------
+        ValueError
+            If the mapping does not conform to the fixture schema.
         """
-        data = _apply_migrations(data)
-        return cls(
-            version=cls.SCHEMA_VERSION,
-            metadata=FixtureMetadata.from_dict(data["metadata"]),
-            recordings=[
-                RecordedInvocation.from_dict(r) for r in data.get("recordings", [])
-            ],
-            scrubbing_rules=[
-                ScrubbingRule.from_dict(typ.cast("ScrubbingRuleDict", r))
-                for r in data.get("scrubbing_rules", [])
-            ],
-        )
+        try:
+            data = _apply_migrations(data)
+            return cls(
+                version=cls.SCHEMA_VERSION,
+                metadata=FixtureMetadata.from_dict(data["metadata"]),
+                recordings=[
+                    RecordedInvocation.from_dict(r) for r in data.get("recordings", [])
+                ],
+                scrubbing_rules=[
+                    ScrubbingRule.from_dict(typ.cast("ScrubbingRuleDict", r))
+                    for r in data.get("scrubbing_rules", [])
+                ],
+            )
+        except (AttributeError, KeyError, TypeError) as exc:
+            msg = f"Invalid fixture schema: {exc}"
+            raise ValueError(msg) from exc
 
     def save(self, path: Path) -> None:
         """Write this fixture to *path* as JSON, creating directories as needed.

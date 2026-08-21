@@ -123,10 +123,10 @@ def _validate_environment() -> float:
 
     Raises
     ------
-    ValueError
-        If the configured timeout is not positive and finite. The caller
-        converts this validation failure to a process exit.
-    """
+    SystemExit
+        If the IPC socket environment variable is unset or the configured
+        timeout is not positive and finite.
+    """  # noqa: DOC501, DOC502 - validation failures convert to SystemExit via sys.exit; the DOC rules cannot trace that path as an explicit raise
     if os.environ.get(CMOX_IPC_SOCKET_ENV) is None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)

@@ -351,3 +351,46 @@ def test_command_runner_honours_override_environment(
     runner.run(invocation, {})
 
     assert captured[0] == str(script)
+
+
+def test_run_response_includes_applied_environment(
+    runner: CommandRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """run() surfaces the merged environment overrides in ``Response.env``."""
+    script = tmp_path / "echo"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+
+    def fake_run(
+        argv: list[str], *, env: dict[str, str], **_kwargs: object
+    ) -> DummyResult:
+        return DummyResult(env)
+
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which", lambda cmd, path=None: str(script)
+    )
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    invocation = Invocation(command="echo", args=[], stdin="", env={"VAR": "inv"})
+    response = runner.run(invocation, {"VAR": "expect"})
+
+    assert response.env["VAR"] == "expect"
+
+
+def test_execute_command_error_response_includes_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """execute_command surfaces the applied environment on error responses."""
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise FileNotFoundError
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    invocation = Invocation(command="missing", args=[], stdin="", env={})
+    response = execute_command(
+        Path("/bin/true"), invocation, env={"VAR": "x"}, timeout=30
+    )
+
+    assert response.exit_code == 127
+    assert response.env == {"VAR": "x"}

@@ -540,7 +540,7 @@ def test_cleanup_temporary_directory_skip_logic(
     Raises
     ------
     AssertionError
-        If the parametrised scenario name is unsupported.
+        If the parameterized scenario name is unsupported.
     """
     mgr = EnvironmentManager()
     created, replacement = _prepare_cleanup_scenario(scenario, tmp_path, mgr)
@@ -681,7 +681,7 @@ def test_maybe_shorten_windows_path_skips_short_paths(
 def test_path_identity_normalizes_case_and_segments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Path identity should normalise separators and casing on Windows."""
+    """Path identity should normalize separators and casing on Windows."""
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     upper = Path(r"C:\Tools\..\BIN")
     lower = Path(r"c:\bin")

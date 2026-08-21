@@ -58,7 +58,7 @@ def _tracked_remote_fallback(
     source: str | Path,
     destination: Path,
 ) -> rollout.RefreshResult | None:
-    """Return a valid tracked config only for an unavailable HTTPS authority."""  # noqa: DOC201
+    """Return a valid tracked config only for an unavailable HTTPS authority."""  # noqa: DOC201 - private fallback helper has an obvious optional return
     if not isinstance(source, str) or urllib.parse.urlsplit(source).scheme != "https":
         return None
     try:

@@ -479,6 +479,9 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def matches(self, invocation: Invocation) -> bool:
         """Return whether *invocation* satisfies the expectation.
 
+        The command name is checked before expectation matching so a double
+        cannot accept an invocation owned by another command.
+
         Parameters
         ----------
         invocation : Invocation
@@ -580,7 +583,14 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         env : dict[str, str] or None
             Expected environment mapping, when supplied.
 
-        """
+        Raises
+        ------
+        AssertionError
+            If this double is not a spy, no invocation has been recorded, or
+            the most recent invocation's args, stdin (when supplied), or env
+            (when supplied) differ from the expectations.
+
+        """  # noqa: DOC502 - AssertionError is raised by the validation helpers invoked below
         self._validate_spy_usage("assert_called_with")
         invocation = self._get_last_invocation()
         self._validate_arguments(invocation, args)

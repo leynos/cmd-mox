@@ -242,6 +242,13 @@ class TestFixtureFile:
         with pytest.raises(ValueError, match="expected str"):
             FixtureFile.from_dict(data)
 
+    def test_from_dict_normalizes_missing_metadata_to_value_error(self) -> None:
+        """Missing required fields surface as a schema ValueError."""
+        data = _sample_fixture().to_dict()
+        del data["metadata"]
+        with pytest.raises(ValueError, match="Invalid fixture schema"):
+            FixtureFile.from_dict(data)
+
     def test_scrubbing_rules_serialization(self) -> None:
         """Scrubbing rules survive serialization."""
         rule = ScrubbingRule(

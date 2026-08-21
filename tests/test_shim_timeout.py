@@ -31,6 +31,10 @@ def test_main_errors_on_invalid_timeout(
     with pytest.raises(SystemExit) as exc:
         shim.main()
 
-    assert exc.value.code == 1, "Assertion failed"
+    assert exc.value.code == 1, (
+        f"shim.main should exit with code 1 for invalid timeout {value!r}"
+    )
     stderr = capsys.readouterr().err
-    assert f"invalid timeout: '{value}'" in stderr, "Assertion failed"
+    assert f"invalid timeout: '{value}'" in stderr, (
+        "shim.main should report the rejected timeout value on stderr"
+    )

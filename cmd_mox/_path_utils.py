@@ -14,7 +14,7 @@ def normalize_path_string(path: str) -> str:
     Returns
     -------
     str
-        The normalised path, using case-folding on Windows.
+        The normalized path, using case-folding on Windows.
     """
     module = ntpath if IS_WINDOWS else os.path
     normalized = module.normpath(path)
@@ -24,11 +24,11 @@ def normalize_path_string(path: str) -> str:
 
 
 def normalize_path(path: os.PathLike[str] | str) -> str:
-    """Normalise *path* regardless of whether it is a string or Path.
+    """Normalize *path* regardless of whether it is a string or Path.
 
     Returns
     -------
     str
-        The normalised path string.
+        The normalized path string.
     """
     return normalize_path_string(os.fspath(path))

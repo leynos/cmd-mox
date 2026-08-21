@@ -31,4 +31,6 @@ def test_pipeline_composes_multiple_mocks(cmd_mox: CmdMox) -> None:
         shell=True,
     )
 
-    assert result.stdout.strip() == "c b a", "Assertion failed"
+    assert result.stdout.strip() == "c b a", (
+        "pipeline should output the sort -r result 'c b a'"
+    )

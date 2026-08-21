@@ -50,7 +50,7 @@ def rollout_modules_fixture(
 
 
 def _dictionary_text(stem: str = "organ") -> str:
-    """Return a minimal valid shared-dictionary document."""  # noqa: DOC201
+    """Return a minimal valid shared-dictionary document."""  # noqa: DOC201 - private test helper has an obvious text return
     return (
         'schema = 1\n\n[oxford]\nstems = ["'
         + stem
@@ -106,7 +106,7 @@ def test_https_failure_reuses_valid_tracked_config(
     tracked_config.write_text('[default]\nlocale = "en-gb"\n', encoding="utf-8")
 
     def unavailable(*_args: object, **_kwargs: object) -> None:
-        """Model an unavailable HTTPS authority."""  # noqa: DOC501
+        """Model an unavailable HTTPS authority."""  # noqa: DOC501 - test stub raises only to model a network failure
         raise urllib.error.URLError("offline")
 
     monkeypatch.setattr(rollout, "refresh_base", unavailable)
@@ -301,7 +301,7 @@ def test_remote_failure_reuses_only_a_valid_stale_cache(
     metadata = tmp_path / "cache.json"
 
     def fail(*_args: object, **_kwargs: object) -> None:
-        """Model an unavailable remote authority."""  # noqa: DOC501
+        """Model an unavailable remote authority."""  # noqa: DOC501 - test stub raises only to model a network failure
         message = "offline"
         raise urllib.error.URLError(message)
 

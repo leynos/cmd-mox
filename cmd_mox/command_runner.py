@@ -57,7 +57,12 @@ class CommandRunner:
             invocation.command, merged_path, override
         )
         if isinstance(resolved, Response):
-            return resolved
+            return Response(
+                stdout=resolved.stdout,
+                stderr=resolved.stderr,
+                exit_code=resolved.exit_code,
+                env=dict(env),
+            )
 
         return self._execute_command(resolved, invocation, env)
 
@@ -188,22 +193,32 @@ def execute_command(
             stdout=result.stdout,
             stderr=result.stderr,
             exit_code=result.returncode,
+            env=dict(env),
         )
     except subprocess.TimeoutExpired:
         duration = int(timeout)
         return Response(
             stderr=f"{invocation.command}: timeout after {duration} seconds",
             exit_code=124,
+            env=dict(env),
         )
     except FileNotFoundError:
-        return Response(stderr=f"{invocation.command}: not found", exit_code=127)
+        return Response(
+            stderr=f"{invocation.command}: not found", exit_code=127, env=dict(env)
+        )
     except PermissionError as exc:
-        return Response(stderr=f"{invocation.command}: {exc}", exit_code=126)
+        return Response(
+            stderr=f"{invocation.command}: {exc}", exit_code=126, env=dict(env)
+        )
     except OSError as exc:
         return Response(
-            stderr=f"{invocation.command}: execution failed: {exc}", exit_code=126
+            stderr=f"{invocation.command}: execution failed: {exc}",
+            exit_code=126,
+            env=dict(env),
         )
     except Exception as exc:  # noqa: BLE001 - defensive
         return Response(
-            stderr=f"{invocation.command}: unexpected error: {exc}", exit_code=126
+            stderr=f"{invocation.command}: unexpected error: {exc}",
+            exit_code=126,
+            env=dict(env),
         )

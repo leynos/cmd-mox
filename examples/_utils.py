@@ -6,7 +6,7 @@ import shutil
 
 
 def resolve_command(name: str) -> str:
-    """Return an absolute path for *name* when available.
+    """Return a resolved path for *name*, falling back to *name* when unavailable.
 
     Returns
     -------

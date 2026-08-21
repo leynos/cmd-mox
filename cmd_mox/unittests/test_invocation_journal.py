@@ -38,7 +38,10 @@ class StubReturns(typ.TypedDict, total=False):
 
 
 def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
-    """Return shim path for a command; requires prior mox.replay().
+    """Return the path to a command shim for *obj*.
+
+    Accepts either a :class:`CmdMox` that has completed ``mox.replay()`` or an
+    initialized :class:`EnvironmentManager` whose context has been entered.
 
     Returns
     -------
@@ -48,7 +51,8 @@ def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
     env = typ.cast("EnvironmentManager", getattr(obj, "environment", obj))
     shim_dir = env.shim_dir
     assert shim_dir is not None, (
-        "shim_dir is None; did you forget to call mox.replay()?"
+        "shim_dir is None; pass a CmdMox after mox.replay() or an "
+        "initialized EnvironmentManager"
     )
     return shim_dir.joinpath(*parts)
 

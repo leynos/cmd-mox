@@ -104,7 +104,7 @@ def _normalize_command_name(name: str) -> str:
     Parameters
     ----------
     name : str
-        Command name to normalise.
+        Command name to normalize.
 
     Returns
     -------

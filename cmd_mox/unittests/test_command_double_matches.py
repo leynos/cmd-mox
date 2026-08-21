@@ -21,12 +21,16 @@ def test_matches_delegates_only_for_its_own_command() -> None:
     with patch.object(
         Expectation, "matches", autospec=True, return_value=True
     ) as matches:
-        assert double.matches(matching_invocation)
+        assert double.matches(matching_invocation), (
+            "matches() should accept an invocation for its own command"
+        )
         matches.assert_called_once_with(double.expectation, matching_invocation)
 
         matches.reset_mock()
 
-        assert not double.matches(mismatched_invocation)
+        assert not double.matches(mismatched_invocation), (
+            "matches() should reject a different command without delegating"
+        )
         matches.assert_not_called()
 
 
@@ -45,5 +49,7 @@ def test_matches_rejects_every_different_command_without_delegating(
     with patch.object(
         Expectation, "matches", autospec=True, return_value=True
     ) as matches:
-        assert not double.matches(invocation)
+        assert not double.matches(invocation), (
+            "matches() should short-circuit a command mismatch without delegating"
+        )
         matches.assert_not_called()

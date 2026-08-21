@@ -49,7 +49,7 @@ class Dictionary:
 
 
 def _string_list(table: cabc.Mapping[str, object], key: str) -> tuple[str, ...]:
-    """Read and validate a list of strings from a TOML table."""  # noqa: DOC201, DOC501
+    """Read and validate a list of strings from a TOML table."""  # noqa: DOC201, DOC501 - private TOML reader has an obvious return and raises only for malformed tables
     value = table.get(key, [])
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         message = f"{key!r} must be a list of strings"

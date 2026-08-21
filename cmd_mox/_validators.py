@@ -8,6 +8,11 @@ import math
 def validate_positive_finite_timeout(timeout: float) -> None:
     """Ensure *timeout* represents a usable IPC timeout value.
 
+    Parameters
+    ----------
+    timeout : float
+        IPC timeout in seconds.
+
     Raises
     ------
     TypeError
@@ -27,6 +32,13 @@ def validate_positive_finite_timeout(timeout: float) -> None:
 def validate_optional_timeout(timeout: float | None, *, name: str) -> None:
     """Validate optional timeout values passed to IPC helpers.
 
+    Parameters
+    ----------
+    timeout : float or None
+        Optional IPC timeout in seconds.
+    name : str
+        Parameter name used in error messages.
+
     Raises
     ------
     TypeError
@@ -45,10 +57,16 @@ def validate_optional_timeout(timeout: float | None, *, name: str) -> None:
     except ValueError as exc:
         msg = f"{name} must be > 0 and finite"
         raise ValueError(msg) from exc
+    return
 
 
 def validate_retry_attempts(retries: int) -> None:
     """Ensure retry attempt counts are sensible.
+
+    Parameters
+    ----------
+    retries : int
+        Number of connection attempts to permit.
 
     Raises
     ------
@@ -57,7 +75,7 @@ def validate_retry_attempts(retries: int) -> None:
     ValueError
         If *retries* is less than one.
     """
-    if isinstance(retries, bool):
+    if isinstance(retries, bool) or not isinstance(retries, int):
         msg = "retries must be an integer"
         raise TypeError(msg)
 
@@ -68,6 +86,11 @@ def validate_retry_attempts(retries: int) -> None:
 
 def validate_retry_backoff(backoff: float) -> None:
     """Ensure retry backoff configuration is valid.
+
+    Parameters
+    ----------
+    backoff : float
+        Initial delay between retries in seconds.
 
     Raises
     ------
@@ -87,6 +110,11 @@ def validate_retry_backoff(backoff: float) -> None:
 
 def validate_retry_jitter(jitter: float) -> None:
     """Ensure retry jitter configuration stays within safe bounds.
+
+    Parameters
+    ----------
+    jitter : float
+        Randomisation factor applied to the retry backoff delay.
 
     Raises
     ------

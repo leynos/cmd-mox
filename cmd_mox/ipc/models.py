@@ -208,7 +208,7 @@ class Response:
         Raises
         ------
         RuntimeError
-            If the payload contains an invalid passthrough request.
+            If the payload fields cannot construct a valid Response.
         """
         passthrough_payload = payload.get("passthrough")
         passthrough: PassthroughRequest | None = None
