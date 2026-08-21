@@ -8,22 +8,64 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_WHITELIST_NAMES = frozenset({"bootstrap_shim_path"})
-EXPECTED_ENTRYPOINT_FULL_NAMES = frozenset({
-    "cmd_mox.environment._Win32Function.argtypes",
-    "cmd_mox.environment._Win32Function.restype",
-    "cmd_mox.ipc.server._BaseIPCServer._export_environment",
-    "cmd_mox.ipc.server.IPCServer._post_stop_cleanup",
-    "cmd_mox.ipc.server.IPCServer._prepare_backend_start",
-    "cmd_mox.ipc.server.IPCServer._stop_backend",
-    "cmd_mox.ipc.server.IPCServer._wait_until_ready",
-    "cmd_mox.ipc.server.NamedPipeServer._prepare_backend_start",
-    "cmd_mox.ipc.server.NamedPipeServer._stop_backend",
-    "cmd_mox.ipc.server.NamedPipeServer._wait_until_ready",
-    "cmd_mox.ipc.server.ParsedRequest.validate",
-    "cmd_mox.ipc.server._NamedPipeState._poke_pipe",
-    "cmd_mox.ipc.server._NamedPipeState.stop",
-    "cmd_mox.ipc.server._ServerLifecycle._stop_backend.server",
-})
+EXPECTED_ENTRYPOINT_REASONS = {
+    "cmd_mox.environment._Win32Function.argtypes": (
+        "_get_short_path assigns this ctypes argument signature to "
+        "GetShortPathNameW through the typed protocol."
+    ),
+    "cmd_mox.environment._Win32Function.restype": (
+        "_get_short_path assigns this ctypes return type to GetShortPathNameW "
+        "through the typed protocol."
+    ),
+    "cmd_mox.ipc.server._BaseIPCServer._export_environment": (
+        "_ServerLifecycle.start invokes this inherited hook before backend "
+        "creation to export the active IPC environment."
+    ),
+    "cmd_mox.ipc.server.IPCServer._post_stop_cleanup": (
+        "_ServerLifecycle.stop invokes this Unix transport hook after joining "
+        "the backend thread to remove the socket."
+    ),
+    "cmd_mox.ipc.server.IPCServer._prepare_backend_start": (
+        "_ServerLifecycle.start invokes this Unix transport hook before "
+        "creating _InnerServer."
+    ),
+    "cmd_mox.ipc.server.IPCServer._stop_backend": (
+        "_ServerLifecycle.stop invokes this Unix transport hook to shut down "
+        "_InnerServer."
+    ),
+    "cmd_mox.ipc.server.IPCServer._wait_until_ready": (
+        "_ServerLifecycle.start invokes this Unix transport hook after "
+        "starting the backend thread to wait for the socket."
+    ),
+    "cmd_mox.ipc.server.NamedPipeServer._prepare_backend_start": (
+        "_ServerLifecycle.start invokes this named-pipe hook; it is a no-op "
+        "because named pipes leave no socket artefact."
+    ),
+    "cmd_mox.ipc.server.NamedPipeServer._stop_backend": (
+        "_ServerLifecycle.stop invokes this named-pipe hook to stop the state "
+        "and join its clients."
+    ),
+    "cmd_mox.ipc.server.NamedPipeServer._wait_until_ready": (
+        "_ServerLifecycle.start invokes this named-pipe hook to wait for the "
+        "state readiness event."
+    ),
+    "cmd_mox.ipc.server.ParsedRequest.validate": (
+        "_request_pipeline invokes this validator before dispatch for Unix and "
+        "named-pipe request ingress."
+    ),
+    "cmd_mox.ipc.server._NamedPipeState._poke_pipe": (
+        "_NamedPipeState.stop invokes this helper to wake the named-pipe accept loop."
+    ),
+    "cmd_mox.ipc.server._NamedPipeState.stop": (
+        "NamedPipeServer._wait_until_ready invokes this on timeout and "
+        "NamedPipeServer._stop_backend invokes it during shutdown."
+    ),
+    "cmd_mox.ipc.server._ServerLifecycle._stop_backend.server": (
+        "_ServerLifecycle.stop passes the stored backend instance through this "
+        "abstract lifecycle hook."
+    ),
+}
+EXPECTED_ENTRYPOINT_FULL_NAMES = frozenset(EXPECTED_ENTRYPOINT_REASONS)
 
 
 def _pyproject() -> dict[str, object]:
@@ -31,6 +73,12 @@ def _pyproject() -> dict[str, object]:
     return tomllib.loads(
         (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
+
+
+def _skylos_config() -> dict[str, object]:
+    """Return the Skylos configuration from the project file."""
+    tool_config = typ.cast("dict[str, object]", _pyproject()["tool"])
+    return typ.cast("dict[str, object]", tool_config["skylos"])
 
 
 def test_skylos_is_a_pinned_external_tool() -> None:
@@ -54,9 +102,7 @@ def test_skylos_is_a_pinned_external_tool() -> None:
 
 def test_skylos_configuration_is_strict_and_reasoned() -> None:
     """Require reasons for every configured Skylos exception."""
-    config = _pyproject()
-    tool_config = typ.cast("dict[str, object]", config["tool"])
-    skylos = typ.cast("dict[str, object]", tool_config["skylos"])
+    skylos = _skylos_config()
     whitelist = typ.cast("dict[str, object]", skylos["whitelist"])
     documented = typ.cast("dict[str, str]", whitelist["documented"])
     whitelist_names = frozenset(typ.cast("list[str]", whitelist["names"]))
@@ -79,6 +125,14 @@ def test_skylos_configuration_is_strict_and_reasoned() -> None:
     )
     assert entrypoint_full_names == EXPECTED_ENTRYPOINT_FULL_NAMES, (
         "Expected the reviewed Skylos entry points to stay enabled."
+    )
+    entrypoint_reasons = {
+        full_name: typ.cast("str", entrypoint["reason"])
+        for entrypoint in entrypoints
+        for full_name in typ.cast("list[str]", entrypoint["full_name"])
+    }
+    assert entrypoint_reasons == EXPECTED_ENTRYPOINT_REASONS, (
+        "Expected every Skylos entry point to retain its verified runtime caller."
     )
     assert all(
         isinstance(reason := entrypoint.get("reason"), str) and reason.strip()
