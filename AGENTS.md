@@ -99,6 +99,11 @@ When implementing changes, adhere to the following testing procedures:
       `[tool.skylos.whitelist.documented]` table in `pyproject.toml`. Keep
       each reason caller-specific; group symbols only when the same runtime
       caller or lifecycle reaches all of them.
+      For a verified false positive, `make skylos-allow NAME=<name>` invokes
+      Skylos's name-only whitelist subcommand. It accepts no reason, so the
+      same reviewed change must add or retain the matching
+      `[tool.skylos.whitelist.documented]` entry with its caller-specific
+      reason in `pyproject.toml`.
     - **Formatting:** Adheres to formatting standards (`make check-fmt`,
       formatting can be applied by running `make fmt`).
     - **Typechecking:** Passes type checking (`make typecheck`).

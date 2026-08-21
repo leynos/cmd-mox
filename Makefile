@@ -15,8 +15,9 @@ PYLINT_PYPY_SHIM = git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_P
 PYLINT_BASELINE_DISABLE = no-else-return,unnecessary-ellipsis,too-many-lines,too-many-arguments,too-many-positional-arguments,subprocess-run-check,use-implicit-booleaness-not-comparison-to-string,unnecessary-dunder-call,use-implicit-booleaness-not-comparison
 PYLINT = $(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)
 SKYLOS_VERSION = 4.33.2
-SKYLOS = $(UV_ENV) $(UV) tool run --from 'skylos==$(SKYLOS_VERSION)' skylos \
-	--config-file pyproject.toml
+SKYLOS_COMMAND = $(UV_ENV) $(UV) tool run --from 'skylos==$(SKYLOS_VERSION)' skylos
+SKYLOS = $(SKYLOS_COMMAND) --config-file pyproject.toml
+SKYLOS_WHITELIST = $(SKYLOS_COMMAND) whitelist
 SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
@@ -25,7 +26,7 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 .PHONY: help all clean build build-release lint fmt check-fmt
-.PHONY: markdownlint markdownlint-run nixie spelling test typecheck
+.PHONY: markdownlint markdownlint-run nixie spelling skylos-allow test typecheck
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
@@ -95,6 +96,11 @@ lint: build ## Run linters
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
 	+$(MAKE) spelling
+
+skylos-allow: export SKYLOS_NAME = $(value NAME)
+skylos-allow: ## Add one named Skylos whitelist exception
+	@test -n "$${SKYLOS_NAME}" || { printf "Error: NAME is required for a named whitelist exception\\n" >&2; exit 2; }
+	$(SKYLOS_WHITELIST) "$${SKYLOS_NAME}"
 
 typecheck: build ## Run typechecking
 	$(TY) --version

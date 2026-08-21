@@ -80,6 +80,12 @@ use separate entries. Do not add unexplained exceptions or use the allow list
 to avoid a removal. The `--no-grep-verify` configuration is intentional: test
 references must not keep production symbols live in the blocking scan.
 
+For a verified false positive, use `make skylos-allow NAME=<name>` to invoke
+Skylos's name-only whitelist subcommand. The subcommand accepts the symbol name
+but no reason. Treat its output as a candidate only: in the same reviewed
+change, add or retain the matching `[tool.skylos.whitelist.documented]` entry
+in `pyproject.toml` with a caller-specific reason.
+
 ## Spelling policy
 
 The lint and Markdown gates run a pinned `typos` release with British English
