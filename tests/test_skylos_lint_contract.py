@@ -7,6 +7,23 @@ import typing as typ
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_WHITELIST_NAMES = frozenset({"bootstrap_shim_path"})
+EXPECTED_ENTRYPOINT_FULL_NAMES = frozenset({
+    "cmd_mox.environment._Win32Function.argtypes",
+    "cmd_mox.environment._Win32Function.restype",
+    "cmd_mox.ipc.server._BaseIPCServer._export_environment",
+    "cmd_mox.ipc.server.IPCServer._post_stop_cleanup",
+    "cmd_mox.ipc.server.IPCServer._prepare_backend_start",
+    "cmd_mox.ipc.server.IPCServer._stop_backend",
+    "cmd_mox.ipc.server.IPCServer._wait_until_ready",
+    "cmd_mox.ipc.server.NamedPipeServer._prepare_backend_start",
+    "cmd_mox.ipc.server.NamedPipeServer._stop_backend",
+    "cmd_mox.ipc.server.NamedPipeServer._wait_until_ready",
+    "cmd_mox.ipc.server.ParsedRequest.validate",
+    "cmd_mox.ipc.server._NamedPipeState._poke_pipe",
+    "cmd_mox.ipc.server._NamedPipeState.stop",
+    "cmd_mox.ipc.server._ServerLifecycle._stop_backend.server",
+})
 
 
 def _pyproject() -> dict[str, object]:
@@ -42,13 +59,27 @@ def test_skylos_configuration_is_strict_and_reasoned() -> None:
     skylos = typ.cast("dict[str, object]", tool_config["skylos"])
     whitelist = typ.cast("dict[str, object]", skylos["whitelist"])
     documented = typ.cast("dict[str, str]", whitelist["documented"])
+    whitelist_names = frozenset(typ.cast("list[str]", whitelist["names"]))
+    assert whitelist_names == EXPECTED_WHITELIST_NAMES, (
+        "Expected the reviewed Skylos whitelist names to stay enabled."
+    )
+    assert frozenset(documented) == whitelist_names, (
+        "Expected every documented Skylos whitelist exception to be enabled."
+    )
     assert all(reason.strip() for reason in documented.values()), (
         "Expected every documented Skylos whitelist entry to have a reason."
     )
 
     dead_code = typ.cast("dict[str, object]", skylos["dead_code"])
     entrypoints = typ.cast("list[dict[str, object]]", dead_code["entrypoints"])
-    assert entrypoints, "Expected verified runtime entry points to be documented."
+    entrypoint_full_names = frozenset(
+        full_name
+        for entrypoint in entrypoints
+        for full_name in typ.cast("list[str]", entrypoint["full_name"])
+    )
+    assert entrypoint_full_names == EXPECTED_ENTRYPOINT_FULL_NAMES, (
+        "Expected the reviewed Skylos entry points to stay enabled."
+    )
     assert all(
         isinstance(reason := entrypoint.get("reason"), str) and reason.strip()
         for entrypoint in entrypoints

@@ -93,7 +93,6 @@ CmdMox-specific Pylint baseline.
 - Revisit unsupported Ruff selectors when the pinned Ruff version changes.
 - Keep `docs/developers-guide.md` synchronized with Makefile and
   `pyproject.toml` lint policy changes.
-
 ## Amendment (2026-08-27): third lint tier
 
 CmdMox adds a third lint tier: an isolated CPython 3.14 Pylint pass configured
@@ -107,3 +106,17 @@ the temporary PyPy baseline.
 
 Consequence: the DF12 plugin and snapshot scanner run on CPython 3.14 without
 changing the PyPy-backed Pylint baseline.
+
+## Amendment (2026-08-21): fourth lint tier
+
+CmdMox adds Skylos as a strict fourth lint tier for production dead-code
+detection. The locally provisioned, pinned analyser scans `cmd_mox` with
+`--category dead_code --gate --format concise --no-upload --no-provenance`, and
+`--no-grep-verify`; Linux CI runs the same `make lint` target.
+
+Remove confirmed dead code. Model verified implicit runtime callers with typed
+`[tool.skylos.dead_code.entrypoints]` records. Only when that cannot model the
+boundary may a documented whitelist exception be used, with a caller-specific
+reason. Review exceptions whenever the runtime lifecycle, ctypes protocol, or
+bootstrap behaviour changes, and update Skylos only after a clean production
+scan and lint contract run.
