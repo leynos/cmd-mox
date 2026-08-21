@@ -150,10 +150,6 @@ class CmdMox:
         """Return all commands registered via doubles."""
         return set(self._doubles)
 
-    def _expected_commands(self) -> set[str]:
-        """Return commands that must be called during replay."""
-        return {name for name, dbl in self._doubles.items() if dbl.is_expected}
-
     # ------------------------------------------------------------------
     # Context manager protocol
     # ------------------------------------------------------------------

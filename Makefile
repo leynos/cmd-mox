@@ -14,6 +14,10 @@ PYLINT_PYPY_SHIM_REF ?= 726d09f968b4d729ee4b29c71fc732e744854f3b
 PYLINT_PYPY_SHIM = git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)
 PYLINT_BASELINE_DISABLE = no-else-return,unnecessary-ellipsis,too-many-lines,too-many-arguments,too-many-positional-arguments,subprocess-run-check,use-implicit-booleaness-not-comparison-to-string,unnecessary-dunder-call,use-implicit-booleaness-not-comparison
 PYLINT = $(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)
+SKYLOS_VERSION = 4.33.2
+SKYLOS = $(UV_ENV) $(UV) tool run --from 'skylos==$(SKYLOS_VERSION)' skylos \
+	--config-file pyproject.toml
+SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	--log-file=windows-ipc.log \
@@ -89,6 +93,7 @@ markdownlint-run: ## Run markdownlint-cli2 with pinned fallback
 lint: build ## Run linters
 	$(RUFF) check
 	$(PYLINT) $(PYLINT_TARGETS)
+	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
 	+$(MAKE) spelling
 
 typecheck: build ## Run typechecking

@@ -6,17 +6,18 @@ where lint policy is configured.
 
 ## Linting
 
-CmdMox uses a two-tier linting pipeline. Run it with:
+CmdMox uses a three-stage linting pipeline. Run it with:
 
 ```bash
 make lint
 ```
 
 The `lint` target first builds the development environment through
-`make build`. It then runs the two lint tiers in order:
+`make build`. It then runs the checks in order:
 
 1. `ruff check`
 2. PyPy-backed Pylint through `pylint-pypy-shim`
+3. a blocking Skylos dead-code scan of the production package
 
 Ruff is the fast first tier. It enforces import order, pycodestyle and Pyflakes
 rules, pathlib usage, docstring rules, pytest rules, selected Ruff preview
@@ -29,21 +30,29 @@ footguns, and module or function shape limits. The Pylint tier is intentionally
 focused: `pyproject.toml` disables all Pylint messages by default and then
 enables only the selected messages that complement Ruff.
 
+Skylos is the final production-liveness check. It is separately provisioned at
+an exact release, scans `cmd_mox` without treating test references as live
+callers, and fails the local gate and Linux CI when it reports unexplained dead
+code. The scan uses only local static analysis: uploads, provenance collection,
+and grep verification are disabled.
+
 ## Makefile lint variables
 
 The `Makefile` exposes the lint runner through variables so developers and
 Continuous Integration (CI) jobs can override the runtime without editing
 project files.
 
-| Variable                  | Default                                                                                                                            | Purpose                                                                           |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `RUFF`                    | `$(UV_ENV) $(UV) run ruff`                                                                                                         | Runs the Ruff command inside the `uv` environment.                                |
-| `PYLINT_PYTHON`           | `pypy`                                                                                                                             | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
-| `PYLINT_TARGETS`          | `cmd_mox conftest.py examples tests`                                                                                               | Lists the directories and files linted by Pylint.                                 |
-| `PYLINT_PYPY_SHIM_REF`    | `726d09f968b4d729ee4b29c71fc732e744854f3b`                                                                                         | Pins the shim repository revision.                                                |
-| `PYLINT_PYPY_SHIM`        | `git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)`                                                       | Identifies the shim package used by `uv tool run`.                                |
-| `PYLINT_BASELINE_DISABLE` | Existing cmd-mox baseline                                                                                                          | Temporarily disables legacy Pylint findings while keeping the second tier active. |
-| `PYLINT`                  | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy-backed Pylint command.                                       |
+| Variable                    | Default                                                                                                                            | Purpose                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `RUFF`                      | `$(UV_ENV) $(UV) run ruff`                                                                                                         | Runs the Ruff command inside the `uv` environment.                                |
+| `PYLINT_PYTHON`             | `pypy`                                                                                                                             | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
+| `PYLINT_TARGETS`            | `cmd_mox conftest.py examples tests`                                                                                               | Lists the directories and files linted by Pylint.                                 |
+| `PYLINT_PYPY_SHIM_REF`      | `726d09f968b4d729ee4b29c71fc732e744854f3b`                                                                                         | Pins the shim repository revision.                                                |
+| `PYLINT_PYPY_SHIM`          | `git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)`                                                       | Identifies the shim package used by `uv tool run`.                                |
+| `PYLINT_BASELINE_DISABLE`   | Existing cmd-mox baseline                                                                                                          | Temporarily disables legacy Pylint findings while keeping the second tier active. |
+| `PYLINT`                    | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy-backed Pylint command.                                       |
+| `SKYLOS_VERSION`            | `4.33.2`                                                                                                                           | Pins the separately provisioned dead-code analyser.                               |
+| `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                          | Limits dead-code liveness analysis to production sources.                         |
 
 _Table 1: Makefile variables for the lint pipeline._
 
@@ -55,8 +64,20 @@ make lint PYLINT_TARGETS=cmd_mox/ipc PYLINT_PYTHON=pypy
 ```
 
 Do not bypass `make lint` for normal validation. Running the target keeps the
-Ruff and Pylint tiers ordered consistently with CI and preserves the shared
-`uv` cache configuration.
+Ruff, Pylint, and Skylos checks ordered consistently with CI and preserves the
+shared `uv` cache configuration.
+
+## Skylos dead-code policy
+
+Treat a Skylos report as genuine dead code until a runtime caller has been
+verified. Remove confirmed dead code. For a confirmed false positive that
+cannot be represented as an ordinary static reference, add a precise typed
+entry-point rule to `[tool.skylos.dead_code.entrypoints]` or a named exception
+to `[tool.skylos.whitelist.documented]` in `pyproject.toml`. Every exception
+must name its verified runtime caller in its reason. Do not add unexplained
+exceptions or use the allow list to avoid a removal. The `--no-grep-verify`
+configuration is intentional: test references must not keep production symbols
+live in the blocking scan.
 
 ## Spelling policy
 
@@ -80,6 +101,7 @@ goals:
 - use focused Pylint checks for problems that Ruff does not cover as well; and
 - run Pylint under PyPy through the shared
   [pylint-pypy-shim](https://github.com/leynos/pylint-pypy-shim) approach.
+- detect unused production symbols with a local, blocking Skylos scan.
 
 The policy is adapted for CmdMox rather than copied blindly. CmdMox targets
 Python 3.12 in `pyproject.toml`, while Episodic targets a newer interpreter.
@@ -130,6 +152,13 @@ The `Makefile` currently supplies `PYLINT_BASELINE_DISABLE` in addition to the
 `pyproject.toml` tables. That split is intentional: `pyproject.toml` documents
 the desired selected Pylint policy, while the `Makefile` carries the temporary
 project baseline required to keep the new tier actionable.
+
+### Skylos tables
+
+- `[tool.skylos.gate]` enables strict failure for unexplained dead-code
+  findings.
+- `[tool.skylos.whitelist.documented]` stores only reasoned false positives;
+  each entry must identify the verified runtime caller.
 
 ## Updating lint policy
 

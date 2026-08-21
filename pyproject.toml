@@ -355,6 +355,51 @@ also_copy = ["conftest.py", "features/", "docs/"]
 [tool.uv]
 package = true
 
+[tool.skylos.gate]
+strict = true
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = [
+    "cmd_mox.ipc.server._BaseIPCServer._export_environment",
+    "cmd_mox.ipc.server.IPCServer._prepare_backend_start",
+    "cmd_mox.ipc.server.IPCServer._wait_until_ready",
+    "cmd_mox.ipc.server.IPCServer._stop_backend",
+    "cmd_mox.ipc.server.IPCServer._post_stop_cleanup",
+    "cmd_mox.ipc.server.NamedPipeServer._prepare_backend_start",
+    "cmd_mox.ipc.server.NamedPipeServer._wait_until_ready",
+    "cmd_mox.ipc.server.NamedPipeServer._stop_backend",
+]
+reason = "The shared IPC lifecycle invokes transport hooks through dynamically dispatched self calls."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = [
+    "cmd_mox.ipc.server.ParsedRequest.validate",
+    "cmd_mox.ipc.server._NamedPipeState.stop",
+    "cmd_mox.ipc.server._NamedPipeState._poke_pipe",
+]
+reason = "The IPC request and named-pipe lifecycle invoke these methods through runtime transport state."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "variable"
+full_name = [
+    "cmd_mox.environment._Win32Function.argtypes",
+    "cmd_mox.environment._Win32Function.restype",
+]
+reason = "ctypes function pointers expose these runtime-configured attributes through the typed protocol."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "parameter"
+full_name = ["cmd_mox.ipc.server._ServerLifecycle._stop_backend.server"]
+reason = "The abstract lifecycle contract receives the backend instance from its start and stop orchestration."
+
+[tool.skylos.whitelist]
+names = ["bootstrap_shim_path"]
+
+[tool.skylos.whitelist.documented]
+bootstrap_shim_path = "cmd_mox.shim re-imports this helper after bootstrap before main invokes it."
+
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

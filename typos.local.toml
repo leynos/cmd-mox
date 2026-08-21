@@ -6,7 +6,7 @@ schema = 1
 stems = []
 
 [words]
-accepted = ["Flavored"] # Formal GitHub Flavored Markdown product name.
+accepted = ["Flavored", "color"] # Formal product name and literal US API spelling.
 
 [words.corrections]
 
