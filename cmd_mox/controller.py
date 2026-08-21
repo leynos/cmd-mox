@@ -183,16 +183,6 @@ class CmdMox:
         """
         return set(self._doubles)
 
-    def _expected_commands(self) -> set[str]:
-        """Return commands that must be called during replay.
-
-        Returns
-        -------
-        set[str]
-            The names of doubles carrying a mandatory expectation.
-        """
-        return {name for name, dbl in self._doubles.items() if dbl.is_expected}
-
     # ------------------------------------------------------------------
     # Context manager protocol
     # ------------------------------------------------------------------

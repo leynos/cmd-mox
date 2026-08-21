@@ -55,18 +55,19 @@ made to the generators and the uploader together is still a reviewed change.
 
 ## Linting
 
-CmdMox uses a three-tier linting pipeline. Run it with:
+CmdMox uses a four-tier linting pipeline. Run it with:
 
 ```bash
 make lint
 ```
 
 The `lint` target first builds the development environment through
-`make build`. It then runs the three lint tiers in order:
+`make build`. It then runs the four lint tiers in order:
 
 1. `ruff check`
 2. Pylint on uv-managed PyPy 3.12
 3. CPython 3.14 Pylint with `df12_python_lints`, followed by `ambrleaks`
+4. a blocking Skylos dead-code scan of the production package
 
 Ruff is the fast first tier. It enforces import order, pycodestyle and Pyflakes
 rules, pathlib usage, docstring rules, pytest rules, selected Ruff preview
@@ -83,6 +84,12 @@ The DF12 tier is isolated from the project environment and uses uv-managed
 CPython 3.14. Its separate `pylintrc-df12.toml` enables every DF12 checker
 against CmdMox's supported Python 3.12 source baseline. `ambrleaks` then scans
 the test snapshot area for unredacted values.
+
+Skylos is the final production-liveness check. It is separately provisioned at
+an exact release, scans `cmd_mox` without treating test references as live
+callers, and fails the local gate and Linux CI when it reports unexplained dead
+code. The scan uses only local static analysis: uploads, provenance collection,
+and grep verification are disabled.
 
 ## Makefile lint variables
 
@@ -107,6 +114,8 @@ project files.
 | `DF12_PYTHON_LINTS`       | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                                       | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
 | `DF12_PYLINT`             | uv-isolated Pylint under CPython 3.14                                                                                                                | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
 | `AMBRLEAKS`               | uv-isolated `ambrleaks` under CPython 3.14                                                                                                           | Scans tracked test snapshot files for unredacted values.                          |
+| `SKYLOS_VERSION`            | `4.33.2`                                                                                                                                             | Pins the separately provisioned dead-code analyser.                               |
+| `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                                           | Limits dead-code liveness analysis to production sources.                         |
 
 _Table 1: Makefile variables for the lint pipeline._
 
@@ -122,7 +131,7 @@ make lint PYLINT_TARGETS=cmd_mox/ipc PYLINT_PYTHON=pypy@3.12
 ```
 
 Do not bypass `make lint` for normal validation. Running the target keeps the
-Ruff, PyPy Pylint, DF12 Pylint, and snapshot-leak tiers ordered consistently
+Ruff, PyPy Pylint, DF12 Pylint, snapshot-leak, and Skylos tiers ordered consistently
 with CI and preserves the shared `uv` cache configuration.
 
 ## Snapshot testing
@@ -197,6 +206,17 @@ dispatch:
 `CommandDouble.name`. It performs that command-name check before expectation
 matching and must not invoke expectation matching for a different command. This
 prevents a double from accepting an invocation owned by another command.
+## Skylos dead-code policy
+
+Treat a Skylos report as genuine dead code until a runtime caller has been
+verified. Remove confirmed dead code. For a confirmed false positive that
+cannot be represented as an ordinary static reference, add a precise typed
+entry-point rule to `[tool.skylos.dead_code.entrypoints]` or a named exception
+to `[tool.skylos.whitelist.documented]` in `pyproject.toml`. Every exception
+must name its verified runtime caller in its reason. Do not add unexplained
+exceptions or use the allow list to avoid a removal. The `--no-grep-verify`
+configuration is intentional: test references must not keep production symbols
+live in the blocking scan.
 
 ## Spelling policy
 
@@ -213,12 +233,13 @@ Add repository-only proper names or quoted upstream terms to
 ## Episodic lint policy
 
 CmdMox imports its lint posture from
-[Episodic](https://github.com/leynos/episodic). The imported policy has three
+[Episodic](https://github.com/leynos/episodic). The imported policy has four
 goals:
 
 - keep Ruff as the fast, broad, first-pass linter;
-- use focused Pylint checks for problems that Ruff does not cover as well; and
-- run a pinned Pylint under uv-managed PyPy 3.12 as an isolated tool.
+- use focused Pylint checks for problems that Ruff does not cover as well;
+- run a pinned Pylint under uv-managed PyPy 3.12 as an isolated tool; and
+- detect unused production symbols with a local, blocking Skylos scan.
 
 The DF12 extension preserves that baseline while adding an isolated CPython
 3.14 pass. Its plugin is deliberately configured separately so baseline Pylint
@@ -291,6 +312,13 @@ tier. It loads `df12_python_lints`, analyses the Python 3.12 source baseline,
 disables the general Pylint catalogue, and enables the complete DF12 checker
 list explicitly. This keeps the DF12 policy auditable and independent of the
 temporary PyPy Pylint baseline.
+
+### Skylos tables
+
+- `[tool.skylos.gate]` enables strict failure for unexplained dead-code
+  findings.
+- `[tool.skylos.whitelist.documented]` stores only reasoned false positives;
+  each entry must identify the verified runtime caller.
 
 ## Updating lint policy
 
