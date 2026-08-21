@@ -112,6 +112,20 @@ the temporary PyPy baseline.
 Consequence: the DF12 plugin and snapshot scanner run on CPython 3.14 without
 changing the PyPy-backed Pylint baseline.
 
+## Amendment (2026-08-21): fourth lint tier
+
+CmdMox adds Skylos as a strict fourth lint tier for production dead-code
+detection. The locally provisioned, pinned analyser scans `cmd_mox` with
+`--category dead_code --gate --format concise --no-upload --no-provenance`, and
+`--no-grep-verify`; Linux CI runs the same `make lint` target.
+
+Remove confirmed dead code. Model verified implicit runtime callers with typed
+`[tool.skylos.dead_code.entrypoints]` records. Only when that cannot model the
+boundary may a documented whitelist exception be used, with a caller-specific
+reason. Review exceptions whenever the runtime lifecycle, ctypes protocol, or
+bootstrap behaviour changes, and update Skylos only after a clean production
+scan and lint contract run.
+
 ## Amendment (2026-09-25): plain Pylint on PyPy 3.12
 
 PyPy 8 implements Python 3.12, and uv provides it as a managed interpreter.
