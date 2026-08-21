@@ -642,7 +642,8 @@ socket path provided by the `EnvironmentManager`. Incoming JSON messages are
 parsed into `Invocation` objects and processed in background threads with
 reasonable timeouts (default: 5.0s). Callers can pass an `IPCHandlers`
 dataclass to provide invocation and passthrough callbacks when constructing the
-server, removing the need to subclass for custom behaviour. The
+server for simple composition. Subclassing remains supported when custom
+behaviour requires overriding the public handler hooks. The
 `CallbackIPCServer` compatibility wrapper forwards a `TimeoutConfig` dataclass
 so callers can continue to customize startup and accept timeouts without
 exceeding the four-argument limit. On Windows hosts the controller constructs a
@@ -656,6 +657,14 @@ the journal. On Unix systems the server cleans up the socket on shutdown to
 prevent stale sockets from interfering with subsequent tests, while the Windows
 transport simply closes the pipe handles. The timeout is configurable via :data:
 `cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
+
+#### Dispatch and observability decision (2026-08-21)
+
+The IPC dispatch metadata stores public hook names, and both the Unix-domain-
+socket and Windows named-pipe transports share `_request_pipeline`. Dispatch
+remains virtual so subclasses can override the server hooks. The payload parser
+and validator run before any hook invocation. Observability records only bounded
+request metadata and never payload data.
 
 When `IPCServer.start()` executes inside an active :class:
 `~cmd_mox.environment.EnvironmentManager`, the manager exports both the socket

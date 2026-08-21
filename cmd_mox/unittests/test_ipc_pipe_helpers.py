@@ -8,7 +8,7 @@ import typing as typ
 from pathlib import Path
 
 from cmd_mox.ipc.client import RetryConfig, _send_pipe_request
-from cmd_mox.ipc.server import _NamedPipeState
+from cmd_mox.ipc.named_pipe import _NamedPipeState
 from cmd_mox.ipc.windows import Win32FileProtocol, read_pipe_message
 
 if typ.TYPE_CHECKING:
@@ -136,12 +136,12 @@ def test_named_pipe_handler_uses_shared_helpers(
     )
     state._client_threads.add(threading.current_thread())
 
-    monkeypatch.setattr("cmd_mox.ipc.server.read_pipe_message", fake_read)
-    monkeypatch.setattr("cmd_mox.ipc.server.write_pipe_payload", fake_write)
-    monkeypatch.setattr("cmd_mox.ipc.server._request_pipeline", fake_process)
-    monkeypatch.setattr("cmd_mox.ipc.server.win32file", _FakeWin32File())
-    monkeypatch.setattr("cmd_mox.ipc.server.win32pipe", _FakeWin32Pipe())
-    monkeypatch.setattr("cmd_mox.ipc.server.pywintypes", _FakePyWinTypes())
+    monkeypatch.setattr("cmd_mox.ipc.named_pipe.read_pipe_message", fake_read)
+    monkeypatch.setattr("cmd_mox.ipc.named_pipe.write_pipe_payload", fake_write)
+    monkeypatch.setattr("cmd_mox.ipc.named_pipe._request_pipeline", fake_process)
+    monkeypatch.setattr("cmd_mox.ipc.named_pipe.win32file", _FakeWin32File())
+    monkeypatch.setattr("cmd_mox.ipc.named_pipe.win32pipe", _FakeWin32Pipe())
+    monkeypatch.setattr("cmd_mox.ipc.named_pipe.pywintypes", _FakePyWinTypes())
 
     state._handle_client(handle)
 

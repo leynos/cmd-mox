@@ -789,8 +789,7 @@ the full table of methods and examples.
 
 Most projects interact with the IPC server through `CmdMox`, but advanced
 scenarios can instantiate `cmd_mox.ipc.IPCServer` themselves. The server
-accepts optional callbacks so invocation handling can be customized without
-subclassing:
+accepts optional callbacks for simple composition:
 
 ```python
 from cmd_mox.ipc import IPCHandlers, IPCServer, Response
@@ -807,6 +806,28 @@ with IPCServer(socket_path, handlers=handlers):
 Providing `passthrough_handler=` to `IPCHandlers` intercepts passthrough
 completions in the same fashion. When no callbacks are supplied the server
 keeps its default echo behaviour, so existing code continues to work unchanged.
+Request dispatch invokes the public `handle_invocation()` and
+`handle_passthrough_result()` hooks. Subclass `IPCServer` when server behaviour
+requires overriding those hooks:
+
+```python
+from cmd_mox.ipc import IPCServer, Invocation, PassthroughResult, Response
+
+class CustomIPCServer(IPCServer):
+    def handle_invocation(self, invocation: Invocation) -> Response:
+        return Response(stdout=f"handled {invocation.command}")
+
+    def handle_passthrough_result(self, result: PassthroughResult) -> Response:
+        return Response(stdout=f"recorded {result.invocation_id}")
+
+with CustomIPCServer(socket_path):
+    ...
+```
+
+The same dispatch contract applies to both the Unix-domain-socket transport
+and the Windows named-pipe transport. Use callbacks for simple composition and
+subclassing for behaviour that requires overridden hooks.
+
 On Windows the transport can be forced explicitly by swapping `IPCServer` for
 :class:`NamedPipeServer`; `CmdMox` selects it automatically based on
 ``os.name``.

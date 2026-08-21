@@ -11,7 +11,6 @@ import json
 import logging
 import socketserver
 import threading
-import time
 import typing as typ
 from pathlib import Path
 
@@ -21,20 +20,6 @@ from cmd_mox._validators import (
     validate_positive_finite_timeout,
 )
 from cmd_mox.environment import EnvironmentManager
-from cmd_mox.ipc.windows import (
-    ERROR_BROKEN_PIPE,
-    ERROR_FILE_NOT_FOUND,
-    ERROR_NO_DATA,
-    ERROR_OPERATION_ABORTED,
-    ERROR_PIPE_BUSY,
-    ERROR_PIPE_CONNECTED,
-    PIPE_CHUNK_SIZE,
-    PyWinTypesProtocol,
-    Win32FileProtocol,
-    derive_pipe_name,
-    read_pipe_message,
-    write_pipe_payload,
-)
 
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import (
@@ -82,22 +67,10 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
 if typ.TYPE_CHECKING:
     from socketserver import ThreadingUnixStreamServer as _BaseUnixServer
     from types import TracebackType
+
+    from .named_pipe import CallbackNamedPipeServer, NamedPipeServer
 else:
     _BaseUnixServer = _resolve_unix_server_base()
-
-if path_utils.IS_WINDOWS:  # pragma: win32-only
-    try:
-        pywintypes_mod = importlib.import_module("pywintypes")
-        win32file = importlib.import_module("win32file")
-        win32pipe = importlib.import_module("win32pipe")
-        pywintypes = pywintypes_mod
-    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
-        msg = "pywin32 is required for Windows named pipe support"
-        raise RuntimeError(msg) from exc
-else:  # pragma: no cover - non-Windows fallback for type-checkers
-    pywintypes = typ.cast("typ.Any", None)
-    win32file = typ.cast("typ.Any", None)
-    win32pipe = typ.cast("typ.Any", None)
 
 logger = logging.getLogger(__name__)
 
@@ -361,6 +334,7 @@ class CallbackIPCServer(IPCServer):
 
 
 type _RequestProcessor = typ.Literal["handle_invocation", "handle_passthrough_result"]
+type _DispatchOutcome = typ.Literal["success", "invalid_request", "handler_error"]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
     KIND_INVOCATION: (validate_invocation_payload, "handle_invocation"),
@@ -398,12 +372,12 @@ def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
         return payload
 
     try:
-        obj = json.loads(raw.decode("utf-8"))
+        _ = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        logger.exception("IPC received malformed JSON")
+        logger.error("IPC received malformed JSON")  # noqa: TRY400 - logging exception details could expose untrusted bytes.
         return None
 
-    logger.error("IPC payload not a dict: %r", obj)
+    logger.error("IPC payload is not a mapping")
     return None
 
 
@@ -415,7 +389,7 @@ def _parse_payload(raw: bytes) -> ParsedRequest | None:
     kind = str(payload.get("kind", KIND_INVOCATION))
     handler_entry = _REQUEST_HANDLERS.get(kind)
     if handler_entry is None:
-        logger.error("Unknown IPC payload kind: %r", kind)
+        logger.error("Unknown IPC payload kind")
         return None
 
     body = {key: value for key, value in payload.items() if key != "kind"}
@@ -432,6 +406,38 @@ def _encode_response(response: Response) -> bytes:
     return json.dumps(response.to_dict()).encode("utf-8")
 
 
+def _emit_dispatch_outcome(
+    kind: str,
+    request: Invocation | PassthroughResult | None,
+    outcome: _DispatchOutcome,
+    *,
+    error_category: str | None = None,
+) -> None:
+    """Emit bounded metadata for one IPC dispatch outcome.
+
+    Parameters
+    ----------
+    kind : str
+        Validated protocol request kind.
+    request : Invocation or PassthroughResult or None
+        Parsed request model, when validation succeeded.
+    outcome : {"success", "invalid_request", "handler_error"}
+        Terminal result of the shared dispatch pipeline.
+    error_category : str or None, optional
+        Stable failure category, when the outcome is not successful.
+    """
+    extra: dict[str, str] = {
+        "operation": "ipc.dispatch",
+        "kind": kind,
+        "outcome": outcome,
+    }
+    if isinstance(request, PassthroughResult):
+        extra["invocation_id"] = request.invocation_id
+    if error_category is not None:
+        extra["error_category"] = error_category
+    logger.info("IPC dispatch outcome", extra=extra)
+
+
 def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
     """Parse, validate, dispatch, and encode an IPC request in order."""  # noqa: DOC201 - private wire pipeline has an obvious optional bytes return
     parsed = _parse_payload(raw)
@@ -440,9 +446,25 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
 
     obj = parsed.validate()
     if obj is None:
+        _emit_dispatch_outcome(
+            parsed.kind,
+            None,
+            "invalid_request",
+            error_category="ValidationError",
+        )
         return None
 
-    return _encode_response(_execute_request(server, parsed.processor, obj))
+    response, error_category = _execute_request(server, parsed.processor, obj)
+    outcome: _DispatchOutcome = "success"
+    if error_category is not None:
+        outcome = "handler_error"
+    _emit_dispatch_outcome(
+        parsed.kind,
+        obj,
+        outcome,
+        error_category=error_category,
+    )
+    return _encode_response(response)
 
 
 def _raise_invalid_request_dispatch(
@@ -458,21 +480,20 @@ def _execute_request(
     server: _BaseIPCServer[typ.Any],
     processor: _RequestProcessor,
     obj: Invocation | PassthroughResult,
-) -> Response:
+) -> tuple[Response, str | None]:
     try:
         match processor, obj:
             case "handle_invocation", Invocation() as invocation:
-                return server.handle_invocation(invocation)
+                return server.handle_invocation(invocation), None
             case "handle_passthrough_result", PassthroughResult() as result:
-                return server.handle_passthrough_result(result)
+                return server.handle_passthrough_result(result), None
             case _:
                 return _raise_invalid_request_dispatch(processor, obj)
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("IPC handler raised an exception")
+    except Exception as exc:  # noqa: BLE001 - IPC converts arbitrary application handler failures into responses.
         message = str(exc) or exc.__class__.__name__
-        return Response(stderr=message, exit_code=1)
+        return Response(stderr=message, exit_code=1), exc.__class__.__name__
 
 
 class _IPCHandler(socketserver.StreamRequestHandler):
@@ -496,298 +517,18 @@ class _InnerServer(_BaseUnixServer):
         self.daemon_threads = True
 
 
-class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
-    """Windows named pipe variant of :class:`IPCServer`."""
+def __getattr__(name: str) -> object:
+    """Lazily expose named-pipe servers after defining the shared pipeline.
 
-    _pipe_name: str
-
-    def __init__(
-        self,
-        socket_path: Path,
-        timeout: float = 5.0,
-        accept_timeout: float | None = None,
-        *,
-        handlers: IPCHandlers | None = None,
-    ) -> None:
-        if not path_utils.IS_WINDOWS:
-            msg = "NamedPipeServer is only available on Windows"
-            raise RuntimeError(msg)
-        super().__init__(
-            socket_path,
-            timeout=timeout,
-            accept_timeout=accept_timeout,
-            handlers=handlers,
-        )
-        self._pipe_name = derive_pipe_name(self.socket_path)
-
-    def _prepare_backend_start(self) -> None:
-        # Named pipes do not leave filesystem artefacts that require cleanup.
-        pass
-
-    def _create_backend(self) -> tuple[_NamedPipeState, threading.Thread]:
-        state = _NamedPipeState(
-            pipe_name=self._pipe_name,
-            outer=self,
-            accept_timeout=self.accept_timeout,
-        )
-        thread = threading.Thread(target=state.serve_forever, daemon=True)
-        return state, thread
-
-    def _wait_until_ready(self) -> None:
-        state = self._server
-        if state is None:
-            return
-        if not state.ready_event.wait(self.timeout):
-            state.stop()
-            msg = (
-                f"Named pipe {self._pipe_name} not accepting connections within timeout"
-            )
-            raise RuntimeError(msg)
-
-    def _stop_backend(self, server: _NamedPipeState | None) -> None:
-        if server is None:
-            return
-        server.stop()
-        server.join_clients(self.timeout)
-
-
-class CallbackNamedPipeServer(NamedPipeServer):
-    """Callback-based helper mirroring :class:`CallbackIPCServer`."""
-
-    def __init__(
-        self,
-        socket_path: Path,
-        handler: cabc.Callable[[Invocation], Response],
-        passthrough_handler: cabc.Callable[[PassthroughResult], Response],
-        *,
-        timeouts: TimeoutConfig | None = None,
-    ) -> None:
-        timeouts = timeouts or TimeoutConfig()
-        super().__init__(
-            socket_path,
-            timeout=timeouts.timeout,
-            accept_timeout=timeouts.accept_timeout,
-            handlers=IPCHandlers(
-                handler=handler,
-                passthrough_handler=passthrough_handler,
-            ),
-        )
-
-
-class _NamedPipeState:
-    """Stateful helper managing named pipe connections and worker threads."""
-
-    def __init__(
-        self,
-        *,
-        pipe_name: str,
-        outer: _BaseIPCServer[_NamedPipeState],
-        accept_timeout: float,
-    ) -> None:
-        self.pipe_name, self.outer = pipe_name, outer
-        self.accept_timeout = accept_timeout
-        self.stop_event = threading.Event()
-        self.ready_event = threading.Event()
-        self._client_threads: set[threading.Thread] = set()
-        self._client_lock = threading.Lock()
-
-    def _try_connect_pipe(self, handle: object) -> tuple[bool, bool]:
-        """Attempt to connect *handle* to the named pipe."""  # noqa: DOC201 - private pipe helper's tuple result is defined by its local state machine
-        try:
-            win32pipe.ConnectNamedPipe(handle, None)
-        except pywintypes.error as exc:
-            return self._handle_connection_error(exc, handle)
-        return True, True
-
-    def _handle_connection_error(
-        self, exc: object, handle: object
-    ) -> tuple[bool, bool]:
-        """Return control-flow decisions for a failed connection attempt."""  # noqa: DOC201 - private pipe helper's tuple result is defined by its local state machine
-        winerror = getattr(exc, "winerror", None)
-        if winerror is None:
-            logger.exception("Named pipe connect failed")
-            self._close_handle(handle)
-            return True, False
-        if winerror == ERROR_PIPE_CONNECTED:
-            return True, True
-        if winerror in (ERROR_OPERATION_ABORTED, ERROR_NO_DATA):
-            self._close_handle(handle)
-            return False, False
-        logger.exception("Named pipe connect failed")
-        self._close_handle(handle)
-        return True, False
-
-    @staticmethod
-    def _close_handle(handle: object) -> None:
-        win32file.CloseHandle(handle)
-
-    def _spawn_handler_thread(self, handle: object) -> None:
-        """Create and track the per-client handler thread."""
-        thread = threading.Thread(
-            target=self._handle_client,
-            args=(handle,),
-            daemon=True,
-        )
-        with self._client_lock:
-            self._client_threads.add(thread)
-        thread.start()
-
-    def _get_active_threads(self) -> list[threading.Thread]:
-        """Get a snapshot of active client threads."""  # noqa: DOC201 - private thread accessor has an obvious list return
-        with self._client_lock:
-            return list(self._client_threads)
-
-    def _calculate_remaining_time(self, deadline: float) -> float | None:
-        """Calculate remaining time until deadline.
-
-        Returns None if deadline has passed, otherwise remaining seconds.
-
-        Returns
-        -------
-        float | None
-            The remaining seconds, or ``None`` when the deadline has passed.
-        """
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None
-        return remaining
-
-    def _join_thread_with_deadline(
-        self, thread: threading.Thread, deadline: float
-    ) -> bool:
-        """Join a thread respecting the deadline.
-
-        Returns True if join attempted, False if deadline expired before join.
-
-        Returns
-        -------
-        bool
-            Whether the thread could be joined before the deadline.
-        """
-        remaining = self._calculate_remaining_time(deadline)
-        if remaining is None:
-            return False
-        thread.join(max(0.0, remaining))
-        return True
-
-    def _join_all_threads_with_deadline(
-        self, threads: list[threading.Thread], deadline: float
-    ) -> bool:
-        """Join all threads respecting the deadline.
-
-        Returns True if all threads were processed, False if deadline expired.
-
-        Returns
-        -------
-        bool
-            Whether every thread could be joined before the deadline.
-        """
-        for thread in threads:
-            if not self._join_thread_with_deadline(thread, deadline):
-                return False
-        return True
-
-    def serve_forever(self) -> None:
-        if not path_utils.IS_WINDOWS:  # pragma: no cover - defensive guard
-            return
-
-        while not self.stop_event.is_set():
-            handle = self._create_pipe_instance()
-            if not self.ready_event.is_set():
-                self.ready_event.set()
-            should_continue, should_handle = self._try_connect_pipe(handle)
-            if not should_continue:
-                break
-            if not should_handle:
-                continue
-
-            if self.stop_event.is_set():
-                win32file.CloseHandle(handle)
-                break
-
-            self._spawn_handler_thread(handle)
-
-    def stop(self) -> None:
-        if self.stop_event.is_set():
-            return
-        self.stop_event.set()
-        self.ready_event.set()
-        self._poke_pipe()
-
-    def join_clients(self, timeout: float) -> None:
-        deadline = time.monotonic() + timeout
-        while True:
-            threads = self._get_active_threads()
-            if not threads:
-                return
-            if self._calculate_remaining_time(deadline) is None:
-                return
-            if not self._join_all_threads_with_deadline(threads, deadline):
-                return
-
-    def _create_pipe_instance(self) -> object:
-        timeout_ms = max(1, int(self.accept_timeout * 1000))
-        return win32pipe.CreateNamedPipe(
-            self.pipe_name,
-            win32pipe.PIPE_ACCESS_DUPLEX,
-            win32pipe.PIPE_TYPE_MESSAGE
-            | win32pipe.PIPE_READMODE_MESSAGE
-            | win32pipe.PIPE_WAIT,
-            win32pipe.PIPE_UNLIMITED_INSTANCES,
-            PIPE_CHUNK_SIZE,
-            PIPE_CHUNK_SIZE,
-            timeout_ms,
-            None,
-        )
-
-    def _handle_client(self, handle: object) -> None:
-        thread = threading.current_thread()
-        try:
-            raw = self._read_request(handle)
-            if raw is None:
-                return
-            response_bytes = _request_pipeline(self.outer, raw)
-            if response_bytes is not None:
-                write_pipe_payload(
-                    handle,
-                    response_bytes,
-                    win32file=typ.cast("Win32FileProtocol", win32file),
-                )
-        except pywintypes.error as exc:
-            if exc.winerror not in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
-                logger.exception("Named pipe handler failed")
-        finally:
-            with contextlib.suppress(pywintypes.error):
-                win32pipe.DisconnectNamedPipe(handle)
-            win32file.CloseHandle(handle)
-            with self._client_lock:
-                self._client_threads.discard(thread)
-
-    def _read_request(self, handle: object) -> bytes | None:
-        return read_pipe_message(
-            handle,
-            win32file=typ.cast("Win32FileProtocol", win32file),
-            pywintypes=typ.cast("PyWinTypesProtocol", pywintypes),
-            chunk_size=PIPE_CHUNK_SIZE,
-        )
-
-    def _poke_pipe(self) -> None:
-        try:
-            handle = win32file.CreateFile(
-                self.pipe_name,
-                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
-                0,
-                None,
-                win32file.OPEN_EXISTING,
-                0,
-                None,
-            )
-        except pywintypes.error as exc:
-            if exc.winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
-                logger.debug("Named pipe wakeup failed: %s", exc)
-            return
-        else:
-            win32file.CloseHandle(handle)
+    Raises
+    ------
+    AttributeError
+        If *name* is not a public named-pipe server.
+    """  # noqa: DOC201 - module attribute hook returns different public server classes
+    if name not in {"CallbackNamedPipeServer", "NamedPipeServer"}:
+        raise AttributeError(name)
+    named_pipe = importlib.import_module(f"{__package__}.named_pipe")
+    return getattr(named_pipe, name)
 
 
 __all__ = [

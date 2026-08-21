@@ -49,6 +49,21 @@ class _OverridingIPCServer(IPCServer):
         return Response(stdout=f"override:{result.invocation_id}")
 
 
+def _dispatch_events(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]]:
+    """Return bounded IPC dispatch records captured by *caplog*.
+
+    Returns
+    -------
+    list[dict[str, object]]
+        Dispatch outcome records emitted by the shared pipeline.
+    """
+    return [
+        record.__dict__
+        for record in caplog.records
+        if record.__dict__.get("operation") == "ipc.dispatch"
+    ]
+
+
 @dataclass(slots=True)
 class TimeoutTestCase:
     """Test case configuration for timeout validation."""
@@ -368,6 +383,160 @@ def test_request_pipeline_dispatches_to_overridden_handlers(
     assert response["stdout"] == expected_stdout, "Override was bypassed by dispatch"
 
 
+def test_socket_dispatches_to_overridden_invocation_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Socket requests should invoke an IPCServer invocation override."""
+    socket_path = tmp_path / "ipc.sock"
+
+    with _OverridingIPCServer(socket_path):
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        response = invoke_server(
+            Invocation(command="git", args=["status"], stdin="", env={}),
+            timeout=1.0,
+        )
+
+    assert response.stdout == "override:git", "Invocation override was bypassed"
+
+
+def test_socket_dispatches_to_overridden_passthrough_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Socket requests should invoke an IPCServer passthrough override."""
+    socket_path = tmp_path / "ipc.sock"
+
+    with _OverridingIPCServer(socket_path):
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        response = report_passthrough_result(
+            PassthroughResult(
+                invocation_id="passthrough-123",
+                stdout="",
+                stderr="",
+                exit_code=0,
+            ),
+            timeout=1.0,
+        )
+
+    assert response.stdout == "override:passthrough-123", (
+        "Passthrough override was bypassed"
+    )
+
+
+def test_request_pipeline_logs_successful_invocation_dispatch(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Successful invocation dispatch should emit bounded metadata."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc.server")
+    ipc_server = IPCServer(tmp_path / "ipc.sock")
+
+    response = server._request_pipeline(
+        ipc_server,
+        json.dumps({
+            "kind": server.KIND_INVOCATION,
+            "command": "git",
+            "args": ["status"],
+            "stdin": "",
+            "env": {},
+        }).encode(),
+    )
+
+    assert response is not None, "Successful dispatch did not return a response"
+    [event] = _dispatch_events(caplog)
+    assert event["operation"] == "ipc.dispatch", "Wrong operation"
+    assert event["kind"] == server.KIND_INVOCATION, "Wrong request kind"
+    assert event["outcome"] == "success", "Wrong dispatch outcome"
+    assert "invocation_id" not in event, "Invocation ID must be omitted"
+    assert "error_category" not in event, "Success must not include an error"
+
+
+def test_request_pipeline_logs_successful_passthrough_dispatch(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    echo_handler: cabc.Callable[[Invocation], Response],
+    passthrough_handler: cabc.Callable[[PassthroughResult], Response],
+) -> None:
+    """Successful passthrough dispatch should include its invocation ID."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc.server")
+    ipc_server = IPCServer(
+        tmp_path / "ipc.sock",
+        handlers=IPCHandlers(
+            handler=echo_handler,
+            passthrough_handler=passthrough_handler,
+        ),
+    )
+
+    response = server._request_pipeline(
+        ipc_server,
+        json.dumps({
+            "kind": server.KIND_PASSTHROUGH_RESULT,
+            "invocation_id": "passthrough-123",
+            "stdout": "",
+            "stderr": "",
+            "exit_code": 0,
+        }).encode(),
+    )
+
+    assert response is not None, "Successful dispatch did not return a response"
+    [event] = _dispatch_events(caplog)
+    assert event["kind"] == server.KIND_PASSTHROUGH_RESULT, "Wrong kind"
+    assert event["invocation_id"] == "passthrough-123", "Wrong ID"
+    assert event["outcome"] == "success", "Wrong dispatch outcome"
+    assert "error_category" not in event, "Success must not include an error"
+
+
+def test_request_pipeline_logs_invalid_request(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Invalid requests should emit a bounded validation outcome."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc.server")
+    ipc_server = IPCServer(tmp_path / "ipc.sock")
+
+    response = server._request_pipeline(
+        ipc_server,
+        json.dumps({"kind": server.KIND_INVOCATION}).encode(),
+    )
+
+    assert response is None, "Invalid request unexpectedly produced a response"
+    [event] = _dispatch_events(caplog)
+    assert event["kind"] == server.KIND_INVOCATION, "Wrong request kind"
+    assert event["outcome"] == "invalid_request", "Wrong outcome"
+    assert event["error_category"] == "ValidationError", "Wrong error"
+    assert "invocation_id" not in event, "Invocation ID must be omitted"
+
+
+def test_request_pipeline_logs_handler_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Handler failures should emit only a bounded error category."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc.server")
+
+    def failing_handler(_invocation: Invocation) -> Response:
+        msg = "handler failure"
+        raise RuntimeError(msg)
+
+    ipc_server = IPCServer(
+        tmp_path / "ipc.sock",
+        handlers=IPCHandlers(handler=failing_handler),
+    )
+    response = server._request_pipeline(
+        ipc_server,
+        json.dumps({
+            "kind": server.KIND_INVOCATION,
+            "command": "git",
+            "args": [],
+            "stdin": "",
+            "env": {},
+        }).encode(),
+    )
+
+    assert response is not None, "Handler failure did not return an error response"
+    [event] = _dispatch_events(caplog)
+    assert event["kind"] == server.KIND_INVOCATION, "Wrong request kind"
+    assert event["outcome"] == "handler_error", "Wrong outcome"
+    assert event["error_category"] == "RuntimeError", "Wrong error"
+    assert "invocation_id" not in event, "Invocation ID must be omitted"
+
+
 def test_request_pipeline_validation_failure_returns_none(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -411,7 +580,7 @@ def test_decode_payload_rejects_non_mapping(caplog: pytest.LogCaptureFixture) ->
     result = server._decode_payload(json.dumps([1, 2, 3]).encode())
 
     assert result is None, "Assertion failed"
-    assert "IPC payload not a dict" in caplog.text, "Assertion failed"
+    assert "IPC payload is not a mapping" in caplog.text, "Assertion failed"
 
 
 def test_encode_response_serialises_response_fields(

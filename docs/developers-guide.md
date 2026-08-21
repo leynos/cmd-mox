@@ -94,6 +94,28 @@ uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py \
 Run the focused tests again without `--snapshot-update` before committing so
 that the committed snapshots are verified rather than rewritten.
 
+## IPC request dispatch
+
+The shared IPC request pipeline keeps transport handling separate from request
+dispatch:
+
+- `_REQUEST_HANDLERS` maps each wire `kind` to its validator and the public
+  handler-method name.
+- `_request_pipeline` parses and validates a request before dispatching it.
+- `_execute_request` resolves and calls `handle_invocation` or
+  `handle_passthrough_result` on the actual server instance.
+- This virtual dispatch is intentional. Do not replace it with fixed
+  module-level processors that bypass subclass overrides.
+- Direct `_request_pipeline` tests cover parsing, validation, and response
+  encoding.
+- Socket-level tests cover transport-to-hook dispatch.
+
+`CommandDouble.matches` must reject an `Invocation` whose `command` differs
+from `CommandDouble.name`. It performs that command-name check before
+expectation matching and must not invoke expectation matching for a different
+command. This prevents a double from accepting an invocation owned by another
+command.
+
 ## Spelling policy
 
 The lint and Markdown gates run a pinned `typos` release with British English
