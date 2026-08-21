@@ -96,7 +96,9 @@ When implementing changes, adhere to the following testing procedures:
       Investigate every Skylos finding and remove genuine dead code. After
       verifying a false positive, add a reasoned, reviewed exception to the
       appropriate `[tool.skylos.dead_code.entrypoints]` or
-      `[tool.skylos.whitelist.documented]` table in `pyproject.toml`.
+      `[tool.skylos.whitelist.documented]` table in `pyproject.toml`. Keep
+      each reason caller-specific; group symbols only when the same runtime
+      caller or lifecycle reaches all of them.
     - **Formatting:** Adheres to formatting standards (`make check-fmt`,
       formatting can be applied by running `make fmt`).
     - **Typechecking:** Passes type checking (`make typecheck`).
