@@ -1,9 +1,10 @@
-# Architectural decision record (ADR) 001: Two-tier linting architecture
+# Architectural decision record (ADR) 001: Three-stage linting architecture
 
 ## Status
 
-Accepted. CmdMox uses Ruff as the first lint tier and PyPy-backed Pylint as the
-second lint tier.
+Accepted. CmdMox uses Ruff as the first lint tier, PyPy-backed Pylint as the
+second lint tier, and a strict Skylos dead-code scan as the final production
+liveness check.
 
 ## Date
 
@@ -21,6 +22,12 @@ Pylint also needs to run in a way that matches the Episodic approach: through
 the `pylint-pypy-shim` repository and under PyPy as a second-tier lint action
 after Ruff.
 
+Ruff and Pylint do not model cross-module symbol liveness. CmdMox therefore
+also needs a deterministic dead-code check that identifies unused production
+symbols without letting test-only references keep them alive. Framework-style
+dispatch, ctypes metadata, and the shim bootstrap include verified runtime
+surfaces that require narrowly reasoned exceptions rather than a broad baseline.
+
 ## Decision drivers
 
 - Keep `make lint` as the single developer entrypoint for lint validation.
@@ -31,6 +38,9 @@ after Ruff.
 - Keep existing CmdMox lint debt visible without forcing unrelated refactors
   into the lint architecture change.
 - Pin the shim revision so lint execution is reproducible.
+- Detect genuine unused production symbols in the standard local and CI gate.
+- Keep dead-code exceptions explicit, typed where possible, and reviewable in
+  `pyproject.toml`.
 
 ## Options considered
 
@@ -65,18 +75,39 @@ _Table 1: Linting architecture options._
 
 ## Decision outcome
 
-CmdMox adopts the Ruff plus PyPy-backed Pylint architecture.
+CmdMox adopts a three-stage Ruff, PyPy-backed Pylint, and Skylos architecture.
 
 The `lint` target runs `ruff check` first and then runs Pylint through
 `pylint-pypy-shim`. Ruff and Pylint policy are configured in `pyproject.toml`,
 while the Makefile defines the executable composition and the temporary
 CmdMox-specific Pylint baseline.
 
+The final stage provisions Skylos 4.33.2 separately from the project
+environment. It scans only `cmd_mox` with
+`--category dead_code --gate
+--format concise --no-upload --no-provenance --no-grep-verify`.
+The existing Linux CI `make lint` step therefore enforces the same local,
+non-interactive production scan. Strict mode fails the gate for unexplained
+findings.
+
+Verified runtime entry points are recorded with symbol type, fully qualified
+name, and reason under `[tool.skylos.dead_code.entrypoints]`. Exceptions that
+cannot describe an entry point are stored in both
+`[tool.skylos.whitelist].names` and `[tool.skylos.whitelist.documented]`, with
+a reason. This preserves a narrow, auditable distinction between real dead code
+and static-analysis limits.
+
 ## Consequences
 
 - Developers continue to run one command: `make lint`.
 - Ruff remains the fastest feedback path and blocks before Pylint starts.
 - Pylint adds second-tier checks without becoming a separate manual workflow.
+- Skylos removes confirmed dead production code and blocks new unexplained
+  findings locally and in Linux CI.
+- Test references do not influence the dead-code graph, and the scan does not
+  upload code, collect provenance, or invoke cloud analysis.
+- Runtime false positives require reasoned, version-controlled entry-point or
+  whitelist configuration; the contract test protects the reviewed symbols.
 - The project carries an explicit baseline for existing findings. This makes
   future clean-up incremental rather than hiding the stricter policy.
 - The managed PyPy runtime may lag the syntax used by CmdMox. The Pylint
@@ -90,3 +121,8 @@ CmdMox-specific Pylint baseline.
 - Revisit unsupported Ruff selectors when the pinned Ruff version changes.
 - Keep `docs/developers-guide.md` synchronized with Makefile and
   `pyproject.toml` lint policy changes.
+- Review Skylos exceptions whenever the runtime lifecycle, ctypes protocol, or
+  bootstrap behaviour changes, and remove obsolete entries with the code that
+  made them unnecessary.
+- Update the pinned Skylos release only with a clean production scan and the
+  complete lint contract test.
