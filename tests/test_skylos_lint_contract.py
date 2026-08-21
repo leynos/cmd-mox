@@ -100,6 +100,61 @@ def test_skylos_is_a_pinned_external_tool() -> None:
     )
 
 
+def test_skylos_allow_target_uses_the_standalone_subcommand() -> None:
+    """Keep the name-only whitelist command separate from the scan command."""
+    make_executable = shutil.which("make")
+    assert make_executable is not None, "Expected make to be available for the test."
+
+    result = subprocess.run(  # noqa: S603 - test executes make without a shell
+        [
+            make_executable,
+            "--no-print-directory",
+            "--dry-run",
+            "NAME=bootstrap_shim_path",
+            "skylos-allow",
+        ],
+        cwd=REPOSITORY_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, "Expected the Skylos allow-list target to expand."
+    whitelist_commands = [
+        line for line in result.stdout.splitlines() if "skylos whitelist" in line
+    ]
+    assert len(whitelist_commands) == 1, (
+        "Expected the allow-list target to call the standalone Skylos "
+        "whitelist subcommand without scan options."
+    )
+    whitelist_command = whitelist_commands[0]
+    assert whitelist_command.endswith('skylos whitelist "${SKYLOS_NAME}"'), (
+        "Expected the standalone command to put the whitelist subcommand "
+        "before its name."
+    )
+    scan_options = ("--config-file", "--category", "--gate")
+    assert not any(option in whitelist_command for option in scan_options), (
+        "Expected the standalone whitelist command not to include scan options."
+    )
+
+
+def test_skylos_allow_target_requires_a_name() -> None:
+    """Prevent an incomplete allow-list operation from invoking Skylos."""
+    make_executable = shutil.which("make")
+    assert make_executable is not None, "Expected make to be available for the test."
+
+    result = subprocess.run(  # noqa: S603 - test executes make without a shell
+        [make_executable, "--no-print-directory", "skylos-allow"],
+        cwd=REPOSITORY_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2, "Expected an unnamed allow-list operation to fail."
+    assert "Error: NAME is required for a named whitelist exception" in result.stderr
+
+
 def test_skylos_configuration_is_strict_and_reasoned() -> None:
     """Require reasons for every configured Skylos exception."""
     skylos = _skylos_config()
