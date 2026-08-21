@@ -6,12 +6,12 @@ schema = 1
 stems = []
 
 [words]
-accepted = ["Flavored", "color"] # Formal product name and literal US API spelling.
+accepted = ["Flavored"] # Formal GitHub Flavored Markdown product name.
 
 [words.corrections]
 
 [patterns]
-ignore = []
+ignore = ["`color`"] # Literal external API spelling in the style guide.
 
 [files]
 exclude = []
