@@ -91,19 +91,18 @@ When implementing changes, adhere to the following testing procedures:
 
     - **Testing:** Passes all relevant unit and behavioural tests according to
       the guidelines above (`make test`).
-    - **Linting:** Passes the complete `make lint` pipeline: Ruff, the
-      PyPy-backed Pylint rules, and the blocking Skylos dead-code scan.
-      Investigate every Skylos finding and remove genuine dead code. After
-      verifying a false positive, add a reasoned, reviewed exception to the
-      appropriate `[tool.skylos.dead_code.entrypoints]` or
-      `[tool.skylos.whitelist.documented]` table in `pyproject.toml`. Keep
-      each reason caller-specific; group symbols only when the same runtime
-      caller or lifecycle reaches all of them.
-      For a verified false positive, `make skylos-allow NAME=<name>` invokes
-      Skylos's name-only whitelist subcommand. It accepts no reason, so the
-      same reviewed change must add or retain the matching
-      `[tool.skylos.whitelist.documented]` entry with its caller-specific
-      reason in `pyproject.toml`.
+    - **Linting:** Passes the complete `make lint` pipeline, including the
+      fourth Python lint tier: the blocking Skylos production dead-code scan.
+      Investigate every Skylos finding and remove genuine dead code. For a
+      verified false positive, first model an implicit runtime caller with a
+      precise, typed entry-point rule in
+      `[tool.skylos.dead_code.entrypoints]`; use `type = "method"` for methods
+      and include the fully qualified symbol and a caller-specific reason. Only
+      when an entry-point rule cannot describe the boundary may a documented
+      allow-list exception be added with
+      `make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"`.
+      The helper requires both variables; retain the same caller-specific
+      reason in `[tool.skylos.whitelist.documented]` in `pyproject.toml`.
     - **Formatting:** Adheres to formatting standards (`make check-fmt`,
       formatting can be applied by running `make fmt`).
     - **Typechecking:** Passes type checking (`make typecheck`).

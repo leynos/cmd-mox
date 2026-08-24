@@ -145,6 +145,28 @@ def test_merge_rejects_conflicting_corrections(
         rollout.merge_dictionaries(base, local)
 
 
+def test_committed_local_policy_preserves_api_literal_exemption(
+    rollout_modules: tuple[types.ModuleType, types.ModuleType, types.ModuleType],
+    tmp_path: Path,
+) -> None:
+    """The generated configuration retains the reviewed API literal exemption."""
+    _, _, generator = rollout_modules
+    (tmp_path / ".typos-oxendict-base.toml").write_text(
+        _dictionary_text(), encoding="utf-8"
+    )
+    (tmp_path / "typos.local.toml").write_text(
+        (SCRIPT_DIRECTORY.parent / "typos.local.toml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    config = tomllib.loads(generator.render_config(tmp_path))
+
+    assert "`color`" in config["default"]["extend-ignore-re"], (
+        "The committed literal external API spelling exemption must survive "
+        "generated configuration."
+    )
+
+
 def test_render_and_write_are_deterministic_valid_toml(
     rollout_modules: tuple[types.ModuleType, types.ModuleType, types.ModuleType],
     tmp_path: Path,

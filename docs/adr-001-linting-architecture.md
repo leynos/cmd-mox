@@ -1,4 +1,4 @@
-# Architectural decision record (ADR) 001: Three-stage linting architecture
+# Architectural decision record (ADR) 001: Python linting architecture
 
 ## Status
 
@@ -75,7 +75,8 @@ _Table 1: Linting architecture options._
 
 ## Decision outcome
 
-CmdMox adopts a three-stage Ruff, PyPy-backed Pylint, and Skylos architecture.
+CmdMox adopts Ruff, PyPy-backed Pylint, and Skylos as its source linting
+architecture.
 
 The `lint` target runs `ruff check` first and then runs Pylint through
 `pylint-pypy-shim`. Ruff and Pylint policy are configured in `pyproject.toml`,
@@ -128,3 +129,28 @@ static-analysis limits.
   made them unnecessary.
 - Update the pinned Skylos release only with a clean production scan and the
   complete lint contract test.
+
+## Addendum — 2026-08-24: Skylos fourth Python lint tier
+
+The original two-tier decision is historical. The current Python lint
+architecture records Skylos as the fourth tier in the complete quality gate.
+The pipeline now runs Ruff first, PyPy-backed Pylint second, the spelling
+policy third, and Skylos fourth. This records the full project lint workflow
+without altering the historical Pylint decision.
+Skylos is blocking: it runs with the pinned Python 3.14 command-only CLI,
+scans production modules while excluding test paths, and uses strict gate mode
+for unexplained dead-code findings. Scan-only global options such as
+`--config-file pyproject.toml` remain separate from that CLI macro so the
+command-first `whitelist` helper can dispatch safely.
+
+Investigate every finding and remove genuine dead code. Model implicit runtime
+callers with typed entry-point rules first; use the documented allow list only
+when an entry-point rule cannot describe the verified boundary. The helper is:
+
+```bash
+make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
+```
+
+The `SYMBOL` name avoids WSL's `NAME` collision, and both variables are
+required. Keep the caller-specific reason in the reviewed
+`[tool.skylos.whitelist.documented]` configuration.

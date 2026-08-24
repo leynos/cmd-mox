@@ -6,7 +6,7 @@ where lint policy is configured.
 
 ## Linting
 
-CmdMox uses a three-stage linting pipeline. Run it with:
+CmdMox uses a four-tier linting pipeline for its Python project. Run it with:
 
 ```bash
 make lint
@@ -17,7 +17,8 @@ The `lint` target first builds the development environment through
 
 1. `ruff check`
 2. PyPy-backed Pylint through `pylint-pypy-shim`
-3. a blocking Skylos dead-code scan of the production package
+3. the en-GB-oxendict spelling policy
+4. the blocking Skylos dead-code scan of the production package
 
 Ruff is the fast first tier. It enforces import order, pycodestyle and Pyflakes
 rules, pathlib usage, docstring rules, pytest rules, selected Ruff preview
@@ -30,11 +31,11 @@ footguns, and module or function shape limits. The Pylint tier is intentionally
 focused: `pyproject.toml` disables all Pylint messages by default and then
 enables only the selected messages that complement Ruff.
 
-Skylos is the final production-liveness check. It is separately provisioned at
-an exact release, scans `cmd_mox` without treating test references as live
-callers, and fails the local gate and Linux CI when it reports unexplained dead
-code. The scan uses only local static analysis: uploads, provenance collection,
-and grep verification are disabled.
+Skylos is the fourth lint tier and the production-liveness check. It is
+separately provisioned at an exact release, scans `cmd_mox` while excluding
+tests from the liveness graph, and fails the local gate and Linux CI when it
+reports unexplained dead code. The scan uses only local static analysis:
+uploads, provenance collection, and grep verification are disabled.
 
 ## Makefile lint variables
 
@@ -52,7 +53,10 @@ project files.
 | `PYLINT_BASELINE_DISABLE`   | Existing cmd-mox baseline                                                                                                          | Temporarily disables legacy Pylint findings while keeping the second tier active. |
 | `PYLINT`                    | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy-backed Pylint command.                                       |
 | `SKYLOS_VERSION`            | `4.33.2`                                                                                                                           | Pins the separately provisioned dead-code analyser.                               |
+| `SKYLOS_CLI`                | `$(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' skylos`                                                 | Command-only CLI; Python 3.14 supplies Skylos's source AST runtime.               |
+| `SKYLOS`                    | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                       | Adds scan-only global options for the blocking lint target.                       |
 | `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                          | Limits dead-code liveness analysis to production sources.                         |
+| `SKYLOS_EXCLUDE_FOLDERS`    | `tests`                                                                                                                            | Prevents test-only references from keeping production symbols live.               |
 
 _Table 1: Makefile variables for the lint pipeline._
 
@@ -80,11 +84,44 @@ use separate entries. Do not add unexplained exceptions or use the allow list
 to avoid a removal. The `--no-grep-verify` configuration is intentional: test
 references must not keep production symbols live in the blocking scan.
 
-For a verified false positive, use `make skylos-allow NAME=<name>` to invoke
-Skylos's name-only whitelist subcommand. The subcommand accepts the symbol name
-but no reason. Treat its output as a candidate only: in the same reviewed
-change, add or retain the matching `[tool.skylos.whitelist.documented]` entry
-in `pyproject.toml` with a caller-specific reason.
+For a verified false positive that cannot be modelled with an entry-point rule,
+use the command-first helper:
+
+```bash
+make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
+```
+
+The target requires both variables and invokes `skylos whitelist <symbol>
+--reason <reason>`. `SYMBOL` avoids WSL's caller-owned `NAME` environment
+variable. Treat the helper as a reviewed write: retain the matching
+`[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
+caller-specific reason, and never use it to avoid removing genuine dead code.
+
+Skylos parses source with the AST implementation of its own runtime. The
+command-only `SKYLOS_CLI` therefore pins Python 3.14 to prevent newer
+syntax from producing phantom findings. Scan-only global options such as
+`--config-file pyproject.toml` belong in `SKYLOS`, not in the command-only
+macro, so the `whitelist` subcommand remains first for helper dispatch.
+
+The blocking scan targets production modules only, excludes test paths from
+the liveness graph, and enables strict gate mode. Investigate every finding;
+remove genuine dead code and record only verified false positives.
+
+The contract test parses the Makefile with the pinned Makeutil executable, and
+`make test` verifies that the parser is available before running the suite. CI
+installs the same revision independently in each isolated full-suite job.
+
+For local test runs, install the same parser and toolchain before running
+`make test`:
+
+```bash
+rustup toolchain install nightly-2026-05-28 --profile minimal
+RUSTFLAGS="-Zpolonius=next" cargo +nightly-2026-05-28 install \
+  --git https://github.com/leynos/makeutil \
+  --rev 29fc5a1634ffbaa18a773eed9dff1b2838a45d9c \
+  --locked --force makeutil
+make test
+```
 
 ## Spelling policy
 
