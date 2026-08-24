@@ -67,7 +67,11 @@ project files.
 | `DF12_PYLINT`             | uv-isolated Pylint under CPython 3.14                                                                                              | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
 | `AMBRLEAKS`               | uv-isolated `ambrleaks` under CPython 3.14                                                                                         | Scans tracked test snapshot files for unredacted values.                          |
 | `SKYLOS_VERSION`            | `4.33.2`                                                                                                                           | Pins the separately provisioned dead-code analyser.                               |
+| `SKYLOS_CLI`                | `$(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' skylos`                                                 | Command-only CLI; Python 3.14 supplies Skylos's source AST runtime.               |
+| `SKYLOS`                    | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                       | Adds scan-only global options for the blocking lint target.                       |
 | `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                          | Limits dead-code liveness analysis to production sources.                         |
+| `SKYLOS_EXCLUDE_FOLDERS`    | `tests`                                                                                                                            | Prevents test-only references from keeping production symbols live.               |
+| `SKYLOS_WHITELIST_LOCK`     | `.skylos-whitelist.lock`                                                                                                           | Repository-local lock serialising documented whitelist updates.                   |
 
 _Table 1: Makefile variables for the lint pipeline._
 
@@ -83,8 +87,8 @@ make lint PYLINT_TARGETS=cmd_mox/ipc PYLINT_PYTHON=pypy
 ```
 
 Do not bypass `make lint` for normal validation. Running the target keeps the
-Ruff, PyPy Pylint, DF12 Pylint, snapshot-leak, and Skylos tiers ordered consistently
-with CI and preserves the shared `uv` cache configuration.
+Ruff, PyPy Pylint, DF12 Pylint, snapshot-leak, Skylos, and spelling gates
+ordered consistently with CI and preserves the shared `uv` cache configuration.
 
 ## Snapshot testing
 
@@ -158,24 +162,63 @@ dispatch:
 `CommandDouble.name`. It performs that command-name check before expectation
 matching and must not invoke expectation matching for a different command. This
 prevents a double from accepting an invocation owned by another command.
+
 ## Skylos dead-code policy
 
 Treat a Skylos report as genuine dead code until a runtime caller has been
 verified. Remove confirmed dead code. For a confirmed false positive that
-cannot be represented as an ordinary static reference, add a precise typed
-entry-point rule to `[tool.skylos.dead_code.entrypoints]` or a named exception
-to `[tool.skylos.whitelist.documented]` in `pyproject.toml`. Every exception
-must name its verified runtime caller in a caller-specific reason. Group
-symbols only when the same caller or lifecycle reaches all of them; otherwise,
-use separate entries. Do not add unexplained exceptions or use the allow list
-to avoid a removal. The `--no-grep-verify` configuration is intentional: test
+cannot be represented as an ordinary static reference, first add a precise
+typed entry-point rule to `[[tool.skylos.dead_code.entrypoints]]`. Add a named
+exception to `[tool.skylos.whitelist.documented]` in `pyproject.toml` only when
+an entry-point rule cannot model the verified boundary. Every exception must
+name its verified runtime caller in a caller-specific reason. Group symbols
+only when the same caller or lifecycle reaches all of them; otherwise, use
+separate entries. Do not add unexplained exceptions or use the allow list to
+avoid a removal. The `--no-grep-verify` configuration is intentional: test
 references must not keep production symbols live in the blocking scan.
 
-For a verified false positive, use `make skylos-allow NAME=<name>` to invoke
-Skylos's name-only whitelist subcommand. The subcommand accepts the symbol name
-but no reason. Treat its output as a candidate only: in the same reviewed
-change, add or retain the matching `[tool.skylos.whitelist.documented]` entry
-in `pyproject.toml` with a caller-specific reason.
+For a verified false positive that cannot be modelled with an entry-point rule,
+use the command-first helper:
+
+```bash
+make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
+```
+
+The target requires both variables to contain non-whitespace values and invokes
+`skylos whitelist <symbol> --reason <reason>`. `SYMBOL` avoids WSL's
+caller-owned `NAME` environment variable. Treat the helper as a reviewed,
+serialised write: it locks the ignored repository-local
+`.skylos-whitelist.lock` while updating the whitelist. Retain the matching
+`[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
+caller-specific reason, and never use it to avoid removing genuine dead code.
+Override `SKYLOS_WHITELIST_LOCK` only when isolating helper tests from the
+checkout.
+
+Skylos parses source with the AST implementation of its own runtime. The
+command-only `SKYLOS_CLI` therefore pins Python 3.14 to prevent newer
+syntax from producing phantom findings. Scan-only global options such as
+`--config-file pyproject.toml` belong in `SKYLOS`, not in the command-only
+macro, so the `whitelist` subcommand remains first for helper dispatch.
+
+The blocking scan targets production modules only, excludes test paths from
+the liveness graph, and enables strict gate mode. Investigate every finding;
+remove genuine dead code and record only verified false positives.
+
+The contract test parses the Makefile with the pinned Makeutil executable, and
+`make test` verifies that the parser is available before running the suite. CI
+installs the same revision independently in each isolated full-suite job.
+
+For local test runs, install the same parser and toolchain before running
+`make test`:
+
+```bash
+rustup toolchain install nightly-2026-05-28 --profile minimal
+RUSTFLAGS="-Zpolonius=next" cargo +nightly-2026-05-28 install \
+  --git https://github.com/leynos/makeutil \
+  --rev 29fc5a1634ffbaa18a773eed9dff1b2838a45d9c \
+  --locked --force makeutil
+make test
+```
 
 ## Spelling policy
 

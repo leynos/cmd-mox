@@ -2,6 +2,7 @@ NIXIE ?= nixie
 UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
 TOOLS = $(UV)
 VENV_TOOLS = pytest
+MAKEUTIL = makeutil
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 RUFF_VERSION ?= 0.16.4
 TY_VERSION ?= 0.0.74
@@ -28,10 +29,12 @@ DF12_PYTHON_LINTS = git+https://github.com/leynos/df12-python-lints.git@$(DF12_P
 DF12_PYLINT = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' pylint
 AMBRLEAKS = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' ambrleaks
 SKYLOS_VERSION = 4.33.2
-SKYLOS_COMMAND = $(UV_ENV) $(UV) tool run --from 'skylos==$(SKYLOS_VERSION)' skylos
-SKYLOS = $(SKYLOS_COMMAND) --config-file pyproject.toml
-SKYLOS_WHITELIST = $(SKYLOS_COMMAND) whitelist
+# Skylos parses source using its own Python AST. Python 3.14 avoids phantom
+# dead-code findings from newer syntax that older tool runtimes cannot parse.
+SKYLOS_CLI = $(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' skylos
+SKYLOS = $(SKYLOS_CLI) --config-file pyproject.toml
 SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
+SKYLOS_EXCLUDE_FOLDERS ?= tests
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	tests/test_named_pipe_server.py \
@@ -40,7 +43,7 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 .PHONY: help all clean build build-release lint fmt check-fmt
-.PHONY: markdownlint markdownlint-run nixie spelling skylos-allow test typecheck
+.PHONY: makeutil markdownlint markdownlint-run nixie spelling skylos-allow test typecheck
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
@@ -117,13 +120,15 @@ lint: build ## Run linters
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
 	$(AMBRLEAKS) tests
-	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
+	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) --exclude $(SKYLOS_EXCLUDE_FOLDERS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
 	+$(MAKE) spelling
 
-skylos-allow: export SKYLOS_NAME = $(value NAME)
+skylos-allow: export SKYLOS_SYMBOL = $(value SYMBOL)
+skylos-allow: export SKYLOS_REASON = $(value REASON)
 skylos-allow: ## Add one named Skylos whitelist exception
-	@test -n "$${SKYLOS_NAME}" || { printf "Error: NAME is required for a named whitelist exception\\n" >&2; exit 2; }
-	$(SKYLOS_WHITELIST) "$${SKYLOS_NAME}"
+	@test -n "$${SKYLOS_SYMBOL}" || { printf "Error: SYMBOL is required for a named whitelist exception\\n" >&2; exit 2; }
+	@test -n "$${SKYLOS_REASON}" || { printf "Error: REASON is required for a named whitelist exception\\n" >&2; exit 2; }
+	$(SKYLOS_CLI) whitelist "$${SKYLOS_SYMBOL}" --reason "$${SKYLOS_REASON}"
 
 typecheck: build ## Run typechecking
 	$(TY) --version
@@ -143,7 +148,10 @@ spelling: ## Enforce en-GB-oxendict spelling in Markdown prose
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
 
-test: build $(UV) $(VENV_TOOLS) ## Run tests
+makeutil: ## Verify the Makefile parser used by contract tests
+	$(call ensure_tool,$@)
+
+test: build $(UV) $(VENV_TOOLS) makeutil ## Run tests
 	$(UV_ENV) $(UV) run pytest -v -n auto
 
 windows-smoke: build $(UV) $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs

@@ -93,6 +93,7 @@ CmdMox-specific Pylint baseline.
 - Revisit unsupported Ruff selectors when the pinned Ruff version changes.
 - Keep `docs/developers-guide.md` synchronized with Makefile and
   `pyproject.toml` lint policy changes.
+
 ## Amendment (2026-08-27): third lint tier
 
 CmdMox adds a third lint tier: an isolated CPython 3.14 Pylint pass configured
@@ -107,16 +108,32 @@ the temporary PyPy baseline.
 Consequence: the DF12 plugin and snapshot scanner run on CPython 3.14 without
 changing the PyPy-backed Pylint baseline.
 
-## Amendment (2026-08-21): fourth lint tier
+## Addendum — 2026-08-24: Skylos fourth Python lint tier
 
-CmdMox adds Skylos as a strict fourth lint tier for production dead-code
-detection. The locally provisioned, pinned analyser scans `cmd_mox` with
-`--category dead_code --gate --format concise --no-upload --no-provenance`, and
-`--no-grep-verify`; Linux CI runs the same `make lint` target.
+The original two-tier decision is historical. CmdMox now records Skylos as the
+fourth Python lint tier, after Ruff, PyPy-backed Pylint, and the DF12
+Pylint/ambrleaks tier. The spelling policy remains a separate quality gate.
+Skylos is a blocking production dead-code scan: it scans production modules
+only, excludes test paths, enables strict gate mode, and uses the local-only
+flags `--category dead_code --gate --format concise --no-upload --no-provenance
+--no-grep-verify`.
 
-Remove confirmed dead code. Model verified implicit runtime callers with typed
-`[tool.skylos.dead_code.entrypoints]` records. Only when that cannot model the
-boundary may a documented whitelist exception be used, with a caller-specific
-reason. Review exceptions whenever the runtime lifecycle, ctypes protocol, or
-bootstrap behaviour changes, and update Skylos only after a clean production
-scan and lint contract run.
+The command-only `SKYLOS_CLI` macro runs Skylos with Python 3.14. Skylos parses
+source with the AST implementation of its own runtime, so pinning Python 3.14
+prevents phantom findings when newer Python syntax is present. Scan-only global
+options, including `--config-file pyproject.toml`, remain in a separate macro
+used by the lint target; this leaves the `whitelist` subcommand first in the
+documented helper invocation.
+
+Investigate every finding and remove genuine dead code. Model verified implicit
+runtime callers with typed `[[tool.skylos.dead_code.entrypoints]]` rules first,
+using a caller-specific reason. Add a documented allow-list entry only when an
+entry-point rule cannot model the verified boundary. The helper is:
+
+```bash
+make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
+```
+
+Both `SYMBOL` and `REASON` must contain non-whitespace values. `SYMBOL` avoids
+WSL's `NAME` collision, and the helper preserves the caller-specific reason in
+`[tool.skylos.whitelist.documented]` for review.
