@@ -16,6 +16,7 @@ Repository = "https://github.com/leynos/cmd-mox"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.165.10,<7.0",
     "pytest",
     "pytest-xdist",
     "ruff",

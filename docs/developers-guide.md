@@ -91,9 +91,10 @@ use the command-first helper:
 make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 ```
 
-The target requires both variables and invokes `skylos whitelist <symbol>
---reason <reason>`. `SYMBOL` avoids WSL's caller-owned `NAME` environment
-variable. Treat the helper as a reviewed write: retain the matching
+The target requires both variables to contain non-whitespace values and
+invokes `skylos whitelist <symbol> --reason <reason>`. `SYMBOL` avoids WSL's
+caller-owned `NAME` environment variable. Treat the helper as a reviewed write:
+retain the matching
 `[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
 caller-specific reason, and never use it to avoid removing genuine dead code.
 
