@@ -162,10 +162,12 @@ a clean checkout cannot reach the authority.
 For Python development, refer to the detailed guidelines in the `.rules/`
 directory:
 
-- [Python Code Style Guidelines](.rules/python-00.md) - Core Python 3.13 style
+- [Python Code Style Guidelines](.rules/python-00.md) - Core Python 3.12 style
   conventions
 - [Python Context Managers](.rules/python-context-managers.md) - Best practices
   for context managers
+- [Python Exception Design](.rules/python-exception-design-raising-handling-and-logging.md) -
+  Exception design, raising, handling, and logging
 - [Python Generators](.rules/python-generators.md) - Generator and iterator
   patterns
 - [Python Project Configuration](.rules/python-pyproject.md) - pyproject.toml

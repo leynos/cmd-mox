@@ -1,8 +1,10 @@
-# Advanced Typing and Language Features (Python 3.13)
+# Advanced Typing and Language Features (Python 3.12)
 
-> This section documents forward-looking Python 3.13 typing features and best
-> practices to improve clarity, correctness, and tooling support. Use these
-> features to write expressive, modern Python.
+> This section documents forward-looking typing features and best practices to
+> improve clarity, correctness, and tooling support against the project's
+> Python 3.12 baseline. Use these features to write expressive, modern Python.
+> Features that require a newer interpreter than the baseline are marked as
+> such below and remain unavailable until the baseline rises.
 
 ## `enum.Enum`, `enum.IntEnum`, `enum.StrEnum`
 
@@ -95,6 +97,9 @@ This decorator is a no-op at runtime but improves tooling correctness.
 
 ## `TypeIs` (PEP 742)
 
+> **Not yet available.** PEP 742 lands in Python 3.13; it is unavailable until
+> the project's baseline rises above 3.12. Use `TypeGuard[T]` in the interim.
+
 Use `TypeIs[T]` to define custom runtime type guards that narrow types in type
 checkers.
 
@@ -109,6 +114,9 @@ Unlike `isinstance`, this informs the type checker that `val` is now
 `list[str]`.
 
 ## Defaults for TypeVars (PEP 696)
+
+> **Not yet available.** PEP 696 lands in Python 3.13; it is unavailable until
+> the project's baseline rises above 3.12.
 
 Allow generic classes/functions to fall back to default types when no specific
 type is provided.
