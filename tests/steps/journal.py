@@ -74,7 +74,7 @@ def _check_journal_entry_details_impl(
         'stdin "{stdin}" env var "{var}"="{val}"'
     )
 )
-def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
+def check_journal_entry_details(
     mox: CmdMox,
     cmd: str,
     args: str,
@@ -111,7 +111,7 @@ def _check_journal_entry_result_impl(
         r'"(?P<stdout>[^"]*)" stderr "(?P<stderr>[^"]*)" exit code (?P<code>\d+)'
     )
 )
-def check_journal_entry_result(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
+def check_journal_entry_result(
     mox: CmdMox,
     cmd: str,
     stdout: str,

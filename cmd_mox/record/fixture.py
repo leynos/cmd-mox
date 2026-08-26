@@ -64,7 +64,7 @@ def _parse_version(version_str: str) -> tuple[int, int]:
 
 
 def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-    """Migrate a v0.x fixture dict to v1.0 format."""  # noqa: DOC201 - private migration helper has an obvious dict return
+    """Migrate a v0.x fixture dict to v1.0 format."""  # ruff: ignore[docstring-missing-returns] - private migration helper has an obvious dict return
     data["version"] = "1.0"
     return data
 
@@ -184,7 +184,7 @@ def _execute_migration_chain(
 
 
 def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-    """Apply chained migrations to bring *data* up to the current schema."""  # noqa: DOC201 - private migration helper has an obvious dict return
+    """Apply chained migrations to bring *data* up to the current schema."""  # ruff: ignore[docstring-missing-returns] - private migration helper has an obvious dict return
     data = copy.deepcopy(data)  # deep copy to avoid mutating the caller's dict
 
     _normalize_version_field(data)
@@ -202,7 +202,7 @@ def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
 
 
 def _cmdmox_version() -> str:
-    """Return the installed cmd-mox version, or ``"unknown"``."""  # noqa: DOC201 - private version lookup has an obvious str return
+    """Return the installed cmd-mox version, or ``"unknown"``."""  # ruff: ignore[docstring-missing-returns] - private version lookup has an obvious str return
     try:
         return importlib.metadata.version("cmd-mox")
     except importlib.metadata.PackageNotFoundError:
@@ -452,6 +452,6 @@ class FixtureFile:
             If ``path`` does not exist.
         ValueError
             If the fixture is not valid JSON or fails schema validation.
-        """  # noqa: DOC502 - pathlib and JSON/schema parsing propagate these caller-visible failures.
+        """  # ruff: ignore[docstring-extraneous-exception] - pathlib and JSON/schema parsing propagate these caller-visible failures.
         data = json.loads(path.read_text())
         return cls.from_dict(data)

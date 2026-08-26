@@ -24,7 +24,7 @@ class CommandRunner:
 
     @property
     def timeout(self) -> float:
-        """Return the configured subprocess timeout."""
+        """The configured subprocess timeout."""
         return self._timeout
 
     def run(self, invocation: Invocation, extra_env: dict[str, str]) -> Response:
@@ -180,7 +180,7 @@ def execute_command(
         The captured command output and exit status.
     """
     try:
-        result = subprocess.run(  # noqa: S603 - sanitized absolute path + shell=False
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - sanitized absolute path + shell=False
             [str(resolved_path), *invocation.args],
             input=invocation.stdin,
             capture_output=True,
@@ -216,7 +216,7 @@ def execute_command(
             exit_code=126,
             env=dict(env),
         )
-    except Exception as exc:  # noqa: BLE001 - defensive
+    except Exception as exc:  # ruff: ignore[blind-except] - defensive
         return Response(
             stderr=f"{invocation.command}: unexpected error: {exc}",
             exit_code=126,

@@ -38,7 +38,7 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
 
 
 def _try_socket_connection(address: str, timeout: float) -> bool:
-    """Attempt to connect to *address* within *timeout* seconds."""  # noqa: DOC201 - private socket probe has an obvious boolean return
+    """Attempt to connect to *address* within *timeout* seconds."""  # ruff: ignore[docstring-missing-returns] - private socket probe has an obvious boolean return
     with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
         probe.settimeout(timeout)
         try:
@@ -49,7 +49,7 @@ def _try_socket_connection(address: str, timeout: float) -> bool:
 
 
 def _poll_socket_until_ready(socket_path: pathlib.Path, timeout: float) -> None:
-    """Poll a Unix domain socket until it accepts connections within timeout."""  # noqa: DOC501 - private readiness helper raises only its local timeout signal
+    """Poll a Unix domain socket until it accepts connections within timeout."""  # ruff: ignore[docstring-missing-exception] - private readiness helper raises only its local timeout signal
     deadline = time.monotonic() + timeout
     wait_time = 0.001
     address = str(socket_path)

@@ -106,7 +106,7 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     if jitter:
         # Randomise the linear backoff within the jitter bounds to avoid
         # thundering herds if many clients retry simultaneously.
-        factor = random.uniform(1.0 - jitter, 1.0 + jitter)  # noqa: S311
+        factor = random.uniform(1.0 - jitter, 1.0 + jitter)  # ruff: ignore[suspicious-non-cryptographic-random-usage]
         delay *= factor
     return max(delay, MIN_RETRY_SLEEP)
 
@@ -181,7 +181,7 @@ def retry_with_backoff[T](
     for attempt in range(max_attempts):
         try:
             return func(attempt)
-        except Exception as exc:  # noqa: BLE001 - broad catch to reuse helper
+        except Exception as exc:  # ruff: ignore[blind-except] - broad catch to reuse helper
             context = _RetryContext(
                 attempt=attempt,
                 max_attempts=max_attempts,
@@ -199,12 +199,12 @@ def retry_with_backoff[T](
 
 
 def _compute_deadline(timeout: float) -> float:
-    """Return the absolute deadline for *timeout* seconds from now."""  # noqa: DOC201 - private timing helper has an obvious float return
+    """Return the absolute deadline for *timeout* seconds from now."""  # ruff: ignore[docstring-missing-returns] - private timing helper has an obvious float return
     return time.monotonic() + timeout
 
 
 def _remaining_time(deadline: float) -> float:
-    """Return the seconds remaining before *deadline* expires."""  # noqa: DOC201, DOC501 - private timing helper has an obvious float result and raises only on local expiry
+    """Return the seconds remaining before *deadline* expires."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private timing helper has an obvious float result and raises only on local expiry
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         msg = "IPC client operation timed out"
@@ -263,7 +263,7 @@ def _validate_initial_deadline(
 def _join_with_timeout_and_cancel(
     thread: threading.Thread, remaining: float, cancel: cabc.Callable[[], None]
 ) -> None:
-    """Join the thread with timeout; cancel and raise if still alive."""  # noqa: DOC501 - private cancellation hook raises only its local timeout signal
+    """Join the thread with timeout; cancel and raise if still alive."""  # ruff: ignore[docstring-missing-exception] - private cancellation hook raises only its local timeout signal
     thread.join(remaining)
     if thread.is_alive():
         cancel()
@@ -273,7 +273,7 @@ def _join_with_timeout_and_cancel(
 
 
 def _extract_outcome(outcome: dict[str, typ.Any]) -> object:
-    """Extract the result from the outcome dict, raising any stored error."""  # noqa: DOC201, DOC501 - private thread handoff uses stored exceptions as internal control flow
+    """Extract the result from the outcome dict, raising any stored error."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private thread handoff uses stored exceptions as internal control flow
     if (error := outcome.get("error")) is not None:
         raise typ.cast("BaseException", error)
     value = outcome.get("value", _SENTINEL)
@@ -288,13 +288,13 @@ def _run_blocking_io[T](
     deadline: float,
     cancel: cabc.Callable[[], None],
 ) -> T:
-    """Execute *func* on a worker thread until completion or timeout."""  # noqa: DOC201 - private thread helper's generic result is defined by its type parameter
+    """Execute *func* on a worker thread until completion or timeout."""  # ruff: ignore[docstring-missing-returns] - private thread helper's generic result is defined by its type parameter
     outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
     def _target() -> None:
         try:
             outcome["value"] = func()
-        except BaseException as exc:  # noqa: BLE001 - propagate cross-thread errors
+        except BaseException as exc:  # ruff: ignore[blind-except] - propagate cross-thread errors
             outcome["error"] = exc
 
     thread = threading.Thread(
@@ -314,7 +314,7 @@ def _connect_unix_with_retries(
     timeout: float,
     retry_config: RetryConfig,
 ) -> socket.socket:
-    """Connect to *sock_path* retrying on :class:`OSError`."""  # noqa: DOC201 - private transport helper has an obvious socket return
+    """Connect to *sock_path* retrying on :class:`OSError`."""  # ruff: ignore[docstring-missing-returns] - private transport helper has an obvious socket return
     retry_config.validate(timeout)
     address = str(sock_path)
 
@@ -345,7 +345,7 @@ def _connect_unix_with_retries(
 
 
 def _get_validated_socket_path() -> Path:
-    """Fetch the IPC socket path from the environment."""  # noqa: DOC201, DOC501 - private configuration lookup has an obvious path result and local missing-setting error
+    """Fetch the IPC socket path from the environment."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private configuration lookup has an obvious path result and local missing-setting error
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
     if sock is None:
         msg = f"{CMOX_IPC_SOCKET_ENV} is not set"
@@ -354,7 +354,7 @@ def _get_validated_socket_path() -> Path:
 
 
 def _read_all(sock: socket.socket) -> bytes:
-    """Read all data from *sock* until EOF."""  # noqa: DOC201 - private transport helper has an obvious bytes return
+    """Read all data from *sock* until EOF."""  # ruff: ignore[docstring-missing-returns] - private transport helper has an obvious bytes return
     chunks = []
     while chunk := sock.recv(1024):
         chunks.append(chunk)
@@ -382,7 +382,7 @@ def _decode_response(raw: bytes) -> Response:
 
 
 def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> bool:
-    """Return True when *exc* represents a retryable pipe error."""  # noqa: DOC201 - private retry predicate is fully described by its summary
+    """Return True when *exc* represents a retryable pipe error."""  # ruff: ignore[docstring-missing-returns] - private retry predicate is fully described by its summary
     winerror = getattr(exc, "winerror", None)
     if winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
         return False
@@ -407,7 +407,7 @@ def _wait_for_pipe_availability(
 
 
 def _create_pipe_handle(pipe_name: str) -> object:
-    """Create and configure a handle for *pipe_name*."""  # noqa: DOC201 - private Win32 helper's opaque handle type is clear from its annotation
+    """Create and configure a handle for *pipe_name*."""  # ruff: ignore[docstring-missing-returns] - private Win32 helper's opaque handle type is clear from its annotation
     handle = win32file.CreateFile(
         pipe_name,
         win32file.GENERIC_READ | win32file.GENERIC_WRITE,
@@ -509,7 +509,7 @@ def _send_request(
     timeout: float,
     retry_config: RetryConfig | None,
 ) -> Response:
-    """Send a JSON request of *kind* to the IPC server."""  # noqa: DOC201 - private transport helper has an obvious response return
+    """Send a JSON request of *kind* to the IPC server."""  # ruff: ignore[docstring-missing-returns] - private transport helper has an obvious response return
     retry = retry_config or RetryConfig()
     sock_path = _get_validated_socket_path()
     payload = dict(data)

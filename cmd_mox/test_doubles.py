@@ -406,7 +406,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             the replay fixture is invalid.
         RuntimeError
             If a replay session already exists.
-        """  # noqa: DOC502 - ReplaySession.load propagates fixture-load failures.
+        """  # ruff: ignore[docstring-extraneous-exception] - ReplaySession.load propagates fixture-load failures.
         if self.kind is not DoubleKind.SPY:
             msg = "replay() is only valid for spies"
             raise ValueError(msg)
@@ -431,7 +431,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     @property
     def has_recording_session(self) -> bool:
-        """Return whether a recording session is attached.
+        """Whether a recording session is attached.
 
         Returns
         -------
@@ -442,7 +442,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     @property
     def recording_session(self) -> RecordingSession | None:
-        """Return the attached recording session, or ``None``.
+        """The attached recording session, or ``None``.
 
         Returns
         -------
@@ -453,7 +453,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     @property
     def has_replay_session(self) -> bool:
-        """Return whether a replay session is attached.
+        """Whether a replay session is attached.
 
         Returns
         -------
@@ -464,7 +464,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     @property
     def replay_session(self) -> ReplaySession | None:
-        """Return the attached replay session, or ``None``.
+        """The attached replay session, or ``None``.
 
         Returns
         -------
@@ -498,7 +498,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     @property
     def is_expected(self) -> bool:
-        """Return whether this double is a mock.
+        """Whether this double is a mock.
 
         Returns
         -------
@@ -509,7 +509,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     @property
     def is_recording(self) -> bool:
-        """Return whether this double records invocations.
+        """Whether this double records invocations.
 
         Returns
         -------
@@ -520,7 +520,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     @property
     def call_count(self) -> int:
-        """Return the number of recorded invocations.
+        """The number of recorded invocations.
 
         Returns
         -------
@@ -590,7 +590,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             the most recent invocation's args, stdin (when supplied), or env
             (when supplied) differ from the expectations.
 
-        """  # noqa: DOC502 - AssertionError is raised by the validation helpers invoked below
+        """  # ruff: ignore[docstring-extraneous-exception] - AssertionError is raised by the validation helpers invoked below
         self._validate_spy_usage("assert_called_with")
         invocation = self._get_last_invocation()
         self._validate_arguments(invocation, args)

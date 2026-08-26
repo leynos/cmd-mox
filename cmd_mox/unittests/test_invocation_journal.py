@@ -289,7 +289,7 @@ def test_invocation_to_dict() -> None:
 )
 def test_invocation_repr_redacts_keys(key: str) -> None:
     """__repr__ redacts keys containing sensitive tokens."""
-    secret = "super-secret"  # noqa: S105 - test value
+    secret = "super-secret"  # ruff: ignore[hardcoded-password-string] - test value
     inv = Invocation(
         command="cmd",
         args=[],

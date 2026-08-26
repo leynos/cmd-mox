@@ -51,7 +51,7 @@ EXPECTED_WITH = {
 
 
 def _load() -> dict[str, object]:
-    """Parse the workflow file."""  # noqa: DOC201 - test parser helper; return contract is test-local
+    """Parse the workflow file."""  # ruff: ignore[docstring-missing-returns] - test parser helper; return contract is test-local
     return typ.cast(
         "dict[str, object]",
         yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8")),
@@ -59,14 +59,14 @@ def _load() -> dict[str, object]:
 
 
 def _triggers(workflow: dict[str, object]) -> dict[str, object]:
-    """Return the ``on:`` mapping (PyYAML parses the bare key as True)."""  # noqa: DOC201 - test parser helper; return contract is test-local
+    """Return the ``on:`` mapping (PyYAML parses the bare key as True)."""  # ruff: ignore[docstring-missing-returns] - test parser helper; return contract is test-local
     triggers = workflow.get("on", workflow.get(True))
     assert isinstance(triggers, dict), "the workflow must declare an on: mapping"
     return typ.cast("dict[str, object]", triggers)
 
 
 def _mutation_job(workflow: dict[str, object]) -> dict[str, object]:
-    """Return the single calling job."""  # noqa: DOC201 - test parser helper; return contract is test-local
+    """Return the single calling job."""  # ruff: ignore[docstring-missing-returns] - test parser helper; return contract is test-local
     jobs = workflow.get("jobs")
     assert isinstance(jobs, dict), "the workflow must declare a jobs mapping"
     jobs_map = typ.cast("dict[str, object]", jobs)

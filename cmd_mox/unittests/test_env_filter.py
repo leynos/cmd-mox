@@ -57,7 +57,7 @@ class TestFilterEnvSubset:
             allowlist=["MY_SECRET_KEY", "PATH"],
         )
 
-        assert result["MY_SECRET_KEY"] == "supersecret"  # noqa: S105
+        assert result["MY_SECRET_KEY"] == "supersecret"  # ruff: ignore[hardcoded-password-string]
         assert result["PATH"] == "/usr/bin"
 
     def test_includes_command_prefix_keys(self) -> None:
@@ -88,7 +88,7 @@ class TestFilterEnvSubset:
         )
 
         assert result["HOME"] == "/home/user"
-        assert result["SECRET_TOKEN"] == "tok"  # noqa: S105
+        assert result["SECRET_TOKEN"] == "tok"  # ruff: ignore[hardcoded-password-string]
 
     def test_preserves_non_sensitive_keys(self) -> None:
         """Arbitrary non-sensitive, non-system keys pass through."""

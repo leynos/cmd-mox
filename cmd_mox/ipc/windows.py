@@ -35,15 +35,15 @@ class _PyWinTypes(typ.Protocol):
 class _Win32File(typ.Protocol):
     """Subset of win32file methods used by IPC helpers."""
 
-    def ReadFile(  # noqa: N802 - mirrors pywin32 API casing
+    def ReadFile(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object, chunk_size: int
     ) -> tuple[int, bytes]: ...
 
-    def WriteFile(  # noqa: N802 - mirrors pywin32 API casing
+    def WriteFile(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object, payload: bytes
     ) -> None: ...
 
-    def FlushFileBuffers(  # noqa: N802 - mirrors pywin32 API casing
+    def FlushFileBuffers(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object
     ) -> None: ...
 

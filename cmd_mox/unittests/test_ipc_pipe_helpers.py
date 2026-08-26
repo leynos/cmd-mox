@@ -22,7 +22,7 @@ class _FakeWin32File(Win32FileProtocol):
         self.flushes: list[object] = []
         self.closes: list[object] = []
 
-    def ReadFile(self, handle: object, chunk_size: int) -> tuple[int, bytes]:  # noqa: N802 - the protocol mirrors the external Windows API casing
+    def ReadFile(self, handle: object, chunk_size: int) -> tuple[int, bytes]:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
         if not self.responses:
             msg = "No response configured"
             raise AssertionError(msg)
@@ -31,13 +31,13 @@ class _FakeWin32File(Win32FileProtocol):
             raise response
         return response  # type: ignore[return-value, ty:invalid-return-type]
 
-    def WriteFile(self, handle: object, payload: bytes) -> None:  # noqa: N802 - the protocol mirrors the external Windows API casing
+    def WriteFile(self, handle: object, payload: bytes) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
         self.writes.append((handle, payload))
 
-    def FlushFileBuffers(self, handle: object) -> None:  # noqa: N802 - the protocol mirrors the external Windows API casing
+    def FlushFileBuffers(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
         self.flushes.append(handle)
 
-    def CloseHandle(self, handle: object) -> None:  # noqa: N802 - helper
+    def CloseHandle(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - helper
         self.closes.append(handle)
 
 
@@ -117,12 +117,12 @@ def test_named_pipe_handler_uses_shared_helpers(
         return b"processed"
 
     class _FakeWin32File:
-        def CloseHandle(self, h: object) -> None:  # noqa: N802 - the protocol mirrors the external Windows API casing
+        def CloseHandle(self, h: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
             closes.append(h)
 
     class _FakeWin32Pipe:
         @staticmethod
-        def DisconnectNamedPipe(_handle: object) -> None:  # noqa: N802 - the protocol mirrors the external Windows API casing
+        def DisconnectNamedPipe(_handle: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
             return None
 
     class _FakePyWinTypes:

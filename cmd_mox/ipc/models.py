@@ -140,7 +140,7 @@ class PassthroughResult:
 def _build_passthrough_request(
     payload: dict[str, typ.Any],
 ) -> PassthroughRequest | None:
-    """Convert *payload* into a :class:`PassthroughRequest` when possible."""  # noqa: DOC201 - private payload parser has an obvious optional request return
+    """Convert *payload* into a :class:`PassthroughRequest` when possible."""  # ruff: ignore[docstring-missing-returns] - private payload parser has an obvious optional request return
     try:
         invocation_id = str(payload["invocation_id"])
         lookup_path = str(payload["lookup_path"])

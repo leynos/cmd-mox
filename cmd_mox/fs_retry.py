@@ -122,14 +122,14 @@ def _fix_windows_permissions(path: Path) -> None:
 
 
 def _path_is_missing(path: Path, exc: OSError) -> bool:
-    """Check if the path is missing (from the exception or filesystem)."""  # noqa: DOC201 - private retry predicate is fully described by its summary
+    """Check if the path is missing (from the exception or filesystem)."""  # ruff: ignore[docstring-missing-returns] - private retry predicate is fully described by its summary
     return isinstance(exc, FileNotFoundError) or not path.exists()
 
 
 def _handle_rmtree_final_failure(
     path: Path, attempts: int, exc: OSError, logger: logging.Logger
 ) -> typ.NoReturn:
-    """Handle final rmtree failure by logging and raising RobustRmtreeError."""  # noqa: DOC501 - private retry hook raises only its local terminal error
+    """Handle final rmtree failure by logging and raising RobustRmtreeError."""  # ruff: ignore[docstring-missing-exception] - private retry hook raises only its local terminal error
     logger.warning(
         "Failed to remove temporary directory %s after %d attempts",
         path,
@@ -187,7 +187,7 @@ def retry_unlink(
     Exception
         Custom exception from ``exc_factory`` (if provided).
 
-    """  # noqa: DOC502 - _handle_unlink_failure propagates the documented terminal failures.
+    """  # ruff: ignore[docstring-extraneous-exception] - _handle_unlink_failure propagates the documented terminal failures.
     if not path.exists():
         return
 
@@ -195,7 +195,7 @@ def retry_unlink(
     for attempt in range(config.max_attempts):
         try:
             path.unlink()
-            return  # noqa: TRY300 - the successful retry path must exit the loop immediately
+            return  # ruff: ignore[try-consider-else] - the successful retry path must exit the loop immediately
         except FileNotFoundError:
             return
         except (PermissionError, OSError) as exc:
@@ -235,7 +235,7 @@ def robust_rmtree(
         When all retry attempts are exhausted, wrapping the last ``OSError``
         encountered.
 
-    """  # noqa: DOC502 - _handle_rmtree_final_failure propagates the documented terminal failure.
+    """  # ruff: ignore[docstring-extraneous-exception] - _handle_rmtree_final_failure propagates the documented terminal failure.
     if not path.exists():
         return
 

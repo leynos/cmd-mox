@@ -54,22 +54,22 @@ class _Kernel32(typ.Protocol):
 class _CtypesModule(typ.Protocol):
     """Typed subset of ``ctypes`` used by the Windows path-shortening helper."""
 
-    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32: ...  # noqa: N802 - the protocol mirrors the external Windows API casing
+    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32: ...  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
 
     def get_last_error(self) -> int: ...
 
-    def FormatError(self, code: int) -> str: ...  # noqa: N802 - the protocol mirrors the external Windows API casing
+    def FormatError(self, code: int) -> str: ...  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
 
     def create_unicode_buffer(self, init_or_size: int) -> _UnicodeBuffer: ...
 
 
 def _path_identity(path: Path | None) -> str | None:
-    """Return a comparable representation of *path*, or ``None`` if unset."""  # noqa: DOC201 - private normalization helper has an obvious optional string return
+    """Return a comparable representation of *path*, or ``None`` if unset."""  # ruff: ignore[docstring-missing-returns] - private normalization helper has an obvious optional string return
     return None if path is None else path_utils.normalize_path(path)
 
 
 def _should_shorten_path(raw_path: Path) -> bool:
-    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""  # noqa: DOC201 - private platform predicate is fully described by its summary
+    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""  # ruff: ignore[docstring-missing-returns] - private platform predicate is fully described by its summary
     return (
         len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD
         if path_utils.IS_WINDOWS
@@ -78,7 +78,7 @@ def _should_shorten_path(raw_path: Path) -> bool:
 
 
 def _get_short_path(path: Path) -> Path | None:
-    """Return the short (8.3) variant for *path*, or ``None`` if unavailable."""  # noqa: DOC201, DOC501 - private Win32 fallback has an obvious optional path result and local OS-error handling
+    """Return the short (8.3) variant for *path*, or ``None`` if unavailable."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private Win32 fallback has an obvious optional path result and local OS-error handling
     if not path_utils.IS_WINDOWS:
         return None
 
@@ -121,7 +121,7 @@ def _get_short_path(path: Path) -> Path | None:
 
 
 def _maybe_shorten_windows_path(path: Path) -> Path:
-    """Return a MAX_PATH-safe variant of *path* when running on Windows."""  # noqa: DOC201 - private platform helper has a self-evident path return
+    """Return a MAX_PATH-safe variant of *path* when running on Windows."""  # ruff: ignore[docstring-missing-returns] - private platform helper has a self-evident path return
     if not path_utils.IS_WINDOWS or not _should_shorten_path(path):
         return path
 
@@ -328,7 +328,7 @@ class EnvironmentManager:
     def _restore_original_environment(
         self, _cleanup_errors: list[CleanupError]
     ) -> None:
-        """Return the process environment to its original state."""  # noqa: DOC501 - private cleanup hook records OSError locally for aggregation
+        """Return the process environment to its original state."""  # ruff: ignore[docstring-missing-exception] - private cleanup hook records OSError locally for aggregation
         if self._orig_env is not None:
             _restore_env(self._orig_env)
             if path_utils.IS_WINDOWS:
@@ -344,7 +344,7 @@ class EnvironmentManager:
         type(self).reset_active_manager()
 
     def _should_skip_directory_removal(self) -> bool:
-        """Return ``True`` if no matching temporary directory remains."""  # noqa: DOC201 - private cleanup predicate is fully described by its summary
+        """Return ``True`` if no matching temporary directory remains."""  # ruff: ignore[docstring-missing-returns] - private cleanup predicate is fully described by its summary
         shim = self.shim_dir
         created = self._created_dir
         if created is None or shim is None:
@@ -354,7 +354,7 @@ class EnvironmentManager:
         return not shim.exists()
 
     def _has_mismatched_directories(self) -> bool:
-        """Check if the created directory differs from the current shim directory."""  # noqa: DOC201 - private cleanup predicate is fully described by its summary
+        """Check if the created directory differs from the current shim directory."""  # ruff: ignore[docstring-missing-returns] - private cleanup predicate is fully described by its summary
         created = self._created_dir
         shim = self.shim_dir
         if created is None or shim is None:
@@ -391,7 +391,7 @@ class EnvironmentManager:
         cleanup_errors: list[CleanupError],
         exc_type: type[BaseException] | None,
     ) -> None:
-        """Log and potentially raise aggregated cleanup errors."""  # noqa: DOC501 - private cleanup hook raises only the locally aggregated failure
+        """Log and potentially raise aggregated cleanup errors."""  # ruff: ignore[docstring-missing-exception] - private cleanup hook raises only the locally aggregated failure
         if cleanup_errors:
             messages = [msg for msg, _ in cleanup_errors]
             error_msg = "; ".join(messages)
@@ -404,7 +404,7 @@ class EnvironmentManager:
 
     @property
     def original_environment(self) -> dict[str, str]:
-        """Return the unmodified environment prior to ``__enter__``."""
+        """The unmodified environment prior to ``__enter__``."""
         return self._orig_env or {}
 
     def _validate_timeout(self, timeout: float) -> None:

@@ -53,7 +53,7 @@ def _make_recorded_invocation(
     args: list[str] | None = None,
     spec: RecordedInvocationSpec | None = None,
 ) -> RecordedInvocation:
-    """Build a RecordedInvocation with sensible defaults."""  # noqa: DOC201 - private test helper has an obvious RecordedInvocation return
+    """Build a RecordedInvocation with sensible defaults."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious RecordedInvocation return
     s = spec or RecordedInvocationSpec()
     return RecordedInvocation(
         sequence=s.sequence,
@@ -74,7 +74,7 @@ def _make_fixture_file(
     recordings: list[RecordedInvocation] | None = None,
     filename: str = "fixture.json",
 ) -> Path:
-    """Write a fixture file to tmp_path and return the path."""  # noqa: DOC201 - private test helper has an obvious Path return
+    """Write a fixture file to tmp_path and return the path."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious Path return
     recs = [_make_recorded_invocation()] if recordings is None else recordings
     fixture = FixtureFile(
         version=FixtureFile.SCHEMA_VERSION,
@@ -93,7 +93,7 @@ def _make_invocation(
     stdin: str = "",
     env: dict[str, str] | None = None,
 ) -> Invocation:
-    """Build an Invocation with sensible defaults."""  # noqa: DOC201 - private test helper has an obvious Invocation return
+    """Build an Invocation with sensible defaults."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious Invocation return
     return Invocation(
         command=command,
         args=["status"] if args is None else args,
@@ -109,7 +109,7 @@ def _run_session_match(
     *,
     strict_matching: bool = True,
 ) -> Response | None:
-    """Create a fixture, load a ReplaySession, and return match result."""  # noqa: DOC201 - private test helper has an obvious optional Response return
+    """Create a fixture, load a ReplaySession, and return match result."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious optional Response return
     path = _make_fixture_file(tmp_path, recordings)
     session = ReplaySession(path, strict_matching=strict_matching)
     session.load()

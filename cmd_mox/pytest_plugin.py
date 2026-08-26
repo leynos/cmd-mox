@@ -268,7 +268,7 @@ class _CmdMoxManager:
 
     @property
     def auto_lifecycle(self) -> bool:
-        """Return whether replay and verification should run automatically.
+        """Whether replay and verification should run automatically.
 
         Returns
         -------
@@ -279,7 +279,7 @@ class _CmdMoxManager:
 
     @property
     def entered(self) -> bool:
-        """Return whether :meth:`enter` has successfully entered.
+        """Whether :meth:`enter` has successfully entered.
 
         Returns
         -------

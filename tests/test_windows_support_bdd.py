@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
-from tests.steps import *  # noqa: F403,E402 - import shared step definitions
+from tests.steps import *  # ruff: ignore[undefined-local-with-import-star, module-import-not-at-top-of-file] - import shared step definitions
 
 
 @pytest.fixture(autouse=True)

@@ -14,7 +14,7 @@ DOCS_ROOT = Path(__file__).resolve().parents[2] / "docs"
 
 @given("the CmdMox usage guide is available", target_fixture="usage_guide_text")
 def load_usage_guide() -> str:
-    """Load the usage guide markdown for assertions."""  # noqa: DOC201 - BDD support helper; return contract is scenario-local
+    """Load the usage guide markdown for assertions."""  # ruff: ignore[docstring-missing-returns] - BDD support helper; return contract is scenario-local
     return (DOCS_ROOT / "usage-guide.md").read_text(encoding="utf-8")
 
 

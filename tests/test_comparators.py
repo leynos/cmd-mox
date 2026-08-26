@@ -37,8 +37,8 @@ from cmd_mox.verifiers import UnexpectedCommandVerifier
 )
 def test_matchers_match_and_repr(
     matcher: cabc.Callable[[typ.Any], bool],
-    good: typ.Any,  # noqa: ANN401 - test cases deliberately accept values of multiple runtime types
-    bad: typ.Any,  # noqa: ANN401 - test cases deliberately accept values of multiple runtime types
+    good: typ.Any,  # ruff: ignore[any-type] - test cases deliberately accept values of multiple runtime types
+    bad: typ.Any,  # ruff: ignore[any-type] - test cases deliberately accept values of multiple runtime types
     expected_repr: str,
 ) -> None:
     """Matchers evaluate values and provide helpful reprs."""
@@ -61,7 +61,7 @@ def test_is_a_repr_with_custom_type() -> None:
 
 
 def _mock_double(expectation: Expectation) -> CommandDouble:
-    """Return a typed mock CommandDouble stub exposing the provided expectation."""  # noqa: DOC201 - test mock helper; return contract is test-local
+    """Return a typed mock CommandDouble stub exposing the provided expectation."""  # ruff: ignore[docstring-missing-returns] - test mock helper; return contract is test-local
     return typ.cast(
         "CommandDouble",
         SimpleNamespace(

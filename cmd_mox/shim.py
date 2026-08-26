@@ -54,18 +54,18 @@ if __name__ == "__main__":
 else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
 
-from cmd_mox import _path_utils as path_utils  # noqa: E402, I001 - shim bootstrap configures sys.path before package imports
-from cmd_mox.command_runner import (  # noqa: E402 - shim bootstrap configures sys.path before package imports
+from cmd_mox import _path_utils as path_utils  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
+from cmd_mox.command_runner import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
     execute_command,
     prepare_environment,
     resolve_command_with_override,
 )
-from cmd_mox.environment import (  # noqa: E402 - shim bootstrap configures sys.path before package imports
+from cmd_mox.environment import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
     CMOX_REAL_COMMAND_ENV_PREFIX,
 )
-from cmd_mox.ipc import (  # noqa: E402 - shim bootstrap configures sys.path before package imports
+from cmd_mox.ipc import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
     Invocation,
     PassthroughRequest,
     PassthroughResult,
@@ -126,7 +126,7 @@ def _validate_environment() -> float:
     SystemExit
         If the IPC socket environment variable is unset or the configured
         timeout is not positive and finite.
-    """  # noqa: DOC501, DOC502 - validation failures convert to SystemExit via sys.exit; the DOC rules cannot trace that path as an explicit raise
+    """  # ruff: ignore[docstring-missing-exception, docstring-extraneous-exception] - validation failures convert to SystemExit via sys.exit; the DOC rules cannot trace that path as an explicit raise
     if os.environ.get(CMOX_IPC_SOCKET_ENV) is None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)
@@ -135,7 +135,7 @@ def _validate_environment() -> float:
     try:
         timeout = float(timeout_raw)
         if timeout <= 0 or not math.isfinite(timeout):
-            raise ValueError  # noqa: TRY301 - unify error handling
+            raise ValueError  # ruff: ignore[raise-within-try] - unify error handling
     except ValueError:
         print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
         sys.exit(1)

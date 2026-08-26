@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pytest_bdd import scenario
 
-from tests.steps import *  # noqa: F403 - re-export pytest-bdd steps
+from tests.steps import *  # ruff: ignore[undefined-local-with-import-star] - re-export pytest-bdd steps
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 

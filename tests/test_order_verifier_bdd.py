@@ -16,25 +16,25 @@ FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
 @pytest.fixture
 def ordered_expectations() -> list[Expectation]:
-    """Collect expectations that must appear in order."""  # noqa: DOC201 - pytest fixture; return contract is scenario-local
+    """Collect expectations that must appear in order."""  # ruff: ignore[docstring-missing-returns] - pytest fixture; return contract is scenario-local
     return []
 
 
 @pytest.fixture
 def unordered_expectations() -> list[Expectation]:
-    """Collect expectations that are not part of the ordered sequence."""  # noqa: DOC201 - pytest fixture; return contract is scenario-local
+    """Collect expectations that are not part of the ordered sequence."""  # ruff: ignore[docstring-missing-returns] - pytest fixture; return contract is scenario-local
     return []
 
 
 @pytest.fixture
 def journal() -> list[Invocation]:
-    """Accumulate recorded invocations for verification."""  # noqa: DOC201 - pytest fixture; return contract is scenario-local
+    """Accumulate recorded invocations for verification."""  # ruff: ignore[docstring-missing-returns] - pytest fixture; return contract is scenario-local
     return []
 
 
 @pytest.fixture
 def verification_context() -> dict[str, Exception | None]:
-    """Store verification outcomes for assertions."""  # noqa: DOC201 - pytest fixture; return contract is scenario-local
+    """Store verification outcomes for assertions."""  # ruff: ignore[docstring-missing-returns] - pytest fixture; return contract is scenario-local
     return {}
 
 
@@ -96,7 +96,7 @@ def validate_order(
     verifier = OrderVerifier(ordered_expectations)
     try:
         verifier.verify(journal)
-    except Exception as exc:  # noqa: BLE001 - capturing for assertion
+    except Exception as exc:  # ruff: ignore[blind-except] - capturing for assertion
         verification_context["error"] = exc
     else:
         verification_context["error"] = None

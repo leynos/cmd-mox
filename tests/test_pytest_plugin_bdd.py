@@ -66,13 +66,13 @@ TEST_CODE = textwrap.dedent(
 
 @given("a temporary test file using the cmd_mox fixture", target_fixture="test_file")
 def create_test_file(pytester: Pytester) -> Path:
-    """Write the example test file."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Write the example test file."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     return pytester.makepyfile(TEST_CODE)
 
 
 @when("I run pytest on the file", target_fixture="result")
 def run_pytest(pytester: Pytester, test_file: Path) -> RunResult:
-    """Run the inner pytest instance."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Run the inner pytest instance."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     return pytester.runpytest(str(test_file))
 
 
@@ -89,7 +89,7 @@ def assert_success(result: RunResult) -> None:
 def create_parallel_suite(
     pytester: Pytester, parallel_artifact_dir: Path
 ) -> ParallelSuite:
-    """Generate a pytest module that runs under multiple workers."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Generate a pytest module that runs under multiple workers."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     pytest.importorskip("xdist")
     test_file = pytester.makepyfile(load_parallel_suite())
     return ParallelSuite(test_file=test_file, artifact_dir=parallel_artifact_dir)
@@ -97,7 +97,7 @@ def create_parallel_suite(
 
 @when("I run pytest with 2 workers", target_fixture="parallel_result")
 def run_pytest_parallel(pytester: Pytester, parallel_suite: ParallelSuite) -> RunResult:
-    """Execute the generated suite with pytest-xdist."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Execute the generated suite with pytest-xdist."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     return pytester.runpytest("-n2", "-s", str(parallel_suite.test_file))
 
 

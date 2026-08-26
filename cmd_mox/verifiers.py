@@ -38,7 +38,7 @@ def _mask_env_value(key: str, value: str | None) -> str | None:
     """
     if value is None:
         return None
-    else:  # noqa: RET505 - required for clarity per review guidance
+    else:  # ruff: ignore[superfluous-else-return] - required for clarity per review guidance
         key_cf = key.casefold()
         return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
 

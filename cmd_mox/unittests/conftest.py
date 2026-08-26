@@ -11,7 +11,7 @@ import pytest
 
 def run_subprocess(
     args: cabc.Sequence[str],
-    **kwargs: typ.Any,  # noqa: ANN401 - test cases deliberately accept values of multiple runtime types
+    **kwargs: typ.Any,  # ruff: ignore[any-type] - test cases deliberately accept values of multiple runtime types
 ) -> subprocess.CompletedProcess[str]:
     """Run ``subprocess.run`` with common defaults for tests.
 
@@ -20,7 +20,7 @@ def run_subprocess(
     subprocess.CompletedProcess[str]
         The completed process returned by ``subprocess.run``.
     """
-    return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
         args, capture_output=True, text=True, check=True, **kwargs
     )
 

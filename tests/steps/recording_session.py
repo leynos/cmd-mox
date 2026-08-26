@@ -22,7 +22,7 @@ if typ.TYPE_CHECKING:
     target_fixture="session",
 )
 def recording_session_targeting_tmp(tmp_path: Path) -> RecordingSession:
-    """Create a recording session writing to a temporary fixture file."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Create a recording session writing to a temporary fixture file."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     return RecordingSession(tmp_path / "fixture.json")
 
 
@@ -31,7 +31,7 @@ def recording_session_targeting_tmp(tmp_path: Path) -> RecordingSession:
     target_fixture="session",
 )
 def recording_session_with_allowlist(tmp_path: Path, key: str) -> RecordingSession:
-    """Create a recording session with the given key on its allowlist."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Create a recording session with the given key on its allowlist."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     return RecordingSession(
         tmp_path / "fixture.json",
         env_allowlist=[key],
@@ -77,7 +77,7 @@ def record_invocation_with_sensitive_env(session: RecordingSession) -> None:
 
 @when("the session is finalized", target_fixture="fixture")
 def finalize_session(session: RecordingSession) -> FixtureFile:
-    """Finalize the session and return the resulting fixture."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Finalize the session and return the resulting fixture."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     return session.finalize()
 
 
@@ -142,7 +142,7 @@ def metadata_has_python_version(fixture: FixtureFile) -> None:
 
 @given("a v0.9 fixture file on disk", target_fixture="fixture_path")
 def v09_fixture_on_disk(tmp_path: Path) -> Path:
-    """Write a v0.9 fixture file to disk for migration testing."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Write a v0.9 fixture file to disk for migration testing."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     data = {
         "version": "0.9",
         "metadata": {
@@ -174,7 +174,7 @@ def v09_fixture_on_disk(tmp_path: Path) -> Path:
 
 @when("the fixture file is loaded", target_fixture="loaded_fixture")
 def load_fixture_file(fixture_path: Path) -> FixtureFile:
-    """Load the fixture file from disk."""  # noqa: DOC201 - BDD fixture step; return contract is scenario-local
+    """Load the fixture file from disk."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
     return FixtureFile.load(fixture_path)
 
 

@@ -18,7 +18,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 def _require_replay_shim_dir(mox: CmdMox) -> Path:
-    """Return the shim directory when replay is active, asserting availability."""  # noqa: DOC201, DOC501 - BDD setup helper; contract and failure are scenario-local
+    """Return the shim directory when replay is active, asserting availability."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - BDD setup helper; contract and failure are scenario-local
     env = mox.environment
     if env is None or env.shim_dir is None:
         msg = "Replay environment is unavailable"

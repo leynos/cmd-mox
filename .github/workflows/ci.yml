@@ -41,7 +41,11 @@ jobs:
       - name: Install CLI tools
         if: matrix.run-windows-smoke == false
         run: |
-          for tool in mbake ty ruff; do uv tool install ${tool}; done
+          uv tool install mbake
+          # Keep these pins in sync with RUFF_VERSION and TY_VERSION in the
+          # Makefile; tests/test_toolchain_contract.py enforces the match.
+          uv tool install 'ruff==0.16.4'
+          uv tool install 'ty==0.0.74'
           npm install -g markdownlint-cli2
 
       - name: Install make

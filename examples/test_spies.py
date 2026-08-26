@@ -17,7 +17,7 @@ def test_spy_records_invocations_for_assertions(cmd_mox: CmdMox) -> None:
     """Spies record calls for later inspection and assertions."""
     spy = cmd_mox.spy("whoami").returns(stdout="tester").times_called(1)
 
-    result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup
         [resolve_command("whoami")],
         capture_output=True,
         text=True,

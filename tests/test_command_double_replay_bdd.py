@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pytest_bdd import scenario
 
-from tests.steps.command_double_replay import *  # noqa: F403 - pytest-bdd registers step definitions through star imports
+from tests.steps.command_double_replay import *  # ruff: ignore[undefined-local-with-import-star] - pytest-bdd registers step definitions through star imports
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 

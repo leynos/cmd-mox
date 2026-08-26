@@ -18,7 +18,7 @@ def test_stub_returns_canned_stdout(cmd_mox: CmdMox) -> None:
     """Stubs provide canned responses without strict verification."""
     cmd_mox.stub("hello").returns(stdout="world")
 
-    result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup
         [resolve_command("hello")],
         capture_output=True,
         text=True,
@@ -39,7 +39,7 @@ def test_stub_runs_dynamic_handler(cmd_mox: CmdMox) -> None:
 
     cmd_mox.stub("greeter").with_args("CmdMox").runs(handler)
 
-    result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup
         [resolve_command("greeter"), "CmdMox"],
         capture_output=True,
         text=True,

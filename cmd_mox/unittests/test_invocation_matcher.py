@@ -29,7 +29,7 @@ def _make_recorded_invocation(
     args: list[str] | None = None,
     spec: RecordedInvocationSpec | None = None,
 ) -> RecordedInvocation:
-    """Build a RecordedInvocation with sensible defaults."""  # noqa: DOC201 - private test helper has an obvious RecordedInvocation return
+    """Build a RecordedInvocation with sensible defaults."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious RecordedInvocation return
     s = spec or RecordedInvocationSpec()
     return RecordedInvocation(
         sequence=s.sequence,
@@ -51,7 +51,7 @@ def _make_invocation(
     stdin: str = "",
     env: dict[str, str] | None = None,
 ) -> Invocation:
-    """Build an Invocation with sensible defaults."""  # noqa: DOC201 - private test helper has an obvious Invocation return
+    """Build an Invocation with sensible defaults."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious Invocation return
     return Invocation(
         command=command,
         args=["status"] if args is None else args,

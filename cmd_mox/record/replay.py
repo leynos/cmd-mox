@@ -64,7 +64,7 @@ class ReplaySession:
 
     @property
     def fixture_path(self) -> Path:
-        """Return the path to the fixture JSON file.
+        """The path to the fixture JSON file.
 
         Returns
         -------
@@ -75,7 +75,7 @@ class ReplaySession:
 
     @property
     def strict_matching(self) -> bool:
-        """Return whether strict matching mode is enabled.
+        """Whether strict matching mode is enabled.
 
         Returns
         -------
@@ -86,7 +86,7 @@ class ReplaySession:
 
     @property
     def allow_unmatched(self) -> bool:
-        """Return whether unconsumed recordings are tolerated.
+        """Whether unconsumed recordings are tolerated.
 
         Returns
         -------
@@ -97,7 +97,7 @@ class ReplaySession:
 
     @property
     def consumed_count(self) -> int:
-        """Return the number of recordings consumed so far.
+        """The number of recordings consumed so far.
 
         Returns
         -------
@@ -136,14 +136,14 @@ class ReplaySession:
             If the fixture file does not exist.
         ValueError
             If the fixture is not valid JSON or fails schema validation.
-        """  # noqa: DOC502 - FixtureFile.load propagates these caller-visible failures.
+        """  # ruff: ignore[docstring-extraneous-exception] - FixtureFile.load propagates these caller-visible failures.
         if self._fixture is not None:
             msg = "Fixture already loaded; load() may only be called once"
             raise LifecycleError(msg)
         self._fixture = FixtureFile.load(self._fixture_path)
 
     def _ensure_loaded(self) -> FixtureFile:
-        """Return the loaded fixture, raising if not yet loaded."""  # noqa: DOC201, DOC501 - private load guard has an obvious FixtureFile return and raises only LifecycleError
+        """Return the loaded fixture, raising if not yet loaded."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private load guard has an obvious FixtureFile return and raises only LifecycleError
         if self._fixture is None:
             msg = "Fixture not loaded; call load() first"
             raise LifecycleError(msg)
@@ -176,7 +176,7 @@ class ReplaySession:
         LifecycleError
             If :meth:`load` has not been called successfully.
 
-        """  # noqa: DOC502 - _ensure_loaded propagates this caller-visible failure.
+        """  # ruff: ignore[docstring-extraneous-exception] - _ensure_loaded propagates this caller-visible failure.
         fixture = self._ensure_loaded()
 
         with self._lock:
@@ -208,7 +208,7 @@ class ReplaySession:
         VerificationError
             If any recordings were not consumed and
             ``allow_unmatched`` is ``False``.
-        """  # noqa: DOC502 - _ensure_loaded propagates this caller-visible failure.
+        """  # ruff: ignore[docstring-extraneous-exception] - _ensure_loaded propagates this caller-visible failure.
         fixture = self._ensure_loaded()
 
         if self._allow_unmatched:

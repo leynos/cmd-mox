@@ -37,7 +37,7 @@ class ReplayInterruptionState(typ.TypedDict):
     manager_active: EnvironmentManager | None
 
 
-from tests.steps import *  # noqa: F403,E402 - re-export pytest-bdd steps
+from tests.steps import *  # ruff: ignore[undefined-local-with-import-star, module-import-not-at-top-of-file] - re-export pytest-bdd steps
 
 
 @scenario(str(FEATURES_DIR / "controller.feature"), "stubbed command execution")

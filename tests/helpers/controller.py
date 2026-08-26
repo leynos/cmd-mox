@@ -94,12 +94,12 @@ def escape_windows_batch_args(argv: list[str]) -> list[str]:
 def _execute_command_with_params(
     params: CommandExecution,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute a command described by *params*."""  # noqa: DOC201 - test-only helper; return contract is local
+    """Execute a command described by *params*."""  # ruff: ignore[docstring-missing-returns] - test-only helper; return contract is local
     env = os.environ | {params.env_var: params.env_val}
     decoded_args = decode_placeholders(params.args)
     argv = [params.cmd, *shlex.split(decoded_args)]
     argv = escape_windows_batch_args(argv)
-    return subprocess.run(  # noqa: S603 - the test executes a command path prepared by the test harness
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
         argv,
         input=params.stdin,
         capture_output=True,
@@ -114,7 +114,7 @@ def _execute_command_with_params(
 def execute_command_with_details(
     mox: CmdMox, execution: CommandExecution
 ) -> subprocess.CompletedProcess[str]:
-    """Run the command specified by *execution*."""  # noqa: DOC201 - test-only helper; return contract is local
+    """Run the command specified by *execution*."""  # ruff: ignore[docstring-missing-returns] - test-only helper; return contract is local
     del mox
     return _execute_command_with_params(execution)
 
@@ -122,7 +122,7 @@ def execute_command_with_details(
 def _find_matching_journal_entry(
     mox: CmdMox, expectation: JournalEntryExpectation
 ) -> Invocation:
-    """Locate the journal entry matching *expectation*."""  # noqa: DOC201, DOC501 - test-only helper; contract and failure are local
+    """Locate the journal entry matching *expectation*."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - test-only helper; contract and failure are local
     candidates = [inv for inv in mox.journal if inv.command == expectation.cmd]
     if expectation.args is not None:
         decoded = decode_placeholders(expectation.args)
@@ -152,7 +152,7 @@ def _validate_journal_entry_fields(
     for field, expected in checks.items():
         if expected is not None:
             actual = getattr(inv, field)
-            assert actual == expected, (  # noqa: S101 - assertion helpers make BDD failures concise and local
+            assert actual == expected, (  # ruff: ignore[assert] - assertion helpers make BDD failures concise and local
                 f"{field} mismatch: {actual!r} != {expected!r}"
             )
 
@@ -163,7 +163,7 @@ def _validate_journal_entry_environment(
     """Validate environment variable against expectation."""
     if expectation.env_var is not None:
         actual_env = inv.env.get(expectation.env_var)
-        assert actual_env == expectation.env_val, (  # noqa: S101 - assertion helpers make BDD failures concise and local
+        assert actual_env == expectation.env_val, (  # ruff: ignore[assert] - assertion helpers make BDD failures concise and local
             f"env[{expectation.env_var!r}] mismatch: "
             f"{actual_env!r} != {expectation.env_val!r}"
         )

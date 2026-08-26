@@ -60,7 +60,7 @@ class IsA(_ReprMixin):
         """
         try:
             self.typ(value)
-        except Exception:  # noqa: BLE001 - conversion may fail
+        except Exception:  # ruff: ignore[blind-except] - conversion may fail
             return False
         return True
 

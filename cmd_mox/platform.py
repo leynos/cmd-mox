@@ -30,12 +30,12 @@ _PYTEST_REQUIRED_MESSAGE: typ.Final[str] = (
 
 
 def _normalize_platform(platform: str) -> str:
-    """Return a normalized platform name suitable for prefix checks."""  # noqa: DOC201 - private platform helper is fully described by its summary
+    """Return a normalized platform name suitable for prefix checks."""  # ruff: ignore[docstring-missing-returns] - private platform helper is fully described by its summary
     return platform.strip().lower()
 
 
 def _current_platform(platform: str | None = None) -> str:
-    """Return the effective platform name, honouring test overrides."""  # noqa: DOC201 - private platform helper is fully described by its summary
+    """Return the effective platform name, honouring test overrides."""  # ruff: ignore[docstring-missing-returns] - private platform helper is fully described by its summary
     if platform:
         return _normalize_platform(platform)
 

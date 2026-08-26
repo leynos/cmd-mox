@@ -144,7 +144,7 @@ class _NamedPipeState:
         self._client_lock = threading.Lock()
 
     def _try_connect_pipe(self, handle: object) -> tuple[bool, bool]:
-        """Attempt to connect *handle* to the named pipe."""  # noqa: DOC201 - private pipe helper's tuple result is defined by its local state machine
+        """Attempt to connect *handle* to the named pipe."""  # ruff: ignore[docstring-missing-returns] - private pipe helper's tuple result is defined by its local state machine
         try:
             win32pipe.ConnectNamedPipe(handle, None)
         except pywintypes.error as exc:
@@ -154,7 +154,7 @@ class _NamedPipeState:
     def _handle_connection_error(
         self, exc: object, handle: object
     ) -> tuple[bool, bool]:
-        """Return control-flow decisions for a failed connection attempt."""  # noqa: DOC201 - private pipe helper's tuple result is defined by its local state machine
+        """Return control-flow decisions for a failed connection attempt."""  # ruff: ignore[docstring-missing-returns] - private pipe helper's tuple result is defined by its local state machine
         winerror = getattr(exc, "winerror", None)
         if winerror is None:
             logger.exception("Named pipe connect failed")
@@ -185,7 +185,7 @@ class _NamedPipeState:
         thread.start()
 
     def _get_active_threads(self) -> list[threading.Thread]:
-        """Get a snapshot of active client threads."""  # noqa: DOC201 - private thread accessor has an obvious list return
+        """Get a snapshot of active client threads."""  # ruff: ignore[docstring-missing-returns] - private thread accessor has an obvious list return
         with self._client_lock:
             return list(self._client_threads)
 
