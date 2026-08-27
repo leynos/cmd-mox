@@ -17,6 +17,41 @@ from tests.helpers.fixtures import write_minimal_replay_fixture, write_replay_fi
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+    from cmd_mox.test_doubles import CommandDouble
+
+
+def _assert_replay_recorded(
+    mox: CmdMox,
+    spy: CommandDouble,
+    invocation: Invocation,
+    response: Response,
+    expected_stdout: str,
+) -> None:
+    """Assert a dispatched invocation was answered and recorded.
+
+    Parameters
+    ----------
+    mox : CmdMox
+        Controller whose journal should hold the invocation.
+    spy : CommandDouble
+        Spy double expected to have recorded the invocation.
+    invocation : Invocation
+        The dispatched invocation.
+    response : Response
+        Response returned by the controller for *invocation*.
+    expected_stdout : str
+        Standard output the response must carry.
+    """
+    assert response.stdout == expected_stdout, (
+        f"expected stdout {expected_stdout!r}, got {response.stdout!r}"
+    )
+    assert spy.invocations == [invocation], (
+        f"spy recorded {spy.invocations!r}, expected [{invocation!r}]"
+    )
+    assert list(mox.journal) == [invocation], (
+        f"journal holds {list(mox.journal)!r}, expected [{invocation!r}]"
+    )
+
 
 class TestControllerReplayIntegration:
     """Replay-backed controller dispatch should use fixture responses."""
@@ -65,11 +100,9 @@ class TestControllerReplayIntegration:
 
         response = mox._handle_invocation(invocation)
 
-        assert response.stdout == "ok\n"
+        _assert_replay_recorded(mox, spy, invocation, response, "ok\n")
         assert response.env["EXPECT_ENV"] == "VALUE"
         assert invocation.env["EXPECT_ENV"] == "VALUE"
-        assert spy.invocations == [invocation]
-        assert list(mox.journal) == [invocation]
 
     def test_replay_match_rejects_conflicting_expectation_env(
         self, tmp_path: Path
@@ -102,9 +135,7 @@ class TestControllerReplayIntegration:
 
         response = mox._handle_invocation(invocation)
 
-        assert response.stdout == "ok\n"
-        assert spy.invocations == [invocation]
-        assert list(mox.journal) == [invocation]
+        _assert_replay_recorded(mox, spy, invocation, response, "ok\n")
         assert spy.call_count == 1
 
     def test_strict_replay_mismatch_raises_without_recording(
@@ -135,9 +166,7 @@ class TestControllerReplayIntegration:
 
         response = mox._handle_invocation(invocation)
 
-        assert response.stdout == "fallback"
-        assert spy.invocations == [invocation]
-        assert list(mox.journal) == [invocation]
+        _assert_replay_recorded(mox, spy, invocation, response, "fallback")
 
     def test_fuzzy_replay_mismatch_falls_back_to_dynamic_handler(
         self, tmp_path: Path
@@ -157,9 +186,7 @@ class TestControllerReplayIntegration:
         response = mox._handle_invocation(invocation)
 
         assert handler_calls == [invocation]
-        assert response.stdout == "handler-fallback"
-        assert spy.invocations == [invocation]
-        assert list(mox.journal) == [invocation]
+        _assert_replay_recorded(mox, spy, invocation, response, "handler-fallback")
 
 
 class TestControllerReplayVerification:

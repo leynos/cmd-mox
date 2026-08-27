@@ -31,7 +31,13 @@ def _build_recording(
     args: list[str],
     spec: RecordingSpec | None = None,
 ) -> RecordedInvocation:
-    """Build a RecordedInvocation with sensible defaults."""  # ruff: ignore[docstring-missing-returns] - BDD helper; return contract is scenario-local
+    """Build a RecordedInvocation with sensible defaults.
+
+    Returns
+    -------
+    RecordedInvocation
+        A recording for *command* with the supplied or default overrides.
+    """
     s = spec or RecordingSpec()
     return RecordedInvocation(
         sequence=s.sequence,
@@ -51,7 +57,13 @@ def _save_fixture(
     tmp_path: Path,
     recordings: list[RecordedInvocation],
 ) -> Path:
-    """Persist a fixture file and return its path."""  # ruff: ignore[docstring-missing-returns] - BDD helper; return contract is scenario-local
+    """Persist a fixture file and return its path.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     fixture = FixtureFile(
         version=FixtureFile.SCHEMA_VERSION,
         metadata=FixtureMetadata.create(),
@@ -71,7 +83,13 @@ def _save_fixture(
     target_fixture="replay_fixture_path",
 )
 def fixture_with_single_recording(tmp_path: Path, cmd: str, args: str) -> Path:
-    """Create a fixture file with a single recording."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Create a fixture file with a single recording.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     rec = _build_recording(cmd, args.split())
     return _save_fixture(tmp_path, [rec])
 
@@ -83,7 +101,13 @@ def fixture_with_single_recording(tmp_path: Path, cmd: str, args: str) -> Path:
     target_fixture="replay_fixture_path",
 )
 def fixture_with_n_recordings(tmp_path: Path, count: int, cmd: str, args: str) -> Path:
-    """Create a fixture file with *count* identical recordings."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Create a fixture file with *count* identical recordings.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     recs = [
         _build_recording(cmd, args.split(), RecordingSpec(sequence=i))
         for i in range(count)
@@ -104,7 +128,13 @@ def fixture_with_stdin_and_env(
     stdin: str,
     env_kv: str,
 ) -> Path:
-    """Create a fixture file with specific stdin and env_subset."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Create a fixture file with specific stdin and env_subset.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     cmd, *args = invocation.split()
     key, _, value = env_kv.partition("=")
     rec = _build_recording(
@@ -121,7 +151,13 @@ def fixture_with_stdin_and_env(
     target_fixture="replay_fixture_path",
 )
 def fixture_with_env_specificity(tmp_path: Path, invocation: str) -> Path:
-    """Create a fixture with two recordings: one generic, one with env_subset."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Create a fixture with two recordings: one generic, one with env_subset.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     cmd, *args = invocation.split()
     recs = [
         # Generic recording with no env_subset
@@ -150,7 +186,13 @@ def fixture_with_env_specificity(tmp_path: Path, invocation: str) -> Path:
     target_fixture="replay_fixture_path",
 )
 def fixture_with_different_stdin(tmp_path: Path, invocation: str) -> Path:
-    """Create a fixture with two recordings: different stdin values."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Create a fixture with two recordings: different stdin values.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     cmd, *args = invocation.split()
     recs = [
         _build_recording(cmd, args, RecordingSpec(sequence=0, stdin="other")),
@@ -167,7 +209,13 @@ def fixture_with_different_stdin(tmp_path: Path, invocation: str) -> Path:
     target_fixture="replay_session",
 )
 def replay_session_strict(replay_fixture_path: Path) -> ReplaySession:
-    """Create a strict-mode ReplaySession."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Create a strict-mode ReplaySession.
+
+    Returns
+    -------
+    ReplaySession
+        A session configured with strict matching enabled.
+    """
     return ReplaySession(replay_fixture_path, strict_matching=True)
 
 
@@ -176,7 +224,13 @@ def replay_session_strict(replay_fixture_path: Path) -> ReplaySession:
     target_fixture="replay_session",
 )
 def replay_session_fuzzy(replay_fixture_path: Path) -> ReplaySession:
-    """Create a fuzzy-mode ReplaySession."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Create a fuzzy-mode ReplaySession.
+
+    Returns
+    -------
+    ReplaySession
+        A session configured with fuzzy matching enabled.
+    """
     return ReplaySession(replay_fixture_path, strict_matching=False)
 
 
@@ -196,7 +250,13 @@ def load_replay_session(replay_session: ReplaySession) -> None:
 def match_replay_invocation(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match an invocation against the replay session."""  # ruff: ignore[docstring-missing-returns] - BDD step; return contract is scenario-local
+    """Match an invocation against the replay session.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
     inv = Invocation(command=cmd, args=args.split(), stdin="", env={})
     return replay_session.match(inv)
 
@@ -208,7 +268,13 @@ def match_replay_invocation(
 def match_replay_invocation_again(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match a second invocation against the replay session."""  # ruff: ignore[docstring-missing-returns] - BDD step; return contract is scenario-local
+    """Match a second invocation against the replay session.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
     inv = Invocation(command=cmd, args=args.split(), stdin="", env={})
     return replay_session.match(inv)
 
@@ -223,7 +289,13 @@ def match_replay_invocation_again(
 def match_replay_with_different_stdin_env(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match an invocation with deliberately different stdin and env."""  # ruff: ignore[docstring-missing-returns] - BDD step; return contract is scenario-local
+    """Match an invocation with deliberately different stdin and env.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
     inv = Invocation(
         command=cmd,
         args=args.split(),
@@ -242,7 +314,13 @@ def match_replay_with_different_stdin_env(
 def match_replay_with_env(
     replay_session: ReplaySession, invocation: str, env_kv: str
 ) -> Response | None:
-    """Match an invocation with specific environment."""  # ruff: ignore[docstring-missing-returns] - BDD step; return contract is scenario-local
+    """Match an invocation with specific environment.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
     cmd, *args = invocation.split()
     key, _, value = env_kv.partition("=")
     inv = Invocation(command=cmd, args=args, stdin="", env={key: value, "EXTRA": "val"})
@@ -258,7 +336,13 @@ def match_replay_with_env(
 def match_replay_with_stdin(
     replay_session: ReplaySession, invocation: str, stdin: str
 ) -> Response | None:
-    """Match an invocation with specific stdin."""  # ruff: ignore[docstring-missing-returns] - BDD step; return contract is scenario-local
+    """Match an invocation with specific stdin.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
     cmd, *args = invocation.split()
     inv = Invocation(command=cmd, args=args, stdin=stdin, env={})
     return replay_session.match(inv)

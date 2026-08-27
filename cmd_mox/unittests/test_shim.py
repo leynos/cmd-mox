@@ -27,7 +27,6 @@ from cmd_mox.shim import (
     _validate_environment,
     _write_response,
 )
-from tests.helpers.pytest_typing import pytest_fail, pytest_skip
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -146,22 +145,23 @@ def test_create_invocation_reads_stdin_when_not_tty(
     assert dummy_stdin.read_calls == 1
 
 
-def test_normalize_windows_arg_collapses_repeated_carets(
+@pytest.mark.parametrize(
+    ("is_windows", "expected"),
+    [
+        (True, r"^literal^"),
+        (False, r"^^^literal^^^^"),
+    ],
+    ids=["windows-collapses-carets", "posix-preserves-carets"],
+)
+def test_normalize_windows_arg_respects_platform(
     monkeypatch: pytest.MonkeyPatch,
+    is_windows: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized platform, not a flag
+    expected: str,
 ) -> None:
-    """Windows argument normalisation should reduce escaped carets."""
-    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
+    """Caret normalisation should only collapse carets on Windows."""
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", is_windows)
 
-    assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^literal^"
-
-
-def test_normalize_windows_arg_is_noop_on_posix(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Non-Windows platforms should preserve carets untouched."""
-    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
-
-    assert shim._normalize_windows_arg(r"^^^literal^^^^") == r"^^^literal^^^^"
+    assert shim._normalize_windows_arg(r"^^^literal^^^^") == expected
 
 
 def test_create_invocation_normalizes_windows_args(
@@ -255,7 +255,7 @@ def test_execute_invocation_returns_response_without_passthrough(
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
 
     def fail_passthrough(*_args: object, **_kwargs: object) -> typ.NoReturn:
-        return pytest_fail("passthrough handler should not run")
+        return pytest.fail("passthrough handler should not run")
 
     monkeypatch.setattr(
         shim,
@@ -449,8 +449,16 @@ def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
     assert not _shim_bootstrap._BOOTSTRAP_DONE
 
 
-def _make_directory_symlink(tmp_path: Path) -> Path:
-    """Return a symlink to a directory for override validation tests.
+@pytest.fixture
+def directory_symlink(tmp_path: Path) -> Path:
+    """Provide a symlink to a directory for override validation tests.
+
+    The test is skipped when the platform cannot create symlinks.
+
+    Parameters
+    ----------
+    tmp_path : pathlib.Path
+        Temporary directory supplied by pytest.
 
     Returns
     -------
@@ -461,11 +469,11 @@ def _make_directory_symlink(tmp_path: Path) -> Path:
     target_dir.mkdir()
     symlink = tmp_path / "dir-link"
     if not hasattr(os, "symlink"):
-        return pytest_skip("Platform does not support symlinks")
+        pytest.skip("Platform does not support symlinks")
     try:
         symlink.symlink_to(target_dir, target_is_directory=True)
     except OSError as exc:  # pragma: no cover - windows without admin rights
-        return pytest_skip(f"Symlinks unavailable: {exc}")
+        pytest.skip(f"Symlinks unavailable: {exc}")
     return symlink
 
 
@@ -482,12 +490,8 @@ def _make_directory_symlink(tmp_path: Path) -> Path:
             126,
             "invalid executable path",
         ),
-        (
-            _make_directory_symlink,
-            126,
-            "invalid executable path",
-        ),
     ],
+    ids=["missing-file", "directory"],
 )
 def test_validate_override_path_reports_missing_or_invalid_targets(
     tmp_path: Path,
@@ -502,6 +506,17 @@ def test_validate_override_path_reports_missing_or_invalid_targets(
     assert isinstance(result, Response)
     assert result.exit_code == expected_exit
     assert expected_message in result.stderr
+
+
+def test_validate_override_path_rejects_directory_symlink(
+    directory_symlink: Path,
+) -> None:
+    """Symlinks pointing at directories should be rejected as executables."""
+    result = _validate_override_path("tool", os.fspath(directory_symlink))
+
+    assert isinstance(result, Response)
+    assert result.exit_code == 126
+    assert "invalid executable path" in result.stderr
 
 
 def test_validate_override_path_rejects_non_executable_file(tmp_path: Path) -> None:

@@ -51,30 +51,44 @@ EXPECTED_WITH = {
 
 
 def _load() -> dict[str, object]:
-    """Parse the workflow file."""  # ruff: ignore[docstring-missing-returns] - test parser helper; return contract is test-local
-    return typ.cast(
-        "dict[str, object]",
-        yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8")),
-    )
+    """Parse the workflow file.
+
+    Returns
+    -------
+    dict[str, object]
+        The decoded top-level mapping of the workflow document.
+    """
+    return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
 
 def _triggers(workflow: dict[str, object]) -> dict[str, object]:
-    """Return the ``on:`` mapping (PyYAML parses the bare key as True)."""  # ruff: ignore[docstring-missing-returns] - test parser helper; return contract is test-local
+    """Return the ``on:`` mapping (PyYAML parses the bare key as True).
+
+    Returns
+    -------
+    dict[str, object]
+        The workflow's trigger mapping.
+    """
     triggers = workflow.get("on", workflow.get(True))
     assert isinstance(triggers, dict), "the workflow must declare an on: mapping"
-    return typ.cast("dict[str, object]", triggers)
+    return triggers
 
 
 def _mutation_job(workflow: dict[str, object]) -> dict[str, object]:
-    """Return the single calling job."""  # ruff: ignore[docstring-missing-returns] - test parser helper; return contract is test-local
+    """Return the single calling job.
+
+    Returns
+    -------
+    dict[str, object]
+        The definition of the sole ``mutation`` job.
+    """
     jobs = workflow.get("jobs")
     assert isinstance(jobs, dict), "the workflow must declare a jobs mapping"
-    jobs_map = typ.cast("dict[str, object]", jobs)
-    assert jobs_map, "the workflow must declare at least one job"
-    assert list(jobs_map) == ["mutation"], (
-        f"expected a single job named 'mutation', found {sorted(jobs_map)}"
+    assert jobs, "the workflow must declare at least one job"
+    assert list(jobs) == ["mutation"], (
+        f"expected a single job named 'mutation', found {sorted(jobs)}"
     )
-    return typ.cast("dict[str, object]", jobs_map["mutation"])
+    return jobs["mutation"]
 
 
 def test_uses_reference_is_pinned_to_a_commit_sha() -> None:

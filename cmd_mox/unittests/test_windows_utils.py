@@ -67,13 +67,15 @@ class _FakeWin32File(Win32FileProtocol):
             msg = "No response configured for ReadFile call"
             raise AssertionError(msg)
         response = self._responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        if isinstance(response, bytes):
-            return (0, response)
-        if isinstance(response, str):
-            return (0, response.encode("utf-8"))
-        return response
+        match response:
+            case Exception():
+                raise response
+            case bytes():
+                return (0, response)
+            case str():
+                return (0, response.encode("utf-8"))
+            case _:
+                return response
 
     def WriteFile(  # ruff: ignore[invalid-function-name] - mirror pywin32 API casing for realism
         self, handle: object, payload: bytes

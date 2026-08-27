@@ -16,7 +16,11 @@ pytestmark = [pytest.mark.requires_unix_sockets]
 
 def test_cleanup_stale_socket_noop_for_missing_path(tmp_path: pathlib.Path) -> None:
     """Non-existent socket paths should be ignored gracefully."""
-    cleanup_stale_socket(tmp_path / "absent.sock")
+    absent = tmp_path / "absent.sock"
+
+    cleanup_stale_socket(absent)
+
+    assert not absent.exists(), "Missing socket path must not be created"
 
 
 def test_cleanup_stale_socket_removes_unbound_file(tmp_path: pathlib.Path) -> None:
@@ -53,6 +57,7 @@ def test_cleanup_stale_socket_refuses_active_socket(tmp_path: pathlib.Path) -> N
 def test_wait_for_socket_succeeds_when_server_accepts(tmp_path: pathlib.Path) -> None:
     """wait_for_socket should connect successfully once the server listens."""
     socket_path = tmp_path / "ipc.sock"
+    accepted: list[bool] = []
 
     def _serve() -> None:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
@@ -61,6 +66,7 @@ def test_wait_for_socket_succeeds_when_server_accepts(tmp_path: pathlib.Path) ->
             server.bind(str(socket_path))
             server.listen()
             conn, _ = server.accept()
+            accepted.append(True)
             conn.close()
 
     thread = threading.Thread(target=_serve)
@@ -71,6 +77,8 @@ def test_wait_for_socket_succeeds_when_server_accepts(tmp_path: pathlib.Path) ->
         thread.join()
         if socket_path.exists():
             socket_path.unlink()
+
+    assert accepted == [True], "wait_for_socket did not connect to the listener"
 
 
 def test_wait_for_socket_times_out(tmp_path: pathlib.Path) -> None:

@@ -31,13 +31,27 @@ def stub_command(mox: CmdMox, cmd: str, text: str) -> None:
     mox.stub(cmd).returns(stdout=text)
 
 
-def _stub_command_full_impl(mox: CmdMox, cmd: str, output: CommandOutput) -> None:
-    """Configure a stubbed command using aggregated output parameters."""
-    mox.stub(cmd).returns(
-        stdout=output.stdout,
-        stderr=output.stderr,
-        exit_code=output.exit_code,
-    )
+def _require_env_value(invocation: Invocation, expected: EnvVar) -> str:
+    """Return the shim environment value for *expected*, asserting it matches.
+
+    Returns
+    -------
+    str
+        The value recorded on *invocation* for ``expected.name``.
+
+    Raises
+    ------
+    AssertionError
+        If the recorded value differs from ``expected.value``.
+    """
+    actual = invocation.env.get(expected.name)
+    if actual != expected.value:
+        msg = (
+            "expected shim env "
+            f"{expected.name!r} to equal {expected.value!r} but got {actual!r}"
+        )
+        raise AssertionError(msg)
+    return actual
 
 
 @given(
@@ -51,7 +65,11 @@ def stub_command_full(
 ) -> None:
     """Configure a stubbed command with explicit streams and exit code."""
     output = CommandOutput(stdout=stdout, stderr=stderr, exit_code=code)
-    _stub_command_full_impl(mox, cmd, output)
+    mox.stub(cmd).returns(
+        stdout=output.stdout,
+        stderr=output.stderr,
+        exit_code=output.exit_code,
+    )
 
 
 @given(parsers.cfparse('the command "{cmd}" is stubbed to run a handler'))
@@ -200,11 +218,6 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     mox.stub(cmd).with_env({var: val}).runs(handler)
 
 
-def _mock_with_env_returns_impl(mox: CmdMox, cmd: str, env: EnvVar, text: str) -> None:
-    """Configure a mock that injects environment variables before returning."""
-    mox.mock(cmd).with_env({env.name: env.value}).returns(stdout=text)
-
-
 @given(
     parsers.cfparse(
         'the command "{cmd}" is mocked with env var "{var}"="{val}" returning "{text}"'
@@ -213,7 +226,7 @@ def _mock_with_env_returns_impl(mox: CmdMox, cmd: str, env: EnvVar, text: str) -
 def mock_with_env_returns(mox: CmdMox, cmd: str, var: str, val: str, text: str) -> None:
     """Mock command returning a canned response with injected environment."""
     env = EnvVar(name=var, value=val)
-    _mock_with_env_returns_impl(mox, cmd, env, text)
+    mox.mock(cmd).with_env({env.name: env.value}).returns(stdout=text)
 
 
 @given(parsers.cfparse('the command "{cmd}" seeds shim env var "{var}"="{val}"'))
@@ -235,13 +248,7 @@ def _stub_expect_and_seed_env_impl(
     """Stub that validates one env var before seeding another."""
 
     def handler(invocation: Invocation) -> Response:
-        actual = invocation.env.get(expected.name)
-        if actual != expected.value:
-            msg = (
-                "expected shim env "
-                f"{expected.name!r} to equal {expected.value!r} but got {actual!r}"
-            )
-            raise AssertionError(msg)
+        _require_env_value(invocation, expected)
         return Response(env={seed.name: seed.value})
 
     mox.stub(cmd).runs(handler)
@@ -271,20 +278,8 @@ def _stub_records_merged_env_impl(
     """Stub that asserts merged shim environment values."""
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
-        actual_first = invocation.env.get(first.name)
-        actual_second = invocation.env.get(second.name)
-        if actual_first != first.value:
-            msg = (
-                "expected shim env "
-                f"{first.name!r} to equal {first.value!r} but got {actual_first!r}"
-            )
-            raise AssertionError(msg)
-        if actual_second != second.value:
-            msg = (
-                "expected shim env "
-                f"{second.name!r} to equal {second.value!r} but got {actual_second!r}"
-            )
-            raise AssertionError(msg)
+        actual_first = _require_env_value(invocation, first)
+        actual_second = _require_env_value(invocation, second)
         return (f"{actual_first}+{actual_second}", "", 0)
 
     mox.stub(cmd).runs(handler)
@@ -307,7 +302,13 @@ def stub_records_merged_env(
 
 @given(parsers.cfparse('the command "{cmd}" requires env var "{var}"="{val}"'))
 def command_requires_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
-    """Attach an environment requirement to an existing double."""  # ruff: ignore[docstring-missing-exception] - BDD setup step; assertion failure is scenario-local
+    """Attach an environment requirement to an existing double.
+
+    Raises
+    ------
+    AssertionError
+        If *cmd* has not been registered as a mock, stub, or spy.
+    """
     for collection in (mox.mocks, mox.stubs, mox.spies):
         double = collection.get(cmd)
         if double is not None:

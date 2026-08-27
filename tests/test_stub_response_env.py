@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from cmd_mox.controller import CmdMox
-from tests.helpers.controller import CommandExecution, _execute_command_with_params
+from tests.helpers.controller import CommandExecution, execute_command_with_details
 
 pytestmark = [pytest.mark.requires_unix_sockets]
 
@@ -20,7 +20,7 @@ def test_stub_response_env_is_isolated() -> None:
         params = CommandExecution(
             cmd="foo", args="", stdin="", env_var="A", env_val="1"
         )
-        result = _execute_command_with_params(params)
+        result = execute_command_with_details(params)
         assert result.stdout == "ok", "Assertion failed"
         assert result.returncode == 0, "Assertion failed"
         assert stub.response.env == {}, "Assertion failed"
@@ -29,7 +29,7 @@ def test_stub_response_env_is_isolated() -> None:
         params = CommandExecution(
             cmd="foo", args="", stdin="", env_var="B", env_val="2"
         )
-        result = _execute_command_with_params(params)
+        result = execute_command_with_details(params)
         assert result.stdout == "ok", "Assertion failed"
         assert result.returncode == 0, "Assertion failed"
         assert stub.response.env == {}, "Assertion failed"

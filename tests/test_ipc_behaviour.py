@@ -22,7 +22,13 @@ if typ.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 def _run_shim(
     env: EnvironmentManager, command: str
 ) -> subprocess.CompletedProcess[str]:
-    """Execute *command* through its generated shim."""  # ruff: ignore[docstring-missing-returns] - test helper; return contract is test-local
+    """Execute *command* through its generated shim.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the shim.
+    """
     shim_path = _shim_cmd_path(env, command)
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
         [str(shim_path)],
@@ -35,7 +41,13 @@ def _run_shim(
 def _run_unserved_shim(
     env: EnvironmentManager, command: str
 ) -> subprocess.CompletedProcess[str]:
-    """Execute *command* through a shim without an available IPC server."""  # ruff: ignore[docstring-missing-returns] - test helper; return contract is test-local
+    """Execute *command* through a shim without an available IPC server.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the unserved shim.
+    """
     assert env.shim_dir is not None, "Assertion failed"
     create_shim_symlinks(env.shim_dir, [command])
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
@@ -52,7 +64,13 @@ def _invoke_command_via_ipc(
     *,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Start an IPC server and run *command* through its shim."""  # ruff: ignore[docstring-missing-returns] - test helper; return contract is test-local
+    """Start an IPC server and run *command* through its shim.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the shim against the server.
+    """
     assert env.shim_dir is not None, "Assertion failed"
     socket_path = env.socket_path
     assert socket_path is not None, "Assertion failed"

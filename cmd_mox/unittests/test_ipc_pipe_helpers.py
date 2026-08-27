@@ -37,7 +37,7 @@ class _FakeWin32File(Win32FileProtocol):
     def FlushFileBuffers(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
         self.flushes.append(handle)
 
-    def CloseHandle(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - helper
+    def CloseHandle(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
         self.closes.append(handle)
 
 

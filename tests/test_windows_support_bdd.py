@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
-from tests.steps import *  # ruff: ignore[undefined-local-with-import-star, module-import-not-at-top-of-file] - import shared step definitions
+from tests.steps import *  # ruff: ignore[undefined-local-with-import-star, module-import-not-at-top-of-file] - pytest-bdd registers step definitions through star imports; it sits after this module's own definitions so the star import cannot shadow them
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc

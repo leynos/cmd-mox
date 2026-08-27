@@ -73,7 +73,13 @@ def spy_with_passthrough(mox: CmdMox) -> CommandDouble:
 def _call_replay_with_strict(
     mox: CmdMox, fixture_path: Path, *, strict: bool
 ) -> CommandDouble:
-    """Attach a replay session to a git spy with the specified strict mode."""  # ruff: ignore[docstring-missing-returns] - BDD helper; return contract is scenario-local
+    """Attach a replay session to a git spy with the specified strict mode.
+
+    Returns
+    -------
+    CommandDouble
+        The spy with the replay session attached.
+    """
     return mox.spy("git").replay(fixture_path, strict=strict)
 
 
@@ -86,7 +92,13 @@ def _assert_strict_matching(spy_after_replay: CommandDouble, *, expected: bool) 
 
 @when('replay is called on a "git" spy', target_fixture="spy_after_replay")
 def call_replay(mox: CmdMox, fixture_path: Path) -> CommandDouble:
-    """Attach a strict replay session to a spy."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Attach a strict replay session to a spy.
+
+    Returns
+    -------
+    CommandDouble
+        The spy with the strict replay session attached.
+    """
     return _call_replay_with_strict(mox, fixture_path, strict=True)
 
 
@@ -95,7 +107,13 @@ def call_replay(mox: CmdMox, fixture_path: Path) -> CommandDouble:
     target_fixture="spy_after_replay",
 )
 def call_replay_fuzzy(mox: CmdMox, fixture_path: Path) -> CommandDouble:
-    """Attach a fuzzy replay session to a spy."""  # ruff: ignore[docstring-missing-returns] - BDD fixture step; return contract is scenario-local
+    """Attach a fuzzy replay session to a spy.
+
+    Returns
+    -------
+    CommandDouble
+        The spy with the fuzzy replay session attached.
+    """
     return _call_replay_with_strict(mox, fixture_path, strict=False)
 
 

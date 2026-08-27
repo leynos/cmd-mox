@@ -9,7 +9,6 @@ import math
 import os
 import stat
 import threading
-import typing as typ
 from pathlib import Path
 from unittest import mock
 
@@ -150,7 +149,7 @@ def test_export_ipc_environment_rejects_invalid_timeout(invalid: float) -> None:
 def test_export_ipc_environment_invalid_timeout_type(invalid_type: object) -> None:
     """Invalid timeout types should propagate TypeError."""
     with EnvironmentManager() as env, pytest.raises(TypeError):
-        env.export_ipc_environment(timeout=typ.cast("float", invalid_type))
+        env.export_ipc_environment(timeout=invalid_type)
 
 
 def test_export_ipc_environment_reuses_previous_timeout() -> None:

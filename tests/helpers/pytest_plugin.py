@@ -10,7 +10,13 @@ PARALLEL_SUITE_PATH = Path(__file__).with_name("data") / "parallel_suite.py"
 
 
 def load_parallel_suite() -> str:
-    """Return the source for the parallel isolation pytest suite."""  # ruff: ignore[docstring-missing-returns] - test plugin helper; return contract is local
+    """Return the source for the parallel isolation pytest suite.
+
+    Returns
+    -------
+    str
+        The contents of the parallel isolation suite module.
+    """
     return PARALLEL_SUITE_PATH.read_text()
 
 
@@ -25,7 +31,13 @@ class ParallelRecord:
 
 
 def read_parallel_records(artifact_dir: Path) -> list[ParallelRecord]:
-    """Return parsed records written by the parallel isolation suite."""  # ruff: ignore[docstring-missing-returns] - test plugin helper; return contract is local
+    """Return parsed records written by the parallel isolation suite.
+
+    Returns
+    -------
+    list[ParallelRecord]
+        The records parsed from each worker's artifact file.
+    """
     records: list[ParallelRecord] = []
     for path in sorted(artifact_dir.glob("*.json")):
         payload = json.loads(path.read_text())

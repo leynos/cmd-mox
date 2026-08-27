@@ -17,6 +17,23 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
 
 
+def _assert_message_contains(
+    excinfo: pytest.ExceptionInfo[BaseException], *fragments: str
+) -> None:
+    """Assert the captured exception message contains every fragment.
+
+    Parameters
+    ----------
+    excinfo : pytest.ExceptionInfo
+        Exception information captured by ``pytest.raises``.
+    *fragments : str
+        Substrings that must all appear in the rendered message.
+    """
+    message = str(excinfo.value)
+    for fragment in fragments:
+        assert fragment in message, f"{fragment!r} missing from {message!r}"
+
+
 def test_unexpected_invocation_message_includes_diff(
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -32,10 +49,12 @@ def test_unexpected_invocation_message_includes_diff(
     with pytest.raises(UnexpectedCommandError) as excinfo:
         mox.verify()
 
-    message = str(excinfo.value)
-    assert "Unexpected command invocation." in message
-    assert "git('status')" in message
-    assert "git('commit')" in message
+    _assert_message_contains(
+        excinfo,
+        "Unexpected command invocation.",
+        "git('status')",
+        "git('commit')",
+    )
 
 
 def test_unfulfilled_expectation_message_includes_counts(
@@ -53,10 +72,12 @@ def test_unfulfilled_expectation_message_includes_counts(
     with pytest.raises(UnfulfilledExpectationError) as excinfo:
         mox.verify()
 
-    message = str(excinfo.value)
-    assert "Unfulfilled expectation." in message
-    assert "expected calls=2" in message
-    assert "1 (expected 2)" in message
+    _assert_message_contains(
+        excinfo,
+        "Unfulfilled expectation.",
+        "expected calls=2",
+        "1 (expected 2)",
+    )
 
 
 def test_order_violation_reports_first_mismatch(
@@ -78,11 +99,13 @@ def test_order_violation_reports_first_mismatch(
     with pytest.raises(UnexpectedCommandError) as excinfo:
         mox.verify()
 
-    message = str(excinfo.value)
-    assert "Ordered expectation violated." in message
-    assert "position 1" in message
-    assert "first" in message
-    assert "second" in message
+    _assert_message_contains(
+        excinfo,
+        "Ordered expectation violated.",
+        "position 1",
+        "first",
+        "second",
+    )
 
 
 def test_extra_invocation_reports_count(
@@ -101,7 +124,9 @@ def test_extra_invocation_reports_count(
     with pytest.raises(UnexpectedCommandError) as excinfo:
         mox.verify()
 
-    message = str(excinfo.value)
-    assert "Unexpected additional invocation." in message
-    assert "Observed calls" in message
-    assert "Last call" in message
+    _assert_message_contains(
+        excinfo,
+        "Unexpected additional invocation.",
+        "Observed calls",
+        "Last call",
+    )

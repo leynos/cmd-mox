@@ -13,7 +13,7 @@ if typ.TYPE_CHECKING:
 
 def run_subprocess(
     args: cabc.Sequence[str],
-    **kwargs: typ.Any,  # ruff: ignore[any-type] - test cases deliberately accept values of multiple runtime types
+    **kwargs: typ.Any,  # ruff: ignore[any-type] - forwarded verbatim to subprocess.run, whose keyword arguments are heterogeneous
 ) -> subprocess.CompletedProcess[str]:
     """Run ``subprocess.run`` with common defaults for tests.
 

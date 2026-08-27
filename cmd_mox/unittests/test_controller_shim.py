@@ -60,6 +60,24 @@ def shim_symlink_spy(monkeypatch: pytest.MonkeyPatch) -> _ShimSymlinkSpy:
     return spy
 
 
+def _assert_shim_created_for(spy: _ShimSymlinkSpy, mox: CmdMox, name: str) -> None:
+    """Assert the spy recorded exactly one shim creation for *name*.
+
+    Parameters
+    ----------
+    spy : _ShimSymlinkSpy
+        Spy standing in for ``create_shim_symlinks``.
+    mox : CmdMox
+        Controller whose environment supplies the expected shim directory.
+    name : str
+        Command name that should have been created.
+    """
+    env = mox.environment
+    assert env is not None
+    assert env.shim_dir is not None
+    assert spy.calls == [(env.shim_dir, (name,))]
+
+
 def test_cmdmox_nonstubbed_command_behavior(
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -89,10 +107,7 @@ def test_register_command_creates_shim_during_replay(
 
     mox.register_command("late")
 
-    env = mox.environment
-    assert env is not None
-    assert env.shim_dir is not None
-    assert shim_symlink_spy.calls == [(env.shim_dir, ("late",))]
+    _assert_shim_created_for(shim_symlink_spy, mox, "late")
 
     mox.verify()
 
@@ -133,23 +148,25 @@ def test_ensure_shim_during_replay_behaviour(
     """_ensure_shim_during_replay handles replay state and environment availability."""
     mox = CmdMox()
 
-    if setup == "phase_only":
-        # Directly toggle the private phase to isolate replay behaviour without
-        # invoking the full environment machinery. The test accepts the tighter
-        # coupling in exchange for targeting this edge case explicitly.
-        mox._phase = Phase.REPLAY
-    elif setup == "full_replay":
-        mox.__enter__()
-        mox.replay()
-        shim_symlink_spy.calls.clear()
+    match setup:
+        case "phase_only":
+            # Directly toggle the private phase to isolate replay behaviour
+            # without invoking the full environment machinery. The test accepts
+            # the tighter coupling in exchange for targeting this edge case
+            # explicitly.
+            mox._phase = Phase.REPLAY
+        case "full_replay":
+            mox.__enter__()
+            mox.replay()
+            shim_symlink_spy.calls.clear()
+        case _:
+            # "no_replay": leave the controller in its pristine record phase.
+            pass
 
     mox._ensure_shim_during_replay("late")
 
     if expected_call_count:
-        env = mox.environment
-        assert env is not None
-        assert env.shim_dir is not None
-        assert shim_symlink_spy.calls == [(env.shim_dir, ("late",))]
+        _assert_shim_created_for(shim_symlink_spy, mox, "late")
     else:
         assert not shim_symlink_spy.called
         assert shim_symlink_spy.calls == []
@@ -176,7 +193,7 @@ def test_ensure_shim_during_replay_repairs_broken_symlink(
 
     mox._ensure_shim_during_replay("late")
 
-    assert shim_symlink_spy.calls == [(tmp_path, ("late",))]
+    _assert_shim_created_for(shim_symlink_spy, mox, "late")
 
 
 def test_ensure_shim_during_replay_repairs_multiple_broken_symlinks(
@@ -229,11 +246,7 @@ def test_register_command_fails_when_path_exists() -> None:
     mox.__enter__()
     mox.replay()
 
-    env = mox.environment
-    assert env is not None
-    assert env.shim_dir is not None
-
-    collision = env.shim_dir / "late"
+    collision = require_shim_dir(mox.environment) / "late"
     collision.write_text("collision")
 
     with pytest.raises(FileExistsError, match="already exists and is not a symlink"):
@@ -269,10 +282,7 @@ def test_register_command_skips_existing_shim(
     mox.__enter__()
     mox.replay()
 
-    env = mox.environment
-    assert env is not None
-    assert env.shim_dir is not None
-    controller.create_shim_symlinks(env.shim_dir, ["again"])
+    controller.create_shim_symlinks(require_shim_dir(mox.environment), ["again"])
 
     called = False
 

@@ -37,7 +37,7 @@ class ReplayInterruptionState(typ.TypedDict):
     manager_active: EnvironmentManager | None
 
 
-from tests.steps import *  # ruff: ignore[undefined-local-with-import-star, module-import-not-at-top-of-file] - re-export pytest-bdd steps
+from tests.steps import *  # ruff: ignore[undefined-local-with-import-star, module-import-not-at-top-of-file] - pytest-bdd registers step definitions through star imports; it sits after this module's own definitions so the star import cannot shadow them
 
 
 @scenario(str(FEATURES_DIR / "controller.feature"), "stubbed command execution")

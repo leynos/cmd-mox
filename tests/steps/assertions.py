@@ -15,6 +15,33 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
     from cmd_mox.controller import CmdMox
     from cmd_mox.errors import MissingEnvironmentError, VerificationError
+    from cmd_mox.test_doubles import CommandDouble
+
+
+def _require_spy(mox: CmdMox, cmd: str) -> CommandDouble:
+    """Return the registered spy for *cmd*, failing clearly when absent.
+
+    Returns
+    -------
+    CommandDouble
+        The spy registered under *cmd*. The step fails with an
+        ``AssertionError`` when no spy is registered for *cmd*.
+    """
+    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
+    return mox.spies[cmd]
+
+
+def _require_mock(mox: CmdMox, cmd: str) -> CommandDouble:
+    """Return the registered mock for *cmd*, failing clearly when absent.
+
+    Returns
+    -------
+    CommandDouble
+        The mock registered under *cmd*. The step fails with an
+        ``AssertionError`` when no mock is registered for *cmd*.
+    """
+    assert cmd in mox.mocks, f"Mock for command '{cmd}' not found"
+    return mox.mocks[cmd]
 
 
 @then(parsers.cfparse('the shim for "{cmd}" should end with "{suffix}"'))
@@ -71,24 +98,21 @@ def verification_error_excludes(
 @then(parsers.cfparse('the spy "{cmd}" should record {count:d} invocation'))
 def check_spy(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the spy recorded the invocation."""
-    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
-    spy = mox.spies[cmd]
+    spy = _require_spy(mox, cmd)
     assert len(spy.invocations) == count, "Assertion failed"
 
 
 @then(parsers.cfparse('the spy "{cmd}" call count should be {count:d}'))
 def check_spy_call_count(mox: CmdMox, cmd: str, count: int) -> None:
     """Assert ``SpyCommand.call_count`` equals *count*."""
-    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
-    spy = mox.spies[cmd]
+    spy = _require_spy(mox, cmd)
     assert spy.call_count == count, "Assertion failed"
 
 
 @then(parsers.cfparse('the spy "{cmd}" should have been called'))
 def spy_assert_called(mox: CmdMox, cmd: str) -> None:
     """Assert the spy was invoked at least once."""
-    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
-    mox.spies[cmd].assert_called()
+    _require_spy(mox, cmd).assert_called()
 
 
 @then(
@@ -96,21 +120,18 @@ def spy_assert_called(mox: CmdMox, cmd: str) -> None:
 )
 def spy_assert_called_with(mox: CmdMox, cmd: str, args: str) -> None:
     """Assert the spy's last call used the given arguments."""
-    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
     decoded = decode_placeholders(args)
-    mox.spies[cmd].assert_called_with(*shlex.split(decoded))
+    _require_spy(mox, cmd).assert_called_with(*shlex.split(decoded))
 
 
 @then(parsers.cfparse('the spy "{cmd}" should not have been called'))
 def spy_assert_not_called(mox: CmdMox, cmd: str) -> None:
     """Assert the spy was never invoked."""
-    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
-    mox.spies[cmd].assert_not_called()
+    _require_spy(mox, cmd).assert_not_called()
 
 
 @then(parsers.cfparse('the mock "{cmd}" should record {count:d} invocation'))
 def check_mock(mox: CmdMox, cmd: str, count: int) -> None:
     """Verify the mock recorded the invocation."""
-    assert cmd in mox.mocks, f"Mock for command '{cmd}' not found"
-    mock = mox.mocks[cmd]
+    mock = _require_mock(mox, cmd)
     assert len(mock.invocations) == count, "Assertion failed"

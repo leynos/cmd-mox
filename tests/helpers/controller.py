@@ -91,10 +91,16 @@ def escape_windows_batch_args(argv: list[str]) -> list[str]:
     return escaped
 
 
-def _execute_command_with_params(
+def execute_command_with_details(
     params: CommandExecution,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute a command described by *params*."""  # ruff: ignore[docstring-missing-returns] - test-only helper; return contract is local
+    """Execute a command described by *params*.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the described command.
+    """
     env = os.environ | {params.env_var: params.env_val}
     decoded_args = decode_placeholders(params.args)
     argv = [params.cmd, *shlex.split(decoded_args)]
@@ -111,32 +117,34 @@ def _execute_command_with_params(
     )
 
 
-def execute_command_with_details(
-    mox: CmdMox, execution: CommandExecution
-) -> subprocess.CompletedProcess[str]:
-    """Run the command specified by *execution*."""  # ruff: ignore[docstring-missing-returns] - test-only helper; return contract is local
-    del mox
-    return _execute_command_with_params(execution)
-
-
 def _find_matching_journal_entry(
     mox: CmdMox, expectation: JournalEntryExpectation
 ) -> Invocation:
-    """Locate the journal entry matching *expectation*."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - test-only helper; contract and failure are local
+    """Locate the journal entry matching *expectation*.
+
+    Returns
+    -------
+    Invocation
+        The most recent journal entry matching *expectation*.
+
+    Raises
+    ------
+    AssertionError
+        If no journal entry matches *expectation*.
+    """
     candidates = [inv for inv in mox.journal if inv.command == expectation.cmd]
     if expectation.args is not None:
         decoded = decode_placeholders(expectation.args)
         wanted_args = shlex.split(decoded)
         candidates = [inv for inv in candidates if inv.args == wanted_args]
-    inv = candidates[-1] if candidates else None
-    if inv is None:
+    if not candidates:
         available = [(i.command, list(i.args)) for i in mox.journal]
         msg = (
             f"Journal does not contain expected entry for {expectation.cmd!r} "
             f"with args {expectation.args!r}. Available: {available!r}"
         )
         raise AssertionError(msg)
-    return inv
+    return candidates[-1]
 
 
 def _validate_journal_entry_fields(

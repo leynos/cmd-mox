@@ -4,81 +4,97 @@ from __future__ import annotations
 
 import typing as typ
 
+import pytest
+
 from tests.helpers import controller
 
 if typ.TYPE_CHECKING:
-    import pytest
+    import collections.abc as cabc
 
 
-def _set_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force helpers to behave as if running on Windows."""
+@pytest.fixture
+def windows_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force helpers to behave as if running on Windows.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to patch the platform indicator consulted by the helper.
+    """
     monkeypatch.setattr(controller.os, "name", "nt")
 
 
-def _set_posix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force helpers to behave as if running on POSIX."""
+@pytest.fixture
+def posix_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force helpers to behave as if running on POSIX.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to patch the platform indicator consulted by the helper.
+    """
     monkeypatch.setattr(controller.os, "name", "posix")
 
 
-def test_escape_batch_args_is_noop_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.usefixtures("posix_platform")
+def test_escape_batch_args_is_noop_on_posix() -> None:
     """Non-Windows platforms should return argv unchanged."""
-    _set_posix(monkeypatch)
     argv = ["build.cmd", "arg^1"]
     assert controller.escape_windows_batch_args(argv) == argv, "Assertion failed"
 
 
-def test_escape_batch_args_for_cmd_extension(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Arguments to explicit .cmd scripts should have carets quadrupled."""
-    _set_windows(monkeypatch)
-    argv = ["build.cmd", "arg^1", "safe"]
-
-    escaped = controller.escape_windows_batch_args(argv)
-
-    assert escaped == ["build.cmd", "arg^^^^1", "safe"], "Assertion failed"
-
-
-def test_escape_batch_args_resolves_pathext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Resolution through PATHEXT should still trigger caret escaping."""
-    _set_windows(monkeypatch)
-    monkeypatch.setattr(controller.shutil, "which", lambda cmd: f"C:/tools/{cmd}.cmd")
-    argv = ["builder", "^caret"]
-
-    escaped = controller.escape_windows_batch_args(argv)
-
-    assert escaped == ["builder", "^^^^caret"], "Assertion failed"
-
-
-def test_escape_batch_args_missing_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Missing PATH resolution should leave arguments unchanged."""
-    _set_windows(monkeypatch)
-    monkeypatch.setattr(controller.shutil, "which", lambda cmd: None)
-    argv = ["builder", "^caret"]
-
-    escaped = controller.escape_windows_batch_args(argv)
-
-    assert escaped == ["builder", "^caret"], "Assertion failed"
-
-
-def test_escape_batch_args_ignores_non_batch_resolution(
+@pytest.mark.usefixtures("windows_platform")
+@pytest.mark.parametrize(
+    ("which_result", "argv", "expected"),
+    [
+        (
+            None,
+            ["build.cmd", "arg^1", "safe"],
+            ["build.cmd", "arg^^^^1", "safe"],
+        ),
+        (
+            lambda cmd: f"C:/tools/{cmd}.cmd",
+            ["builder", "^caret"],
+            ["builder", "^^^^caret"],
+        ),
+        (
+            lambda _cmd: None,
+            ["builder", "^caret"],
+            ["builder", "^caret"],
+        ),
+        (
+            lambda cmd: f"C:/bin/{cmd}.exe",
+            ["builder", "^"],
+            ["builder", "^"],
+        ),
+        (
+            None,
+            ["build.cmd", "%PATH%", ""],
+            ["build.cmd", "%PATH%", ""],
+        ),
+    ],
+    ids=[
+        "explicit-cmd-extension",
+        "pathext-resolves-to-batch",
+        "missing-on-path",
+        "non-batch-resolution",
+        "percent-and-empty-untouched",
+    ],
+)
+def test_escape_batch_args_on_windows(
     monkeypatch: pytest.MonkeyPatch,
+    which_result: cabc.Callable[[str], str | None] | None,
+    argv: list[str],
+    expected: list[str],
 ) -> None:
-    """Executables should not be treated as batch scripts."""
-    _set_windows(monkeypatch)
-    monkeypatch.setattr(controller.shutil, "which", lambda cmd: f"C:/bin/{cmd}.exe")
-    argv = ["builder", "^"]
+    """Caret escaping should follow how the command resolves on Windows.
+
+    ``which_result`` of ``None`` leaves the real ``shutil.which`` in place so
+    the explicit ``.cmd`` suffix drives the decision.
+    """
+    if which_result is not None:
+        monkeypatch.setattr(controller.shutil, "which", which_result)
 
     escaped = controller.escape_windows_batch_args(argv)
 
-    assert escaped == argv, "Assertion failed"
-
-
-def test_escape_batch_args_preserves_percent_and_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Percent signs and empty arguments should be left untouched."""
-    _set_windows(monkeypatch)
-    argv = ["build.cmd", "%PATH%", ""]
-
-    escaped = controller.escape_windows_batch_args(argv)
-
-    assert escaped == ["build.cmd", "%PATH%", ""], "Assertion failed"
+    assert escaped == expected, f"unexpected escaping for {argv!r}"

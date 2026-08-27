@@ -14,8 +14,8 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
 from tests.helpers.controller import (
     CommandExecution,
     JournalEntryExpectation,
-    _execute_command_with_params,
     _find_matching_journal_entry,
+    execute_command_with_details,
     verify_journal_entry_details,
 )
 
@@ -41,7 +41,7 @@ def test_execute_and_verify_helpers() -> None:
             env_var="ENV_VAR",
             env_val="VALUE",
         )
-        result = _execute_command_with_params(params)
+        result = execute_command_with_details(params)
     # Sanity-check handler result
     assert result.stdout.strip() == "handled", "Assertion failed"
     assert result.returncode == 0, "Assertion failed"
@@ -74,7 +74,7 @@ def test_find_matching_journal_entry_returns_most_recent() -> None:
             env_var="ENV",
             env_val="VAL",
         )
-        _execute_command_with_params(params)
+        execute_command_with_details(params)
         params = CommandExecution(
             cmd="foo",
             args="--flag",
@@ -82,7 +82,7 @@ def test_find_matching_journal_entry_returns_most_recent() -> None:
             env_var="ENV",
             env_val="VAL",
         )
-        _execute_command_with_params(params)
+        execute_command_with_details(params)
         expectation = JournalEntryExpectation(cmd="foo", args="--flag")
         inv = _find_matching_journal_entry(mox, expectation)
     assert inv.stdin == "second", "Assertion failed"
@@ -104,7 +104,7 @@ def test_helpers_raise_on_mismatch() -> None:
             env_var="ENV",
             env_val="VAL",
         )
-        _execute_command_with_params(params)
+        execute_command_with_details(params)
         expectation = JournalEntryExpectation(cmd="foo", exit_code=1)
         with pytest.raises(AssertionError, match="exit_code"):
             verify_journal_entry_details(mox, expectation)

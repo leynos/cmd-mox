@@ -105,25 +105,42 @@ def test_with_env_injection(
     assert result.stdout.strip() == "WORLD"
 
 
-def test_with_env_rejects_non_string_keys() -> None:
-    """with_env() should reject non-string keys and values."""
+@pytest.mark.parametrize(
+    ("payload", "exc_type", "match"),
+    [
+        pytest.param(
+            {42: "value"},
+            TypeError,
+            "name must be str",
+            id="non-string-key",
+        ),
+        pytest.param(
+            {"": "value"},
+            ValueError,
+            "cannot be empty",
+            id="empty-key",
+        ),
+        pytest.param(
+            {"VAR": 7},
+            TypeError,
+            "value must be str",
+            id="non-string-value",
+        ),
+    ],
+)
+def test_with_env_rejects_invalid_entries(
+    payload: dict[typ.Any, typ.Any],
+    exc_type: type[Exception],
+    match: str,
+) -> None:
+    """with_env() should reject malformed environment entries.
+
+    The parametrized payloads deliberately violate the ``dict[str, str]``
+    contract to exercise the defensive validation inside ``with_env()``.
+    """
     expectation = Expectation("cmd")
-    with pytest.raises(TypeError, match="name must be str"):
-        expectation.with_env({42: "value"})  # type: ignore[arg-type, ty:invalid-argument-type]
-
-
-def test_with_env_rejects_empty_key() -> None:
-    """with_env() should reject empty environment variable names."""
-    expectation = Expectation("cmd")
-    with pytest.raises(ValueError, match="cannot be empty"):
-        expectation.with_env({"": "value"})
-
-
-def test_with_env_rejects_non_string_values() -> None:
-    """with_env() should reject non-string values."""
-    expectation = Expectation("cmd")
-    with pytest.raises(TypeError, match="value must be str"):
-        expectation.with_env({"VAR": 7})  # type: ignore[arg-type, ty:invalid-argument-type]
+    with pytest.raises(exc_type, match=match):
+        expectation.with_env(payload)
 
 
 def test_any_order_expectations_allow_flexible_sequence(
@@ -302,6 +319,24 @@ def test_expectation_failures(
     )
 
 
+def _assert_mismatch_reason(exp: Expectation, inv: Invocation, fragment: str) -> None:
+    """Assert *exp* rejects *inv* and explains the mismatch.
+
+    Parameters
+    ----------
+    exp : Expectation
+        Expectation under test.
+    inv : Invocation
+        Invocation that must not match *exp*.
+    fragment : str
+        Substring expected in the mismatch explanation.
+    """
+    assert exp.matches(inv) is False
+    reason = exp.explain_mismatch(inv)
+    assert reason is not None
+    assert fragment in reason, f"{fragment!r} missing from {reason!r}"
+
+
 class TestStdinMatching:
     """Tests for Expectation stdin matching and mismatch explanation."""
 
@@ -316,10 +351,7 @@ class TestStdinMatching:
         """A literal string stdin does not match a different value."""
         exp = Expectation("cmd").with_stdin("hello")
         inv = Invocation(command="cmd", args=[], stdin="world", env={})
-        assert exp.matches(inv) is False
-        reason = exp.explain_mismatch(inv)
-        assert reason is not None
-        assert "world" in reason
+        _assert_mismatch_reason(exp, inv, "world")
 
     def test_callable_stdin_matches(self) -> None:
         """A callable stdin predicate is invoked with invocation.stdin."""
@@ -331,19 +363,13 @@ class TestStdinMatching:
         """A callable stdin predicate that returns False causes mismatch."""
         exp = Expectation("cmd").with_stdin(lambda s: s == "expected")
         inv = Invocation(command="cmd", args=[], stdin="actual", env={})
-        assert exp.matches(inv) is False
-        reason = exp.explain_mismatch(inv)
-        assert reason is not None
-        assert "actual" in reason
+        _assert_mismatch_reason(exp, inv, "actual")
 
     def test_callable_stdin_exception_returns_false(self) -> None:
         """A callable stdin predicate that raises is treated as non-match."""
         exp = Expectation("cmd").with_stdin(lambda s: 1 / 0)
         inv = Invocation(command="cmd", args=[], stdin="data", env={})
-        assert exp.matches(inv) is False
-        reason = exp.explain_mismatch(inv)
-        assert reason is not None
-        assert "raised" in reason
+        _assert_mismatch_reason(exp, inv, "raised")
 
     def test_non_string_non_callable_stdin_does_not_match(self) -> None:
         """A non-string, non-callable stdin value is rejected.
@@ -355,10 +381,7 @@ class TestStdinMatching:
         exp = Expectation("cmd")
         exp.stdin = 42  # type: ignore[assignment, ty:invalid-assignment]
         inv = Invocation(command="cmd", args=[], stdin="hello", env={})
-        assert exp.matches(inv) is False
-        reason = exp.explain_mismatch(inv)
-        assert reason is not None
-        assert "not str or callable" in reason
+        _assert_mismatch_reason(exp, inv, "not str or callable")
 
     def test_none_stdin_always_matches(self) -> None:
         """When stdin expectation is None, any stdin value matches."""

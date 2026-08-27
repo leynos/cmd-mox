@@ -21,12 +21,12 @@ def test_retry_unlink_success(tmp_path: Path) -> None:
 
 
 def test_retry_unlink_missing_path_noop(tmp_path: Path) -> None:
-    """retry_unlink is a no-op for missing paths."""
+    """retry_unlink is a no-op for missing paths, and leaves them missing."""
     missing = tmp_path / "missing.txt"
 
     fs_retry.retry_unlink(missing)
 
-    assert not missing.exists()
+    assert not missing.exists(), "missing path should remain absent"
 
 
 def test_retry_unlink_retries_then_succeeds(
@@ -103,14 +103,6 @@ def test_retry_unlink_propagates_original_exception(
         )
 
 
-def test_retry_unlink_treats_missing_path_as_success(tmp_path: Path) -> None:
-    """TOCTOU-safe: missing path during unlink is treated as success."""
-    target = tmp_path / "missing.txt"
-
-    # No file present; should exit quietly.
-    fs_retry.retry_unlink(target)
-
-
 def test_retry_unlink_missing_between_checks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -119,8 +111,10 @@ def test_retry_unlink_missing_between_checks(
     target.write_text("tmp")
 
     original_unlink = Path.unlink
+    attempts: dict[str, int] = {"count": 0}
 
     def remove_then_raise(self: Path) -> None:
+        attempts["count"] += 1
         original_unlink(self)
         raise FileNotFoundError("gone")
 
@@ -129,6 +123,9 @@ def test_retry_unlink_missing_between_checks(
     fs_retry.retry_unlink(
         target, config=fs_retry.RetryConfig(max_attempts=2, retry_delay=0)
     )
+
+    assert not target.exists(), "vanished file should not be recreated"
+    assert attempts["count"] == 1, "FileNotFoundError should end the retry loop"
 
 
 @pytest.mark.parametrize(

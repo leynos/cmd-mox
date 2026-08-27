@@ -39,7 +39,13 @@ _TEST_BODIES: dict[LifecyclePhase, str] = {
 
 
 def _format_block(block: str, *, indent: int = 0) -> str:
-    """Return a dedented block optionally indented by ``indent`` spaces."""  # ruff: ignore[docstring-missing-returns] - private module helper has an obvious str return
+    """Return a dedented block optionally indented by ``indent`` spaces.
+
+    Returns
+    -------
+    str
+        The dedented block, indented by ``indent`` spaces if requested.
+    """
     normalized = textwrap.dedent(block).strip("\n")
     if not normalized:
         return ""
@@ -51,7 +57,13 @@ def _format_block(block: str, *, indent: int = 0) -> str:
 
 
 def _build_module_prefix(*, include_subprocess_helper: bool) -> str:
-    """Compose the module header and optional shim helper."""  # ruff: ignore[docstring-missing-returns] - private module helper has an obvious str return
+    """Compose the module header and optional shim helper.
+
+    Returns
+    -------
+    str
+        The generated module preamble, including imports and shim helpers.
+    """
     header_lines = [
         "import pytest",
         "from cmd_mox.controller import Phase",

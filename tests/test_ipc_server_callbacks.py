@@ -41,11 +41,23 @@ class _OverridingIPCServer(IPCServer):
     """IPC server whose hook overrides prove request dispatch remains virtual."""
 
     def handle_invocation(self, invocation: Invocation) -> Response:
-        """Return a response that identifies the overridden invocation hook."""  # ruff: ignore[docstring-missing-returns] - test callback; return contract is test-local
+        """Return a response that identifies the overridden invocation hook.
+
+        Returns
+        -------
+        Response
+            A response whose stdout names the overridden invocation's command.
+        """
         return Response(stdout=f"override:{invocation.command}")
 
     def handle_passthrough_result(self, result: PassthroughResult) -> Response:
-        """Return a response that identifies the overridden passthrough hook."""  # ruff: ignore[docstring-missing-returns] - test callback; return contract is test-local
+        """Return a response that identifies the overridden passthrough hook.
+
+        Returns
+        -------
+        Response
+            A response whose stdout names the overridden passthrough's invocation id.
+        """
         return Response(stdout=f"override:{result.invocation_id}")
 
 
@@ -75,7 +87,13 @@ class TimeoutTestCase:
 
 @pytest.fixture
 def echo_handler() -> cabc.Callable[[Invocation], Response]:
-    """Return a handler that echoes the command name."""  # ruff: ignore[docstring-missing-returns] - pytest fixture; return contract is test-local
+    """Return a handler that echoes the command name.
+
+    Returns
+    -------
+    cabc.Callable[[Invocation], Response]
+        A handler returning the invoked command name as stdout.
+    """
 
     def handler(invocation: Invocation) -> Response:
         return Response(stdout=invocation.command)
@@ -85,7 +103,13 @@ def echo_handler() -> cabc.Callable[[Invocation], Response]:
 
 @pytest.fixture
 def passthrough_handler() -> cabc.Callable[[PassthroughResult], Response]:
-    """Return a handler that returns a fixed passthrough response."""  # ruff: ignore[docstring-missing-returns] - pytest fixture; return contract is test-local
+    """Return a handler that returns a fixed passthrough response.
+
+    Returns
+    -------
+    cabc.Callable[[PassthroughResult], Response]
+        A handler returning a fixed "passthrough" response.
+    """
 
     def handler(_result: PassthroughResult) -> Response:
         return Response(stdout="passthrough")
@@ -119,7 +143,13 @@ def test_ipcserver_invocation_handler(
     seen: list[Invocation] = []
 
     def handler(invocation: Invocation) -> Response:
-        """Record invocations and return a distinctive response."""  # ruff: ignore[docstring-missing-returns] - test callback; return contract is test-local
+        """Record invocations and return a distinctive response.
+
+        Returns
+        -------
+        Response
+            A fixed response identifying this handler as having run.
+        """
         seen.append(invocation)
         return Response(stdout="handled", stderr="err", exit_code=2)
 
@@ -189,7 +219,13 @@ def test_ipcserver_passthrough_handler(
     seen: list[PassthroughResult] = []
 
     def passthrough_handler(result: PassthroughResult) -> Response:
-        """Capture passthrough results and return a custom response."""  # ruff: ignore[docstring-missing-returns] - test callback; return contract is test-local
+        """Capture passthrough results and return a custom response.
+
+        Returns
+        -------
+        Response
+            A fixed response identifying this passthrough handler as having run.
+        """
         seen.append(result)
         return Response(stdout="passthrough", exit_code=5)
 
@@ -616,8 +652,19 @@ def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
     server = IPCServer(tmp_path / "ipc.sock")
     server.start()
 
+    # Exceptions raised inside a thread target are printed to stderr and never
+    # reach the joining thread, so they must be captured explicitly for the
+    # assertions below to have any force.
+    failures: list[BaseException] = []
+
+    def stop_and_capture() -> None:
+        try:
+            server.stop()
+        except BaseException as exc:  # ruff: ignore[blind-except] - thread targets must not propagate; the failure is surfaced by the assertion below
+            failures.append(exc)
+
     try:
-        threads = [threading.Thread(target=server.stop) for _ in range(3)]
+        threads = [threading.Thread(target=stop_and_capture) for _ in range(3)]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -625,6 +672,10 @@ def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
     finally:
         # Additional stop should be a no-op when the server is already stopped.
         server.stop()
+
+    assert not failures, f"concurrent stop() raised: {failures}"
+    assert server._server is None, "Assertion failed"
+    assert server._thread is None, "Assertion failed"
 
 
 def test_handle_passthrough_default(tmp_path: Path) -> None:

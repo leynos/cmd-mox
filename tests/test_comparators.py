@@ -63,7 +63,13 @@ def test_is_a_repr_with_custom_type() -> None:
 
 
 def _mock_double(expectation: Expectation) -> CommandDouble:
-    """Return a typed mock CommandDouble stub exposing the provided expectation."""  # ruff: ignore[docstring-missing-returns] - test mock helper; return contract is test-local
+    """Return a typed mock CommandDouble stub exposing the provided expectation.
+
+    Returns
+    -------
+    CommandDouble
+        A stub double of kind ``MOCK`` carrying *expectation*.
+    """
     return typ.cast(
         "CommandDouble",
         SimpleNamespace(

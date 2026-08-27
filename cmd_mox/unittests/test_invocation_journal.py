@@ -85,7 +85,6 @@ def _setup_and_execute_command(
     mox.replay()
     cmd_path = _shim_cmd_path(mox, stub_name)
     return execute_command_with_details(
-        mox,
         CommandExecution(
             cmd=str(cmd_path),
             args=params.args,
@@ -289,12 +288,12 @@ def test_invocation_to_dict() -> None:
 )
 def test_invocation_repr_redacts_keys(key: str) -> None:
     """__repr__ redacts keys containing sensitive tokens."""
-    secret = "super-secret"  # ruff: ignore[hardcoded-password-string] - test value
+    sensitive_value = "super-secret"
     inv = Invocation(
         command="cmd",
         args=[],
         stdin="",
-        env={key: secret},
+        env={key: sensitive_value},
         stdout="",
         stderr="",
         exit_code=0,
@@ -302,7 +301,7 @@ def test_invocation_repr_redacts_keys(key: str) -> None:
     text = repr(inv)
     data = ast.literal_eval(text[len("Invocation(") : -1])
     assert data["env"][key] == "<redacted>"
-    assert "super-secret" not in text
+    assert sensitive_value not in text
 
 
 def test_invocation_repr_does_not_redact_benign_key() -> None:

@@ -25,7 +25,18 @@ class MissingParallelArtifactDirError(RuntimeError):
 
 
 def _artifact_dir() -> Path:
-    """Return the directory for recording worker metadata."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - test artifact helper; contract and missing-config failure are local
+    """Return the directory for recording worker metadata.
+
+    Returns
+    -------
+    Path
+        The created (or existing) artifact directory for this worker.
+
+    Raises
+    ------
+    MissingParallelArtifactDirError
+        If the ``CMD_MOX_PARALLEL_ARTIFACT_DIR`` environment variable is unset.
+    """
     try:
         root = Path(os.environ["CMD_MOX_PARALLEL_ARTIFACT_DIR"])
     except KeyError as exc:  # pragma: no cover - defensive guard for template misuse
