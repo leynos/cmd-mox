@@ -101,9 +101,12 @@ When implementing changes, adhere to the following testing procedures:
       when an entry-point rule cannot describe the boundary may a documented
       allow-list exception be added with
       `make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"`.
-      The helper requires both variables to contain non-whitespace values;
-      retain the same caller-specific reason in
-      `[tool.skylos.whitelist.documented]` in `pyproject.toml`.
+      The helper requires both variables to contain non-whitespace values and
+      serializes the whitelist read-modify-write through the ignored,
+      repository-local `.skylos-whitelist.lock`. Retain the same
+      caller-specific reason in `[tool.skylos.whitelist.documented]` in
+      `pyproject.toml`; override the lock path only when isolating helper
+      tests from the checkout.
     - **Formatting:** Adheres to formatting standards (`make check-fmt`,
       formatting can be applied by running `make fmt`).
     - **Typechecking:** Passes type checking (`make typecheck`).

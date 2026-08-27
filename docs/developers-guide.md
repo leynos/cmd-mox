@@ -234,13 +234,12 @@ make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 
 The target requires both variables to contain non-whitespace values and invokes
 `skylos whitelist <symbol> --reason <reason>`. `SYMBOL` avoids WSL's
-caller-owned `NAME` environment variable. Treat the helper as a reviewed,
-serialised write: it locks the ignored repository-local
-`.skylos-whitelist.lock` while updating the whitelist. Retain the matching
+caller-owned `NAME` environment variable. Each read-modify-write is serialised
+with `flock` on the ignored repository-local `.skylos-whitelist.lock`; tests
+may override `SKYLOS_WHITELIST_LOCK` when running in an isolated temporary
+directory. Treat the helper as a reviewed write: retain the matching
 `[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
 caller-specific reason, and never use it to avoid removing genuine dead code.
-Override `SKYLOS_WHITELIST_LOCK` only when isolating helper tests from the
-checkout.
 
 Skylos parses source with the AST implementation of its own runtime. The
 command-only `SKYLOS_CLI` therefore pins Python 3.14 to prevent newer
