@@ -56,6 +56,38 @@ def _assert_replay_recorded(
     )
 
 
+def _handle_replay_match(
+    mox: CmdMox,
+    fixture_path: Path,
+    *,
+    expectation_env: dict[str, str] | None = None,
+) -> ReplayRecordedExpectation:
+    """Dispatch a replay-matched ``git status`` invocation through *mox*.
+
+    Returns
+    -------
+    ReplayRecordedExpectation
+        The spy, invocation, response, and expected stdout for assertion.
+    """
+    spy = mox.spy("git")
+    if expectation_env is not None:
+        spy = spy.with_env(expectation_env)
+    spy = spy.replay(fixture_path)
+    invocation = Invocation(
+        command="git",
+        args=["status"],
+        stdin="",
+        env={},
+    )
+    response = mox._handle_invocation(invocation)
+    return ReplayRecordedExpectation(
+        spy=spy,
+        invocation=invocation,
+        response=response,
+        expected_stdout="ok\n",
+    )
+
+
 def _create_dynamic_replay_spy(
     mox: CmdMox,
     fixture_path: Path,
@@ -115,22 +147,15 @@ class TestControllerReplayIntegration:
         """Replay matches should still apply expectation env semantics."""
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
-        spy = mox.spy("git").with_env({"EXPECT_ENV": "VALUE"}).replay(fixture_path)
-        invocation = Invocation(command="git", args=["status"], stdin="", env={})
-
-        response = mox._handle_invocation(invocation)
-
-        _assert_replay_recorded(
+        expectation = _handle_replay_match(
             mox,
-            ReplayRecordedExpectation(
-                spy=spy,
-                invocation=invocation,
-                response=response,
-                expected_stdout="ok\n",
-            ),
+            fixture_path,
+            expectation_env={"EXPECT_ENV": "VALUE"},
         )
-        assert response.env["EXPECT_ENV"] == "VALUE"
-        assert invocation.env["EXPECT_ENV"] == "VALUE"
+
+        _assert_replay_recorded(mox, expectation)
+        assert expectation.response.env["EXPECT_ENV"] == "VALUE"
+        assert expectation.invocation.env["EXPECT_ENV"] == "VALUE"
 
     def test_replay_match_rejects_conflicting_expectation_env(
         self, tmp_path: Path
@@ -158,21 +183,10 @@ class TestControllerReplayIntegration:
         """Replay-backed responses should still update spy history and journal."""
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
-        spy = mox.spy("git").replay(fixture_path)
-        invocation = Invocation(command="git", args=["status"], stdin="", env={})
+        expectation = _handle_replay_match(mox, fixture_path)
 
-        response = mox._handle_invocation(invocation)
-
-        _assert_replay_recorded(
-            mox,
-            ReplayRecordedExpectation(
-                spy=spy,
-                invocation=invocation,
-                response=response,
-                expected_stdout="ok\n",
-            ),
-        )
-        assert spy.call_count == 1
+        _assert_replay_recorded(mox, expectation)
+        assert expectation.spy.call_count == 1
 
     def test_strict_replay_mismatch_raises_without_recording(
         self, tmp_path: Path
