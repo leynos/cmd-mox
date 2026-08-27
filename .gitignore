@@ -212,6 +212,8 @@ target/
 .claude/
 .memdb/
 .grepai/
+.skylos/
+.skylos-whitelist.lock
 *.swp
 *.swo
 *~

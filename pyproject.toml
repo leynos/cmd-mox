@@ -16,6 +16,7 @@ Repository = "https://github.com/leynos/cmd-mox"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.165.10,<7.0",
     "pytest",
     "pytest-xdist",
     "ruff",
@@ -354,6 +355,85 @@ also_copy = ["conftest.py", "features/", "docs/"]
 
 [tool.uv]
 package = true
+
+[tool.skylos.gate]
+strict = true
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server._BaseIPCServer._export_environment"]
+reason = "_ServerLifecycle.start invokes this inherited hook before backend creation to export the active IPC environment."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server.IPCServer._prepare_backend_start"]
+reason = "_ServerLifecycle.start invokes this Unix transport hook before creating _InnerServer."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server.IPCServer._wait_until_ready"]
+reason = "_ServerLifecycle.start invokes this Unix transport hook after starting the backend thread to wait for the socket."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server.IPCServer._stop_backend"]
+reason = "_ServerLifecycle.stop invokes this Unix transport hook to shut down _InnerServer."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server.IPCServer._post_stop_cleanup"]
+reason = "_ServerLifecycle.stop invokes this Unix transport hook after joining the backend thread to remove the socket."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server.NamedPipeServer._prepare_backend_start"]
+reason = "_ServerLifecycle.start invokes this named-pipe hook; it is a no-op because named pipes leave no socket artefact."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server.NamedPipeServer._wait_until_ready"]
+reason = "_ServerLifecycle.start invokes this named-pipe hook to wait for the state readiness event."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server.NamedPipeServer._stop_backend"]
+reason = "_ServerLifecycle.stop invokes this named-pipe hook to stop the state and join its clients."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server.ParsedRequest.validate"]
+reason = "_request_pipeline invokes this validator before dispatch for Unix and named-pipe request ingress."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server._NamedPipeState.stop"]
+reason = "NamedPipeServer._wait_until_ready invokes this on timeout and NamedPipeServer._stop_backend invokes it during shutdown."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.ipc.server._NamedPipeState._poke_pipe"]
+reason = "_NamedPipeState.stop invokes this helper to wake the named-pipe accept loop."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "variable"
+full_name = ["cmd_mox.environment._Win32Function.argtypes"]
+reason = "_get_short_path assigns this ctypes argument signature to GetShortPathNameW through the typed protocol."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "variable"
+full_name = ["cmd_mox.environment._Win32Function.restype"]
+reason = "_get_short_path assigns this ctypes return type to GetShortPathNameW through the typed protocol."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "parameter"
+full_name = ["cmd_mox.ipc.server._ServerLifecycle._stop_backend.server"]
+reason = "_ServerLifecycle.stop passes the stored backend instance through this abstract lifecycle hook."
+
+[tool.skylos.whitelist]
+names = ["bootstrap_shim_path"]
+
+[tool.skylos.whitelist.documented]
+bootstrap_shim_path = "cmd_mox.shim re-imports this helper after bootstrap before main invokes it."
 
 
 [build-system]
