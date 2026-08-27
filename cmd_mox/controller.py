@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses as dc
 import enum
 import logging
 import os
@@ -15,7 +14,7 @@ from .command_runner import CommandRunner
 from .environment import (
     EnvironmentManager,
     ensure_dir_exists,
-    temporary_env,
+    validate_env_attr,
 )
 from .errors import LifecycleError, MissingEnvironmentError, UnexpectedCommandError
 from .ipc import (
@@ -26,7 +25,19 @@ from .ipc import (
     Response,
 )
 from .passthrough import PassthroughConfig, PassthroughCoordinator
-from .shimgen import create_shim_symlinks
+from .response_strategy import (
+    ResponseStrategy,
+    apply_expectation_env,
+    default_response,
+    execute_handler,
+    finalize_response_env,
+    select_response_strategy,
+)
+from .shimgen import (
+    create_shim_symlinks,
+    has_non_symlink_collision,
+    is_shim_healthy,
+)
 from .test_doubles import CommandDouble, DoubleKind
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
@@ -37,11 +48,6 @@ if typ.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_ENV_ATTR_RULES: dict[str, tuple[str, bool]] = {
-    "shim_dir": ("Replay shim directory", True),
-    "socket_path": ("Replay socket path", False),
-}
-
 
 class Phase(enum.StrEnum):
     """Lifecycle phases for :class:`CmdMox`."""
@@ -49,14 +55,6 @@ class Phase(enum.StrEnum):
     RECORD = "RECORD"
     REPLAY = "REPLAY"
     VERIFY = "VERIFY"
-
-
-class _ResponseStrategy(enum.Enum):
-    """Response selection strategy for invocation handling."""
-
-    MISSING_DOUBLE = enum.auto()
-    PASSTHROUGH = enum.auto()
-    REGULAR = enum.auto()
 
 
 class CmdMox:
@@ -176,11 +174,23 @@ class CmdMox:
     # Internal helper accessors
     # ------------------------------------------------------------------
     def _registered_commands(self) -> set[str]:
-        """Return all commands registered via doubles."""  # ruff: ignore[docstring-missing-returns] - private accessor has an obvious set return type
+        """Return all commands registered via doubles.
+
+        Returns
+        -------
+        set[str]
+            The names of every registered double.
+        """
         return set(self._doubles)
 
     def _expected_commands(self) -> set[str]:
-        """Return commands that must be called during replay."""  # ruff: ignore[docstring-missing-returns] - private accessor has an obvious set return type
+        """Return commands that must be called during replay.
+
+        Returns
+        -------
+        set[str]
+            The names of doubles carrying a mandatory expectation.
+        """
         return {name for name, dbl in self._doubles.items() if dbl.is_expected}
 
     # ------------------------------------------------------------------
@@ -227,13 +237,25 @@ class CmdMox:
             self._entered = False
 
     def _handle_auto_verify(self, exc_type: type[BaseException] | None) -> bool:
-        """Invoke :meth:`verify` when exiting a replay block."""  # ruff: ignore[docstring-missing-returns] - private lifecycle hook has an obvious boolean return
+        """Invoke :meth:`verify` when exiting a replay block.
+
+        Returns
+        -------
+        bool
+            ``True`` when verification ran and already performed teardown, so
+            the caller should skip its own cleanup.
+
+        Raises
+        ------
+        Exception
+            The verification failure, when no exception is already propagating.
+        """  # ruff: ignore[docstring-extraneous-exception] - the captured verification failure is re-raised, so it stays caller-visible
         if not self._verify_on_exit or self._phase is not Phase.REPLAY:
             return False
         verify_error: Exception | None = None
         try:
             self.verify()
-        except Exception as err:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
+        except Exception as err:  # ruff: ignore[blind-except] - user verifiers may raise anything; defer it so teardown still completes
             # pragma: no cover - verification failed
             verify_error = err
         if exc_type is None and verify_error is not None:
@@ -271,35 +293,26 @@ class CmdMox:
         shim_path = self._get_replay_shim_path(name)
         if shim_path is None:
             return
-        if self._should_skip_shim_creation(shim_path):
+        if is_shim_healthy(shim_path):
             return
-        if self._has_non_symlink_collision(shim_path):
+        if has_non_symlink_collision(shim_path):
             msg = f"{shim_path} already exists and is not a symlink"
             raise FileExistsError(msg)
         create_shim_symlinks(shim_path.parent, [name])
 
     def _get_replay_shim_path(self, name: str) -> Path | None:
-        """Return the target shim path when replay shims are writable."""  # ruff: ignore[docstring-missing-returns] - private path lookup is self-explanatory from its annotation
+        """Return the target shim path when replay shims are writable.
+
+        Returns
+        -------
+        Path or None
+            The shim path for *name*, or ``None`` when no shim directory has
+            been prepared.
+        """
         env = self.environment
         if env is None or env.shim_dir is None:
             return None
         return Path(env.shim_dir) / name
-
-    def _should_skip_shim_creation(self, shim_path: Path) -> bool:
-        """Return ``True`` when the shim already points to a valid target."""  # ruff: ignore[docstring-missing-returns] - private predicate is fully described by its summary and annotation
-        if not shim_path.is_symlink():
-            return False
-        return not self._is_broken_symlink(shim_path)
-
-    @staticmethod
-    def _has_non_symlink_collision(shim_path: Path) -> bool:
-        """Return ``True`` when a non-symlink file blocks shim creation."""  # ruff: ignore[docstring-missing-returns] - private predicate is fully described by its summary and annotation
-        return shim_path.exists() and not shim_path.is_symlink()
-
-    @staticmethod
-    def _is_broken_symlink(path: Path) -> bool:
-        """Return ``True`` when *path* is a symlink whose target is missing."""  # ruff: ignore[docstring-missing-returns] - private predicate is fully described by its summary and annotation
-        return path.is_symlink() and not path.exists()
 
     def _get_double(self, command_name: str, kind: DoubleKind) -> CommandDouble:
         dbl = self._doubles.get(command_name)
@@ -381,11 +394,11 @@ class CmdMox:
             first_error: BaseException | None = None
             try:
                 self._finalize_verification()
-            except BaseException as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
+            except BaseException as exc:  # ruff: ignore[blind-except] - both finalizers must always run, so capture any failure and re-raise the first
                 first_error = exc
             try:
                 self._finalize_recording_sessions()
-            except BaseException as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
+            except BaseException as exc:  # ruff: ignore[blind-except] - both finalizers must always run, so capture any failure and re-raise the first
                 if first_error is None:
                     first_error = exc
             if first_error is not None:
@@ -394,93 +407,35 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    @staticmethod
-    def _execute_handler(
-        double: CommandDouble,
-        invocation: Invocation,
-        overrides: dict[str, str],
-    ) -> Response:
-        """Execute the handler with the appropriate environment context."""  # ruff: ignore[docstring-missing-returns] - private dispatch helper has a clear response type
-        if double.handler is None:
-            base = double.response
-            return dc.replace(base, env=dict(base.env))
-        if overrides:
-            with temporary_env(overrides):
-                return double.handler(invocation)
-        return double.handler(invocation)
-
-    @staticmethod
-    def _finalize_response_env(resp: Response, overrides: dict[str, str]) -> None:
-        """Ensure response environment includes all expectation overrides."""
-        if not overrides:
-            return
-        # Ensure the shim observes the injected variables even when the handler
-        # returns a cached Response instance, without clobbering handler-set
-        # overrides.
-        for key, value in overrides.items():
-            resp.env.setdefault(key, value)
-
     def _invoke_handler(
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
-        """Run ``double``'s handler within its expectation environment."""  # ruff: ignore[docstring-missing-returns] - private dispatch helper has a clear response type
-        overrides = self._apply_expectation_env(double, invocation)
+        """Run ``double``'s handler within its expectation environment.
+
+        Returns
+        -------
+        Response
+            The handler response with expectation overrides applied.
+        """
+        overrides = apply_expectation_env(double, invocation)
         return self._invoke_handler_with_overrides(double, invocation, overrides)
 
+    @staticmethod
     def _invoke_handler_with_overrides(
-        self,
         double: CommandDouble,
         invocation: Invocation,
         overrides: dict[str, str],
     ) -> Response:
-        """Run ``double``'s handler with prevalidated expectation overrides."""  # ruff: ignore[docstring-missing-returns] - private dispatch helper has a clear response type
-        resp = self._execute_handler(double, invocation, overrides)
-        self._finalize_response_env(resp, overrides)
-        return resp
-
-    @staticmethod
-    def _apply_expectation_env(
-        double: CommandDouble, invocation: Invocation
-    ) -> dict[str, str]:
-        """Validate and apply expectation environment to invocation.
+        """Run ``double``'s handler with prevalidated expectation overrides.
 
         Returns
         -------
-        dict[str, str]
-            The environment overrides that were applied.
-
-        Raises
-        ------
-        UnexpectedCommandError
-            When the expectation environment conflicts with invocation environment.
+        Response
+            The handler response with *overrides* merged into its environment.
         """
-        expectation_env = double.expectation.env or {}
-        overrides = dict(expectation_env)
-
-        if not overrides:
-            return overrides
-
-        conflicts = {
-            key: invocation.env[key]
-            for key, value in overrides.items()
-            if key in invocation.env and invocation.env[key] != value
-        }
-
-        if conflicts:
-            conflict_list = ", ".join(f"{k}={v!r}" for k, v in conflicts.items())
-            msg = (
-                f"Invocation for {invocation.command!r} provided conflicting "
-                f"environment values: {conflict_list}"
-            )
-            raise UnexpectedCommandError(msg)
-
-        invocation.env.update(overrides)
-        return overrides
-
-    @staticmethod
-    def _response_for_missing_double(invocation: Invocation) -> Response:
-        """Return a default response when no double is registered."""  # ruff: ignore[docstring-missing-returns] - private strategy helper has a clear response type
-        return Response(stdout=invocation.command)
+        resp = execute_handler(double, invocation, overrides)
+        finalize_response_env(resp, overrides)
+        return resp
 
     def _response_for_regular(
         self,
@@ -488,9 +443,15 @@ class CmdMox:
         invocation: Invocation,
         overrides: dict[str, str] | None = None,
     ) -> Response:
-        """Handle a non-passthrough invocation with optional recording."""  # ruff: ignore[docstring-missing-returns] - private strategy helper has a clear response type
+        """Handle a non-passthrough invocation with optional recording.
+
+        Returns
+        -------
+        Response
+            The handler response for *invocation*.
+        """
         applied_overrides = (
-            self._apply_expectation_env(double, invocation)
+            apply_expectation_env(double, invocation)
             if overrides is None
             else overrides
         )
@@ -504,16 +465,30 @@ class CmdMox:
     def _response_for_replay(
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
-        """Handle a replay-backed invocation before normal spy behaviour."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private strategy helper uses exceptions for internal mismatch control flow
+        """Handle a replay-backed invocation before normal spy behaviour.
+
+        Returns
+        -------
+        Response
+            The matched fixture response, or the regular spy response when
+            strict matching is disabled.
+
+        Raises
+        ------
+        RuntimeError
+            If the double has no attached replay session.
+        UnexpectedCommandError
+            If strict matching is enabled and no recording matches.
+        """
         replay_session = double.replay_session
         if replay_session is None:
             msg = "Replay response requested without an attached replay session"
             raise RuntimeError(msg)
 
-        overrides = self._apply_expectation_env(double, invocation)
+        overrides = apply_expectation_env(double, invocation)
 
         if matched := replay_session.match(invocation):
-            self._finalize_response_env(matched, overrides)
+            finalize_response_env(matched, overrides)
             double.invocations.append(invocation)
             return matched
 
@@ -524,34 +499,42 @@ class CmdMox:
 
         return self._response_for_regular(double, invocation, overrides)
 
-    @staticmethod
-    def _select_response_strategy(double: CommandDouble | None) -> _ResponseStrategy:
-        """Determine the response strategy for the given double."""  # ruff: ignore[docstring-missing-returns] - private selector has a self-evident enum return
-        if double is None:
-            return _ResponseStrategy.MISSING_DOUBLE
-        if double.passthrough_mode:
-            return _ResponseStrategy.PASSTHROUGH
-        return _ResponseStrategy.REGULAR
-
     def _resolve_response(
         self, double: CommandDouble | None, invocation: Invocation
     ) -> Response:
-        """Resolve the response for non-replay invocation paths."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private resolver uses exceptions for internal strategy failures
-        if double is None:
-            return self._response_for_missing_double(invocation)
+        """Resolve the response for non-replay invocation paths.
 
-        strategy = self._select_response_strategy(double)
+        Returns
+        -------
+        Response
+            The response produced by the selected strategy.
+
+        Raises
+        ------
+        RuntimeError
+            If the selected strategy has no dispatch branch.
+        """
+        if double is None:
+            return default_response(invocation)
+
+        strategy = select_response_strategy(double)
         match strategy:
-            case _ResponseStrategy.PASSTHROUGH:
+            case ResponseStrategy.PASSTHROUGH:
                 return self._prepare_passthrough(double, invocation)
-            case _ResponseStrategy.REGULAR:
+            case ResponseStrategy.REGULAR:
                 return self._response_for_regular(double, invocation)
             case _:
                 msg = f"Unhandled response strategy: {strategy}"
                 raise RuntimeError(msg)
 
     def _make_response(self, invocation: Invocation) -> Response:
-        """Build the response for an invocation using the appropriate strategy."""  # ruff: ignore[docstring-missing-returns] - private resolver has a clear response type
+        """Build the response for an invocation using the appropriate strategy.
+
+        Returns
+        -------
+        Response
+            The response for *invocation*, already applied to it.
+        """
         double = self._doubles.get(invocation.command)
 
         if double is not None and double.replay_session is not None:
@@ -563,7 +546,13 @@ class CmdMox:
         return resp
 
     def _handle_invocation(self, invocation: Invocation) -> Response:
-        """Record *invocation* and return the configured response."""  # ruff: ignore[docstring-missing-returns] - private handler has a clear response type
+        """Record *invocation* and return the configured response.
+
+        Returns
+        -------
+        Response
+            The response for *invocation*.
+        """
         resp = self._make_response(invocation)
         if resp.passthrough is None:
             self.journal.append(invocation)
@@ -587,7 +576,7 @@ class CmdMox:
         Response
             Instructions that make the shim execute the passthrough command.
         """
-        overrides = self._apply_expectation_env(double, invocation)
+        overrides = apply_expectation_env(double, invocation)
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
@@ -603,7 +592,13 @@ class CmdMox:
         )
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:
-        """Finalize a passthrough invocation once the shim reports results."""  # ruff: ignore[docstring-missing-returns] - private completion helper has a clear response type
+        """Finalize a passthrough invocation once the shim reports results.
+
+        Returns
+        -------
+        Response
+            The recorded response derived from the shim's passthrough result.
+        """
         double, invocation, resp = self._passthrough_coordinator.finalize_result(result)
         if double.is_recording:
             double.invocations.append(invocation)
@@ -611,7 +606,13 @@ class CmdMox:
         return resp
 
     def _require_phase(self, expected: Phase, action: str) -> None:
-        """Ensure we're in ``expected`` phase before executing ``action``."""  # ruff: ignore[docstring-missing-exception] - private guard raises only for an invalid internal lifecycle state
+        """Ensure we're in ``expected`` phase before executing ``action``.
+
+        Raises
+        ------
+        LifecycleError
+            If the controller is not in the *expected* phase.
+        """
         if self._phase != expected:
             msg = (
                 f"Cannot call {action}(): not in '{expected.name.lower()}' phase "
@@ -620,47 +621,37 @@ class CmdMox:
             raise LifecycleError(msg)
 
     def _require_env_attrs(self, *attrs: str) -> None:
-        """Ensure all referenced ``EnvironmentManager`` attributes exist."""  # ruff: ignore[docstring-missing-exception] - private guard raises only for an invalid internal lifecycle state
+        """Ensure all referenced ``EnvironmentManager`` attributes exist.
+
+        Raises
+        ------
+        MissingEnvironmentError
+            If the environment manager is absent or any *attrs* is unset.
+        """
         env = self.environment
         if env is None:  # pragma: no cover - defensive guard
             raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
 
         missing: list[str] = []
         for attr in attrs:
-            error = self._validate_env_attr(env, attr)
+            error = validate_env_attr(env, attr)
             if error is not None:
                 missing.append(error)
 
         if missing:
             raise MissingEnvironmentError("; ".join(missing))
 
-    @staticmethod
-    def _validate_env_attr(env: EnvironmentManager, attr: str) -> str | None:
-        """Return an error message when *attr* is invalid, otherwise ``None``."""  # ruff: ignore[docstring-missing-returns] - private validation helper has a self-evident optional string return
-        label, requires_dir = _ENV_ATTR_RULES.get(
-            attr, (f"Replay {attr.replace('_', ' ')}", False)
-        )
-        value = getattr(env, attr, None)
-
-        if requires_dir:
-            try:
-                ensure_dir_exists(
-                    value,
-                    name=label,
-                    error_type=MissingEnvironmentError,
-                    missing_message=f"{label} is missing",
-                )
-            except MissingEnvironmentError as exc:
-                return str(exc)
-            return None
-
-        if value is None:
-            return f"{label} is missing"
-
-        return None
-
     def _check_replay_preconditions(self) -> None:
-        """Validate state and environment before starting replay."""  # ruff: ignore[docstring-missing-exception] - private precondition guard raises only for invalid internal state
+        """Validate state and environment before starting replay.
+
+        Raises
+        ------
+        LifecycleError
+            If the controller is not in the record phase or the context has not
+            been entered.
+        MissingEnvironmentError
+            If the shim directory or socket path is unavailable.
+        """  # ruff: ignore[docstring-extraneous-exception] - _require_env_attrs propagates this caller-visible failure.
         self._require_phase(Phase.RECORD, "replay")
         if not self._entered:
             msg = (
@@ -698,14 +689,27 @@ class CmdMox:
         return shim_dir, Path(env.socket_path)
 
     def _is_environment_initialized(self) -> bool:
-        """Check if environment manager is properly initialized."""  # ruff: ignore[docstring-missing-returns] - private predicate is fully described by its summary and annotation
+        """Check if environment manager is properly initialized.
+
+        Returns
+        -------
+        bool
+            ``True`` when the manager exists with a shim directory and socket
+            path.
+        """
         env = self.environment
         return (
             env is not None and env.shim_dir is not None and env.socket_path is not None
         )
 
     def _start_ipc_server(self) -> None:
-        """Prepare shims and launch the IPC server."""  # ruff: ignore[docstring-missing-exception] - private startup guard raises only for invalid internal state
+        """Prepare shims and launch the IPC server.
+
+        Raises
+        ------
+        MissingEnvironmentError
+            If the environment manager has not been initialised.
+        """
         self.journal.clear()
         self._commands = self._registered_commands() | self._commands
         if not self._entered and not self._is_environment_initialized():

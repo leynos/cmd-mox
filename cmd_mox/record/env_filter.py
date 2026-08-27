@@ -40,7 +40,13 @@ COMMAND_ENV_PREFIXES: typ.Final[dict[str, str]] = {
 
 
 def _is_cmox_internal(key: str) -> bool:
-    """Return whether *key* is a CmdMox-internal environment variable."""  # ruff: ignore[docstring-missing-returns] - private environment predicate is fully described by its summary
+    """Return whether *key* is a CmdMox-internal environment variable.
+
+    Returns
+    -------
+    bool
+        ``True`` when *key* carries one of the CmdMox-internal prefixes.
+    """
     return key.startswith(_CMOX_ENV_PREFIX) or key.startswith(_CMD_MOX_ENV_PREFIX)
 
 
@@ -51,7 +57,14 @@ def _should_include_env_key(
     allow: set[str],
     cmd_prefix: str,
 ) -> bool:
-    """Return whether *key* should be included in the filtered subset."""  # ruff: ignore[docstring-missing-returns] - private environment predicate is fully described by its summary
+    """Return whether *key* should be included in the filtered subset.
+
+    Returns
+    -------
+    bool
+        ``True`` when *key* survives the internal, explicit, allowlist, system
+        and tool-prefix filters.
+    """
     # CmdMox internals are never recorded, even if allowlisted or explicit.
     if _is_cmox_internal(key):
         return False

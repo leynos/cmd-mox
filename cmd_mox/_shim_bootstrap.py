@@ -82,7 +82,7 @@ def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | 
         module = importlib_util.module_from_spec(spec)
         try:
             spec.loader.exec_module(module)
-        except (FileNotFoundError, OSError, ImportError):
+        except (OSError, ImportError):
             module = None
     except (OSError, ValueError):
         module = None

@@ -116,6 +116,22 @@ def _resolve_command_name() -> str:
     return Path(sys.argv[0]).name
 
 
+def _parse_positive_finite(raw: str) -> float | None:
+    """Parse *raw* as a strictly positive, finite float.
+
+    Returns
+    -------
+    float or None
+        The parsed value, or ``None`` when *raw* is unparseable, non-positive,
+        or not finite.
+    """
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 and math.isfinite(value) else None
+
+
 def _validate_environment() -> float:
     """Validate required environment variables and return the timeout.
 
@@ -129,17 +145,14 @@ def _validate_environment() -> float:
     SystemExit
         If the IPC socket environment variable is unset or the configured
         timeout is not positive and finite.
-    """  # ruff: ignore[docstring-missing-exception, docstring-extraneous-exception] - validation failures convert to SystemExit via sys.exit; the DOC rules cannot trace that path as an explicit raise
+    """  # ruff: ignore[docstring-extraneous-exception] - the failures exit via sys.exit, which the DOC rules cannot trace back to SystemExit
     if os.environ.get(CMOX_IPC_SOCKET_ENV) is None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)
 
     timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
-    try:
-        timeout = float(timeout_raw)
-        if timeout <= 0 or not math.isfinite(timeout):
-            raise ValueError  # ruff: ignore[raise-within-try] - unify error handling
-    except ValueError:
+    timeout = _parse_positive_finite(timeout_raw)
+    if timeout is None:
         print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
         sys.exit(1)
 

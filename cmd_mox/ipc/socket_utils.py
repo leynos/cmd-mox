@@ -24,7 +24,7 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
     with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
         try:
             probe.connect(address)
-        except (ConnectionRefusedError, OSError):
+        except OSError:
             pass
         else:
             msg = f"Socket {socket_path} is still in use"
@@ -38,33 +38,42 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
 
 
 def _try_socket_connection(address: str, timeout: float) -> bool:
-    """Attempt to connect to *address* within *timeout* seconds."""  # ruff: ignore[docstring-missing-returns] - private socket probe has an obvious boolean return
+    """Attempt to connect to *address* within *timeout* seconds.
+
+    Returns
+    -------
+    bool
+        ``True`` when the connection succeeded, ``False`` otherwise.
+    """
     with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
         probe.settimeout(timeout)
         try:
             probe.connect(address)
-        except (FileNotFoundError, ConnectionRefusedError, OSError):
+        except OSError:
             return False
     return True
 
 
 def _poll_socket_until_ready(socket_path: pathlib.Path, timeout: float) -> None:
-    """Poll a Unix domain socket until it accepts connections within timeout."""  # ruff: ignore[docstring-missing-exception] - private readiness helper raises only its local timeout signal
+    """Poll a Unix domain socket until it accepts connections within timeout.
+
+    Raises
+    ------
+    RuntimeError
+        If the socket does not accept connections before *timeout* elapses.
+    """
     deadline = time.monotonic() + timeout
     wait_time = 0.001
     address = str(socket_path)
 
     while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        if (remaining := deadline - time.monotonic()) <= 0:
             break
 
-        attempt = min(wait_time, remaining)
-        if _try_socket_connection(address, attempt):
+        if _try_socket_connection(address, min(wait_time, remaining)):
             return
 
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        if (remaining := deadline - time.monotonic()) <= 0:
             break
 
         time.sleep(min(wait_time, remaining))

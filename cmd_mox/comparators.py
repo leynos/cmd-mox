@@ -61,7 +61,7 @@ class IsA(_ReprMixin):
         """
         try:
             self.typ(value)
-        except Exception:  # ruff: ignore[blind-except] - conversion may fail
+        except Exception:  # ruff: ignore[blind-except] - ``typ`` is caller-supplied, so conversion may raise any exception type
             return False
         return True
 

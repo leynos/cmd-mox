@@ -88,8 +88,6 @@ class DoubleKind(enum.StrEnum):
 class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-base]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
 
-    T_Kind = DoubleKind
-
     __slots__ = (
         "_recording_session",
         "_replay_session",

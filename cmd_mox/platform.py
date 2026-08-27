@@ -10,9 +10,6 @@ import os
 import sys
 import typing as typ
 
-if typ.TYPE_CHECKING:
-    import collections.abc as cabc
-
 # ``pytester``-driven tests set this override to emulate alternative platforms
 # (for example Windows) without needing to spawn a different OS.
 PLATFORM_OVERRIDE_ENV: typ.Final[str] = "CMD_MOX_PLATFORM_OVERRIDE"
@@ -32,12 +29,25 @@ _PYTEST_REQUIRED_MESSAGE: typ.Final[str] = (
 
 
 def _normalize_platform(platform: str) -> str:
-    """Return a normalized platform name suitable for prefix checks."""  # ruff: ignore[docstring-missing-returns] - private platform helper is fully described by its summary
+    """Return a normalized platform name suitable for prefix checks.
+
+    Returns
+    -------
+    str
+        *platform* stripped of surrounding whitespace and lower-cased.
+    """
     return platform.strip().lower()
 
 
 def _current_platform(platform: str | None = None) -> str:
-    """Return the effective platform name, honouring test overrides."""  # ruff: ignore[docstring-missing-returns] - private platform helper is fully described by its summary
+    """Return the effective platform name, honouring test overrides.
+
+    Returns
+    -------
+    str
+        The normalized explicit *platform*, the override environment variable,
+        or ``sys.platform``, in that order of precedence.
+    """
     if platform:
         return _normalize_platform(platform)
 
@@ -123,8 +133,7 @@ def skip_if_unsupported(
     except ModuleNotFoundError as exc:  # pragma: no cover - pytest is a test dep
         raise RuntimeError(_PYTEST_REQUIRED_MESSAGE) from exc
 
-    skip = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.skip)
-    skip(skip_reason)  # ty misreads @_with_exception
+    pytest.skip(skip_reason)
 
 
 __all__ = (

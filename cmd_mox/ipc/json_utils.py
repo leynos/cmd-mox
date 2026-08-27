@@ -25,7 +25,7 @@ def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
         return None
     if not isinstance(payload, dict):
         return None
-    return typ.cast("dict[str, typ.Any]", payload)
+    return payload
 
 
 def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | None:

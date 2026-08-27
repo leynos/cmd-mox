@@ -19,7 +19,7 @@ import typing as typ
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
-from .scrubber import ScrubbingRule, ScrubbingRuleDict
+from .scrubber import ScrubbingRule
 
 _SCHEMA_VERSION: typ.Final[str] = "1.0"
 
@@ -67,7 +67,13 @@ def _parse_version(version_str: str) -> tuple[int, int]:
 
 
 def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-    """Migrate a v0.x fixture dict to v1.0 format."""  # ruff: ignore[docstring-missing-returns] - private migration helper has an obvious dict return
+    """Migrate a v0.x fixture dict to v1.0 format.
+
+    Returns
+    -------
+    dict[str, typ.Any]
+        *data* with its ``version`` field stamped as ``"1.0"``.
+    """
     data["version"] = "1.0"
     return data
 
@@ -187,7 +193,13 @@ def _execute_migration_chain(
 
 
 def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-    """Apply chained migrations to bring *data* up to the current schema."""  # ruff: ignore[docstring-missing-returns] - private migration helper has an obvious dict return
+    """Apply chained migrations to bring *data* up to the current schema.
+
+    Returns
+    -------
+    dict[str, typ.Any]
+        A deep copy of *data* migrated to the current schema version.
+    """
     data = copy.deepcopy(data)  # deep copy to avoid mutating the caller's dict
 
     _normalize_version_field(data)
@@ -205,7 +217,14 @@ def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
 
 
 def _cmdmox_version() -> str:
-    """Return the installed cmd-mox version, or ``"unknown"``."""  # ruff: ignore[docstring-missing-returns] - private version lookup has an obvious str return
+    """Return the installed cmd-mox version, or ``"unknown"``.
+
+    Returns
+    -------
+    str
+        The distribution version, or ``"unknown"`` when cmd-mox is not
+        installed as a distribution.
+    """
     try:
         return importlib.metadata.version("cmd-mox")
     except importlib.metadata.PackageNotFoundError:
@@ -416,8 +435,7 @@ class FixtureFile:
                     RecordedInvocation.from_dict(r) for r in data.get("recordings", [])
                 ],
                 scrubbing_rules=[
-                    ScrubbingRule.from_dict(typ.cast("ScrubbingRuleDict", r))
-                    for r in data.get("scrubbing_rules", [])
+                    ScrubbingRule.from_dict(r) for r in data.get("scrubbing_rules", [])
                 ],
             )
         except (AttributeError, KeyError, TypeError) as exc:

@@ -39,7 +39,7 @@ def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
             msg = "Unix domain socket servers are unavailable on Windows"
             raise RuntimeError(msg)
 
-    return typ.cast("type[socketserver.BaseServer]", _UnsupportedUnixServer)
+    return _UnsupportedUnixServer
 
 
 def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
@@ -47,7 +47,7 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
         return _create_unsupported_unix_server()
     threading_server = getattr(socketserver, "ThreadingUnixStreamServer", None)
     if threading_server is not None:
-        return typ.cast("type[socketserver.BaseServer]", threading_server)
+        return threading_server
     unix_server = getattr(socketserver, "UnixStreamServer", None)
     if unix_server is not None:
 
@@ -59,7 +59,7 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
 
             pass
 
-        return typ.cast("type[socketserver.BaseServer]", _ThreadingUnixCompat)
+        return _ThreadingUnixCompat
     msg = "Unix domain socket servers are not supported on this platform"
     raise RuntimeError(msg)
 
@@ -219,7 +219,24 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         error_builder: cabc.Callable[[DispatchArg, Exception], RuntimeError]
         | None = None,
     ) -> Response:
-        """Invoke *handler* when provided, otherwise fall back to *default*."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private dispatch helper has a clear response type and wraps callback failures locally
+        """Invoke *handler* when provided, otherwise fall back to *default*.
+
+        Returns
+        -------
+        Response
+            The handler's response, or *default*'s response when no handler is
+            configured.
+
+        Raises
+        ------
+        KeyboardInterrupt
+            Propagated unchanged from *handler*.
+        SystemExit
+            Propagated unchanged from *handler*.
+        RuntimeError
+            The wrapped handler failure built by *error_builder*, when one is
+            supplied.
+        """  # ruff: ignore[docstring-extraneous-exception] - error_builder propagates this caller-visible failure.
         if handler is None:
             return default(argument)
         if error_builder is None:
@@ -233,12 +250,24 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
 
     @staticmethod
     def _default_invocation_response(invocation: Invocation) -> Response:
-        """Echo the command name when no handler overrides the behaviour."""  # ruff: ignore[docstring-missing-returns] - private default handler has an obvious response return
+        """Echo the command name when no handler overrides the behaviour.
+
+        Returns
+        -------
+        Response
+            A response whose stdout is the invoked command name.
+        """
         return Response(stdout=invocation.command)
 
     @staticmethod
     def _raise_unhandled_passthrough(result: PassthroughResult) -> Response:
-        """Raise when passthrough results lack a configured handler."""  # ruff: ignore[docstring-missing-exception] - private default handler raises only for an unhandled internal dispatch
+        """Raise when passthrough results lack a configured handler.
+
+        Raises
+        ------
+        RuntimeError
+            Always, naming the unhandled invocation.
+        """
         msg = f"Unhandled passthrough result for {result.invocation_id}"
         raise RuntimeError(msg)
 
@@ -246,7 +275,13 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
     def _build_passthrough_error(
         result: PassthroughResult, exc: Exception
     ) -> RuntimeError:
-        """Create the wrapped passthrough error surfaced to callers."""  # ruff: ignore[docstring-missing-returns] - private error adapter has an obvious RuntimeError return
+        """Create the wrapped passthrough error surfaced to callers.
+
+        Returns
+        -------
+        RuntimeError
+            An error naming the invocation and the underlying failure.
+        """
         msg = f"Exception in passthrough handler for {result.invocation_id}: {exc}"
         return RuntimeError(msg)
 
@@ -370,7 +405,13 @@ class ParsedRequest:
 
 
 def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
-    """Decode raw request bytes into a mapping, logging malformed input once."""  # ruff: ignore[docstring-missing-returns] - private wire parser has an obvious optional mapping return
+    """Decode raw request bytes into a mapping, logging malformed input once.
+
+    Returns
+    -------
+    dict[str, typ.Any] or None
+        The decoded payload, or ``None`` when *raw* is not a JSON mapping.
+    """
     payload = parse_json_safely(raw)
     if payload is not None:
         return payload
@@ -378,7 +419,7 @@ def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
     try:
         _ = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        logger.error("IPC received malformed JSON")  # ruff: ignore[error-instead-of-exception] - logging exception details could expose untrusted bytes.
+        logger.error("IPC received malformed JSON")  # ruff: ignore[error-instead-of-exception] - decode-error messages embed a snippet of the untrusted payload, so the traceback must not be logged
         return None
 
     logger.error("IPC payload is not a mapping")
@@ -443,7 +484,14 @@ def _emit_dispatch_outcome(
 
 
 def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
-    """Parse, validate, dispatch, and encode an IPC request in order."""  # ruff: ignore[docstring-missing-returns] - private wire pipeline has an obvious optional bytes return
+    """Parse, validate, dispatch, and encode an IPC request in order.
+
+    Returns
+    -------
+    bytes or None
+        The encoded response, or ``None`` when the request was unparseable or
+        failed validation.
+    """
     parsed = _parse_payload(raw)
     if parsed is None:
         return None
@@ -474,7 +522,13 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
 def _raise_invalid_request_dispatch(
     processor: _RequestProcessor, obj: Invocation | PassthroughResult
 ) -> typ.NoReturn:
-    """Raise when the request registry maps a validator to the wrong hook."""  # ruff: ignore[docstring-missing-exception] - private registry guard raises only for an internal wiring invariant
+    """Raise when the request registry maps a validator to the wrong hook.
+
+    Raises
+    ------
+    TypeError
+        Always, naming the mismatched processor and payload type.
+    """
     msg = f"Request processor {processor!r} does not match validated "
     msg += f"payload {type(obj).__name__}"
     raise TypeError(msg)
@@ -524,11 +578,16 @@ class _InnerServer(_BaseUnixServer):
 def __getattr__(name: str) -> object:
     """Lazily expose named-pipe servers after defining the shared pipeline.
 
+    Returns
+    -------
+    object
+        The requested named-pipe server class.
+
     Raises
     ------
     AttributeError
         If *name* is not a public named-pipe server.
-    """  # ruff: ignore[docstring-missing-returns] - module attribute hook returns different public server classes
+    """
     if name not in {"CallbackNamedPipeServer", "NamedPipeServer"}:
         raise AttributeError(name)
     named_pipe = importlib.import_module(f"{__package__}.named_pipe")

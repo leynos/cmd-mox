@@ -124,14 +124,27 @@ def _fix_windows_permissions(path: Path) -> None:
 
 
 def _path_is_missing(path: Path, exc: OSError) -> bool:
-    """Check if the path is missing (from the exception or filesystem)."""  # ruff: ignore[docstring-missing-returns] - private retry predicate is fully described by its summary
+    """Check if the path is missing (from the exception or filesystem).
+
+    Returns
+    -------
+    bool
+        ``True`` when *exc* is a ``FileNotFoundError`` or *path* no longer
+        exists.
+    """
     return isinstance(exc, FileNotFoundError) or not path.exists()
 
 
 def _handle_rmtree_final_failure(
     path: Path, attempts: int, exc: OSError, logger: logging.Logger
 ) -> typ.NoReturn:
-    """Handle final rmtree failure by logging and raising RobustRmtreeError."""  # ruff: ignore[docstring-missing-exception] - private retry hook raises only its local terminal error
+    """Handle final rmtree failure by logging and raising RobustRmtreeError.
+
+    Raises
+    ------
+    RobustRmtreeError
+        Always, wrapping *exc* with the attempt count.
+    """
     logger.warning(
         "Failed to remove temporary directory %s after %d attempts",
         path,
@@ -197,16 +210,19 @@ def retry_unlink(
     for attempt in range(config.max_attempts):
         try:
             path.unlink()
-            return  # ruff: ignore[try-consider-else] - the successful retry path must exit the loop immediately
         except FileNotFoundError:
             return
-        except (PermissionError, OSError) as exc:
+        # ``PermissionError`` is an ``OSError``; the earlier ``FileNotFoundError``
+        # clause already claims the "already gone" case.
+        except OSError as exc:
             is_last = attempt == config.max_attempts - 1
             if is_last:
                 _handle_unlink_failure(path, exc, exc_factory)
 
             _log_retry_attempt(log, attempt, path, config.retry_delay)
             time.sleep(config.retry_delay)
+        else:
+            return
 
 
 def robust_rmtree(

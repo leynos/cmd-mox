@@ -440,12 +440,7 @@ class OrderVerifier:
             expected_descriptions,
             actual_descriptions,
         )
-        self._check_order_violations(
-            ordered_seq,
-            relevant_invocations,
-            expected_descriptions,
-            actual_descriptions,
-        )
+        self._check_order_violations(ordered_seq, relevant_invocations)
         self._check_extra_invocations(
             ordered_seq,
             relevant_invocations,
@@ -479,8 +474,6 @@ class OrderVerifier:
         self,
         ordered_seq: list[Expectation],
         relevant_invocations: list[Invocation],
-        expected_descriptions: list[str],
-        actual_descriptions: list[str],
     ) -> None:
         for index, (exp, actual_inv) in enumerate(
             zip(ordered_seq, relevant_invocations, strict=False)

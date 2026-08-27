@@ -143,7 +143,18 @@ class ReplaySession:
         self._fixture = FixtureFile.load(self._fixture_path)
 
     def _ensure_loaded(self) -> FixtureFile:
-        """Return the loaded fixture, raising if not yet loaded."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private load guard has an obvious FixtureFile return and raises only LifecycleError
+        """Return the loaded fixture, raising if not yet loaded.
+
+        Returns
+        -------
+        FixtureFile
+            The fixture loaded by :meth:`load`.
+
+        Raises
+        ------
+        LifecycleError
+            If :meth:`load` has not been called successfully.
+        """
         if self._fixture is None:
             msg = "Fixture not loaded; call load() first"
             raise LifecycleError(msg)

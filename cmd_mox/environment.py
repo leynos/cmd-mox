@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import _path_utils as path_utils
 from ._validators import validate_positive_finite_timeout
+from .errors import MissingEnvironmentError
 from .fs_retry import robust_rmtree
 
 _MAX_PATH_THRESHOLD: typ.Final[int] = 240
@@ -64,12 +65,25 @@ class _CtypesModule(typ.Protocol):
 
 
 def _path_identity(path: Path | None) -> str | None:
-    """Return a comparable representation of *path*, or ``None`` if unset."""  # ruff: ignore[docstring-missing-returns] - private normalization helper has an obvious optional string return
+    """Return a comparable representation of *path*, or ``None`` if unset.
+
+    Returns
+    -------
+    str or None
+        The normalized path string, or ``None`` when *path* is ``None``.
+    """
     return None if path is None else path_utils.normalize_path(path)
 
 
 def _should_shorten_path(raw_path: Path) -> bool:
-    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""  # ruff: ignore[docstring-missing-returns] - private platform predicate is fully described by its summary
+    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit.
+
+    Returns
+    -------
+    bool
+        ``True`` on Windows when the path length reaches the MAX_PATH
+        threshold; always ``False`` elsewhere.
+    """
     return (
         len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD
         if path_utils.IS_WINDOWS
@@ -78,7 +92,20 @@ def _should_shorten_path(raw_path: Path) -> bool:
 
 
 def _get_short_path(path: Path) -> Path | None:
-    """Return the short (8.3) variant for *path*, or ``None`` if unavailable."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private Win32 fallback has an obvious optional path result and local OS-error handling
+    """Return the short (8.3) variant for *path*, or ``None`` if unavailable.
+
+    Returns
+    -------
+    Path or None
+        The 8.3 short path, or ``None`` off Windows and when the filesystem
+        declines to supply one.
+
+    Raises
+    ------
+    OSError
+        If ``GetShortPathNameW`` fails for a reason other than a missing or
+        disabled short-path alias.
+    """
     if not path_utils.IS_WINDOWS:
         return None
 
@@ -87,7 +114,7 @@ def _get_short_path(path: Path) -> Path | None:
     import ctypes
     from ctypes import wintypes
 
-    ctypes_module = typ.cast("_CtypesModule", ctypes)
+    ctypes_module = ctypes
     kernel32 = ctypes_module.WinDLL("kernel32", use_last_error=True)
     get_short_path_name = kernel32.GetShortPathNameW
     get_short_path_name.argtypes = (
@@ -121,7 +148,13 @@ def _get_short_path(path: Path) -> Path | None:
 
 
 def _maybe_shorten_windows_path(path: Path) -> Path:
-    """Return a MAX_PATH-safe variant of *path* when running on Windows."""  # ruff: ignore[docstring-missing-returns] - private platform helper has a self-evident path return
+    """Return a MAX_PATH-safe variant of *path* when running on Windows.
+
+    Returns
+    -------
+    Path
+        The 8.3 short path when one is available, otherwise *path* unchanged.
+    """
     if not path_utils.IS_WINDOWS or not _should_shorten_path(path):
         return path
 
@@ -146,10 +179,48 @@ def _ensure_windows_pathext(original: dict[str, str]) -> None:
         return
 
     parts = [part.strip() for part in pathext.split(os.pathsep) if part.strip()]
-    seen = {part.upper() for part in parts}
-    if ".CMD" not in seen:
+    if ".CMD" not in {part.upper() for part in parts}:
         parts.append(".CMD")
     os.environ["PATHEXT"] = os.pathsep.join(parts)
+
+
+# Maps ``EnvironmentManager`` attribute names to their user-facing label and
+# whether the value must resolve to an existing directory.
+ENV_ATTR_RULES: dict[str, tuple[str, bool]] = {
+    "shim_dir": ("Replay shim directory", True),
+    "socket_path": ("Replay socket path", False),
+}
+
+
+def validate_env_attr(env: EnvironmentManager, attr: str) -> str | None:
+    """Return an error message when *attr* is invalid, otherwise ``None``.
+
+    Returns
+    -------
+    str or None
+        A description of why *attr* is unusable, or ``None`` when valid.
+    """
+    label, requires_dir = ENV_ATTR_RULES.get(
+        attr, (f"Replay {attr.replace('_', ' ')}", False)
+    )
+    value = getattr(env, attr, None)
+
+    if requires_dir:
+        try:
+            ensure_dir_exists(
+                value,
+                name=label,
+                error_type=MissingEnvironmentError,
+                missing_message=f"{label} is missing",
+            )
+        except MissingEnvironmentError as exc:
+            return str(exc)
+        return None
+
+    if value is None:
+        return f"{label} is missing"
+
+    return None
 
 
 def ensure_dir_exists(
@@ -328,13 +399,18 @@ class EnvironmentManager:
     def _restore_original_environment(
         self, _cleanup_errors: list[CleanupError]
     ) -> None:
-        """Return the process environment to its original state."""  # ruff: ignore[docstring-missing-exception] - private cleanup hook records OSError locally for aggregation
+        """Return the process environment to its original state.
+
+        Raises
+        ------
+        AssertionError
+            If ``PATHEXT`` was not restored on Windows.
+        """
         if self._orig_env is not None:
             _restore_env(self._orig_env)
             if path_utils.IS_WINDOWS:
                 original = self._orig_env.get("PATHEXT")
-                restored = os.environ.get("PATHEXT")
-                if restored != original:
+                if os.environ.get("PATHEXT") != original:
                     msg = "PATHEXT was not restored after environment teardown"
                     raise AssertionError(msg)
             self._orig_env = None
@@ -344,7 +420,14 @@ class EnvironmentManager:
         type(self).reset_active_manager()
 
     def _should_skip_directory_removal(self) -> bool:
-        """Return ``True`` if no matching temporary directory remains."""  # ruff: ignore[docstring-missing-returns] - private cleanup predicate is fully described by its summary
+        """Return ``True`` if no matching temporary directory remains.
+
+        Returns
+        -------
+        bool
+            ``True`` when nothing was created, the shim directory has been
+            reassigned, or the directory no longer exists.
+        """
         shim = self.shim_dir
         created = self._created_dir
         if created is None or shim is None:
@@ -354,7 +437,13 @@ class EnvironmentManager:
         return not shim.exists()
 
     def _has_mismatched_directories(self) -> bool:
-        """Check if the created directory differs from the current shim directory."""  # ruff: ignore[docstring-missing-returns] - private cleanup predicate is fully described by its summary
+        """Check if the created directory differs from the current shim directory.
+
+        Returns
+        -------
+        bool
+            ``True`` when both paths are set and refer to different locations.
+        """
         created = self._created_dir
         shim = self.shim_dir
         if created is None or shim is None:
@@ -391,7 +480,13 @@ class EnvironmentManager:
         cleanup_errors: list[CleanupError],
         exc_type: type[BaseException] | None,
     ) -> None:
-        """Log and potentially raise aggregated cleanup errors."""  # ruff: ignore[docstring-missing-exception] - private cleanup hook raises only the locally aggregated failure
+        """Log and potentially raise aggregated cleanup errors.
+
+        Raises
+        ------
+        RuntimeError
+            If cleanup failed and no exception is already propagating.
+        """
         if cleanup_errors:
             messages = [msg for msg, _ in cleanup_errors]
             error_msg = "; ".join(messages)

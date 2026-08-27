@@ -217,7 +217,7 @@ def execute_command(
             exit_code=126,
             env=dict(env),
         )
-    except Exception as exc:  # ruff: ignore[blind-except] - defensive
+    except Exception as exc:  # ruff: ignore[blind-except] - passthrough boundary: the shim must always emit a Response, never a traceback
         return Response(
             stderr=f"{invocation.command}: unexpected error: {exc}",
             exit_code=126,

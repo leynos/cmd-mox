@@ -331,3 +331,38 @@ def create_shim_symlinks(
     for name in command_list:
         mapping[name] = _create_shim_for_command(directory, name)
     return mapping
+
+
+def is_broken_symlink(path: Path) -> bool:
+    """Return ``True`` when *path* is a symlink whose target is missing.
+
+    Returns
+    -------
+    bool
+        ``True`` when *path* is a dangling symlink.
+    """
+    return path.is_symlink() and not path.exists()
+
+
+def is_shim_healthy(shim_path: Path) -> bool:
+    """Return ``True`` when the shim already points to a valid target.
+
+    Returns
+    -------
+    bool
+        ``True`` when *shim_path* is an intact symlink needing no repair.
+    """
+    if not shim_path.is_symlink():
+        return False
+    return not is_broken_symlink(shim_path)
+
+
+def has_non_symlink_collision(shim_path: Path) -> bool:
+    """Return ``True`` when a non-symlink file blocks shim creation.
+
+    Returns
+    -------
+    bool
+        ``True`` when *shim_path* exists but is not a symlink.
+    """
+    return shim_path.exists() and not shim_path.is_symlink()

@@ -407,8 +407,7 @@ class _CmdMoxManager:
                     f"{type(err).__name__}: {err}",
                 )
         message = _format_teardown_failure(errors, nodeid=self._nodeid)
-        fail = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.fail)
-        fail(message)  # ty misreads @_with_exception
+        pytest.fail(message)
 
     def _auto_lifecycle_enabled(self) -> bool:
         """Resolve the auto-lifecycle flag respecting all configuration sources.

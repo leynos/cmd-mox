@@ -18,8 +18,6 @@ from cmd_mox.ipc.windows import (
     ERROR_PIPE_BUSY,
     ERROR_PIPE_CONNECTED,
     PIPE_CHUNK_SIZE,
-    PyWinTypesProtocol,
-    Win32FileProtocol,
     derive_pipe_name,
     read_pipe_message,
     write_pipe_payload,
@@ -145,7 +143,14 @@ class _NamedPipeState:
         self._client_lock = threading.Lock()
 
     def _try_connect_pipe(self, handle: object) -> tuple[bool, bool]:
-        """Attempt to connect *handle* to the named pipe."""  # ruff: ignore[docstring-missing-returns] - private pipe helper's tuple result is defined by its local state machine
+        """Attempt to connect *handle* to the named pipe.
+
+        Returns
+        -------
+        tuple[bool, bool]
+            ``(keep_serving, connected)``: whether the accept loop should
+            continue, and whether a client is now attached to *handle*.
+        """
         try:
             win32pipe.ConnectNamedPipe(handle, None)
         except pywintypes.error as exc:
@@ -155,7 +160,14 @@ class _NamedPipeState:
     def _handle_connection_error(
         self, exc: BaseException, handle: object
     ) -> tuple[bool, bool]:
-        """Return control-flow decisions for a failed connection attempt."""  # ruff: ignore[docstring-missing-returns] - private pipe helper's tuple result is defined by its local state machine
+        """Return control-flow decisions for a failed connection attempt.
+
+        Returns
+        -------
+        tuple[bool, bool]
+            ``(keep_serving, connected)``: whether the accept loop should
+            continue, and whether *handle* is usable despite *exc*.
+        """
         winerror = getattr(exc, "winerror", None)
         if winerror is None:
             logger.error("Named pipe connect failed", exc_info=exc)
@@ -186,7 +198,13 @@ class _NamedPipeState:
         thread.start()
 
     def _get_active_threads(self) -> list[threading.Thread]:
-        """Get a snapshot of active client threads."""  # ruff: ignore[docstring-missing-returns] - private thread accessor has an obvious list return
+        """Get a snapshot of active client threads.
+
+        Returns
+        -------
+        list[threading.Thread]
+            A copy of the tracked per-client handler threads.
+        """
         with self._client_lock:
             return list(self._client_threads)
 
@@ -305,7 +323,7 @@ class _NamedPipeState:
                 write_pipe_payload(
                     handle,
                     response_bytes,
-                    win32file=typ.cast("Win32FileProtocol", win32file),
+                    win32file=win32file,
                 )
         except pywintypes.error as exc:
             if exc.winerror not in {ERROR_BROKEN_PIPE, ERROR_NO_DATA}:
@@ -321,8 +339,8 @@ class _NamedPipeState:
     def _read_request(handle: object) -> bytes | None:
         return read_pipe_message(
             handle,
-            win32file=typ.cast("Win32FileProtocol", win32file),
-            pywintypes=typ.cast("PyWinTypesProtocol", pywintypes),
+            win32file=win32file,
+            pywintypes=pywintypes,
             chunk_size=PIPE_CHUNK_SIZE,
         )
 

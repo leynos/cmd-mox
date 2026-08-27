@@ -27,7 +27,13 @@ _SECRET_ENV_KEY_RE: typ.Final[re.Pattern[str]] = re.compile(
 
 
 def _is_sensitive_env_key(key: str) -> bool:
-    """Return True if key likely holds secret material (substring match)."""  # ruff: ignore[docstring-missing-returns] - private redaction predicate is fully described by its summary
+    """Return True if key likely holds secret material (substring match).
+
+    Returns
+    -------
+    bool
+        ``True`` when *key* contains one of the sensitive substrings.
+    """
     k = key.casefold()
     return any(tkn in k for tkn in _SENSITIVE_TOKENS)
 
@@ -191,11 +197,24 @@ class Expectation:
         )
 
     def _matches_command(self, invocation: Invocation) -> bool:
-        """Return ``True`` if the command name matches."""  # ruff: ignore[docstring-missing-returns] - private matcher predicate has an obvious boolean result
+        """Return ``True`` if the command name matches.
+
+        Returns
+        -------
+        bool
+            ``True`` when the invoked command equals the expected name.
+        """
         return invocation.command == self.name
 
     def _matches_args(self, invocation: Invocation) -> bool:
-        """Validate positional arguments."""  # ruff: ignore[docstring-missing-returns] - private matcher predicate has an obvious boolean result
+        """Validate positional arguments.
+
+        Returns
+        -------
+        bool
+            ``True`` when the invocation satisfies the literal ``args`` and any
+            ``match_args`` validators.
+        """
         if self.args is not None and invocation.args != self.args:
             return False
         if self.match_args is not None:
@@ -203,7 +222,14 @@ class Expectation:
         return True
 
     def _validate_matchers(self, args: list[str]) -> bool:
-        """Return ``True`` if ``args`` satisfy ``match_args`` validators."""  # ruff: ignore[docstring-missing-returns] - private matcher predicate has an obvious boolean result
+        """Return ``True`` if ``args`` satisfy ``match_args`` validators.
+
+        Returns
+        -------
+        bool
+            ``True`` when arity matches and every validator accepts its
+            argument without raising.
+        """
         matchers = self.match_args
         if matchers is None:
             # Defensive fallback: callers ensure ``match_args`` is set before
@@ -212,7 +238,7 @@ class Expectation:
             return False
         if len(args) != len(matchers):
             return False
-        for arg, matcher in zip(args, matchers):  # ruff: ignore[zip-without-explicit-strict] - paired values have already been validated for matching arity
+        for arg, matcher in zip(args, matchers, strict=True):
             try:
                 if not matcher(arg):
                     return False
@@ -241,19 +267,39 @@ class Expectation:
         return "args, stdin, or env mismatch"
 
     def _explain_command_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if the command name differs."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
+        """Return a message if the command name differs.
+
+        Returns
+        -------
+        str or None
+            The mismatch description, or ``None`` when the names agree.
+        """
         if self._matches_command(invocation):
             return None
         return f"command {invocation.command!r} != {self.name!r}"
 
     def _explain_args_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if explicit args do not match."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
+        """Return a message if explicit args do not match.
+
+        Returns
+        -------
+        str or None
+            The mismatch description, or ``None`` when the arguments agree or
+            no literal ``args`` were configured.
+        """
         if self.args is None or invocation.args == self.args:
             return None
         return f"arguments {invocation.args!r} != {self.args!r}"
 
     def _explain_match_args_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message when matcher-based args fail."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
+        """Return a message when matcher-based args fail.
+
+        Returns
+        -------
+        str or None
+            The first arity, rejection, or validator-error description, or
+            ``None`` when every matcher accepts its argument.
+        """
         if self.match_args is None:
             return None
         if len(invocation.args) != len(self.match_args):
@@ -261,7 +307,7 @@ class Expectation:
                 f"expected {len(self.match_args)} args but got {len(invocation.args)}"
             )
         for i, (arg, matcher) in enumerate(
-            zip(invocation.args, self.match_args),  # ruff: ignore[zip-without-explicit-strict] - paired values have already been validated for matching arity
+            zip(invocation.args, self.match_args, strict=True),
         ):
             try:
                 ok = bool(matcher(arg))
@@ -275,7 +321,14 @@ class Expectation:
         return None
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if stdin fails to satisfy the expectation."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
+        """Return a message if stdin fails to satisfy the expectation.
+
+        Returns
+        -------
+        str or None
+            The mismatch description, or ``None`` when stdin is unconstrained
+            or satisfies the expectation.
+        """
         stdin = self.stdin
         if stdin is None:
             return None
@@ -289,7 +342,13 @@ class Expectation:
     def _explain_stdin_string_mismatch(
         invocation: Invocation, stdin: str
     ) -> str | None:
-        """Return a message if literal stdin fails to match the expectation."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
+        """Return a message if literal stdin fails to match the expectation.
+
+        Returns
+        -------
+        str or None
+            The mismatch description, or ``None`` when the strings are equal.
+        """
         if invocation.stdin != stdin:
             return f"stdin {invocation.stdin!r} != {stdin!r}"
         return None
@@ -298,7 +357,14 @@ class Expectation:
     def _explain_stdin_predicate_mismatch(
         invocation: Invocation, stdin: cabc.Callable[[str], object]
     ) -> str | None:
-        """Return a message if the stdin predicate rejects or raises."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
+        """Return a message if the stdin predicate rejects or raises.
+
+        Returns
+        -------
+        str or None
+            The rejection or predicate-error description, or ``None`` when the
+            predicate accepts the recorded stdin.
+        """
         try:
             ok = bool(stdin(invocation.stdin))
         except Exception as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
@@ -308,7 +374,14 @@ class Expectation:
         return None
 
     def _explain_env_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if an env variable mismatch is found."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
+        """Return a message if an env variable mismatch is found.
+
+        Returns
+        -------
+        str or None
+            The first mismatch description with secret values redacted, or
+            ``None`` when every expected variable matches.
+        """
         if not self.env:
             return None
         for key, value in self.env.items():
@@ -321,7 +394,14 @@ class Expectation:
         return None
 
     def _matches_stdin(self, invocation: Invocation) -> bool:
-        """Check stdin data or predicate."""  # ruff: ignore[docstring-missing-returns] - private matcher predicate has an obvious boolean result
+        """Check stdin data or predicate.
+
+        Returns
+        -------
+        bool
+            ``True`` when stdin is unconstrained, equals the expected literal,
+            or is accepted by the configured predicate.
+        """
         if self.stdin is None:
             return True
         if isinstance(self.stdin, str):
@@ -334,5 +414,11 @@ class Expectation:
         return False
 
     def _matches_env(self, invocation: Invocation) -> bool:
-        """Verify required environment variables."""  # ruff: ignore[docstring-missing-returns] - private matcher predicate has an obvious boolean result
+        """Verify required environment variables.
+
+        Returns
+        -------
+        bool
+            ``True`` when every expected environment variable matches.
+        """
         return all(invocation.env.get(key) == value for key, value in self.env.items())
