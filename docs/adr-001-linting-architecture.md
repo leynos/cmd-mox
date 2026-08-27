@@ -134,6 +134,9 @@ entry-point rule cannot model the verified boundary. The helper is:
 make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 ```
 
-Both `SYMBOL` and `REASON` must contain non-whitespace values. `SYMBOL` avoids
-WSL's `NAME` collision, and the helper preserves the caller-specific reason in
-`[tool.skylos.whitelist.documented]` for review.
+The `SYMBOL` name avoids WSL's `NAME` collision, and both variables are
+required, including rejection of whitespace-only values. The helper
+serialises its read-modify-write through `flock` on the ignored,
+repository-local `.skylos-whitelist.lock`; tests may override that path when
+isolating the helper from the checkout. Keep the caller-specific reason in the
+reviewed `[tool.skylos.whitelist.documented]` configuration.

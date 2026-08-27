@@ -186,9 +186,10 @@ make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 
 The target requires both variables to contain non-whitespace values and invokes
 `skylos whitelist <symbol> --reason <reason>`. `SYMBOL` avoids WSL's
-caller-owned `NAME` environment variable. Treat the helper as a reviewed,
-serialised write: it locks the ignored repository-local
-`.skylos-whitelist.lock` while updating the whitelist. Retain the matching
+caller-owned `NAME` environment variable. Each read-modify-write is serialised
+with `flock` on the ignored repository-local `.skylos-whitelist.lock`; tests
+may override `SKYLOS_WHITELIST_LOCK` when running in an isolated temporary
+directory. Treat the helper as a reviewed write: retain the matching
 `[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
 caller-specific reason, and never use it to avoid removing genuine dead code.
 Override `SKYLOS_WHITELIST_LOCK` only when isolating helper tests from the
@@ -235,13 +236,13 @@ Add repository-only proper names or quoted upstream terms to
 ## Episodic lint policy
 
 CmdMox imports its lint posture from
-[Episodic](https://github.com/leynos/episodic). The imported policy has three
+[Episodic](https://github.com/leynos/episodic). The imported policy has four
 goals:
 
 - keep Ruff as the fast, broad, first-pass linter;
-- use focused Pylint checks for problems that Ruff does not cover as well; and
+- use focused Pylint checks for problems that Ruff does not cover as well;
 - run Pylint under PyPy through the shared
-  [pylint-pypy-shim](https://github.com/leynos/pylint-pypy-shim) approach.
+  [pylint-pypy-shim](https://github.com/leynos/pylint-pypy-shim) approach; and
 - detect unused production symbols with a local, blocking Skylos scan.
 
 The DF12 extension preserves that baseline while adding an isolated CPython
