@@ -243,13 +243,18 @@ def load_replay_session(replay_session: ReplaySession) -> None:
     replay_session.load()
 
 
+@dc.dataclass(slots=True)
+class _ReplayMatchRequest:
+    """Normalized data for one replay match request."""
+
+    command: str
+    args: list[str]
+    stdin: str = ""
+    env: dict[str, str] | None = None
+
+
 def _match_replay(
-    replay_session: ReplaySession,
-    command: str,
-    args: list[str],
-    *,
-    stdin: str = "",
-    env: dict[str, str] | None = None,
+    replay_session: ReplaySession, request: _ReplayMatchRequest
 ) -> Response | None:
     """Match one normalized invocation against the replay session.
 
@@ -259,10 +264,10 @@ def _match_replay(
         The matched response, or ``None`` if no recording matched.
     """
     invocation = Invocation(
-        command=command,
-        args=args,
-        stdin=stdin,
-        env={} if env is None else env,
+        command=request.command,
+        args=request.args,
+        stdin=request.stdin,
+        env={} if request.env is None else request.env,
     )
     return replay_session.match(invocation)
 
@@ -281,7 +286,9 @@ def match_replay_invocation(
     Response | None
         The matched response, or ``None`` if no recording matched.
     """
-    return _match_replay(replay_session, cmd, args.split())
+    return _match_replay(
+        replay_session, _ReplayMatchRequest(command=cmd, args=args.split())
+    )
 
 
 @when(
@@ -298,7 +305,9 @@ def match_replay_invocation_again(
     Response | None
         The matched response, or ``None`` if no recording matched.
     """
-    return _match_replay(replay_session, cmd, args.split())
+    return _match_replay(
+        replay_session, _ReplayMatchRequest(command=cmd, args=args.split())
+    )
 
 
 @when(
@@ -320,10 +329,12 @@ def match_replay_with_different_stdin_env(
     """
     return _match_replay(
         replay_session,
-        cmd,
-        args.split(),
-        stdin="completely different",
-        env={"OTHER_KEY": "other_value"},
+        _ReplayMatchRequest(
+            command=cmd,
+            args=args.split(),
+            stdin="completely different",
+            env={"OTHER_KEY": "other_value"},
+        ),
     )
 
 
@@ -347,9 +358,7 @@ def match_replay_with_env(
     key, _, value = env_kv.partition("=")
     return _match_replay(
         replay_session,
-        cmd,
-        args,
-        env={key: value, "EXTRA": "val"},
+        _ReplayMatchRequest(command=cmd, args=args, env={key: value, "EXTRA": "val"}),
     )
 
 
@@ -370,7 +379,9 @@ def match_replay_with_stdin(
         The matched response, or ``None`` if no recording matched.
     """
     cmd, *args = invocation.split()
-    return _match_replay(replay_session, cmd, args, stdin=stdin)
+    return _match_replay(
+        replay_session, _ReplayMatchRequest(command=cmd, args=args, stdin=stdin)
+    )
 
 
 # -- Then steps ---------------------------------------------------------------

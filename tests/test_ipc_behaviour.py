@@ -19,10 +19,13 @@ if typ.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from pathlib import Path
 
 
-def _run_shim(
-    env: EnvironmentManager, command: str
+def _execute_shim(
+    env: EnvironmentManager,
+    command: str,
+    *,
+    check: bool,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute *command* through its generated shim.
+    """Execute a generated shim with the requested failure contract.
 
     Returns
     -------
@@ -34,8 +37,21 @@ def _run_shim(
         [str(shim_path)],
         capture_output=True,
         text=True,
-        check=True,
+        check=check,
     )
+
+
+def _run_shim(
+    env: EnvironmentManager, command: str
+) -> subprocess.CompletedProcess[str]:
+    """Execute *command* through its generated shim.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the shim.
+    """
+    return _execute_shim(env, command, check=True)
 
 
 def _run_unserved_shim(
@@ -50,12 +66,7 @@ def _run_unserved_shim(
     """
     assert env.shim_dir is not None, "Assertion failed"
     create_shim_symlinks(env.shim_dir, [command])
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
-        [_shim_cmd_path(env, command)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    return _execute_shim(env, command, check=False)
 
 
 def _invoke_command_via_ipc(

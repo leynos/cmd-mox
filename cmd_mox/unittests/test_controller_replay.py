@@ -111,6 +111,23 @@ def _create_dynamic_replay_spy(
     return spy, handler_calls
 
 
+def _handle_fuzzy_replay_mismatch(
+    mox: CmdMox,
+    spy: CommandDouble,
+    *,
+    expected_stdout: str,
+) -> ReplayRecordedExpectation:
+    """Dispatch an unmatched fuzzy replay invocation through *mox*."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious expectation return
+    invocation = Invocation(command="git", args=["commit"], stdin="", env={})
+    response = mox._handle_invocation(invocation)
+    return ReplayRecordedExpectation(
+        spy=spy,
+        invocation=invocation,
+        response=response,
+        expected_stdout=expected_stdout,
+    )
+
+
 class TestControllerReplayIntegration:
     """Replay-backed controller dispatch should use fixture responses."""
 
@@ -212,19 +229,10 @@ class TestControllerReplayIntegration:
         spy = (
             mox.spy("git").returns(stdout="fallback").replay(fixture_path, strict=False)
         )
-        invocation = Invocation(command="git", args=["commit"], stdin="", env={})
-
-        response = mox._handle_invocation(invocation)
-
-        _assert_replay_recorded(
-            mox,
-            ReplayRecordedExpectation(
-                spy=spy,
-                invocation=invocation,
-                response=response,
-                expected_stdout="fallback",
-            ),
+        expectation = _handle_fuzzy_replay_mismatch(
+            mox, spy, expected_stdout="fallback"
         )
+        _assert_replay_recorded(mox, expectation)
 
     def test_fuzzy_replay_mismatch_falls_back_to_dynamic_handler(
         self, tmp_path: Path
@@ -233,20 +241,10 @@ class TestControllerReplayIntegration:
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
         spy, handler_calls = _create_dynamic_replay_spy(mox, fixture_path, strict=False)
-        invocation = Invocation(command="git", args=["commit"], stdin="", env={})
+        expectation = _handle_fuzzy_replay_mismatch(mox, spy, expected_stdout="handler")
 
-        response = mox._handle_invocation(invocation)
-
-        assert handler_calls == [invocation]
-        _assert_replay_recorded(
-            mox,
-            ReplayRecordedExpectation(
-                spy=spy,
-                invocation=invocation,
-                response=response,
-                expected_stdout="handler",
-            ),
-        )
+        assert handler_calls == [expectation.invocation]
+        _assert_replay_recorded(mox, expectation)
 
 
 class TestControllerReplayVerification:

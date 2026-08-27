@@ -7,6 +7,7 @@ where the production code branches on the platform.
 
 from __future__ import annotations
 
+import dataclasses as dc
 import threading
 import time
 import typing as typ
@@ -635,21 +636,36 @@ def test_poke_pipe_handles_connection_errors(
     assert not file_fake.closed, "no handle exists to close"
 
 
+@dc.dataclass(slots=True, frozen=True)
+class _HandleClientFailureCase:
+    """Windows error and logging expectation for one client failure."""
+
+    winerror: int
+    is_logged: bool
+
+
 @pytest.mark.parametrize(
-    ("winerror", "is_logged"),
+    "case",
     [
-        (ERROR_BROKEN_PIPE, False),
-        (ERROR_NO_DATA, False),
-        (UNEXPECTED_WINERROR, True),
+        pytest.param(
+            _HandleClientFailureCase(ERROR_BROKEN_PIPE, is_logged=False),
+            id="broken-pipe",
+        ),
+        pytest.param(
+            _HandleClientFailureCase(ERROR_NO_DATA, is_logged=False),
+            id="no-data",
+        ),
+        pytest.param(
+            _HandleClientFailureCase(UNEXPECTED_WINERROR, is_logged=True),
+            id="unexpected",
+        ),
     ],
-    ids=["broken-pipe", "no-data", "unexpected"],
 )
 def test_handle_client_reports_unexpected_failures(
     patch_win32: _PatchWin32,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
-    winerror: int,
-    is_logged: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized expectation, not an API flag
+    case: _HandleClientFailureCase,
 ) -> None:
     """Disconnect-style read failures stay quiet; others are logged."""
     caplog.set_level("ERROR", logger="cmd_mox.ipc.named_pipe")
@@ -657,13 +673,13 @@ def test_handle_client_reports_unexpected_failures(
     state = _build_state()
 
     def fail_read(_handle: object) -> bytes:
-        raise _FakeWinError(winerror)
+        raise _FakeWinError(case.winerror)
 
     monkeypatch.setattr(state, "_read_request", fail_read)
     handle = object()
     state._handle_client(handle)
 
-    assert ("handler failed" in caplog.text) is is_logged, "logging mismatch"
+    assert ("handler failed" in caplog.text) is case.is_logged, "logging mismatch"
     assert file_fake.closed == [handle], "the client handle was not closed"
     assert pipe_fake.disconnected == [handle], "the client was not disconnected"
 
