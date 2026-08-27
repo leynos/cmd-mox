@@ -11,6 +11,7 @@ import json
 import logging
 import socketserver
 import threading
+import time
 import typing as typ
 from pathlib import Path
 
@@ -451,36 +452,58 @@ def _encode_response(response: Response) -> bytes:
     return json.dumps(response.to_dict()).encode("utf-8")
 
 
-def _emit_dispatch_outcome(
-    kind: str,
-    request: Invocation | PassthroughResult | None,
-    outcome: _DispatchOutcome,
-    *,
-    error_category: str | None = None,
-) -> None:
-    """Emit bounded metadata for one IPC dispatch outcome.
+@dc.dataclass(slots=True)
+class _DispatchRecord:
+    """Bounded metadata describing one IPC dispatch outcome.
 
-    Parameters
-    ----------
-    kind : str
-        Validated protocol request kind.
-    request : Invocation or PassthroughResult or None
-        Parsed request model, when validation succeeded.
-    outcome : {"success", "invalid_request", "handler_error"}
-        Terminal result of the shared dispatch pipeline.
-    error_category : str or None, optional
-        Stable failure category, when the outcome is not successful.
+    Every field is safe to log: nothing derived from request payloads, command
+    arguments, standard streams, environments, socket paths, or exception
+    messages may be added here.
     """
-    extra: dict[str, str] = {
-        "operation": "ipc.dispatch",
-        "kind": kind,
-        "outcome": outcome,
-    }
-    if isinstance(request, PassthroughResult):
-        extra["invocation_id"] = request.invocation_id
-    if error_category is not None:
-        extra["error_category"] = error_category
-    logger.info("IPC dispatch outcome", extra=extra)
+
+    kind: str
+    request: Invocation | PassthroughResult | None
+    outcome: _DispatchOutcome
+    duration_ms: float
+    error_category: str | None = None
+
+    def as_extra(self) -> dict[str, str | float]:
+        """Render the record as structured logging fields.
+
+        Returns
+        -------
+        dict[str, str | float]
+            Bounded fields for the dispatch log record.
+        """
+        extra: dict[str, str | float] = {
+            "operation": "ipc.dispatch",
+            "kind": self.kind,
+            "outcome": self.outcome,
+            "duration_ms": self.duration_ms,
+        }
+        # Invocation requests carry no server-assigned identifier, so only
+        # passthrough results contribute one; never manufacture a substitute.
+        if isinstance(self.request, PassthroughResult):
+            extra["invocation_id"] = self.request.invocation_id
+        if self.error_category is not None:
+            extra["error_category"] = self.error_category
+        return extra
+
+
+def _emit_dispatch_outcome(record: _DispatchRecord) -> None:
+    """Emit bounded metadata for one IPC dispatch outcome."""
+    logger.info("IPC dispatch outcome", extra=record.as_extra())
+
+
+def _elapsed_ms(started: float) -> float:
+    """Return milliseconds elapsed since the *started* monotonic reading.
+
+    Returns
+    -------
+    float
+        Elapsed duration in milliseconds.
+    """
+    return (time.perf_counter() - started) * 1000.0
 
 
 def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
@@ -492,6 +515,9 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
         The encoded response, or ``None`` when the request was unparseable or
         failed validation.
     """
+    # Scope the measurement to the whole pipeline so parsing, validation, and
+    # hook execution are all attributed to the dispatch record.
+    started = time.perf_counter()
     parsed = _parse_payload(raw)
     if parsed is None:
         return None
@@ -499,10 +525,13 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
     obj = parsed.validate()
     if obj is None:
         _emit_dispatch_outcome(
-            parsed.kind,
-            None,
-            "invalid_request",
-            error_category="ValidationError",
+            _DispatchRecord(
+                kind=parsed.kind,
+                request=None,
+                outcome="invalid_request",
+                duration_ms=_elapsed_ms(started),
+                error_category="ValidationError",
+            )
         )
         return None
 
@@ -511,10 +540,13 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
     if error_category is not None:
         outcome = "handler_error"
     _emit_dispatch_outcome(
-        parsed.kind,
-        obj,
-        outcome,
-        error_category=error_category,
+        _DispatchRecord(
+            kind=parsed.kind,
+            request=obj,
+            outcome=outcome,
+            duration_ms=_elapsed_ms(started),
+            error_category=error_category,
+        )
     )
     return _encode_response(response)
 

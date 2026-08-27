@@ -109,6 +109,11 @@ dispatch:
 - Direct `_request_pipeline` tests cover parsing, validation, and response
   encoding.
 - Socket-level tests cover transport-to-hook dispatch.
+- Each request emits exactly one bounded dispatch record with `operation`,
+  `kind`, `outcome`, `duration_ms`, an `invocation_id` only for passthrough
+  results, and an `error_category` only on failure. Payloads, arguments,
+  standard streams, environments, socket paths, and exception messages must
+  never be logged.
 
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs
 from `CommandDouble.name`. It performs that command-name check before
