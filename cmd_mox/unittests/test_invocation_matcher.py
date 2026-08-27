@@ -24,6 +24,17 @@ class RecordedInvocationSpec:
     sequence: int = 0
 
 
+@dc.dataclass(slots=True, frozen=True)
+class MatchCase:
+    """One InvocationMatcher.matches() test case."""
+
+    strict: bool
+    mode: str
+    spec: RecordedInvocationSpec
+    inv_kwargs: dict[str, typ.Any]
+    expected: bool
+
+
 def _make_recorded_invocation(
     command: str = "git",
     args: list[str] | None = None,
@@ -72,114 +83,150 @@ def _make_invocation(
     )
 
 
+def _assert_match(case: MatchCase) -> None:
+    """Assert that one invocation matches its recording as expected."""
+    matcher = InvocationMatcher(strict=case.strict)
+    invocation = _make_invocation(**case.inv_kwargs)
+    recording = _make_recorded_invocation(spec=case.spec)
+
+    assert matcher.matches(invocation, recording) is case.expected, (
+        f"{case.mode} matches() should be {case.expected} "
+        f"for invocation {case.inv_kwargs}"
+    )
+
+
 class TestInvocationMatcherStrictMode:
     """Tests for InvocationMatcher.matches() in strict mode."""
 
     @pytest.mark.parametrize(
-        ("spec", "inv_kwargs", "expected"),
+        "case",
         [
             pytest.param(
-                RecordedInvocationSpec(stdin="data", env_subset={"FOO": "bar"}),
-                {"stdin": "data", "env": {"FOO": "bar"}},
-                True,
+                MatchCase(
+                    strict=True,
+                    mode="strict",
+                    spec=RecordedInvocationSpec(
+                        stdin="data", env_subset={"FOO": "bar"}
+                    ),
+                    inv_kwargs={"stdin": "data", "env": {"FOO": "bar"}},
+                    expected=True,
+                ),
                 id="exact-match",
             ),
             pytest.param(
-                RecordedInvocationSpec(),
-                {"command": "curl"},
-                False,
+                MatchCase(
+                    strict=True,
+                    mode="strict",
+                    spec=RecordedInvocationSpec(),
+                    inv_kwargs={"command": "curl"},
+                    expected=False,
+                ),
                 id="command-differs",
             ),
             pytest.param(
-                RecordedInvocationSpec(),
-                {"args": ["pull"]},
-                False,
+                MatchCase(
+                    strict=True,
+                    mode="strict",
+                    spec=RecordedInvocationSpec(),
+                    inv_kwargs={"args": ["pull"]},
+                    expected=False,
+                ),
                 id="args-differ",
             ),
             pytest.param(
-                RecordedInvocationSpec(stdin="different"),
-                {"stdin": "expected"},
-                False,
+                MatchCase(
+                    strict=True,
+                    mode="strict",
+                    spec=RecordedInvocationSpec(stdin="different"),
+                    inv_kwargs={"stdin": "expected"},
+                    expected=False,
+                ),
                 id="stdin-differs",
             ),
             pytest.param(
-                RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
-                {"env": {"GIT_DIR": "/other"}},
-                False,
+                MatchCase(
+                    strict=True,
+                    mode="strict",
+                    spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
+                    inv_kwargs={"env": {"GIT_DIR": "/other"}},
+                    expected=False,
+                ),
                 id="env-subset-not-contained",
             ),
             pytest.param(
-                RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
-                {"env": {"GIT_DIR": ".git", "EXTRA": "value"}},
-                True,
+                MatchCase(
+                    strict=True,
+                    mode="strict",
+                    spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
+                    inv_kwargs={"env": {"GIT_DIR": ".git", "EXTRA": "value"}},
+                    expected=True,
+                ),
                 id="env-subset-contained",
             ),
         ],
     )
     def test_strict_mode_requires_command_args_stdin_and_env_subset(
         self,
-        spec: RecordedInvocationSpec,
-        inv_kwargs: dict[str, typ.Any],
-        *,
-        expected: bool,
+        case: MatchCase,
     ) -> None:
         """Strict mode matches only when command, args, stdin, and env agree."""
-        matcher = InvocationMatcher(strict=True)
-        inv = _make_invocation(**inv_kwargs)
-        rec = _make_recorded_invocation(spec=spec)
-
-        assert matcher.matches(inv, rec) is expected, (
-            f"strict matches() should be {expected} for invocation {inv_kwargs}"
-        )
+        _assert_match(case)
 
 
 class TestInvocationMatcherFuzzyMode:
     """Tests for InvocationMatcher.matches() in fuzzy mode."""
 
     @pytest.mark.parametrize(
-        ("spec", "inv_kwargs", "expected"),
+        "case",
         [
             pytest.param(
-                RecordedInvocationSpec(stdin="recorded input"),
-                {"stdin": "different input"},
-                True,
+                MatchCase(
+                    strict=False,
+                    mode="fuzzy",
+                    spec=RecordedInvocationSpec(stdin="recorded input"),
+                    inv_kwargs={"stdin": "different input"},
+                    expected=True,
+                ),
                 id="ignores-stdin",
             ),
             pytest.param(
-                RecordedInvocationSpec(env_subset={"FOO": "different"}),
-                {"env": {"FOO": "bar"}},
-                True,
+                MatchCase(
+                    strict=False,
+                    mode="fuzzy",
+                    spec=RecordedInvocationSpec(env_subset={"FOO": "different"}),
+                    inv_kwargs={"env": {"FOO": "bar"}},
+                    expected=True,
+                ),
                 id="ignores-env",
             ),
             pytest.param(
-                RecordedInvocationSpec(),
-                {"command": "curl"},
-                False,
+                MatchCase(
+                    strict=False,
+                    mode="fuzzy",
+                    spec=RecordedInvocationSpec(),
+                    inv_kwargs={"command": "curl"},
+                    expected=False,
+                ),
                 id="requires-command",
             ),
             pytest.param(
-                RecordedInvocationSpec(),
-                {"args": ["pull"]},
-                False,
+                MatchCase(
+                    strict=False,
+                    mode="fuzzy",
+                    spec=RecordedInvocationSpec(),
+                    inv_kwargs={"args": ["pull"]},
+                    expected=False,
+                ),
                 id="requires-args",
             ),
         ],
     )
     def test_fuzzy_mode_ignores_stdin_and_env_but_requires_command_and_args(
         self,
-        spec: RecordedInvocationSpec,
-        inv_kwargs: dict[str, typ.Any],
-        *,
-        expected: bool,
+        case: MatchCase,
     ) -> None:
         """Fuzzy mode ignores stdin and env yet still requires command and args."""
-        matcher = InvocationMatcher(strict=False)
-        inv = _make_invocation(**inv_kwargs)
-        rec = _make_recorded_invocation(spec=spec)
-
-        assert matcher.matches(inv, rec) is expected, (
-            f"fuzzy matches() should be {expected} for invocation {inv_kwargs}"
-        )
+        _assert_match(case)
 
 
 class TestInvocationMatcherFindMatch:
