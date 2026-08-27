@@ -271,17 +271,7 @@ def _collect_os_error(
     ],
     cabc.Callable[typ.Concatenate[EnvironmentManager, list[CleanupError], P], None],
 ]:
-    """Return a decorator that records ``OSError``s in ``cleanup_errors``.
-
-    The decorated function is expected to take ``(self, cleanup_errors)`` and
-    should raise ``OSError`` on failure. Any such exception is captured and the
-    formatted message appended to ``cleanup_errors``.
-
-    Returns
-    -------
-    collections.abc.Callable
-        A decorator that converts ``OSError`` failures into cleanup records.
-    """
+    """Return a decorator that records ``OSError`` cleanup failures."""
 
     def decorator(
         func: cabc.Callable[
@@ -511,22 +501,7 @@ class EnvironmentManager:
         validate_positive_finite_timeout(timeout)
 
     def _resolve_effective_timeout(self, timeout: float | object) -> float | None:
-        """Return the timeout value that should be exported.
-
-        The helper isolates the branching necessary to honour explicit
-        overrides, fall back to the previously configured value, and surface
-        invalid types consistently with other validation paths.
-
-        Returns
-        -------
-        float | None
-            The configured timeout, or ``None`` when IPC timeouts are disabled.
-
-        Raises
-        ------
-        TypeError
-            If ``timeout`` is neither a real number nor the unset sentinel.
-        """
+        """Return the effective IPC timeout for export."""
         if timeout is _UNSET_TIMEOUT:
             return self.ipc_timeout
 
@@ -546,6 +521,10 @@ class EnvironmentManager:
 
         Raises
         ------
+        TypeError
+            If ``timeout`` is neither a real number nor the unset sentinel.
+        ValueError
+            If an explicit ``timeout`` is non-finite or not strictly positive.
         RuntimeError
             If called before the manager has entered its environment.
         """

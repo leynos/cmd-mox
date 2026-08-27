@@ -662,7 +662,7 @@ transport simply closes the pipe handles. The timeout is configurable via :data:
 
 The IPC dispatch metadata stores public hook names, and both the Unix-domain-
 socket and Windows named-pipe transports share `_request_pipeline`. Dispatch
-remains virtual so subclasses can override the server hooks. The payload parser
+remains virtual, so subclasses can override the server hooks. The payload parser
 and validator run before any hook invocation. Observability records only bounded
 request metadata and never payload data.
 

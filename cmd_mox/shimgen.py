@@ -102,18 +102,7 @@ def _validate_command_name(name: str) -> None:
 
 
 def _normalize_command_name(name: str) -> str:
-    """Return a filesystem-safe comparison key for *name*.
-
-    Parameters
-    ----------
-    name : str
-        Command name to normalize.
-
-    Returns
-    -------
-    str
-        Case-folded name on Windows, otherwise the original name.
-    """
+    """Return a filesystem-safe comparison key for *name*."""
     return name.casefold() if path_utils.IS_WINDOWS else name
 
 

@@ -97,7 +97,7 @@ class PassthroughRequest:
     timeout: float = 30.0
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serialisable mapping of this request.
+        """Return a JSON-serializable mapping of this request.
 
         Returns
         -------
@@ -122,7 +122,7 @@ class PassthroughResult:
     exit_code: int
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serialisable mapping of this result.
+        """Return a JSON-serializable mapping of this result.
 
         Returns
         -------

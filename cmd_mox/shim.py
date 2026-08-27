@@ -133,19 +133,7 @@ def _parse_positive_finite(raw: str) -> float | None:
 
 
 def _validate_environment() -> float:
-    """Validate required environment variables and return the timeout.
-
-    Returns
-    -------
-    float
-        Positive finite IPC timeout in seconds.
-
-    Raises
-    ------
-    SystemExit
-        If the IPC socket environment variable is unset or the configured
-        timeout is not positive and finite.
-    """  # ruff: ignore[docstring-extraneous-exception] - the failures exit via sys.exit, which the DOC rules cannot trace back to SystemExit
+    """Validate required environment variables and return the timeout."""
     if os.environ.get(CMOX_IPC_SOCKET_ENV) is None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)
