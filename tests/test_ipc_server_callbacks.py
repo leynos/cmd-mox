@@ -615,8 +615,10 @@ def test_decode_payload_rejects_non_mapping(caplog: pytest.LogCaptureFixture) ->
 
     result = server._decode_payload(json.dumps([1, 2, 3]).encode())
 
-    assert result is None, "Assertion failed"
-    assert "IPC payload is not a mapping" in caplog.text, "Assertion failed"
+    assert result is None, "Non-object JSON unexpectedly produced a payload mapping"
+    assert "IPC payload is not a mapping" in caplog.text, (
+        "Non-mapping JSON was not logged without including its payload contents"
+    )
 
 
 def test_encode_response_serialises_response_fields(

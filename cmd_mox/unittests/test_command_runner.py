@@ -321,9 +321,11 @@ def test_execute_command_handles_exceptions(
 
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
 
-    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
+    env = {"PATH": "/test/bin", "VAR": "x"}
+    response = execute_command(Path("/bin/true"), invocation, env=env, timeout=30)
     assert response.exit_code == scenario.exit_code
     assert response.stderr == scenario.stderr
+    assert response.env == env
 
 
 def test_command_runner_honours_override_environment(
@@ -371,10 +373,16 @@ def test_run_response_includes_applied_environment(
     )
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
 
-    invocation = Invocation(command="echo", args=[], stdin="", env={"VAR": "inv"})
+    invocation = Invocation(
+        command="echo",
+        args=[],
+        stdin="",
+        env={"PATH": "/invocation/bin", "VAR": "inv"},
+    )
     response = runner.run(invocation, {"VAR": "expect"})
 
-    assert response.env["VAR"] == "expect"
+    expected_env = {"PATH": "/invocation/bin", "VAR": "expect"}
+    assert response.env == expected_env
 
 
 def test_execute_command_error_response_includes_env(

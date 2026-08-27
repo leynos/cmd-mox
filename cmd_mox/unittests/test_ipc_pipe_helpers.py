@@ -148,3 +148,36 @@ def test_named_pipe_handler_uses_shared_helpers(
     assert read_calls == [handle]
     assert writes == [b"processed"]
     assert closes == [handle]
+
+
+def test_named_pipe_server_signals_ready_when_accept_creation_fails(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Pipe creation failures should signal readiness and stop accepting clients."""
+
+    class _FakePipeError(Exception):
+        pass
+
+    def fail_pipe_creation() -> object:
+        msg = "pipe creation failed"
+        raise _FakePipeError(msg)
+
+    state = _NamedPipeState(
+        pipe_name="pipe",
+        outer=object(),  # type: ignore[arg-type, ty:invalid-argument-type]
+        accept_timeout=0.1,
+    )
+    caplog.set_level("ERROR", logger="cmd_mox.ipc.named_pipe")
+    monkeypatch.setattr("cmd_mox.ipc.named_pipe.path_utils.IS_WINDOWS", True)
+    monkeypatch.setattr(
+        "cmd_mox.ipc.named_pipe.pywintypes",
+        types.SimpleNamespace(error=_FakePipeError),
+    )
+    monkeypatch.setattr(state, "_create_pipe_instance", fail_pipe_creation)
+
+    state.serve_forever()
+
+    assert state.ready_event.is_set(), "Pipe creation failure did not signal readiness"
+    assert "Named pipe accept failed" in caplog.text, (
+        "Pipe creation failure was not logged with the accept-loop context"
+    )

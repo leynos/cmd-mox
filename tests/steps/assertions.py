@@ -11,6 +11,7 @@ from tests.helpers.parameters import decode_placeholders
 from tests.steps.shim_management import _require_replay_shim_dir
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
+    import collections.abc as cabc
     import subprocess
 
     from cmd_mox.controller import CmdMox
@@ -18,30 +19,22 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.test_doubles import CommandDouble
 
 
-def _require_spy(mox: CmdMox, cmd: str) -> CommandDouble:
-    """Return the registered spy for *cmd*, failing clearly when absent.
+def _require_double(
+    doubles: cabc.Mapping[str, CommandDouble], cmd: str, kind: str
+) -> CommandDouble:
+    """Return the required command double, failing clearly when absent."""  # ruff: ignore[docstring-missing-returns] - private assertion helper has an obvious CommandDouble return
+    assert cmd in doubles, f"{kind} for command '{cmd}' not found"
+    return doubles[cmd]
 
-    Returns
-    -------
-    CommandDouble
-        The spy registered under *cmd*. The step fails with an
-        ``AssertionError`` when no spy is registered for *cmd*.
-    """
-    assert cmd in mox.spies, f"Spy for command '{cmd}' not found"
-    return mox.spies[cmd]
+
+def _require_spy(mox: CmdMox, cmd: str) -> CommandDouble:
+    """Return the registered spy for *cmd*, failing clearly when absent."""  # ruff: ignore[docstring-missing-returns] - private wrapper has an obvious CommandDouble return
+    return _require_double(mox.spies, cmd, "Spy")
 
 
 def _require_mock(mox: CmdMox, cmd: str) -> CommandDouble:
-    """Return the registered mock for *cmd*, failing clearly when absent.
-
-    Returns
-    -------
-    CommandDouble
-        The mock registered under *cmd*. The step fails with an
-        ``AssertionError`` when no mock is registered for *cmd*.
-    """
-    assert cmd in mox.mocks, f"Mock for command '{cmd}' not found"
-    return mox.mocks[cmd]
+    """Return the registered mock for *cmd*, failing clearly when absent."""  # ruff: ignore[docstring-missing-returns] - private wrapper has an obvious CommandDouble return
+    return _require_double(mox.mocks, cmd, "Mock")
 
 
 @then(parsers.cfparse('the shim for "{cmd}" should end with "{suffix}"'))

@@ -264,7 +264,12 @@ class _NamedPipeState:
             return
 
         while not self.stop_event.is_set():
-            handle = self._create_pipe_instance()
+            try:
+                handle = self._create_pipe_instance()
+            except pywintypes.error:
+                logger.exception("Named pipe accept failed")
+                self.ready_event.set()
+                break
             if not self.ready_event.is_set():
                 self.ready_event.set()
             should_continue, should_handle = self._try_connect_pipe(handle)

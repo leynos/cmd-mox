@@ -102,7 +102,7 @@ def _validate_command_name(name: str) -> None:
 
 
 def _normalize_command_name(name: str) -> str:
-    """Return a filesystem-safe comparison key for *name*."""
+    """Return a filesystem-safe comparison key for *name*."""  # ruff: ignore[docstring-missing-returns] - private normalizer has an obvious string return
     return name.casefold() if path_utils.IS_WINDOWS else name
 
 

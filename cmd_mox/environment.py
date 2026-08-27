@@ -271,7 +271,7 @@ def _collect_os_error(
     ],
     cabc.Callable[typ.Concatenate[EnvironmentManager, list[CleanupError], P], None],
 ]:
-    """Return a decorator that records ``OSError`` cleanup failures."""
+    """Return a decorator that records ``OSError`` cleanup failures."""  # ruff: ignore[docstring-missing-returns] - private decorator factory has an obvious decorator return
 
     def decorator(
         func: cabc.Callable[
@@ -501,7 +501,7 @@ class EnvironmentManager:
         validate_positive_finite_timeout(timeout)
 
     def _resolve_effective_timeout(self, timeout: float | object) -> float | None:
-        """Return the effective IPC timeout for export."""
+        """Return the effective IPC timeout for export."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private timeout resolver keeps a concise summary while its contract is documented by the public exporter
         if timeout is _UNSET_TIMEOUT:
             return self.ipc_timeout
 
@@ -527,7 +527,7 @@ class EnvironmentManager:
             If an explicit ``timeout`` is non-finite or not strictly positive.
         RuntimeError
             If called before the manager has entered its environment.
-        """
+        """  # ruff: ignore[docstring-extraneous-exception] - timeout validation propagates the documented TypeError and ValueError.
         if self.socket_path is None:
             msg = "Cannot export IPC settings before entering the environment"
             raise RuntimeError(msg)
