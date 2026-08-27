@@ -210,31 +210,48 @@ def make_manager(
     return _make
 
 
+@dc.dataclass(slots=True, frozen=True)
+class _WorkerPrefixCase:
+    """Input and expected result for worker-prefix generation."""
+
+    env_var: str | None
+    workerinput: object
+    expected_prefix: str
+
+
 @pytest.mark.parametrize(
-    ("env_var", "workerinput", "expected_prefix"),
+    "case",
     [
         pytest.param(
-            None,
-            {"workerid": "gw-dict"},
-            "cmdmox-gw-dict-",
+            _WorkerPrefixCase(
+                env_var=None,
+                workerinput={"workerid": "gw-dict"},
+                expected_prefix="cmdmox-gw-dict-",
+            ),
             id="mapping-workerinput",
         ),
         pytest.param(
-            "env-worker",
-            {"workerid": "gw-dict"},
-            "cmdmox-env-worker-",
+            _WorkerPrefixCase(
+                env_var="env-worker",
+                workerinput={"workerid": "gw-dict"},
+                expected_prefix="cmdmox-env-worker-",
+            ),
             id="env-override",
         ),
         pytest.param(
-            None,
-            object(),
-            "cmdmox-main-",
+            _WorkerPrefixCase(
+                env_var=None,
+                workerinput=object(),
+                expected_prefix="cmdmox-main-",
+            ),
             id="unexpected-workerinput",
         ),
         pytest.param(
-            "env worker*!",
-            {"workerid": "gw/unsafe"},
-            "cmdmox-env-worker--",
+            _WorkerPrefixCase(
+                env_var="env worker*!",
+                workerinput={"workerid": "gw/unsafe"},
+                expected_prefix="cmdmox-env-worker--",
+            ),
             id="sanitised-worker",
         ),
     ],
@@ -242,24 +259,22 @@ def make_manager(
 def test_worker_prefix_generation(
     monkeypatch: pytest.MonkeyPatch,
     make_manager: cabc.Callable[..., _CmdMoxManager],
-    env_var: str | None,
-    workerinput: object,
-    expected_prefix: str,
+    case: _WorkerPrefixCase,
 ) -> None:
     """Ensure worker prefix generation from various input sources."""
-    if env_var is None:
+    if case.env_var is None:
         monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     else:
-        monkeypatch.setenv("PYTEST_XDIST_WORKER", env_var)
+        monkeypatch.setenv("PYTEST_XDIST_WORKER", case.env_var)
 
-    config = _StubConfig(workerinput=workerinput)
+    config = _StubConfig(workerinput=case.workerinput)
     request = _StubRequest(config=config)
 
     manager = make_manager(request)
 
     env = manager.mox.environment
     assert isinstance(env, EnvironmentManager), "Assertion failed"
-    assert env._prefix.startswith(expected_prefix), "Assertion failed"
+    assert env._prefix.startswith(case.expected_prefix), "Assertion failed"
 
 
 def test_cmd_mox_fixture_restores_path_on_replay_failure(
