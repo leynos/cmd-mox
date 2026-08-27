@@ -57,6 +57,7 @@ project files.
 | `SKYLOS`                    | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                       | Adds scan-only global options for the blocking lint target.                       |
 | `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                          | Limits dead-code liveness analysis to production sources.                         |
 | `SKYLOS_EXCLUDE_FOLDERS`    | `tests`                                                                                                                            | Prevents test-only references from keeping production symbols live.               |
+| `SKYLOS_WHITELIST_LOCK`     | `.skylos-whitelist.lock`                                                                                                           | Ignored repository-local lock for serialized whitelist updates.                   |
 
 _Table 1: Makefile variables for the lint pipeline._
 
@@ -93,8 +94,10 @@ make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 
 The target requires both variables to contain non-whitespace values and
 invokes `skylos whitelist <symbol> --reason <reason>`. `SYMBOL` avoids WSL's
-caller-owned `NAME` environment variable. Treat the helper as a reviewed write:
-retain the matching
+caller-owned `NAME` environment variable. Each read-modify-write is serialized
+with `flock` on the ignored repository-local `.skylos-whitelist.lock`; tests
+may override `SKYLOS_WHITELIST_LOCK` when running in an isolated temporary
+directory. Treat the helper as a reviewed write: retain the matching
 `[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
 caller-specific reason, and never use it to avoid removing genuine dead code.
 
@@ -139,13 +142,13 @@ Add repository-only proper names or quoted upstream terms to
 ## Episodic lint policy
 
 CmdMox imports its lint posture from
-[Episodic](https://github.com/leynos/episodic). The imported policy has three
+[Episodic](https://github.com/leynos/episodic). The imported policy has four
 goals:
 
 - keep Ruff as the fast, broad, first-pass linter;
-- use focused Pylint checks for problems that Ruff does not cover as well; and
+- use focused Pylint checks for problems that Ruff does not cover as well;
 - run Pylint under PyPy through the shared
-  [pylint-pypy-shim](https://github.com/leynos/pylint-pypy-shim) approach.
+  [pylint-pypy-shim](https://github.com/leynos/pylint-pypy-shim) approach; and
 - detect unused production symbols with a local, blocking Skylos scan.
 
 The policy is adapted for CmdMox rather than copied blindly. CmdMox targets

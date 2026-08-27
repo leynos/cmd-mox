@@ -22,6 +22,7 @@ SKYLOS_CLI = $(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VER
 SKYLOS = $(SKYLOS_CLI) --config-file pyproject.toml
 SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
 SKYLOS_EXCLUDE_FOLDERS ?= tests
+SKYLOS_WHITELIST_LOCK ?= .skylos-whitelist.lock
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	--log-file=windows-ipc.log \
@@ -105,7 +106,7 @@ skylos-allow: export SKYLOS_REASON = $(value REASON)
 skylos-allow: ## Add one named Skylos whitelist exception
 	@case "$${SKYLOS_SYMBOL}" in *[![:space:]]*) ;; *) printf "Error: SYMBOL is required for a named whitelist exception\\n" >&2; exit 2;; esac
 	@case "$${SKYLOS_REASON}" in *[![:space:]]*) ;; *) printf "Error: REASON is required for a named whitelist exception\\n" >&2; exit 2;; esac
-	$(SKYLOS_CLI) whitelist "$${SKYLOS_SYMBOL}" --reason "$${SKYLOS_REASON}"
+	flock "$(SKYLOS_WHITELIST_LOCK)" env $(SKYLOS_CLI) whitelist "$${SKYLOS_SYMBOL}" --reason "$${SKYLOS_REASON}"
 
 typecheck: build ## Run typechecking
 	$(TY) --version

@@ -152,5 +152,8 @@ make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 ```
 
 The `SYMBOL` name avoids WSL's `NAME` collision, and both variables are
-required. Keep the caller-specific reason in the reviewed
-`[tool.skylos.whitelist.documented]` configuration.
+required, including rejection of whitespace-only values. The helper
+serializes its read-modify-write through `flock` on the ignored,
+repository-local `.skylos-whitelist.lock`; tests may override that path when
+isolating the helper from the checkout. Keep the caller-specific reason in the
+reviewed `[tool.skylos.whitelist.documented]` configuration.
