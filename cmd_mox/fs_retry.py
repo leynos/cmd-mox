@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import dataclasses as dc
 import logging
 import os
@@ -12,6 +11,9 @@ import typing as typ
 from pathlib import Path
 
 from . import _path_utils as path_utils
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 _logger = logging.getLogger(__name__)
 

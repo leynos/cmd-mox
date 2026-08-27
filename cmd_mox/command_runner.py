@@ -188,6 +188,7 @@ def execute_command(
             env=env,
             shell=False,
             timeout=timeout,
+            check=False,
         )
         return Response(
             stdout=result.stdout,

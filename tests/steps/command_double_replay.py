@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import typing as typ
 
 import pytest
@@ -13,6 +12,7 @@ from cmd_mox.ipc import Invocation
 from tests.helpers.fixtures import write_minimal_replay_fixture
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from pathlib import Path
 
     from cmd_mox.test_doubles import CommandDouble

@@ -42,6 +42,7 @@ def _run_unserved_shim(
         [_shim_cmd_path(env, command)],
         capture_output=True,
         text=True,
+        check=False,
     )
 
 
@@ -72,7 +73,7 @@ def test_shim_invokes_via_ipc() -> None:
     with EnvironmentManager() as env:
         result = _invoke_command_via_ipc(env, "foo")
         assert result.stdout.strip() == "foo", "Assertion failed"
-        assert result.stderr == "", "Assertion failed"
+        assert not result.stderr, "Assertion failed"
         assert result.returncode == 0, "Assertion failed"
 
 
@@ -89,7 +90,7 @@ def test_shim_errors_when_socket_unset() -> None:
     with EnvironmentManager() as env:
         os.environ.pop(CMOX_IPC_SOCKET_ENV, None)
         result = _run_unserved_shim(env, "bar")
-        assert result.stdout == "", "Assertion failed"
+        assert not result.stdout, "Assertion failed"
         assert result.stderr.strip() == "IPC socket not specified", "Assertion failed"
         assert result.returncode == 1, "Assertion failed"
 
@@ -100,7 +101,7 @@ def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None
         monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "dummy")
         monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "nan")
         result = _run_unserved_shim(env, "baz")
-        assert result.stdout == "", "Assertion failed"
+        assert not result.stdout, "Assertion failed"
         assert "invalid timeout: 'nan'" in result.stderr, "Assertion failed"
         assert result.returncode == 1, "Assertion failed"
 

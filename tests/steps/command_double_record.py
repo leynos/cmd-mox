@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import typing as typ
 
 import pytest
@@ -11,6 +10,7 @@ from pytest_bdd import given, then, when
 from cmd_mox.controller import CmdMox
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from pathlib import Path
 
     from cmd_mox.test_doubles import CommandDouble

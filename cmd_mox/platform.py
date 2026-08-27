@@ -6,10 +6,12 @@ lets both the pytest plug-in and external test suites react consistently.
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import os
 import sys
 import typing as typ
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 # ``pytester``-driven tests set this override to emulate alternative platforms
 # (for example Windows) without needing to spawn a different OS.

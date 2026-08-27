@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import importlib.util
 import json
 import math
 import os
 import sys
+import typing as typ
 from pathlib import Path
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PACKAGE_ROOT) not in sys.path:

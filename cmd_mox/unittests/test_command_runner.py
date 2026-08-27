@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import os
 import subprocess
 import typing as typ
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -33,7 +33,7 @@ class DummyResult:
         self.env = env
 
 
-@dataclass
+@dc.dataclass
 class CommandTestScenario:
     """Test case data for invalid command scenarios."""
 
@@ -249,7 +249,7 @@ def test_resolve_command_with_override_reports_errors(tmp_path: Path) -> None:
     assert result.exit_code == 127
 
 
-@dataclass(frozen=True)
+@dc.dataclass(frozen=True)
 class ExecuteExceptionScenario:
     """Bundle execute_command exception expectations for parametrized tests."""
 
@@ -273,7 +273,7 @@ class ExecuteExceptionScenario:
         ),
         pytest.param(
             ExecuteExceptionScenario(
-                factory=lambda: FileNotFoundError(),
+                factory=FileNotFoundError,
                 command="missing",
                 exit_code=127,
                 stderr="missing: not found",

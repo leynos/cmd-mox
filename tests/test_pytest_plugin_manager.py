@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import os
 import textwrap
 import typing as typ
-from dataclasses import dataclass
 
 import pytest
 
@@ -100,7 +100,7 @@ class _StubRequest:
             self.param = param
 
 
-@dataclass(slots=True)
+@dc.dataclass(slots=True)
 class StubMoxBehaviorConfig:
     """Configuration for _StubMox behavioral flags."""
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import math
 import typing as typ
 
@@ -14,9 +15,9 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.test_doubles import CommandDouble
 
 
+@dc.dataclass(frozen=True)
 class _FakeExpectation:
-    def __init__(self, env: dict[str, str]) -> None:
-        self.env = env
+    env: dict[str, str]
 
 
 class _FakeDouble:

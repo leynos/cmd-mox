@@ -42,7 +42,7 @@ def test_environment_manager_handles_empty_pathext(
         pathext = os.environ["PATHEXT"]
         assert ".CMD" in _collect_pathext(pathext), "Assertion failed"
 
-    assert os.environ["PATHEXT"] == "", "Assertion failed"
+    assert not os.environ["PATHEXT"], "Assertion failed"
 
 
 def test_environment_manager_handles_missing_pathext(

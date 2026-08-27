@@ -120,7 +120,7 @@ def test_main_skips_interactive_stdin(
 
     assert excinfo.value.code == 0, "shim.main should exit with code 0"
     invocation = captured["invocation"]
-    assert invocation.stdin == "", "shim should not read stdin for tty input"
+    assert not invocation.stdin, "shim should not read stdin for tty input"
     assert not interactive.read_called, (
         "shim should not call read() on interactive stdin"
     )
@@ -155,7 +155,7 @@ def test_main_honours_custom_timeout(
     )
     out = capsys.readouterr()
     assert out.out == "custom", "shim.main should forward the response stdout"
-    assert out.err == "", "shim.main should not emit stderr for an empty response"
+    assert not out.err, "shim.main should not emit stderr for an empty response"
 
 
 def test_main_requires_socket_env(

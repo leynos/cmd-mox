@@ -150,13 +150,16 @@ class _ServerLifecycle[BackendT](abc.ABC):
     def _export_environment(self) -> None:  # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
         """Export environment variables for client processes."""
 
-    def _start_backend_thread(self, thread: threading.Thread) -> None:
+    @staticmethod
+    def _start_backend_thread(thread: threading.Thread) -> None:
         thread.start()
 
     def _wait_until_ready(self) -> None:  # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
         """Wait for the backend server to be ready to accept connections."""
 
-    def _stop_backend(self, server: BackendT | None) -> None:  # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
+    # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
+    @staticmethod
+    def _stop_backend(server: BackendT | None) -> None:
         """Stop the backend server instance."""
 
     def _join_backend_thread(self, thread: threading.Thread | None) -> None:
@@ -207,8 +210,8 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         self._handler = handlers.handler
         self._passthrough_handler = handlers.passthrough_handler
 
+    @staticmethod
     def _dispatch[DispatchArg: (Invocation, PassthroughResult)](
-        self,
         handler: cabc.Callable[[DispatchArg], Response] | None,
         argument: DispatchArg,
         *,
@@ -297,7 +300,8 @@ class IPCServer(_BaseIPCServer["_InnerServer"]):
     def _wait_until_ready(self) -> None:
         wait_for_socket(self.socket_path, self.timeout)
 
-    def _stop_backend(self, server: _InnerServer | None) -> None:
+    @staticmethod
+    def _stop_backend(server: _InnerServer | None) -> None:
         if server is None:
             return
         server.shutdown()

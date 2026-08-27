@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import os
 import pathlib
 import stat
@@ -12,8 +11,8 @@ import typing as typ
 
 import pytest
 
-import cmd_mox.shimgen as shimgen
 from cmd_mox import _path_utils as path_utils
+from cmd_mox import shimgen
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
@@ -31,6 +30,7 @@ from cmd_mox.shimgen import (
 )
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing helpers only
+    import collections.abc as cabc
     import subprocess
 
     from cmd_mox.fs_retry import RetryConfig

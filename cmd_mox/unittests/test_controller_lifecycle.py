@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import typing as typ
 
 import pytest
@@ -19,6 +18,7 @@ from tests.helpers.fixtures import write_minimal_replay_fixture
 pytestmark = pytest.mark.requires_unix_sockets
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
+    import collections.abc as cabc
     import subprocess
     from pathlib import Path
 

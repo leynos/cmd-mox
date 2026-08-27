@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import socket
 import tempfile
+import typing as typ
 from pathlib import Path
 
 import pytest
 
 import cmd_mox.environment
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 _UNIX_SOCKETS_SUPPORTED: bool | None = None
 
@@ -38,8 +41,7 @@ def _can_bind_unix_socket() -> bool:
                     sock_path.unlink()
     except OSError:
         return False
-    else:
-        return True
+    return True
 
 
 def _unix_sockets_supported() -> bool:

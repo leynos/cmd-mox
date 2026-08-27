@@ -38,9 +38,8 @@ def _mask_env_value(key: str, value: str | None) -> str | None:
     """
     if value is None:
         return None
-    else:  # ruff: ignore[superfluous-else-return] - required for clarity per review guidance
-        key_cf = key.casefold()
-        return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
+    key_cf = key.casefold()
+    return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
 
 
 def _format_env(mapping: cabc.Mapping[str, str | None]) -> str:
@@ -326,8 +325,8 @@ class UnexpectedCommandVerifier:
 
         self._raise_mock_overflow_error(exp, inv, observed)
 
+    @staticmethod
     def _raise_unregistered_command_error(
-        self,
         inv: Invocation,
         doubles: cabc.Mapping[str, CommandDouble],
     ) -> None:
@@ -343,8 +342,8 @@ class UnexpectedCommandVerifier:
         )
         raise UnexpectedCommandError(msg)
 
+    @staticmethod
     def _raise_expectation_mismatch_error(
-        self,
         exp: Expectation,
         inv: Invocation,
     ) -> None:
@@ -366,8 +365,8 @@ class UnexpectedCommandVerifier:
         )
         raise UnexpectedCommandError(msg)
 
+    @staticmethod
     def _raise_mock_overflow_error(
-        self,
         exp: Expectation,
         inv: Invocation,
         observed: int,
@@ -413,8 +412,8 @@ class OrderVerifier:
             ordered_seq.extend([exp] * exp.count)
         return ordered_seq
 
+    @staticmethod
     def _get_relevant_invocations(
-        self,
         journal: cabc.Iterable[Invocation],
         ordered_seq: list[Expectation],
     ) -> list[Invocation]:
@@ -454,8 +453,8 @@ class OrderVerifier:
             actual_descriptions,
         )
 
+    @staticmethod
     def _check_missing_expectations(
-        self,
         ordered_seq: list[Expectation],
         relevant_invocations: list[Invocation],
         expected_descriptions: list[str],
@@ -498,8 +497,8 @@ class OrderVerifier:
             )
             return
 
+    @staticmethod
     def _check_extra_invocations(
-        self,
         ordered_seq: list[Expectation],
         relevant_invocations: list[Invocation],
         expected_descriptions: list[str],
@@ -567,8 +566,8 @@ class OrderVerifier:
 class CountVerifier:
     """Check that each expectation was met the expected number of times."""
 
+    @staticmethod
     def verify(
-        self,
         expectations: cabc.Mapping[str, Expectation],
         invocations: cabc.Mapping[str, list[Invocation]],
     ) -> None:

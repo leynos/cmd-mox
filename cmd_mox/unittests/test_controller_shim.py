@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import typing as typ
 
 import pytest
 
-import cmd_mox.controller as controller
 from cmd_mox import _path_utils as path_utils
+from cmd_mox import controller
 from cmd_mox.controller import CmdMox, Phase
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.unittests._env_helpers import require_shim_dir
@@ -21,6 +20,7 @@ pytestmark = [
 ]
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
+    import collections.abc as cabc
     import subprocess
     from pathlib import Path
 

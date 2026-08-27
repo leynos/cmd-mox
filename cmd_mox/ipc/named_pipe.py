@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import importlib
 import logging
 import threading
 import time
 import typing as typ
-from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
 from cmd_mox.ipc.windows import (
@@ -30,6 +28,9 @@ from cmd_mox.ipc.windows import (
 from .server import IPCHandlers, TimeoutConfig, _BaseIPCServer, _request_pipeline
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+    from pathlib import Path
+
     from .models import Invocation, PassthroughResult, Response
 
 if path_utils.IS_WINDOWS:  # pragma: win32-only
@@ -152,20 +153,20 @@ class _NamedPipeState:
         return True, True
 
     def _handle_connection_error(
-        self, exc: object, handle: object
+        self, exc: BaseException, handle: object
     ) -> tuple[bool, bool]:
         """Return control-flow decisions for a failed connection attempt."""  # ruff: ignore[docstring-missing-returns] - private pipe helper's tuple result is defined by its local state machine
         winerror = getattr(exc, "winerror", None)
         if winerror is None:
-            logger.exception("Named pipe connect failed")
+            logger.error("Named pipe connect failed", exc_info=exc)
             self._close_handle(handle)
             return True, False
         if winerror == ERROR_PIPE_CONNECTED:
             return True, True
-        if winerror in (ERROR_OPERATION_ABORTED, ERROR_NO_DATA):
+        if winerror in {ERROR_OPERATION_ABORTED, ERROR_NO_DATA}:
             self._close_handle(handle)
             return False, False
-        logger.exception("Named pipe connect failed")
+        logger.error("Named pipe connect failed", exc_info=exc)
         self._close_handle(handle)
         return True, False
 
@@ -189,7 +190,8 @@ class _NamedPipeState:
         with self._client_lock:
             return list(self._client_threads)
 
-    def _calculate_remaining_time(self, deadline: float) -> float | None:
+    @staticmethod
+    def _calculate_remaining_time(deadline: float) -> float | None:
         """Calculate remaining time until deadline.
 
         Returns None if deadline has passed, otherwise remaining seconds.
@@ -306,7 +308,7 @@ class _NamedPipeState:
                     win32file=typ.cast("Win32FileProtocol", win32file),
                 )
         except pywintypes.error as exc:
-            if exc.winerror not in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
+            if exc.winerror not in {ERROR_BROKEN_PIPE, ERROR_NO_DATA}:
                 logger.exception("Named pipe handler failed")
         finally:
             with contextlib.suppress(pywintypes.error):
@@ -315,7 +317,8 @@ class _NamedPipeState:
             with self._client_lock:
                 self._client_threads.discard(thread)
 
-    def _read_request(self, handle: object) -> bytes | None:
+    @staticmethod
+    def _read_request(handle: object) -> bytes | None:
         return read_pipe_message(
             handle,
             win32file=typ.cast("Win32FileProtocol", win32file),
@@ -335,8 +338,7 @@ class _NamedPipeState:
                 None,
             )
         except pywintypes.error as exc:
-            if exc.winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
+            if exc.winerror not in {ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND}:
                 logger.debug("Named pipe wakeup failed: %s", exc)
             return
-        else:
-            win32file.CloseHandle(handle)
+        win32file.CloseHandle(handle)

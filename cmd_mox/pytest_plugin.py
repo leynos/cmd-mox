@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
+import contextlib
 import logging
 import os
 import re
@@ -13,6 +13,9 @@ import pytest
 from .controller import CmdMox, Phase
 from .environment import EnvironmentManager
 from .platform import skip_if_unsupported
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +268,7 @@ class _CmdMoxManager:
         # initialisation, so injecting the worker-scoped manager here ensures the
         # replay lifecycle observes the correct PATH mutations once entered.
         self._entered = False
+        self._exit_stack: contextlib.ExitStack | None = None
 
     @property
     def auto_lifecycle(self) -> bool:
@@ -290,7 +294,9 @@ class _CmdMoxManager:
 
     def enter(self) -> None:
         """Enter the controller context and replay if configured."""
-        self.mox.__enter__()
+        stack = contextlib.ExitStack()
+        stack.enter_context(self.mox)
+        self._exit_stack = stack
         self._entered = True
         if self._auto_lifecycle:
             self.mox.replay()
@@ -356,8 +362,8 @@ class _CmdMoxManager:
         exit_error = self._close_controller()
         return verify_error, exit_error
 
+    @staticmethod
     def _should_suppress_errors(
-        self,
         verify_error: Exception | None,
         exit_error: Exception | None,
         *,
@@ -499,15 +505,18 @@ class _CmdMoxManager:
         return None
 
     def _close_controller(self) -> Exception | None:
-        """Invoke :meth:`CmdMox.__exit__` and capture cleanup failures.
+        """Close the controller's exit stack and capture cleanup failures.
 
         Returns
         -------
         Exception or None
             Captured cleanup error, if controller teardown failed.
         """
+        stack, self._exit_stack = self._exit_stack, None
+        if stack is None:
+            return None
         try:
-            self.mox.__exit__(None, None, None)
+            stack.close()
         except Exception as err:
             logger.exception(
                 "Error during cmd_mox fixture cleanup for %s", self._nodeid

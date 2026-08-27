@@ -291,7 +291,8 @@ class CmdMox:
             return False
         return not self._is_broken_symlink(shim_path)
 
-    def _has_non_symlink_collision(self, shim_path: Path) -> bool:
+    @staticmethod
+    def _has_non_symlink_collision(shim_path: Path) -> bool:
         """Return ``True`` when a non-symlink file blocks shim creation."""  # ruff: ignore[docstring-missing-returns] - private predicate is fully described by its summary and annotation
         return shim_path.exists() and not shim_path.is_symlink()
 
@@ -393,8 +394,8 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    @staticmethod
     def _execute_handler(
-        self,
         double: CommandDouble,
         invocation: Invocation,
         overrides: dict[str, str],
@@ -408,7 +409,8 @@ class CmdMox:
                 return double.handler(invocation)
         return double.handler(invocation)
 
-    def _finalize_response_env(self, resp: Response, overrides: dict[str, str]) -> None:
+    @staticmethod
+    def _finalize_response_env(resp: Response, overrides: dict[str, str]) -> None:
         """Ensure response environment includes all expectation overrides."""
         if not overrides:
             return
@@ -436,8 +438,9 @@ class CmdMox:
         self._finalize_response_env(resp, overrides)
         return resp
 
+    @staticmethod
     def _apply_expectation_env(
-        self, double: CommandDouble, invocation: Invocation
+        double: CommandDouble, invocation: Invocation
     ) -> dict[str, str]:
         """Validate and apply expectation environment to invocation.
 
@@ -474,7 +477,8 @@ class CmdMox:
         invocation.env.update(overrides)
         return overrides
 
-    def _response_for_missing_double(self, invocation: Invocation) -> Response:
+    @staticmethod
+    def _response_for_missing_double(invocation: Invocation) -> Response:
         """Return a default response when no double is registered."""  # ruff: ignore[docstring-missing-returns] - private strategy helper has a clear response type
         return Response(stdout=invocation.command)
 
@@ -520,9 +524,8 @@ class CmdMox:
 
         return self._response_for_regular(double, invocation, overrides)
 
-    def _select_response_strategy(
-        self, double: CommandDouble | None
-    ) -> _ResponseStrategy:
+    @staticmethod
+    def _select_response_strategy(double: CommandDouble | None) -> _ResponseStrategy:
         """Determine the response strategy for the given double."""  # ruff: ignore[docstring-missing-returns] - private selector has a self-evident enum return
         if double is None:
             return _ResponseStrategy.MISSING_DOUBLE
@@ -631,7 +634,8 @@ class CmdMox:
         if missing:
             raise MissingEnvironmentError("; ".join(missing))
 
-    def _validate_env_attr(self, env: EnvironmentManager, attr: str) -> str | None:
+    @staticmethod
+    def _validate_env_attr(env: EnvironmentManager, attr: str) -> str | None:
         """Return an error message when *attr* is invalid, otherwise ``None``."""  # ruff: ignore[docstring-missing-returns] - private validation helper has a self-evident optional string return
         label, requires_dir = _ENV_ATTR_RULES.get(
             attr, (f"Replay {attr.replace('_', ' ')}", False)

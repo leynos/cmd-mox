@@ -23,6 +23,9 @@ from .scrubber import ScrubbingRule, ScrubbingRuleDict
 
 _SCHEMA_VERSION: typ.Final[str] = "1.0"
 
+# A "major.minor" version string always has exactly two dot-separated parts.
+_VERSION_COMPONENT_COUNT: typ.Final[int] = 2
+
 # ---------------------------------------------------------------------------
 # Schema version parsing and migration
 # ---------------------------------------------------------------------------
@@ -49,7 +52,7 @@ def _parse_version(version_str: str) -> tuple[int, int]:
         If the string cannot be parsed as two dot-separated integers.
     """
     parts = version_str.strip().split(".")
-    if len(parts) != 2:
+    if len(parts) != _VERSION_COMPONENT_COUNT:
         msg = f"Invalid schema version {version_str!r}; expected 'major.minor'"
         raise ValueError(msg)
     try:

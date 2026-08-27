@@ -121,7 +121,7 @@ __all__ = [
     "UnexpectedCommandError",
     "UnfulfilledExpectationError",
     "VerificationError",
-    "cmd_mox_fixture",
+    "cmd_mox_fixture",  # ruff: ignore[undefined-export] - resolved lazily by module __getattr__ so importing cmd_mox does not require pytest
     "create_shim_symlinks",
     "is_supported",
     "skip_if_unsupported",

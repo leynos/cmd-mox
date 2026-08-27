@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import typing as typ
 
@@ -10,8 +11,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
 import pytest
 
-import cmd_mox.controller as controller
-from cmd_mox import CmdMox
+from cmd_mox import CmdMox, controller
 
 pytestmark = [pytest.mark.requires_unix_sockets]
 
@@ -20,7 +20,10 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure environment is restored when replay setup fails."""
     mox = CmdMox()
     pre_env = os.environ.copy()
-    mox.__enter__()
+    # Entered deliberately without a matching exit: replay() is expected to
+    # fail before an exit would normally occur, and the assertions below
+    # verify the controller cleans up its own state on that failure path.
+    contextlib.ExitStack().enter_context(mox)
 
     called: list[
         tuple[type[BaseException] | None, BaseException | None, TracebackType | None]

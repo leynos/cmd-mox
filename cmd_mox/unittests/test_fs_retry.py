@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import cmd_mox.fs_retry as fs_retry
+from cmd_mox import fs_retry
 
 
 def test_retry_unlink_success(tmp_path: Path) -> None:

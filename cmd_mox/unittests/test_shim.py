@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import math
 import os
 import sys
@@ -11,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import cmd_mox.shim as shim
+from cmd_mox import shim
 from cmd_mox.command_runner import validate_override_path as _validate_override_path
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
@@ -29,6 +28,9 @@ from cmd_mox.shim import (
     _write_response,
 )
 from tests.helpers.pytest_typing import pytest_fail, pytest_skip
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 
 def test_resolve_command_name_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -447,41 +449,6 @@ def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
     assert not _shim_bootstrap._BOOTSTRAP_DONE
 
 
-@pytest.mark.parametrize(
-    ("factory", "expected_exit", "expected_message"),
-    [
-        (
-            lambda tmp_path: tmp_path / "missing",  # missing file
-            127,
-            "not found",
-        ),
-        (
-            lambda tmp_path: tmp_path,  # directory
-            126,
-            "invalid executable path",
-        ),
-        (
-            lambda tmp_path: _make_directory_symlink(tmp_path),
-            126,
-            "invalid executable path",
-        ),
-    ],
-)
-def test_validate_override_path_reports_missing_or_invalid_targets(
-    tmp_path: Path,
-    factory: cabc.Callable[[Path], Path],
-    expected_exit: int,
-    expected_message: str,
-) -> None:
-    """Validate error handling for nonexistent and non-file overrides."""
-    target = factory(tmp_path)
-    result = _validate_override_path("tool", os.fspath(target))
-
-    assert isinstance(result, Response)
-    assert result.exit_code == expected_exit
-    assert expected_message in result.stderr
-
-
 def _make_directory_symlink(tmp_path: Path) -> Path:
     """Return a symlink to a directory for override validation tests.
 
@@ -500,6 +467,41 @@ def _make_directory_symlink(tmp_path: Path) -> Path:
     except OSError as exc:  # pragma: no cover - windows without admin rights
         return pytest_skip(f"Symlinks unavailable: {exc}")
     return symlink
+
+
+@pytest.mark.parametrize(
+    ("factory", "expected_exit", "expected_message"),
+    [
+        (
+            lambda tmp_path: tmp_path / "missing",  # missing file
+            127,
+            "not found",
+        ),
+        (
+            lambda tmp_path: tmp_path,  # directory
+            126,
+            "invalid executable path",
+        ),
+        (
+            _make_directory_symlink,
+            126,
+            "invalid executable path",
+        ),
+    ],
+)
+def test_validate_override_path_reports_missing_or_invalid_targets(
+    tmp_path: Path,
+    factory: cabc.Callable[[Path], Path],
+    expected_exit: int,
+    expected_message: str,
+) -> None:
+    """Validate error handling for nonexistent and non-file overrides."""
+    target = factory(tmp_path)
+    result = _validate_override_path("tool", os.fspath(target))
+
+    assert isinstance(result, Response)
+    assert result.exit_code == expected_exit
+    assert expected_message in result.stderr
 
 
 def test_validate_override_path_rejects_non_executable_file(tmp_path: Path) -> None:

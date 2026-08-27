@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import dataclasses as dc
 import importlib
@@ -38,6 +37,9 @@ from cmd_mox.ipc.windows import (
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 logger = logging.getLogger(__name__)
 
@@ -384,7 +386,7 @@ def _decode_response(raw: bytes) -> Response:
 def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> bool:
     """Return True when *exc* represents a retryable pipe error."""  # ruff: ignore[docstring-missing-returns] - private retry predicate is fully described by its summary
     winerror = getattr(exc, "winerror", None)
-    if winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
+    if winerror not in {ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND}:
         return False
     return attempt < max_retries - 1
 

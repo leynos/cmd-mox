@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import typing as typ
 
 import pytest
@@ -14,6 +13,7 @@ from cmd_mox.unittests._env_helpers import require_shim_dir
 pytestmark = pytest.mark.requires_unix_sockets
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
+    import collections.abc as cabc
     import subprocess
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import re
 import typing as typ
 from types import SimpleNamespace
@@ -24,6 +23,9 @@ from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
 from cmd_mox.test_doubles import CommandDouble, DoubleKind
 from cmd_mox.verifiers import UnexpectedCommandVerifier
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 
 @pytest.mark.parametrize(

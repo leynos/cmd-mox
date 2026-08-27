@@ -99,22 +99,9 @@ extend-ignore = [
     "D203",  # Conflicts with D211; prefer enforcing no blank line before class docstring.
     "D213",  # Conflicts with D212; keep summary on the first line.
     "RUF201",  # Selectors deliberately use rule codes to stay aligned with Episodic.
-    # Existing cmd-mox baseline. Keep the imported Episodic rule set visible
-    # while avoiding broad behavioural refactors in this lint-wiring change.
-    "B903",
-    "F822",
-    "FURB118",
-    "ICN003",
-    "LOG004",
-    "PLR0402",
-    "PLR0904",
-    "PLR0911",
-    "PLR2004",
-    "PLR6201",
-    "PLR6301",
-    "PLW0108",
+    # cmd-mox is a subprocess-mocking library, so importing subprocess is its
+    # core domain; the security caution that S404 flags does not apply here.
     "S404",
-    "TC003",
 ]
 
 [tool.ruff.lint.per-file-ignores]

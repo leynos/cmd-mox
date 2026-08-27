@@ -63,7 +63,7 @@ def test_response_from_payload_warns_on_invalid_env(
     with caplog.at_level("WARNING", logger="cmd_mox.ipc.models"):
         response = Response.from_payload(payload)
 
-    assert response.env == {}, "Assertion failed"
+    assert not response.env, "Assertion failed"
     assert any(
         "Payload 'env' is not a dict" in record.message for record in caplog.records
     ), "Assertion failed"

@@ -6,7 +6,7 @@ import typing as typ
 
 import pytest
 
-import cmd_mox.platform as platform
+from cmd_mox import platform
 from tests.helpers.pytest_typing import pytest_fail
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for type hints

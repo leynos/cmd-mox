@@ -2,6 +2,7 @@
 
 import collections.abc as cabc
 import dataclasses as dc
+import operator
 import os
 import subprocess
 import typing as typ
@@ -315,7 +316,7 @@ class TestSpyAssertions:
     @pytest.mark.parametrize(
         "scenario",
         ASSERTION_FAILURE_SCENARIOS,
-        ids=lambda s: s["name"],
+        ids=operator.itemgetter("name"),
     )
     def test_spy_assertion_failures(
         self,

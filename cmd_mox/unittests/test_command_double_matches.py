@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest import mock
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -18,7 +18,7 @@ def test_matches_delegates_only_for_its_own_command() -> None:
     matching_invocation = Invocation("git", ["status"], "", {})
     mismatched_invocation = Invocation("hg", ["status"], "", {})
 
-    with patch.object(
+    with mock.patch.object(
         Expectation, "matches", autospec=True, return_value=True
     ) as matches:
         assert double.matches(matching_invocation), (
@@ -46,7 +46,7 @@ def test_matches_rejects_every_different_command_without_delegating(
     double = CmdMox().stub(command)
     invocation = Invocation(different_command, [], "", {})
 
-    with patch.object(
+    with mock.patch.object(
         Expectation, "matches", autospec=True, return_value=True
     ) as matches:
         assert not double.matches(invocation), (

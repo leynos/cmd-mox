@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import enum
 import typing as typ
 
@@ -10,6 +9,8 @@ from .expectations import Expectation
 from .ipc import Invocation, Response
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing-only import
+    import collections.abc as cabc
+
     from .controller import CmdMox
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -82,6 +83,8 @@ class DoubleKind(enum.StrEnum):
     SPY = "spy"
 
 
+# ruff: ignore[too-many-public-methods] - deliberately wide fluent stub/mock/spy
+# builder API; splitting it would fragment a single cohesive DSL.
 class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-base]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
 
@@ -516,7 +519,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         bool
             ``True`` for mocks and spies.
         """
-        return self.kind in (DoubleKind.MOCK, DoubleKind.SPY)
+        return self.kind in {DoubleKind.MOCK, DoubleKind.SPY}
 
     @property
     def call_count(self) -> int:

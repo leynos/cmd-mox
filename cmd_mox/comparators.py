@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import re
 import typing as typ
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 
 class _ReprMixin:
@@ -27,7 +29,6 @@ class Comparator(typ.Protocol):
 
     def __call__(self, value: str) -> bool:
         """Return ``True`` if *value* satisfies the comparison."""
-        ...
 
 
 class Any(_ReprMixin):

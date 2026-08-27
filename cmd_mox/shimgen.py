@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import logging
 import os
 import sys
+import typing as typ
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
 from cmd_mox.environment import ensure_dir_exists
 from cmd_mox.fs_retry import DEFAULT_UNLINK_RETRY, retry_unlink
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
 logger = logging.getLogger(__name__)

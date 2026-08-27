@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import ast
-import collections.abc as cabc
 import dataclasses as dc
 import os
 import subprocess
 import typing as typ
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from pathlib import Path
 
     from cmd_mox import EnvironmentManager

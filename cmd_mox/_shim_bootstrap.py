@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import importlib
 import importlib.util as importlib_util
@@ -12,6 +11,7 @@ import typing as typ
 from pathlib import Path
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from types import ModuleType
 
 _BOOTSTRAP_DONE = False
@@ -72,6 +72,7 @@ def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | 
     ModuleType or None
         The loaded module when the file has a usable import specification.
     """
+    module: ModuleType | None = None
     try:
         if not file_path.is_file():
             return None
@@ -82,11 +83,10 @@ def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | 
         try:
             spec.loader.exec_module(module)
         except (FileNotFoundError, OSError, ImportError):
-            return None
-        else:
-            return module
+            module = None
     except (OSError, ValueError):
-        return None
+        module = None
+    return module
 
 
 def _load_stdlib_platform() -> ModuleType:

@@ -8,10 +8,12 @@ signature via ``typing.cast``.
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import typing as typ
 
 import pytest
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 
 def pytest_skip(reason: str) -> typ.NoReturn:

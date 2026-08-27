@@ -72,8 +72,8 @@ class InvocationMatcher:
             for key, value in recording.env_subset.items()
         )
 
+    @staticmethod
     def _env_match_stats(
-        self,
         invocation: Invocation,
         recording: RecordedInvocation,
     ) -> tuple[bool, int, int]:

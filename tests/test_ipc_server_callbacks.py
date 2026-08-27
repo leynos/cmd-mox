@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
+import dataclasses as dc
 import json
 import threading
 import typing as typ
-from dataclasses import dataclass
 
 import pytest
 
-import cmd_mox.ipc.server as server
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc import (
     CallbackIPCServer,
@@ -22,9 +20,11 @@ from cmd_mox.ipc import (
     TimeoutConfig,
     invoke_server,
     report_passthrough_result,
+    server,
 )
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from pathlib import Path
 
     from syrupy.assertion import SnapshotAssertion
@@ -64,7 +64,7 @@ def _dispatch_events(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]
     ]
 
 
-@dataclass(slots=True)
+@dc.dataclass(slots=True)
 class TimeoutTestCase:
     """Test case configuration for timeout validation."""
 

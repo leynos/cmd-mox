@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import dataclasses as dc
 import re
 import typing as typ
@@ -49,6 +48,8 @@ def is_sensitive_recording_env_key(key: str) -> bool:
 
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
+
     from .ipc import Invocation
 
 
@@ -118,7 +119,7 @@ class Expectation:
             if not isinstance(key, str):
                 msg = f"Environment variable name must be str, got {type(key).__name__}"
                 raise TypeError(msg)
-            if key == "":
+            if not key:
                 msg = "Environment variable name cannot be empty"
                 raise ValueError(msg)
             if not isinstance(value, str):
@@ -275,22 +276,35 @@ class Expectation:
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:
         """Return a message if stdin fails to satisfy the expectation."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
-        if self.stdin is None:
+        stdin = self.stdin
+        if stdin is None:
             return None
-        if isinstance(self.stdin, str):
-            if invocation.stdin != self.stdin:
-                return f"stdin {invocation.stdin!r} != {self.stdin!r}"
-            return None
-        if not callable(self.stdin):
-            return f"stdin expectation {self.stdin!r} is not str or callable"
+        if isinstance(stdin, str):
+            return self._explain_stdin_string_mismatch(invocation, stdin)
+        if not callable(stdin):
+            return f"stdin expectation {stdin!r} is not str or callable"
+        return self._explain_stdin_predicate_mismatch(invocation, stdin)
+
+    @staticmethod
+    def _explain_stdin_string_mismatch(
+        invocation: Invocation, stdin: str
+    ) -> str | None:
+        """Return a message if literal stdin fails to match the expectation."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
+        if invocation.stdin != stdin:
+            return f"stdin {invocation.stdin!r} != {stdin!r}"
+        return None
+
+    @staticmethod
+    def _explain_stdin_predicate_mismatch(
+        invocation: Invocation, stdin: cabc.Callable[[str], object]
+    ) -> str | None:
+        """Return a message if the stdin predicate rejects or raises."""  # ruff: ignore[docstring-missing-returns] - private explanation helper has a self-evident optional string return
         try:
-            ok = bool(self.stdin(invocation.stdin))
+            ok = bool(stdin(invocation.stdin))
         except Exception as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
-            return (
-                f"stdin predicate {self.stdin!r} raised {exc.__class__.__name__}: {exc}"
-            )
+            return f"stdin predicate {stdin!r} raised {exc.__class__.__name__}: {exc}"
         if not ok:
-            return f"stdin {invocation.stdin!r} failed {self.stdin!r}"
+            return f"stdin {invocation.stdin!r} failed {stdin!r}"
         return None
 
     def _explain_env_mismatch(self, invocation: Invocation) -> str | None:

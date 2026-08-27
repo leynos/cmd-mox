@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import pathlib
 import threading
 import types
+import typing as typ
 
 import pytest
 
 from cmd_mox.ipc import windows
 from cmd_mox.ipc.client import RetryConfig
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 
 @pytest.fixture(autouse=True)
 def _patch_windows_modules(monkeypatch: pytest.MonkeyPatch) -> None:
-    import cmd_mox.ipc.client as client
+    from cmd_mox.ipc import client
 
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     monkeypatch.setattr(
@@ -49,7 +52,7 @@ def test_connect_pipe_with_retries_eventually_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ensure named pipe connections retry when the backend is busy."""
-    import cmd_mox.ipc.client as client
+    from cmd_mox.ipc import client
 
     attempts = {"count": 0}
 
@@ -80,7 +83,7 @@ def test_connect_pipe_with_retries_raises_after_non_retryable_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify non-retryable errors bubble up immediately."""
-    import cmd_mox.ipc.client as client
+    from cmd_mox.ipc import client
 
     def fake_create(_pipe_name: pathlib.Path, *_args: object) -> str:
         raise _DummyPipeError(windows.ERROR_NO_DATA)
@@ -97,7 +100,7 @@ def test_connect_pipe_with_retries_raises_after_non_retryable_error(
 
 def test_send_pipe_request_writes_and_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     """``_send_pipe_request`` should write payloads and read responses."""
-    import cmd_mox.ipc.client as client
+    from cmd_mox.ipc import client
 
     handle_log: list[str] = []
 
@@ -141,7 +144,7 @@ def test_send_pipe_request_closes_handle_on_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``_send_pipe_request`` should close handles when timeouts surface."""
-    import cmd_mox.ipc.client as client
+    from cmd_mox.ipc import client
 
     class _FakeHandle:
         def __init__(self) -> None:
@@ -194,7 +197,7 @@ def test_run_blocking_io_times_out_and_invokes_cancel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The helper should abort hung I/O and trigger the cancel callback."""
-    import cmd_mox.ipc.client as client
+    from cmd_mox.ipc import client
 
     stop_event = threading.Event()
 

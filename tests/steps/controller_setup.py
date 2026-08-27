@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import os
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,9 @@ from cmd_mox.errors import (
 )
 from cmd_mox.ipc import CallbackNamedPipeServer
 from tests.helpers.pytest_typing import pytest_skip
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 _ERROR_TYPES: dict[str, type[VerificationError]] = {
     "UnexpectedCommandError": UnexpectedCommandError,
@@ -144,7 +147,10 @@ def replay_controller_interrupt(mox: CmdMox) -> dict[str, object]:
     env = mox.environment
     assert env is not None, "Replay environment was not initialised"
 
-    mox.__enter__()
+    # KeyboardInterrupt aborts replay() before a matching exit would normally
+    # run, so the context is entered without also registering the exit here;
+    # the assertions below verify the controller's own failure cleanup.
+    contextlib.ExitStack().enter_context(mox)
     assert env.shim_dir is not None, "Replay environment was not initialised"
     assert env.socket_path is not None, "Replay environment was not initialised"
     shim_dir = Path(env.shim_dir)

@@ -77,4 +77,3 @@ class Scrubber(typ.Protocol):
 
     def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
         """Return a sanitized copy of *recording*."""
-        ...

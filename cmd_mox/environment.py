@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import functools
 import logging
@@ -21,6 +20,7 @@ _MAX_PATH_THRESHOLD: typ.Final[int] = 240
 logger = logging.getLogger(__name__)
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
     import types
 
 CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
@@ -111,7 +111,7 @@ def _get_short_path(path: Path) -> Path | None:
             # short path (either because it does not exist yet or the volume
             # disabled 8.3 aliases). Falling back to the original path keeps
             # CmdMox functional even without short-path support.
-            if error in (0, 2, 3):
+            if error in {0, 2, 3}:
                 return None
             raise OSError(ctypes_module.FormatError(error))
         if result >= buffer_len:
@@ -386,8 +386,8 @@ class EnvironmentManager:
         finally:
             self._created_dir = None
 
+    @staticmethod
     def _handle_cleanup_errors(
-        self,
         cleanup_errors: list[CleanupError],
         exc_type: type[BaseException] | None,
     ) -> None:
@@ -407,7 +407,8 @@ class EnvironmentManager:
         """The unmodified environment prior to ``__enter__``."""
         return self._orig_env or {}
 
-    def _validate_timeout(self, timeout: float) -> None:
+    @staticmethod
+    def _validate_timeout(timeout: float) -> None:
         """Validate that *timeout* is a positive finite number.
 
         Raise ``ValueError`` if the provided value is not positive and finite.
