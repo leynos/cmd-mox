@@ -56,6 +56,29 @@ def _assert_replay_recorded(
     )
 
 
+def _create_dynamic_replay_spy(
+    mox: CmdMox,
+    fixture_path: Path,
+    *,
+    strict: bool,
+) -> tuple[CommandDouble, list[Invocation]]:
+    """Create a dynamic replay spy and its recorded handler calls.
+
+    Returns
+    -------
+    tuple[CommandDouble, list[Invocation]]
+        The configured spy and the list its handler appends invocations to.
+    """
+    handler_calls: list[Invocation] = []
+
+    def handler(invocation: Invocation) -> Response:
+        handler_calls.append(invocation)
+        return Response(stdout="handler", stderr="", exit_code=0)
+
+    spy = mox.spy("git").runs(handler).replay(fixture_path, strict=strict)
+    return spy, handler_calls
+
+
 class TestControllerReplayIntegration:
     """Replay-backed controller dispatch should use fixture responses."""
 
@@ -78,13 +101,7 @@ class TestControllerReplayIntegration:
         """A replay match should not call the spy's dynamic handler."""
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
-        handler_calls: list[Invocation] = []
-
-        def handler(invocation: Invocation) -> Response:
-            handler_calls.append(invocation)
-            return Response(stdout="handler", stderr="", exit_code=0)
-
-        mox.spy("git").runs(handler).replay(fixture_path)
+        _spy, handler_calls = _create_dynamic_replay_spy(mox, fixture_path, strict=True)
         invocation = Invocation(command="git", args=["status"], stdin="", env={})
 
         response = mox._make_response(invocation)
@@ -201,13 +218,7 @@ class TestControllerReplayIntegration:
         """Fuzzy replay should fall back to the spy handler when no match exists."""
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
-        handler_calls: list[Invocation] = []
-
-        def handler(invocation: Invocation) -> Response:
-            handler_calls.append(invocation)
-            return Response(stdout="handler-fallback", stderr="", exit_code=0)
-
-        spy = mox.spy("git").runs(handler).replay(fixture_path, strict=False)
+        spy, handler_calls = _create_dynamic_replay_spy(mox, fixture_path, strict=False)
         invocation = Invocation(command="git", args=["commit"], stdin="", env={})
 
         response = mox._handle_invocation(invocation)
@@ -219,7 +230,7 @@ class TestControllerReplayIntegration:
                 spy=spy,
                 invocation=invocation,
                 response=response,
-                expected_stdout="handler-fallback",
+                expected_stdout="handler",
             ),
         )
 
