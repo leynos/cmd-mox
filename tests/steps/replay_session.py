@@ -243,6 +243,30 @@ def load_replay_session(replay_session: ReplaySession) -> None:
     replay_session.load()
 
 
+def _match_replay(
+    replay_session: ReplaySession,
+    command: str,
+    args: list[str],
+    *,
+    stdin: str = "",
+    env: dict[str, str] | None = None,
+) -> Response | None:
+    """Match one normalized invocation against the replay session.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
+    invocation = Invocation(
+        command=command,
+        args=args,
+        stdin=stdin,
+        env={} if env is None else env,
+    )
+    return replay_session.match(invocation)
+
+
 @when(
     parsers.parse('a replay invocation of "{cmd}" with args "{args}" is matched'),
     target_fixture="replay_match_result",
@@ -257,8 +281,7 @@ def match_replay_invocation(
     Response | None
         The matched response, or ``None`` if no recording matched.
     """
-    inv = Invocation(command=cmd, args=args.split(), stdin="", env={})
-    return replay_session.match(inv)
+    return _match_replay(replay_session, cmd, args.split())
 
 
 @when(
@@ -275,8 +298,7 @@ def match_replay_invocation_again(
     Response | None
         The matched response, or ``None`` if no recording matched.
     """
-    inv = Invocation(command=cmd, args=args.split(), stdin="", env={})
-    return replay_session.match(inv)
+    return _match_replay(replay_session, cmd, args.split())
 
 
 @when(
@@ -296,13 +318,13 @@ def match_replay_with_different_stdin_env(
     Response | None
         The matched response, or ``None`` if no recording matched.
     """
-    inv = Invocation(
-        command=cmd,
-        args=args.split(),
+    return _match_replay(
+        replay_session,
+        cmd,
+        args.split(),
         stdin="completely different",
         env={"OTHER_KEY": "other_value"},
     )
-    return replay_session.match(inv)
 
 
 @when(
@@ -323,8 +345,12 @@ def match_replay_with_env(
     """
     cmd, *args = invocation.split()
     key, _, value = env_kv.partition("=")
-    inv = Invocation(command=cmd, args=args, stdin="", env={key: value, "EXTRA": "val"})
-    return replay_session.match(inv)
+    return _match_replay(
+        replay_session,
+        cmd,
+        args,
+        env={key: value, "EXTRA": "val"},
+    )
 
 
 @when(
@@ -344,8 +370,7 @@ def match_replay_with_stdin(
         The matched response, or ``None`` if no recording matched.
     """
     cmd, *args = invocation.split()
-    inv = Invocation(command=cmd, args=args, stdin=stdin, env={})
-    return replay_session.match(inv)
+    return _match_replay(replay_session, cmd, args, stdin=stdin)
 
 
 # -- Then steps ---------------------------------------------------------------
