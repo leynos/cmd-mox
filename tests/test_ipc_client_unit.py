@@ -11,6 +11,7 @@ import pytest
 from cmd_mox.ipc.client import (
     RetryConfig,
     _connect_unix_with_retries,
+    _ConnectionContext,
     invoke_server,
     report_passthrough_result,
 )
@@ -94,7 +95,8 @@ def test_connect_unix_with_retries_eventually_succeeds(
 
     retry_config = RetryConfig(retries=3, backoff=0.0, jitter=0.0)
     sock = _connect_unix_with_retries(
-        tmp_path / "ipc.sock", timeout=0.1, retry_config=retry_config
+        tmp_path / "ipc.sock",
+        _ConnectionContext(timeout=0.1, retry_config=retry_config),
     )
 
     assert isinstance(sock, _FakeSocket), "Assertion failed"
@@ -111,7 +113,8 @@ def test_connect_unix_with_retries_raises_after_exhaustion(
 
     with pytest.raises(ConnectionRefusedError, match=r"^$"):
         _connect_unix_with_retries(
-            tmp_path / "ipc.sock", timeout=0.1, retry_config=retry_config
+            tmp_path / "ipc.sock",
+            _ConnectionContext(timeout=0.1, retry_config=retry_config),
         )
     assert _AlwaysFailSocket.attempts == 2, "Assertion failed"
 

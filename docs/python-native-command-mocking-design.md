@@ -666,6 +666,35 @@ remains virtual, so subclasses can override the server hooks. The payload parser
 and validator run before any hook invocation. Observability records only bounded
 request metadata and never payload data.
 
+#### Observability seam and correlation identifiers (2026-08-28)
+
+`cmd_mox.ipc._observability` is a dependency-free seam shared by the client and
+both server transports. It defines a frozen `IPCEvent` carrying only bounded
+dimensions — `operation`, `transport`, `kind`, `outcome`, `error_category`,
+`attempt`, `duration_ms`, `message_size`, and `correlation_id` — renders them as
+structured logging fields, logs them at INFO, and counts them in an in-process
+registry keyed by `(operation, transport, outcome)`. Tests assert on emissions
+through `capture_events()` and `counter_snapshot()` rather than an external
+metrics collector. The module documents a never-log list: command names,
+arguments, standard streams, environments, socket paths, exception messages,
+and raw payloads must never become fields.
+
+Requests carry an opaque `correlation_id` as a top-level envelope field beside
+`kind`. The client reuses the model's `invocation_id` when the request already
+has one and otherwise mints a fresh `uuid4().hex`; identifiers are never derived
+from request content. The server strips both envelope fields before validating
+the body, so `Invocation`/`PassthroughResult` never see them, and carries the
+identifier on `ParsedRequest`. When an older shim omits the field, the server
+falls back to the validated model's `invocation_id` and otherwise omits the
+dimension rather than manufacturing a substitute. The field is optional on the
+wire, so servers still accept requests without it.
+
+Client events use the operations `ipc.client.request` (outcomes `started`,
+`success`, `error`) and `ipc.client.connect_retry` (outcome `attempt_failed`,
+with a 1-based `attempt`). Server dispatch keeps the existing
+`IPC dispatch outcome` record under the `ipc.dispatch` operation, now also
+carrying `transport` and `correlation_id`.
+
 When `IPCServer.start()` executes inside an active :class:
 `~cmd_mox.environment.EnvironmentManager`, the manager exports both the socket
 and timeout environment variables automatically. This keeps tests and shim

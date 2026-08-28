@@ -118,7 +118,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
 
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
         raw = self.rfile.read()
-        response_bytes = _request_pipeline(self.server.outer, raw)  # type: ignore[attr-defined, ty:unresolved-attribute]
+        response_bytes = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
         if response_bytes is None:
             return
         self.wfile.write(response_bytes)

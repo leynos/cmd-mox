@@ -25,6 +25,7 @@ from cmd_mox._validators import (
 )
 from cmd_mox.environment import EnvironmentManager
 
+from . import _observability
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import (
     parse_json_safely,
@@ -296,14 +297,31 @@ _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
 }
 
 
+DISPATCH_OPERATION: typ.Final[str] = "ipc.dispatch"
+_DISPATCH_MESSAGE: typ.Final[str] = "IPC dispatch outcome"
+
+# Envelope fields wrap the model body on the wire and are stripped before
+# validation; passing them to ``Invocation``/``PassthroughResult`` would raise
+# ``TypeError`` and reject every request.
+_ENVELOPE_FIELDS: typ.Final[frozenset[str]] = frozenset({"kind", "correlation_id"})
+# Correlation identifiers are opaque and client-supplied, so cap their length to
+# keep the observability dimension bounded.
+_MAX_CORRELATION_ID_LENGTH: typ.Final[int] = 64
+
+
 @dc.dataclass(slots=True)
 class ParsedRequest:
-    """Parsed request containing payload and dispatch metadata."""
+    """Parsed request containing payload and dispatch metadata.
+
+    ``payload`` holds only the model body: the ``kind`` and ``correlation_id``
+    envelope fields are stripped during parsing and surfaced as attributes.
+    """
 
     payload: dict[str, typ.Any]
     kind: str
     validator: _RequestValidator
     processor: _RequestProcessor
+    correlation_id: str | None = None
 
     def validate(self) -> Invocation | PassthroughResult | None:
         """Run the validator associated with this request payload.
@@ -338,7 +356,33 @@ def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
     return None
 
 
+def _extract_correlation_id(payload: dict[str, typ.Any]) -> str | None:
+    """Return the bounded ``correlation_id`` envelope field, if usable.
+
+    Returns
+    -------
+    str or None
+        The identifier, or ``None`` when absent, empty, over-long, or not a
+        string. No server-side substitute is manufactured.
+    """
+    value = payload.get("correlation_id")
+    if isinstance(value, str) and 0 < len(value) <= _MAX_CORRELATION_ID_LENGTH:
+        return value
+    return None
+
+
 def _parse_payload(raw: bytes) -> ParsedRequest | None:
+    """Split a raw request into its envelope metadata and model body.
+
+    The ``kind`` and ``correlation_id`` envelope fields are removed from the
+    body so the model constructors only ever see their own fields.
+
+    Returns
+    -------
+    ParsedRequest or None
+        The parsed request, or ``None`` when the payload is undecodable or
+        names an unknown kind.
+    """
     payload = _decode_payload(raw)
     if payload is None:
         return None
@@ -349,13 +393,14 @@ def _parse_payload(raw: bytes) -> ParsedRequest | None:
         logger.error("Unknown IPC payload kind")
         return None
 
-    body = {key: value for key, value in payload.items() if key != "kind"}
+    body = {key: value for key, value in payload.items() if key not in _ENVELOPE_FIELDS}
     validator, processor = handler_entry
     return ParsedRequest(
         payload=body,
         kind=kind,
         validator=validator,
         processor=processor,
+        correlation_id=_extract_correlation_id(payload),
     )
 
 
@@ -377,47 +422,76 @@ class _DispatchRecord:
     outcome: _DispatchOutcome
     duration_ms: float
     error_category: str | None = None
+    correlation_id: str | None = None
+    transport: _observability.Transport | None = None
 
-    def as_extra(self) -> dict[str, str | float]:
-        """Render the record as structured logging fields.
+    def to_event(self) -> _observability.IPCEvent:
+        """Render the record as a shared observability event.
 
         Returns
         -------
-        dict[str, str | float]
-            Bounded fields for the dispatch log record.
+        _observability.IPCEvent
+            The bounded event describing this dispatch.
         """
-        extra: dict[str, str | float] = {
-            "operation": "ipc.dispatch",
-            "kind": self.kind,
-            "outcome": self.outcome,
-            "duration_ms": self.duration_ms,
-        }
+        return _observability.IPCEvent(
+            operation=DISPATCH_OPERATION,
+            transport=self.transport,
+            kind=self.kind,
+            outcome=self.outcome,
+            error_category=self.error_category,
+            duration_ms=self.duration_ms,
+            correlation_id=self.correlation_id,
+        )
+
+    def extra_fields(self) -> dict[str, str | int | float]:
+        """Return bounded fields the shared event does not model.
+
+        Returns
+        -------
+        dict[str, str | int | float]
+            The passthrough-only invocation identifier, when one exists.
+        """
         # Invocation requests carry no server-assigned identifier, so only
         # passthrough results contribute one; never manufacture a substitute.
         if isinstance(self.request, PassthroughResult):
-            extra["invocation_id"] = self.request.invocation_id
-        if self.error_category is not None:
-            extra["error_category"] = self.error_category
-        return extra
+            return {"invocation_id": self.request.invocation_id}
+        return {}
 
 
 def _emit_dispatch_outcome(record: _DispatchRecord) -> None:
     """Emit bounded metadata for one IPC dispatch outcome."""
-    logger.info("IPC dispatch outcome", extra=record.as_extra())
+    _observability.emit(
+        record.to_event(),
+        logger=logger,
+        extra=record.extra_fields(),
+        message=_DISPATCH_MESSAGE,
+    )
 
 
-def _elapsed_ms(started: float) -> float:
-    """Return milliseconds elapsed since the *started* monotonic reading.
+def _resolve_correlation_id(
+    parsed: ParsedRequest, obj: Invocation | PassthroughResult | None
+) -> str | None:
+    """Return the identifier correlating this dispatch with the client record.
+
+    Older shims omit the envelope field, so fall back to the validated model's
+    ``invocation_id`` when it has one and omit the dimension otherwise.
 
     Returns
     -------
-    float
-        Elapsed duration in milliseconds.
+    str or None
+        The correlation identifier, or ``None`` when none is available.
     """
-    return (time.perf_counter() - started) * 1000.0
+    if parsed.correlation_id is not None:
+        return parsed.correlation_id
+    invocation_id = getattr(obj, "invocation_id", None)
+    return invocation_id if isinstance(invocation_id, str) else None
 
 
-def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | None:
+def _request_pipeline(
+    server: _BaseIPCServer[typ.Any],
+    raw: bytes,
+    transport: _observability.Transport | None = None,
+) -> bytes | None:
     """Parse, validate, dispatch, and encode an IPC request in order.
 
     Returns
@@ -440,8 +514,10 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
                 kind=parsed.kind,
                 request=None,
                 outcome="invalid_request",
-                duration_ms=_elapsed_ms(started),
+                duration_ms=_observability.elapsed_ms(started),
                 error_category="ValidationError",
+                correlation_id=parsed.correlation_id,
+                transport=transport,
             )
         )
         return None
@@ -455,8 +531,10 @@ def _request_pipeline(server: _BaseIPCServer[typ.Any], raw: bytes) -> bytes | No
             kind=parsed.kind,
             request=obj,
             outcome=outcome,
-            duration_ms=_elapsed_ms(started),
+            duration_ms=_observability.elapsed_ms(started),
             error_category=error_category,
+            correlation_id=_resolve_correlation_id(parsed, obj),
+            transport=transport,
         )
     )
     return _encode_response(response)

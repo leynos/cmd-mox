@@ -23,6 +23,19 @@ if typ.TYPE_CHECKING:
 
 pytestmark = [pytest.mark.requires_unix_sockets]
 
+# Structured-field names that must never appear on an emitted record. The
+# stdlib ``LogRecord`` owns ``args``, so command arguments are guarded by the
+# value scan in :func:`_assert_bounded_fields` instead.
+_NEVER_LOGGED_KEYS: frozenset[str] = frozenset({
+    "command",
+    "env",
+    "payload",
+    "socket_path",
+    "stderr",
+    "stdin",
+    "stdout",
+})
+
 
 @pytest.fixture
 def echo_handler() -> cabc.Callable[[Invocation], Response]:
@@ -89,16 +102,21 @@ def _assert_bounded_fields(
     """
     allowed = {
         "operation",
+        "transport",
         "kind",
         "outcome",
         "duration_ms",
         "invocation_id",
+        "correlation_id",
         "error_category",
     }
     emitted = {key: event[key] for key in allowed if key in event}
     rendered = " ".join(str(value) for value in emitted.values())
+    rendered += f" {event.get('msg', '')}"
     for secret in secrets:
         assert secret not in rendered, f"{secret!r} leaked into dispatch metadata"
+    banned = _NEVER_LOGGED_KEYS & set(event)
+    assert not banned, f"payload fields leaked as metadata: {sorted(banned)}"
 
 
 def test_request_pipeline_logs_successful_invocation_dispatch(
@@ -217,3 +235,113 @@ def test_request_pipeline_logs_handler_failure(
     [event] = _dispatch_events(caplog)
     assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
     assert event["outcome"] == "handler_error", "Wrong outcome"
+
+
+def test_request_pipeline_records_transport_and_correlation_id(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The dispatch record should carry the transport and envelope identifier."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    ipc_server = IPCServer(tmp_path / "ipc.sock")
+
+    response = _server_core._request_pipeline(
+        ipc_server,
+        json.dumps({
+            "kind": _server_core.KIND_INVOCATION,
+            "correlation_id": "corr-abc",
+            "command": "git",
+            "args": ["status"],
+            "stdin": "secret-stdin",
+            "env": {"TOKEN": "secret-env"},
+        }).encode(),
+        "unix",
+    )
+
+    assert response is not None, "Successful dispatch did not return a response"
+    [event] = _dispatch_events(caplog)
+    assert event["transport"] == "unix", "Wrong transport"
+    assert event["correlation_id"] == "corr-abc", "Wrong correlation id"
+    _assert_bounded_fields(event, ["git", "status", "secret-stdin", "secret-env"])
+
+
+def test_request_pipeline_omits_correlation_id_for_legacy_invocations(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Older shims omit the envelope field and invocations carry no identifier."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    ipc_server = IPCServer(tmp_path / "ipc.sock")
+
+    _server_core._request_pipeline(
+        ipc_server,
+        json.dumps({
+            "kind": _server_core.KIND_INVOCATION,
+            "command": "git",
+            "args": [],
+            "stdin": "",
+            "env": {},
+        }).encode(),
+    )
+
+    [event] = _dispatch_events(caplog)
+    assert "correlation_id" not in event, "No identifier may be manufactured"
+    assert "transport" not in event, "Unknown transport must be omitted"
+
+
+def test_request_pipeline_falls_back_to_model_invocation_id(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    echo_handler: cabc.Callable[[Invocation], Response],
+    passthrough_handler: cabc.Callable[[PassthroughResult], Response],
+) -> None:
+    """Without an envelope field the validated model supplies the identifier."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    ipc_server = IPCServer(
+        tmp_path / "ipc.sock",
+        handlers=IPCHandlers(
+            handler=echo_handler,
+            passthrough_handler=passthrough_handler,
+        ),
+    )
+
+    _server_core._request_pipeline(
+        ipc_server,
+        json.dumps({
+            "kind": _server_core.KIND_PASSTHROUGH_RESULT,
+            "invocation_id": "passthrough-123",
+            "stdout": "",
+            "stderr": "",
+            "exit_code": 0,
+        }).encode(),
+    )
+
+    [event] = _dispatch_events(caplog)
+    assert event["correlation_id"] == "passthrough-123", "Wrong correlation id"
+    assert event["invocation_id"] == "passthrough-123", "Wrong invocation id"
+
+
+@pytest.mark.parametrize(
+    "correlation_id",
+    [
+        pytest.param(17, id="not-a-string"),
+        pytest.param("", id="empty"),
+        pytest.param("x" * 65, id="over-long"),
+    ],
+)
+def test_parse_payload_rejects_unbounded_correlation_ids(
+    correlation_id: object,
+) -> None:
+    """Unusable envelope identifiers are dropped rather than logged."""
+    parsed = _server_core._parse_payload(
+        json.dumps({
+            "kind": _server_core.KIND_INVOCATION,
+            "correlation_id": correlation_id,
+            "command": "git",
+            "args": [],
+            "stdin": "",
+            "env": {},
+        }).encode()
+    )
+
+    assert parsed is not None, "Payload should still parse"
+    assert parsed.correlation_id is None, "Unbounded identifier must be dropped"
+    assert "correlation_id" not in parsed.payload, "Envelope field must be stripped"

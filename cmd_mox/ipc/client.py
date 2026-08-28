@@ -32,6 +32,7 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
+from . import _client_events, _observability
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
@@ -90,6 +91,24 @@ class RetryStrategy:
     on_failure: cabc.Callable[[int, Exception], None] | None = None
     should_retry: cabc.Callable[[Exception, int, int], bool] | None = None
     sleep: cabc.Callable[[float], None] = time.sleep
+
+
+@dc.dataclass(frozen=True, slots=True)
+class _ConnectionContext:
+    """Per-request connection parameters shared by both client transports.
+
+    Bundling the timeout, retry configuration, and correlation identifier keeps
+    the transport helpers within the project's argument-count limit and lets the
+    identifier reach the retry seam without widening any public signature.
+    """
+
+    timeout: float
+    retry_config: RetryConfig
+    correlation_id: str | None = None
+
+    def validate(self) -> None:
+        """Re-validate the retry configuration against the timeout."""
+        self.retry_config.validate(self.timeout)
 
 
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
@@ -352,8 +371,7 @@ def _run_blocking_io[T](
 
 def _connect_unix_with_retries(
     sock_path: Path,
-    timeout: float,
-    retry_config: RetryConfig,
+    context: _ConnectionContext,
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`.
 
@@ -362,12 +380,12 @@ def _connect_unix_with_retries(
     socket.socket
         The connected Unix domain socket.
     """
-    retry_config.validate(timeout)
+    context.validate()
     address = str(sock_path)
 
     def attempt_connect(_attempt: int) -> socket.socket:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
+        sock.settimeout(context.timeout)
         try:
             sock.connect(address)
         except OSError:
@@ -379,14 +397,15 @@ def _connect_unix_with_retries(
         logger.debug(
             "IPC connect attempt %d/%d to %s failed: %s",
             attempt + 1,
-            retry_config.retries,
+            context.retry_config.retries,
             address,
             exc,
         )
+        _client_events.emit_connect_retry("unix", attempt, exc, context.correlation_id)
 
     return retry_with_backoff(
         attempt_connect,
-        retry_config=retry_config,
+        retry_config=context.retry_config,
         strategy=RetryStrategy(on_failure=log_failure),
     )
 
@@ -428,10 +447,9 @@ def _read_all(sock: socket.socket) -> bytes:
 def _send_unix_request(
     sock_path: Path,
     payload: bytes,
-    timeout: float,
-    retry_config: RetryConfig,
+    context: _ConnectionContext,
 ) -> bytes:
-    with _connect_unix_with_retries(sock_path, timeout, retry_config) as client:
+    with _connect_unix_with_retries(sock_path, context) as client:
         client.sendall(payload)
         client.shutdown(socket.SHUT_WR)
         return _read_all(client)
@@ -503,22 +521,24 @@ def _create_pipe_handle(pipe_name: str) -> object:
 
 def _connect_pipe_with_retries(
     pipe_name: os.PathLike[str] | str,
-    timeout: float,
-    retry_config: RetryConfig,
+    context: _ConnectionContext,
     *,
     deadline: float | None = None,
 ) -> object:
-    retry_config.validate(timeout)
+    context.validate()
     pipe_name_str = os.fspath(pipe_name)
-    connect_deadline = deadline or _compute_deadline(timeout)
+    connect_deadline = deadline or _compute_deadline(context.timeout)
 
     def log_failure(attempt: int, exc: Exception) -> None:
         logger.debug(
             "IPC pipe connect attempt %d/%d to %s failed: %s",
             attempt + 1,
-            retry_config.retries,
+            context.retry_config.retries,
             pipe_name,
             exc,
+        )
+        _client_events.emit_connect_retry(
+            "named_pipe", attempt, exc, context.correlation_id
         )
 
     def sleep(delay: float) -> None:
@@ -530,7 +550,7 @@ def _connect_pipe_with_retries(
 
     return retry_with_backoff(
         lambda _attempt: _create_pipe_handle(pipe_name_str),
-        retry_config=retry_config,
+        retry_config=context.retry_config,
         strategy=RetryStrategy(
             on_failure=log_failure,
             should_retry=_should_retry_pipe_error,
@@ -542,15 +562,14 @@ def _connect_pipe_with_retries(
 def _send_pipe_request(
     sock_path: Path,
     payload: bytes,
-    timeout: float,
-    retry_config: RetryConfig,
+    context: _ConnectionContext,
 ) -> bytes:
     pipe_name = derive_pipe_name(sock_path)
+    timeout = context.timeout
     connect_deadline = _compute_deadline(timeout)
     handle = _connect_pipe_with_retries(
         pipe_name,
-        timeout,
-        retry_config,
+        context,
         deadline=connect_deadline,
     )
     closer = _HandleCloser(handle)
@@ -578,6 +597,76 @@ def _send_pipe_request(
         closer.close()
 
 
+def _build_request_envelope(kind: str, data: dict[str, typ.Any]) -> tuple[bytes, str]:
+    """Encode *data* as a request envelope of *kind*.
+
+    The envelope adds two fields alongside the model's own: ``kind`` and the
+    opaque ``correlation_id``. Both are stripped by the server before the body
+    is validated.
+
+    Returns
+    -------
+    tuple[bytes, str]
+        The encoded envelope and its correlation identifier.
+    """
+    correlation_id = _client_events.resolve_correlation_id(data)
+    payload = dict(data)
+    payload["kind"] = kind
+    payload["correlation_id"] = correlation_id
+    return json.dumps(payload).encode("utf-8"), correlation_id
+
+
+def _dispatch_request(payload: bytes, context: _ConnectionContext) -> bytes:
+    """Send *payload* over the transport this host uses.
+
+    Returns
+    -------
+    bytes
+        The raw response bytes returned by the server.
+    """
+    sock_path = _get_validated_socket_path()
+    if path_utils.IS_WINDOWS:
+        return _send_pipe_request(sock_path, payload, context)
+    return _send_unix_request(sock_path, payload, context)
+
+
+def _perform_request(
+    payload: bytes, kind: str, context: _ConnectionContext
+) -> Response:
+    """Send *payload*, emitting bounded request-lifecycle events.
+
+    Returns
+    -------
+    Response
+        The decoded server response.
+    """
+    started = time.perf_counter()
+    _client_events.RequestEvent(
+        kind=kind,
+        outcome="started",
+        correlation_id=context.correlation_id,
+        message_size=len(payload),
+    ).emit()
+    try:
+        response = _decode_response(_dispatch_request(payload, context))
+    except Exception as exc:
+        _client_events.RequestEvent(
+            kind=kind,
+            outcome="error",
+            correlation_id=context.correlation_id,
+            duration_ms=_observability.elapsed_ms(started),
+            error_category=type(exc).__name__,
+        ).emit()
+        raise
+    _client_events.RequestEvent(
+        kind=kind,
+        outcome="success",
+        correlation_id=context.correlation_id,
+        duration_ms=_observability.elapsed_ms(started),
+    ).emit()
+    return response
+
+
 def _send_request(
     kind: str,
     data: dict[str, typ.Any],
@@ -591,16 +680,13 @@ def _send_request(
     Response
         The decoded server response.
     """
-    retry = retry_config or RetryConfig()
-    sock_path = _get_validated_socket_path()
-    payload = dict(data)
-    payload["kind"] = kind
-    payload_bytes = json.dumps(payload).encode("utf-8")
-    if path_utils.IS_WINDOWS:
-        raw = _send_pipe_request(sock_path, payload_bytes, timeout, retry)
-    else:
-        raw = _send_unix_request(sock_path, payload_bytes, timeout, retry)
-    return _decode_response(raw)
+    payload_bytes, correlation_id = _build_request_envelope(kind, data)
+    context = _ConnectionContext(
+        timeout=timeout,
+        retry_config=retry_config or RetryConfig(),
+        correlation_id=correlation_id,
+    )
+    return _perform_request(payload_bytes, kind, context)
 
 
 def invoke_server(

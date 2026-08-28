@@ -328,7 +328,7 @@ class _NamedPipeState:
             raw = self._read_request(handle)
             if raw is None:
                 return
-            response_bytes = _request_pipeline(self.outer, raw)
+            response_bytes = _request_pipeline(self.outer, raw, "named_pipe")
             if response_bytes is not None:
                 write_pipe_payload(
                     handle,

@@ -7,7 +7,7 @@ import types
 import typing as typ
 from pathlib import Path
 
-from cmd_mox.ipc.client import RetryConfig, _send_pipe_request
+from cmd_mox.ipc.client import RetryConfig, _ConnectionContext, _send_pipe_request
 from cmd_mox.ipc.named_pipe import _NamedPipeState
 from cmd_mox.ipc.windows import Win32FileProtocol, read_pipe_message
 
@@ -86,8 +86,7 @@ def test_send_pipe_request_uses_shared_helpers(
     result = _send_pipe_request(
         Path("socket"),
         b"payload",
-        timeout=1.0,
-        retry_config=RetryConfig(),
+        _ConnectionContext(timeout=1.0, retry_config=RetryConfig()),
     )
 
     assert result == b"response"
@@ -112,8 +111,9 @@ def test_named_pipe_handler_uses_shared_helpers(
     def fake_write(handle_obj: object, payload: bytes, *, win32file: object) -> None:
         writes.append(payload)
 
-    def fake_process(_outer: object, raw: bytes) -> bytes:
+    def fake_process(_outer: object, raw: bytes, transport: str) -> bytes:
         assert raw == b"raw-request"
+        assert transport == "named_pipe"
         return b"processed"
 
     class _FakeWin32File:
