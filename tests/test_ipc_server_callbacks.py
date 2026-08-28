@@ -18,9 +18,9 @@ from cmd_mox.ipc import (
     PassthroughResult,
     Response,
     TimeoutConfig,
+    _server_core,
     invoke_server,
     report_passthrough_result,
-    server,
 )
 
 if typ.TYPE_CHECKING:
@@ -272,9 +272,9 @@ def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
 
 def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) -> None:
     """Invalid UTF-8 payloads should log and return ``None`` instead of raising."""
-    caplog.set_level("ERROR", logger="cmd_mox.ipc.server")
+    caplog.set_level("ERROR", logger="cmd_mox.ipc._server_core")
 
-    result = server._parse_payload(b"\xff\xfe")
+    result = _server_core._parse_payload(b"\xff\xfe")
 
     assert result is None, "Assertion failed"
     assert "malformed JSON" in caplog.text, "Assertion failed"
@@ -289,25 +289,25 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
     ),
     [
         (
-            server.KIND_PASSTHROUGH_RESULT,
+            _server_core.KIND_PASSTHROUGH_RESULT,
             {
                 "invocation_id": "abc",
                 "stdout": "out",
                 "stderr": "err",
                 "exit_code": 2,
             },
-            server.validate_passthrough_payload,
+            _server_core.validate_passthrough_payload,
             "handle_passthrough_result",
         ),
         (
-            server.KIND_INVOCATION,
+            _server_core.KIND_INVOCATION,
             {
                 "command": "ls",
                 "args": [],
                 "stdin": "",
                 "env": {},
             },
-            server.validate_invocation_payload,
+            _server_core.validate_invocation_payload,
             "handle_invocation",
         ),
     ],
@@ -315,7 +315,7 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
 def test_parse_payload_returns_handler_metadata(
     kind: str,
     payload: _RequestPayload,
-    expected_validator: server._RequestValidator,
+    expected_validator: _server_core._RequestValidator,
     expected_processor: str,
 ) -> None:
     """Parsed requests should carry handler metadata for pipeline steps.
@@ -324,7 +324,7 @@ def test_parse_payload_returns_handler_metadata(
     """
     raw = json.dumps({"kind": kind, **payload}).encode()
 
-    parsed = server._parse_payload(raw)
+    parsed = _server_core._parse_payload(raw)
 
     assert parsed is not None, "Assertion failed"
     assert parsed.kind == kind, "Assertion failed"
@@ -347,14 +347,14 @@ def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
     )
 
     raw = json.dumps({
-        "kind": server.KIND_INVOCATION,
+        "kind": _server_core.KIND_INVOCATION,
         "command": "echo",
         "args": [],
         "stdin": "",
         "env": {},
     }).encode()
 
-    response_bytes = server._request_pipeline(ipc_server, raw)
+    response_bytes = _server_core._request_pipeline(ipc_server, raw)
 
     assert response_bytes is not None, "Assertion failed"
     assert handled == ["echo"], "Assertion failed"
@@ -369,7 +369,7 @@ def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
     [
         (
             {
-                "kind": server.KIND_INVOCATION,
+                "kind": _server_core.KIND_INVOCATION,
                 "command": "echo",
                 "args": [],
                 "stdin": "",
@@ -379,7 +379,7 @@ def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
         ),
         (
             {
-                "kind": server.KIND_PASSTHROUGH_RESULT,
+                "kind": _server_core.KIND_PASSTHROUGH_RESULT,
                 "invocation_id": "abc",
                 "stdout": "",
                 "stderr": "",
@@ -397,7 +397,9 @@ def test_request_pipeline_dispatches_to_overridden_handlers(
     """Network request dispatch should honour overridden public handler hooks."""
     ipc_server = _OverridingIPCServer(tmp_path / "ipc.sock")
 
-    response_bytes = server._request_pipeline(ipc_server, json.dumps(payload).encode())
+    response_bytes = _server_core._request_pipeline(
+        ipc_server, json.dumps(payload).encode()
+    )
 
     assert response_bytes is not None, "Request pipeline did not return a response"
     response = json.loads(response_bytes.decode("utf-8"))
@@ -459,21 +461,21 @@ def test_request_pipeline_validation_failure_returns_none(
         return Response(stdout="ok")
 
     monkeypatch.setitem(
-        server._REQUEST_HANDLERS,
-        server.KIND_INVOCATION,
+        _server_core._REQUEST_HANDLERS,
+        _server_core.KIND_INVOCATION,
         (failing_validator, spy_processor),
     )
 
     ipc_server = IPCServer(tmp_path / "ipc.sock")
     raw = json.dumps({
-        "kind": server.KIND_INVOCATION,
+        "kind": _server_core.KIND_INVOCATION,
         "command": "echo",
         "args": [],
         "stdin": "",
         "env": {},
     }).encode()
 
-    response_bytes = server._request_pipeline(ipc_server, raw)
+    response_bytes = _server_core._request_pipeline(ipc_server, raw)
 
     assert response_bytes is None, "Assertion failed"
     assert calls == [], "Assertion failed"
@@ -481,9 +483,9 @@ def test_request_pipeline_validation_failure_returns_none(
 
 def test_decode_payload_rejects_non_mapping(caplog: pytest.LogCaptureFixture) -> None:
     """Non-object JSON should be rejected with a clear log entry."""
-    caplog.set_level("ERROR", logger="cmd_mox.ipc.server")
+    caplog.set_level("ERROR", logger="cmd_mox.ipc._server_core")
 
-    result = server._decode_payload(json.dumps([1, 2, 3]).encode())
+    result = _server_core._decode_payload(json.dumps([1, 2, 3]).encode())
 
     assert result is None, "Non-object JSON unexpectedly produced a payload mapping"
     assert "IPC payload is not a mapping" in caplog.text, (
@@ -497,7 +499,7 @@ def test_encode_response_serialises_response_fields(
     """Response encoding should produce JSON bytes matching the model."""
     response = Response(stdout="out", stderr="err", exit_code=5, env={"KEY": "VAL"})
 
-    encoded = server._encode_response(response)
+    encoded = _server_core._encode_response(response)
     payload = json.loads(encoded.decode("utf-8"))
 
     assert payload == snapshot, "Encoded IPC response payload changed"
@@ -507,10 +509,10 @@ def test_request_pipeline_rejects_unknown_kind(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Unknown IPC kinds should be logged and ignored without dispatch."""
-    caplog.set_level("ERROR", logger="cmd_mox.ipc.server")
+    caplog.set_level("ERROR", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    response = server._request_pipeline(
+    response = _server_core._request_pipeline(
         ipc_server,
         json.dumps({"kind": "mystery"}).encode(),
     )

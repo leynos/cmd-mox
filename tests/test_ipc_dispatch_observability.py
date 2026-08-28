@@ -13,7 +13,7 @@ from cmd_mox.ipc import (
     IPCServer,
     PassthroughResult,
     Response,
-    server,
+    _server_core,
 )
 
 if typ.TYPE_CHECKING:
@@ -105,13 +105,13 @@ def test_request_pipeline_logs_successful_invocation_dispatch(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Successful invocation dispatch should emit bounded metadata."""
-    caplog.set_level("INFO", logger="cmd_mox.ipc.server")
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    response = server._request_pipeline(
+    response = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
-            "kind": server.KIND_INVOCATION,
+            "kind": _server_core.KIND_INVOCATION,
             "command": "git",
             "args": ["status"],
             "stdin": "secret-stdin",
@@ -122,7 +122,7 @@ def test_request_pipeline_logs_successful_invocation_dispatch(
     assert response is not None, "Successful dispatch did not return a response"
     [event] = _dispatch_events(caplog)
     assert event["operation"] == "ipc.dispatch", "Wrong operation"
-    assert event["kind"] == server.KIND_INVOCATION, "Wrong request kind"
+    assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
     assert event["outcome"] == "success", "Wrong dispatch outcome"
     assert "invocation_id" not in event, "Invocation ID must be omitted"
     assert "error_category" not in event, "Success must not include an error"
@@ -137,7 +137,7 @@ def test_request_pipeline_logs_successful_passthrough_dispatch(
     passthrough_handler: cabc.Callable[[PassthroughResult], Response],
 ) -> None:
     """Successful passthrough dispatch should include its invocation ID."""
-    caplog.set_level("INFO", logger="cmd_mox.ipc.server")
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(
         tmp_path / "ipc.sock",
         handlers=IPCHandlers(
@@ -146,10 +146,10 @@ def test_request_pipeline_logs_successful_passthrough_dispatch(
         ),
     )
 
-    response = server._request_pipeline(
+    response = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
-            "kind": server.KIND_PASSTHROUGH_RESULT,
+            "kind": _server_core.KIND_PASSTHROUGH_RESULT,
             "invocation_id": "passthrough-123",
             "stdout": "secret-stdout",
             "stderr": "secret-stderr",
@@ -159,7 +159,7 @@ def test_request_pipeline_logs_successful_passthrough_dispatch(
 
     assert response is not None, "Successful dispatch did not return a response"
     [event] = _dispatch_events(caplog)
-    assert event["kind"] == server.KIND_PASSTHROUGH_RESULT, "Wrong kind"
+    assert event["kind"] == _server_core.KIND_PASSTHROUGH_RESULT, "Wrong kind"
     assert event["invocation_id"] == "passthrough-123", "Wrong ID"
     assert event["outcome"] == "success", "Wrong dispatch outcome"
     assert "error_category" not in event, "Success must not include an error"
@@ -171,17 +171,17 @@ def test_request_pipeline_logs_invalid_request(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Invalid requests should emit a bounded validation outcome."""
-    caplog.set_level("INFO", logger="cmd_mox.ipc.server")
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    response = server._request_pipeline(
+    response = _server_core._request_pipeline(
         ipc_server,
-        json.dumps({"kind": server.KIND_INVOCATION}).encode(),
+        json.dumps({"kind": _server_core.KIND_INVOCATION}).encode(),
     )
 
     assert response is None, "Invalid request unexpectedly produced a response"
     [event] = _dispatch_events(caplog)
-    assert event["kind"] == server.KIND_INVOCATION, "Wrong request kind"
+    assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
     assert event["outcome"] == "invalid_request", "Wrong outcome"
     assert event["error_category"] == "ValidationError", "Wrong error"
     assert "invocation_id" not in event, "Invocation ID must be omitted"
@@ -192,7 +192,7 @@ def test_request_pipeline_logs_handler_failure(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Handler failures should emit only a bounded error category."""
-    caplog.set_level("INFO", logger="cmd_mox.ipc.server")
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
 
     def failing_handler(_invocation: Invocation) -> Response:
         msg = "handler failure"
@@ -202,10 +202,10 @@ def test_request_pipeline_logs_handler_failure(
         tmp_path / "ipc.sock",
         handlers=IPCHandlers(handler=failing_handler),
     )
-    response = server._request_pipeline(
+    response = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
-            "kind": server.KIND_INVOCATION,
+            "kind": _server_core.KIND_INVOCATION,
             "command": "git",
             "args": [],
             "stdin": "",
@@ -215,5 +215,5 @@ def test_request_pipeline_logs_handler_failure(
 
     assert response is not None, "Handler failure did not return an error response"
     [event] = _dispatch_events(caplog)
-    assert event["kind"] == server.KIND_INVOCATION, "Wrong request kind"
+    assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
     assert event["outcome"] == "handler_error", "Wrong outcome"

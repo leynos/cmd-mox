@@ -15,14 +15,13 @@ import typing as typ
 import pytest
 
 from cmd_mox import _path_utils as path_utils
-from cmd_mox.ipc import named_pipe
+from cmd_mox.ipc import TimeoutConfig, named_pipe
 from cmd_mox.ipc.models import Invocation, PassthroughResult, Response
 from cmd_mox.ipc.named_pipe import (
     CallbackNamedPipeServer,
     NamedPipeServer,
     _NamedPipeState,
 )
-from cmd_mox.ipc.server import TimeoutConfig
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
     ERROR_FILE_NOT_FOUND,

@@ -1,5 +1,6 @@
 """Public interface for IPC server/client helpers."""
 
+from ._server_core import IPCHandlers, TimeoutConfig
 from .client import (
     DEFAULT_CONNECT_BACKOFF,
     DEFAULT_CONNECT_JITTER,
@@ -19,14 +20,8 @@ from .constants import (
     MESSAGE_KINDS,
 )
 from .models import Invocation, PassthroughRequest, PassthroughResult, Response
-from .server import (
-    CallbackIPCServer,
-    CallbackNamedPipeServer,
-    IPCHandlers,
-    IPCServer,
-    NamedPipeServer,
-    TimeoutConfig,
-)
+from .named_pipe import CallbackNamedPipeServer, NamedPipeServer
+from .server import CallbackIPCServer, IPCServer
 
 __all__ = [
     "DEFAULT_CONNECT_BACKOFF",

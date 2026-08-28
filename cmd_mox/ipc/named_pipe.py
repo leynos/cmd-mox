@@ -23,7 +23,12 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
-from .server import IPCHandlers, TimeoutConfig, _BaseIPCServer, _request_pipeline
+from ._server_core import (
+    IPCHandlers,
+    TimeoutConfig,
+    _BaseIPCServer,
+    _request_pipeline,
+)
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
