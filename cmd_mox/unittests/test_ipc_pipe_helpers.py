@@ -11,10 +11,12 @@ import pytest
 from cmd_mox.ipc.client import RetryConfig, _ConnectionContext, _send_pipe_request
 from cmd_mox.ipc.named_pipe import _NamedPipeState
 from cmd_mox.ipc.windows import (
+    ERROR_BROKEN_PIPE,
     ERROR_MORE_DATA,
     PipeMessageTooLargeError,
     PipeReadOptions,
     Win32FileProtocol,
+    _read_pipe_chunk,
     read_pipe_message,
 )
 
@@ -238,6 +240,42 @@ def test_read_pipe_message_rejects_oversized_multi_chunk_message() -> None:
     assert excinfo.value.limit == 8, "limit not reported"
     assert not win32file.responses, "reader stopped before the final chunk"
     assert "abcd" not in str(excinfo.value), "message data leaked into the error"
+
+
+class _FakeWinError(Exception):
+    """Minimal ``pywintypes.error`` double carrying a Windows error code."""
+
+    def __init__(self, winerror: int) -> None:
+        super().__init__(winerror)
+        self.winerror = winerror
+
+
+def test_read_pipe_chunk_reports_peer_disconnection() -> None:
+    """A broken pipe ends the read rather than propagating."""
+
+    def reader(_size: int) -> tuple[int, bytes]:
+        raise _FakeWinError(ERROR_BROKEN_PIPE)
+
+    result = _read_pipe_chunk(
+        reader, 4, pywintypes=types.SimpleNamespace(error=_FakeWinError)
+    )
+
+    assert result is None, "a broken pipe should signal completion"
+
+
+def test_read_pipe_chunk_propagates_unexpected_errors() -> None:
+    """Any other Windows error reaches the caller unchanged."""
+    unexpected = 1234
+
+    def reader(_size: int) -> tuple[int, bytes]:
+        raise _FakeWinError(unexpected)
+
+    with pytest.raises(_FakeWinError) as excinfo:
+        _read_pipe_chunk(
+            reader, 4, pywintypes=types.SimpleNamespace(error=_FakeWinError)
+        )
+
+    assert excinfo.value.winerror == unexpected, "wrong error propagated"
 
 
 def test_read_pipe_message_uses_the_injected_reader() -> None:

@@ -16,6 +16,11 @@ if typ.TYPE_CHECKING:
 #: as :func:`win32file.ReadFile` would.
 type PipeChunkReader = cabc.Callable[[int], tuple[int, bytes]]
 
+#: One chunk read outcome: ``(status, data)``, or ``None`` once the peer has
+#: disconnected. Private to :func:`_read_pipe_chunk`; not part of the public
+#: surface.
+type PipeReadResult = tuple[int, bytes] | None
+
 WINDOWS_PIPE_PREFIX: typ.Final[str] = r"\\.\pipe\cmdmox-"
 PIPE_CHUNK_SIZE: typ.Final[int] = 64 * 1024
 # Largest IPC message the transport will buffer for a single client. A real
@@ -172,6 +177,27 @@ def _continue_reading(status: int) -> bool:
     return False
 
 
+def _read_pipe_chunk(
+    read_chunk: PipeChunkReader,
+    chunk_size: int,
+    *,
+    pywintypes: PyWinTypesProtocol,
+) -> PipeReadResult:
+    """Read one pipe chunk and handle peer disconnection.
+
+    Returns
+    -------
+    PipeReadResult
+        The ``(status, data)`` pair, or ``None`` when the peer disconnected.
+    """
+    try:
+        return read_chunk(chunk_size)
+    except pywintypes.error as exc:
+        if exc.winerror == ERROR_BROKEN_PIPE:
+            return None
+        raise
+
+
 def read_pipe_message(
     handle: object,
     *,
@@ -205,12 +231,10 @@ def read_pipe_message(
     chunks: list[bytes] = []
     received = 0
     while True:
-        try:
-            status, data = read_chunk(options.chunk_size)
-        except pywintypes.error as exc:
-            if exc.winerror == ERROR_BROKEN_PIPE:
-                break
-            raise
+        result = _read_pipe_chunk(read_chunk, options.chunk_size, pywintypes=pywintypes)
+        if result is None:
+            break
+        status, data = result
         received += len(data)
         if received > options.max_bytes:
             # Drop the buffered prefix: the message is already unusable, and
