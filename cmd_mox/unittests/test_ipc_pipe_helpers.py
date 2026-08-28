@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import threading
 import types
-import typing as typ
 from pathlib import Path
+
+import pytest
 
 from cmd_mox.ipc.client import RetryConfig, _ConnectionContext, _send_pipe_request
 from cmd_mox.ipc.named_pipe import _NamedPipeState
-from cmd_mox.ipc.windows import Win32FileProtocol, read_pipe_message
+from cmd_mox.ipc.windows import (
+    ERROR_MORE_DATA,
+    PipeMessageTooLargeError,
+    PipeReadOptions,
+    Win32FileProtocol,
+    read_pipe_message,
+)
 
-if typ.TYPE_CHECKING:
-    import pytest
+
+class _UnusedError(Exception):
+    """Placeholder ``pywintypes.error`` for readers that never raise."""
 
 
 class _FakeWin32File(Win32FileProtocol):
@@ -69,7 +77,7 @@ def test_send_pipe_request_uses_shared_helpers(
         writes.append((h, payload, win32file))
 
     def fake_read(
-        h: object, *, win32file: object, pywintypes: object, chunk_size: int
+        h: object, *, win32file: object, pywintypes: object, options: object
     ) -> bytes:
         return b"response"
 
@@ -181,3 +189,71 @@ def test_named_pipe_server_signals_ready_when_accept_creation_fails(
     assert "Named pipe accept failed" in caplog.text, (
         "Pipe creation failure was not logged with the accept-loop context"
     )
+
+
+@pytest.mark.parametrize(
+    ("chunks", "max_bytes", "expected"),
+    [
+        ([b"abcd", b"efgh"], 8, b"abcdefgh"),
+        ([b"abcd", b"efg"], 8, b"abcdefg"),
+        ([b"a"], 1, b"a"),
+    ],
+    ids=["exactly-at-limit", "below-limit", "single-byte-limit"],
+)
+def test_read_pipe_message_accepts_messages_within_the_limit(
+    chunks: list[bytes], max_bytes: int, expected: bytes
+) -> None:
+    """A message at or below the limit is returned in full."""
+    responses: list[object] = [(ERROR_MORE_DATA, chunk) for chunk in chunks[:-1]]
+    responses.append((0, chunks[-1]))
+    win32file = _FakeWin32File(responses)
+
+    payload = read_pipe_message(
+        object(),
+        win32file=win32file,
+        pywintypes=types.SimpleNamespace(error=_UnusedError),
+        options=PipeReadOptions(chunk_size=4, max_bytes=max_bytes),
+    )
+
+    assert payload == expected, "bounded read altered an in-limit message"
+
+
+def test_read_pipe_message_rejects_oversized_multi_chunk_message() -> None:
+    """A multi-chunk message beyond the limit is refused, not buffered."""
+    win32file = _FakeWin32File([
+        (ERROR_MORE_DATA, b"abcd"),
+        (ERROR_MORE_DATA, b"efgh"),
+        (0, b"ijkl"),
+    ])
+
+    with pytest.raises(PipeMessageTooLargeError) as excinfo:
+        read_pipe_message(
+            object(),
+            win32file=win32file,
+            pywintypes=types.SimpleNamespace(error=_UnusedError),
+            options=PipeReadOptions(chunk_size=4, max_bytes=8),
+        )
+
+    assert excinfo.value.received == 12, "byte count not reported"
+    assert excinfo.value.limit == 8, "limit not reported"
+    assert not win32file.responses, "reader stopped before the final chunk"
+    assert "abcd" not in str(excinfo.value), "message data leaked into the error"
+
+
+def test_read_pipe_message_uses_the_injected_reader() -> None:
+    """A supplied reader replaces the synchronous ``ReadFile`` call."""
+    seen: list[int] = []
+
+    def reader(size: int) -> tuple[int, bytes]:
+        seen.append(size)
+        return 0, b"payload"
+
+    payload = read_pipe_message(
+        object(),
+        win32file=_FakeWin32File([]),
+        pywintypes=types.SimpleNamespace(error=_UnusedError),
+        options=PipeReadOptions(chunk_size=17, read_chunk=reader),
+    )
+
+    assert payload == b"payload", "injected reader was not used"
+    assert seen == [17], "chunk size was not forwarded to the reader"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import importlib
 import logging
 import threading
@@ -13,16 +14,31 @@ from cmd_mox import _path_utils as path_utils
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
     ERROR_FILE_NOT_FOUND,
+    ERROR_IO_PENDING,
+    ERROR_MORE_DATA,
     ERROR_NO_DATA,
     ERROR_OPERATION_ABORTED,
     ERROR_PIPE_BUSY,
     ERROR_PIPE_CONNECTED,
+    MAX_MESSAGE_SIZE,
     PIPE_CHUNK_SIZE,
+    PipeMessageTooLargeError,
+    PipeReadOptions,
     derive_pipe_name,
     read_pipe_message,
     write_pipe_payload,
 )
 
+from . import _observability
+from ._named_pipe_limits import (
+    CLIENT_READ_TIMEOUT_SECONDS,
+    MAX_ACTIVE_CLIENTS,
+    ClientSlot,
+    PipeReadCancelled,
+    WorkerEvent,
+    acquire_client_slot,
+    emit_worker_event,
+)
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -39,6 +55,7 @@ if typ.TYPE_CHECKING:
 if path_utils.IS_WINDOWS:  # pragma: win32-only
     try:
         pywintypes = importlib.import_module("pywintypes")
+        win32event = importlib.import_module("win32event")
         win32file = importlib.import_module("win32file")
         win32pipe = importlib.import_module("win32pipe")
     except ModuleNotFoundError as exc:  # pragma: no cover - import guard
@@ -46,6 +63,7 @@ if path_utils.IS_WINDOWS:  # pragma: win32-only
         raise RuntimeError(msg) from exc
 else:  # pragma: no cover - non-Windows fallback for type-checkers
     pywintypes = typ.cast("typ.Any", None)
+    win32event = typ.cast("typ.Any", None)
     win32file = typ.cast("typ.Any", None)
     win32pipe = typ.cast("typ.Any", None)
 
@@ -131,7 +149,32 @@ class CallbackNamedPipeServer(NamedPipeServer):
 
 
 class _NamedPipeState:
-    """Stateful helper managing named-pipe connections and worker threads."""
+    """Stateful helper managing named-pipe connections and worker threads.
+
+    Concurrency, message size, and client lifetime are all bounded here:
+
+    * at most :data:`MAX_ACTIVE_CLIENTS` workers run at once, enforced by a
+      :class:`threading.BoundedSemaphore` acquired before a worker is spawned;
+    * a request may not exceed :data:`~cmd_mox.ipc.windows.MAX_MESSAGE_SIZE`;
+    * a client has :data:`CLIENT_READ_TIMEOUT_SECONDS` to deliver its request.
+
+    Cancellation design
+    -------------------
+    Pipe instances are created with ``FILE_FLAG_OVERLAPPED`` and every blocking
+    operation (``ConnectNamedPipe`` and ``ReadFile``) is issued asynchronously,
+    then awaited with ``WaitForMultipleObjects`` on the operation's event *and*
+    a Win32 shutdown event. A deadline or a :meth:`stop` therefore wakes the
+    waiting thread itself, which cancels the request with ``CancelIoEx`` and
+    drains it with ``GetOverlappedResult`` before releasing the buffer. This is
+    preferred to a watchdog thread because the blocked thread performs its own
+    cancellation and unwinds, so no thread is ever left stranded in the kernel,
+    and to a plain synchronous read because a synchronous ``ReadFile`` cannot
+    be given a deadline from within its own thread.
+
+    ``ConnectNamedPipe`` must be issued with an ``OVERLAPPED`` on an overlapped
+    handle: passing ``None`` there is documented to report completion
+    incorrectly, so the accept path awaits the connect event explicitly.
+    """
 
     def __init__(
         self,
@@ -146,6 +189,95 @@ class _NamedPipeState:
         self.ready_event = threading.Event()
         self._client_threads: set[threading.Thread] = set()
         self._client_lock = threading.Lock()
+        self._client_slots = threading.BoundedSemaphore(MAX_ACTIVE_CLIENTS)
+        self._stop_handle: object | None = None
+        self._stop_handle_lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Overlapped I/O plumbing
+    # ------------------------------------------------------------------
+
+    def _win32_stop_handle(self) -> object:
+        """Return the Win32 event signalled when the server stops.
+
+        The handle is created lazily so that constructing the state object
+        stays possible on platforms without ``pywin32``.
+
+        Returns
+        -------
+        object
+            A manual-reset Win32 event handle, already signalled when
+            :meth:`stop` has run.
+        """
+        with self._stop_handle_lock:
+            if self._stop_handle is None:
+                # CreateEvent(security, manual_reset, initial_state, name).
+                self._stop_handle = win32event.CreateEvent(
+                    None,
+                    True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
+                    False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
+                    None,
+                )
+                if self.stop_event.is_set():
+                    win32event.SetEvent(self._stop_handle)
+            return self._stop_handle
+
+    @staticmethod
+    def _create_overlapped() -> tuple[typ.Any, object]:
+        """Build an ``OVERLAPPED`` with a dedicated manual-reset event.
+
+        Returns
+        -------
+        tuple[typing.Any, object]
+            The overlapped structure and its event handle. The caller owns the
+            event and must close it.
+        """
+        overlapped = pywintypes.OVERLAPPED()
+        # CreateEvent(security, manual_reset, initial_state, name).
+        event = win32event.CreateEvent(
+            None,
+            True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
+            False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
+            None,
+        )
+        overlapped.hEvent = event
+        return overlapped, event
+
+    @staticmethod
+    def _cancel_overlapped(handle: object, overlapped: object) -> None:
+        """Cancel a pending overlapped operation and wait for it to settle.
+
+        Draining with ``GetOverlappedResult`` before the caller releases the
+        buffer guarantees the kernel is no longer writing into it.
+        """
+        with contextlib.suppress(pywintypes.error):
+            win32file.CancelIoEx(handle, overlapped)
+        with contextlib.suppress(pywintypes.error):
+            # GetOverlappedResult(handle, overlapped, wait).
+            win32file.GetOverlappedResult(
+                handle,
+                overlapped,
+                True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
+            )
+
+    def _wait_for_overlapped(self, event: object, timeout_ms: int) -> int:
+        """Wait for *event* or shutdown, whichever comes first.
+
+        Returns
+        -------
+        int
+            The ``WaitForMultipleObjects`` result code.
+        """
+        # WaitForMultipleObjects(handles, wait_all, timeout_ms).
+        return win32event.WaitForMultipleObjects(
+            [event, self._win32_stop_handle()],
+            False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
+            timeout_ms,
+        )
+
+    # ------------------------------------------------------------------
+    # Accept loop
+    # ------------------------------------------------------------------
 
     def _try_connect_pipe(self, handle: object) -> tuple[bool, bool]:
         """Attempt to connect *handle* to the named pipe.
@@ -156,8 +288,41 @@ class _NamedPipeState:
             ``(keep_serving, connected)``: whether the accept loop should
             continue, and whether a client is now attached to *handle*.
         """
+        overlapped, event = self._create_overlapped()
         try:
-            win32pipe.ConnectNamedPipe(handle, None)
+            try:
+                status = win32pipe.ConnectNamedPipe(handle, overlapped)
+            except pywintypes.error as exc:
+                return self._handle_connection_error(exc, handle)
+            if status == ERROR_IO_PENDING:
+                return self._await_connection(handle, overlapped, event)
+            return True, True
+        finally:
+            win32file.CloseHandle(event)
+
+    def _await_connection(
+        self, handle: object, overlapped: object, event: object
+    ) -> tuple[bool, bool]:
+        """Block until a client attaches to *handle* or the server stops.
+
+        Returns
+        -------
+        tuple[bool, bool]
+            ``(keep_serving, connected)`` for the accept loop.
+        """
+        if self._wait_for_overlapped(event, win32event.INFINITE) != (
+            win32event.WAIT_OBJECT_0
+        ):
+            self._cancel_overlapped(handle, overlapped)
+            self._close_handle(handle)
+            return False, False
+        try:
+            # GetOverlappedResult(handle, overlapped, wait).
+            win32file.GetOverlappedResult(
+                handle,
+                overlapped,
+                True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
+            )
         except pywintypes.error as exc:
             return self._handle_connection_error(exc, handle)
         return True, True
@@ -191,16 +356,67 @@ class _NamedPipeState:
     def _close_handle(handle: object) -> None:
         win32file.CloseHandle(handle)
 
-    def _spawn_handler_thread(self, handle: object) -> None:
-        """Create and track the per-client handler thread."""
+    @staticmethod
+    def _dispose_handle(handle: object) -> None:
+        """Disconnect and close a client *handle*, tolerating pipe errors.
+
+        Closing is tolerant because the cancel-and-drain path may already have
+        closed the handle; a second close must not escape a worker thread.
+        """
+        with contextlib.suppress(pywintypes.error):
+            win32pipe.DisconnectNamedPipe(handle)
+        with contextlib.suppress(pywintypes.error):
+            win32file.CloseHandle(handle)
+
+    def _admit_client(self, handle: object) -> None:
+        """Hand *handle* to a worker thread, or refuse it when at capacity.
+
+        Refusal is never fatal to the accept loop: the handle is disposed of
+        and serving continues.
+        """
+        slot = acquire_client_slot(self._client_slots)
+        if slot is None:
+            emit_worker_event(
+                WorkerEvent("rejected", error_category="ClientLimitReached")
+            )
+            self._dispose_handle(handle)
+            return
+        try:
+            self._spawn_handler_thread(handle, slot)
+        except RuntimeError:
+            # The interpreter refused a new thread, so the worker will never
+            # run and cannot release the permit; do it here instead.
+            logger.exception("Named pipe handler thread could not start")
+            slot.release()
+            emit_worker_event(
+                WorkerEvent("rejected", error_category="ThreadStartFailed")
+            )
+            self._dispose_handle(handle)
+
+    def _spawn_handler_thread(
+        self, handle: object, slot: ClientSlot | None = None
+    ) -> None:
+        """Create and track the per-client handler thread.
+
+        Raises
+        ------
+        RuntimeError
+            If the interpreter cannot start a new thread. The thread is
+            untracked again before the error propagates.
+        """
         thread = threading.Thread(
             target=self._handle_client,
-            args=(handle,),
+            args=(handle, slot),
             daemon=True,
         )
         with self._client_lock:
             self._client_threads.add(thread)
-        thread.start()
+        try:
+            thread.start()
+        except RuntimeError:
+            with self._client_lock:
+                self._client_threads.discard(thread)
+            raise
 
     def _get_active_threads(self) -> list[threading.Thread]:
         """Get a snapshot of active client threads.
@@ -287,14 +503,29 @@ class _NamedPipeState:
                 win32file.CloseHandle(handle)
                 break
 
-            self._spawn_handler_thread(handle)
+            self._admit_client(handle)
 
     def stop(self) -> None:
         if self.stop_event.is_set():
             return
         self.stop_event.set()
         self.ready_event.set()
+        self._signal_stop_handle()
+        # The Win32 event already unblocks the accept wait and any active read;
+        # the poke remains as a cheap belt-and-braces wakeup for a pipe instance
+        # created before the shutdown event existed.
         self._poke_pipe()
+
+    def _signal_stop_handle(self) -> None:
+        """Wake any thread waiting on the Win32 shutdown event.
+
+        A handle created after this point observes the already-set Python
+        event and is signalled at creation, so no wakeup can be lost.
+        """
+        with self._stop_handle_lock:
+            handle = self._stop_handle
+        if handle is not None:
+            win32event.SetEvent(handle)
 
     def join_clients(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
@@ -311,7 +542,11 @@ class _NamedPipeState:
         timeout_ms = max(1, int(self.accept_timeout * 1000))
         return win32pipe.CreateNamedPipe(
             self.pipe_name,
-            win32pipe.PIPE_ACCESS_DUPLEX,
+            # Overlapped I/O is mandatory for cancellation: an overlapped read
+            # issued on a synchronous handle completes synchronously, so
+            # CancelIoEx would have nothing to cancel and the deadline could
+            # not be enforced.
+            win32pipe.PIPE_ACCESS_DUPLEX | win32file.FILE_FLAG_OVERLAPPED,
             win32pipe.PIPE_TYPE_MESSAGE
             | win32pipe.PIPE_READMODE_MESSAGE
             | win32pipe.PIPE_WAIT,
@@ -322,37 +557,229 @@ class _NamedPipeState:
             None,
         )
 
-    def _handle_client(self, handle: object) -> None:
+    def _handle_client(self, handle: object, slot: ClientSlot | None = None) -> None:
+        """Serve one client, always disposing of its handle and permit.
+
+        The ``finally`` block is the single release point for *slot*, so every
+        exit path — success, handler error, read failure, oversize rejection,
+        timeout, and shutdown — returns exactly one permit.
+        """
         thread = threading.current_thread()
+        started = time.perf_counter()
+        emit_worker_event(WorkerEvent("admitted"))
+        try:
+            self._serve_one_request(handle, started)
+        finally:
+            # Disposal is nested so that a failing CloseHandle - plausible when
+            # the cancel-and-drain path has already closed the handle - cannot
+            # skip the permit release and leak capacity permanently.
+            try:
+                self._dispose_handle(handle)
+            finally:
+                with self._client_lock:
+                    self._client_threads.discard(thread)
+                if slot is not None:
+                    slot.release()
+
+    def _serve_one_request(self, handle: object, started: float) -> None:
+        """Read, dispatch, and answer one request, emitting its outcome."""
         try:
             raw = self._read_request(handle)
-            if raw is None:
-                return
-            response_bytes = _request_pipeline(self.outer, raw, "named_pipe")
-            if response_bytes is not None:
-                write_pipe_payload(
-                    handle,
-                    response_bytes,
-                    win32file=win32file,
+            if raw is not None:
+                response_bytes = _request_pipeline(self.outer, raw, "named_pipe")
+                if response_bytes is not None:
+                    write_pipe_payload(handle, response_bytes, win32file=win32file)
+        except PipeMessageTooLargeError as exc:
+            # The limit trips before any envelope is parsed, so no correlation
+            # id exists; only the byte count is reported, never the bytes.
+            emit_worker_event(
+                WorkerEvent(
+                    "read_size_rejected",
+                    error_category="PipeMessageTooLargeError",
+                    message_size=exc.received,
                 )
+            )
+        except PipeReadCancelled as exc:
+            emit_worker_event(self._cancellation_event(exc, started))
         except pywintypes.error as exc:
             if exc.winerror not in {ERROR_BROKEN_PIPE, ERROR_NO_DATA}:
                 logger.exception("Named pipe handler failed")
-        finally:
-            with contextlib.suppress(pywintypes.error):
-                win32pipe.DisconnectNamedPipe(handle)
-            win32file.CloseHandle(handle)
-            with self._client_lock:
-                self._client_threads.discard(thread)
+            emit_worker_event(
+                WorkerEvent(
+                    "completed",
+                    error_category=self._pipe_error_category(exc),
+                    duration_ms=_observability.elapsed_ms(started),
+                )
+            )
+        else:
+            emit_worker_event(
+                WorkerEvent("completed", duration_ms=_observability.elapsed_ms(started))
+            )
 
     @staticmethod
-    def _read_request(handle: object) -> bytes | None:
+    def _cancellation_event(exc: PipeReadCancelled, started: float) -> WorkerEvent:
+        """Describe a cancelled read as a bounded worker event.
+
+        Returns
+        -------
+        WorkerEvent
+            A ``timeout`` event when the deadline expired, otherwise a
+            ``completed`` event attributed to server shutdown.
+        """
+        if exc.timed_out:
+            return WorkerEvent("timeout", error_category="ReadTimeout")
+        return WorkerEvent(
+            "completed",
+            error_category="ServerStopped",
+            duration_ms=_observability.elapsed_ms(started),
+        )
+
+    @staticmethod
+    def _pipe_error_category(exc: BaseException) -> str:
+        """Map a pywin32 error to a closed-set failure label.
+
+        Returns
+        -------
+        str
+            One of ``"BrokenPipe"``, ``"NoData"``, or ``"PipeError"``. The
+            exception message is never used.
+        """
+        winerror = getattr(exc, "winerror", None)
+        if winerror == ERROR_BROKEN_PIPE:
+            return "BrokenPipe"
+        if winerror == ERROR_NO_DATA:
+            return "NoData"
+        return "PipeError"
+
+    def _read_request(self, handle: object) -> bytes | None:
+        """Read one size-bounded request from *handle* within the deadline.
+
+        Propagates :class:`~cmd_mox.ipc.windows.PipeMessageTooLargeError` when
+        the client sends more than
+        :data:`~cmd_mox.ipc.windows.MAX_MESSAGE_SIZE` bytes, and
+        :class:`PipeReadCancelled` when the deadline expires or the server
+        stops first.
+
+        Returns
+        -------
+        bytes | None
+            The raw request bytes.
+        """
+        deadline = time.monotonic() + CLIENT_READ_TIMEOUT_SECONDS
         return read_pipe_message(
             handle,
             win32file=win32file,
             pywintypes=pywintypes,
-            chunk_size=PIPE_CHUNK_SIZE,
+            options=PipeReadOptions(
+                chunk_size=PIPE_CHUNK_SIZE,
+                max_bytes=MAX_MESSAGE_SIZE,
+                read_chunk=functools.partial(self._read_chunk, handle, deadline),
+            ),
         )
+
+    def _read_chunk(
+        self, handle: object, deadline: float, chunk_size: int
+    ) -> tuple[int, bytes]:
+        """Read up to *chunk_size* bytes with a cancellable overlapped read.
+
+        Propagates :class:`PipeReadCancelled` when *deadline* expires or the
+        server stops before the read completes; the pending read is cancelled
+        and drained before that signal escapes.
+
+        Returns
+        -------
+        tuple[int, bytes]
+            The ``ReadFile`` status and the bytes transferred.
+        """
+        overlapped, event = self._create_overlapped()
+        try:
+            buffer = win32file.AllocateReadBuffer(chunk_size)
+            if self._start_overlapped_read(handle, buffer, overlapped) == (
+                ERROR_IO_PENDING
+            ):
+                self._await_read(handle, overlapped, event, deadline)
+            return self._finish_overlapped_read(handle, overlapped, buffer, chunk_size)
+        finally:
+            win32file.CloseHandle(event)
+
+    @staticmethod
+    def _start_overlapped_read(
+        handle: object, buffer: object, overlapped: object
+    ) -> int:
+        """Issue the overlapped ``ReadFile`` and report its initial status.
+
+        Returns
+        -------
+        int
+            ``ERROR_IO_PENDING`` when the read is still in flight, otherwise
+            the completion status reported synchronously.
+        """
+        try:
+            status, _ = win32file.ReadFile(handle, buffer, overlapped)
+        except pywintypes.error as exc:
+            if exc.winerror != ERROR_IO_PENDING:
+                raise
+            return ERROR_IO_PENDING
+        return status
+
+    def _await_read(
+        self, handle: object, overlapped: object, event: object, deadline: float
+    ) -> None:
+        """Wait for the pending read, the deadline, or shutdown.
+
+        Raises
+        ------
+        PipeReadCancelled
+            If the deadline expires or the server stops. The read is cancelled
+            and drained before the signal propagates, so the kernel is no
+            longer writing into the buffer once this returns.
+        """
+        result = self._wait_for_overlapped(event, self._remaining_ms(deadline))
+        if result == win32event.WAIT_OBJECT_0:
+            return
+        self._cancel_overlapped(handle, overlapped)
+        raise PipeReadCancelled(timed_out=result == win32event.WAIT_TIMEOUT)
+
+    @staticmethod
+    def _finish_overlapped_read(
+        handle: object, overlapped: object, buffer: cabc.Buffer, chunk_size: int
+    ) -> tuple[int, bytes]:
+        """Collect the completed overlapped read.
+
+        Returns
+        -------
+        tuple[int, bytes]
+            The ``ReadFile`` status and the transferred bytes.
+        """
+        try:
+            # GetOverlappedResult(handle, overlapped, wait).
+            transferred = win32file.GetOverlappedResult(
+                handle,
+                overlapped,
+                True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
+            )
+        except pywintypes.error as exc:
+            if exc.winerror != ERROR_MORE_DATA:
+                raise
+            # ERROR_MORE_DATA means the buffer was filled and the message
+            # continues; pywin32 does not surface the count alongside the
+            # error, but a filled buffer is by definition ``chunk_size`` bytes.
+            return ERROR_MORE_DATA, bytes(memoryview(buffer)[:chunk_size])
+        return 0, bytes(memoryview(buffer)[:transferred])
+
+    @staticmethod
+    def _remaining_ms(deadline: float) -> int:
+        """Return the milliseconds left before *deadline*.
+
+        Returns
+        -------
+        int
+            Zero once the deadline has passed, so the wait returns at once.
+        """
+        remaining = _NamedPipeState._calculate_remaining_time(deadline)
+        if remaining is None:
+            return 0
+        return max(0, int(remaining * 1000))
 
     def _poke_pipe(self) -> None:
         try:

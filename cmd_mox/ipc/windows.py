@@ -2,22 +2,62 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
+import functools
 import hashlib
 import logging
 import os
 import typing as typ
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
+#: Reads one chunk of *chunk_size* bytes, returning ``(status, data)`` exactly
+#: as :func:`win32file.ReadFile` would.
+type PipeChunkReader = cabc.Callable[[int], tuple[int, bytes]]
+
 WINDOWS_PIPE_PREFIX: typ.Final[str] = r"\\.\pipe\cmdmox-"
 PIPE_CHUNK_SIZE: typ.Final[int] = 64 * 1024
+# Largest IPC message the transport will buffer for a single client. A real
+# invocation payload (command name, argv, stdin, and environment) is kilobytes
+# at worst, so 8 MiB leaves several orders of magnitude of headroom while still
+# bounding the memory one misbehaving or hostile peer can pin. The limit is
+# deliberately conservative: it is cheap to raise, whereas an unbounded reader
+# lets a single client exhaust the server process.
+MAX_MESSAGE_SIZE: typ.Final[int] = 8 * 1024 * 1024
 ERROR_BROKEN_PIPE: typ.Final[int] = 109
 ERROR_PIPE_BUSY: typ.Final[int] = 231
 ERROR_NO_DATA: typ.Final[int] = 232
 ERROR_MORE_DATA: typ.Final[int] = 234
 ERROR_PIPE_CONNECTED: typ.Final[int] = 535
 ERROR_OPERATION_ABORTED: typ.Final[int] = 995
+ERROR_IO_PENDING: typ.Final[int] = 997
 ERROR_FILE_NOT_FOUND: typ.Final[int] = 2
 
 logger = logging.getLogger(__name__)
+
+
+class PipeMessageTooLargeError(RuntimeError):
+    """Raised when a named-pipe message exceeds the configured size limit.
+
+    The exception carries byte counts only. Message content is dropped as soon
+    as the limit is breached and is never retained, logged, or embedded in the
+    exception, so this error is safe to report through the bounded
+    observability seam.
+
+    Attributes
+    ----------
+    received:
+        Number of bytes read when the limit was breached.
+    limit:
+        Configured maximum message size in bytes.
+    """
+
+    def __init__(self, *, received: int, limit: int) -> None:
+        msg = f"named pipe message exceeded the {limit}-byte limit"
+        super().__init__(msg)
+        self.received = received
+        self.limit = limit
 
 
 class _PyWinError(Exception):
@@ -47,6 +87,25 @@ class _Win32File(typ.Protocol):
         self, handle: object
     ) -> None: ...
 
+    def CloseHandle(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        self, handle: object
+    ) -> None: ...
+
+    def AllocateReadBuffer(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        self, size: int
+    ) -> object: ...
+
+    def GetOverlappedResult(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        self,
+        handle: object,
+        overlapped: object,
+        wait: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - pywin32 takes the wait flag positionally
+    ) -> int: ...
+
+    def CancelIoEx(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        self, handle: object, overlapped: object
+    ) -> None: ...
+
 
 Win32FileProtocol = _Win32File
 PyWinTypesProtocol = _PyWinTypes
@@ -72,40 +131,95 @@ def derive_pipe_name(identifier: os.PathLike[str] | str) -> str:
     return f"{WINDOWS_PIPE_PREFIX}{digest[:32]}"
 
 
+@dc.dataclass(frozen=True, slots=True)
+class PipeReadOptions:
+    """Tunables for :func:`read_pipe_message`.
+
+    Bundling these keeps the reader's call surface small while letting the
+    server supply a cancellable reader and the shared size limit.
+
+    Parameters
+    ----------
+    chunk_size:
+        Bytes requested per ``ReadFile`` call.
+    max_bytes:
+        Maximum total message size. Exceeding it raises
+        :class:`PipeMessageTooLargeError`.
+    read_chunk:
+        Optional replacement for the default synchronous ``ReadFile`` call,
+        used by the server to enforce a per-client deadline.
+    """
+
+    chunk_size: int = PIPE_CHUNK_SIZE
+    max_bytes: int = MAX_MESSAGE_SIZE
+    read_chunk: PipeChunkReader | None = None
+
+
+def _continue_reading(status: int) -> bool:
+    """Return whether the message continues past the chunk just read.
+
+    Returns
+    -------
+    bool
+        ``True`` when Windows reported ``ERROR_MORE_DATA``; ``False`` on
+        completion or on an unexpected status, which is logged.
+    """
+    if status == 0:
+        return False
+    if status == ERROR_MORE_DATA:
+        return True
+    logger.warning("Unexpected ReadFile status: %s; returning partial data", status)
+    return False
+
+
 def read_pipe_message(
     handle: object,
     *,
     win32file: Win32FileProtocol,
     pywintypes: PyWinTypesProtocol,
-    chunk_size: int = PIPE_CHUNK_SIZE,
+    options: PipeReadOptions | None = None,
 ) -> bytes:
-    """Read a complete message from a Windows named pipe *handle*.
+    """Read a complete, size-bounded message from a named pipe *handle*.
 
     Windows delivers named pipe messages in chunks, reporting ``ERROR_MORE_DATA``
     while the message continues. We loop until the status indicates completion
     or the peer disappears (``ERROR_BROKEN_PIPE``), returning whatever data was
     received so callers can decide how to handle disconnects.
 
+    Reading stops as soon as the accumulated message would exceed
+    ``options.max_bytes``. The buffered prefix is discarded at that point, so an
+    oversized message is never fully retained in memory.
+
     Returns
     -------
     bytes
         The complete message, or the received prefix after a peer disconnect.
+
+    Raises
+    ------
+    PipeMessageTooLargeError
+        If the peer sends more than ``options.max_bytes`` bytes.
     """
+    options = options or PipeReadOptions()
+    read_chunk = options.read_chunk or functools.partial(win32file.ReadFile, handle)
     chunks: list[bytes] = []
+    received = 0
     while True:
         try:
-            hr, data = win32file.ReadFile(handle, chunk_size)
+            status, data = read_chunk(options.chunk_size)
         except pywintypes.error as exc:
             if exc.winerror == ERROR_BROKEN_PIPE:
                 break
             raise
+        received += len(data)
+        if received > options.max_bytes:
+            # Drop the buffered prefix: the message is already unusable, and
+            # retaining it would defeat the point of the limit.
+            chunks.clear()
+            raise PipeMessageTooLargeError(received=received, limit=options.max_bytes)
         chunks.append(data)
-        if hr == 0:
+        if not _continue_reading(status):
             break
-        if hr == ERROR_MORE_DATA:
-            continue
-        logger.warning("Unexpected ReadFile status: %s; returning partial data", hr)
-        break
     return b"".join(chunks)
 
 
@@ -120,12 +234,17 @@ def write_pipe_payload(
 __all__ = sorted([
     "ERROR_BROKEN_PIPE",
     "ERROR_FILE_NOT_FOUND",
+    "ERROR_IO_PENDING",
     "ERROR_MORE_DATA",
     "ERROR_NO_DATA",
     "ERROR_OPERATION_ABORTED",
     "ERROR_PIPE_BUSY",
     "ERROR_PIPE_CONNECTED",
+    "MAX_MESSAGE_SIZE",
     "PIPE_CHUNK_SIZE",
+    "PipeChunkReader",
+    "PipeMessageTooLargeError",
+    "PipeReadOptions",
     "PyWinErrorProtocol",
     "PyWinTypesProtocol",
     "WINDOWS_PIPE_PREFIX",

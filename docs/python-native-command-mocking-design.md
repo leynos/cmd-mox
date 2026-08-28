@@ -695,6 +695,42 @@ with a 1-based `attempt`). Server dispatch keeps the existing
 `IPC dispatch outcome` record under the `ipc.dispatch` operation, now also
 carrying `transport` and `correlation_id`.
 
+#### Named-pipe resource bounds (2026-08-28)
+
+The Windows named-pipe transport bounds concurrency, message size, and client
+lifetime so a single misbehaving peer cannot exhaust the server.
+`cmd_mox.ipc._named_pipe_limits` holds the limits and the event vocabulary:
+`MAX_ACTIVE_CLIENTS` (64) caps simultaneously served clients through a
+`threading.BoundedSemaphore` acquired non-blockingly *before* a worker thread is
+spawned, and `CLIENT_READ_TIMEOUT_SECONDS` (30.0) bounds how long one client may
+take to deliver its request. `cmd_mox.ipc.windows.MAX_MESSAGE_SIZE` (8 MiB)
+caps a single message; `read_pipe_message` stops reading once the limit would be
+exceeded, discards the buffered prefix, and raises `PipeMessageTooLargeError`,
+which carries byte counts only and never message data.
+
+Each admitted client owns exactly one permit. The accept loop acquires it, the
+worker's `finally` block releases it, and the accept loop releases it itself
+when the thread fails to start; `ClientSlot.release` latches under a lock, so no
+exit path can release twice or miss a release. Refusals never break the accept
+loop: the handle is disconnected and closed, and serving continues.
+
+Reads are cancellable rather than watchdogged. Pipe instances are created with
+`FILE_FLAG_OVERLAPPED`, and both `ConnectNamedPipe` and `ReadFile` are issued
+asynchronously and then awaited with `WaitForMultipleObjects` on the operation's
+event plus a Win32 shutdown event. A deadline or a `stop()` therefore wakes the
+waiting thread itself, which cancels with `CancelIoEx` and drains with
+`GetOverlappedResult` before releasing the buffer, so no thread is left blocked
+in the kernel. `ConnectNamedPipe` is always passed an `OVERLAPPED` because a
+null one is documented to report completion incorrectly on an overlapped handle.
+
+Workers emit bounded events under the operation `ipc.named_pipe.worker` with
+`transport="named_pipe"` and outcomes `admitted`, `rejected`, `completed`,
+`timeout`, and `read_size_rejected`. Rejections and timeouts carry
+`error_category`, completions carry `duration_ms`, and read-size rejections
+carry `message_size`. No worker event carries a `correlation_id`: a worker never
+parses the envelope, so none is available, and the size rejection happens before
+parsing. The correlated record remains the `ipc.dispatch` event.
+
 When `IPCServer.start()` executes inside an active :class:
 `~cmd_mox.environment.EnvironmentManager`, the manager exports both the socket
 and timeout environment variables automatically. This keeps tests and shim
