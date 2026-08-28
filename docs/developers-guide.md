@@ -94,6 +94,28 @@ uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py \
 Run the focused tests again without `--snapshot-update` before committing so
 that the committed snapshots are verified rather than rewritten.
 
+## Property-based testing
+
+The development dependency group includes
+[Hypothesis](https://hypothesis.readthedocs.io/) (`hypothesis>=6`), which
+generates inputs for property-based tests: rather than asserting a fixed
+table of examples, a property states an invariant that must hold across a
+broad input space.
+
+`cmd_mox/unittests/test_command_double_matches.py` uses it to exercise
+`CommandDouble.matches`, generating command-name pairs to check that a double
+never matches an invocation for a different command.
+
+Run the affected test module with the normal test command:
+
+```bash
+uv run pytest cmd_mox/unittests/test_command_double_matches.py
+```
+
+Hypothesis complements the snapshot tests above rather than replacing them:
+snapshots pin exact serialized output, while properties assert relations that
+should hold for every generated input.
+
 ## IPC request dispatch
 
 The shared IPC request pipeline keeps transport handling separate from request

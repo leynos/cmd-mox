@@ -62,6 +62,21 @@ def test_retry_config_validates_inputs() -> None:
         RetryConfig(jitter=2.0)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(1.5, id="float"),
+        pytest.param("3", id="str"),
+        pytest.param(None, id="none"),
+        pytest.param(True, id="bool"),
+    ],
+)
+def test_retry_config_rejects_non_integer_retries(value: object) -> None:
+    """RetryConfig should reject non-integer retry counts eagerly."""
+    with pytest.raises(TypeError, match=r"^retries must be an integer$"):
+        RetryConfig(retries=value)  # type: ignore[arg-type, ty:invalid-argument-type] - the test deliberately supplies non-integer retry counts
+
+
 def test_retry_config_validate_checks_timeout() -> None:
     """RetryConfig.validate should validate timeout in addition to fields."""
     config = RetryConfig()
