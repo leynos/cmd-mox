@@ -6,12 +6,38 @@ import pathlib
 import socket
 import threading
 import time
+import typing as typ
 
 import pytest
 
 from cmd_mox.ipc.socket_utils import cleanup_stale_socket, wait_for_socket
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 pytestmark = [pytest.mark.requires_unix_sockets]
+
+
+@pytest.fixture
+def bound_socket(
+    tmp_path: pathlib.Path,
+) -> cabc.Iterator[tuple[pathlib.Path, socket.socket]]:
+    """Bind a Unix socket, yielding it with its path and cleaning up after.
+
+    Yields
+    ------
+    tuple[pathlib.Path, socket.socket]
+        The bound socket's path and the socket itself.
+    """
+    socket_path = tmp_path / "ipc.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(socket_path))
+    try:
+        yield socket_path, server
+    finally:
+        server.close()
+        if socket_path.exists():
+            socket_path.unlink()
 
 
 def test_cleanup_stale_socket_noop_for_missing_path(tmp_path: pathlib.Path) -> None:
@@ -23,35 +49,31 @@ def test_cleanup_stale_socket_noop_for_missing_path(tmp_path: pathlib.Path) -> N
     assert not absent.exists(), "Missing socket path must not be created"
 
 
-def test_cleanup_stale_socket_removes_unbound_file(tmp_path: pathlib.Path) -> None:
+def test_cleanup_stale_socket_removes_unbound_file(
+    bound_socket: tuple[pathlib.Path, socket.socket],
+) -> None:
     """cleanup_stale_socket should unlink orphaned socket files."""
-    socket_path = tmp_path / "ipc.sock"
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(str(socket_path))
+    socket_path, server = bound_socket
     server.close()
 
-    assert socket_path.exists(), "Assertion failed"
+    assert socket_path.exists(), "binding should leave a socket file behind"
 
     cleanup_stale_socket(socket_path)
 
-    assert not socket_path.exists(), "Assertion failed"
+    assert not socket_path.exists(), "an orphaned socket file should be unlinked"
 
 
-def test_cleanup_stale_socket_refuses_active_socket(tmp_path: pathlib.Path) -> None:
+def test_cleanup_stale_socket_refuses_active_socket(
+    bound_socket: tuple[pathlib.Path, socket.socket],
+) -> None:
     """cleanup_stale_socket should not remove sockets with active listeners."""
-    socket_path = tmp_path / "ipc.sock"
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(str(socket_path))
+    socket_path, server = bound_socket
     server.listen()
 
-    try:
-        with pytest.raises(RuntimeError, match="still in use"):
-            cleanup_stale_socket(socket_path)
-        assert socket_path.exists(), "Assertion failed"
-    finally:
-        server.close()
-        if socket_path.exists():
-            socket_path.unlink()
+    with pytest.raises(RuntimeError, match="still in use"):
+        cleanup_stale_socket(socket_path)
+
+    assert socket_path.exists(), "an active socket must not be unlinked"
 
 
 def test_wait_for_socket_succeeds_when_server_accepts(tmp_path: pathlib.Path) -> None:
