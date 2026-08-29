@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import typing as typ
 
+from cmd_mox import _path_utils as path_utils
 from tests.helpers.parameters import decode_placeholders
 
 RUN_TIMEOUT_SECONDS = 30
@@ -57,7 +58,7 @@ def _should_escape_batch_args(command_path: str) -> bool:
     bool
         Whether the command path invokes a Windows batch script.
     """
-    if os.name != "nt":
+    if not path_utils.IS_WINDOWS:
         return False
 
     lower = command_path.lower()
@@ -132,19 +133,28 @@ def _find_matching_journal_entry(
     AssertionError
         If no journal entry matches *expectation*.
     """
-    candidates = [inv for inv in mox.journal if inv.command == expectation.cmd]
-    if expectation.args is not None:
-        decoded = decode_placeholders(expectation.args)
-        wanted_args = shlex.split(decoded)
-        candidates = [inv for inv in candidates if inv.args == wanted_args]
-    if not candidates:
+    wanted_args = (
+        None
+        if expectation.args is None
+        else shlex.split(decode_placeholders(expectation.args))
+    )
+    match = next(
+        (
+            inv
+            for inv in reversed(mox.journal)
+            if inv.command == expectation.cmd
+            and (wanted_args is None or inv.args == wanted_args)
+        ),
+        None,
+    )
+    if match is None:
         available = [(i.command, list(i.args)) for i in mox.journal]
         msg = (
             f"Journal does not contain expected entry for {expectation.cmd!r} "
             f"with args {expectation.args!r}. Available: {available!r}"
         )
         raise AssertionError(msg)
-    return candidates[-1]
+    return match
 
 
 def _validate_journal_entry_fields(

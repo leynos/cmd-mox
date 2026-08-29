@@ -83,12 +83,18 @@ class ScriptedRead:
         Whether ``GetOverlappedResult`` reports ``ERROR_MORE_DATA``.
     error:
         Optional error raised from ``GetOverlappedResult`` instead.
+    start_error:
+        Optional error raised from ``ReadFile`` itself, once the buffer has
+        been filled. Windows reports a still-pending overlapped read this way,
+        so it models ``ERROR_IO_PENDING`` as a raised error rather than a
+        returned status.
     """
 
     data: bytes = b""
     status: int = 0
     more: bool = False
     error: BaseException | None = None
+    start_error: BaseException | None = None
 
 
 class FakeWin32File:
@@ -150,13 +156,19 @@ class FakeWin32File:
         ------
         AssertionError
             If the test scripted no further reads.
-        """
+        BaseException
+            The scripted ``start_error``, when one was supplied.
+        """  # ruff: ignore[docstring-extraneous-exception] - the scripted start_error is raised verbatim and stays caller-visible
         if not self._reads:
             msg = "no scripted read remains"
             raise AssertionError(msg)
         self._current = self._reads.pop(0)
         size = min(len(self._current.data), len(buffer))
         buffer[:size] = self._current.data[:size]
+        if self._current.start_error is not None:
+            # The kernel fills the buffer asynchronously, so a pending read
+            # still delivers its data even though ``ReadFile`` raised.
+            raise self._current.start_error
         return self._current.status, buffer
 
     def GetOverlappedResult(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing

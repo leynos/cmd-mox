@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
     """Remove a pre-existing socket when no server is listening.
 
+    Only two probe failures prove that nothing is listening: a refused
+    connection, and a path that no longer exists. Every other :class:`OSError`
+    — a permission denial, most importantly — means the probe could not reach a
+    socket that may well be live, so it propagates untouched rather than
+    deleting a socket this process merely cannot connect to.
+
     Raises
     ------
     RuntimeError
@@ -24,7 +30,7 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
     with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
         try:
             probe.connect(address)
-        except OSError:
+        except (ConnectionRefusedError, FileNotFoundError):
             pass
         else:
             msg = f"Socket {socket_path} is still in use"

@@ -195,6 +195,13 @@ ENV_ATTR_RULES: dict[str, tuple[str, bool]] = {
 def validate_env_attr(env: EnvironmentManager, attr: str) -> str | None:
     """Return an error message when *attr* is invalid, otherwise ``None``.
 
+    Parameters
+    ----------
+    env : EnvironmentManager
+        Manager whose replay attributes are being validated.
+    attr : str
+        Name of the attribute to validate.
+
     Returns
     -------
     str or None

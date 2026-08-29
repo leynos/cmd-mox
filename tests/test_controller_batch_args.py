@@ -6,6 +6,7 @@ import typing as typ
 
 import pytest
 
+from cmd_mox import _path_utils as path_utils
 from tests.helpers import controller
 
 if typ.TYPE_CHECKING:
@@ -21,7 +22,7 @@ def windows_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch : pytest.MonkeyPatch
         Fixture used to patch the platform indicator consulted by the helper.
     """
-    monkeypatch.setattr(controller.os, "name", "nt")
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
 
 
 @pytest.fixture
@@ -33,14 +34,16 @@ def posix_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch : pytest.MonkeyPatch
         Fixture used to patch the platform indicator consulted by the helper.
     """
-    monkeypatch.setattr(controller.os, "name", "posix")
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
 
 
 @pytest.mark.usefixtures("posix_platform")
 def test_escape_batch_args_is_noop_on_posix() -> None:
     """Non-Windows platforms should return argv unchanged."""
     argv = ["build.cmd", "arg^1"]
-    assert controller.escape_windows_batch_args(argv) == argv, "Assertion failed"
+    assert controller.escape_windows_batch_args(argv) == argv, (
+        "POSIX argv should be returned unescaped"
+    )
 
 
 @pytest.mark.usefixtures("windows_platform")

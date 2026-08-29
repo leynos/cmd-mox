@@ -2,9 +2,11 @@
 
 This module owns the operation names, correlation-identifier derivation, and
 event shapes used by :mod:`cmd_mox.ipc.client`. It depends only on the
-transport-neutral seam in :mod:`cmd_mox.ipc._observability`, so it introduces
-no import cycle. Every field emitted here is a bounded dimension; see that
-module's never-log list.
+transport-neutral seam in :mod:`cmd_mox.ipc._observability` and on the
+transport-neutral request core in :mod:`cmd_mox.ipc._server_core`, neither of
+which imports a transport, so it introduces no import cycle. Every field
+emitted here is a bounded dimension; see the observability module's never-log
+list.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import uuid
 from cmd_mox import _path_utils as path_utils
 
 from . import _observability
+from ._server_core import bounded_correlation_id
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -43,10 +46,12 @@ def client_transport() -> _observability.Transport:
 def resolve_correlation_id(data: cabc.Mapping[str, typ.Any]) -> str:
     """Return the correlation identifier for a request envelope.
 
-    The model's ``invocation_id`` is reused when the request already carries
-    one so the client and server records share a single identifier. Otherwise
-    a fresh opaque UUID is minted; identifiers are never derived from request
-    content.
+    The model's ``invocation_id`` is reused when the request already carries a
+    usable one, so the client and server records share a single identifier. An
+    absent, empty, or over-long value is treated as no identifier at all and a
+    fresh opaque UUID is minted instead; identifiers are never derived from
+    request content, and never exceed
+    :data:`~cmd_mox.ipc._server_core.MAX_CORRELATION_ID_LENGTH` characters.
 
     Parameters
     ----------
@@ -56,10 +61,10 @@ def resolve_correlation_id(data: cabc.Mapping[str, typ.Any]) -> str:
     Returns
     -------
     str
-        The opaque correlation identifier for this request.
+        The opaque, length-bounded correlation identifier for this request.
     """
-    existing = data.get("invocation_id")
-    if isinstance(existing, str) and existing:
+    existing = bounded_correlation_id(data.get("invocation_id"))
+    if existing is not None:
         return existing
     return uuid.uuid4().hex
 

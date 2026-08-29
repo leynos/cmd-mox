@@ -477,8 +477,8 @@ def test_request_pipeline_validation_failure_returns_none(
 
     response_bytes = _server_core._request_pipeline(ipc_server, raw)
 
-    assert response_bytes is None, "Assertion failed"
-    assert calls == [], "Assertion failed"
+    assert response_bytes is None, "Validation failure should suppress the response"
+    assert calls == [], "Validation failure should prevent processor dispatch"
 
 
 def test_decode_payload_rejects_non_mapping(caplog: pytest.LogCaptureFixture) -> None:
@@ -548,8 +548,8 @@ def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
         server.stop()
 
     assert not failures, f"concurrent stop() raised: {failures}"
-    assert server._server is None, "Assertion failed"
-    assert server._thread is None, "Assertion failed"
+    assert server._server is None, "stop() should clear the backend reference"
+    assert server._thread is None, "stop() should clear the thread reference"
 
 
 def test_handle_passthrough_default(tmp_path: Path) -> None:

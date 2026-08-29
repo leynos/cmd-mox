@@ -120,3 +120,23 @@ def test_wait_for_socket_retries_until_success(
 
     wait_for_socket(pathlib.Path("fake.sock"), timeout=0.1)
     assert attempts[0] == 3, "Assertion failed"
+
+
+def test_cleanup_stale_socket_keeps_an_unreachable_socket(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """A probe denied by permissions must not delete a possibly live socket."""
+    socket_path = tmp_path / "ipc.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(socket_path))
+    server.close()
+
+    def _refuse(_self: object, _address: str) -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(socket.socket, "connect", _refuse)
+
+    with pytest.raises(PermissionError):
+        cleanup_stale_socket(socket_path)
+
+    assert socket_path.exists(), "an unreachable socket must not be unlinked"

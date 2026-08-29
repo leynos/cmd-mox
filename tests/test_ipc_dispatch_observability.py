@@ -21,7 +21,9 @@ if typ.TYPE_CHECKING:
     from pathlib import Path
 
 
-pytestmark = [pytest.mark.requires_unix_sockets]
+# Every test here drives ``_request_pipeline``/``_parse_payload`` directly, and
+# constructing ``IPCServer`` only stores values, so nothing binds a socket and
+# the module needs no ``requires_unix_sockets`` gate.
 
 # Structured-field names that must never appear on an emitted record. The
 # stdlib ``LogRecord`` owns ``args``, so command arguments are guarded by the
@@ -345,3 +347,32 @@ def test_parse_payload_rejects_unbounded_correlation_ids(
     assert parsed is not None, "Payload should still parse"
     assert parsed.correlation_id is None, "Unbounded identifier must be dropped"
     assert "correlation_id" not in parsed.payload, "Envelope field must be stripped"
+
+
+def test_dispatch_record_omits_an_over_long_invocation_identifier(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    passthrough_handler: cabc.Callable[[PassthroughResult], Response],
+) -> None:
+    """A client-supplied over-long identifier is dropped, not logged."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    over_long = "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1)
+    ipc_server = IPCServer(
+        tmp_path / "ipc.sock",
+        handlers=IPCHandlers(passthrough_handler=passthrough_handler),
+    )
+
+    _server_core._request_pipeline(
+        ipc_server,
+        json.dumps({
+            "kind": _server_core.KIND_PASSTHROUGH_RESULT,
+            "invocation_id": over_long,
+            "stdout": "",
+            "stderr": "",
+            "exit_code": 0,
+        }).encode(),
+    )
+
+    [event] = _dispatch_events(caplog)
+    assert "invocation_id" not in event, "Over-long identifier must be omitted"
+    assert "correlation_id" not in event, "Over-long fallback must be omitted"

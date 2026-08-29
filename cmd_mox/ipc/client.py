@@ -6,7 +6,6 @@ import contextlib
 import dataclasses as dc
 import importlib
 import json
-import logging
 import os
 import random
 import socket
@@ -41,11 +40,10 @@ from .models import Invocation, PassthroughResult, Response
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
-logger = logging.getLogger(__name__)
-
 if path_utils.IS_WINDOWS:  # pragma: win32-only
     try:
         pywintypes = importlib.import_module("pywintypes")
+        win32api = importlib.import_module("win32api")
         win32file = importlib.import_module("win32file")
         win32pipe = importlib.import_module("win32pipe")
     except ModuleNotFoundError as exc:  # pragma: no cover - import guard
@@ -53,6 +51,7 @@ if path_utils.IS_WINDOWS:  # pragma: win32-only
         raise RuntimeError(msg) from exc
 else:  # pragma: no cover - satisfies type-checkers on non-Windows hosts
     pywintypes = typ.cast("typ.Any", None)
+    win32api = typ.cast("typ.Any", None)
     win32file = typ.cast("typ.Any", None)
     win32pipe = typ.cast("typ.Any", None)
 
@@ -60,7 +59,12 @@ DEFAULT_CONNECT_RETRIES: typ.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: typ.Final[float] = 0.05
 DEFAULT_CONNECT_JITTER: typ.Final[float] = 0.2
 MIN_RETRY_SLEEP: typ.Final[float] = 0.001
-IO_CANCEL_GRACE: typ.Final[float] = 0.05
+# Upper bound on the wait for a cancelled I/O worker to unwind: generous enough
+# for a cancellation to complete, short enough that a wedged worker cannot hang
+# the caller indefinitely.
+IO_CANCEL_GRACE: typ.Final[float] = 1.0
+# ``CancelSynchronousIo`` requires THREAD_TERMINATE access to its target.
+_THREAD_TERMINATE: typ.Final[int] = 0x0001
 
 _SENTINEL: typ.Final[object] = object()
 
@@ -272,6 +276,58 @@ class _HandleCloser:
         return self._closed
 
 
+def _request_synchronous_io_cancel(thread: threading.Thread) -> None:
+    """Ask Windows to abort *thread*'s in-flight synchronous I/O.
+
+    Closing the pipe handle does not reliably wake a thread already blocked
+    inside ``ReadFile``; ``CancelSynchronousIo`` does. It is absent from some
+    ``pywin32`` builds and from every non-Windows host, so it and the worker's
+    native thread id are resolved defensively and the request is skipped when
+    either is missing. Failing to cancel is never fatal: the handle close that
+    follows remains the fallback.
+    """
+    # The pywin32 modules are untyped stand-ins off Windows, so the resolved
+    # callables are deliberately dynamic.
+    cancel_io: typ.Any = getattr(win32file, "CancelSynchronousIo", None)
+    open_thread: typ.Any = getattr(win32api, "OpenThread", None)
+    if cancel_io is None or open_thread is None:
+        return
+    native_id = thread.native_id
+    if native_id is None:
+        return
+    with contextlib.suppress(Exception):
+        # OpenThread(desired_access, inherit_handle, thread_id).
+        handle = open_thread(
+            _THREAD_TERMINATE,
+            False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes the inherit flag positionally
+            native_id,
+        )
+        try:
+            cancel_io(handle)
+        finally:
+            win32file.CloseHandle(handle)
+
+
+def _cancel_and_await_worker(
+    thread: threading.Thread, cancel: cabc.Callable[[], None]
+) -> bool:
+    """Abort the worker's I/O and wait, bounded, for the worker to exit.
+
+    Returning before the worker has exited would leave a daemon thread owning
+    the pipe handle the caller believes it has released, so the wait is not
+    optional; it is merely bounded by :data:`IO_CANCEL_GRACE`.
+
+    Returns
+    -------
+    bool
+        Whether the worker exited before the grace period elapsed.
+    """
+    _request_synchronous_io_cancel(thread)
+    cancel()
+    thread.join(IO_CANCEL_GRACE)
+    return not thread.is_alive()
+
+
 def _validate_initial_deadline(
     deadline: float, cancel: cabc.Callable[[], None], thread: threading.Thread
 ) -> float:
@@ -292,8 +348,7 @@ def _validate_initial_deadline(
     try:
         return _remaining_time(deadline)
     except TimeoutError:
-        cancel()
-        thread.join(IO_CANCEL_GRACE)
+        _cancel_and_await_worker(thread, cancel)
         raise
 
 
@@ -302,17 +357,22 @@ def _join_with_timeout_and_cancel(
 ) -> None:
     """Join the thread with timeout; cancel and raise if still alive.
 
+    The timeout is not reported until the cancelled worker has terminated, so
+    the caller never resumes while a daemon thread still owns the pipe handle.
+    A worker surviving the bounded grace is named in the raised message.
+
     Raises
     ------
     TimeoutError
         If *thread* is still running after *remaining* seconds.
     """
     thread.join(remaining)
-    if thread.is_alive():
-        cancel()
-        thread.join(IO_CANCEL_GRACE)
-        msg = "IPC client operation timed out"
-        raise TimeoutError(msg)
+    if not thread.is_alive():
+        return
+    msg = "IPC client operation timed out"
+    if not _cancel_and_await_worker(thread, cancel):
+        msg += "; the I/O worker did not exit after cancellation"
+    raise TimeoutError(msg)
 
 
 def _extract_outcome(outcome: dict[str, typ.Any]) -> object:
@@ -395,13 +455,8 @@ def _connect_unix_with_retries(
         return sock
 
     def log_failure(attempt: int, exc: Exception) -> None:
-        logger.debug(
-            "IPC connect attempt %d/%d to %s failed: %s",
-            attempt + 1,
-            context.retry_config.retries,
-            address,
-            exc,
-        )
+        # The bounded event is the only report: the socket path and the
+        # exception message are both on the observability never-log list.
         _client_events.emit_connect_retry("unix", attempt, exc, context.correlation_id)
 
     return retry_with_backoff(
@@ -531,13 +586,8 @@ def _connect_pipe_with_retries(
     connect_deadline = deadline or _compute_deadline(context.timeout)
 
     def log_failure(attempt: int, exc: Exception) -> None:
-        logger.debug(
-            "IPC pipe connect attempt %d/%d to %s failed: %s",
-            attempt + 1,
-            context.retry_config.retries,
-            pipe_name,
-            exc,
-        )
+        # The bounded event is the only report: the pipe name and the
+        # exception message are both on the observability never-log list.
         _client_events.emit_connect_retry(
             "named_pipe", attempt, exc, context.correlation_id
         )

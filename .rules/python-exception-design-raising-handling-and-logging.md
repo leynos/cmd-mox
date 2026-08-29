@@ -26,7 +26,7 @@ class CardDeclinedError(PaymentsError):  # ✅ ends with Error (N818)
 attributes (codes, identifiers, retry hints) so that business logic need not
 parse free‑form strings.
 
-## 2) Raise the right thing, with the right cause (TRY003/TRY004/TRY200/TRY201)
+## 2) Raise the right thing, with the right cause (TRY003/TRY004/B904)
 
 ### Prefer specific built‑ins or domain errors over “vanilla” exceptions
 
@@ -50,12 +50,13 @@ domain‑specific classes.
 try:
     token = decode_jwt(payload)
 except jwt.InvalidTokenError as exc:
-    raise AuthenticationError("Invalid session token") from exc  # ✅ TRY201
+    raise AuthenticationError("Invalid session token") from exc  # ✅ B904
 ```
 
 When transforming low‑level failures into domain errors, `raise … from …`
-retains traceback lineage (TRY201). Avoid discarding causes in contexts
-expected to preserve them (TRY200).
+retains traceback lineage (B904). Avoid discarding causes in contexts expected
+to preserve them. TRY201 is a distinct rule: it flags a redundant bare
+`raise exc` inside an `except` block, where plain `raise` would do.
 
 ## 3) Catch narrowly; avoid blind handlers (BLE001), and use `else` for the happy path (TRY300)
 
@@ -145,7 +146,7 @@ exception object to the format arguments is redundant (TRY401).
 point). Inner layers should handle or re‑raise without logging to avoid
 duplicate noise.
 
-## 5) Performance considerations in loops (PERF203)
+## 5) Performance considerations in loops (PERF203, manual guidance)
 
 ```python
 # ❌ try/except inside a tight loop
@@ -164,8 +165,18 @@ except ParseError:
 ```
 
 Exception handling carries overhead on the exceptional path; hoisting the block
-can improve throughput in hot loops (PERF203). Treat as a micro‑optimization
-guided by profiling.
+can improve throughput in hot loops. Treat as a micro‑optimization guided by
+profiling, and note that hoisting changes behaviour, not just performance: the
+first `ParseError` now exits the loop entirely, so every later item is
+skipped, whereas the per‑item `except: continue` form processes all items and
+only skips the failing ones. Keep the per‑item form whenever later valid items
+must still be processed, and reserve hoisting for cases where any failure
+should abort the remaining work.
+
+PERF203 (`try-except-in-loop`) only fires on Python versions before 3.11,
+which introduced zero‑cost exception handling; at this project's `py312`
+target it never triggers. Treat hoisting as manual guidance rather than a
+lint‑enforced rule at this target version.
 
 ## 6) Testing: assert specific failures (B017)
 
@@ -205,7 +216,8 @@ def charge(amount_pennies: int, card_token: str) -> str:
     try:
         return gateway.charge(amount_pennies, card_token)
     except gateway.Timeout as exc:
-        raise PaymentsError("Gateway timeout") from exc  # ✅ TRY201
+        msg = "Gateway timeout"
+        raise PaymentsError(msg) from exc  # ✅ B904
     except gateway.CardDeclined as exc:
         raise CardDeclinedError(exc.code, retry_after=60) from exc
 ```
@@ -233,12 +245,12 @@ def must_have_key(d: dict, key: str) -> None:
 logger.info("Dispatching order_id=%s to shop_id=%s", order_id, shop_id)  # structured
 ```
 
-### `try/except` in loops (PERF203) and `else` usage (TRY300)
+### `try/except` in loops (PERF203, manual) and `else` usage (TRY300)
 
 ```python
 def parse_all(raw_items: list[str]) -> list[Record]:
     parsed: list[Record] = []
-    try:  # ✅ PERF203 hoist
+    try:  # ✅ hoisted try (manual PERF203 guidance, inert at py312+)
         for raw in raw_items:
             rec = parse_record(raw)
             parsed.append(rec)
@@ -248,6 +260,13 @@ def parse_all(raw_items: list[str]) -> list[Record]:
         logger.info("Parsed %s records", len(parsed))
     return parsed
 ```
+
+Hoisting here changes behaviour: the first `ParseError` aborts the loop, so
+`parsed` contains only the records processed before the failure, and every
+later `raw_items` entry is skipped rather than parsed. This is appropriate
+when a single bad record should halt the batch; retain per‑item
+`try/except: continue` handling whenever later valid items must still be
+processed despite earlier failures.
 
 ### Tests with specific exceptions (B017)
 
@@ -271,31 +290,38 @@ select = [
   "EM",       # flake8-errmsg
   "LOG",      # flake8-logging
   "N818",     # exception names end with Error
-  "PERF203",  # try/except in loop
+  "B904",     # raise-without-from-inside-except
   "B017",     # assert-raises-exception
 ]
 ```
+
+`PERF203` (try/except in loop) is deliberately omitted: it only fires on
+Python versions before 3.11, so it is inert against this project's `py312`
+target. Treat the hoisting advice in §5 as manual guidance, not an
+enforced rule.
 
 ## 10) One‑page policy for repositories
 
 > **Exceptions are part of the public API.** Define a small hierarchy with a
 > package base and `*Error` suffix; raise specific types; wrap external
 > failures with `raise … from …`; catch only what can be handled; use `else`
-> for the happy path; avoid `try/except` in hot loops; never format log
-> messages directly; log exceptions once at a boundary via `logger.exception`.
-> Enforce with Ruff (TRY/BLE/EM/LOG/N818/PERF203/B017).
+> for the happy path; avoid `try/except` in hot loops (manual guidance; see
+> §5); never format log messages directly; log exceptions once at a boundary
+> via `logger.exception`. Enforce with Ruff (TRY/BLE/EM/LOG/N818/B904/B017).
 
 ## 11) References
 
 - Ruff rules: Tryceratops (TRY), Blind Except (BLE001), flake8‑errmsg
   (EM101/EM102), flake8‑logging (LOG004/LOG007/LOG009/LOG014/LOG015), N818,
-  PERF203, B017.
+  B904, B017. PERF203 is mentioned in §5 as manual guidance only; it is
+  inert on Python 3.11+.
   - [https://docs.astral.sh/ruff/rules/#tryceratops-try](https://docs.astral.sh/ruff/rules/#tryceratops-try)
   - [https://docs.astral.sh/ruff/rules/blind-except/](https://docs.astral.sh/ruff/rules/blind-except/)
   - [https://docs.astral.sh/ruff/rules/assert-raises-exception/](https://docs.astral.sh/ruff/rules/assert-raises-exception/)
   - [https://docs.astral.sh/ruff/rules/#flake8-errmsg-em](https://docs.astral.sh/ruff/rules/#flake8-errmsg-em)
   - [https://docs.astral.sh/ruff/rules/#flake8-logging-log](https://docs.astral.sh/ruff/rules/#flake8-logging-log)
   - [https://docs.astral.sh/ruff/rules/error-suffix-on-exception-name/](https://docs.astral.sh/ruff/rules/error-suffix-on-exception-name/)
+  - [https://docs.astral.sh/ruff/rules/raise-without-from-inside-except/](https://docs.astral.sh/ruff/rules/raise-without-from-inside-except/)
   - [https://docs.astral.sh/ruff/rules/try-except-in-loop/](https://docs.astral.sh/ruff/rules/try-except-in-loop/)
 - Gui Commits practice notes:
   - Exception structure:

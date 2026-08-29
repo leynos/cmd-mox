@@ -231,3 +231,15 @@ def test_envelope_round_trip_reaches_the_model_unchanged() -> None:
     assert isinstance(validated, Invocation), "Envelope broke model construction"
     assert validated.command == "git", "Model body was not preserved"
     assert json.loads(payload)["correlation_id"] == correlation_id, "Wire field missing"
+
+
+def test_over_long_invocation_id_yields_a_fresh_bounded_correlation_id() -> None:
+    """An unbounded model identifier is replaced, never reused verbatim."""
+    over_long = "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1)
+
+    correlation_id = _client_events.resolve_correlation_id({"invocation_id": over_long})
+
+    assert correlation_id != over_long, "Over-long identifier must not be reused"
+    assert len(correlation_id) <= _server_core.MAX_CORRELATION_ID_LENGTH, (
+        "Minted identifier is not bounded"
+    )

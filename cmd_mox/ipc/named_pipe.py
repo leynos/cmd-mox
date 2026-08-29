@@ -94,10 +94,6 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         )
         self._pipe_name = derive_pipe_name(self.socket_path)
 
-    def _prepare_backend_start(self) -> None:
-        # Named pipes do not leave filesystem artefacts that require cleanup.
-        pass
-
     def _create_backend(self) -> tuple[_NamedPipeState, threading.Thread]:
         state = _NamedPipeState(
             pipe_name=self._pipe_name,
@@ -111,12 +107,20 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         state = self._server
         if state is None:
             return
-        if not state.ready_event.wait(self.timeout):
-            state.stop()
-            msg = (
-                f"Named pipe {self._pipe_name} not accepting connections within timeout"
-            )
-            raise RuntimeError(msg)
+        # The accept loop sets ``ready_event`` on its way out of a failed pipe
+        # creation too, so the event alone would report a dead server as ready;
+        # ``startup_failed`` is what distinguishes the two.
+        ready = state.ready_event.wait(self.timeout)
+        if ready and not state.startup_failed:
+            return
+        state.stop()
+        reason = (
+            "failed to create its first pipe instance"
+            if ready
+            else "not accepting connections within timeout"
+        )
+        msg = f"Named pipe {self._pipe_name} {reason}"
+        raise RuntimeError(msg)
 
     def _stop_backend(self, server: _NamedPipeState | None) -> None:
         if server is None:
@@ -187,6 +191,8 @@ class _NamedPipeState:
         self.accept_timeout = accept_timeout
         self.stop_event = threading.Event()
         self.ready_event = threading.Event()
+        # Set when the accept loop never created its first pipe instance.
+        self.startup_failed = False
         self._client_threads: set[threading.Thread] = set()
         self._client_lock = threading.Lock()
         self._client_slots = threading.BoundedSemaphore(MAX_ACTIVE_CLIENTS)
@@ -431,9 +437,7 @@ class _NamedPipeState:
 
     @staticmethod
     def _calculate_remaining_time(deadline: float) -> float | None:
-        """Calculate remaining time until deadline.
-
-        Returns None if deadline has passed, otherwise remaining seconds.
+        """Calculate the time remaining until *deadline*.
 
         Returns
         -------
@@ -450,8 +454,6 @@ class _NamedPipeState:
     ) -> bool:
         """Join a thread respecting the deadline.
 
-        Returns True if join attempted, False if deadline expired before join.
-
         Returns
         -------
         bool
@@ -467,8 +469,6 @@ class _NamedPipeState:
         self, threads: list[threading.Thread], deadline: float
     ) -> bool:
         """Join all threads respecting the deadline.
-
-        Returns True if all threads were processed, False if deadline expired.
 
         Returns
         -------
@@ -489,6 +489,7 @@ class _NamedPipeState:
                 handle = self._create_pipe_instance()
             except pywintypes.error:
                 logger.exception("Named pipe accept failed")
+                self.startup_failed = not self.ready_event.is_set()
                 self.ready_event.set()
                 break
             if not self.ready_event.is_set():
@@ -654,8 +655,7 @@ class _NamedPipeState:
     def _read_request(self, handle: object) -> bytes | None:
         """Read one size-bounded request from *handle* within the deadline.
 
-        Propagates :class:`~cmd_mox.ipc.windows.PipeMessageTooLargeError` when
-        the client sends more than
+        Propagates :class:`~cmd_mox.ipc.windows.PipeMessageTooLargeError` past
         :data:`~cmd_mox.ipc.windows.MAX_MESSAGE_SIZE` bytes, and
         :class:`PipeReadCancelled` when the deadline expires or the server
         stops first.

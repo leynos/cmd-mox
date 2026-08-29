@@ -16,6 +16,8 @@ from cmd_mox.record.replay import ReplaySession
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+    from cmd_mox.unittests._invocation_helpers import InvocationKwargs
+
 
 @dc.dataclass
 class RecordedInvocationSpec:
@@ -27,15 +29,6 @@ class RecordedInvocationSpec:
     stderr: str = ""
     exit_code: int = 0
     sequence: int = 0
-
-
-class InvocationKwargs(typ.TypedDict, total=False):
-    """Keyword arguments accepted by ``_make_invocation``."""
-
-    command: str
-    args: list[str] | None
-    stdin: str
-    env: dict[str, str] | None
 
 
 @dc.dataclass(slots=True)

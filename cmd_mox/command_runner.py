@@ -197,7 +197,9 @@ def execute_command(
             env=dict(env),
         )
     except subprocess.TimeoutExpired:
-        duration = int(timeout)
+        # ``%g`` keeps sub-second timeouts legible (0.5 -> "0.5") while
+        # sparing whole numbers a spurious ".0" suffix (5.0 -> "5").
+        duration = f"{timeout:g}"
         return Response(
             stderr=f"{invocation.command}: timeout after {duration} seconds",
             exit_code=124,

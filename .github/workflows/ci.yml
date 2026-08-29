@@ -5,8 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+permissions: {}
+
 jobs:
   quality:
+    permissions:
+      contents: read # Checkout only; CodeScene uses CS_ACCESS_TOKEN, not OIDC.
     strategy:
       fail-fast: false
       matrix:

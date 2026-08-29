@@ -328,6 +328,36 @@ def test_execute_command_handles_exceptions(
     assert response.env == env
 
 
+@pytest.mark.parametrize(
+    ("timeout", "expected"),
+    [
+        pytest.param(0.5, "0.5", id="fractional"),
+        pytest.param(5.0, "5", id="whole_float"),
+        pytest.param(30, "30", id="integer"),
+    ],
+)
+def test_execute_command_formats_timeout_duration(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout: float,
+    expected: str,
+) -> None:
+    """Timeout messages should report the configured value without truncation."""
+    invocation = Invocation(command="sleepy", args=[], stdin="", env={})
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise subprocess.TimeoutExpired(cmd=["sleepy"], timeout=timeout)
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    response = execute_command(
+        Path("/bin/true"), invocation, env={"PATH": "/test/bin"}, timeout=timeout
+    )
+    assert response.exit_code == 124, "timeout must map to exit code 124"
+    assert response.stderr == f"sleepy: timeout after {expected} seconds", (
+        "timeout duration formatting"
+    )
+
+
 def test_command_runner_honours_override_environment(
     runner: CommandRunner,
     monkeypatch: pytest.MonkeyPatch,

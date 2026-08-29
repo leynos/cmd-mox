@@ -325,6 +325,11 @@ def create_shim_symlinks(
 def is_broken_symlink(path: Path) -> bool:
     """Return ``True`` when *path* is a symlink whose target is missing.
 
+    Parameters
+    ----------
+    path : pathlib.Path
+        Filesystem path to inspect.
+
     Returns
     -------
     bool
@@ -335,6 +340,11 @@ def is_broken_symlink(path: Path) -> bool:
 
 def is_shim_healthy(shim_path: Path) -> bool:
     """Return ``True`` when the shim already points to a valid target.
+
+    Parameters
+    ----------
+    shim_path : pathlib.Path
+        Path to the shim to inspect.
 
     Returns
     -------
@@ -348,6 +358,11 @@ def is_shim_healthy(shim_path: Path) -> bool:
 
 def has_non_symlink_collision(shim_path: Path) -> bool:
     """Return ``True`` when a non-symlink file blocks shim creation.
+
+    Parameters
+    ----------
+    shim_path : pathlib.Path
+        Path where the shim would be created.
 
     Returns
     -------

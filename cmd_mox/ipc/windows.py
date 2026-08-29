@@ -159,6 +159,28 @@ class PipeReadOptions:
     max_bytes: int = MAX_MESSAGE_SIZE
     read_chunk: PipeChunkReader | None = None
 
+    def __post_init__(self) -> None:
+        """Reject read tunables that cannot describe a usable read.
+
+        A non-positive ``chunk_size`` is the more dangerous of the two: a
+        zero-byte read reports ``ERROR_MORE_DATA`` with no data, so the
+        received count never grows and :func:`read_pipe_message` spins forever.
+        A non-positive ``max_bytes`` does not hang — it fails fast with
+        :class:`PipeMessageTooLargeError` on the first chunk — but it is
+        equally a misconfiguration, so both are rejected up front.
+
+        Raises
+        ------
+        ValueError
+            If ``chunk_size`` or ``max_bytes`` is not strictly positive.
+        """
+        if self.chunk_size <= 0:
+            msg = f"chunk_size must be positive, got {self.chunk_size}"
+            raise ValueError(msg)
+        if self.max_bytes <= 0:
+            msg = f"max_bytes must be positive, got {self.max_bytes}"
+            raise ValueError(msg)
+
 
 def _continue_reading(status: int) -> bool:
     """Return whether the message continues past the chunk just read.

@@ -20,10 +20,6 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure environment is restored when replay setup fails."""
     mox = CmdMox()
     pre_env = os.environ.copy()
-    # Entered deliberately without a matching exit: replay() is expected to
-    # fail before an exit would normally occur, and the assertions below
-    # verify the controller cleans up its own state on that failure path.
-    contextlib.ExitStack().enter_context(mox)
 
     called: list[
         tuple[type[BaseException] | None, BaseException | None, TracebackType | None]
@@ -42,16 +38,24 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args: object, **_kwargs: object) -> typ.NoReturn:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(CmdMox, "__exit__", fake_exit)
-    monkeypatch.setattr(controller, "create_shim_symlinks", boom)
+    # The stack guarantees the controller is exited even if an assertion below
+    # fails. replay() is expected to fail and clean up on its own, so once the
+    # assertions confirm that self-cleanup the stack's callback is discarded to
+    # avoid a second exit.
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mox)
 
-    with pytest.raises(RuntimeError):
-        mox.replay()
+        monkeypatch.setattr(CmdMox, "__exit__", fake_exit)
+        monkeypatch.setattr(controller, "create_shim_symlinks", boom)
 
-    assert called == [(None, None, None)], "Assertion failed"
-    assert mox._server is None, "Assertion failed"
-    assert not mox._entered, "Assertion failed"
-    assert os.environ == pre_env, "Assertion failed"
+        with pytest.raises(RuntimeError):
+            mox.replay()
+
+        assert called == [(None, None, None)], "replay() should exit the controller"
+        assert mox._server is None, "replay() failure should clear the IPC server"
+        assert not mox._entered, "replay() failure should leave the controller exited"
+        assert os.environ == pre_env, "replay() failure should restore the environment"
+        stack.pop_all()
 
 
 def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,9 +91,9 @@ def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
         trigger()
 
     exc_type, exc, tb = called[0]
-    assert exc_type is BoomError, "Assertion failed"
-    assert isinstance(exc, BoomError), "Assertion failed"
-    assert tb is not None, "Assertion failed"
-    assert mox._server is None, "Assertion failed"
-    assert not mox._entered, "Assertion failed"
-    assert os.environ == pre_env, "Assertion failed"
+    assert exc_type is BoomError, "__exit__ should receive the raised exception type"
+    assert isinstance(exc, BoomError), "__exit__ should receive the exception instance"
+    assert tb is not None, "__exit__ should receive a traceback"
+    assert mox._server is None, "exceptional exit should clear the IPC server"
+    assert not mox._entered, "exceptional exit should leave the controller exited"
+    assert os.environ == pre_env, "exceptional exit should restore the environment"

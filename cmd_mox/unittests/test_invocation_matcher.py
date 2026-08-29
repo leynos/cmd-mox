@@ -11,6 +11,9 @@ from cmd_mox.ipc import Invocation
 from cmd_mox.record.fixture import RecordedInvocation
 from cmd_mox.record.matching import InvocationMatcher
 
+if typ.TYPE_CHECKING:
+    from cmd_mox.unittests._invocation_helpers import InvocationKwargs
+
 
 @dc.dataclass
 class RecordedInvocationSpec:
@@ -29,10 +32,20 @@ class MatchCase:
     """One InvocationMatcher.matches() test case."""
 
     strict: bool
-    mode: str
     spec: RecordedInvocationSpec
-    inv_kwargs: dict[str, typ.Any]
+    inv_kwargs: InvocationKwargs
     expected: bool
+
+    @property
+    def mode(self) -> str:
+        """The matcher mode implied by *strict*.
+
+        Returns
+        -------
+        str
+            ``"strict"`` when strict matching is enabled, otherwise ``"fuzzy"``.
+        """
+        return "strict" if self.strict else "fuzzy"
 
 
 def _make_recorded_invocation(
@@ -104,7 +117,6 @@ class TestInvocationMatcherStrictMode:
             pytest.param(
                 MatchCase(
                     strict=True,
-                    mode="strict",
                     spec=RecordedInvocationSpec(
                         stdin="data", env_subset={"FOO": "bar"}
                     ),
@@ -116,7 +128,6 @@ class TestInvocationMatcherStrictMode:
             pytest.param(
                 MatchCase(
                     strict=True,
-                    mode="strict",
                     spec=RecordedInvocationSpec(),
                     inv_kwargs={"command": "curl"},
                     expected=False,
@@ -126,7 +137,6 @@ class TestInvocationMatcherStrictMode:
             pytest.param(
                 MatchCase(
                     strict=True,
-                    mode="strict",
                     spec=RecordedInvocationSpec(),
                     inv_kwargs={"args": ["pull"]},
                     expected=False,
@@ -136,7 +146,6 @@ class TestInvocationMatcherStrictMode:
             pytest.param(
                 MatchCase(
                     strict=True,
-                    mode="strict",
                     spec=RecordedInvocationSpec(stdin="different"),
                     inv_kwargs={"stdin": "expected"},
                     expected=False,
@@ -146,7 +155,6 @@ class TestInvocationMatcherStrictMode:
             pytest.param(
                 MatchCase(
                     strict=True,
-                    mode="strict",
                     spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
                     inv_kwargs={"env": {"GIT_DIR": "/other"}},
                     expected=False,
@@ -156,7 +164,6 @@ class TestInvocationMatcherStrictMode:
             pytest.param(
                 MatchCase(
                     strict=True,
-                    mode="strict",
                     spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
                     inv_kwargs={"env": {"GIT_DIR": ".git", "EXTRA": "value"}},
                     expected=True,
@@ -182,7 +189,6 @@ class TestInvocationMatcherFuzzyMode:
             pytest.param(
                 MatchCase(
                     strict=False,
-                    mode="fuzzy",
                     spec=RecordedInvocationSpec(stdin="recorded input"),
                     inv_kwargs={"stdin": "different input"},
                     expected=True,
@@ -192,7 +198,6 @@ class TestInvocationMatcherFuzzyMode:
             pytest.param(
                 MatchCase(
                     strict=False,
-                    mode="fuzzy",
                     spec=RecordedInvocationSpec(env_subset={"FOO": "different"}),
                     inv_kwargs={"env": {"FOO": "bar"}},
                     expected=True,
@@ -202,7 +207,6 @@ class TestInvocationMatcherFuzzyMode:
             pytest.param(
                 MatchCase(
                     strict=False,
-                    mode="fuzzy",
                     spec=RecordedInvocationSpec(),
                     inv_kwargs={"command": "curl"},
                     expected=False,
@@ -212,7 +216,6 @@ class TestInvocationMatcherFuzzyMode:
             pytest.param(
                 MatchCase(
                     strict=False,
-                    mode="fuzzy",
                     spec=RecordedInvocationSpec(),
                     inv_kwargs={"args": ["pull"]},
                     expected=False,

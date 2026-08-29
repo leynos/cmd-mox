@@ -305,8 +305,35 @@ _DISPATCH_MESSAGE: typ.Final[str] = "IPC dispatch outcome"
 # ``TypeError`` and reject every request.
 _ENVELOPE_FIELDS: typ.Final[frozenset[str]] = frozenset({"kind", "correlation_id"})
 # Correlation identifiers are opaque and client-supplied, so cap their length to
-# keep the observability dimension bounded.
-_MAX_CORRELATION_ID_LENGTH: typ.Final[int] = 64
+# keep the observability dimension bounded. The limit lives here rather than in
+# :mod:`cmd_mox.ipc._observability` so that a single definition serves both the
+# server and :mod:`cmd_mox.ipc._client_events`; neither module imports the
+# other's transport, so the shared import introduces no cycle.
+MAX_CORRELATION_ID_LENGTH: typ.Final[int] = 64
+
+
+def bounded_correlation_id(value: object) -> str | None:
+    """Return *value* when it is a usable, length-bounded correlation identifier.
+
+    Identifiers are opaque and supplied by the caller, so an absent, empty,
+    non-string, or over-long value is treated as no identifier at all. An
+    over-long value is deliberately dropped rather than truncated: two distinct
+    identifiers sharing a prefix would collapse onto one, silently correlating
+    unrelated records.
+
+    Parameters
+    ----------
+    value:
+        Candidate identifier taken from a wire envelope or a validated model.
+
+    Returns
+    -------
+    str or None
+        The identifier, or ``None`` when it is unusable.
+    """
+    if isinstance(value, str) and 0 < len(value) <= MAX_CORRELATION_ID_LENGTH:
+        return value
+    return None
 
 
 @dc.dataclass(slots=True)
@@ -365,10 +392,7 @@ def _extract_correlation_id(payload: dict[str, typ.Any]) -> str | None:
         The identifier, or ``None`` when absent, empty, over-long, or not a
         string. No server-side substitute is manufactured.
     """
-    value = payload.get("correlation_id")
-    if isinstance(value, str) and 0 < len(value) <= _MAX_CORRELATION_ID_LENGTH:
-        return value
-    return None
+    return bounded_correlation_id(payload.get("correlation_id"))
 
 
 def _parse_payload(raw: bytes) -> ParsedRequest | None:
@@ -449,12 +473,17 @@ class _DispatchRecord:
         Returns
         -------
         dict[str, str | int | float]
-            The passthrough-only invocation identifier, when one exists.
+            The passthrough-only invocation identifier, when one exists and is
+            within the length bound.
         """
         # Invocation requests carry no server-assigned identifier, so only
         # passthrough results contribute one; never manufacture a substitute.
+        # The value is client-supplied, so it passes the same length bound as
+        # the envelope identifier and is omitted when it fails.
         if isinstance(self.request, PassthroughResult):
-            return {"invocation_id": self.request.invocation_id}
+            invocation_id = bounded_correlation_id(self.request.invocation_id)
+            if invocation_id is not None:
+                return {"invocation_id": invocation_id}
         return {}
 
 
@@ -474,7 +503,9 @@ def _resolve_correlation_id(
     """Return the identifier correlating this dispatch with the client record.
 
     Older shims omit the envelope field, so fall back to the validated model's
-    ``invocation_id`` when it has one and omit the dimension otherwise.
+    ``invocation_id`` when it has one and omit the dimension otherwise. The
+    fallback is bounded exactly like the envelope field, so a client cannot
+    smuggle an unbounded string into the record by omitting the envelope.
 
     Returns
     -------
@@ -483,8 +514,7 @@ def _resolve_correlation_id(
     """
     if parsed.correlation_id is not None:
         return parsed.correlation_id
-    invocation_id = getattr(obj, "invocation_id", None)
-    return invocation_id if isinstance(invocation_id, str) else None
+    return bounded_correlation_id(getattr(obj, "invocation_id", None))
 
 
 def _request_pipeline(

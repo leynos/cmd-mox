@@ -8,6 +8,7 @@ cancellable deadline-aware read, plus the bounded events each path emits.
 
 from __future__ import annotations
 
+import pathlib
 import threading
 import time
 import typing as typ
@@ -476,10 +477,10 @@ def test_shutdown_cancelled_read_is_reported_as_a_stopped_worker(
     assert slot.released, "permit was not released"
 
 
-def test_read_chunk_treats_a_pending_error_as_a_pending_read(
+def test_read_chunk_treats_a_more_data_completion_as_a_continuation(
     patch_win32: PatchWin32,
 ) -> None:
-    """``ReadFile`` raising ``ERROR_IO_PENDING`` still awaits completion."""
+    """``GetOverlappedResult`` raising ``ERROR_MORE_DATA`` continues the message."""
     event_fake = FakeWin32Event()
     patch_win32(
         FakeWin32File(
@@ -495,6 +496,68 @@ def test_read_chunk_treats_a_pending_error_as_a_pending_read(
 
     assert status == named_pipe.ERROR_MORE_DATA, "continuation status lost"
     assert data == b"hi", "a filled buffer must be returned in full"
+
+
+def test_read_chunk_treats_a_pending_readfile_error_as_a_pending_read(
+    patch_win32: PatchWin32,
+) -> None:
+    """``ReadFile`` raising ``ERROR_IO_PENDING`` still awaits completion."""
+    event_fake = FakeWin32Event()
+    patch_win32(
+        FakeWin32File(
+            reads=[ScriptedRead(data=b"hi", start_error=FakeWinError(ERROR_IO_PENDING))]
+        ),
+        win32event=event_fake,
+    )
+    state = build_state()
+
+    status, data = state._read_chunk(object(), time.monotonic() + 5.0, 2)
+
+    assert status == 0, "a completed pending read must report success"
+    assert data == b"hi", "the awaited read did not deliver its data"
+    assert len(event_fake.waits) == 1, "the pending read was not awaited"
+
+
+def test_read_chunk_propagates_an_unexpected_readfile_error(
+    patch_win32: PatchWin32,
+) -> None:
+    """Any other ``ReadFile`` failure reaches the caller unchanged."""
+    patch_win32(
+        FakeWin32File(
+            reads=[ScriptedRead(start_error=FakeWinError(UNEXPECTED_WINERROR))]
+        ),
+        win32event=FakeWin32Event(),
+    )
+    state = build_state()
+
+    with pytest.raises(FakeWinError) as excinfo:
+        state._read_chunk(object(), time.monotonic() + 5.0, 2)
+
+    assert excinfo.value.winerror == UNEXPECTED_WINERROR, "wrong error propagated"
+
+
+# ---------------------------------------------------------------------------
+# Startup failure reporting
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_accept_failure_at_startup_is_reported_to_the_waiting_starter(
+    patch_win32: PatchWin32,
+) -> None:
+    """A server whose first pipe instance fails must not report a clean start."""
+    patch_win32(
+        win32pipe=FakeWin32Pipe(handles=[FakeWinError(UNEXPECTED_WINERROR)]),
+        win32event=FakeWin32Event(),
+    )
+    server = named_pipe.NamedPipeServer(pathlib.Path("ipc.sock"), timeout=1.0)
+
+    with pytest.raises(RuntimeError, match="failed to create its first pipe instance"):
+        server.start()
+
+    state = server._server
+    assert state is not None, "state was discarded"
+    assert state.startup_failed, "failure was not recorded"
 
 
 def test_remaining_ms_floors_at_zero() -> None:

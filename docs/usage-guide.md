@@ -832,6 +832,12 @@ On Windows the transport can be forced explicitly by swapping `IPCServer` for
 :class:`NamedPipeServer`; `CmdMox` selects it automatically based on
 ``os.name``.
 
+Both transports emit bounded, structured observability events with
+correlation identifiers, and the Windows named-pipe transport bounds
+concurrent clients, message size, and per-client read time. See the
+[design document](./python-native-command-mocking-design.md) for the event
+vocabulary and the specific limits.
+
 Projects that rely on :class:`CallbackIPCServer` can still customize startup
 and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
 

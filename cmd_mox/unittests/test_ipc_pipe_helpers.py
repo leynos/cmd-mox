@@ -8,11 +8,14 @@ from pathlib import Path
 
 import pytest
 
+from cmd_mox.ipc import client
 from cmd_mox.ipc.client import RetryConfig, _ConnectionContext, _send_pipe_request
 from cmd_mox.ipc.named_pipe import _NamedPipeState
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
     ERROR_MORE_DATA,
+    MAX_MESSAGE_SIZE,
+    PIPE_CHUNK_SIZE,
     PipeMessageTooLargeError,
     PipeReadOptions,
     Win32FileProtocol,
@@ -295,3 +298,102 @@ def test_read_pipe_message_uses_the_injected_reader() -> None:
 
     assert payload == b"payload", "injected reader was not used"
     assert seen == [17], "chunk size was not forwarded to the reader"
+
+
+@pytest.mark.parametrize(
+    ("chunk_size", "max_bytes", "field"),
+    [
+        pytest.param(0, MAX_MESSAGE_SIZE, "chunk_size", id="zero-chunk-size"),
+        pytest.param(-1, MAX_MESSAGE_SIZE, "chunk_size", id="negative-chunk-size"),
+        pytest.param(PIPE_CHUNK_SIZE, 0, "max_bytes", id="zero-max-bytes"),
+        pytest.param(PIPE_CHUNK_SIZE, -1, "max_bytes", id="negative-max-bytes"),
+    ],
+)
+def test_pipe_read_options_reject_non_positive_bounds(
+    chunk_size: int, max_bytes: int, field: str
+) -> None:
+    """Non-positive read tunables are refused at construction."""
+    with pytest.raises(ValueError, match=f"{field} must be positive"):
+        PipeReadOptions(chunk_size=chunk_size, max_bytes=max_bytes)
+
+
+def test_join_with_timeout_waits_for_the_cancelled_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The timeout is not reported until the cancelled worker has exited."""
+    monkeypatch.setattr(client, "IO_CANCEL_GRACE", 1.0)
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, daemon=True)
+    worker.start()
+
+    try:
+        with pytest.raises(TimeoutError) as excinfo:
+            client._join_with_timeout_and_cancel(worker, 0.01, release.set)
+    finally:
+        release.set()
+        worker.join(1.0)
+
+    assert "did not exit" not in str(excinfo.value), "worker exit was not awaited"
+    assert not worker.is_alive(), "the worker was still running on return"
+
+
+def test_join_with_timeout_reports_a_wedged_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker that ignores cancellation is named in the raised error."""
+    monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, daemon=True)
+    worker.start()
+
+    try:
+        with pytest.raises(TimeoutError, match="did not exit after cancellation"):
+            client._join_with_timeout_and_cancel(worker, 0.01, lambda: None)
+    finally:
+        release.set()
+        worker.join(1.0)
+
+
+def test_synchronous_io_cancel_is_skipped_without_pywin32() -> None:
+    """The cancellation request is inert when the Windows API is absent."""
+    worker = threading.Thread(target=lambda: None, daemon=True)
+    worker.start()
+    worker.join()
+
+    client._request_synchronous_io_cancel(worker)
+
+
+def test_synchronous_io_cancel_opens_and_closes_the_thread_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When exposed, ``CancelSynchronousIo`` runs against the worker's handle."""
+    handle = object()
+    cancelled: list[object] = []
+    closed: list[object] = []
+    opened: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(
+        client,
+        "win32api",
+        types.SimpleNamespace(
+            OpenThread=lambda *args: (opened.append(args), handle)[1]
+        ),
+    )
+    monkeypatch.setattr(
+        client,
+        "win32file",
+        types.SimpleNamespace(
+            CancelSynchronousIo=cancelled.append,
+            CloseHandle=closed.append,
+        ),
+    )
+    worker = threading.Thread(target=lambda: None, daemon=True)
+    worker.start()
+    worker.join()
+
+    client._request_synchronous_io_cancel(worker)
+
+    assert cancelled == [handle], "the worker's I/O was not cancelled"
+    assert closed == [handle], "the thread handle was not closed"
+    assert len(opened) == 1, "the thread handle was not opened once"
+    assert opened[0][2] == worker.native_id, "wrong thread targeted"

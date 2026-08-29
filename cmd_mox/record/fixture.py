@@ -416,6 +416,11 @@ class FixtureFile:
         version differences within the same major version are tolerated
         because unknown fields are ignored.
 
+        Parameters
+        ----------
+        data : dict[str, typ.Any]
+            A JSON-compatible mapping describing a fixture file.
+
         Returns
         -------
         FixtureFile

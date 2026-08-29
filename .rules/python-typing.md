@@ -1,4 +1,4 @@
-# Advanced Typing and Language Features (Python 3.12)
+# Advanced typing and language features (Python 3.12)
 
 > This section documents forward-looking typing features and best practices to
 > improve clarity, correctness, and tooling support against the project's
