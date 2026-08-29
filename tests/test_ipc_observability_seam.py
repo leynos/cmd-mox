@@ -6,6 +6,7 @@ import dataclasses as dc
 import json
 import socket
 import typing as typ
+import uuid
 
 import pytest
 
@@ -233,13 +234,50 @@ def test_envelope_round_trip_reaches_the_model_unchanged() -> None:
     assert json.loads(payload)["correlation_id"] == correlation_id, "Wire field missing"
 
 
-def test_over_long_invocation_id_yields_a_fresh_bounded_correlation_id() -> None:
-    """An unbounded model identifier is replaced, never reused verbatim."""
-    over_long = "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1)
+def _assert_minted_identifier(value: str, rejected: object) -> None:
+    """Assert *value* is a fresh, bounded, log-safe minted identifier."""
+    assert value, "Minted identifier is empty"
+    assert value != rejected, "Rejected identifier was reused"
+    assert len(value) <= _server_core.MAX_CORRELATION_ID_LENGTH, "Not bounded"
+    assert uuid.UUID(value), "Minted identifier is not a UUID"
+    assert _server_core.bounded_correlation_id(value) == value, "Not log-safe"
 
-    correlation_id = _client_events.resolve_correlation_id({"invocation_id": over_long})
 
-    assert correlation_id != over_long, "Over-long identifier must not be reused"
-    assert len(correlation_id) <= _server_core.MAX_CORRELATION_ID_LENGTH, (
-        "Minted identifier is not bounded"
-    )
+@pytest.mark.parametrize(
+    ("data", "rejected"),
+    [
+        pytest.param({}, None, id="absent"),
+        pytest.param({"invocation_id": ""}, "", id="empty"),
+        pytest.param(
+            {"invocation_id": "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1)},
+            "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1),
+            id="over-long",
+        ),
+        pytest.param(
+            {"invocation_id": "id\nWARNING fake"}, "id\nWARNING fake", id="newline"
+        ),
+        pytest.param(
+            {"invocation_id": "id\x1b[31mred"}, "id\x1b[31mred", id="ansi-escape"
+        ),
+        pytest.param({"invocation_id": "id\x00null"}, "id\x00null", id="control-char"),
+    ],
+)
+def test_unusable_invocation_id_yields_a_fresh_bounded_correlation_id(
+    data: dict[str, object], rejected: object
+) -> None:
+    """An unusable model identifier is replaced by a fresh opaque UUID."""
+    first = _client_events.resolve_correlation_id(data)
+    second = _client_events.resolve_correlation_id(data)
+
+    _assert_minted_identifier(first, rejected)
+    _assert_minted_identifier(second, rejected)
+    assert first != second, "Minted identifiers must be distinct"
+
+
+def test_usable_invocation_id_is_reused_verbatim() -> None:
+    """A conforming identifier is carried through, not replaced."""
+    existing = uuid.uuid4().hex
+
+    resolved = _client_events.resolve_correlation_id({"invocation_id": existing})
+
+    assert resolved == existing, "A usable identifier must be reused"

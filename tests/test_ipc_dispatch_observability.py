@@ -327,6 +327,9 @@ def test_request_pipeline_falls_back_to_model_invocation_id(
         pytest.param(17, id="not-a-string"),
         pytest.param("", id="empty"),
         pytest.param("x" * 65, id="over-long"),
+        pytest.param("id\nWARNING forged", id="newline"),
+        pytest.param("id\x1b[31mred", id="ansi-escape"),
+        pytest.param("id\x00null", id="control-char"),
     ],
 )
 def test_parse_payload_rejects_unbounded_correlation_ids(
@@ -349,14 +352,30 @@ def test_parse_payload_rejects_unbounded_correlation_ids(
     assert "correlation_id" not in parsed.payload, "Envelope field must be stripped"
 
 
-def test_dispatch_record_omits_an_over_long_invocation_identifier(
+@pytest.mark.parametrize(
+    "invocation_id",
+    [
+        pytest.param(
+            "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1), id="over-long"
+        ),
+        pytest.param("id\nWARNING forged", id="newline"),
+        pytest.param("id\x1b[31mred", id="ansi-escape"),
+        pytest.param("id\x00null", id="control-char"),
+    ],
+)
+def test_dispatch_record_omits_an_unusable_invocation_identifier(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
     passthrough_handler: cabc.Callable[[PassthroughResult], Response],
+    invocation_id: str,
 ) -> None:
-    """A client-supplied over-long identifier is dropped, not logged."""
+    """An over-long or non-log-safe identifier is dropped, not logged.
+
+    The record reaches ``logging``'s ``extra=`` mapping, and a consuming
+    application chooses the formatter, so control characters must never get
+    that far.
+    """
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
-    over_long = "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1)
     ipc_server = IPCServer(
         tmp_path / "ipc.sock",
         handlers=IPCHandlers(passthrough_handler=passthrough_handler),
@@ -366,7 +385,7 @@ def test_dispatch_record_omits_an_over_long_invocation_identifier(
         ipc_server,
         json.dumps({
             "kind": _server_core.KIND_PASSTHROUGH_RESULT,
-            "invocation_id": over_long,
+            "invocation_id": invocation_id,
             "stdout": "",
             "stderr": "",
             "exit_code": 0,
@@ -374,5 +393,5 @@ def test_dispatch_record_omits_an_over_long_invocation_identifier(
     )
 
     [event] = _dispatch_events(caplog)
-    assert "invocation_id" not in event, "Over-long identifier must be omitted"
-    assert "correlation_id" not in event, "Over-long fallback must be omitted"
+    assert "invocation_id" not in event, "Unusable identifier must be omitted"
+    assert "correlation_id" not in event, "Unusable fallback must be omitted"

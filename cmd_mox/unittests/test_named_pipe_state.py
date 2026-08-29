@@ -15,6 +15,7 @@ import typing as typ
 import pytest
 
 from cmd_mox.ipc import TimeoutConfig
+from cmd_mox.ipc._named_pipe_limits import join_threads_before, remaining_seconds
 from cmd_mox.ipc.models import Invocation, PassthroughResult, Response
 from cmd_mox.ipc.named_pipe import (
     CallbackNamedPipeServer,
@@ -275,49 +276,30 @@ def test_get_active_threads_returns_a_snapshot() -> None:
     [(-1.0, True), (0.0, True), (5.0, False)],
     ids=["past", "now", "future"],
 )
-def test_calculate_remaining_time(
+def test_remaining_seconds(
     offset: float,
     is_expired: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized expectation, not an API flag
 ) -> None:
     """Remaining time is ``None`` once the deadline has passed."""
-    remaining = _NamedPipeState._calculate_remaining_time(time.monotonic() + offset)
+    remaining = remaining_seconds(time.monotonic() + offset)
 
     assert (remaining is None) is is_expired, "expiry classification mismatch"
 
 
 @pytest.mark.parametrize(
-    ("offset", "expected"),
-    [(-1.0, False), (5.0, True)],
-    ids=["deadline-passed", "deadline-remaining"],
-)
-def test_join_thread_with_deadline(
-    offset: float,
-    expected: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized expectation, not an API flag
-) -> None:
-    """Joining is attempted only while the deadline has not expired."""
-    state = build_state()
-    thread = _finished_thread()
-
-    result = state._join_thread_with_deadline(thread, time.monotonic() + offset)
-
-    assert result is expected, "join attempt decision mismatch"
-
-
-@pytest.mark.parametrize(
     ("offset", "thread_count", "expected"),
-    [(5.0, 0, True), (5.0, 2, True), (-1.0, 1, False)],
-    ids=["no-threads", "all-joined", "deadline-passed"],
+    [(5.0, 0, True), (5.0, 1, True), (5.0, 2, True), (-1.0, 1, False)],
+    ids=["no-threads", "one-joined", "all-joined", "deadline-passed"],
 )
-def test_join_all_threads_with_deadline(
+def test_join_threads_before(
     offset: float,
     thread_count: int,
     expected: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized expectation, not an API flag
 ) -> None:
     """All threads are joined unless the deadline expires part-way."""
-    state = build_state()
     threads = [_finished_thread() for _ in range(thread_count)]
 
-    result = state._join_all_threads_with_deadline(threads, time.monotonic() + offset)
+    result = join_threads_before(threads, time.monotonic() + offset)
 
     assert result is expected, "join completion decision mismatch"
 

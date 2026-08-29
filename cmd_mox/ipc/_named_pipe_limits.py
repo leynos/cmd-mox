@@ -1,9 +1,10 @@
 """Resource bounds and bounded worker events for the named-pipe transport.
 
 This module holds the concurrency, message-size, and lifetime limits applied by
-:mod:`cmd_mox.ipc.named_pipe`, plus the vocabulary used to report them through
-the observability seam. It deliberately imports no ``pywin32`` module, so the
-limits are importable and testable on any platform.
+:mod:`cmd_mox.ipc.named_pipe`, the deadline arithmetic that enforces them, and
+the vocabulary used to report them through the observability seam. It
+deliberately imports no ``pywin32`` module, so the limits are importable and
+testable on any platform.
 """
 
 from __future__ import annotations
@@ -11,9 +12,13 @@ from __future__ import annotations
 import dataclasses as dc
 import logging
 import threading
+import time
 import typing as typ
 
 from . import _observability
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 # Upper bound on named-pipe clients served concurrently. Each admitted client
 # owns an OS thread and a pipe instance, so this caps both. Sixty-four is well
@@ -136,6 +141,69 @@ class ClientSlot:
         self._semaphore.release()
 
 
+def remaining_seconds(deadline: float) -> float | None:
+    """Return the time left before *deadline*.
+
+    Parameters
+    ----------
+    deadline:
+        A :func:`time.monotonic` timestamp.
+
+    Returns
+    -------
+    float | None
+        The remaining seconds, or ``None`` once the deadline has passed.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+    return remaining
+
+
+def remaining_ms(deadline: float) -> int:
+    """Return the milliseconds left before *deadline*.
+
+    Parameters
+    ----------
+    deadline:
+        A :func:`time.monotonic` timestamp.
+
+    Returns
+    -------
+    int
+        Zero once the deadline has passed, so a wait returns at once.
+    """
+    remaining = remaining_seconds(deadline)
+    if remaining is None:
+        return 0
+    return max(0, int(remaining * 1000))
+
+
+def join_threads_before(
+    threads: cabc.Iterable[threading.Thread], deadline: float
+) -> bool:
+    """Join every thread in *threads*, stopping once *deadline* passes.
+
+    Parameters
+    ----------
+    threads:
+        The worker threads to join, in the order they should be awaited.
+    deadline:
+        A :func:`time.monotonic` timestamp bounding the whole sweep.
+
+    Returns
+    -------
+    bool
+        Whether every thread's join was attempted before the deadline expired.
+    """
+    for thread in threads:
+        remaining = remaining_seconds(deadline)
+        if remaining is None:
+            return False
+        thread.join(remaining)
+    return True
+
+
 def acquire_client_slot(semaphore: threading.BoundedSemaphore) -> ClientSlot | None:
     """Reserve one permit from *semaphore* without blocking.
 
@@ -158,4 +226,7 @@ __all__ = [
     "WorkerEvent",
     "WorkerOutcome",
     "acquire_client_slot",
+    "join_threads_before",
+    "remaining_ms",
+    "remaining_seconds",
 ]

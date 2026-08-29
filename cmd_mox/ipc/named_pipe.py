@@ -38,6 +38,8 @@ from ._named_pipe_limits import (
     WorkerEvent,
     acquire_client_slot,
     emit_worker_event,
+    join_threads_before,
+    remaining_ms,
 )
 from ._server_core import (
     IPCHandlers,
@@ -375,34 +377,57 @@ class _NamedPipeState:
             win32file.CloseHandle(handle)
 
     def _admit_client(self, handle: object) -> None:
-        """Hand *handle* to a worker thread, or refuse it when at capacity.
+        """Hand *handle* to a worker thread, or refuse it.
 
-        Refusal is never fatal to the accept loop: the handle is disposed of
-        and serving continues.
+        Admission is refused when the client limit has been reached, when the
+        interpreter cannot start a thread, and when shutdown has begun. Refusal
+        is never fatal to the accept loop: the handle is disposed of and serving
+        continues.
         """
         slot = acquire_client_slot(self._client_slots)
         if slot is None:
-            emit_worker_event(
-                WorkerEvent("rejected", error_category="ClientLimitReached")
-            )
-            self._dispose_handle(handle)
+            self._refuse_client(handle, None, "ClientLimitReached")
             return
         try:
-            self._spawn_handler_thread(handle, slot)
+            admitted = self._spawn_handler_thread(handle, slot)
         except RuntimeError:
             # The interpreter refused a new thread, so the worker will never
             # run and cannot release the permit; do it here instead.
             logger.exception("Named pipe handler thread could not start")
+            self._refuse_client(handle, slot, "ThreadStartFailed")
+            return
+        if not admitted:
+            self._refuse_client(handle, slot, "ServerStopping")
+
+    def _refuse_client(
+        self, handle: object, slot: ClientSlot | None, error_category: str
+    ) -> None:
+        """Report a refused admission and release everything it reserved.
+
+        The permit is released exactly once by :meth:`ClientSlot.release`, and
+        the handle is disposed of, because no worker will ever own either.
+        """
+        if slot is not None:
             slot.release()
-            emit_worker_event(
-                WorkerEvent("rejected", error_category="ThreadStartFailed")
-            )
-            self._dispose_handle(handle)
+        emit_worker_event(WorkerEvent("rejected", error_category=error_category))
+        self._dispose_handle(handle)
 
     def _spawn_handler_thread(
         self, handle: object, slot: ClientSlot | None = None
-    ) -> None:
+    ) -> bool:
         """Create and track the per-client handler thread.
+
+        Registration re-checks ``stop_event`` while holding ``_client_lock``,
+        the same lock :meth:`stop` sets the event under. Either stop wins and
+        the admission is refused, or registration completes first and the
+        snapshot :meth:`join_clients` takes is guaranteed to include the
+        thread; no worker can slip in behind an emptied snapshot.
+
+        Returns
+        -------
+        bool
+            Whether the worker was registered and started. ``False`` means
+            shutdown began first and the caller must undo the admission.
 
         Raises
         ------
@@ -416,6 +441,8 @@ class _NamedPipeState:
             daemon=True,
         )
         with self._client_lock:
+            if self.stop_event.is_set():
+                return False
             self._client_threads.add(thread)
         try:
             thread.start()
@@ -423,6 +450,7 @@ class _NamedPipeState:
             with self._client_lock:
                 self._client_threads.discard(thread)
             raise
+        return True
 
     def _get_active_threads(self) -> list[threading.Thread]:
         """Get a snapshot of active client threads.
@@ -434,51 +462,6 @@ class _NamedPipeState:
         """
         with self._client_lock:
             return list(self._client_threads)
-
-    @staticmethod
-    def _calculate_remaining_time(deadline: float) -> float | None:
-        """Calculate the time remaining until *deadline*.
-
-        Returns
-        -------
-        float | None
-            The remaining seconds, or ``None`` when the deadline has passed.
-        """
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None
-        return remaining
-
-    def _join_thread_with_deadline(
-        self, thread: threading.Thread, deadline: float
-    ) -> bool:
-        """Join a thread respecting the deadline.
-
-        Returns
-        -------
-        bool
-            Whether joining was attempted before the deadline expired.
-        """
-        remaining = self._calculate_remaining_time(deadline)
-        if remaining is None:
-            return False
-        thread.join(max(0.0, remaining))
-        return True
-
-    def _join_all_threads_with_deadline(
-        self, threads: list[threading.Thread], deadline: float
-    ) -> bool:
-        """Join all threads respecting the deadline.
-
-        Returns
-        -------
-        bool
-            Whether every thread's join was attempted before the deadline expired.
-        """
-        for thread in threads:
-            if not self._join_thread_with_deadline(thread, deadline):
-                return False
-        return True
 
     def serve_forever(self) -> None:
         if not path_utils.IS_WINDOWS:  # pragma: no cover - defensive guard
@@ -507,9 +490,12 @@ class _NamedPipeState:
             self._admit_client(handle)
 
     def stop(self) -> None:
-        if self.stop_event.is_set():
-            return
-        self.stop_event.set()
+        # ``stop_event`` is set under ``_client_lock`` so that admission and
+        # shutdown are mutually exclusive: see ``_spawn_handler_thread``.
+        with self._client_lock:
+            if self.stop_event.is_set():
+                return
+            self.stop_event.set()
         self.ready_event.set()
         self._signal_stop_handle()
         # The Win32 event already unblocks the accept wait and any active read;
@@ -534,9 +520,7 @@ class _NamedPipeState:
             threads = self._get_active_threads()
             if not threads:
                 return
-            if self._calculate_remaining_time(deadline) is None:
-                return
-            if not self._join_all_threads_with_deadline(threads, deadline):
+            if not join_threads_before(threads, deadline):
                 return
 
     def _create_pipe_instance(self) -> object:
@@ -734,7 +718,7 @@ class _NamedPipeState:
             and drained before the signal propagates, so the kernel is no
             longer writing into the buffer once this returns.
         """
-        result = self._wait_for_overlapped(event, self._remaining_ms(deadline))
+        result = self._wait_for_overlapped(event, remaining_ms(deadline))
         if result == win32event.WAIT_OBJECT_0:
             return
         self._cancel_overlapped(handle, overlapped)
@@ -766,20 +750,6 @@ class _NamedPipeState:
             # error, but a filled buffer is by definition ``chunk_size`` bytes.
             return ERROR_MORE_DATA, bytes(memoryview(buffer)[:chunk_size])
         return 0, bytes(memoryview(buffer)[:transferred])
-
-    @staticmethod
-    def _remaining_ms(deadline: float) -> int:
-        """Return the milliseconds left before *deadline*.
-
-        Returns
-        -------
-        int
-            Zero once the deadline has passed, so the wait returns at once.
-        """
-        remaining = _NamedPipeState._calculate_remaining_time(deadline)
-        if remaining is None:
-            return 0
-        return max(0, int(remaining * 1000))
 
     def _poke_pipe(self) -> None:
         try:

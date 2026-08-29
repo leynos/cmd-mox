@@ -48,10 +48,12 @@ def resolve_correlation_id(data: cabc.Mapping[str, typ.Any]) -> str:
 
     The model's ``invocation_id`` is reused when the request already carries a
     usable one, so the client and server records share a single identifier. An
-    absent, empty, or over-long value is treated as no identifier at all and a
-    fresh opaque UUID is minted instead; identifiers are never derived from
-    request content, and never exceed
-    :data:`~cmd_mox.ipc._server_core.MAX_CORRELATION_ID_LENGTH` characters.
+    absent, empty, over-long, or non-conforming value is treated as no
+    identifier at all and a fresh opaque UUID is minted instead; identifiers are
+    never derived from request content, never exceed
+    :data:`~cmd_mox.ipc._server_core.MAX_CORRELATION_ID_LENGTH` characters, and
+    are always drawn from the log-safe alphabet
+    :func:`~cmd_mox.ipc._server_core.bounded_correlation_id` accepts.
 
     Parameters
     ----------

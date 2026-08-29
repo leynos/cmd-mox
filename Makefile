@@ -30,6 +30,7 @@ DF12_PYLINT = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated -
 AMBRLEAKS = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' ambrleaks
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
+	tests/test_named_pipe_server.py \
 	--log-file=windows-ipc.log \
 	--log-file-level=DEBUG \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"

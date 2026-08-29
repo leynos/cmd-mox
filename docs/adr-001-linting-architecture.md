@@ -1,9 +1,12 @@
-# Architectural decision record (ADR) 001: Layered linting architecture
+# Architectural decision record (ADR) 001: Two-tier linting architecture
 
 ## Status
 
-Accepted. CmdMox uses Ruff as the first lint tier, PyPy-backed Pylint as the
-second, and CPython 3.14 DF12 Pylint plus `ambrleaks` as the third.
+Accepted. CmdMox uses Ruff as the first lint tier and PyPy-backed Pylint as the
+second lint tier.
+
+Amended 2026-08-27 to add a third lint tier; see
+[Amendment (2026-08-27): third lint tier](#amendment-2026-08-27-third-lint-tier).
 
 ## Date
 
@@ -31,7 +34,6 @@ after Ruff.
 - Keep existing CmdMox lint debt visible without forcing unrelated refactors
   into the lint architecture change.
 - Pin the shim revision so lint execution is reproducible.
-- Keep DF12 checker policy independent of the temporary PyPy baseline.
 
 ## Options considered
 
@@ -73,18 +75,11 @@ The `lint` target runs `ruff check` first and then runs Pylint through
 while the Makefile defines the executable composition and the temporary
 CmdMox-specific Pylint baseline.
 
-The target then runs an isolated CPython 3.14 Pylint pass configured in
-`pylintrc-df12.toml`. It installs the DF12 plugin from a pinned immutable
-revision and enables its complete checker set. The same pinned distribution
-also provides `ambrleaks`, which scans test snapshots after the Pylint passes.
-
 ## Consequences
 
 - Developers continue to run one command: `make lint`.
 - Ruff remains the fastest feedback path and blocks before Pylint starts.
 - Pylint adds second-tier checks without becoming a separate manual workflow.
-- The DF12 plugin and snapshot scanner run on CPython 3.14 without changing
-  the PyPy-backed Pylint baseline.
 - The project carries an explicit baseline for existing findings. This makes
   future clean-up incremental rather than hiding the stricter policy.
 - The managed PyPy runtime may lag the syntax used by CmdMox. The Pylint
@@ -98,3 +93,17 @@ also provides `ambrleaks`, which scans test snapshots after the Pylint passes.
 - Revisit unsupported Ruff selectors when the pinned Ruff version changes.
 - Keep `docs/developers-guide.md` synchronized with Makefile and
   `pyproject.toml` lint policy changes.
+
+## Amendment (2026-08-27): third lint tier
+
+CmdMox adds a third lint tier: an isolated CPython 3.14 Pylint pass configured
+in `pylintrc-df12.toml`. The `lint` target installs the DF12 plugin from a
+pinned immutable revision and enables its complete checker set. The same
+pinned distribution also provides `ambrleaks`, which scans test snapshots
+after the Pylint passes.
+
+The driver for this amendment was to keep DF12 checker policy independent of
+the temporary PyPy baseline.
+
+Consequence: the DF12 plugin and snapshot scanner run on CPython 3.14 without
+changing the PyPy-backed Pylint baseline.

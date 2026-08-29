@@ -8,6 +8,7 @@ cancellable deadline-aware read, plus the bounded events each path emits.
 
 from __future__ import annotations
 
+import functools
 import pathlib
 import threading
 import time
@@ -21,6 +22,7 @@ from cmd_mox.ipc._named_pipe_limits import (
     ClientSlot,
     PipeReadCancelled,
     acquire_client_slot,
+    remaining_ms,
 )
 from cmd_mox.ipc.windows import ERROR_IO_PENDING, PipeMessageTooLargeError
 from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import] - re-exported pytest fixtures
@@ -40,6 +42,14 @@ from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import]
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+#: Interleavings tried when racing an admission against ``stop``.
+_RACE_ATTEMPTS: typ.Final[int] = 40
+
+
+def _no_gate() -> None:
+    """Release an admitting thread immediately, with no rendezvous."""
+
 
 #: Fields an event may never carry: they would be derived from the payload.
 _FORBIDDEN_FIELDS: typ.Final[tuple[str, ...]] = (
@@ -190,6 +200,121 @@ def test_admit_client_releases_the_permit_when_the_thread_cannot_start(
     assert state._client_slots.acquire(blocking=False), "permit was not released"
     assert pipe_fake.disconnected == [handle], "handle was not disconnected"
     assert closed_pipe_handles(file_fake) == [handle], "handle was not closed"
+
+
+def test_admit_client_refuses_a_client_arriving_after_stop(
+    patch_win32: PatchWin32,
+) -> None:
+    """Shutdown closes admission: a late client is refused, not registered."""
+    file_fake, pipe_fake = patch_win32(
+        FakeWin32File(FakeWinError(named_pipe.ERROR_FILE_NOT_FOUND))
+    )
+    state = build_state()
+    state._client_slots = threading.BoundedSemaphore(1)
+    state.stop()
+    handle = object()
+
+    with _observability.capture_events() as events:
+        state._admit_client(handle)
+
+    rejected = _worker_events(events, "rejected")
+    assert len(rejected) == 1, "the late client was not rejected"
+    assert rejected[0].error_category == "ServerStopping", "wrong category"
+    _assert_bounded(rejected[0])
+    assert not state._get_active_threads(), "a worker was registered after stop"
+    assert state._client_slots.acquire(blocking=False), "permit was not released"
+    assert pipe_fake.disconnected == [handle], "handle was not disconnected"
+    assert closed_pipe_handles(file_fake) == [handle], "handle was not closed"
+
+
+def _admit_on_thread(
+    state: named_pipe._NamedPipeState, gate: cabc.Callable[[], object]
+) -> threading.Thread:
+    """Start a thread that admits one client once *gate* releases it.
+
+    Returns
+    -------
+    threading.Thread
+        The started admitting thread.
+    """
+
+    def admit() -> None:
+        gate()
+        state._admit_client(object())
+
+    thread = threading.Thread(target=admit)
+    thread.start()
+    return thread
+
+
+@pytest.mark.parametrize(
+    "synchronised",
+    [pytest.param(True, id="barrier"), pytest.param(False, id="free-running")],
+)
+def test_admission_racing_stop_is_refused_or_joined(
+    patch_win32: PatchWin32,
+    monkeypatch: pytest.MonkeyPatch,
+    synchronised: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized scheduling strategy, not an API flag
+) -> None:
+    """A client admitted alongside ``stop`` is refused or joined, never left.
+
+    Registration and shutdown take the same lock, so every attempt resolves one
+    way or the other: the admission is refused outright, or the worker is
+    registered before ``stop`` and therefore appears in the snapshot
+    ``join_clients`` awaits. Rendezvousing on a barrier lets shutdown win the
+    race; letting the admitting thread run free lets admission win, so the two
+    parameters cover both interleavings.
+    """
+    patch_win32(FakeWin32File(FakeWinError(named_pipe.ERROR_FILE_NOT_FOUND)))
+    for _ in range(_RACE_ATTEMPTS):
+        state = build_state()
+        monkeypatch.setattr(state, "_read_request", lambda _handle: None)
+        barrier = threading.Barrier(2)
+        gate = functools.partial(barrier.wait, 5.0) if synchronised else _no_gate
+
+        with _observability.capture_events() as events:
+            admitter = _admit_on_thread(state, gate)
+            if synchronised:
+                barrier.wait(5.0)
+            state.stop()
+            admitter.join(5.0)
+            state.join_clients(5.0)
+
+        assert not admitter.is_alive(), "the admitting thread stalled"
+        assert not state._get_active_threads(), "a worker outlived shutdown"
+        admitted = _worker_events(events, "admitted")
+        rejected = _worker_events(events, "rejected")
+        assert len(admitted) + len(rejected) == 1, "the admission was ambiguous"
+        assert len(_worker_events(events, "completed")) == len(admitted), (
+            "an admitted worker never finished"
+        )
+
+
+def test_a_worker_admitted_before_stop_is_joined(
+    patch_win32: PatchWin32, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``join_clients`` awaits a worker registered before shutdown began."""
+    patch_win32(FakeWin32File(FakeWinError(named_pipe.ERROR_FILE_NOT_FOUND)))
+    state = build_state()
+    serving = threading.Event()
+    release = threading.Event()
+
+    def block_read(_handle: object) -> bytes | None:
+        serving.set()
+        assert release.wait(5.0), "the blocked worker was never released"
+        return None
+
+    monkeypatch.setattr(state, "_read_request", block_read)
+    state._admit_client(object())
+    assert serving.wait(5.0), "the worker never began serving"
+    [worker] = state._get_active_threads()
+
+    state.stop()
+    release.set()
+    state.join_clients(5.0)
+
+    assert not worker.is_alive(), "shutdown returned with a worker still running"
+    assert not state._get_active_threads(), "the worker was not untracked"
 
 
 def test_completed_client_releases_capacity(
@@ -562,7 +687,7 @@ def test_accept_failure_at_startup_is_reported_to_the_waiting_starter(
 
 def test_remaining_ms_floors_at_zero() -> None:
     """An expired deadline yields a zero timeout rather than a negative one."""
-    assert named_pipe._NamedPipeState._remaining_ms(0.0) == 0, "negative timeout"
+    assert remaining_ms(0.0) == 0, "negative timeout"
 
 
 # ---------------------------------------------------------------------------
