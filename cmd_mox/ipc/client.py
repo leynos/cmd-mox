@@ -277,17 +277,12 @@ class _HandleCloser:
 
 
 def _request_synchronous_io_cancel(thread: threading.Thread) -> None:
-    """Ask Windows to abort *thread*'s in-flight synchronous I/O.
-
-    Closing the pipe handle does not reliably wake a thread already blocked
-    inside ``ReadFile``; ``CancelSynchronousIo`` does. It is absent from some
-    ``pywin32`` builds and from every non-Windows host, so it and the worker's
-    native thread id are resolved defensively and the request is skipped when
-    either is missing. Failing to cancel is never fatal: the handle close that
-    follows remains the fallback.
-    """
-    # The pywin32 modules are untyped stand-ins off Windows, so the resolved
-    # callables are deliberately dynamic.
+    """Ask Windows to abort *thread*'s in-flight synchronous I/O."""
+    # Closing the pipe handle does not reliably wake a thread already blocked
+    # inside ReadFile; CancelSynchronousIo does. Both it and the native thread
+    # id are resolved defensively: the API is missing from some pywin32 builds
+    # and from every non-Windows host. The modules are untyped stand-ins off
+    # Windows, so the resolved callables are deliberately dynamic.
     cancel_io: typ.Any = getattr(win32file, "CancelSynchronousIo", None)
     open_thread: typ.Any = getattr(win32api, "OpenThread", None)
     if cancel_io is None or open_thread is None:
@@ -295,6 +290,8 @@ def _request_synchronous_io_cancel(thread: threading.Thread) -> None:
     native_id = thread.native_id
     if native_id is None:
         return
+    # Best-effort: failing to cancel is never fatal, because the caller's
+    # handle close remains the fallback for waking the worker.
     with contextlib.suppress(Exception):
         # OpenThread(desired_access, inherit_handle, thread_id).
         handle = open_thread(
@@ -302,10 +299,10 @@ def _request_synchronous_io_cancel(thread: threading.Thread) -> None:
             False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes the inherit flag positionally
             native_id,
         )
-        try:
+        # Reuse the shared guard rather than closing by hand, so the thread
+        # handle is reclaimed exactly once on both the success and error paths.
+        with contextlib.closing(_HandleCloser(handle)):
             cancel_io(handle)
-        finally:
-            win32file.CloseHandle(handle)
 
 
 def _cancel_and_await_worker(

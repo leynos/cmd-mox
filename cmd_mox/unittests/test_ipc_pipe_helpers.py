@@ -387,6 +387,11 @@ def test_synchronous_io_cancel_opens_and_closes_the_thread_handle(
             CloseHandle=closed.append,
         ),
     )
+    # A Windows host always has pywintypes alongside win32file; stub it too so
+    # the handle guard can resolve the error type it suppresses.
+    monkeypatch.setattr(
+        client, "pywintypes", types.SimpleNamespace(error=_FakeWinError)
+    )
     worker = threading.Thread(target=lambda: None, daemon=True)
     worker.start()
     worker.join()
