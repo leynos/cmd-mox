@@ -159,9 +159,13 @@ def test_ensure_shim_during_replay_behaviour(
             mox.__enter__()
             mox.replay()
             shim_symlink_spy.calls.clear()
-        case _:
-            # "no_replay": leave the controller in its pristine record phase.
+        case "no_replay":
+            # Leave the controller in its pristine record phase.
             pass
+        case _:
+            # Guard against a future typo or an unsupported case being added to
+            # the parametrization and silently exercising the no-replay path.
+            pytest.fail(f"unsupported setup: {setup!r}")
 
     mox._ensure_shim_during_replay("late")
 
