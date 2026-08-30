@@ -8,14 +8,18 @@ where the production code branches on the platform.
 from __future__ import annotations
 
 import dataclasses as dc
+import pathlib
 import threading
 import time
-import typing as typ
 
 import pytest
 
 from cmd_mox.ipc import TimeoutConfig
-from cmd_mox.ipc._named_pipe_limits import join_threads_before, remaining_seconds
+from cmd_mox.ipc._named_pipe_limits import (
+    join_threads_before,
+    remaining_ms,
+    remaining_seconds,
+)
 from cmd_mox.ipc.models import Invocation, PassthroughResult, Response
 from cmd_mox.ipc.named_pipe import (
     CallbackNamedPipeServer,
@@ -25,6 +29,7 @@ from cmd_mox.ipc.named_pipe import (
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
     ERROR_FILE_NOT_FOUND,
+    ERROR_IO_PENDING,
     ERROR_NO_DATA,
     ERROR_OPERATION_ABORTED,
     ERROR_PIPE_BUSY,
@@ -34,6 +39,7 @@ from cmd_mox.ipc.windows import (
 from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import] - re-exported pytest fixtures
     UNEXPECTED_WINERROR,
     FakePyWinTypes,
+    FakeWin32Event,
     FakeWin32File,
     FakeWin32Pipe,
     FakeWinError,
@@ -43,9 +49,6 @@ from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import]
     patch_win32_fixture,
     windows_platform_fixture,
 )
-
-if typ.TYPE_CHECKING:
-    import pathlib
 
 
 def _finished_thread() -> threading.Thread:
@@ -149,6 +152,25 @@ def test_wait_until_ready_raises_when_state_never_signals(
 
 
 @pytest.mark.usefixtures("windows_platform")
+def test_accept_failure_at_startup_is_reported_to_the_waiting_starter(
+    patch_win32: PatchWin32,
+) -> None:
+    """A server whose first pipe instance fails must not report a clean start."""
+    patch_win32(
+        win32pipe=FakeWin32Pipe(handles=[FakeWinError(UNEXPECTED_WINERROR)]),
+        win32event=FakeWin32Event(),
+    )
+    server = NamedPipeServer(pathlib.Path("ipc.sock"), timeout=1.0)
+
+    with pytest.raises(RuntimeError, match="failed to create its first pipe instance"):
+        server.start()
+
+    state = server._server
+    assert state is not None, "state was discarded"
+    assert state.startup_failed, "failure was not recorded"
+
+
+@pytest.mark.usefixtures("windows_platform")
 def test_stop_backend_tolerates_missing_server(tmp_path: pathlib.Path) -> None:
     """Stopping a server that never started is a no-op."""
     server = NamedPipeServer(tmp_path / "ipc.sock", timeout=1.0)
@@ -230,6 +252,58 @@ def test_try_connect_pipe_maps_errors(
     assert (closed == [handle]) is expect_closed, "handle disposal mismatch"
 
 
+def test_try_connect_pipe_awaits_a_pending_connection(
+    patch_win32: PatchWin32,
+) -> None:
+    """A pending ``ConnectNamedPipe`` is awaited before serving the client."""
+    event_fake = FakeWin32Event()
+    file_fake, _pipe_fake = patch_win32(
+        win32pipe=FakeWin32Pipe(connect_results=[ERROR_IO_PENDING]),
+        win32event=event_fake,
+    )
+    handle = object()
+
+    assert build_state()._try_connect_pipe(handle) == (True, True), "bad decision"
+    assert len(event_fake.waits) == 1, "the pending connect was not awaited"
+    assert closed_pipe_handles(file_fake) == [], "the client handle was closed"
+
+
+def test_try_connect_pipe_stops_when_shutdown_wins_the_race(
+    patch_win32: PatchWin32,
+) -> None:
+    """A shutdown during accept cancels the connect and ends the loop."""
+    file_fake, _pipe_fake = patch_win32(
+        win32pipe=FakeWin32Pipe(connect_results=[ERROR_IO_PENDING]),
+        win32event=FakeWin32Event([FakeWin32Event.WAIT_OBJECT_0 + 1]),
+    )
+    handle = object()
+
+    assert build_state()._try_connect_pipe(handle) == (False, False), "bad decision"
+    assert file_fake.cancelled == [handle], "the pending connect was not cancelled"
+    assert closed_pipe_handles(file_fake) == [handle], "handle was not closed"
+
+
+def test_try_connect_pipe_maps_a_failed_overlapped_connect(
+    patch_win32: PatchWin32,
+) -> None:
+    """A connect that fails on completion is mapped like a direct failure."""
+    file_fake, _pipe_fake = patch_win32(
+        FakeWin32File(reads=[]),
+        win32pipe=FakeWin32Pipe(connect_results=[ERROR_IO_PENDING]),
+        win32event=FakeWin32Event(),
+    )
+    state = build_state()
+    handle = object()
+
+    def fail_result(*_args: object) -> int:
+        raise FakeWinError(UNEXPECTED_WINERROR)
+
+    file_fake.GetOverlappedResult = fail_result  # type: ignore[method-assign, ty:invalid-assignment]
+
+    assert state._try_connect_pipe(handle) == (True, False), "bad decision"
+    assert closed_pipe_handles(file_fake) == [handle], "handle was not closed"
+
+
 def test_close_handle_delegates_to_win32file(patch_win32: PatchWin32) -> None:
     """Closing a handle calls straight through to ``win32file``."""
     file_fake, _pipe_fake = patch_win32()
@@ -284,6 +358,11 @@ def test_remaining_seconds(
     remaining = remaining_seconds(time.monotonic() + offset)
 
     assert (remaining is None) is is_expired, "expiry classification mismatch"
+
+
+def test_remaining_ms_floors_at_zero() -> None:
+    """An expired deadline yields a zero timeout rather than a negative one."""
+    assert remaining_ms(0.0) == 0, "negative timeout"
 
 
 @pytest.mark.parametrize(
@@ -449,6 +528,38 @@ def test_stop_is_idempotent(patch_win32: PatchWin32) -> None:
 
     assert len(file_fake.create_file_calls) == 1, "the pipe was poked twice"
     assert state.ready_event.is_set(), "waiters were not released"
+
+
+def test_stop_signals_an_existing_win32_stop_handle(patch_win32: PatchWin32) -> None:
+    """A shutdown wakes threads already waiting on the Win32 event."""
+    event_fake = FakeWin32Event()
+    patch_win32(
+        FakeWin32File(FakeWinError(ERROR_FILE_NOT_FOUND)),
+        win32event=event_fake,
+    )
+    state = build_state()
+    handle = state._win32_stop_handle()
+
+    state.stop()
+
+    assert event_fake.signalled == [handle], "the stop handle was not signalled"
+
+
+def test_win32_stop_handle_is_presignalled_after_stop(
+    patch_win32: PatchWin32,
+) -> None:
+    """A handle created after ``stop`` starts out signalled."""
+    event_fake = FakeWin32Event()
+    patch_win32(
+        FakeWin32File(FakeWinError(ERROR_FILE_NOT_FOUND)),
+        win32event=event_fake,
+    )
+    state = build_state()
+    state.stop()
+
+    handle = state._win32_stop_handle()
+
+    assert event_fake.signalled == [handle], "a late handle missed the wakeup"
 
 
 def test_poke_pipe_closes_the_wakeup_handle(patch_win32: PatchWin32) -> None:
