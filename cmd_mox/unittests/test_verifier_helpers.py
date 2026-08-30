@@ -5,6 +5,8 @@ from __future__ import annotations
 import types
 import typing as typ
 
+import pytest
+
 import cmd_mox.verifiers as v
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
@@ -12,20 +14,34 @@ from cmd_mox.test_doubles import CommandDouble, DoubleKind
 
 
 def _double(kind: DoubleKind) -> CommandDouble:
-    """Return a typed, minimal CommandDouble stub for formatting tests."""
+    """Return a typed, minimal CommandDouble stub for formatting tests.
+
+    Returns
+    -------
+    CommandDouble
+        A minimal command double with the requested kind.
+    """
     return typ.cast("CommandDouble", types.SimpleNamespace(kind=kind))
 
 
-def test_mask_env_value_redacts_sensitive_keys() -> None:
-    """Sensitive environment keys should be obscured."""
-    assert v._mask_env_value("API_KEY", "secret") == "***"
-    assert v._mask_env_value("token", "value") == "***"
-
-
-def test_mask_env_value_preserves_safe_values() -> None:
-    """Safe keys or missing values remain untouched."""
-    assert v._mask_env_value("PATH", "value") == "value"
-    assert v._mask_env_value("PATH", None) is None
+@pytest.mark.parametrize(
+    ("key", "value", "expected"),
+    [
+        ("API_KEY", "secret", "***"),
+        ("token", "value", "***"),
+        ("PATH", "value", "value"),
+        ("PATH", None, None),
+    ],
+    ids=[
+        "sensitive-uppercase-key",
+        "sensitive-lowercase-key",
+        "safe-key",
+        "safe-key-missing-value",
+    ],
+)
+def test_mask_env_value(key: str, value: str | None, expected: str | None) -> None:
+    """Sensitive keys are obscured; safe keys and missing values pass through."""
+    assert v._mask_env_value(key, value) == expected
 
 
 def test_format_env_masks_and_sorts_entries() -> None:

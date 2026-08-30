@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import dataclasses as dc
 import textwrap
 import typing as typ
@@ -19,6 +18,7 @@ pytestmark = pytest.mark.requires_unix_sockets
 LifecyclePhase = plugin_utils.LifecyclePhase
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
     import subprocess
     from pathlib import Path
 

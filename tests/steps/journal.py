@@ -31,7 +31,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 def check_journal(mox: CmdMox, count: str, cmd: str) -> None:
     """Verify the journal records *count* invocations of *cmd*."""
     matches = [inv for inv in mox.journal if inv.command == cmd]
-    assert len(matches) == int(count)
+    assert len(matches) == int(count), "Assertion failed"
 
 
 @then(parsers.cfparse("the journal order should be {commands}"))
@@ -39,14 +39,7 @@ def check_journal_order(mox: CmdMox, commands: str) -> None:
     """Ensure the journal entries are in the expected order."""
     expected = commands.split(",")
     actual = [inv.command for inv in mox.journal]
-    assert actual == expected
-
-
-def _validate_journal_entry_details(
-    mox: CmdMox, expectation: JournalEntryExpectation
-) -> None:
-    """Validate journal entry records invocation details."""
-    verify_journal_entry_details(mox, expectation)
+    assert actual == expected, "Assertion failed"
 
 
 @then(parsers.cfparse('the journal entry for "{cmd}" should record arguments "{args}"'))
@@ -55,7 +48,7 @@ def check_journal_entry_arguments(mox: CmdMox, cmd: str, args: str) -> None:
     resolved_args = resolve_empty_placeholder(args)
     decoded_args = decode_placeholders(resolved_args)
     expectation = JournalEntryExpectation(cmd=cmd, args=decoded_args)
-    _validate_journal_entry_details(mox, expectation)
+    verify_journal_entry_details(mox, expectation)
 
 
 def _check_journal_entry_details_impl(
@@ -72,7 +65,7 @@ def _check_journal_entry_details_impl(
         env.name,
         env.value,
     )
-    _validate_journal_entry_details(mox, expectation)
+    verify_journal_entry_details(mox, expectation)
 
 
 @then(
@@ -81,7 +74,7 @@ def _check_journal_entry_details_impl(
         'stdin "{stdin}" env var "{var}"="{val}"'
     )
 )
-def check_journal_entry_details(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
+def check_journal_entry_details(
     mox: CmdMox,
     cmd: str,
     args: str,
@@ -118,7 +111,7 @@ def _check_journal_entry_result_impl(
         r'"(?P<stdout>[^"]*)" stderr "(?P<stderr>[^"]*)" exit code (?P<code>\d+)'
     )
 )
-def check_journal_entry_result(  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
+def check_journal_entry_result(
     mox: CmdMox,
     cmd: str,
     stdout: str,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import os
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -19,7 +19,9 @@ from cmd_mox.errors import (
     VerificationError,
 )
 from cmd_mox.ipc import CallbackNamedPipeServer
-from tests.helpers.pytest_typing import pytest_skip
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 _ERROR_TYPES: dict[str, type[VerificationError]] = {
     "UnexpectedCommandError": UnexpectedCommandError,
@@ -108,7 +110,13 @@ def invalidate_environment(monkeypatch: pytest.MonkeyPatch, mox: CmdMox) -> None
 
 @when("I replay the controller", target_fixture="mox_stack")
 def replay_controller(mox: CmdMox) -> contextlib.ExitStack:
-    """Enter replay mode within a context manager."""
+    """Enter replay mode within a context manager.
+
+    Returns
+    -------
+    contextlib.ExitStack
+        The stack holding the entered controller context.
+    """
     stack = contextlib.ExitStack()
     stack.enter_context(mox)
     mox.replay()
@@ -127,7 +135,13 @@ def replay_controller_again(mox: CmdMox, mox_stack: contextlib.ExitStack) -> Non
     target_fixture="replay_error",
 )
 def replay_controller_missing_env(mox: CmdMox) -> MissingEnvironmentError:
-    """Attempt replay expecting :class:`MissingEnvironmentError`."""
+    """Attempt replay expecting :class:`MissingEnvironmentError`.
+
+    Returns
+    -------
+    MissingEnvironmentError
+        The exception raised by the failed replay attempt.
+    """
     with contextlib.ExitStack() as stack:
         stack.enter_context(mox)
         with pytest.raises(MissingEnvironmentError) as excinfo:
@@ -140,16 +154,26 @@ def replay_controller_missing_env(mox: CmdMox) -> MissingEnvironmentError:
     target_fixture="replay_interruption_state",
 )
 def replay_controller_interrupt(mox: CmdMox) -> dict[str, object]:
-    """Run replay() and capture cleanup details when startup aborts."""
+    """Run replay() and capture cleanup details when startup aborts.
+
+    Returns
+    -------
+    dict[str, object]
+        The shim directory, socket path, and active environment manager
+        observed at the point of interruption.
+    """
     env = mox.environment
     assert env is not None, "Replay environment was not initialised"
 
-    mox.__enter__()
+    # KeyboardInterrupt aborts replay() before a matching exit would normally
+    # run, so the context is entered without also registering the exit here;
+    # the assertions below verify the controller's own failure cleanup.
+    contextlib.ExitStack().enter_context(mox)
     assert env.shim_dir is not None, "Replay environment was not initialised"
     assert env.socket_path is not None, "Replay environment was not initialised"
     shim_dir = Path(env.shim_dir)
     socket_path = Path(env.socket_path)
-    assert shim_dir.exists()
+    assert shim_dir.exists(), "Assertion failed"
 
     with pytest.raises(KeyboardInterrupt):
         mox.replay()
@@ -177,7 +201,18 @@ def verify_controller(mox: CmdMox, mox_stack: contextlib.ExitStack) -> None:
 def verify_controller_expect_error(
     mox: CmdMox, mox_stack: contextlib.ExitStack, error_name: str
 ) -> VerificationError:
-    """Invoke verification expecting a specific error type."""
+    """Invoke verification expecting a specific error type.
+
+    Returns
+    -------
+    VerificationError
+        The exception raised by the failed verification.
+
+    Raises
+    ------
+    ValueError
+        If *error_name* is not a recognised verification error type.
+    """
     error_type = _ERROR_TYPES.get(error_name)
     if error_type is None:  # pragma: no cover - invalid feature configuration
         msg = f"Unknown verification error type: {error_name}"
@@ -194,8 +229,6 @@ def verify_controller_expect_error(
 def assert_windows_named_pipe_server(mox: CmdMox) -> None:
     """Assert the controller swaps to the named pipe transport on Windows."""
     if os.name != "nt":  # pragma: no cover - guarded by feature preconditions
-        pytest_skip(
-            "Named pipe assertions only apply on Windows"
-        )  # ty misreads @_with_exception
+        pytest.skip("Named pipe assertions only apply on Windows")
     server = mox._server
     assert isinstance(server, CallbackNamedPipeServer), server

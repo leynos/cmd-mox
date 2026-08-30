@@ -26,7 +26,7 @@ def test_usage_guide_api_reference_lists_all_public_symbols() -> None:
 def test_usage_guide_does_not_reference_removed_platform_helper() -> None:
     """Avoid drift: the docs should not reference deprecated helper names."""
     text = USAGE_GUIDE_PATH.read_text(encoding="utf-8")
-    assert "is_supported_platform" not in text
+    assert "is_supported_platform" not in text, "Assertion failed"
 
 
 def test_extract_marked_block_rejects_duplicate_markers() -> None:

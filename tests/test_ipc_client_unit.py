@@ -11,6 +11,7 @@ import pytest
 from cmd_mox.ipc.client import (
     RetryConfig,
     _connect_unix_with_retries,
+    _ConnectionContext,
     invoke_server,
     report_passthrough_result,
 )
@@ -62,6 +63,21 @@ def test_retry_config_validates_inputs() -> None:
         RetryConfig(jitter=2.0)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(1.5, id="float"),
+        pytest.param("3", id="str"),
+        pytest.param(None, id="none"),
+        pytest.param(True, id="bool"),
+    ],
+)
+def test_retry_config_rejects_non_integer_retries(value: object) -> None:
+    """RetryConfig should reject non-integer retry counts eagerly."""
+    with pytest.raises(TypeError, match=r"^retries must be an integer$"):
+        RetryConfig(retries=value)  # type: ignore[arg-type, ty:invalid-argument-type] - the test deliberately supplies non-integer retry counts
+
+
 def test_retry_config_validate_checks_timeout() -> None:
     """RetryConfig.validate should validate timeout in addition to fields."""
     config = RetryConfig()
@@ -79,11 +95,12 @@ def test_connect_unix_with_retries_eventually_succeeds(
 
     retry_config = RetryConfig(retries=3, backoff=0.0, jitter=0.0)
     sock = _connect_unix_with_retries(
-        tmp_path / "ipc.sock", timeout=0.1, retry_config=retry_config
+        tmp_path / "ipc.sock",
+        _ConnectionContext(timeout=0.1, retry_config=retry_config),
     )
 
-    assert isinstance(sock, _FakeSocket)
-    assert _FakeSocket.attempts == 2
+    assert isinstance(sock, _FakeSocket), "Assertion failed"
+    assert _FakeSocket.attempts == 2, "Assertion failed"
 
 
 def test_connect_unix_with_retries_raises_after_exhaustion(
@@ -96,9 +113,10 @@ def test_connect_unix_with_retries_raises_after_exhaustion(
 
     with pytest.raises(ConnectionRefusedError, match=r"^$"):
         _connect_unix_with_retries(
-            tmp_path / "ipc.sock", timeout=0.1, retry_config=retry_config
+            tmp_path / "ipc.sock",
+            _ConnectionContext(timeout=0.1, retry_config=retry_config),
         )
-    assert _AlwaysFailSocket.attempts == 2
+    assert _AlwaysFailSocket.attempts == 2, "Assertion failed"
 
 
 def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,16 +129,16 @@ def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data
-        assert retry is None
+        assert retry is None, "Assertion failed"
         return Response(stdout="ok")
 
     monkeypatch.setattr("cmd_mox.ipc.client._send_request", fake_send)
 
     response = invoke_server(invocation, timeout=1.0, retry_config=None)
 
-    assert response.stdout == "ok"
-    assert captured["kind"] == KIND_INVOCATION
-    assert captured["data"] == invocation.to_dict()
+    assert response.stdout == "ok", "Assertion failed"
+    assert captured["kind"] == KIND_INVOCATION, "Assertion failed"
+    assert captured["data"] == invocation.to_dict(), "Assertion failed"
 
 
 def test_report_passthrough_result_uses_named_kind(
@@ -141,5 +159,5 @@ def test_report_passthrough_result_uses_named_kind(
 
     report_passthrough_result(result, timeout=1.0)
 
-    assert captured["kind"] == KIND_PASSTHROUGH_RESULT
-    assert captured["data"] == result.to_dict()
+    assert captured["kind"] == KIND_PASSTHROUGH_RESULT, "Assertion failed"
+    assert captured["data"] == result.to_dict(), "Assertion failed"

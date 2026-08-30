@@ -19,9 +19,12 @@ import typing as typ
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
-from .scrubber import ScrubbingRule, ScrubbingRuleDict
+from .scrubber import ScrubbingRule
 
 _SCHEMA_VERSION: typ.Final[str] = "1.0"
+
+# A "major.minor" version string always has exactly two dot-separated parts.
+_VERSION_COMPONENT_COUNT: typ.Final[int] = 2
 
 # ---------------------------------------------------------------------------
 # Schema version parsing and migration
@@ -49,7 +52,7 @@ def _parse_version(version_str: str) -> tuple[int, int]:
         If the string cannot be parsed as two dot-separated integers.
     """
     parts = version_str.strip().split(".")
-    if len(parts) != 2:
+    if len(parts) != _VERSION_COMPONENT_COUNT:
         msg = f"Invalid schema version {version_str!r}; expected 'major.minor'"
         raise ValueError(msg)
     try:
@@ -66,9 +69,10 @@ def _parse_version(version_str: str) -> tuple[int, int]:
 def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
     """Migrate a v0.x fixture dict to v1.0 format.
 
-    The v0.x schema is hypothetical (v1.0 is the first release).  This
-    migration exists to exercise the pipeline and serve as a template for
-    future migrations.
+    Returns
+    -------
+    dict[str, typ.Any]
+        *data* with its ``version`` field stamped as ``"1.0"``.
     """
     data["version"] = "1.0"
     return data
@@ -191,24 +195,10 @@ def _execute_migration_chain(
 def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
     """Apply chained migrations to bring *data* up to the current schema.
 
-    The input dict is deep-copied so the caller's original is never
-    mutated.  A missing ``version`` key is treated as ``"0.0"`` (legacy
-    fixture predating the version field).
-
-    Parameters
-    ----------
-    data : dict[str, typ.Any]
-        The raw fixture dict, potentially at an older schema version.
-
     Returns
     -------
     dict[str, typ.Any]
-        The fixture dict migrated to the current schema version.
-
-    Raises
-    ------
-    ValueError
-        If the version is incompatible and no migration path exists.
+        A deep copy of *data* migrated to the current schema version.
     """
     data = copy.deepcopy(data)  # deep copy to avoid mutating the caller's dict
 
@@ -227,7 +217,14 @@ def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
 
 
 def _cmdmox_version() -> str:
-    """Return the installed cmd-mox version, or ``"unknown"``."""
+    """Return the installed cmd-mox version, or ``"unknown"``.
+
+    Returns
+    -------
+    str
+        The distribution version, or ``"unknown"`` when cmd-mox is not
+        installed as a distribution.
+    """
     try:
         return importlib.metadata.version("cmd-mox")
     except importlib.metadata.PackageNotFoundError:
@@ -250,7 +247,13 @@ class RecordedInvocation:
     duration_ms: int
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping matching the v1.0 schema."""
+        """Return a JSON-serializable mapping matching the v1.0 schema.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            Serialized invocation fields.
+        """
         return {
             "sequence": self.sequence,
             "command": self.command,
@@ -266,7 +269,18 @@ class RecordedInvocation:
 
     @classmethod
     def from_dict(cls, data: dict[str, typ.Any]) -> RecordedInvocation:
-        """Construct from a JSON-compatible mapping."""
+        """Construct an invocation from a JSON-compatible mapping.
+
+        Parameters
+        ----------
+        data : dict[str, typing.Any]
+            Mapping containing serialized invocation fields.
+
+        Returns
+        -------
+        RecordedInvocation
+            Parsed invocation model.
+        """
         return cls(
             sequence=int(data["sequence"]),
             command=str(data["command"]),
@@ -293,7 +307,13 @@ class FixtureMetadata:
     test_function: str | None = None
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping."""
+        """Return a JSON-serializable mapping.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            Serialized metadata fields.
+        """
         d: dict[str, typ.Any] = {
             "created_at": self.created_at,
             "cmdmox_version": self.cmdmox_version,
@@ -308,7 +328,18 @@ class FixtureMetadata:
 
     @classmethod
     def from_dict(cls, data: dict[str, typ.Any]) -> FixtureMetadata:
-        """Construct from a JSON-compatible mapping."""
+        """Construct metadata from a JSON-compatible mapping.
+
+        Parameters
+        ----------
+        data : dict[str, typing.Any]
+            Mapping containing serialized metadata fields.
+
+        Returns
+        -------
+        FixtureMetadata
+            Parsed metadata model.
+        """
         raw_module = data.get("test_module")
         raw_function = data.get("test_function")
         return cls(
@@ -327,7 +358,20 @@ class FixtureMetadata:
         test_module: str | None = None,
         test_function: str | None = None,
     ) -> FixtureMetadata:
-        """Auto-populate metadata from the current runtime environment."""
+        """Auto-populate metadata from the current runtime environment.
+
+        Parameters
+        ----------
+        test_module : str or None
+            Optional test module name to record.
+        test_function : str or None
+            Optional test function name to record.
+
+        Returns
+        -------
+        FixtureMetadata
+            Metadata populated from the current process.
+        """
         return cls(
             created_at=dt.datetime.now(dt.UTC).isoformat(),
             cmdmox_version=_cmdmox_version(),
@@ -350,7 +394,13 @@ class FixtureFile:
     scrubbing_rules: list[ScrubbingRule]
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping matching the v1.0 schema."""
+        """Return a JSON-serializable mapping matching the v1.0 schema.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            Serialized fixture fields.
+        """
         return {
             "version": self.version,
             "metadata": self.metadata.to_dict(),
@@ -365,27 +415,69 @@ class FixtureFile:
         Older schema versions are migrated forward automatically.  Minor
         version differences within the same major version are tolerated
         because unknown fields are ignored.
+
+        Parameters
+        ----------
+        data : dict[str, typ.Any]
+            A JSON-compatible mapping describing a fixture file.
+
+        Returns
+        -------
+        FixtureFile
+            The parsed fixture with its data migrated to the current schema.
+
+        Raises
+        ------
+        ValueError
+            If the mapping does not conform to the fixture schema.
         """
-        data = _apply_migrations(data)
-        return cls(
-            version=cls.SCHEMA_VERSION,
-            metadata=FixtureMetadata.from_dict(data["metadata"]),
-            recordings=[
-                RecordedInvocation.from_dict(r) for r in data.get("recordings", [])
-            ],
-            scrubbing_rules=[
-                ScrubbingRule.from_dict(typ.cast("ScrubbingRuleDict", r))
-                for r in data.get("scrubbing_rules", [])
-            ],
-        )
+        try:
+            data = _apply_migrations(data)
+            return cls(
+                version=cls.SCHEMA_VERSION,
+                metadata=FixtureMetadata.from_dict(data["metadata"]),
+                recordings=[
+                    RecordedInvocation.from_dict(r) for r in data.get("recordings", [])
+                ],
+                scrubbing_rules=[
+                    ScrubbingRule.from_dict(r) for r in data.get("scrubbing_rules", [])
+                ],
+            )
+        except (AttributeError, KeyError, TypeError) as exc:
+            msg = f"Invalid fixture schema: {exc}"
+            raise ValueError(msg) from exc
 
     def save(self, path: Path) -> None:
-        """Write this fixture to *path* as JSON, creating directories as needed."""
+        """Write this fixture to *path* as JSON, creating directories as needed.
+
+        Parameters
+        ----------
+        path : pathlib.Path
+            Destination JSON path.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
 
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
-        """Load a fixture from a JSON file at *path*."""
+        """Load a fixture from a JSON file at *path*.
+
+        Parameters
+        ----------
+        path : pathlib.Path
+            JSON fixture path to read.
+
+        Returns
+        -------
+        FixtureFile
+            Parsed and migrated fixture.
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``path`` does not exist.
+        ValueError
+            If the fixture is not valid JSON or fails schema validation.
+        """  # ruff: ignore[docstring-extraneous-exception] - pathlib and JSON/schema parsing propagate these caller-visible failures.
         data = json.loads(path.read_text())
         return cls.from_dict(data)

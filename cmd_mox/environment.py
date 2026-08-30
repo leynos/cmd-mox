@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import functools
 import logging
@@ -14,14 +13,15 @@ from pathlib import Path
 
 from . import _path_utils as path_utils
 from ._validators import validate_positive_finite_timeout
+from .errors import MissingEnvironmentError
 from .fs_retry import robust_rmtree
 
-IS_WINDOWS = path_utils.IS_WINDOWS
 _MAX_PATH_THRESHOLD: typ.Final[int] = 240
 
 logger = logging.getLogger(__name__)
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
     import types
 
 CMOX_IPC_SOCKET_ENV = "CMOX_IPC_SOCKET"
@@ -55,22 +55,35 @@ class _Kernel32(typ.Protocol):
 class _CtypesModule(typ.Protocol):
     """Typed subset of ``ctypes`` used by the Windows path-shortening helper."""
 
-    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32: ...  # noqa: N802
+    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32: ...  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
 
     def get_last_error(self) -> int: ...
 
-    def FormatError(self, code: int) -> str: ...  # noqa: N802
+    def FormatError(self, code: int) -> str: ...  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
 
     def create_unicode_buffer(self, init_or_size: int) -> _UnicodeBuffer: ...
 
 
 def _path_identity(path: Path | None) -> str | None:
-    """Return a comparable representation of *path*, or ``None`` if unset."""
+    """Return a comparable representation of *path*, or ``None`` if unset.
+
+    Returns
+    -------
+    str or None
+        The normalized path string, or ``None`` when *path* is ``None``.
+    """
     return None if path is None else path_utils.normalize_path(path)
 
 
 def _should_shorten_path(raw_path: Path) -> bool:
-    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit."""
+    """Return True if *raw_path* risks exceeding the Windows MAX_PATH limit.
+
+    Returns
+    -------
+    bool
+        ``True`` on Windows when the path length reaches the MAX_PATH
+        threshold; always ``False`` elsewhere.
+    """
     return (
         len(os.fspath(raw_path)) >= _MAX_PATH_THRESHOLD
         if path_utils.IS_WINDOWS
@@ -79,7 +92,20 @@ def _should_shorten_path(raw_path: Path) -> bool:
 
 
 def _get_short_path(path: Path) -> Path | None:
-    """Return the short (8.3) variant for *path*, or ``None`` if unavailable."""
+    """Return the short (8.3) variant for *path*, or ``None`` if unavailable.
+
+    Returns
+    -------
+    Path or None
+        The 8.3 short path, or ``None`` off Windows and when the filesystem
+        declines to supply one.
+
+    Raises
+    ------
+    OSError
+        If ``GetShortPathNameW`` fails for a reason other than a missing or
+        disabled short-path alias.
+    """
     if not path_utils.IS_WINDOWS:
         return None
 
@@ -88,7 +114,7 @@ def _get_short_path(path: Path) -> Path | None:
     import ctypes
     from ctypes import wintypes
 
-    ctypes_module = typ.cast("_CtypesModule", ctypes)
+    ctypes_module = ctypes
     kernel32 = ctypes_module.WinDLL("kernel32", use_last_error=True)
     get_short_path_name = kernel32.GetShortPathNameW
     get_short_path_name.argtypes = (
@@ -112,7 +138,7 @@ def _get_short_path(path: Path) -> Path | None:
             # short path (either because it does not exist yet or the volume
             # disabled 8.3 aliases). Falling back to the original path keeps
             # CmdMox functional even without short-path support.
-            if error in (0, 2, 3):
+            if error in {0, 2, 3}:
                 return None
             raise OSError(ctypes_module.FormatError(error))
         if result >= buffer_len:
@@ -122,7 +148,13 @@ def _get_short_path(path: Path) -> Path | None:
 
 
 def _maybe_shorten_windows_path(path: Path) -> Path:
-    """Return a MAX_PATH-safe variant of *path* when running on Windows."""
+    """Return a MAX_PATH-safe variant of *path* when running on Windows.
+
+    Returns
+    -------
+    Path
+        The 8.3 short path when one is available, otherwise *path* unchanged.
+    """
     if not path_utils.IS_WINDOWS or not _should_shorten_path(path):
         return path
 
@@ -147,10 +179,55 @@ def _ensure_windows_pathext(original: dict[str, str]) -> None:
         return
 
     parts = [part.strip() for part in pathext.split(os.pathsep) if part.strip()]
-    seen = {part.upper() for part in parts}
-    if ".CMD" not in seen:
+    if ".CMD" not in {part.upper() for part in parts}:
         parts.append(".CMD")
     os.environ["PATHEXT"] = os.pathsep.join(parts)
+
+
+# Maps ``EnvironmentManager`` attribute names to their user-facing label and
+# whether the value must resolve to an existing directory.
+ENV_ATTR_RULES: dict[str, tuple[str, bool]] = {
+    "shim_dir": ("Replay shim directory", True),
+    "socket_path": ("Replay socket path", False),
+}
+
+
+def validate_env_attr(env: EnvironmentManager, attr: str) -> str | None:
+    """Return an error message when *attr* is invalid, otherwise ``None``.
+
+    Parameters
+    ----------
+    env : EnvironmentManager
+        Manager whose replay attributes are being validated.
+    attr : str
+        Name of the attribute to validate.
+
+    Returns
+    -------
+    str or None
+        A description of why *attr* is unusable, or ``None`` when valid.
+    """
+    label, requires_dir = ENV_ATTR_RULES.get(
+        attr, (f"Replay {attr.replace('_', ' ')}", False)
+    )
+    value = getattr(env, attr, None)
+
+    if requires_dir:
+        try:
+            ensure_dir_exists(
+                value,
+                name=label,
+                error_type=MissingEnvironmentError,
+                missing_message=f"{label} is missing",
+            )
+        except MissingEnvironmentError as exc:
+            return str(exc)
+        return None
+
+    if value is None:
+        return f"{label} is missing"
+
+    return None
 
 
 def ensure_dir_exists(
@@ -162,8 +239,13 @@ def ensure_dir_exists(
 ) -> Path:
     """Return *path* as a ``Path`` when it refers to an existing directory.
 
-    Normalises path validation so callers raise consistent, descriptive errors
+    Normalizes path validation so callers raise consistent, descriptive errors
     when environment directories disappear or are misconfigured.
+
+    Returns
+    -------
+    Path
+        The resolved existing directory.
     """
     if path is None:
         msg = missing_message or f"{name} is missing"
@@ -196,12 +278,7 @@ def _collect_os_error(
     ],
     cabc.Callable[typ.Concatenate[EnvironmentManager, list[CleanupError], P], None],
 ]:
-    """Return a decorator that records ``OSError``s in ``cleanup_errors``.
-
-    The decorated function is expected to take ``(self, cleanup_errors)`` and
-    should raise ``OSError`` on failure. Any such exception is captured and the
-    formatted message appended to ``cleanup_errors``.
-    """
+    """Return a decorator that records ``OSError`` cleanup failures."""  # ruff: ignore[docstring-missing-returns] - private decorator factory has an obvious decorator return
 
     def decorator(
         func: cabc.Callable[
@@ -240,7 +317,13 @@ class EnvironmentManager:
 
     @classmethod
     def get_active_manager(cls) -> EnvironmentManager | None:
-        """Return the active manager for the current thread, if any."""
+        """Return the active manager for the current thread, if any.
+
+        Returns
+        -------
+        EnvironmentManager or None
+            The manager active in the current thread.
+        """
         return getattr(cls._state, "active_manager", None)
 
     @classmethod
@@ -262,7 +345,19 @@ class EnvironmentManager:
         self._prefix = prefix
 
     def __enter__(self) -> EnvironmentManager:
-        """Set up the temporary environment."""
+        """Set up the temporary environment.
+
+        Returns
+        -------
+        EnvironmentManager
+            This manager instance.
+
+        Raises
+        ------
+        RuntimeError
+            If a manager is already active in the current thread, whether another
+            manager or re-entry of this instance before its context has exited.
+        """
         cls = type(self)
         if self._orig_env is not None or cls.get_active_manager() is not None:
             msg = "EnvironmentManager cannot be nested"
@@ -301,13 +396,18 @@ class EnvironmentManager:
     def _restore_original_environment(
         self, _cleanup_errors: list[CleanupError]
     ) -> None:
-        """Return the process environment to its original state."""
+        """Return the process environment to its original state.
+
+        Raises
+        ------
+        AssertionError
+            If ``PATHEXT`` was not restored on Windows.
+        """
         if self._orig_env is not None:
             _restore_env(self._orig_env)
             if path_utils.IS_WINDOWS:
                 original = self._orig_env.get("PATHEXT")
-                restored = os.environ.get("PATHEXT")
-                if restored != original:
+                if os.environ.get("PATHEXT") != original:
                     msg = "PATHEXT was not restored after environment teardown"
                     raise AssertionError(msg)
             self._orig_env = None
@@ -317,7 +417,14 @@ class EnvironmentManager:
         type(self).reset_active_manager()
 
     def _should_skip_directory_removal(self) -> bool:
-        """Return ``True`` if no matching temporary directory remains."""
+        """Return ``True`` if no matching temporary directory remains.
+
+        Returns
+        -------
+        bool
+            ``True`` when nothing was created, the shim directory has been
+            reassigned, or the directory no longer exists.
+        """
         shim = self.shim_dir
         created = self._created_dir
         if created is None or shim is None:
@@ -327,7 +434,13 @@ class EnvironmentManager:
         return not shim.exists()
 
     def _has_mismatched_directories(self) -> bool:
-        """Check if the created directory differs from the current shim directory."""
+        """Check if the created directory differs from the current shim directory.
+
+        Returns
+        -------
+        bool
+            ``True`` when both paths are set and refer to different locations.
+        """
         created = self._created_dir
         shim = self.shim_dir
         if created is None or shim is None:
@@ -359,12 +472,18 @@ class EnvironmentManager:
         finally:
             self._created_dir = None
 
+    @staticmethod
     def _handle_cleanup_errors(
-        self,
         cleanup_errors: list[CleanupError],
         exc_type: type[BaseException] | None,
     ) -> None:
-        """Log and potentially raise aggregated cleanup errors."""
+        """Log and potentially raise aggregated cleanup errors.
+
+        Raises
+        ------
+        RuntimeError
+            If cleanup failed and no exception is already propagating.
+        """
         if cleanup_errors:
             messages = [msg for msg, _ in cleanup_errors]
             error_msg = "; ".join(messages)
@@ -377,10 +496,11 @@ class EnvironmentManager:
 
     @property
     def original_environment(self) -> dict[str, str]:
-        """Return the unmodified environment prior to ``__enter__``."""
+        """The unmodified environment prior to ``__enter__``."""
         return self._orig_env or {}
 
-    def _validate_timeout(self, timeout: float) -> None:
+    @staticmethod
+    def _validate_timeout(timeout: float) -> None:
         """Validate that *timeout* is a positive finite number.
 
         Raise ``ValueError`` if the provided value is not positive and finite.
@@ -388,12 +508,7 @@ class EnvironmentManager:
         validate_positive_finite_timeout(timeout)
 
     def _resolve_effective_timeout(self, timeout: float | object) -> float | None:
-        """Return the timeout value that should be exported.
-
-        The helper isolates the branching necessary to honour explicit
-        overrides, fall back to the previously configured value, and surface
-        invalid types consistently with other validation paths.
-        """
+        """Return the effective IPC timeout for export."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private timeout resolver keeps a concise summary while its contract is documented by the public exporter
         if timeout is _UNSET_TIMEOUT:
             return self.ipc_timeout
 
@@ -409,7 +524,17 @@ class EnvironmentManager:
     def export_ipc_environment(
         self, *, timeout: float | object = _UNSET_TIMEOUT
     ) -> None:
-        """Expose IPC configuration variables for active shims."""
+        """Expose IPC configuration variables for active shims.
+
+        Raises
+        ------
+        TypeError
+            If ``timeout`` is neither a real number nor the unset sentinel.
+        ValueError
+            If an explicit ``timeout`` is non-finite or not strictly positive.
+        RuntimeError
+            If called before the manager has entered its environment.
+        """  # ruff: ignore[docstring-extraneous-exception] - timeout validation propagates the documented TypeError and ValueError.
         if self.socket_path is None:
             msg = "Cannot export IPC settings before entering the environment"
             raise RuntimeError(msg)

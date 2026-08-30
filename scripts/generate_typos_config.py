@@ -26,7 +26,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
 
 def dictionary_from_cache(repository: Path = REPOSITORY_ROOT) -> rollout.Dictionary:
-    """Load the cached shared base merged with local repository policy."""
+    """Load the cached shared base merged with local repository policy.
+
+    Returns
+    -------
+    rollout.Dictionary
+        The validated shared dictionary with the local overlay applied.
+    """
     dictionary = rollout.load_dictionary(repository / ".typos-oxendict-base.toml")
     local_overlay = repository / "typos.local.toml"
     if local_overlay.exists():
@@ -38,7 +44,13 @@ def dictionary_from_cache(repository: Path = REPOSITORY_ROOT) -> rollout.Diction
 
 
 def render_config(repository: Path = REPOSITORY_ROOT) -> str:
-    """Render deterministic configuration from the populated local cache."""
+    """Render deterministic configuration from the populated local cache.
+
+    Returns
+    -------
+    str
+        The generated, parse-checked ``typos.toml`` content.
+    """
     return rollout.render_typos_config(dictionary_from_cache(repository))
 
 
@@ -46,7 +58,7 @@ def _tracked_remote_fallback(
     source: str | Path,
     destination: Path,
 ) -> rollout.RefreshResult | None:
-    """Return a valid tracked config only for an unavailable HTTPS authority."""
+    """Return a valid tracked config only for an unavailable HTTPS authority."""  # noqa: DOC201 - private fallback helper has an obvious optional return
     if not isinstance(source, str) or urllib.parse.urlsplit(source).scheme != "https":
         return None
     try:
@@ -63,7 +75,20 @@ def main(
     source: str | Path = DEFAULT_BASE_URL,
     offline: bool = False,
 ) -> rollout.RefreshResult:
-    """Refresh the shared base cache and write the merged configuration."""
+    """Refresh the shared base cache and write the merged configuration.
+
+    Returns
+    -------
+    rollout.RefreshResult
+        The cache refresh outcome, or a tracked-config fallback result.
+
+    Raises
+    ------
+    OSError
+        If refreshing the cache or reading the fallback configuration fails.
+    urllib.error.URLError
+        If the remote authority is unavailable and no fallback is valid.
+    """
     destination = output if output is not None else repository / "typos.toml"
     try:
         result = rollout.refresh_base(

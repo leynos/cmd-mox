@@ -33,7 +33,13 @@ class Invocation:
     invocation_id: str | None = None
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping of this invocation."""
+        """Return a JSON-serializable mapping of this invocation.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            The invocation fields in wire-format form.
+        """
         payload: dict[str, typ.Any] = {
             "command": self.command,
             "args": list(self.args),
@@ -56,7 +62,13 @@ class Invocation:
         )
 
     def __repr__(self) -> str:
-        """Return a convenient debug representation."""
+        """Return a convenient debug representation.
+
+        Returns
+        -------
+        str
+            A representation with sensitive environment values redacted.
+        """
         safe_env: dict[str, str] = {}
         for key, value in self.env.items():
             safe_env[key] = (
@@ -85,7 +97,13 @@ class PassthroughRequest:
     timeout: float = 30.0
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serialisable mapping of this request."""
+        """Return a JSON-serializable mapping of this request.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            The passthrough request fields in wire-format form.
+        """
         return {
             "invocation_id": self.invocation_id,
             "lookup_path": self.lookup_path,
@@ -104,7 +122,13 @@ class PassthroughResult:
     exit_code: int
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serialisable mapping of this result."""
+        """Return a JSON-serializable mapping of this result.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            The passthrough result fields in wire-format form.
+        """
         return {
             "invocation_id": self.invocation_id,
             "stdout": self.stdout,
@@ -116,7 +140,13 @@ class PassthroughResult:
 def _build_passthrough_request(
     payload: dict[str, typ.Any],
 ) -> PassthroughRequest | None:
-    """Convert *payload* into a :class:`PassthroughRequest` when possible."""
+    """Convert *payload* into a :class:`PassthroughRequest` when possible.
+
+    Returns
+    -------
+    PassthroughRequest or None
+        The parsed directive, or ``None`` when required fields are absent.
+    """
     try:
         invocation_id = str(payload["invocation_id"])
         lookup_path = str(payload["lookup_path"])
@@ -155,7 +185,13 @@ class Response:
     passthrough: PassthroughRequest | None = None
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping of this response."""
+        """Return a JSON-serializable mapping of this response.
+
+        Returns
+        -------
+        dict[str, typing.Any]
+            The response fields in wire-format form.
+        """
         data: dict[str, typ.Any] = {
             "stdout": self.stdout,
             "stderr": self.stderr,
@@ -168,7 +204,18 @@ class Response:
 
     @classmethod
     def from_payload(cls, payload: dict[str, typ.Any]) -> Response:
-        """Construct a :class:`Response` from a JSON payload."""
+        """Construct a :class:`Response` from a JSON payload.
+
+        Returns
+        -------
+        Response
+            The response represented by *payload*.
+
+        Raises
+        ------
+        RuntimeError
+            If the payload fields cannot construct a valid Response.
+        """
         passthrough_payload = payload.get("passthrough")
         passthrough: PassthroughRequest | None = None
         if isinstance(passthrough_payload, dict):

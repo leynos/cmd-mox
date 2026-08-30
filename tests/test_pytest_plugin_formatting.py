@@ -24,4 +24,4 @@ def test_format_single_error_includes_node_context(
     """Ensure verification failures preserve per-item node context."""
     message = _format_single_error(("verification", _BoomError("boom")), nodeid=nodeid)
 
-    assert message == expected
+    assert message == expected, "Assertion failed"

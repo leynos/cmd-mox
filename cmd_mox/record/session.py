@@ -72,7 +72,7 @@ class RecordingSession:
 
     @property
     def is_started(self) -> bool:
-        """Return ``True`` if the session has been started."""
+        """Whether the session has been started."""
         return self._started_at is not None
 
     def start(self) -> None:
@@ -104,7 +104,7 @@ class RecordingSession:
         LifecycleError
             If the session has not been started or has been finalized.
         ValueError
-            If *duration_ms* is negative.
+            If ``duration_ms`` is negative.
         """
         if self._started_at is None:
             msg = "Recording session has not been started; call start() first"
@@ -139,8 +139,9 @@ class RecordingSession:
         LifecycleError
             If the session has not been started or has been finalized.
         ValueError
-            If *duration_ms* is negative.
-        """
+            If ``duration_ms`` is negative.
+
+        """  # ruff: ignore[docstring-extraneous-exception] - _validate_record_preconditions propagates these caller-visible failures.
         # Lifecycle validation and append are inside the same critical
         # section so a concurrent finalize() cannot snapshot _recordings
         # between the _finalized check and the append.

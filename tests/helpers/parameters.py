@@ -41,7 +41,13 @@ _PLACEHOLDER_TOKENS: dict[str, str] = {
 
 
 def decode_placeholders(value: str) -> str:
-    """Expand user-facing placeholder tokens embedded in feature files."""
+    """Expand user-facing placeholder tokens embedded in feature files.
+
+    Returns
+    -------
+    str
+        *value* with all recognised placeholder tokens replaced.
+    """
     result = value
     for token, replacement in _PLACEHOLDER_TOKENS.items():
         result = result.replace(token, replacement)
@@ -49,5 +55,11 @@ def decode_placeholders(value: str) -> str:
 
 
 def resolve_empty_placeholder(value: str) -> str:
-    """Resolve the special '<empty>' placeholder to an empty string."""
+    """Resolve the special '<empty>' placeholder to an empty string.
+
+    Returns
+    -------
+    str
+        An empty string if *value* is the ``<empty>`` placeholder, else *value*.
+    """
     return "" if value == "<empty>" else value

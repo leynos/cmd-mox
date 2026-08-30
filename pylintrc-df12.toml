@@ -1,0 +1,29 @@
+[tool.pylint.main]
+# Run the DF12 plugin with the CPython 3.14 tool tier declared in the Makefile.
+load-plugins = ["df12_python_lints"]
+# Analyse the project's supported Python 3.12 language baseline. The Makefile
+# still runs this isolated tier under CPython 3.14.
+py-version = "3.12"
+recursive = true
+# Align with cmd-mox's module ceiling: the targeted modules are cohesive and
+# remain below this actionable 800-line review threshold.
+max-module-lines = 800
+
+[tool.pylint."messages control"]
+disable = ["all"]
+enable = [
+    "assert-missing-message",
+    "lint-suppression-without-explanation",
+    "prefer-match-over-constant-chain",
+    "prefer-slots-for-dataclass",
+    "prefer-snapshot-assertion",
+    "prefer-snapshot-substring",
+    "prefer-structural-pattern-matching",
+    "prefer-type-statement",
+    "redundant-future-annotations",
+    "reexport-by-assignment",
+    "trivial-alias-wrapper",
+    "trivial-attribute-wrapper",
+    "too-many-lines",
+    "typecheck-suppression-without-explanation",
+]

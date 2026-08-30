@@ -157,10 +157,10 @@ def test_invoke_server_validates_params(
     socket_path = tmp_path / "ipc.sock"
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
-    timeout = typ.cast("float", kwargs.get("timeout", 1.0))
-    retries = typ.cast("int", kwargs.get("retries", 1))
-    backoff = typ.cast("float", kwargs.get("backoff", 0.0))
-    jitter = typ.cast("float", kwargs.get("jitter", DEFAULT_CONNECT_JITTER))
+    timeout = kwargs.get("timeout", 1.0)
+    retries = kwargs.get("retries", 1)
+    backoff = kwargs.get("backoff", 0.0)
+    jitter = kwargs.get("jitter", DEFAULT_CONNECT_JITTER)
     with pytest.raises(ValueError, match=match):
         invoke_server(
             invocation,

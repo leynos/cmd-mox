@@ -25,7 +25,18 @@ class MissingParallelArtifactDirError(RuntimeError):
 
 
 def _artifact_dir() -> Path:
-    """Return the directory for recording worker metadata."""
+    """Return the directory for recording worker metadata.
+
+    Returns
+    -------
+    Path
+        The created (or existing) artifact directory for this worker.
+
+    Raises
+    ------
+    MissingParallelArtifactDirError
+        If the ``CMD_MOX_PARALLEL_ARTIFACT_DIR`` environment variable is unset.
+    """
     try:
         root = Path(os.environ["CMD_MOX_PARALLEL_ARTIFACT_DIR"])
     except KeyError as exc:  # pragma: no cover - defensive guard for template misuse
@@ -48,13 +59,13 @@ def _record(cmd_mox: CmdMox, label: str) -> None:
     artifact = artifact_dir / f"{label}-{os.getpid()}-{payload['worker']}.json"
     artifact.write_text(json.dumps(payload))
     cmd_path = _shim_cmd_path(cmd_mox, label)
-    result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup
         [str(cmd_path)],
         capture_output=True,
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == label  # noqa: S101 - executed as a pytest test
+    assert result.stdout.strip() == label, "Assertion failed"  # ruff: ignore[assert] - executed as a pytest test
 
 
 def test_alpha(cmd_mox: CmdMox) -> None:

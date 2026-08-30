@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import dataclasses as dc
 import importlib
 import json
-import logging
 import os
 import random
 import socket
@@ -28,26 +26,24 @@ from cmd_mox.ipc.windows import (
     ERROR_FILE_NOT_FOUND,
     ERROR_PIPE_BUSY,
     PIPE_CHUNK_SIZE,
-    PyWinTypesProtocol,
-    Win32FileProtocol,
+    PipeReadOptions,
     derive_pipe_name,
     read_pipe_message,
     write_pipe_payload,
 )
 
-if typ.TYPE_CHECKING:
-    _Win32File = Win32FileProtocol
-    _PyWinTypes = PyWinTypesProtocol
-
+from . import _client_events, _observability
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
 
-logger = logging.getLogger(__name__)
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 if path_utils.IS_WINDOWS:  # pragma: win32-only
     try:
         pywintypes = importlib.import_module("pywintypes")
+        win32api = importlib.import_module("win32api")
         win32file = importlib.import_module("win32file")
         win32pipe = importlib.import_module("win32pipe")
     except ModuleNotFoundError as exc:  # pragma: no cover - import guard
@@ -55,6 +51,7 @@ if path_utils.IS_WINDOWS:  # pragma: win32-only
         raise RuntimeError(msg) from exc
 else:  # pragma: no cover - satisfies type-checkers on non-Windows hosts
     pywintypes = typ.cast("typ.Any", None)
+    win32api = typ.cast("typ.Any", None)
     win32file = typ.cast("typ.Any", None)
     win32pipe = typ.cast("typ.Any", None)
 
@@ -62,7 +59,12 @@ DEFAULT_CONNECT_RETRIES: typ.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: typ.Final[float] = 0.05
 DEFAULT_CONNECT_JITTER: typ.Final[float] = 0.2
 MIN_RETRY_SLEEP: typ.Final[float] = 0.001
-IO_CANCEL_GRACE: typ.Final[float] = 0.05
+# Upper bound on the wait for a cancelled I/O worker to unwind: generous enough
+# for a cancellation to complete, short enough that a wedged worker cannot hang
+# the caller indefinitely.
+IO_CANCEL_GRACE: typ.Final[float] = 1.0
+# ``CancelSynchronousIo`` requires THREAD_TERMINATE access to its target.
+_THREAD_TERMINATE: typ.Final[int] = 0x0001
 
 _SENTINEL: typ.Final[object] = object()
 
@@ -96,16 +98,39 @@ class RetryStrategy:
     sleep: cabc.Callable[[float], None] = time.sleep
 
 
+@dc.dataclass(frozen=True, slots=True)
+class _ConnectionContext:
+    """Per-request connection parameters shared by both client transports.
+
+    Bundling the timeout, retry configuration, and correlation identifier keeps
+    the transport helpers within the project's argument-count limit and lets the
+    identifier reach the retry seam without widening any public signature.
+    """
+
+    timeout: float
+    retry_config: RetryConfig
+    correlation_id: str | None = None
+
+    def validate(self) -> None:
+        """Re-validate the retry configuration against the timeout."""
+        self.retry_config.validate(self.timeout)
+
+
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
     """Return the sleep delay for a 0-based *attempt*.
 
     Never shorter than :data:`MIN_RETRY_SLEEP`.
+
+    Returns
+    -------
+    float
+        The bounded, optionally jittered retry delay in seconds.
     """
     delay = backoff * (attempt + 1)
     if jitter:
         # Randomise the linear backoff within the jitter bounds to avoid
         # thundering herds if many clients retry simultaneously.
-        factor = random.uniform(1.0 - jitter, 1.0 + jitter)  # noqa: S311
+        factor = random.uniform(1.0 - jitter, 1.0 + jitter)  # ruff: ignore[suspicious-non-cryptographic-random-usage] - non-cryptographic jitter for retry backoff
         delay *= factor
     return max(delay, MIN_RETRY_SLEEP)
 
@@ -125,6 +150,11 @@ def _handle_retry_failure(
     """Process a failure from a retry attempt and return the backoff delay.
 
     Raises *exc* when no further retries should be attempted.
+
+    Returns
+    -------
+    float
+        The delay before the next retry attempt.
     """
     if context.strategy.on_failure is not None:
         context.strategy.on_failure(context.attempt, exc)
@@ -158,6 +188,16 @@ def retry_with_backoff[T](
     ``retry_config.jitter`` using :func:`calculate_retry_delay`, and the wait
     is performed via ``strategy.sleep`` (defaulting to :func:`time.sleep` when
     *strategy* is ``None``).
+
+    Returns
+    -------
+    T
+        The value returned by the first successful invocation of ``func``.
+
+    Raises
+    ------
+    RuntimeError
+        If the retry loop terminates without returning or propagating a failure.
     """
     max_attempts = retry_config.retries
     strat = strategy if strategy is not None else RetryStrategy()
@@ -165,7 +205,7 @@ def retry_with_backoff[T](
     for attempt in range(max_attempts):
         try:
             return func(attempt)
-        except Exception as exc:  # noqa: BLE001 - broad catch to reuse helper
+        except Exception as exc:  # ruff: ignore[blind-except] - generic retry helper: *func* is caller-supplied and may raise anything
             context = _RetryContext(
                 attempt=attempt,
                 max_attempts=max_attempts,
@@ -183,12 +223,29 @@ def retry_with_backoff[T](
 
 
 def _compute_deadline(timeout: float) -> float:
-    """Return the absolute deadline for *timeout* seconds from now."""
+    """Return the absolute deadline for *timeout* seconds from now.
+
+    Returns
+    -------
+    float
+        The monotonic clock value at which *timeout* expires.
+    """
     return time.monotonic() + timeout
 
 
 def _remaining_time(deadline: float) -> float:
-    """Return the seconds remaining before *deadline* expires."""
+    """Return the seconds remaining before *deadline* expires.
+
+    Returns
+    -------
+    float
+        The strictly positive seconds left before *deadline*.
+
+    Raises
+    ------
+    TimeoutError
+        If *deadline* has already passed.
+    """
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         msg = "IPC client operation timed out"
@@ -219,37 +276,118 @@ class _HandleCloser:
         return self._closed
 
 
+def _request_synchronous_io_cancel(thread: threading.Thread) -> None:
+    """Ask Windows to abort *thread*'s in-flight synchronous I/O."""
+    # Closing the pipe handle does not reliably wake a thread already blocked
+    # inside ReadFile; CancelSynchronousIo does. Both it and the native thread
+    # id are resolved defensively: the API is missing from some pywin32 builds
+    # and from every non-Windows host. The modules are untyped stand-ins off
+    # Windows, so the resolved callables are deliberately dynamic.
+    cancel_io: typ.Any = getattr(win32file, "CancelSynchronousIo", None)
+    open_thread: typ.Any = getattr(win32api, "OpenThread", None)
+    if cancel_io is None or open_thread is None:
+        return
+    native_id = thread.native_id
+    if native_id is None:
+        return
+    # Best-effort: failing to cancel is never fatal, because the caller's
+    # handle close remains the fallback for waking the worker.
+    with contextlib.suppress(Exception):
+        # OpenThread(desired_access, inherit_handle, thread_id).
+        handle = open_thread(
+            _THREAD_TERMINATE,
+            False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes the inherit flag positionally
+            native_id,
+        )
+        # Reuse the shared guard rather than closing by hand, so the thread
+        # handle is reclaimed exactly once on both the success and error paths.
+        with contextlib.closing(_HandleCloser(handle)):
+            cancel_io(handle)
+
+
+def _cancel_and_await_worker(
+    thread: threading.Thread, cancel: cabc.Callable[[], None]
+) -> bool:
+    """Abort the worker's I/O and wait, bounded, for the worker to exit.
+
+    Returning before the worker has exited would leave a daemon thread owning
+    the pipe handle the caller believes it has released, so the wait is not
+    optional; it is merely bounded by :data:`IO_CANCEL_GRACE`.
+
+    Returns
+    -------
+    bool
+        Whether the worker exited before the grace period elapsed.
+    """
+    _request_synchronous_io_cancel(thread)
+    cancel()
+    thread.join(IO_CANCEL_GRACE)
+    return not thread.is_alive()
+
+
 def _validate_initial_deadline(
     deadline: float, cancel: cabc.Callable[[], None], thread: threading.Thread
 ) -> float:
     """Validate the deadline and return remaining time.
 
     If already expired, cancel the operation and raise TimeoutError.
+
+    Returns
+    -------
+    float
+        The positive time remaining before the operation's deadline.
+
+    Raises
+    ------
+    TimeoutError
+        If the deadline has already passed.
     """
     try:
         return _remaining_time(deadline)
     except TimeoutError:
-        cancel()
-        thread.join(IO_CANCEL_GRACE)
+        _cancel_and_await_worker(thread, cancel)
         raise
 
 
 def _join_with_timeout_and_cancel(
     thread: threading.Thread, remaining: float, cancel: cabc.Callable[[], None]
 ) -> None:
-    """Join the thread with timeout; cancel and raise if still alive."""
+    """Join the thread with timeout; cancel and raise if still alive.
+
+    The timeout is not reported until the cancelled worker has terminated, so
+    the caller never resumes while a daemon thread still owns the pipe handle.
+    A worker surviving the bounded grace is named in the raised message.
+
+    Raises
+    ------
+    TimeoutError
+        If *thread* is still running after *remaining* seconds.
+    """
     thread.join(remaining)
-    if thread.is_alive():
-        cancel()
-        thread.join(IO_CANCEL_GRACE)
-        msg = "IPC client operation timed out"
-        raise TimeoutError(msg)
+    if not thread.is_alive():
+        return
+    msg = "IPC client operation timed out"
+    if not _cancel_and_await_worker(thread, cancel):
+        msg += "; the I/O worker did not exit after cancellation"
+    raise TimeoutError(msg)
 
 
 def _extract_outcome(outcome: dict[str, typ.Any]) -> object:
-    """Extract the result from the outcome dict, raising any stored error."""
+    """Extract the result from the outcome dict, raising any stored error.
+
+    Returns
+    -------
+    object
+        The worker thread's return value, or ``None`` when it produced none.
+
+    Raises
+    ------
+    BaseException
+        The exception captured by the worker thread, re-raised on the caller's
+        thread.
+    """  # ruff: ignore[docstring-extraneous-exception] - the stored worker-thread exception is re-raised verbatim and stays caller-visible
     if (error := outcome.get("error")) is not None:
-        raise typ.cast("BaseException", error)
+        raise error
     value = outcome.get("value", _SENTINEL)
     if value is _SENTINEL:
         value = None
@@ -262,13 +400,19 @@ def _run_blocking_io[T](
     deadline: float,
     cancel: cabc.Callable[[], None],
 ) -> T:
-    """Execute *func* on a worker thread until completion or timeout."""
+    """Execute *func* on a worker thread until completion or timeout.
+
+    Returns
+    -------
+    T
+        The value returned by *func*.
+    """
     outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
     def _target() -> None:
         try:
             outcome["value"] = func()
-        except BaseException as exc:  # noqa: BLE001 - propagate cross-thread errors
+        except BaseException as exc:  # ruff: ignore[blind-except] - worker-thread boundary: any failure must be stashed and re-raised on the caller's thread
             outcome["error"] = exc
 
     thread = threading.Thread(
@@ -285,16 +429,21 @@ def _run_blocking_io[T](
 
 def _connect_unix_with_retries(
     sock_path: Path,
-    timeout: float,
-    retry_config: RetryConfig,
+    context: _ConnectionContext,
 ) -> socket.socket:
-    """Connect to *sock_path* retrying on :class:`OSError`."""
-    retry_config.validate(timeout)
+    """Connect to *sock_path* retrying on :class:`OSError`.
+
+    Returns
+    -------
+    socket.socket
+        The connected Unix domain socket.
+    """
+    context.validate()
     address = str(sock_path)
 
     def attempt_connect(_attempt: int) -> socket.socket:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
+        sock.settimeout(context.timeout)
         try:
             sock.connect(address)
         except OSError:
@@ -303,23 +452,30 @@ def _connect_unix_with_retries(
         return sock
 
     def log_failure(attempt: int, exc: Exception) -> None:
-        logger.debug(
-            "IPC connect attempt %d/%d to %s failed: %s",
-            attempt + 1,
-            retry_config.retries,
-            address,
-            exc,
-        )
+        # The bounded event is the only report: the socket path and the
+        # exception message are both on the observability never-log list.
+        _client_events.emit_connect_retry("unix", attempt, exc, context.correlation_id)
 
     return retry_with_backoff(
         attempt_connect,
-        retry_config=retry_config,
+        retry_config=context.retry_config,
         strategy=RetryStrategy(on_failure=log_failure),
     )
 
 
 def _get_validated_socket_path() -> Path:
-    """Fetch the IPC socket path from the environment."""
+    """Fetch the IPC socket path from the environment.
+
+    Returns
+    -------
+    Path
+        The configured IPC socket path.
+
+    Raises
+    ------
+    RuntimeError
+        If the socket path environment variable is unset.
+    """
     sock = os.environ.get(CMOX_IPC_SOCKET_ENV)
     if sock is None:
         msg = f"{CMOX_IPC_SOCKET_ENV} is not set"
@@ -328,7 +484,13 @@ def _get_validated_socket_path() -> Path:
 
 
 def _read_all(sock: socket.socket) -> bytes:
-    """Read all data from *sock* until EOF."""
+    """Read all data from *sock* until EOF.
+
+    Returns
+    -------
+    bytes
+        Every byte received before the peer closed the connection.
+    """
     chunks = []
     while chunk := sock.recv(1024):
         chunks.append(chunk)
@@ -338,10 +500,9 @@ def _read_all(sock: socket.socket) -> bytes:
 def _send_unix_request(
     sock_path: Path,
     payload: bytes,
-    timeout: float,
-    retry_config: RetryConfig,
+    context: _ConnectionContext,
 ) -> bytes:
-    with _connect_unix_with_retries(sock_path, timeout, retry_config) as client:
+    with _connect_unix_with_retries(sock_path, context) as client:
         client.sendall(payload)
         client.shutdown(socket.SHUT_WR)
         return _read_all(client)
@@ -356,9 +517,14 @@ def _decode_response(raw: bytes) -> Response:
 
 
 def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> bool:
-    """Return True when *exc* represents a retryable pipe error."""
-    winerror = getattr(exc, "winerror", None)
-    if winerror not in (ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND):
+    """Return True when *exc* represents a retryable pipe error.
+
+    Returns
+    -------
+    bool
+        ``True`` when *exc* is a busy/not-found pipe error and attempts remain.
+    """
+    if getattr(exc, "winerror", None) not in {ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND}:
         return False
     return attempt < max_retries - 1
 
@@ -381,7 +547,13 @@ def _wait_for_pipe_availability(
 
 
 def _create_pipe_handle(pipe_name: str) -> object:
-    """Create and configure a handle for *pipe_name*."""
+    """Create and configure a handle for *pipe_name*.
+
+    Returns
+    -------
+    object
+        The opaque pywin32 handle, switched to message read mode.
+    """
     handle = win32file.CreateFile(
         pipe_name,
         win32file.GENERIC_READ | win32file.GENERIC_WRITE,
@@ -393,7 +565,7 @@ def _create_pipe_handle(pipe_name: str) -> object:
     )
     win32pipe.SetNamedPipeHandleState(
         handle,
-        typ.cast("int", getattr(win32pipe, "PIPE_READMODE_MESSAGE", 2)),
+        getattr(win32pipe, "PIPE_READMODE_MESSAGE", 2),
         None,
         None,
     )
@@ -402,26 +574,20 @@ def _create_pipe_handle(pipe_name: str) -> object:
 
 def _connect_pipe_with_retries(
     pipe_name: os.PathLike[str] | str,
-    timeout: float,
-    retry_config: RetryConfig,
+    context: _ConnectionContext,
     *,
     deadline: float | None = None,
 ) -> object:
-    retry_config.validate(timeout)
+    context.validate()
     pipe_name_str = os.fspath(pipe_name)
-    connect_deadline = deadline or _compute_deadline(timeout)
+    connect_deadline = deadline or _compute_deadline(context.timeout)
 
     def log_failure(attempt: int, exc: Exception) -> None:
-        logger.debug(
-            "IPC pipe connect attempt %d/%d to %s failed: %s",
-            attempt + 1,
-            retry_config.retries,
-            pipe_name,
-            exc,
+        # The bounded event is the only report: the pipe name and the
+        # exception message are both on the observability never-log list.
+        _client_events.emit_connect_retry(
+            "named_pipe", attempt, exc, context.correlation_id
         )
-
-    def should_retry(exc: Exception, attempt: int, max_attempts: int) -> bool:
-        return _should_retry_pipe_error(exc, attempt, max_attempts)
 
     def sleep(delay: float) -> None:
         _wait_for_pipe_availability(
@@ -432,10 +598,10 @@ def _connect_pipe_with_retries(
 
     return retry_with_backoff(
         lambda _attempt: _create_pipe_handle(pipe_name_str),
-        retry_config=retry_config,
+        retry_config=context.retry_config,
         strategy=RetryStrategy(
             on_failure=log_failure,
-            should_retry=should_retry,
+            should_retry=_should_retry_pipe_error,
             sleep=sleep,
         ),
     )
@@ -444,22 +610,23 @@ def _connect_pipe_with_retries(
 def _send_pipe_request(
     sock_path: Path,
     payload: bytes,
-    timeout: float,
-    retry_config: RetryConfig,
+    context: _ConnectionContext,
 ) -> bytes:
     pipe_name = derive_pipe_name(sock_path)
+    timeout = context.timeout
     connect_deadline = _compute_deadline(timeout)
     handle = _connect_pipe_with_retries(
         pipe_name,
-        timeout,
-        retry_config,
+        context,
         deadline=connect_deadline,
     )
     closer = _HandleCloser(handle)
     try:
         _run_blocking_io(
             lambda: write_pipe_payload(
-                handle, payload, win32file=typ.cast("Win32FileProtocol", win32file)
+                handle,
+                payload,
+                win32file=win32file,
             ),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
@@ -467,9 +634,9 @@ def _send_pipe_request(
         return _run_blocking_io(
             lambda: read_pipe_message(
                 handle,
-                win32file=typ.cast("Win32FileProtocol", win32file),
-                pywintypes=typ.cast("PyWinTypesProtocol", pywintypes),
-                chunk_size=PIPE_CHUNK_SIZE,
+                win32file=win32file,
+                pywintypes=pywintypes,
+                options=PipeReadOptions(chunk_size=PIPE_CHUNK_SIZE),
             ),
             deadline=_compute_deadline(timeout),
             cancel=closer.close,
@@ -478,23 +645,96 @@ def _send_pipe_request(
         closer.close()
 
 
+def _build_request_envelope(kind: str, data: dict[str, typ.Any]) -> tuple[bytes, str]:
+    """Encode *data* as a request envelope of *kind*.
+
+    The envelope adds two fields alongside the model's own: ``kind`` and the
+    opaque ``correlation_id``. Both are stripped by the server before the body
+    is validated.
+
+    Returns
+    -------
+    tuple[bytes, str]
+        The encoded envelope and its correlation identifier.
+    """
+    correlation_id = _client_events.resolve_correlation_id(data)
+    payload = dict(data)
+    payload["kind"] = kind
+    payload["correlation_id"] = correlation_id
+    return json.dumps(payload).encode("utf-8"), correlation_id
+
+
+def _dispatch_request(payload: bytes, context: _ConnectionContext) -> bytes:
+    """Send *payload* over the transport this host uses.
+
+    Returns
+    -------
+    bytes
+        The raw response bytes returned by the server.
+    """
+    sock_path = _get_validated_socket_path()
+    if path_utils.IS_WINDOWS:
+        return _send_pipe_request(sock_path, payload, context)
+    return _send_unix_request(sock_path, payload, context)
+
+
+def _perform_request(
+    payload: bytes, kind: str, context: _ConnectionContext
+) -> Response:
+    """Send *payload*, emitting bounded request-lifecycle events.
+
+    Returns
+    -------
+    Response
+        The decoded server response.
+    """
+    started = time.perf_counter()
+    _client_events.RequestEvent(
+        kind=kind,
+        outcome="started",
+        correlation_id=context.correlation_id,
+        message_size=len(payload),
+    ).emit()
+    try:
+        response = _decode_response(_dispatch_request(payload, context))
+    except Exception as exc:
+        _client_events.RequestEvent(
+            kind=kind,
+            outcome="error",
+            correlation_id=context.correlation_id,
+            duration_ms=_observability.elapsed_ms(started),
+            error_category=type(exc).__name__,
+        ).emit()
+        raise
+    _client_events.RequestEvent(
+        kind=kind,
+        outcome="success",
+        correlation_id=context.correlation_id,
+        duration_ms=_observability.elapsed_ms(started),
+    ).emit()
+    return response
+
+
 def _send_request(
     kind: str,
     data: dict[str, typ.Any],
     timeout: float,
     retry_config: RetryConfig | None,
 ) -> Response:
-    """Send a JSON request of *kind* to the IPC server."""
-    retry = retry_config or RetryConfig()
-    sock_path = _get_validated_socket_path()
-    payload = dict(data)
-    payload["kind"] = kind
-    payload_bytes = json.dumps(payload).encode("utf-8")
-    if path_utils.IS_WINDOWS:
-        raw = _send_pipe_request(sock_path, payload_bytes, timeout, retry)
-    else:
-        raw = _send_unix_request(sock_path, payload_bytes, timeout, retry)
-    return _decode_response(raw)
+    """Send a JSON request of *kind* to the IPC server.
+
+    Returns
+    -------
+    Response
+        The decoded server response.
+    """
+    payload_bytes, correlation_id = _build_request_envelope(kind, data)
+    context = _ConnectionContext(
+        timeout=timeout,
+        retry_config=retry_config or RetryConfig(),
+        correlation_id=correlation_id,
+    )
+    return _perform_request(payload_bytes, kind, context)
 
 
 def invoke_server(
@@ -508,6 +748,11 @@ def invoke_server(
     Unix clients rely on ``socket.settimeout`` so the kernel enforces the
     limit, while Windows clients cooperatively track the deadline and close
     the named pipe if any step exceeds *timeout*, raising ``TimeoutError``.
+
+    Returns
+    -------
+    Response
+        The IPC server's response to the invocation.
     """
     return _send_request(KIND_INVOCATION, invocation.to_dict(), timeout, retry_config)
 
@@ -522,6 +767,11 @@ def report_passthrough_result(
     Timeout handling mirrors :func:`invoke_server`: Unix sockets enforce the
     limit per system call, and Windows callers rely on cooperative deadlines
     that cancel the named pipe when *timeout* expires.
+
+    Returns
+    -------
+    Response
+        The IPC server's acknowledgement of the passthrough result.
     """
     return _send_request(
         KIND_PASSTHROUGH_RESULT,

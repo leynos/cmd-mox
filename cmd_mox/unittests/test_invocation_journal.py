@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import ast
-import collections.abc as cabc
 import dataclasses as dc
 import os
 import subprocess
 import typing as typ
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from pathlib import Path
 
     from cmd_mox import EnvironmentManager
@@ -38,11 +38,21 @@ class StubReturns(typ.TypedDict, total=False):
 
 
 def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
-    """Return shim path for a command; requires prior mox.replay()."""
+    """Return the path to a command shim for *obj*.
+
+    Accepts either a :class:`CmdMox` that has completed ``mox.replay()`` or an
+    initialized :class:`EnvironmentManager` whose context has been entered.
+
+    Returns
+    -------
+    pathlib.Path
+        The path to the requested command shim.
+    """
     env = typ.cast("EnvironmentManager", getattr(obj, "environment", obj))
     shim_dir = env.shim_dir
     assert shim_dir is not None, (
-        "shim_dir is None; did you forget to call mox.replay()?"
+        "shim_dir is None; pass a CmdMox after mox.replay() or an "
+        "initialized EnvironmentManager"
     )
     return shim_dir.joinpath(*parts)
 
@@ -64,12 +74,17 @@ def _setup_and_execute_command(
     stub_returns: StubReturns,
     params: CommandExecutionParams,
 ) -> subprocess.CompletedProcess[str]:
-    """Create a stub, run it once, and return the result."""
+    """Create a stub, run it once, and return the result.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The result of executing the generated command shim.
+    """
     mox.stub(stub_name).returns(**stub_returns)
     mox.replay()
     cmd_path = _shim_cmd_path(mox, stub_name)
     return execute_command_with_details(
-        mox,
         CommandExecution(
             cmd=str(cmd_path),
             args=params.args,
@@ -273,12 +288,12 @@ def test_invocation_to_dict() -> None:
 )
 def test_invocation_repr_redacts_keys(key: str) -> None:
     """__repr__ redacts keys containing sensitive tokens."""
-    secret = "super-secret"  # noqa: S105 - test value
+    sensitive_value = "super-secret"
     inv = Invocation(
         command="cmd",
         args=[],
         stdin="",
-        env={key: secret},
+        env={key: sensitive_value},
         stdout="",
         stderr="",
         exit_code=0,
@@ -286,7 +301,7 @@ def test_invocation_repr_redacts_keys(key: str) -> None:
     text = repr(inv)
     data = ast.literal_eval(text[len("Invocation(") : -1])
     assert data["env"][key] == "<redacted>"
-    assert "super-secret" not in text
+    assert sensitive_value not in text
 
 
 def test_invocation_repr_does_not_redact_benign_key() -> None:

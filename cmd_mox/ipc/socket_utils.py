@@ -12,13 +12,25 @@ logger = logging.getLogger(__name__)
 
 
 def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
-    """Remove a pre-existing socket when no server is listening."""
+    """Remove a pre-existing socket when no server is listening.
+
+    Only two probe failures prove that nothing is listening: a refused
+    connection, and a path that no longer exists. Every other :class:`OSError`
+    — a permission denial, most importantly — means the probe could not reach a
+    socket that may well be live, so it propagates untouched rather than
+    deleting a socket this process merely cannot connect to.
+
+    Raises
+    ------
+    RuntimeError
+        If an active server is still listening on *socket_path*.
+    """
     socket_path = pathlib.Path(socket_path)
     address = str(socket_path)
     with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
         try:
             probe.connect(address)
-        except (ConnectionRefusedError, OSError):
+        except (ConnectionRefusedError, FileNotFoundError):
             pass
         else:
             msg = f"Socket {socket_path} is still in use"
@@ -32,33 +44,42 @@ def cleanup_stale_socket(socket_path: pathlib.Path) -> None:
 
 
 def _try_socket_connection(address: str, timeout: float) -> bool:
-    """Attempt to connect to *address* within *timeout* seconds."""
+    """Attempt to connect to *address* within *timeout* seconds.
+
+    Returns
+    -------
+    bool
+        ``True`` when the connection succeeded, ``False`` otherwise.
+    """
     with contextlib.closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as probe:
         probe.settimeout(timeout)
         try:
             probe.connect(address)
-        except (FileNotFoundError, ConnectionRefusedError, OSError):
+        except OSError:
             return False
     return True
 
 
 def _poll_socket_until_ready(socket_path: pathlib.Path, timeout: float) -> None:
-    """Poll a Unix domain socket until it accepts connections within timeout."""
+    """Poll a Unix domain socket until it accepts connections within timeout.
+
+    Raises
+    ------
+    RuntimeError
+        If the socket does not accept connections before *timeout* elapses.
+    """
     deadline = time.monotonic() + timeout
     wait_time = 0.001
     address = str(socket_path)
 
     while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        if (remaining := deadline - time.monotonic()) <= 0:
             break
 
-        attempt = min(wait_time, remaining)
-        if _try_socket_connection(address, attempt):
+        if _try_socket_connection(address, min(wait_time, remaining)):
             return
 
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        if (remaining := deadline - time.monotonic()) <= 0:
             break
 
         time.sleep(min(wait_time, remaining))

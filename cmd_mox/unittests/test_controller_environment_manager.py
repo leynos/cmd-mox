@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import typing as typ
 from pathlib import Path
 
@@ -11,6 +10,9 @@ import pytest
 from cmd_mox.controller import CmdMox
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.errors import MissingEnvironmentError
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 pytestmark = pytest.mark.requires_unix_sockets
 

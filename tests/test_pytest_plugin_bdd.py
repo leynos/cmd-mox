@@ -17,7 +17,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used for type checking only
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
 @scenario(str(FEATURES_DIR / "pytest_plugin.feature"), "cmd_mox fixture basic usage")
@@ -66,13 +66,25 @@ TEST_CODE = textwrap.dedent(
 
 @given("a temporary test file using the cmd_mox fixture", target_fixture="test_file")
 def create_test_file(pytester: Pytester) -> Path:
-    """Write the example test file."""
+    """Write the example test file.
+
+    Returns
+    -------
+    Path
+        The path to the generated pytest module.
+    """
     return pytester.makepyfile(TEST_CODE)
 
 
 @when("I run pytest on the file", target_fixture="result")
 def run_pytest(pytester: Pytester, test_file: Path) -> RunResult:
-    """Run the inner pytest instance."""
+    """Run the inner pytest instance.
+
+    Returns
+    -------
+    RunResult
+        The result of the inner pytest run.
+    """
     return pytester.runpytest(str(test_file))
 
 
@@ -89,7 +101,13 @@ def assert_success(result: RunResult) -> None:
 def create_parallel_suite(
     pytester: Pytester, parallel_artifact_dir: Path
 ) -> ParallelSuite:
-    """Generate a pytest module that runs under multiple workers."""
+    """Generate a pytest module that runs under multiple workers.
+
+    Returns
+    -------
+    ParallelSuite
+        The generated test file and its artifact directory.
+    """
     pytest.importorskip("xdist")
     test_file = pytester.makepyfile(load_parallel_suite())
     return ParallelSuite(test_file=test_file, artifact_dir=parallel_artifact_dir)
@@ -97,7 +115,13 @@ def create_parallel_suite(
 
 @when("I run pytest with 2 workers", target_fixture="parallel_result")
 def run_pytest_parallel(pytester: Pytester, parallel_suite: ParallelSuite) -> RunResult:
-    """Execute the generated suite with pytest-xdist."""
+    """Execute the generated suite with pytest-xdist.
+
+    Returns
+    -------
+    RunResult
+        The result of the parallel pytest run.
+    """
     return pytester.runpytest("-n2", "-s", str(parallel_suite.test_file))
 
 
@@ -108,18 +132,18 @@ def assert_parallel_isolation(
     """Assert that shim directories and sockets are unique per worker."""
     parallel_result.assert_outcomes(passed=2)
     records = read_parallel_records(parallel_suite.artifact_dir)
-    assert len(records) == 2
-    assert {record.label for record in records} == {"alpha", "beta"}
+    assert len(records) == 2, "Assertion failed"
+    assert {record.label for record in records} == {"alpha", "beta"}, "Assertion failed"
 
     shim_dirs = {record.shim_dir for record in records}
     sockets = {record.socket for record in records}
     workers = {record.worker for record in records}
 
-    assert len(shim_dirs) == len(records)
-    assert len(sockets) == len(records)
-    assert len(workers) == len(records)
+    assert len(shim_dirs) == len(records), "Assertion failed"
+    assert len(sockets) == len(records), "Assertion failed"
+    assert len(workers) == len(records), "Assertion failed"
 
     for record in records:
-        assert record.socket.parent == record.shim_dir
-        assert not record.shim_dir.exists()
-        assert not record.socket.exists()
+        assert record.socket.parent == record.shim_dir, "Assertion failed"
+        assert not record.shim_dir.exists(), "Assertion failed"
+        assert not record.socket.exists(), "Assertion failed"

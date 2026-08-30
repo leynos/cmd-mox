@@ -2,20 +2,29 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import socket
 import tempfile
+import typing as typ
 from pathlib import Path
 
 import pytest
 
 import cmd_mox.environment
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 _UNIX_SOCKETS_SUPPORTED: bool | None = None
 
 
 def _can_bind_unix_socket() -> bool:
-    """Return ``True`` when the platform allows binding Unix domain sockets."""
+    """Return whether the platform allows binding Unix domain sockets.
+
+    Returns
+    -------
+    bool
+        ``True`` when a Unix-domain socket can be bound, otherwise ``False``.
+    """
     if not hasattr(socket, "AF_UNIX"):
         return False
     try:
@@ -32,8 +41,7 @@ def _can_bind_unix_socket() -> bool:
                     sock_path.unlink()
     except OSError:
         return False
-    else:
-        return True
+    return True
 
 
 def _unix_sockets_supported() -> bool:
@@ -79,7 +87,13 @@ PARALLEL_ARTIFACT_ENV = "CMD_MOX_PARALLEL_ARTIFACT_DIR"
 
 @pytest.fixture
 def parallel_artifact_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Provide a temporary directory for recording parallel test metadata."""
+    """Provide a temporary directory for recording parallel test metadata.
+
+    Returns
+    -------
+    pathlib.Path
+        The path configured in ``CMD_MOX_PARALLEL_ARTIFACT_DIR``.
+    """
     artifact_dir = tmp_path / "parallel-artifacts"
     monkeypatch.setenv(PARALLEL_ARTIFACT_ENV, str(artifact_dir))
     return artifact_dir

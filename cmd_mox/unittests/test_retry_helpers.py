@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest import mock
 
 import pytest
 
@@ -17,7 +17,7 @@ from cmd_mox.ipc.client import (
 def test_calculate_retry_delay() -> None:
     """Retry delay scales linearly and applies jitter bounds."""
     assert calculate_retry_delay(1, 0.1, 0.0) == pytest.approx(0.2)
-    with patch("cmd_mox.ipc.random.uniform", return_value=1.25) as mock_uniform:
+    with mock.patch("cmd_mox.ipc.random.uniform", return_value=1.25) as mock_uniform:
         delay = calculate_retry_delay(0, 1.0, 0.5)
         assert delay == pytest.approx(1.25)
         mock_uniform.assert_called_once_with(0.5, 1.5)
@@ -35,7 +35,7 @@ def test_retry_with_backoff_retries_then_succeeds() -> None:
 
     strategy = RetryStrategy(
         on_failure=lambda attempt_idx, exc: failures.append((attempt_idx, exc)),
-        sleep=lambda delay: sleeps.append(delay),
+        sleep=sleeps.append,
     )
 
     result = retry_with_backoff(
@@ -61,7 +61,7 @@ def test_retry_with_backoff_respects_should_retry() -> None:
     strategy = RetryStrategy(
         on_failure=lambda attempt_idx, _exc: failures.append(attempt_idx),
         should_retry=lambda _exc, _attempt, _max: False,
-        sleep=lambda delay: sleeps.append(delay),
+        sleep=sleeps.append,
     )
 
     with pytest.raises(RuntimeError):

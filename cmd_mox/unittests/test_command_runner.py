@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import os
 import subprocess
 import typing as typ
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -33,7 +33,7 @@ class DummyResult:
         self.env = env
 
 
-@dataclass
+@dc.dataclass
 class CommandTestScenario:
     """Test case data for invalid command scenarios."""
 
@@ -44,7 +44,13 @@ class CommandTestScenario:
     stderr: str
 
     def get_which_result_for_file_creation(self) -> str:
-        """Return ``which_result`` when a file should be created."""
+        """Return ``which_result`` when a file should be created.
+
+        Returns
+        -------
+        str
+            The command path returned by ``which``.
+        """
         assert self.create_file
         assert self.which_result is not None
         return self.which_result
@@ -52,7 +58,13 @@ class CommandTestScenario:
 
 @pytest.fixture
 def runner() -> cabc.Iterator[CommandRunner]:
-    """Return a :class:`CommandRunner` with a managed environment."""
+    """Return a :class:`CommandRunner` with a managed environment.
+
+    Yields
+    ------
+    CommandRunner
+        A command runner backed by the managed test environment.
+    """
     env_mgr = EnvironmentManager()
     env_mgr.__enter__()
     yield CommandRunner(env_mgr)
@@ -237,7 +249,7 @@ def test_resolve_command_with_override_reports_errors(tmp_path: Path) -> None:
     assert result.exit_code == 127
 
 
-@dataclass(frozen=True)
+@dc.dataclass(frozen=True)
 class ExecuteExceptionScenario:
     """Bundle execute_command exception expectations for parametrized tests."""
 
@@ -261,7 +273,7 @@ class ExecuteExceptionScenario:
         ),
         pytest.param(
             ExecuteExceptionScenario(
-                factory=lambda: FileNotFoundError(),
+                factory=FileNotFoundError,
                 command="missing",
                 exit_code=127,
                 stderr="missing: not found",
@@ -309,9 +321,41 @@ def test_execute_command_handles_exceptions(
 
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
 
-    response = execute_command(Path("/bin/true"), invocation, env={}, timeout=30)
+    env = {"PATH": "/test/bin", "VAR": "x"}
+    response = execute_command(Path("/bin/true"), invocation, env=env, timeout=30)
     assert response.exit_code == scenario.exit_code
     assert response.stderr == scenario.stderr
+    assert response.env == env
+
+
+@pytest.mark.parametrize(
+    ("timeout", "expected"),
+    [
+        pytest.param(0.5, "0.5", id="fractional"),
+        pytest.param(5.0, "5", id="whole_float"),
+        pytest.param(30, "30", id="integer"),
+    ],
+)
+def test_execute_command_formats_timeout_duration(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout: float,
+    expected: str,
+) -> None:
+    """Timeout messages should report the configured value without truncation."""
+    invocation = Invocation(command="sleepy", args=[], stdin="", env={})
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise subprocess.TimeoutExpired(cmd=["sleepy"], timeout=timeout)
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    response = execute_command(
+        Path("/bin/true"), invocation, env={"PATH": "/test/bin"}, timeout=timeout
+    )
+    assert response.exit_code == 124, "timeout must map to exit code 124"
+    assert response.stderr == f"sleepy: timeout after {expected} seconds", (
+        "timeout duration formatting"
+    )
 
 
 def test_command_runner_honours_override_environment(
@@ -339,3 +383,52 @@ def test_command_runner_honours_override_environment(
     runner.run(invocation, {})
 
     assert captured[0] == str(script)
+
+
+def test_run_response_includes_applied_environment(
+    runner: CommandRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """run() surfaces the merged environment overrides in ``Response.env``."""
+    script = tmp_path / "echo"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+
+    def fake_run(
+        argv: list[str], *, env: dict[str, str], **_kwargs: object
+    ) -> DummyResult:
+        return DummyResult(env)
+
+    monkeypatch.setattr(
+        "cmd_mox.command_runner.shutil.which", lambda cmd, path=None: str(script)
+    )
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    invocation = Invocation(
+        command="echo",
+        args=[],
+        stdin="",
+        env={"PATH": "/invocation/bin", "VAR": "inv"},
+    )
+    response = runner.run(invocation, {"VAR": "expect"})
+
+    expected_env = {"PATH": "/invocation/bin", "VAR": "expect"}
+    assert response.env == expected_env
+
+
+def test_execute_command_error_response_includes_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """execute_command surfaces the applied environment on error responses."""
+
+    def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        raise FileNotFoundError
+
+    monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
+
+    invocation = Invocation(command="missing", args=[], stdin="", env={})
+    response = execute_command(
+        Path("/bin/true"), invocation, env={"VAR": "x"}, timeout=30
+    )
+
+    assert response.exit_code == 127
+    assert response.env == {"VAR": "x"}

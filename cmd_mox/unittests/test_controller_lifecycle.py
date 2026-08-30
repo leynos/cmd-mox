@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import typing as typ
 
 import pytest
@@ -19,6 +18,7 @@ from tests.helpers.fixtures import write_minimal_replay_fixture
 pytestmark = pytest.mark.requires_unix_sockets
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
+    import collections.abc as cabc
     import subprocess
     from pathlib import Path
 
@@ -92,11 +92,6 @@ def test_replay_after_exit_without_verify_raises() -> None:
     an idempotent no-op; it should raise because the context is no
     longer active.
 
-    Raises
-    ------
-    LifecycleError
-        Expected when ``replay()`` is called after the context has
-        exited with ``verify_on_exit=False``.
     """
     mox = CmdMox(verify_on_exit=False)
     mox.stub("dummy").returns(stdout="ok")

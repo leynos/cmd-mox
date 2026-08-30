@@ -24,7 +24,7 @@ def test_passthrough_spy_executes_real_command(
     monkeypatch.setenv(f"CMOX_REAL_COMMAND_{command_name}", sys.executable)
     spy = cmd_mox.spy(command_name).passthrough()
 
-    result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup
         [resolve_command(command_name), "-c", "print('hello')"],
         capture_output=True,
         text=True,
@@ -32,6 +32,6 @@ def test_passthrough_spy_executes_real_command(
         shell=False,
     )
 
-    assert result.stdout.strip() == "hello"
-    assert spy.call_count == 1
+    assert result.stdout.strip() == "hello", "Assertion failed"
+    assert spy.call_count == 1, "Assertion failed"
     spy.assert_called_with("-c", "print('hello')")

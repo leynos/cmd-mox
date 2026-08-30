@@ -59,7 +59,7 @@ class _FakeWin32File(Win32FileProtocol):
         self.writes: list[tuple[object, bytes]] = []
         self.flush_calls = 0
 
-    def ReadFile(  # noqa: N802 - mirror pywin32 API casing for realism
+    def ReadFile(  # ruff: ignore[invalid-function-name] - mirror pywin32 API casing for realism
         self, handle: object, chunk_size: int
     ) -> tuple[int, bytes]:
         self.read_sizes.append(chunk_size)
@@ -67,20 +67,22 @@ class _FakeWin32File(Win32FileProtocol):
             msg = "No response configured for ReadFile call"
             raise AssertionError(msg)
         response = self._responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        if isinstance(response, bytes):
-            return (0, response)
-        if isinstance(response, str):
-            return (0, response.encode("utf-8"))
-        return response
+        match response:
+            case Exception():
+                raise response
+            case bytes():
+                return (0, response)
+            case str():
+                return (0, response.encode("utf-8"))
+            case _:
+                return response
 
-    def WriteFile(  # noqa: N802 - mirror pywin32 API casing for realism
+    def WriteFile(  # ruff: ignore[invalid-function-name] - mirror pywin32 API casing for realism
         self, handle: object, payload: bytes
     ) -> None:
         self.writes.append((handle, payload))
 
-    def FlushFileBuffers(  # noqa: N802 - mirror pywin32 API casing for realism
+    def FlushFileBuffers(  # ruff: ignore[invalid-function-name] - mirror pywin32 API casing for realism
         self, handle: object
     ) -> None:
         self.flush_calls += 1

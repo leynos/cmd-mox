@@ -4,18 +4,33 @@ UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
 TOOLS = $(MDFORMAT_ALL) $(UV)
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
-RUFF = $(UV_ENV) $(UV) run ruff
-TY = $(UV_ENV) $(UV) run ty
+RUFF_VERSION ?= 0.16.4
+TY_VERSION ?= 0.0.74
+RUFF = $(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)
+# Run ty with --with so the pinned version overlays the project virtualenv;
+# an isolated tool environment would not see the project's dependencies.
+TY = $(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty
 TYPOS_VERSION ?= 1.48.0
 TYPOS := $(UV) tool run typos@$(TYPOS_VERSION)
 PYLINT_PYTHON ?= pypy
 PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
 PYLINT_PYPY_SHIM_REF ?= 726d09f968b4d729ee4b29c71fc732e744854f3b
 PYLINT_PYPY_SHIM = git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)
-PYLINT_BASELINE_DISABLE = no-else-return,unnecessary-ellipsis,too-many-lines,too-many-arguments,too-many-positional-arguments,subprocess-run-check,use-implicit-booleaness-not-comparison-to-string,unnecessary-dunder-call,use-implicit-booleaness-not-comparison
+# too-many-lines is enforced by the df12 tier at its 800-line review ceiling
+# (pylintrc-df12.toml); too-many-arguments/too-many-positional-arguments
+# remain for pytest-bdd step wrappers, mirroring the Ruff per-file ignores
+# for tests/steps.
+PYLINT_BASELINE_DISABLE = too-many-lines,too-many-arguments,too-many-positional-arguments
 PYLINT = $(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)
+DF12_PYTHON ?= 3.14
+# Commit SHA of the df12-python-lints v0.3.0 tag.
+DF12_PYTHON_LINTS_REF ?= 4cf41736cce2f7ba2778882a5c629c044568a0e5
+DF12_PYTHON_LINTS = git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)
+DF12_PYLINT = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' pylint
+AMBRLEAKS = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' ambrleaks
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
+	tests/test_named_pipe_server.py \
 	--log-file=windows-ipc.log \
 	--log-file-level=DEBUG \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
@@ -89,11 +104,15 @@ markdownlint-run: ## Run markdownlint-cli2 with pinned fallback
 lint: build ## Run linters
 	$(RUFF) check
 	$(PYLINT) $(PYLINT_TARGETS)
+	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
+	$(AMBRLEAKS) tests
 	+$(MAKE) spelling
 
 typecheck: build ## Run typechecking
 	$(TY) --version
-	$(TY) check
+	# --extra-search-path duplicates tool.ty.environment.extra-paths because
+	# ty 0.0.74 drops config-sourced extra paths when its resolver re-runs.
+	$(TY) check --extra-search-path scripts
 
 markdownlint: ## Lint Markdown files
 	$(MAKE) markdownlint-run

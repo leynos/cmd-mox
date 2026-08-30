@@ -16,6 +16,8 @@ from cmd_mox.record.replay import ReplaySession
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+    from cmd_mox.unittests._invocation_helpers import InvocationKwargs
+
 
 @dc.dataclass
 class RecordedInvocationSpec:
@@ -27,15 +29,6 @@ class RecordedInvocationSpec:
     stderr: str = ""
     exit_code: int = 0
     sequence: int = 0
-
-
-class InvocationKwargs(typ.TypedDict, total=False):
-    """Keyword arguments accepted by ``_make_invocation``."""
-
-    command: str
-    args: list[str] | None
-    stdin: str
-    env: dict[str, str] | None
 
 
 @dc.dataclass(slots=True)
@@ -53,7 +46,13 @@ def _make_recorded_invocation(
     args: list[str] | None = None,
     spec: RecordedInvocationSpec | None = None,
 ) -> RecordedInvocation:
-    """Build a RecordedInvocation with sensible defaults."""
+    """Build a RecordedInvocation with sensible defaults.
+
+    Returns
+    -------
+    RecordedInvocation
+        A recorded invocation populated from *command*, *args*, and *spec*.
+    """
     s = spec or RecordedInvocationSpec()
     return RecordedInvocation(
         sequence=s.sequence,
@@ -74,7 +73,13 @@ def _make_fixture_file(
     recordings: list[RecordedInvocation] | None = None,
     filename: str = "fixture.json",
 ) -> Path:
-    """Write a fixture file to tmp_path and return the path."""
+    """Write a fixture file to tmp_path and return the path.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     recs = [_make_recorded_invocation()] if recordings is None else recordings
     fixture = FixtureFile(
         version=FixtureFile.SCHEMA_VERSION,
@@ -93,7 +98,13 @@ def _make_invocation(
     stdin: str = "",
     env: dict[str, str] | None = None,
 ) -> Invocation:
-    """Build an Invocation with sensible defaults."""
+    """Build an Invocation with sensible defaults.
+
+    Returns
+    -------
+    Invocation
+        An invocation populated from *command*, *args*, *stdin*, and *env*.
+    """
     return Invocation(
         command=command,
         args=["status"] if args is None else args,
@@ -109,7 +120,13 @@ def _run_session_match(
     *,
     strict_matching: bool = True,
 ) -> Response | None:
-    """Create a fixture, load a ReplaySession, and return match result."""
+    """Create a fixture, load a ReplaySession, and return match result.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
     path = _make_fixture_file(tmp_path, recordings)
     session = ReplaySession(path, strict_matching=strict_matching)
     session.load()
@@ -125,25 +142,34 @@ class TestReplaySessionConstruction:
         session = ReplaySession(path)
         assert session.fixture_path == path
 
-    def test_strict_matching_defaults_to_true(self, tmp_path: Path) -> None:
-        """strict_matching defaults to True."""
-        session = ReplaySession(tmp_path / "fixture.json")
-        assert session.strict_matching is True
+    @pytest.mark.parametrize(
+        ("session_kwargs", "attribute", "expected"),
+        [
+            ({}, "strict_matching", True),
+            ({"strict_matching": False}, "strict_matching", False),
+            ({}, "allow_unmatched", False),
+            ({"allow_unmatched": True}, "allow_unmatched", True),
+        ],
+        ids=[
+            "strict-matching-defaults-true",
+            "strict-matching-disabled",
+            "allow-unmatched-defaults-false",
+            "allow-unmatched-enabled",
+        ],
+    )
+    def test_matching_flag_reflects_constructor_argument(
+        self,
+        tmp_path: Path,
+        session_kwargs: dict[str, bool],
+        attribute: str,
+        *,
+        expected: bool,
+    ) -> None:
+        """Matching-mode keyword arguments surface on their public attribute."""
+        session = ReplaySession(tmp_path / "fixture.json", **session_kwargs)
 
-    def test_strict_matching_can_be_disabled(self, tmp_path: Path) -> None:
-        """strict_matching=False disables strict mode."""
-        session = ReplaySession(tmp_path / "f.json", strict_matching=False)
-        assert session.strict_matching is False
-
-    def test_allow_unmatched_defaults_to_false(self, tmp_path: Path) -> None:
-        """allow_unmatched defaults to False."""
-        session = ReplaySession(tmp_path / "fixture.json")
-        assert session.allow_unmatched is False
-
-    def test_allow_unmatched_can_be_enabled(self, tmp_path: Path) -> None:
-        """allow_unmatched=True enables tolerant verification."""
-        session = ReplaySession(tmp_path / "f.json", allow_unmatched=True)
-        assert session.allow_unmatched is True
+        actual = getattr(session, attribute)
+        assert actual is expected, f"{attribute} should be {expected!r}, got {actual!r}"
 
     def test_fixture_not_loaded_initially(self, tmp_path: Path) -> None:
         """_fixture is None before load() is called."""
@@ -260,66 +286,59 @@ class TestReplaySessionStrictMatch:
         assert result.stderr == "warn\n"
         assert result.exit_code == 1
 
-    def test_match_wrong_command_returns_none(self, tmp_path: Path) -> None:
-        """Different command name returns None."""
-        path = _make_fixture_file(tmp_path)
-        session = ReplaySession(path)
-        session.load()
-
-        result = session.match(_make_invocation(command="curl"))
-        assert result is None
-
-    def test_match_wrong_args_returns_none(self, tmp_path: Path) -> None:
-        """Same command but different args returns None."""
-        path = _make_fixture_file(tmp_path)
-        session = ReplaySession(path)
-        session.load()
-
-        result = session.match(_make_invocation(args=["pull"]))
-        assert result is None
-
-    def test_match_wrong_stdin_returns_none(self, tmp_path: Path) -> None:
-        """Matching command and args but different stdin returns None in strict mode."""
-        rec = _make_recorded_invocation(
-            spec=RecordedInvocationSpec(stdin="expected input")
+    @pytest.mark.parametrize(
+        ("spec", "invocation_kwargs", "expect_match"),
+        [
+            pytest.param(
+                RecordedInvocationSpec(),
+                {"command": "curl"},
+                False,
+                id="wrong-command",
+            ),
+            pytest.param(
+                RecordedInvocationSpec(),
+                {"args": ["pull"]},
+                False,
+                id="wrong-args",
+            ),
+            pytest.param(
+                RecordedInvocationSpec(stdin="expected input"),
+                {"stdin": "different input"},
+                False,
+                id="wrong-stdin",
+            ),
+            pytest.param(
+                RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
+                {"env": {"GIT_DIR": "/other"}},
+                False,
+                id="wrong-env",
+            ),
+            pytest.param(
+                RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
+                {"env": {"GIT_DIR": ".git", "EXTRA": "val"}},
+                True,
+                id="env-subset-contained",
+            ),
+        ],
+    )
+    def test_strict_match_requires_command_args_stdin_and_env_subset(
+        self,
+        tmp_path: Path,
+        spec: RecordedInvocationSpec,
+        invocation_kwargs: InvocationKwargs,
+        *,
+        expect_match: bool,
+    ) -> None:
+        """Strict mode matches only when command, args, stdin, and env agree."""
+        result = _run_session_match(
+            tmp_path,
+            [_make_recorded_invocation(spec=spec)],
+            _make_invocation(**invocation_kwargs),
         )
-        path = _make_fixture_file(tmp_path, [rec])
-
-        session = ReplaySession(path)
-        session.load()
-
-        result = session.match(_make_invocation(stdin="different input"))
-        assert result is None
-
-    def test_match_wrong_env_returns_none(self, tmp_path: Path) -> None:
-        """Matching command and args but env_subset mismatch returns None."""
-        rec = _make_recorded_invocation(
-            spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"})
+        assert (result is not None) is expect_match, (
+            f"strict match() should {'succeed' if expect_match else 'fail'} "
+            f"for invocation {invocation_kwargs}, got {result!r}"
         )
-        path = _make_fixture_file(tmp_path, [rec])
-
-        session = ReplaySession(path)
-        session.load()
-
-        # Invocation env has a different value for GIT_DIR
-        result = session.match(_make_invocation(env={"GIT_DIR": "/other"}))
-        assert result is None
-
-    def test_match_env_subset_semantics(self, tmp_path: Path) -> None:
-        """Extra env keys in invocation do not prevent matching."""
-        rec = _make_recorded_invocation(
-            spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"})
-        )
-        path = _make_fixture_file(tmp_path, [rec])
-
-        session = ReplaySession(path)
-        session.load()
-
-        # Invocation has GIT_DIR plus extra keys -- should still match.
-        result = session.match(
-            _make_invocation(env={"GIT_DIR": ".git", "EXTRA": "val"})
-        )
-        assert result is not None
 
 
 class TestReplaySessionFuzzyMatch:
@@ -354,23 +373,30 @@ class TestReplaySessionFuzzyMatch:
         )
         assert result is not None
 
-    def test_fuzzy_match_still_requires_command(self, tmp_path: Path) -> None:
-        """Fuzzy mode still requires command name to match."""
-        path = _make_fixture_file(tmp_path)
-        session = ReplaySession(path, strict_matching=False)
-        session.load()
-
-        result = session.match(_make_invocation(command="curl"))
-        assert result is None
-
-    def test_fuzzy_match_still_requires_args(self, tmp_path: Path) -> None:
-        """Fuzzy mode still requires args to match."""
-        path = _make_fixture_file(tmp_path)
-        session = ReplaySession(path, strict_matching=False)
-        session.load()
-
-        result = session.match(_make_invocation(args=["pull"]))
-        assert result is None
+    @pytest.mark.parametrize(
+        "invocation_kwargs",
+        [
+            {"command": "curl"},
+            {"args": ["pull"]},
+        ],
+        ids=["command-differs", "args-differ"],
+    )
+    def test_fuzzy_match_still_requires_command_and_args(
+        self,
+        tmp_path: Path,
+        invocation_kwargs: InvocationKwargs,
+    ) -> None:
+        """Fuzzy mode still requires command name and args to match."""
+        result = _run_session_match(
+            tmp_path,
+            [_make_recorded_invocation()],
+            _make_invocation(**invocation_kwargs),
+            strict_matching=False,
+        )
+        assert result is None, (
+            f"fuzzy match() should fail for invocation {invocation_kwargs}, "
+            f"got {result!r}"
+        )
 
 
 class TestReplaySessionConsumption:
@@ -442,6 +468,9 @@ class TestReplaySessionVerify:
 
         session.match(_make_invocation())  # consume the one recording
         session.verify_all_consumed()  # should not raise
+        assert session.consumed_count == 1, (
+            "the single recording should remain consumed after verification"
+        )
 
     def test_verify_all_consumed_raises_when_unconsumed(self, tmp_path: Path) -> None:
         """Raises VerificationError when not all recordings consumed."""
@@ -472,6 +501,9 @@ class TestReplaySessionVerify:
         session.load()
 
         session.verify_all_consumed()  # should not raise
+        assert session.consumed_count == 0, (
+            "an empty fixture should leave nothing consumed"
+        )
 
 
 class TestReplaySessionLifecycle:
@@ -512,7 +544,7 @@ class TestReplaySessionThreadSafety:
         session.load()
 
         barrier = threading.Barrier(n_threads)
-        results = typ.cast("list[Response | None]", [None] * n_threads)
+        results: list[Response | None] = [None] * n_threads
 
         def _match(idx: int) -> None:
             barrier.wait()
@@ -543,6 +575,9 @@ class TestReplaySessionAllowUnmatched:
 
         # Do not consume any recordings.
         session.verify_all_consumed()  # should not raise
+        assert session.consumed_count == 0, (
+            "allow_unmatched must tolerate, not disable, consumption bookkeeping"
+        )
 
     def test_allow_unmatched_verify_passes_with_partial_consumption(
         self, tmp_path: Path
@@ -563,6 +598,12 @@ class TestReplaySessionAllowUnmatched:
         # Consume only the first recording, leave the second unconsumed.
         session.match(_make_invocation())
         session.verify_all_consumed()  # should not raise
+        assert session.consumed_count == 1, (
+            "exactly one of the two recordings should be recorded as consumed"
+        )
+        assert session.is_consumed(0), (
+            "the first recording should be the one marked consumed"
+        )
 
 
 class TestReplaySessionMatcherDelegation:

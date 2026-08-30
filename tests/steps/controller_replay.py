@@ -20,7 +20,13 @@ if typ.TYPE_CHECKING:
 
 @given("a git replay fixture exists", target_fixture="git_replay_fixture_path")
 def git_replay_fixture(tmp_path: Path) -> Path:
-    """Create a replay fixture containing ``git status`` -> ``ok``."""
+    """Create a replay fixture containing ``git status`` -> ``ok``.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     return write_minimal_replay_fixture(tmp_path)
 
 
@@ -54,7 +60,13 @@ def spy_with_fuzzy_replay_and_fallback(
 def handle_invocation_expect_error(
     mox: CmdMox, cmd: str, args: str
 ) -> UnexpectedCommandError:
-    """Call ``_handle_invocation()`` directly and capture the strict replay error."""
+    """Call ``_handle_invocation()`` directly and capture the strict replay error.
+
+    Returns
+    -------
+    UnexpectedCommandError
+        The exception raised by the unmatched invocation.
+    """
     invocation = Invocation(command=cmd, args=shlex.split(args), stdin="", env={})
 
     with pytest.raises(UnexpectedCommandError) as excinfo:
@@ -68,4 +80,4 @@ def invocation_error_contains(
     invocation_error: UnexpectedCommandError, text: str
 ) -> None:
     """Assert the captured invocation error contains *text*."""
-    assert text in str(invocation_error)
+    assert text in str(invocation_error), "Assertion failed"

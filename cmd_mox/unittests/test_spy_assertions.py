@@ -2,6 +2,7 @@
 
 import collections.abc as cabc
 import dataclasses as dc
+import operator
 import os
 import subprocess
 import typing as typ
@@ -49,6 +50,11 @@ class TestSpyAssertions:
 
         This helper performs the full mox lifecycle and executes the command
         with the provided arguments, stdin, and environment.
+
+        Returns
+        -------
+        tuple[CmdMox, CommandDouble]
+            The configured controller and its executed spy.
         """
         if config is None:
             config = SpyCommandConfig()
@@ -77,7 +83,13 @@ class TestSpyAssertions:
         stdin: str,
         env: dict[str, str],
     ) -> CommandDouble:
-        """Create a spy pre-populated with a single invocation."""
+        """Create a spy pre-populated with a single invocation.
+
+        Returns
+        -------
+        CommandDouble
+            The spy containing the supplied invocation.
+        """
         mox = CmdMox()
         spy = mox.spy(cmd)
         invocation = Invocation(cmd, args, stdin, env)
@@ -304,7 +316,7 @@ class TestSpyAssertions:
     @pytest.mark.parametrize(
         "scenario",
         ASSERTION_FAILURE_SCENARIOS,
-        ids=lambda s: s["name"],
+        ids=operator.itemgetter("name"),
     )
     def test_spy_assertion_failures(
         self,

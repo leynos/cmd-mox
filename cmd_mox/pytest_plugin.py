@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
+import contextlib
 import logging
 import os
 import re
@@ -14,6 +14,9 @@ from .controller import CmdMox, Phase
 from .environment import EnvironmentManager
 from .platform import skip_if_unsupported
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 logger = logging.getLogger(__name__)
 
 # Stash key to record per-item call-stage failure state.
@@ -21,7 +24,18 @@ STASH_CALL_FAILED: pytest.StashKey[bool] = pytest.StashKey()
 
 
 def _build_worker_prefix(config: pytest.Config) -> str:
-    """Return an EnvironmentManager prefix scoped to the current worker."""
+    """Return an environment-manager prefix scoped to the current worker.
+
+    Parameters
+    ----------
+    config : pytest.Config
+        Pytest configuration used to identify the active worker.
+
+    Returns
+    -------
+    str
+        Prefix incorporating the worker identifier and process ID.
+    """
     worker_id = os.getenv("PYTEST_XDIST_WORKER")
     if worker_id is None:
         worker_input = getattr(config, "workerinput", None)
@@ -36,14 +50,36 @@ def _build_worker_prefix(config: pytest.Config) -> str:
 
 
 def _sanitize_worker_id(value: str) -> str:
-    """Collapse worker identifiers to filesystem-safe characters."""
+    """Collapse worker identifiers to filesystem-safe characters.
+
+    Parameters
+    ----------
+    value : str
+        Worker identifier to sanitise.
+
+    Returns
+    -------
+    str
+        Identifier containing only filesystem-safe characters.
+    """
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value)
 
 
 def _aggregate_teardown_errors(
     verify_error: Exception | None, exit_error: Exception | None
 ) -> list[tuple[str, Exception]]:
-    """Collect teardown errors for aggregation and reporting."""
+    """Collect teardown errors for aggregation and reporting.
+
+    Parameters
+    ----------
+    verify_error, exit_error : Exception or None
+        Errors captured during verification and controller cleanup.
+
+    Returns
+    -------
+    list[tuple[str, Exception]]
+        Non-``None`` errors labelled by teardown stage.
+    """
     errors: list[tuple[str, Exception]] = []
     if verify_error is not None:
         errors.append(("verification", verify_error))
@@ -55,7 +91,20 @@ def _aggregate_teardown_errors(
 def _format_teardown_failure(
     errors: list[tuple[str, Exception]], *, nodeid: str | None = None
 ) -> str:
-    """Format an aggregated error message for pytest failures."""
+    """Format an aggregated error message for pytest failures.
+
+    Parameters
+    ----------
+    errors : list[tuple[str, Exception]]
+        Stage-labelled teardown errors.
+    nodeid : str, optional
+        Pytest node identifier to include in the message.
+
+    Returns
+    -------
+    str
+        Human-readable failure message.
+    """
     if not errors:
         return "cmd_mox teardown failure"
     if len(errors) == 1:
@@ -64,7 +113,20 @@ def _format_teardown_failure(
 
 
 def _format_single_error(error: tuple[str, Exception], *, nodeid: str | None) -> str:
-    """Render a message when exactly one teardown stage failed."""
+    """Render a message when exactly one teardown stage failed.
+
+    Parameters
+    ----------
+    error : tuple[str, Exception]
+        Stage label and captured exception.
+    nodeid : str or None
+        Pytest node identifier to include when available.
+
+    Returns
+    -------
+    str
+        Formatted single-error message.
+    """
     stage, err = error
     if stage == "cleanup":
         base = "cmd_mox fixture cleanup failed"
@@ -80,7 +142,20 @@ def _format_single_error(error: tuple[str, Exception], *, nodeid: str | None) ->
 def _format_multiple_errors(
     errors: list[tuple[str, Exception]], *, nodeid: str | None
 ) -> str:
-    """Render a combined error message for multiple teardown failures."""
+    """Render a combined error message for multiple teardown failures.
+
+    Parameters
+    ----------
+    errors : list[tuple[str, Exception]]
+        Stage-labelled teardown errors.
+    nodeid : str or None
+        Pytest node identifier to include when available.
+
+    Returns
+    -------
+    str
+        Formatted aggregate message.
+    """
     parts: list[str] = []
     for stage, err in errors:
         if stage == "cleanup" and nodeid:
@@ -94,7 +169,13 @@ def _format_multiple_errors(
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register command-line and ini options for the plugin."""
+    """Register command-line and ini options for the plugin.
+
+    Parameters
+    ----------
+    parser : pytest.Parser
+        Parser receiving the cmd-mox options.
+    """
     group = parser.getgroup("cmd_mox")
     group.addoption(
         "--cmd-mox-auto-lifecycle",
@@ -128,7 +209,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register plugin-specific markers."""
+    """Register plugin-specific markers.
+
+    Parameters
+    ----------
+    config : pytest.Config
+        Configuration receiving the marker declaration.
+    """
     config.addinivalue_line(
         "markers",
         (
@@ -142,7 +229,21 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[typ.Any]
 ) -> cabc.Generator[None, None, None]:
-    """Record whether the test body failed for later teardown decisions."""
+    """Record whether the test body failed for later teardown decisions.
+
+    Parameters
+    ----------
+    item : pytest.Item
+        Test item whose call-stage status is being recorded.
+    call : pytest.CallInfo
+        Call information supplied by pytest; the wrapper obtains the final
+        report from the yielded outcome.
+
+    Yields
+    ------
+    None
+        Control while pytest executes the wrapped reporting hook.
+    """
     del call
     outcome = yield
     rep = typ.cast("typ.Any", outcome).get_result()
@@ -167,26 +268,47 @@ class _CmdMoxManager:
         # initialisation, so injecting the worker-scoped manager here ensures the
         # replay lifecycle observes the correct PATH mutations once entered.
         self._entered = False
+        self._exit_stack: contextlib.ExitStack | None = None
 
     @property
     def auto_lifecycle(self) -> bool:
-        """Return whether replay/verify should be driven automatically."""
+        """Whether replay and verification should run automatically.
+
+        Returns
+        -------
+        bool
+            ``True`` when the fixture manages the replay lifecycle.
+        """
         return self._auto_lifecycle
 
     @property
     def entered(self) -> bool:
-        """Return ``True`` once :meth:`enter` has successfully entered."""
+        """Whether :meth:`enter` has successfully entered.
+
+        Returns
+        -------
+        bool
+            ``True`` after the controller context is active.
+        """
         return self._entered
 
     def enter(self) -> None:
         """Enter the controller context and replay if configured."""
-        self.mox.__enter__()
+        stack = contextlib.ExitStack()
+        stack.enter_context(self.mox)
+        self._exit_stack = stack
         self._entered = True
         if self._auto_lifecycle:
             self.mox.replay()
 
     def exit(self, *, body_failed: bool) -> None:
-        """Verify (when appropriate) and tear down the controller."""
+        """Verify (when appropriate) and tear down the controller.
+
+        Parameters
+        ----------
+        body_failed : bool
+            Whether setup or the test body already reported a failure.
+        """
         if not self._entered:
             return
 
@@ -208,7 +330,18 @@ class _CmdMoxManager:
         self._handle_teardown_errors(verify_error, exit_error)
 
     def _determine_effective_failure(self, *, body_failed: bool) -> bool:
-        """Return whether the body or call stage reported a failure."""
+        """Return whether the body or call stage reported a failure.
+
+        Parameters
+        ----------
+        body_failed : bool
+            Whether fixture setup or test execution raised an exception.
+
+        Returns
+        -------
+        bool
+            ``True`` when either the body or pytest call phase failed.
+        """
         try:
             call_failed = bool(self.request.node.stash[STASH_CALL_FAILED])
         except KeyError:
@@ -218,19 +351,38 @@ class _CmdMoxManager:
         return body_failed or call_failed
 
     def _run_teardown_operations(self) -> tuple[Exception | None, Exception | None]:
-        """Execute verification and cleanup, returning any captured errors."""
+        """Execute verification and cleanup, returning captured errors.
+
+        Returns
+        -------
+        tuple[Exception | None, Exception | None]
+            Verification and cleanup errors, respectively.
+        """
         verify_error = self._verify_if_needed()
         exit_error = self._close_controller()
         return verify_error, exit_error
 
+    @staticmethod
     def _should_suppress_errors(
-        self,
         verify_error: Exception | None,
         exit_error: Exception | None,
         *,
         effective_body_failed: bool,
     ) -> bool:
-        """Return True when teardown errors should be suppressed."""
+        """Return whether teardown errors should be suppressed.
+
+        Parameters
+        ----------
+        verify_error, exit_error : Exception or None
+            Errors captured during teardown stages.
+        effective_body_failed : bool
+            Whether the test body or call phase failed.
+
+        Returns
+        -------
+        bool
+            ``True`` when preserving an earlier body failure is preferable.
+        """
         # Suppress verification errors when the test already failed and cleanup
         # succeeded. This preserves the original assertion failure while still
         # recording verification details as a teardown section.
@@ -255,8 +407,7 @@ class _CmdMoxManager:
                     f"{type(err).__name__}: {err}",
                 )
         message = _format_teardown_failure(errors, nodeid=self._nodeid)
-        fail = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.fail)
-        fail(message)  # ty misreads @_with_exception
+        pytest.fail(message)
 
     def _auto_lifecycle_enabled(self) -> bool:
         """Resolve the auto-lifecycle flag respecting all configuration sources.
@@ -264,6 +415,11 @@ class _CmdMoxManager:
         The fixture parameter provides the most granular override, followed by
         a ``@pytest.mark.cmd_mox`` marker, the command-line option, and finally
         the ``pytest.ini`` default.
+
+        Returns
+        -------
+        bool
+            Whether the plugin should manage the controller lifecycle.
         """
         param_value = self._param_override()
         if param_value is not None:
@@ -280,7 +436,13 @@ class _CmdMoxManager:
         return bool(self.config.getini("cmd_mox_auto_lifecycle"))
 
     def _marker_override(self) -> bool | None:
-        """Return marker override for auto lifecycle if configured."""
+        """Return marker override for auto lifecycle if configured.
+
+        Returns
+        -------
+        bool or None
+            Marker value, or ``None`` when no override is present.
+        """
         marker = self.request.node.get_closest_marker("cmd_mox")
         if marker is None:
             return None
@@ -289,29 +451,48 @@ class _CmdMoxManager:
         return None
 
     def _param_override(self) -> bool | None:
-        """Return fixture parameter override for auto lifecycle if present."""
+        """Return fixture parameter override for auto lifecycle if present.
+
+        Returns
+        -------
+        bool or None
+            Fixture parameter value, or ``None`` when no parameter is supplied.
+
+        Raises
+        ------
+        TypeError
+            If the fixture parameter has an unsupported shape.
+        """
         param = getattr(self.request, "param", None)
-        if param is None:
-            return None
-        if isinstance(param, dict):
-            if "auto_lifecycle" in param:
-                return bool(param["auto_lifecycle"])
-            keys = list(param.keys())
-            msg = (
-                "cmd_mox fixture param dict must contain 'auto_lifecycle' key, "
-                f"got keys: {keys}"
-            )
-            raise TypeError(msg)
-        if isinstance(param, bool):
-            return param
-        msg = (
-            "cmd_mox fixture param must be a bool or dict with 'auto_lifecycle' key, "
-            f"got {type(param).__name__}"
-        )
-        raise TypeError(msg)
+        match param:
+            case None:
+                return None
+            case dict() as parameter if "auto_lifecycle" in parameter:
+                return bool(parameter["auto_lifecycle"])
+            case dict() as parameter:
+                keys = list(parameter.keys())
+                msg = (
+                    "cmd_mox fixture param dict must contain 'auto_lifecycle' key, "
+                    f"got keys: {keys}"
+                )
+                raise TypeError(msg)
+            case bool():
+                return param
+            case _:
+                msg = (
+                    "cmd_mox fixture param must be a bool or dict with "
+                    f"'auto_lifecycle' key, got {type(param).__name__}"
+                )
+                raise TypeError(msg)
 
     def _verify_if_needed(self) -> Exception | None:
-        """Run :meth:`CmdMox.verify` when auto lifecycle is active."""
+        """Run :meth:`CmdMox.verify` when auto lifecycle is active.
+
+        Returns
+        -------
+        Exception or None
+            Captured verification error, if verification failed.
+        """
         if not self._auto_lifecycle or self.mox.phase is not Phase.REPLAY:
             return None
         try:
@@ -323,9 +504,18 @@ class _CmdMoxManager:
         return None
 
     def _close_controller(self) -> Exception | None:
-        """Invoke :meth:`CmdMox.__exit__` and capture cleanup failures."""
+        """Close the controller's exit stack and capture cleanup failures.
+
+        Returns
+        -------
+        Exception or None
+            Captured cleanup error, if controller teardown failed.
+        """
+        stack, self._exit_stack = self._exit_stack, None
+        if stack is None:
+            return None
         try:
-            self.mox.__exit__(None, None, None)
+            stack.close()
         except Exception as err:
             logger.exception(
                 "Error during cmd_mox fixture cleanup for %s", self._nodeid
@@ -346,7 +536,18 @@ class _CmdMoxManager:
 
 @pytest.fixture
 def cmd_mox(request: pytest.FixtureRequest) -> cabc.Generator[CmdMox, None, None]:
-    """Provide a :class:`CmdMox` instance with environment active."""
+    """Provide a :class:`CmdMox` instance with its environment active.
+
+    Parameters
+    ----------
+    request : pytest.FixtureRequest
+        Request for the fixture, including marker and parameter overrides.
+
+    Yields
+    ------
+    CmdMox
+        Controller configured for the current test.
+    """
     skip_if_unsupported()
 
     manager = _CmdMoxManager(request)

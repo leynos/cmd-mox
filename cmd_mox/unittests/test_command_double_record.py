@@ -66,7 +66,8 @@ class TestRecordFluentAPI:
 
         mox = CmdMox()
         spy = (
-            mox.spy("git")
+            mox
+            .spy("git")
             .passthrough()
             .record(
                 tmp_path / "fixture.json",
@@ -88,7 +89,8 @@ class TestRecordFluentAPI:
 
         mox = CmdMox()
         spy = (
-            mox.spy("git")
+            mox
+            .spy("git")
             .passthrough()
             .record(
                 tmp_path / "fixture.json",

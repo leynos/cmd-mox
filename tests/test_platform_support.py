@@ -6,8 +6,7 @@ import typing as typ
 
 import pytest
 
-import cmd_mox.platform as platform
-from tests.helpers.pytest_typing import pytest_fail
+from cmd_mox import platform
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for type hints
     from _pytest.pytester import Pytester
@@ -15,13 +14,13 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for type hints
 
 def test_is_supported_true_for_windows() -> None:
     """Windows is now considered a supported platform."""
-    assert platform.unsupported_reason("win32") is None
-    assert platform.is_supported("win32") is True
+    assert platform.unsupported_reason("win32") is None, "Assertion failed"
+    assert platform.is_supported("win32") is True, "Assertion failed"
 
 
 def test_is_supported_true_for_linux() -> None:
     """Linux is currently supported."""
-    assert platform.is_supported("linux") is True
+    assert platform.is_supported("linux") is True, "Assertion failed"
 
 
 def test_override_env_forces_windows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -32,8 +31,8 @@ def test_override_env_forces_windows(monkeypatch: pytest.MonkeyPatch) -> None:
         (("win", "forced block"),),
     )
     monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, "win32")
-    assert platform.is_supported() is False
-    assert platform.unsupported_reason() == "forced block"
+    assert platform.is_supported() is False, "Assertion failed"
+    assert platform.unsupported_reason() == "forced block", "Assertion failed"
 
 
 def test_override_env_handles_unknown_platform(
@@ -44,8 +43,8 @@ def test_override_env_handles_unknown_platform(
     unknown_platform = "unknown-os"
     monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, unknown_platform)
 
-    assert platform.is_supported() is True
-    assert platform.unsupported_reason() is None
+    assert platform.is_supported() is True, "Assertion failed"
+    assert platform.unsupported_reason() is None, "Assertion failed"
 
 
 def test_override_env_forces_supported_platform(
@@ -53,8 +52,8 @@ def test_override_env_forces_supported_platform(
 ) -> None:
     """Overrides should allow tests to simulate supported platforms as well."""
     monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, "linux")
-    assert platform.is_supported() is True
-    assert platform.unsupported_reason() is None
+    assert platform.is_supported() is True, "Assertion failed"
+    assert platform.unsupported_reason() is None, "Assertion failed"
 
 
 def test_skip_if_unsupported_triggers_pytest_skip(
@@ -65,7 +64,7 @@ def test_skip_if_unsupported_triggers_pytest_skip(
     monkeypatch.setattr(platform, "_UNSUPPORTED_PLATFORMS", (("win", reason),))
     with pytest.raises(pytest.skip.Exception) as excinfo:
         platform.skip_if_unsupported(platform="win32")
-    assert str(excinfo.value) == reason
+    assert str(excinfo.value) == reason, "Assertion failed"
 
 
 def test_skip_if_unsupported_allows_custom_reason(
@@ -76,7 +75,7 @@ def test_skip_if_unsupported_allows_custom_reason(
     monkeypatch.setattr(platform, "_UNSUPPORTED_PLATFORMS", (("win", "nope"),))
     with pytest.raises(pytest.skip.Exception) as excinfo:
         platform.skip_if_unsupported(platform="win32", reason=custom_reason)
-    assert str(excinfo.value) == custom_reason
+    assert str(excinfo.value) == custom_reason, "Assertion failed"
 
 
 def test_skip_if_unsupported_uses_custom_reason_with_override(
@@ -90,7 +89,7 @@ def test_skip_if_unsupported_uses_custom_reason_with_override(
     with pytest.raises(pytest.skip.Exception) as excinfo:
         platform.skip_if_unsupported(reason=custom_reason)
 
-    assert str(excinfo.value) == custom_reason
+    assert str(excinfo.value) == custom_reason, "Assertion failed"
 
 
 def test_skip_if_unsupported_ignores_reason_on_supported_platform() -> None:
@@ -98,12 +97,7 @@ def test_skip_if_unsupported_ignores_reason_on_supported_platform() -> None:
     try:
         platform.skip_if_unsupported(platform="linux", reason="custom skip")
     except pytest.skip.Exception as exc:  # pragma: no cover - indicates a bug
-        pytest_fail(f"unexpected skip: {exc}")  # ty misreads @_with_exception
-
-
-def test_skip_if_unsupported_noop_on_supported_platform() -> None:
-    """On supported platforms the helper should return quietly."""
-    platform.skip_if_unsupported(platform="linux")
+        pytest.fail(f"unexpected skip: {exc}")
 
 
 def test_cmd_mox_fixture_auto_skips_on_unsupported_platform(

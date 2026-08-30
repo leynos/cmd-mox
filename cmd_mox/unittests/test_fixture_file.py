@@ -6,13 +6,31 @@ import json
 import sys
 import typing as typ
 
+import hypothesis.strategies as st
 import pytest
+from hypothesis import given
 
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.scrubber import ScrubbingRule
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
+
+#: Every ``RecordedInvocation`` field is plain JSON-compatible data, so the
+#: whole space can be generated from built-in strategies.
+_RECORDED_INVOCATIONS = st.builds(
+    RecordedInvocation,
+    sequence=st.integers(),
+    command=st.text(),
+    args=st.lists(st.text(), max_size=4),
+    stdin=st.text(),
+    env_subset=st.dictionaries(st.text(), st.text(), max_size=4),
+    stdout=st.text(),
+    stderr=st.text(),
+    exit_code=st.integers(),
+    timestamp=st.text(),
+    duration_ms=st.integers(),
+)
 
 
 def _sample_invocation(*, sequence: int = 0) -> RecordedInvocation:
@@ -82,6 +100,21 @@ class TestRecordedInvocation:
         assert set(d.keys()) == expected_keys
 
 
+@given(_RECORDED_INVOCATIONS)
+def test_recorded_invocation_survives_a_json_round_trip(
+    original: RecordedInvocation,
+) -> None:
+    """Serializing to JSON text and back reconstructs an equal invocation.
+
+    Invariant: ``from_dict(json.loads(json.dumps(x.to_dict()))) == x`` for any
+    field values. This is precisely the contract ``FixtureFile.save`` and
+    ``FixtureFile.load`` depend upon.
+    """
+    encoded = json.dumps(original.to_dict())
+    rebuilt = RecordedInvocation.from_dict(json.loads(encoded))
+    assert rebuilt == original, rebuilt
+
+
 class TestFixtureMetadata:
     """Tests for FixtureMetadata creation and serialization."""
 
@@ -117,6 +150,19 @@ class TestFixtureMetadata:
         assert rebuilt.python_version == original.python_version
         assert rebuilt.test_module == original.test_module
         assert rebuilt.test_function == original.test_function
+
+
+def _assert_normalized_to_v1(result: FixtureFile) -> None:
+    """Assert *result* carries the v1.0 schema with its recording intact.
+
+    Parameters
+    ----------
+    result : FixtureFile
+        The fixture returned by ``FixtureFile.from_dict``.
+    """
+    assert result.version == "1.0", result.version
+    assert len(result.recordings) == 1, result.recordings
+    assert result.recordings[0].command == "git", result.recordings[0]
 
 
 class TestFixtureFile:
@@ -182,9 +228,7 @@ class TestFixtureFile:
         data["version"] = "0.9"
         result = FixtureFile.from_dict(data)
 
-        assert result.version == "1.0"
-        assert len(result.recordings) == 1
-        assert result.recordings[0].command == "git"
+        _assert_normalized_to_v1(result)
 
     def test_from_dict_migrates_when_version_missing(self) -> None:
         """from_dict() treats missing version as legacy and migrates to v1.0."""
@@ -192,9 +236,7 @@ class TestFixtureFile:
         data.pop("version", None)
         result = FixtureFile.from_dict(data)
 
-        assert result.version == "1.0"
-        assert len(result.recordings) == 1
-        assert result.recordings[0].command == "git"
+        _assert_normalized_to_v1(result)
 
     def test_from_dict_does_not_mutate_input(self) -> None:
         """from_dict() does not modify the caller's dict."""
@@ -224,9 +266,7 @@ class TestFixtureFile:
         data["new_future_field"] = "should be ignored"
         result = FixtureFile.from_dict(data)
 
-        assert result.version == "1.0"
-        assert len(result.recordings) == 1
-        assert result.recordings[0].command == "git"
+        _assert_normalized_to_v1(result)
 
     def test_from_dict_rejects_incompatible_major_version(self) -> None:
         """from_dict() raises ValueError for a higher major with no migration."""
@@ -240,6 +280,13 @@ class TestFixtureFile:
         data = _sample_fixture().to_dict()
         data["version"] = None
         with pytest.raises(ValueError, match="expected str"):
+            FixtureFile.from_dict(data)
+
+    def test_from_dict_normalizes_missing_metadata_to_value_error(self) -> None:
+        """Missing required fields surface as a schema ValueError."""
+        data = _sample_fixture().to_dict()
+        del data["metadata"]
+        with pytest.raises(ValueError, match="Invalid fixture schema"):
             FixtureFile.from_dict(data)
 
     def test_scrubbing_rules_serialization(self) -> None:
@@ -268,29 +315,28 @@ class TestFixtureFile:
 class TestVersionParsing:
     """Tests for the _parse_version helper."""
 
-    def test_parse_simple_version(self) -> None:
-        """Parse '1.0' into (1, 0) tuple."""
+    @pytest.mark.parametrize(
+        ("version_str", "expected"),
+        [
+            ("1.0", (1, 0)),
+            (" 1.0 ", (1, 0)),
+            ("1.1", (1, 1)),
+            ("0.9", (0, 9)),
+        ],
+        ids=[
+            "simple",
+            "surrounding-whitespace-stripped",
+            "non-zero-minor",
+            "zero-major",
+        ],
+    )
+    def test_parse_valid_versions(
+        self, version_str: str, expected: tuple[int, int]
+    ) -> None:
+        """Well-formed version strings parse into comparable integer tuples."""
         from cmd_mox.record.fixture import _parse_version
 
-        assert _parse_version("1.0") == (1, 0)
-
-    def test_parse_version_with_whitespace(self) -> None:
-        """Surrounding whitespace is stripped before parsing."""
-        from cmd_mox.record.fixture import _parse_version
-
-        assert _parse_version(" 1.0 ") == (1, 0)
-
-    def test_parse_minor_version(self) -> None:
-        """Parse '1.1' into (1, 1) tuple."""
-        from cmd_mox.record.fixture import _parse_version
-
-        assert _parse_version("1.1") == (1, 1)
-
-    def test_parse_zero_version(self) -> None:
-        """Parse '0.9' into (0, 9) tuple."""
-        from cmd_mox.record.fixture import _parse_version
-
-        assert _parse_version("0.9") == (0, 9)
+        assert _parse_version(version_str) == expected
 
     def test_parse_negative_component_raises(self) -> None:
         """Negative version components are rejected."""

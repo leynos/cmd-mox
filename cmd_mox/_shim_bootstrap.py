@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import contextlib
 import importlib
 import importlib.util as importlib_util
@@ -12,6 +11,7 @@ import typing as typ
 from pathlib import Path
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from types import ModuleType
 
 _BOOTSTRAP_DONE = False
@@ -19,7 +19,13 @@ _INITIAL_SYS_PATH = tuple(sys.path)
 
 
 def _try_get_stdlib_path() -> str | None:
-    """Return the configured stdlib path, or ``None`` if config lookup fails."""
+    """Return the configured stdlib path, or ``None`` if lookup fails.
+
+    Returns
+    -------
+    str or None
+        The configured standard-library directory when available.
+    """
     try:
         return sysconfig.get_path("stdlib")
     except (AttributeError, ImportError, KeyError, OSError, ValueError, TypeError):
@@ -43,7 +49,13 @@ def _temporary_sys_path(entries: tuple[str, ...]) -> cabc.Iterator[None]:
 
 
 def _get_stdlib_path() -> str | None:
-    """Return the stdlib path, guarding against missing or invalid configs."""
+    """Return the stdlib path, guarding against invalid configuration.
+
+    Returns
+    -------
+    str or None
+        The standard-library directory, if it can be resolved safely.
+    """
     stdlib_path = _try_get_stdlib_path()
     if stdlib_path is not None:
         return stdlib_path
@@ -53,7 +65,14 @@ def _get_stdlib_path() -> str | None:
 
 
 def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | None:
-    """Load and return a module from *file_path*, or ``None`` on failure."""
+    """Load a module from *file_path*, or return ``None`` on failure.
+
+    Returns
+    -------
+    ModuleType or None
+        The loaded module when the file has a usable import specification.
+    """
+    module: ModuleType | None = None
     try:
         if not file_path.is_file():
             return None
@@ -63,16 +82,21 @@ def _create_module_from_file(module_name: str, file_path: Path) -> ModuleType | 
         module = importlib_util.module_from_spec(spec)
         try:
             spec.loader.exec_module(module)
-        except (FileNotFoundError, OSError, ImportError):
-            return None
-        else:
-            return module
+        except (OSError, ImportError):
+            module = None
     except (OSError, ValueError):
-        return None
+        module = None
+    return module
 
 
 def _load_stdlib_platform() -> ModuleType:
-    """Return the stdlib platform module, falling back to regular import."""
+    """Return the stdlib platform module, with a regular-import fallback.
+
+    Returns
+    -------
+    ModuleType
+        The platform module loaded from the standard library.
+    """
     importlib.invalidate_caches()
     stdlib_path = _get_stdlib_path()
 

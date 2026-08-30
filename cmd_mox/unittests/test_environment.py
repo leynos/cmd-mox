@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import collections.abc as cabc
+import dataclasses as dc
 import logging
 import math
 import os
 import stat
 import threading
-import typing as typ
-from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import patch
+from unittest import mock
 
 import pytest
 
@@ -150,7 +149,7 @@ def test_export_ipc_environment_rejects_invalid_timeout(invalid: float) -> None:
 def test_export_ipc_environment_invalid_timeout_type(invalid_type: object) -> None:
     """Invalid timeout types should propagate TypeError."""
     with EnvironmentManager() as env, pytest.raises(TypeError):
-        env.export_ipc_environment(timeout=typ.cast("float", invalid_type))
+        env.export_ipc_environment(timeout=invalid_type)
 
 
 def test_export_ipc_environment_reuses_previous_timeout() -> None:
@@ -298,7 +297,7 @@ def test_robust_rmtree_retry_on_failure(tmp_path: Path) -> None:
     test_dir = tmp_path / "test_retry"
     test_dir.mkdir()
 
-    with patch("cmd_mox.fs_retry.shutil.rmtree") as mock_rmtree:
+    with mock.patch("cmd_mox.fs_retry.shutil.rmtree") as mock_rmtree:
         # Simulate transient failure followed by success
         mock_rmtree.side_effect = [OSError("Permission denied"), None]
 
@@ -312,7 +311,7 @@ def test_robust_rmtree_max_attempts_exceeded(tmp_path: Path) -> None:
     test_dir = tmp_path / "test_fail"
     test_dir.mkdir()
 
-    with patch("cmd_mox.fs_retry.shutil.rmtree") as mock_rmtree:
+    with mock.patch("cmd_mox.fs_retry.shutil.rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Persistent permission denied")
 
         with pytest.raises(RobustRmtreeError) as exc:
@@ -343,7 +342,7 @@ def test_environment_manager_cleanup_error_basic() -> None:
     """Ensure EnvironmentManager handles generic cleanup errors."""
     original_env = os.environ.copy()
 
-    with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
+    with mock.patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Cleanup failed")
 
         with (
@@ -361,7 +360,7 @@ def test_environment_manager_cleanup_robust_error() -> None:
     original_env = os.environ.copy()
     failure = RobustRmtreeError(Path("shim"), 3, OSError("locked"))
 
-    with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
+    with mock.patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
         mock_rmtree.side_effect = failure
 
         with (
@@ -374,10 +373,16 @@ def test_environment_manager_cleanup_robust_error() -> None:
 
 
 def test_environment_manager_cleanup_error_during_exception() -> None:
-    """Test cleanup errors are logged but don't mask original exceptions."""
+    """Test cleanup errors are logged but don't mask original exceptions.
+
+    Raises
+    ------
+    ValueError
+        The original exception raised while the environment is active.
+    """
     original_env = os.environ.copy()
 
-    with patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
+    with mock.patch("cmd_mox.environment.robust_rmtree") as mock_rmtree:
         mock_rmtree.side_effect = OSError("Cleanup failed")
 
         # Original exception should be preserved, cleanup error logged
@@ -391,7 +396,7 @@ def test_environment_manager_cleanup_error_during_exception() -> None:
     assert os.environ == original_env
 
 
-@dataclass(frozen=True)
+@dc.dataclass(frozen=True)
 class CleanupErrorTestConfig:
     """Configuration for cleanup error test scenarios."""
 
@@ -399,7 +404,7 @@ class CleanupErrorTestConfig:
     manual_restore: bool = False
 
 
-@dataclass(frozen=True)
+@dc.dataclass(frozen=True)
 class CleanupErrorTestCase:
     """Test parameters for cleanup error scenarios."""
 
@@ -415,7 +420,7 @@ def _test_environment_cleanup_error(
     """Validate cleanup error handling and state restoration."""
     original_env = os.environ.copy()
 
-    with patch(test_case.mock_target) as mock_method:
+    with mock.patch(test_case.mock_target) as mock_method:
         mock_method.side_effect = OSError(test_case.error_message)
         mgr = EnvironmentManager()
         with (
@@ -460,7 +465,7 @@ def test_environment_manager_cleanup_error_handling(
     _test_environment_cleanup_error(test_case)
 
 
-@dataclass(frozen=True, slots=True)
+@dc.dataclass(frozen=True, slots=True)
 class CleanupScenario:
     """Describe a temporary-directory cleanup scenario."""
 
@@ -471,7 +476,18 @@ class CleanupScenario:
 def _prepare_cleanup_scenario(
     scenario: CleanupScenario, tmp_path: Path, mgr: EnvironmentManager
 ) -> tuple[Path | None, Path | None]:
-    """Configure *mgr* to emulate *scenario* and return relevant paths."""
+    """Configure *mgr* to emulate *scenario* and return relevant paths.
+
+    Returns
+    -------
+    tuple[pathlib.Path | None, pathlib.Path | None]
+        The created directory and any replacement directory.
+
+    Raises
+    ------
+    AssertionError
+        If *scenario* names an unsupported cleanup case.
+    """
     match scenario.name:
         case "uninitialized":
             mgr._created_dir = None
@@ -518,7 +534,13 @@ def test_cleanup_temporary_directory_skip_logic(
     scenario: CleanupScenario,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify cleanup skips or removes directories for each scenario."""
+    """Verify cleanup skips or removes directories for each scenario.
+
+    Raises
+    ------
+    AssertionError
+        If the parameterized scenario name is unsupported.
+    """
     mgr = EnvironmentManager()
     created, replacement = _prepare_cleanup_scenario(scenario, tmp_path, mgr)
 
@@ -526,7 +548,7 @@ def test_cleanup_temporary_directory_skip_logic(
     caplog.clear()
 
     real_rmtree = envmod.robust_rmtree
-    with patch("cmd_mox.environment.robust_rmtree") as rm:
+    with mock.patch("cmd_mox.environment.robust_rmtree") as rm:
         rm.side_effect = real_rmtree
 
         if scenario.name == "replaced":
@@ -658,7 +680,7 @@ def test_maybe_shorten_windows_path_skips_short_paths(
 def test_path_identity_normalizes_case_and_segments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Path identity should normalise separators and casing on Windows."""
+    """Path identity should normalize separators and casing on Windows."""
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
     upper = Path(r"C:\Tools\..\BIN")
     lower = Path(r"c:\bin")

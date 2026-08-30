@@ -39,7 +39,13 @@ _TEST_BODIES: dict[LifecyclePhase, str] = {
 
 
 def _format_block(block: str, *, indent: int = 0) -> str:
-    """Return a dedented block optionally indented by ``indent`` spaces."""
+    """Return a dedented block optionally indented by ``indent`` spaces.
+
+    Returns
+    -------
+    str
+        The dedented block, indented by ``indent`` spaces if requested.
+    """
     normalized = textwrap.dedent(block).strip("\n")
     if not normalized:
         return ""
@@ -51,7 +57,13 @@ def _format_block(block: str, *, indent: int = 0) -> str:
 
 
 def _build_module_prefix(*, include_subprocess_helper: bool) -> str:
-    """Compose the module header and optional shim helper."""
+    """Compose the module header and optional shim helper.
+
+    Returns
+    -------
+    str
+        The generated module preamble, including imports and shim helpers.
+    """
     header_lines = [
         "import pytest",
         "from cmd_mox.controller import Phase",
@@ -92,6 +104,16 @@ def generate_lifecycle_test_module(
     :class:`LifecyclePhase.AUTO_FAIL` has the same effect regardless of
     ``expect_auto_fail``,
     allowing callers to assert the pure auto-fail module layout.
+
+    Returns
+    -------
+    str
+        A complete pytest module implementing the selected lifecycle scenario.
+
+    Raises
+    ------
+    ValueError
+        If ``expected_phase`` does not name a known lifecycle phase.
     """
     try:
         normalized_phase = LifecyclePhase(expected_phase)

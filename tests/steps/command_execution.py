@@ -29,7 +29,14 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 def _try_resolve_windows_cmd(cmd: str) -> str | None:
-    """Try to resolve a .cmd variant on Windows if not already a .cmd file."""
+    """Try to resolve a .cmd variant on Windows if not already a .cmd file.
+
+    Returns
+    -------
+    str | None
+        The resolved ``.cmd`` path, or ``None`` if not on Windows, *cmd*
+        already ends in ``.cmd``, or no variant was found.
+    """
     if os.name != "nt":
         return None
     if cmd.lower().endswith(".cmd"):
@@ -38,7 +45,13 @@ def _try_resolve_windows_cmd(cmd: str) -> str | None:
 
 
 def _resolve_command(cmd: str) -> str:
-    """Return an executable path for *cmd*, respecting PATHEXT on Windows."""
+    """Return an executable path for *cmd*, respecting PATHEXT on Windows.
+
+    Returns
+    -------
+    str
+        The resolved executable path, or *cmd* unchanged if unresolved.
+    """
     if resolved := shutil.which(cmd):
         return resolved
     if windows_cmd := _try_resolve_windows_cmd(cmd):
@@ -55,9 +68,14 @@ def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
         Command invocation, including arguments.
     check : bool
         When True, raise :class:`CalledProcessError` for non-zero exits.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
     """
     argv = escape_windows_batch_args(argv)
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
         argv,
         capture_output=True,
         text=True,
@@ -68,7 +86,13 @@ def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
 
 @when(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
 def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
-    """Invoke the stubbed command."""
+    """Invoke the stubbed command.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
     resolved = _resolve_command(cmd)
     return _run([resolved], check=True)
 
@@ -77,7 +101,13 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
 def then_run_command(
     mox: CmdMox, cmd: str
 ) -> subprocess.CompletedProcess[str]:  # pragma: no cover - pytest-bdd glue
-    """Alias the 'When' step for scenarios that use Then/And."""
+    """Alias the 'When' step for scenarios that use Then/And.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
     return run_command(mox, cmd)
 
 
@@ -86,7 +116,13 @@ def then_run_command(
     target_fixture="result",
 )
 def run_command_failure(cmd: str) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* expecting a non-zero exit status."""
+    """Run *cmd* expecting a non-zero exit status.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
     return _run([_resolve_command(cmd)], check=False)
 
 
@@ -99,7 +135,13 @@ def run_command_args(
     cmd: str,
     args: str,
 ) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* with additional arguments."""
+    """Run *cmd* with additional arguments.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
     decoded = decode_placeholders(args)
     argv = [_resolve_command(cmd), *shlex.split(decoded)]
     return _run(argv, check=True)
@@ -112,9 +154,15 @@ def run_command_args(
 def run_shell_command(
     mox: CmdMox, command_line: str
 ) -> subprocess.CompletedProcess[str]:
-    """Run *command_line* with shell parsing enabled (e.g., pipelines)."""
+    """Run *command_line* with shell parsing enabled (e.g., pipelines).
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
     decoded = decode_placeholders(command_line)
-    return subprocess.run(  # noqa: S602
+    return subprocess.run(  # ruff: ignore[subprocess-popen-with-shell-equals-true] - the example intentionally exercises shell pipeline behaviour
         decoded,
         capture_output=True,
         text=True,
@@ -129,7 +177,13 @@ def _run_command_args_stdin_env_impl(
     inputs: CommandInputs,
     env: EnvVar,
 ) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* using aggregated command inputs and environment."""
+    """Run *cmd* using aggregated command inputs and environment.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
     params = CommandExecution(
         cmd=cmd,
         args=inputs.args,
@@ -137,7 +191,7 @@ def _run_command_args_stdin_env_impl(
         env_var=env.name,
         env_val=env.value,
     )
-    return execute_command_with_details(mox, params)
+    return execute_command_with_details(params)
 
 
 @when(
@@ -154,8 +208,14 @@ def run_command_args_stdin_env(
     stdin: str,
     var: str,
     val: str,
-) -> subprocess.CompletedProcess[str]:  # noqa: PLR0913, RUF100 - pytest-bdd step wrapper requires all parsed params
-    """Run *cmd* with arguments, stdin, and an environment variable."""
+) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* with arguments, stdin, and an environment variable.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
     resolved_args = resolve_empty_placeholder(args)
     resolved_stdin = resolve_empty_placeholder(stdin)
     decoded_args = decode_placeholders(resolved_args)
@@ -169,12 +229,18 @@ def run_command_args_stdin_env(
     target_fixture="result",
 )
 def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* inside a ``with mox`` block and verify afterwards."""
+    """Run *cmd* inside a ``with mox`` block and verify afterwards.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
     original_env = os.environ.copy()
     with mox:
         mox.replay()
         result = _run([_resolve_command(cmd)], check=True)
-    assert os.environ == original_env
+    assert os.environ == original_env, "Assertion failed"
     return result
 
 
@@ -183,7 +249,13 @@ def run_command_with_block(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess
     target_fixture="result",
 )
 def run_shim_sequence(sequence: str) -> subprocess.CompletedProcess[str]:
-    """Invoke a list of shim commands within a single Python process."""
+    """Invoke a list of shim commands within a single Python process.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process running the last shim invoked in *sequence*.
+    """
     commands = shlex.split(sequence)
     script = textwrap.dedent(
         """
@@ -232,4 +304,4 @@ def run_shim_sequence(sequence: str) -> subprocess.CompletedProcess[str]:
         """
     )
     argv = [sys.executable, "-c", script, *commands]
-    return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # noqa: S603
+    return subprocess.run(argv, capture_output=True, text=True, check=True, shell=False)  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness

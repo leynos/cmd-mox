@@ -13,23 +13,60 @@ from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 if typ.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from pathlib import Path
 
 
-def _run_shim(
-    env: EnvironmentManager, command: str
+def _execute_shim(
+    env: EnvironmentManager,
+    command: str,
+    *,
+    check: bool,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute *command* through its generated shim."""
+    """Execute a generated shim with the requested failure contract.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the shim.
+    """
     shim_path = _shim_cmd_path(env, command)
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
         [str(shim_path)],
         capture_output=True,
         text=True,
-        check=True,
+        check=check,
     )
+
+
+def _run_shim(
+    env: EnvironmentManager, command: str
+) -> subprocess.CompletedProcess[str]:
+    """Execute *command* through its generated shim.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the shim.
+    """
+    return _execute_shim(env, command, check=True)
+
+
+def _run_unserved_shim(
+    env: EnvironmentManager, command: str
+) -> subprocess.CompletedProcess[str]:
+    """Execute *command* through a shim without an available IPC server.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the unserved shim.
+    """
+    assert env.shim_dir is not None, "Assertion failed"
+    create_shim_symlinks(env.shim_dir, [command])
+    return _execute_shim(env, command, check=False)
 
 
 def _invoke_command_via_ipc(
@@ -38,18 +75,24 @@ def _invoke_command_via_ipc(
     *,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Start an IPC server and run *command* through its shim."""
-    assert env.shim_dir is not None
+    """Start an IPC server and run *command* through its shim.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the shim against the server.
+    """
+    assert env.shim_dir is not None, "Assertion failed"
     socket_path = env.socket_path
-    assert socket_path is not None
+    assert socket_path is not None, "Assertion failed"
     server_timeout = timeout if timeout is not None else 5.0
 
     with IPCServer(socket_path, timeout=server_timeout):
         create_shim_symlinks(env.shim_dir, [command])
 
         expected_timeout = str(server_timeout)
-        assert os.environ[CMOX_IPC_SOCKET_ENV] == str(socket_path)
-        assert os.environ[CMOX_IPC_TIMEOUT_ENV] == expected_timeout
+        assert os.environ[CMOX_IPC_SOCKET_ENV] == str(socket_path), "Assertion failed"
+        assert os.environ[CMOX_IPC_TIMEOUT_ENV] == expected_timeout, "Assertion failed"
 
         return _run_shim(env, command)
 
@@ -58,52 +101,38 @@ def test_shim_invokes_via_ipc() -> None:
     """End-to-end shim invocation using the IPC server."""
     with EnvironmentManager() as env:
         result = _invoke_command_via_ipc(env, "foo")
-        assert result.stdout.strip() == "foo"
-        assert result.stderr == ""
-        assert result.returncode == 0
+        assert result.stdout.strip() == "foo", "Assertion failed"
+        assert not result.stderr, "Assertion failed"
+        assert result.returncode == 0, "Assertion failed"
 
 
 def test_ipc_server_exports_custom_timeout() -> None:
     """Starting the server with a custom timeout updates the environment."""
     with EnvironmentManager() as env:
         result = _invoke_command_via_ipc(env, "qux", timeout=1.25)
-        assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "1.25"
-        assert result.stdout.strip() == "qux"
+        assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "1.25", "Assertion failed"
+        assert result.stdout.strip() == "qux", "Assertion failed"
 
 
 def test_shim_errors_when_socket_unset() -> None:
     """Shim prints an error if IPC socket env var is missing."""
-    commands = ["bar"]
     with EnvironmentManager() as env:
-        assert env.shim_dir is not None
-        create_shim_symlinks(env.shim_dir, commands)
         os.environ.pop(CMOX_IPC_SOCKET_ENV, None)
-        result = subprocess.run(  # noqa: S603
-            [str(_shim_cmd_path(env, "bar"))],
-            capture_output=True,
-            text=True,
-        )
-        assert result.stdout == ""
-        assert result.stderr.strip() == "IPC socket not specified"
-        assert result.returncode == 1
+        result = _run_unserved_shim(env, "bar")
+        assert not result.stdout, "Assertion failed"
+        assert result.stderr.strip() == "IPC socket not specified", "Assertion failed"
+        assert result.returncode == 1, "Assertion failed"
 
 
 def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Shim prints an error if timeout env var is invalid."""
-    commands = ["baz"]
     with EnvironmentManager() as env:
-        assert env.shim_dir is not None
-        create_shim_symlinks(env.shim_dir, commands)
         monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "dummy")
         monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "nan")
-        result = subprocess.run(  # noqa: S603
-            [str(_shim_cmd_path(env, "baz"))],
-            capture_output=True,
-            text=True,
-        )
-        assert result.stdout == ""
-        assert "invalid timeout: 'nan'" in result.stderr
-        assert result.returncode == 1
+        result = _run_unserved_shim(env, "baz")
+        assert not result.stdout, "Assertion failed"
+        assert "invalid timeout: 'nan'" in result.stderr, "Assertion failed"
+        assert result.returncode == 1, "Assertion failed"
 
 
 def test_environment_manager_warns_when_shim_replaced(
@@ -118,15 +147,15 @@ def test_environment_manager_warns_when_shim_replaced(
         caplog.at_level(logging.WARNING, logger="cmd_mox.environment"),
         EnvironmentManager() as env,
     ):
-        assert env.shim_dir is not None
+        assert env.shim_dir is not None, "Assertion failed"
         original = env.shim_dir
         env.shim_dir = replacement
 
-    assert original is not None
-    assert original.exists()
-    assert replacement.exists()
+    assert original is not None, "Assertion failed"
+    assert original.exists(), "Assertion failed"
+    assert replacement.exists(), "Assertion failed"
     # The manager should drop ownership of the replacement directory when skipping.
-    assert env.shim_dir is None
+    assert env.shim_dir is None, "Assertion failed"
     assert any(
         record.levelno == logging.WARNING
         and record.message.startswith(

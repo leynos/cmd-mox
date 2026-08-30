@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import datetime as dt
 import typing as typ
 
@@ -16,6 +17,115 @@ from tests.helpers.fixtures import write_minimal_replay_fixture, write_replay_fi
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
+
+    from cmd_mox.test_doubles import CommandDouble
+
+
+@dc.dataclass(slots=True, frozen=True)
+class ReplayRecordedExpectation:
+    """Expected state after a replay-backed invocation."""
+
+    spy: CommandDouble
+    invocation: Invocation
+    response: Response
+    expected_stdout: str
+
+
+def _assert_replay_recorded(
+    mox: CmdMox, expectation: ReplayRecordedExpectation
+) -> None:
+    """Assert a dispatched invocation was answered and recorded.
+
+    Parameters
+    ----------
+    mox : CmdMox
+        Controller whose journal should hold the invocation.
+    expectation : ReplayRecordedExpectation
+        Expected response, spy, invocation, and standard output.
+    """
+    assert expectation.response.stdout == expectation.expected_stdout, (
+        f"expected stdout {expectation.expected_stdout!r}, got "
+        f"{expectation.response.stdout!r}"
+    )
+    assert expectation.spy.invocations == [expectation.invocation], (
+        f"spy recorded {expectation.spy.invocations!r}, expected "
+        f"[{expectation.invocation!r}]"
+    )
+    assert list(mox.journal) == [expectation.invocation], (
+        f"journal holds {list(mox.journal)!r}, expected [{expectation.invocation!r}]"
+    )
+
+
+def _handle_replay_match(
+    mox: CmdMox,
+    fixture_path: Path,
+    *,
+    expectation_env: dict[str, str] | None = None,
+) -> ReplayRecordedExpectation:
+    """Dispatch a replay-matched ``git status`` invocation through *mox*.
+
+    Returns
+    -------
+    ReplayRecordedExpectation
+        The spy, invocation, response, and expected stdout for assertion.
+    """
+    spy = mox.spy("git")
+    if expectation_env is not None:
+        spy = spy.with_env(expectation_env)
+    spy = spy.replay(fixture_path)
+    invocation = Invocation(
+        command="git",
+        args=["status"],
+        stdin="",
+        env={},
+    )
+    response = mox._handle_invocation(invocation)
+    return ReplayRecordedExpectation(
+        spy=spy,
+        invocation=invocation,
+        response=response,
+        expected_stdout="ok\n",
+    )
+
+
+def _create_dynamic_replay_spy(
+    mox: CmdMox,
+    fixture_path: Path,
+    *,
+    strict: bool,
+) -> tuple[CommandDouble, list[Invocation]]:
+    """Create a dynamic replay spy and its recorded handler calls.
+
+    Returns
+    -------
+    tuple[CommandDouble, list[Invocation]]
+        The configured spy and the list its handler appends invocations to.
+    """
+    handler_calls: list[Invocation] = []
+
+    def handler(invocation: Invocation) -> Response:
+        handler_calls.append(invocation)
+        return Response(stdout="handler", stderr="", exit_code=0)
+
+    spy = mox.spy("git").runs(handler).replay(fixture_path, strict=strict)
+    return spy, handler_calls
+
+
+def _handle_fuzzy_replay_mismatch(
+    mox: CmdMox,
+    spy: CommandDouble,
+    *,
+    expected_stdout: str,
+) -> ReplayRecordedExpectation:
+    """Dispatch an unmatched fuzzy replay invocation through *mox*."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious expectation return
+    invocation = Invocation(command="git", args=["commit"], stdin="", env={})
+    response = mox._handle_invocation(invocation)
+    return ReplayRecordedExpectation(
+        spy=spy,
+        invocation=invocation,
+        response=response,
+        expected_stdout=expected_stdout,
+    )
 
 
 class TestControllerReplayIntegration:
@@ -40,13 +150,7 @@ class TestControllerReplayIntegration:
         """A replay match should not call the spy's dynamic handler."""
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
-        handler_calls: list[Invocation] = []
-
-        def handler(invocation: Invocation) -> Response:
-            handler_calls.append(invocation)
-            return Response(stdout="handler", stderr="", exit_code=0)
-
-        mox.spy("git").runs(handler).replay(fixture_path)
+        _spy, handler_calls = _create_dynamic_replay_spy(mox, fixture_path, strict=True)
         invocation = Invocation(command="git", args=["status"], stdin="", env={})
 
         response = mox._make_response(invocation)
@@ -60,16 +164,15 @@ class TestControllerReplayIntegration:
         """Replay matches should still apply expectation env semantics."""
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
-        spy = mox.spy("git").with_env({"EXPECT_ENV": "VALUE"}).replay(fixture_path)
-        invocation = Invocation(command="git", args=["status"], stdin="", env={})
+        expectation = _handle_replay_match(
+            mox,
+            fixture_path,
+            expectation_env={"EXPECT_ENV": "VALUE"},
+        )
 
-        response = mox._handle_invocation(invocation)
-
-        assert response.stdout == "ok\n"
-        assert response.env["EXPECT_ENV"] == "VALUE"
-        assert invocation.env["EXPECT_ENV"] == "VALUE"
-        assert spy.invocations == [invocation]
-        assert list(mox.journal) == [invocation]
+        _assert_replay_recorded(mox, expectation)
+        assert expectation.response.env["EXPECT_ENV"] == "VALUE"
+        assert expectation.invocation.env["EXPECT_ENV"] == "VALUE"
 
     def test_replay_match_rejects_conflicting_expectation_env(
         self, tmp_path: Path
@@ -97,15 +200,10 @@ class TestControllerReplayIntegration:
         """Replay-backed responses should still update spy history and journal."""
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
-        spy = mox.spy("git").replay(fixture_path)
-        invocation = Invocation(command="git", args=["status"], stdin="", env={})
+        expectation = _handle_replay_match(mox, fixture_path)
 
-        response = mox._handle_invocation(invocation)
-
-        assert response.stdout == "ok\n"
-        assert spy.invocations == [invocation]
-        assert list(mox.journal) == [invocation]
-        assert spy.call_count == 1
+        _assert_replay_recorded(mox, expectation)
+        assert expectation.spy.call_count == 1
 
     def test_strict_replay_mismatch_raises_without_recording(
         self, tmp_path: Path
@@ -131,13 +229,10 @@ class TestControllerReplayIntegration:
         spy = (
             mox.spy("git").returns(stdout="fallback").replay(fixture_path, strict=False)
         )
-        invocation = Invocation(command="git", args=["commit"], stdin="", env={})
-
-        response = mox._handle_invocation(invocation)
-
-        assert response.stdout == "fallback"
-        assert spy.invocations == [invocation]
-        assert list(mox.journal) == [invocation]
+        expectation = _handle_fuzzy_replay_mismatch(
+            mox, spy, expected_stdout="fallback"
+        )
+        _assert_replay_recorded(mox, expectation)
 
     def test_fuzzy_replay_mismatch_falls_back_to_dynamic_handler(
         self, tmp_path: Path
@@ -145,21 +240,11 @@ class TestControllerReplayIntegration:
         """Fuzzy replay should fall back to the spy handler when no match exists."""
         mox = CmdMox()
         fixture_path = write_minimal_replay_fixture(tmp_path)
-        handler_calls: list[Invocation] = []
+        spy, handler_calls = _create_dynamic_replay_spy(mox, fixture_path, strict=False)
+        expectation = _handle_fuzzy_replay_mismatch(mox, spy, expected_stdout="handler")
 
-        def handler(invocation: Invocation) -> Response:
-            handler_calls.append(invocation)
-            return Response(stdout="handler-fallback", stderr="", exit_code=0)
-
-        spy = mox.spy("git").runs(handler).replay(fixture_path, strict=False)
-        invocation = Invocation(command="git", args=["commit"], stdin="", env={})
-
-        response = mox._handle_invocation(invocation)
-
-        assert handler_calls == [invocation]
-        assert response.stdout == "handler-fallback"
-        assert spy.invocations == [invocation]
-        assert list(mox.journal) == [invocation]
+        assert handler_calls == [expectation.invocation]
+        _assert_replay_recorded(mox, expectation)
 
 
 class TestControllerReplayVerification:

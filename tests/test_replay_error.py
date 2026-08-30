@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import typing as typ
 
@@ -10,17 +11,15 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
 import pytest
 
-import cmd_mox.controller as controller
-from cmd_mox import CmdMox
+from cmd_mox import CmdMox, controller
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
 def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure environment is restored when replay setup fails."""
     mox = CmdMox()
     pre_env = os.environ.copy()
-    mox.__enter__()
 
     called: list[
         tuple[type[BaseException] | None, BaseException | None, TracebackType | None]
@@ -39,16 +38,24 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args: object, **_kwargs: object) -> typ.NoReturn:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(CmdMox, "__exit__", fake_exit)
-    monkeypatch.setattr(controller, "create_shim_symlinks", boom)
+    # The stack guarantees the controller is exited even if an assertion below
+    # fails. replay() is expected to fail and clean up on its own, so once the
+    # assertions confirm that self-cleanup the stack's callback is discarded to
+    # avoid a second exit.
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mox)
 
-    with pytest.raises(RuntimeError):
-        mox.replay()
+        monkeypatch.setattr(CmdMox, "__exit__", fake_exit)
+        monkeypatch.setattr(controller, "create_shim_symlinks", boom)
 
-    assert called == [(None, None, None)]
-    assert mox._server is None
-    assert not mox._entered
-    assert os.environ == pre_env
+        with pytest.raises(RuntimeError):
+            mox.replay()
+
+        assert called == [(None, None, None)], "replay() should exit the controller"
+        assert mox._server is None, "replay() failure should clear the IPC server"
+        assert not mox._entered, "replay() failure should leave the controller exited"
+        assert os.environ == pre_env, "replay() failure should restore the environment"
+        stack.pop_all()
 
 
 def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,9 +91,9 @@ def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
         trigger()
 
     exc_type, exc, tb = called[0]
-    assert exc_type is BoomError
-    assert isinstance(exc, BoomError)
-    assert tb is not None
-    assert mox._server is None
-    assert not mox._entered
-    assert os.environ == pre_env
+    assert exc_type is BoomError, "__exit__ should receive the raised exception type"
+    assert isinstance(exc, BoomError), "__exit__ should receive the exception instance"
+    assert tb is not None, "__exit__ should receive a traceback"
+    assert mox._server is None, "exceptional exit should clear the IPC server"
+    assert not mox._entered, "exceptional exit should leave the controller exited"
+    assert os.environ == pre_env, "exceptional exit should restore the environment"

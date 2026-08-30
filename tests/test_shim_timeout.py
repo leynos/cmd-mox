@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-import cmd_mox.shim as shim
+from cmd_mox import shim
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
 @pytest.mark.parametrize(
@@ -31,6 +31,10 @@ def test_main_errors_on_invalid_timeout(
     with pytest.raises(SystemExit) as exc:
         shim.main()
 
-    assert exc.value.code == 1
+    assert exc.value.code == 1, (
+        f"shim.main should exit with code 1 for invalid timeout {value!r}"
+    )
     stderr = capsys.readouterr().err
-    assert f"invalid timeout: '{value}'" in stderr
+    assert f"invalid timeout: '{value}'" in stderr, (
+        "shim.main should report the rejected timeout value on stderr"
+    )

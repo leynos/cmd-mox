@@ -16,11 +16,11 @@ Repository = "https://github.com/leynos/cmd-mox"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6",
     "pytest",
     "pytest-xdist",
-    "ruff",
-    "ty",
     "pytest-timeout",
+    "syrupy",
     "pytest-bdd",
     "parse_type",
     "pyyaml>=6.0.3",
@@ -30,6 +30,17 @@ dev = [
 line-length = 88
 preview = true
 target-version = "py312"
+extend-exclude = [
+    # Estate-shared typos rollout tooling; linted upstream, mirrored here
+    # to match the Episodic configuration and avoid local drift.
+    "scripts/generate_typos_config.py",
+    "scripts/tests/test_typos_rollout.py",
+    "scripts/typos_rollout.py",
+    "scripts/typos_rollout_cache.py",
+    # Ruff 0.16 formats Markdown code blocks by default; mdformat owns
+    # Markdown in this repository (see the fmt target in the Makefile).
+    "*.md",
+]
 
 [tool.ruff.lint]
 select = [
@@ -63,6 +74,8 @@ select = [
     "PERF",
     "TRY",
     "D",
+    "DOC",
+    "ASYNC",
     "ANN",
     "C90",
     "PLR",
@@ -80,26 +93,15 @@ select = [
     "RUF053",
     "RUF055",
     "RUF064",
+    "RUF066",
 ]
 extend-ignore = [
     "D203",  # Conflicts with D211; prefer enforcing no blank line before class docstring.
     "D213",  # Conflicts with D212; keep summary on the first line.
-    # Existing cmd-mox baseline. Keep the imported Episodic rule set visible
-    # while avoiding broad behavioural refactors in this lint-wiring change.
-    "B903",
-    "F822",
-    "FURB118",
-    "ICN003",
-    "LOG004",
-    "PLR0402",
-    "PLR0904",
-    "PLR0911",
-    "PLR2004",
-    "PLR6201",
-    "PLR6301",
-    "PLW0108",
+    "RUF201",  # Selectors deliberately use rule codes to stay aligned with Episodic.
+    # cmd-mox is a subprocess-mocking library, so importing subprocess is its
+    # core domain; the security caution that S404 flags does not apply here.
     "S404",
-    "TC003",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -183,6 +185,8 @@ typing = "typ"
 convention = "numpy"
 
 [tool.pylint.main]
+# Activate rules whose behaviour depends on the project's Python baseline.
+py-version = "3.12"
 # Expand directory targets like cmd_mox and tests even when they are not
 # packages.
 recursive = true
@@ -326,6 +330,11 @@ enable = [
     "too-many-public-methods",
     "too-many-statements",
 ]
+
+[tool.ty.environment]
+# The estate typos-rollout scripts import each other as top-level modules,
+# so ty needs scripts/ on the module search path alongside the default roots.
+extra-paths = ["scripts"]
 
 [tool.pytest.ini_options]
 # Tests automatically killed after seconds elapsed

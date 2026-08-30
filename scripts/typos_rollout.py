@@ -49,7 +49,7 @@ class Dictionary:
 
 
 def _string_list(table: cabc.Mapping[str, object], key: str) -> tuple[str, ...]:
-    """Read and validate a list of strings from a TOML table."""
+    """Read and validate a list of strings from a TOML table."""  # noqa: DOC201, DOC501 - private TOML reader has an obvious return and raises only for malformed tables
     value = table.get(key, [])
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         message = f"{key!r} must be a list of strings"
@@ -58,7 +58,7 @@ def _string_list(table: cabc.Mapping[str, object], key: str) -> tuple[str, ...]:
 
 
 def _table(document: cabc.Mapping[str, object], key: str) -> cabc.Mapping[str, object]:
-    """Read and validate a TOML table."""
+    """Read and validate a TOML table."""  # noqa: DOC201, DOC501
     value = document.get(key, {})
     if not isinstance(value, dict):
         message = f"{key!r} must be a table"
@@ -67,7 +67,7 @@ def _table(document: cabc.Mapping[str, object], key: str) -> cabc.Mapping[str, o
 
 
 def _dictionary_from_text(text: str) -> Dictionary:
-    """Parse and validate shared dictionary text."""
+    """Parse and validate shared dictionary text."""  # noqa: DOC201, DOC501
     document = tomllib.loads(text)
     schema = document.get("schema")
     if schema != SCHEMA_VERSION:
@@ -95,12 +95,29 @@ def _dictionary_from_text(text: str) -> Dictionary:
 
 
 def load_dictionary(path: pathlib.Path) -> Dictionary:
-    """Load a validated shared dictionary from *path*."""
+    """Load a validated shared dictionary from *path*.
+
+    Returns
+    -------
+    Dictionary
+        The validated dictionary parsed from *path*.
+    """
     return _dictionary_from_text(path.read_text(encoding="utf-8"))
 
 
 def merge_dictionaries(base: Dictionary, local: Dictionary) -> Dictionary:
-    """Merge a shared dictionary with a non-conflicting local overlay."""
+    """Merge a shared dictionary with a non-conflicting local overlay.
+
+    Returns
+    -------
+    Dictionary
+        The merged dictionary with deterministically ordered values.
+
+    Raises
+    ------
+    ValueError
+        If the dictionaries define different corrections for one word.
+    """
     corrections = dict(base.corrections)
     for word, correction in local.corrections:
         existing = corrections.get(word)
@@ -124,10 +141,17 @@ def merge_dictionaries(base: Dictionary, local: Dictionary) -> Dictionary:
 
 
 def generate_word_mappings(dictionary: Dictionary) -> dict[str, str]:
-    """Expand Oxford stems and explicit words into deterministic mappings."""
+    """Expand Oxford stems and explicit words into deterministic mappings.
+
+    Returns
+    -------
+    dict[str, str]
+        A mapping from accepted or corrected words to their Oxford forms.
+    """
     mappings = {word: word for word in dictionary.accepted}
 
     def add(word: str, correction: str) -> None:
+        """Add a mapping, rejecting conflicting generated corrections."""  # noqa: DOC501 - private helper intentionally raises on conflicting mappings
         existing = mappings.get(word)
         if existing is not None and existing != correction:
             message = (
@@ -147,12 +171,12 @@ def generate_word_mappings(dictionary: Dictionary) -> dict[str, str]:
 
 
 def _toml_string(value: str) -> str:
-    """Render a string using TOML-compatible JSON quoting."""
+    """Render a string using TOML-compatible JSON quoting."""  # noqa: DOC201
     return json.dumps(value, ensure_ascii=False)
 
 
 def _render_array(name: str, values: tuple[str, ...]) -> list[str]:
-    """Render a deterministic TOML string array."""
+    """Render a deterministic TOML string array."""  # noqa: DOC201
     lines = [f"{name} = ["]
     lines.extend(f"    {_toml_string(value)}," for value in values)
     lines.append("]")
@@ -160,7 +184,13 @@ def _render_array(name: str, values: tuple[str, ...]) -> list[str]:
 
 
 def render_typos_config(dictionary: Dictionary) -> str:
-    """Render a deterministic, parse-checked ``typos.toml`` document."""
+    """Render a deterministic, parse-checked ``typos.toml`` document.
+
+    Returns
+    -------
+    str
+        The generated TOML document.
+    """
     lines = [
         "# Generated from the shared en-GB-oxendict dictionary.",
         "# Regenerate with scripts/generate_typos_config.py; do not edit by hand.",
@@ -189,7 +219,7 @@ def write_config(path: pathlib.Path, dictionary: Dictionary) -> None:
 
 
 def _read_metadata(path: pathlib.Path) -> dict[str, object]:
-    """Read best-effort HTTP freshness metadata."""
+    """Read best-effort HTTP freshness metadata."""  # noqa: DOC201
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
@@ -206,7 +236,7 @@ def _write_metadata(
 
 
 def _valid_cache(cache: pathlib.Path) -> bool:
-    """Return whether *cache* contains a valid shared dictionary."""
+    """Return whether *cache* contains a valid shared dictionary."""  # noqa: DOC201
     try:
         load_dictionary(cache)
     except (
@@ -224,7 +254,7 @@ def _remote_is_not_newer(
     saved: cabc.Mapping[str, object],
     headers: cabc.Mapping[str, str],
 ) -> bool:
-    """Return whether HTTP validators prove the response is not newer."""
+    """Return whether HTTP validators prove the response is not newer."""  # noqa: DOC201
     etag = headers.get("ETag")
     if etag is not None and etag == saved.get("etag"):
         return True
@@ -246,7 +276,7 @@ def _local_cache_is_current(
     source_name: str,
     source_mtime_ns: int,
 ) -> bool:
-    """Return whether metadata proves a valid local-source cache is current."""
+    """Return whether metadata proves a valid local-source cache is current."""  # noqa: DOC201
     saved_mtime = saved.get("mtime_ns")
     has_matching_source = saved.get("source") == source_name
     has_new_enough_mtime = (
@@ -260,7 +290,7 @@ def _refresh_local(
     cache: pathlib.Path,
     metadata: pathlib.Path,
 ) -> RefreshResult:
-    """Refresh from a local authoritative copy when it is newer."""
+    """Refresh from a local authoritative copy when it is newer."""  # noqa: DOC201
     source_stat = source.stat()
     source_name = str(source.resolve())
     saved = _read_metadata(metadata)
@@ -282,7 +312,7 @@ def _refresh_local(
 
 
 def _conditional_headers(saved: cabc.Mapping[str, object]) -> dict[str, str]:
-    """Build conditional HTTP headers from persisted validators."""
+    """Build conditional HTTP headers from persisted validators."""  # noqa: DOC201
     headers: dict[str, str] = {}
     etag = saved.get("etag")
     if isinstance(etag, str):
@@ -297,7 +327,7 @@ def _https_request(
     source: str,
     headers: cabc.Mapping[str, str],
 ) -> urllib.request.Request:
-    """Build a request after constraining the shared source to HTTPS."""
+    """Build a request after constraining the shared source to HTTPS."""  # noqa: DOC201, DOC501
     if urllib.parse.urlsplit(source).scheme != "https":
         message = f"shared dictionary URL must use HTTPS: {source}"
         raise ValueError(message)
@@ -310,7 +340,7 @@ def _write_remote_cache(
     content: bytes,
     headers: cabc.Mapping[str, str],
 ) -> RefreshResult:
-    """Validate and atomically persist an HTTP dictionary response."""
+    """Validate and atomically persist an HTTP dictionary response."""  # noqa: DOC201
     _dictionary_from_text(content.decode())
     _atomic_write(targets.cache, content)
     _write_metadata(
@@ -330,7 +360,7 @@ def _remote_response_result(
     saved: cabc.Mapping[str, object],
     response: _RemoteResponse,
 ) -> RefreshResult:
-    """Return the cache result for a successful HTTP response."""
+    """Return the cache result for a successful HTTP response."""  # noqa: DOC201
     if response.status == HTTP_NOT_MODIFIED and _valid_cache(targets.cache):
         return RefreshResult("current", targets.cache)
     if _valid_cache(targets.cache) and _remote_is_not_newer(saved, response.headers):
@@ -342,7 +372,7 @@ def _stale_cache_or_raise(
     cache: pathlib.Path,
     error: OSError | urllib.error.URLError,
 ) -> RefreshResult:
-    """Return a valid stale cache or propagate the download failure."""
+    """Return a valid stale cache or propagate the download failure."""  # noqa: DOC201
     if _valid_cache(cache):
         return RefreshResult("stale-cache", cache)
     raise error
@@ -352,7 +382,7 @@ def _http_error_result(
     cache: pathlib.Path,
     error: urllib.error.HTTPError,
 ) -> RefreshResult:
-    """Translate an HTTP failure into the available cache result."""
+    """Translate an HTTP failure into the available cache result."""  # noqa: DOC201
     if error.code == HTTP_NOT_MODIFIED and _valid_cache(cache):
         return RefreshResult("current", cache)
     return _stale_cache_or_raise(cache, error)
@@ -363,7 +393,7 @@ def _refresh_http(
     cache: pathlib.Path,
     metadata: pathlib.Path,
 ) -> RefreshResult:
-    """Refresh a cache from a validated HTTPS source with stale fallback."""
+    """Refresh a cache from a validated HTTPS source with stale fallback."""  # noqa: DOC201
     saved = _read_metadata(metadata)
     request = _https_request(source, _conditional_headers(saved))
     try:
@@ -387,7 +417,18 @@ def refresh_base(
     metadata: pathlib.Path,
     offline: bool = False,
 ) -> RefreshResult:
-    """Refresh an untracked base cache when the authoritative copy is newer."""
+    """Refresh an untracked base cache when the authoritative copy is newer.
+
+    Returns
+    -------
+    RefreshResult
+        The cache refresh outcome.
+
+    Raises
+    ------
+    FileNotFoundError
+        If offline mode is requested without a valid cached dictionary.
+    """
     if offline:
         if not _valid_cache(cache):
             message = f"no cached shared dictionary at {cache}"

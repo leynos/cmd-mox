@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import enum
 import typing as typ
 
 from .expectations import Expectation
 from .ipc import Invocation, Response
 
-Self = typ.Self
-
 if typ.TYPE_CHECKING:  # pragma: no cover - typing-only import
+    import collections.abc as cabc
+
     from .controller import CmdMox
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -22,28 +21,36 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .record.session import RecordingSession
 
     class _ExpectationProtocol(typ.Protocol):
-        def with_args(self, *args: str) -> Self: ...
+        def with_args(self, *args: str) -> typ.Self: ...
 
-        def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Self: ...
+        def with_matching_args(
+            self, *matchers: cabc.Callable[[str], bool]
+        ) -> typ.Self: ...
 
-        def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> Self: ...
+        def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> typ.Self: ...
 
-        def with_env(self, mapping: dict[str, str]) -> Self: ...
+        def with_env(self, mapping: dict[str, str]) -> typ.Self: ...
 
-        def times(self, count: int) -> Self: ...
+        def times(self, count: int) -> typ.Self: ...
 
-        def times_called(self, count: int) -> Self: ...
+        def times_called(self, count: int) -> typ.Self: ...
 
-        def in_order(self) -> Self: ...
+        def in_order(self) -> typ.Self: ...
 
-        def any_order(self) -> Self: ...
+        def any_order(self) -> typ.Self: ...
 
     _ExpectationType = _ExpectationProtocol
 else:
 
     class _ExpectationType:  # pragma: no cover - runtime placeholder
         def __getattr__(self, name: str) -> cabc.Callable[..., typ.NoReturn]:
-            """Raise NotImplementedError for any method access."""
+            """Return a callable that rejects typing-only method access.
+
+            Returns
+            -------
+            collections.abc.Callable
+                Callable that raises ``NotImplementedError`` when invoked.
+            """
 
             def _method(*args: object, **kwargs: object) -> typ.NoReturn:
                 raise NotImplementedError(f"{name} is typing-only")
@@ -56,6 +63,11 @@ def _create_expectation_proxy() -> type:
 
     Typing builds see a :class:`typing.Protocol`; runtime receives a lightweight
     class that raises when accessed directly.
+
+    Returns
+    -------
+    type
+        The lightweight runtime expectation proxy type.
     """
     return _ExpectationType
 
@@ -71,10 +83,10 @@ class DoubleKind(enum.StrEnum):
     SPY = "spy"
 
 
+# ruff: ignore[too-many-public-methods] - deliberately wide fluent stub/mock/spy
+# builder API; splitting it would fragment a single cohesive DSL.
 class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-base]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
-
-    T_Kind = DoubleKind
 
     __slots__ = (
         "_recording_session",
@@ -101,8 +113,23 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         self._replay_session: ReplaySession | None = None
         self._recording_session: RecordingSession | None = None
 
-    def returns(self, stdout: str = "", stderr: str = "", exit_code: int = 0) -> Self:
-        """Set the static response and return ``self``."""
+    def returns(
+        self, stdout: str = "", stderr: str = "", exit_code: int = 0
+    ) -> typ.Self:
+        """Set the static response and return ``self``.
+
+        Parameters
+        ----------
+        stdout, stderr : str
+            Output streams returned by the command.
+        exit_code : int
+            Exit status returned by the command.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.response = Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
         self.handler = None
         return self
@@ -110,8 +137,21 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def runs(
         self,
         handler: cabc.Callable[[Invocation], tuple[str, str, int] | Response],
-    ) -> Self:
-        """Use *handler* to generate responses dynamically."""
+    ) -> typ.Self:
+        """Use *handler* to generate responses dynamically.
+
+        Parameters
+        ----------
+        handler : collections.abc.Callable
+            Function receiving an invocation and returning a ``Response`` or
+            ``(stdout, stderr, exit_code)`` tuple.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+
+        """
 
         def _wrap(invocation: Invocation) -> Response:
             result = handler(invocation)
@@ -143,50 +183,139 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         if self.expectation in self.controller._ordered:
             self.controller._ordered.remove(self.expectation)
 
-    def with_args(self, *args: str) -> Self:
-        """Require the command be invoked with *args*."""
+    def with_args(self, *args: str) -> typ.Self:
+        """Require the command to be invoked with *args*.
+
+        Parameters
+        ----------
+        *args : str
+            Exact command arguments expected at invocation time.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.expectation.with_args(*args)
         return self
 
-    def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Self:
-        """Validate arguments using matcher predicates."""
+    def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> typ.Self:
+        """Validate arguments using matcher predicates.
+
+        Parameters
+        ----------
+        *matchers : collections.abc.Callable
+            Predicates applied to corresponding command arguments.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.expectation.with_matching_args(*matchers)
         return self
 
-    def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> Self:
-        """Expect the given stdin ``data`` or matcher."""
+    def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> typ.Self:
+        """Expect the given stdin ``data`` or matcher.
+
+        Parameters
+        ----------
+        data : str or collections.abc.Callable
+            Exact stdin text or predicate used for matching.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.expectation.with_stdin(data)
         return self
 
-    def with_env(self, mapping: dict[str, str]) -> Self:
-        """Expect the provided environment mapping."""
+    def with_env(self, mapping: dict[str, str]) -> typ.Self:
+        """Expect the provided environment mapping.
+
+        Parameters
+        ----------
+        mapping : dict[str, str]
+            Environment entries expected at invocation time.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.expectation.with_env(mapping)
         return self
 
-    def times(self, count: int) -> Self:
-        """Require the command be invoked exactly ``count`` times."""
+    def times(self, count: int) -> typ.Self:
+        """Require the command to be invoked exactly ``count`` times.
+
+        Parameters
+        ----------
+        count : int
+            Required invocation count.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.expectation.times(count)
         return self
 
-    def times_called(self, count: int) -> Self:
-        """Verify the spy was called ``count`` times."""
+    def times_called(self, count: int) -> typ.Self:
+        """Verify the spy was called ``count`` times.
+
+        Parameters
+        ----------
+        count : int
+            Required invocation count.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.expectation.times_called(count)
         return self
 
-    def in_order(self) -> Self:
-        """Mark this expectation as ordered."""
+    def in_order(self) -> typ.Self:
+        """Mark this expectation as ordered.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.expectation.in_order()
         self._ensure_in_order()
         return self
 
-    def any_order(self) -> Self:
-        """Mark this expectation as unordered."""
+    def any_order(self) -> typ.Self:
+        """Mark this expectation as unordered.
+
+        Returns
+        -------
+        typ.Self
+            This double, for fluent configuration.
+        """
         self.expectation.any_order()
         self._ensure_any_order()
         return self
 
-    def passthrough(self) -> Self:
-        """Execute the real command while recording invocations."""
+    def passthrough(self) -> typ.Self:
+        """Execute the real command while recording invocations.
+
+        Returns
+        -------
+        typ.Self
+            This spy, for fluent configuration.
+
+        Raises
+        ------
+        ValueError
+            If this double is not a spy or already has a replay session.
+        """
         if self.kind is not DoubleKind.SPY:
             msg = "passthrough() is only valid for spies"
             raise ValueError(msg)
@@ -202,7 +331,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         *,
         scrubber: Scrubber | None = None,
         env_allowlist: list[str] | None = None,
-    ) -> Self:
+    ) -> typ.Self:
         """Enable recording of passthrough invocations to a fixture file.
 
         Must be called after :meth:`passthrough`. Creates and starts a
@@ -217,6 +346,18 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             Optional scrubber for sanitizing recordings before persistence.
         env_allowlist:
             Environment variable keys to always include in recordings.
+
+        Returns
+        -------
+        typ.Self
+            This double, allowing further fluent configuration.
+
+        Raises
+        ------
+        ValueError
+            If passthrough mode is not enabled.
+        RuntimeError
+            If a recording session already exists.
         """
         if not self.passthrough_mode:
             msg = "record() requires passthrough(); call it first"
@@ -242,8 +383,31 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         fixture_path: str | Path,
         *,
         strict: bool = True,
-    ) -> Self:
-        """Attach and eagerly load a replay fixture for a spy."""
+    ) -> typ.Self:
+        """Attach and eagerly load a replay fixture for a spy.
+
+        Parameters
+        ----------
+        fixture_path : str or pathlib.Path
+            Fixture JSON file to load.
+        strict : bool
+            Whether replay matching includes stdin and environment values.
+
+        Returns
+        -------
+        typ.Self
+            This spy, for fluent configuration.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the replay fixture does not exist.
+        ValueError
+            If this double is not a spy, is configured for passthrough, or
+            the replay fixture is invalid.
+        RuntimeError
+            If a replay session already exists.
+        """  # ruff: ignore[docstring-extraneous-exception] - ReplaySession.load propagates fixture-load failures.
         if self.kind is not DoubleKind.SPY:
             msg = "replay() is only valid for spies"
             raise ValueError(msg)
@@ -268,51 +432,115 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     @property
     def has_recording_session(self) -> bool:
-        """Return ``True`` if a recording session is attached."""
+        """Whether a recording session is attached.
+
+        Returns
+        -------
+        bool
+            ``True`` when recording is configured for this double.
+        """
         return self._recording_session is not None
 
     @property
     def recording_session(self) -> RecordingSession | None:
-        """Return the attached recording session, or ``None``."""
+        """The attached recording session, or ``None``.
+
+        Returns
+        -------
+        RecordingSession or None
+            Active recording session, if configured.
+        """
         return self._recording_session
 
     @property
     def has_replay_session(self) -> bool:
-        """Return ``True`` if a replay session is attached."""
+        """Whether a replay session is attached.
+
+        Returns
+        -------
+        bool
+            ``True`` when replay is configured for this double.
+        """
         return self._replay_session is not None
 
     @property
     def replay_session(self) -> ReplaySession | None:
-        """Return the attached replay session, or ``None``."""
+        """The attached replay session, or ``None``.
+
+        Returns
+        -------
+        ReplaySession or None
+            Active replay session, if configured.
+        """
         return self._replay_session
 
     # ------------------------------------------------------------------
     # Matching helpers
     # ------------------------------------------------------------------
     def matches(self, invocation: Invocation) -> bool:
-        """Return ``True`` if *invocation* satisfies the expectation."""
+        """Return whether *invocation* satisfies the expectation.
+
+        The command name is checked before expectation matching so a double
+        cannot accept an invocation owned by another command.
+
+        Parameters
+        ----------
+        invocation : Invocation
+            Invocation to compare with this double's expectation.
+
+        Returns
+        -------
+        bool
+            ``True`` when command and expectation criteria match.
+        """
+        if invocation.command != self.name:
+            return False
         return self.expectation.matches(invocation)
 
     @property
     def is_expected(self) -> bool:
-        """Return ``True`` only for mocks."""
+        """Whether this double is a mock.
+
+        Returns
+        -------
+        bool
+            ``True`` only for :attr:`DoubleKind.MOCK`.
+        """
         return self.kind is DoubleKind.MOCK
 
     @property
     def is_recording(self) -> bool:
-        """Return ``True`` for mocks and spies."""
-        return self.kind in (DoubleKind.MOCK, DoubleKind.SPY)
+        """Whether this double records invocations.
+
+        Returns
+        -------
+        bool
+            ``True`` for mocks and spies.
+        """
+        return self.kind in {DoubleKind.MOCK, DoubleKind.SPY}
 
     @property
     def call_count(self) -> int:
-        """Return the number of recorded invocations."""
+        """The number of recorded invocations.
+
+        Returns
+        -------
+        int
+            Number of invocations recorded by this double.
+        """
         return len(self.invocations)
 
     # ------------------------------------------------------------------
     # Spy assertions
     # ------------------------------------------------------------------
     def assert_called(self) -> None:
-        """Raise ``AssertionError`` if this spy was never invoked."""
+        """Raise ``AssertionError`` if this spy was never invoked.
+
+        Raises
+        ------
+        AssertionError
+            If this is not a spy or no invocation was recorded.
+        """
         self._validate_spy_usage("assert_called")
         if not self.invocations:
             msg = (
@@ -322,7 +550,13 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             raise AssertionError(msg)
 
     def assert_not_called(self) -> None:
-        """Raise ``AssertionError`` if this spy was invoked."""
+        """Raise ``AssertionError`` if this spy was invoked.
+
+        Raises
+        ------
+        AssertionError
+            If this is not a spy or any invocation was recorded.
+        """
         self._validate_spy_usage("assert_not_called")
         if self.invocations:
             last = self.invocations[-1]
@@ -339,7 +573,25 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         stdin: str | None = None,
         env: dict[str, str] | None = None,
     ) -> None:
-        """Assert the most recent call used the given arguments and context."""
+        """Assert the most recent call used the given arguments and context.
+
+        Parameters
+        ----------
+        *args : str
+            Expected command arguments.
+        stdin : str or None
+            Expected stdin text, when supplied.
+        env : dict[str, str] or None
+            Expected environment mapping, when supplied.
+
+        Raises
+        ------
+        AssertionError
+            If this double is not a spy, no invocation has been recorded, or
+            the most recent invocation's args, stdin (when supplied), or env
+            (when supplied) differ from the expectations.
+
+        """  # ruff: ignore[docstring-extraneous-exception] - AssertionError is raised by the validation helpers invoked below
         self._validate_spy_usage("assert_called_with")
         invocation = self._get_last_invocation()
         self._validate_arguments(invocation, args)
@@ -365,6 +617,11 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
         The *label* provides contextual information for the error message,
         yielding a consistent formatting across different validations.
+
+        Raises
+        ------
+        AssertionError
+            If ``actual`` and ``expected`` differ.
         """
         if actual != expected:
             msg = f"{self.name!r} called with {label} {actual!r}, expected {expected!r}"
@@ -388,7 +645,13 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             self._assert_equal("env", invocation.env, expected_env)
 
     def __repr__(self) -> str:
-        """Return debugging representation with name, kind, and response."""
+        """Return debugging representation with name, kind, and response.
+
+        Returns
+        -------
+        str
+            Debugging representation of this double.
+        """
         return (
             f"CommandDouble(name={self.name!r}, "
             f"kind={self.kind!r}, "

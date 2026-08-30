@@ -106,7 +106,7 @@ Published "extras" that an *end user* opts into to enable an optional feature
 of the package, requested with `package[extra]` syntax (for example,
 `pandas[excel]`). Reach for this only when the extra dependency powers
 user-facing functionality that not everyone needs — never for development
-tooling. Add them with `uv add --optional <extra>`:
+tooling. Add them with `uv add --optional <extra> <package>`:
 
 ```toml
 [project.optional-dependencies]
@@ -122,8 +122,9 @@ Tooling only contributors need: test frameworks, linters, type checkers,
 documentation builders, and property or mutation testers. These are
 **local-only** — PEP 735 dependency groups are *not* included in published
 package metadata (they are not part of the wheel), so they must live here rather
-than in `project.optional-dependencies`. Add them with `uv add --dev` (the
-`dev` group) or `uv add --group <name>`:
+than in `project.optional-dependencies`. Add them with
+`uv add --dev <package>` (the `dev` group) or
+`uv add --group <name> <package>`:
 
 ```toml
 [dependency-groups]
@@ -138,8 +139,9 @@ dev = [
 `uv sync` include the `dev` group with no extra flags, so a bare `uv sync`
 gives a contributor the full toolchain. Adjust this with:
 
-- `--no-dev` or `--no-default-groups` to exclude development dependencies (for
-  example, when building a wheel or a production install).
+- `--no-dev` to exclude only the `dev` group.
+- `--no-default-groups` to disable configured default groups while still
+  permitting explicit selection of other groups.
 - `--group <name>` or `--only-group <name>` to include or isolate a
   non-default group.
 - `[tool.uv].default-groups` to change which groups sync by default:
@@ -190,19 +192,19 @@ ______________________________________________________________________
 ## 5. Declaring a Build System
 
 PEP 517/518 require a `[build-system]` table to tell tools how to build and
-install your project. A "modern" convention is to specify `setuptools>=61.0`
+install your project. A "modern" convention is to specify `setuptools>=64.0`
 (for editable installs without `setup.py`) or a lighter alternative like
 `flit_core`. Below is the typical setup using setuptools:
 
 ```toml
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
 ```
 
 - **`requires`:** A list of packages needed at build time. For editable installs
-  in `uv`, you need at least `setuptools>=61.0` and `wheel`. (Python
-  Packaging[^4], Astral Docs[^7])
+  in `uv`, you need at least `setuptools>=64.0`. (Python Packaging[^4], Astral
+  Docs[^7])
 - **`build-backend`:** The entry point for your build backend.
   `setuptools.build_meta` is the PEP 517-compliant backend for setuptools.
   (Python Packaging[^4], Astral Docs[^7])
@@ -282,7 +284,7 @@ docs = [
 mycli = "my_project.cli:main"
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]
@@ -318,9 +320,8 @@ package = true
 
 4. **Build System:**
 
-   - `setuptools>=61.0` plus `wheel` ensures both legacy and editable installs
-     work. ✱ Newer versions of setuptools support PEP 660 editable installs
-     without a `setup.py` stub. (Python Packaging[^4], Astral Docs[^7])
+   - `setuptools>=64.0` supports PEP 660 editable installs without a
+     `setup.py` stub. (Python Packaging[^4], Astral Docs[^7])
    - `build-backend = "setuptools.build_meta"` tells `uv` how to compile your
      package. (Python Packaging[^4], Astral Docs[^7])
 
@@ -372,7 +373,7 @@ A "modern" `pyproject.toml` for an Astral `uv` project should:
   `[dependency-groups]` (the `dev` group installs by default).
 - Define any CLI or GUI entry points under `[project.scripts]` or
   `[project.gui-scripts]`.
-- Declare a PEP 517 `[build-system]` (e.g. `setuptools>=61.0`, `wheel`,
+- Declare a PEP 517 `[build-system]` (e.g. `setuptools>=64.0`,
   `setuptools.build_meta`) to support editable installs, or omit it and rely on
   `tool.uv.package = true`.
 - Include a `[tool.uv]` section, at minimum `package = true` if you want `uv` to

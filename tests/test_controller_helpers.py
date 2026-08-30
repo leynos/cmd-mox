@@ -14,21 +14,21 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
 from tests.helpers.controller import (
     CommandExecution,
     JournalEntryExpectation,
-    _execute_command_with_params,
     _find_matching_journal_entry,
-    _verify_journal_entry_with_expectation,
+    execute_command_with_details,
+    verify_journal_entry_details,
 )
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
 def test_execute_and_verify_helpers() -> None:
     """Ensure helper functions execute and verify invocations."""
 
     def handler(inv: Invocation) -> tuple[str, str, int]:
-        assert inv.args == ["--flag"]
-        assert inv.stdin == "stdin"
-        assert inv.env.get("ENV_VAR") == "VALUE"
+        assert inv.args == ["--flag"], "Assertion failed"
+        assert inv.stdin == "stdin", "Assertion failed"
+        assert inv.env.get("ENV_VAR") == "VALUE", "Assertion failed"
         return ("handled", "", 0)
 
     with CmdMox() as mox:
@@ -41,10 +41,10 @@ def test_execute_and_verify_helpers() -> None:
             env_var="ENV_VAR",
             env_val="VALUE",
         )
-        result = _execute_command_with_params(params)
+        result = execute_command_with_details(params)
     # Sanity-check handler result
-    assert result.stdout.strip() == "handled"
-    assert result.returncode == 0
+    assert result.stdout.strip() == "handled", "Assertion failed"
+    assert result.returncode == 0, "Assertion failed"
     expectation = JournalEntryExpectation(
         cmd="foo",
         args="--flag",
@@ -55,7 +55,7 @@ def test_execute_and_verify_helpers() -> None:
         stderr="",
         exit_code=0,
     )
-    _verify_journal_entry_with_expectation(mox, expectation)
+    verify_journal_entry_details(mox, expectation)
 
 
 def test_find_matching_journal_entry_returns_most_recent() -> None:
@@ -74,7 +74,7 @@ def test_find_matching_journal_entry_returns_most_recent() -> None:
             env_var="ENV",
             env_val="VAL",
         )
-        _execute_command_with_params(params)
+        execute_command_with_details(params)
         params = CommandExecution(
             cmd="foo",
             args="--flag",
@@ -82,10 +82,10 @@ def test_find_matching_journal_entry_returns_most_recent() -> None:
             env_var="ENV",
             env_val="VAL",
         )
-        _execute_command_with_params(params)
+        execute_command_with_details(params)
         expectation = JournalEntryExpectation(cmd="foo", args="--flag")
         inv = _find_matching_journal_entry(mox, expectation)
-    assert inv.stdin == "second"
+    assert inv.stdin == "second", "Assertion failed"
 
 
 def test_helpers_raise_on_mismatch() -> None:
@@ -104,9 +104,9 @@ def test_helpers_raise_on_mismatch() -> None:
             env_var="ENV",
             env_val="VAL",
         )
-        _execute_command_with_params(params)
+        execute_command_with_details(params)
         expectation = JournalEntryExpectation(cmd="foo", exit_code=1)
         with pytest.raises(AssertionError, match="exit_code"):
-            _verify_journal_entry_with_expectation(mox, expectation)
+            verify_journal_entry_details(mox, expectation)
     with pytest.raises(AssertionError, match="does not contain expected entry"):
         _find_matching_journal_entry(mox, JournalEntryExpectation(cmd="bar"))

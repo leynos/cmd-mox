@@ -35,7 +35,13 @@ def test_rollout_scripts_support_python_313() -> None:
 def rollout_modules_fixture(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[types.ModuleType, types.ModuleType, types.ModuleType]:
-    """Import the scripts through the same top-level module path used at runtime."""
+    """Import the scripts through the same top-level module path used at runtime.
+
+    Returns
+    -------
+    tuple[types.ModuleType, types.ModuleType, types.ModuleType]
+        The cache, rollout, and generator modules, in that order.
+    """
     monkeypatch.syspath_prepend(str(SCRIPT_DIRECTORY))
     names = ("typos_rollout_cache", "typos_rollout", "generate_typos_config")
     importlib.invalidate_caches()
@@ -44,7 +50,7 @@ def rollout_modules_fixture(
 
 
 def _dictionary_text(stem: str = "organ") -> str:
-    """Return a minimal valid shared-dictionary document."""
+    """Return a minimal valid shared-dictionary document."""  # noqa: DOC201 - private test helper has an obvious text return
     return (
         'schema = 1\n\n[oxford]\nstems = ["'
         + stem
@@ -100,7 +106,7 @@ def test_https_failure_reuses_valid_tracked_config(
     tracked_config.write_text('[default]\nlocale = "en-gb"\n', encoding="utf-8")
 
     def unavailable(*_args: object, **_kwargs: object) -> None:
-        """Model an unavailable HTTPS authority."""
+        """Model an unavailable HTTPS authority."""  # noqa: DOC501 - test stub raises only to model a network failure
         raise urllib.error.URLError("offline")
 
     monkeypatch.setattr(rollout, "refresh_base", unavailable)
@@ -236,18 +242,36 @@ def test_http_refresh_uses_validators_and_preserves_newer_cache(
         }
 
         def read(self) -> bytes:
-            """Return a valid shared dictionary."""
+            """Return a valid shared dictionary.
+
+            Returns
+            -------
+            bytes
+                A minimal valid shared dictionary document.
+            """
             return _dictionary_text().encode()
 
         def __enter__(self) -> Response:
-            """Enter the fake response context."""
+            """Enter the fake response context.
+
+            Returns
+            -------
+            Response
+                This fake response instance.
+            """
             return self
 
         def __exit__(self, *_args: object) -> None:
             """Leave the fake response context."""
 
     def open_response(request: urllib.request.Request, *, timeout: float) -> Response:
-        """Capture the request passed to the network boundary."""
+        """Capture the request passed to the network boundary.
+
+        Returns
+        -------
+        Response
+            A fake response for the requested shared dictionary.
+        """
         assert timeout == 30.0
         requests.append(request)
         return Response()
@@ -277,7 +301,7 @@ def test_remote_failure_reuses_only_a_valid_stale_cache(
     metadata = tmp_path / "cache.json"
 
     def fail(*_args: object, **_kwargs: object) -> None:
-        """Model an unavailable remote authority."""
+        """Model an unavailable remote authority."""  # noqa: DOC501 - test stub raises only to model a network failure
         message = "offline"
         raise urllib.error.URLError(message)
 
@@ -312,11 +336,23 @@ def test_remote_refresh_rejects_insecure_and_invalid_content(
         headers: typ.ClassVar[dict[str, str]] = {}
 
         def read(self) -> bytes:
-            """Return malformed bytes."""
+            """Return malformed bytes.
+
+            Returns
+            -------
+            bytes
+                Bytes that cannot be parsed as TOML.
+            """
             return b"not = [valid"
 
         def __enter__(self) -> InvalidResponse:
-            """Enter the fake response context."""
+            """Enter the fake response context.
+
+            Returns
+            -------
+            InvalidResponse
+                This fake response instance.
+            """
             return self
 
         def __exit__(self, *_args: object) -> None:

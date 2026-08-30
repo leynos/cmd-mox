@@ -11,7 +11,13 @@ from cmd_mox.verifiers import OrderVerifier
 
 
 def _invocation(command: str, *args: str) -> Invocation:
-    """Create a minimal invocation for *command* with *args*."""
+    """Create a minimal invocation for *command* with *args*.
+
+    Returns
+    -------
+    Invocation
+        The invocation containing the command and arguments.
+    """
     return Invocation(command=command, args=list(args), stdin="", env={})
 
 

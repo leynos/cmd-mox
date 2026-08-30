@@ -16,25 +16,25 @@ FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
 @pytest.fixture
 def ordered_expectations() -> list[Expectation]:
-    """Collect expectations that must appear in order."""
+    """Collect expectations that must appear in order."""  # ruff: ignore[docstring-missing-returns] - pytest fixture seeding an empty accumulator; a Returns section would only restate this
     return []
 
 
 @pytest.fixture
 def unordered_expectations() -> list[Expectation]:
-    """Collect expectations that are not part of the ordered sequence."""
+    """Collect expectations that are not part of the ordered sequence."""  # ruff: ignore[docstring-missing-returns] - pytest fixture seeding an empty accumulator; a Returns section would only restate this
     return []
 
 
 @pytest.fixture
 def journal() -> list[Invocation]:
-    """Accumulate recorded invocations for verification."""
+    """Accumulate recorded invocations for verification."""  # ruff: ignore[docstring-missing-returns] - pytest fixture seeding an empty accumulator; a Returns section would only restate this
     return []
 
 
 @pytest.fixture
 def verification_context() -> dict[str, Exception | None]:
-    """Store verification outcomes for assertions."""
+    """Store verification outcomes for assertions."""  # ruff: ignore[docstring-missing-returns] - pytest fixture seeding an empty accumulator; a Returns section would only restate this
     return {}
 
 
@@ -96,7 +96,7 @@ def validate_order(
     verifier = OrderVerifier(ordered_expectations)
     try:
         verifier.verify(journal)
-    except Exception as exc:  # noqa: BLE001 - capturing for assertion
+    except Exception as exc:  # ruff: ignore[blind-except] - the scenario asserts on whichever error verify() raises, so the type cannot be narrowed here
         verification_context["error"] = exc
     else:
         verification_context["error"] = None
@@ -105,7 +105,7 @@ def validate_order(
 @then("the ordered verification should succeed")
 def assert_order_success(verification_context: dict[str, Exception | None]) -> None:
     """Assert that the verification completed without raising."""
-    assert verification_context.get("error") is None
+    assert verification_context.get("error") is None, "Assertion failed"
 
 
 @scenario(

@@ -22,16 +22,39 @@ _SENSITIVE_TOKENS: tuple[str, ...] = tuple(
 
 
 def _mask_env_value(key: str, value: str | None) -> str | None:
-    """Redact *value* when *key* appears sensitive."""
+    """Redact *value* when *key* appears sensitive.
+
+    Parameters
+    ----------
+    key : str
+        Environment key used to identify sensitive values.
+    value : str or None
+        Value to redact.
+
+    Returns
+    -------
+    str or None
+        Masked value, original value, or ``None``.
+    """
     if value is None:
         return None
-    else:  # noqa: RET505 - required for clarity per review guidance
-        key_cf = key.casefold()
-        return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
+    key_cf = key.casefold()
+    return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
 
 
 def _format_env(mapping: cabc.Mapping[str, str | None]) -> str:
-    """Return a deterministic representation of environment values."""
+    """Return a deterministic representation of environment values.
+
+    Parameters
+    ----------
+    mapping : collections.abc.Mapping
+        Environment values to sort and format.
+
+    Returns
+    -------
+    str
+        Stable representation with sensitive values masked.
+    """
     if not mapping:
         return "{}"
     parts = []
@@ -42,18 +65,56 @@ def _format_env(mapping: cabc.Mapping[str, str | None]) -> str:
 
 
 def _format_args(args: cabc.Sequence[str] | None) -> str:
+    """Format command arguments as a comma-separated representation.
+
+    Parameters
+    ----------
+    args : collections.abc.Sequence[str] or None
+        Arguments to format.
+
+    Returns
+    -------
+    str
+        Repr-formatted arguments, or an empty string when absent.
+    """
     return "" if not args else ", ".join(repr(arg) for arg in args)
 
 
 def _format_matchers(matchers: cabc.Sequence[cabc.Callable[[str], bool]] | None) -> str:
+    """Format argument matcher callables for diagnostic output.
+
+    Parameters
+    ----------
+    matchers : collections.abc.Sequence or None
+        Matcher predicates to format.
+
+    Returns
+    -------
+    str
+        Repr-formatted matchers, or an empty string when absent.
+    """
     return "" if not matchers else ", ".join(repr(matcher) for matcher in matchers)
 
 
 def _format_call(name: str, args_repr: str) -> str:
+    """Format a command name and preformatted arguments as a call.
+
+    Returns
+    -------
+    str
+        Call-like representation such as ``name('arg')``.
+    """
     return f"{name}({args_repr})" if args_repr else f"{name}()"
 
 
 def _expectation_args_repr(exp: Expectation) -> str:
+    """Return the configured argument or matcher representation.
+
+    Returns
+    -------
+    str
+        Representation of exact arguments, matchers, or no arguments.
+    """
     if exp.args is not None:
         return _format_args(exp.args)
     if exp.match_args is not None:
@@ -79,7 +140,20 @@ def _append_env_line(lines: list[str], exp: Expectation) -> None:
 
 
 def _describe_expectation(exp: Expectation, *, include_count: bool = False) -> str:
-    """Return a human readable representation of *exp*."""
+    """Return a human-readable representation of *exp*.
+
+    Parameters
+    ----------
+    exp : Expectation
+        Expectation to describe.
+    include_count : bool
+        Whether to include the expected call count.
+
+    Returns
+    -------
+    str
+        Multi-line diagnostic description.
+    """
     lines = [_format_call(exp.name, _expectation_args_repr(exp))]
     _append_count_line(lines, exp, include_count=include_count)
     _append_stdin_line(lines, exp)
@@ -93,7 +167,22 @@ def _describe_invocation(
     focus_env: cabc.Iterable[str] | None = None,
     include_stdin: bool = False,
 ) -> str:
-    """Return a readable representation of *inv*."""
+    """Return a readable representation of *inv*.
+
+    Parameters
+    ----------
+    inv : Invocation
+        Invocation to describe.
+    focus_env : collections.abc.Iterable[str] or None
+        Environment keys to include, when supplied.
+    include_stdin : bool
+        Whether to include stdin in the description.
+
+    Returns
+    -------
+    str
+        Multi-line diagnostic description.
+    """
     lines = [_format_call(inv.command, _format_args(inv.args))]
     if include_stdin:
         lines.append(f"stdin={inv.stdin!r}")
@@ -109,6 +198,13 @@ def _describe_invocations(
     focus_env: cabc.Iterable[str] | None = None,
     include_stdin: bool = False,
 ) -> str:
+    """Describe a sequence of invocations, or ``(none)`` when empty.
+
+    Returns
+    -------
+    str
+        Multi-line diagnostic description.
+    """
     if not invocations:
         return "(none)"
     return "\n".join(
@@ -118,6 +214,13 @@ def _describe_invocations(
 
 
 def _numbered(entries: cabc.Sequence[str], *, start: int = 1) -> str:
+    """Prefix entries with sequential numbers for diagnostic output.
+
+    Returns
+    -------
+    str
+        Numbered entries, or ``(none)`` when empty.
+    """
     if not entries:
         return "(none)"
     lines: list[str] = []
@@ -129,6 +232,13 @@ def _numbered(entries: cabc.Sequence[str], *, start: int = 1) -> str:
 
 
 def _format_sections(title: str, sections: list[tuple[str, str]]) -> str:
+    """Assemble a titled diagnostic message from labelled sections.
+
+    Returns
+    -------
+    str
+        Formatted message with empty sections omitted.
+    """
     parts = [title]
     for label, body in sections:
         if not body:
@@ -142,6 +252,11 @@ def _list_expected_commands(doubles: cabc.Mapping[str, CommandDouble]) -> str:
 
     Commands registered as stubs are omitted because they are not validated as
     part of unexpected-invocation checks.
+
+    Returns
+    -------
+    str
+        A comma-separated representation of the expected commands.
     """
     names = sorted(
         name for name, dbl in doubles.items() if dbl.kind is not DoubleKind.STUB
@@ -210,8 +325,8 @@ class UnexpectedCommandVerifier:
 
         self._raise_mock_overflow_error(exp, inv, observed)
 
+    @staticmethod
     def _raise_unregistered_command_error(
-        self,
         inv: Invocation,
         doubles: cabc.Mapping[str, CommandDouble],
     ) -> None:
@@ -227,8 +342,8 @@ class UnexpectedCommandVerifier:
         )
         raise UnexpectedCommandError(msg)
 
+    @staticmethod
     def _raise_expectation_mismatch_error(
-        self,
         exp: Expectation,
         inv: Invocation,
     ) -> None:
@@ -250,8 +365,8 @@ class UnexpectedCommandVerifier:
         )
         raise UnexpectedCommandError(msg)
 
+    @staticmethod
     def _raise_mock_overflow_error(
-        self,
         exp: Expectation,
         inv: Invocation,
         observed: int,
@@ -297,8 +412,8 @@ class OrderVerifier:
             ordered_seq.extend([exp] * exp.count)
         return ordered_seq
 
+    @staticmethod
     def _get_relevant_invocations(
-        self,
         journal: cabc.Iterable[Invocation],
         ordered_seq: list[Expectation],
     ) -> list[Invocation]:
@@ -325,12 +440,7 @@ class OrderVerifier:
             expected_descriptions,
             actual_descriptions,
         )
-        self._check_order_violations(
-            ordered_seq,
-            relevant_invocations,
-            expected_descriptions,
-            actual_descriptions,
-        )
+        self._check_order_violations(ordered_seq, relevant_invocations)
         self._check_extra_invocations(
             ordered_seq,
             relevant_invocations,
@@ -338,8 +448,8 @@ class OrderVerifier:
             actual_descriptions,
         )
 
+    @staticmethod
     def _check_missing_expectations(
-        self,
         ordered_seq: list[Expectation],
         relevant_invocations: list[Invocation],
         expected_descriptions: list[str],
@@ -364,8 +474,6 @@ class OrderVerifier:
         self,
         ordered_seq: list[Expectation],
         relevant_invocations: list[Invocation],
-        expected_descriptions: list[str],
-        actual_descriptions: list[str],
     ) -> None:
         for index, (exp, actual_inv) in enumerate(
             zip(ordered_seq, relevant_invocations, strict=False)
@@ -382,8 +490,8 @@ class OrderVerifier:
             )
             return
 
+    @staticmethod
     def _check_extra_invocations(
-        self,
         ordered_seq: list[Expectation],
         relevant_invocations: list[Invocation],
         expected_descriptions: list[str],
@@ -451,12 +559,27 @@ class OrderVerifier:
 class CountVerifier:
     """Check that each expectation was met the expected number of times."""
 
+    @staticmethod
     def verify(
-        self,
         expectations: cabc.Mapping[str, Expectation],
         invocations: cabc.Mapping[str, list[Invocation]],
     ) -> None:
-        """Validate invocation counts against ``expectations``."""
+        """Validate invocation counts against ``expectations``.
+
+        Parameters
+        ----------
+        expectations : collections.abc.Mapping
+            Registered expectations keyed by command name.
+        invocations : collections.abc.Mapping
+            Recorded invocations keyed by command name.
+
+        Raises
+        ------
+        UnfulfilledExpectationError
+            If a command has fewer invocations than expected.
+        UnexpectedCommandError
+            If a command has more invocations than expected.
+        """
         for name, exp in expectations.items():
             calls = invocations.get(name, [])
             actual = len(calls)

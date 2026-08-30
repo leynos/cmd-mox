@@ -1,7 +1,5 @@
 """Shared helpers for controller tests."""
 
-# ruff: noqa: S101
-
 from __future__ import annotations
 
 import dataclasses as dc
@@ -11,6 +9,7 @@ import shutil
 import subprocess
 import typing as typ
 
+from cmd_mox import _path_utils as path_utils
 from tests.helpers.parameters import decode_placeholders
 
 RUN_TIMEOUT_SECONDS = 30
@@ -53,8 +52,13 @@ def _should_escape_batch_args(command_path: str) -> bool:
     one layer of caret escaping before our shim sees the arguments. We need to
     double carets whenever the resolved target is a batch file, even if the
     caller omitted the extension and relies on ``PATHEXT`` to find the shim.
+
+    Returns
+    -------
+    bool
+        Whether the command path invokes a Windows batch script.
     """
-    if os.name != "nt":
+    if not path_utils.IS_WINDOWS:
         return False
 
     lower = command_path.lower()
@@ -75,6 +79,11 @@ def escape_windows_batch_args(argv: list[str]) -> list[str]:
     Note: batch parsing happens twice for our shim flow (once when invoking the
     launcher and again when the launcher expands ``%*``). To preserve a literal
     caret in the final Python argv we must therefore quadruple it up-front.
+
+    Returns
+    -------
+    list[str]
+        The original arguments, with batch-file carets escaped when necessary.
     """
     if not argv or not _should_escape_batch_args(argv[0]):
         return argv
@@ -83,15 +92,21 @@ def escape_windows_batch_args(argv: list[str]) -> list[str]:
     return escaped
 
 
-def _execute_command_with_params(
+def execute_command_with_details(
     params: CommandExecution,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute a command described by *params*."""
+    """Execute a command described by *params*.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed process from running the described command.
+    """
     env = os.environ | {params.env_var: params.env_val}
     decoded_args = decode_placeholders(params.args)
     argv = [params.cmd, *shlex.split(decoded_args)]
     argv = escape_windows_batch_args(argv)
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
         argv,
         input=params.stdin,
         capture_output=True,
@@ -103,32 +118,43 @@ def _execute_command_with_params(
     )
 
 
-def execute_command_with_details(
-    mox: CmdMox, execution: CommandExecution
-) -> subprocess.CompletedProcess[str]:
-    """Run the command specified by *execution*."""
-    del mox
-    return _execute_command_with_params(execution)
-
-
 def _find_matching_journal_entry(
     mox: CmdMox, expectation: JournalEntryExpectation
 ) -> Invocation:
-    """Locate the journal entry matching *expectation*."""
-    candidates = [inv for inv in mox.journal if inv.command == expectation.cmd]
-    if expectation.args is not None:
-        decoded = decode_placeholders(expectation.args)
-        wanted_args = shlex.split(decoded)
-        candidates = [inv for inv in candidates if inv.args == wanted_args]
-    inv = candidates[-1] if candidates else None
-    if inv is None:
+    """Locate the journal entry matching *expectation*.
+
+    Returns
+    -------
+    Invocation
+        The most recent journal entry matching *expectation*.
+
+    Raises
+    ------
+    AssertionError
+        If no journal entry matches *expectation*.
+    """
+    wanted_args = (
+        None
+        if expectation.args is None
+        else shlex.split(decode_placeholders(expectation.args))
+    )
+    match = next(
+        (
+            inv
+            for inv in reversed(mox.journal)
+            if inv.command == expectation.cmd
+            and (wanted_args is None or inv.args == wanted_args)
+        ),
+        None,
+    )
+    if match is None:
         available = [(i.command, list(i.args)) for i in mox.journal]
         msg = (
             f"Journal does not contain expected entry for {expectation.cmd!r} "
             f"with args {expectation.args!r}. Available: {available!r}"
         )
         raise AssertionError(msg)
-    return inv
+    return match
 
 
 def _validate_journal_entry_fields(
@@ -144,7 +170,9 @@ def _validate_journal_entry_fields(
     for field, expected in checks.items():
         if expected is not None:
             actual = getattr(inv, field)
-            assert actual == expected, f"{field} mismatch: {actual!r} != {expected!r}"
+            assert actual == expected, (  # ruff: ignore[assert] - assertion helpers make BDD failures concise and local
+                f"{field} mismatch: {actual!r} != {expected!r}"
+            )
 
 
 def _validate_journal_entry_environment(
@@ -153,23 +181,25 @@ def _validate_journal_entry_environment(
     """Validate environment variable against expectation."""
     if expectation.env_var is not None:
         actual_env = inv.env.get(expectation.env_var)
-        assert actual_env == expectation.env_val, (
+        assert actual_env == expectation.env_val, (  # ruff: ignore[assert] - assertion helpers make BDD failures concise and local
             f"env[{expectation.env_var!r}] mismatch: "
             f"{actual_env!r} != {expectation.env_val!r}"
         )
 
 
-def _verify_journal_entry_with_expectation(
-    mox: CmdMox, expectation: JournalEntryExpectation
-) -> None:
-    """Assert journal entry for *expectation.cmd* matches provided expectation."""
-    inv = _find_matching_journal_entry(mox, expectation)
-    _validate_journal_entry_fields(inv, expectation)
-    _validate_journal_entry_environment(inv, expectation)
-
-
 def verify_journal_entry_details(
     mox: CmdMox, expectation: JournalEntryExpectation
 ) -> None:
-    """Public helper to verify journal entry details."""
-    _verify_journal_entry_with_expectation(mox, expectation)
+    """Assert that the latest matching journal entry meets an expectation.
+
+    Parameters
+    ----------
+    mox : CmdMox
+        Controller whose journal is inspected.
+    expectation : JournalEntryExpectation
+        Expected command and optional invocation details.
+
+    """
+    inv = _find_matching_journal_entry(mox, expectation)
+    _validate_journal_entry_fields(inv, expectation)
+    _validate_journal_entry_environment(inv, expectation)

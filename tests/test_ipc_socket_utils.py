@@ -6,53 +6,80 @@ import pathlib
 import socket
 import threading
 import time
+import typing as typ
 
 import pytest
 
 from cmd_mox.ipc.socket_utils import cleanup_stale_socket, wait_for_socket
 
-pytestmark = pytest.mark.requires_unix_sockets
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 
-def test_cleanup_stale_socket_noop_for_missing_path(tmp_path: pathlib.Path) -> None:
-    """Non-existent socket paths should be ignored gracefully."""
-    cleanup_stale_socket(tmp_path / "absent.sock")
+@pytest.fixture
+def bound_socket(
+    tmp_path: pathlib.Path,
+) -> cabc.Iterator[tuple[pathlib.Path, socket.socket]]:
+    """Bind a Unix socket, yielding it with its path and cleaning up after.
 
-
-def test_cleanup_stale_socket_removes_unbound_file(tmp_path: pathlib.Path) -> None:
-    """cleanup_stale_socket should unlink orphaned socket files."""
+    Yields
+    ------
+    tuple[pathlib.Path, socket.socket]
+        The bound socket's path and the socket itself.
+    """
     socket_path = tmp_path / "ipc.sock"
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(socket_path))
-    server.close()
-
-    assert socket_path.exists()
-
-    cleanup_stale_socket(socket_path)
-
-    assert not socket_path.exists()
-
-
-def test_cleanup_stale_socket_refuses_active_socket(tmp_path: pathlib.Path) -> None:
-    """cleanup_stale_socket should not remove sockets with active listeners."""
-    socket_path = tmp_path / "ipc.sock"
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(str(socket_path))
-    server.listen()
-
     try:
-        with pytest.raises(RuntimeError, match="still in use"):
-            cleanup_stale_socket(socket_path)
-        assert socket_path.exists()
+        yield socket_path, server
     finally:
         server.close()
         if socket_path.exists():
             socket_path.unlink()
 
 
+def test_cleanup_stale_socket_noop_for_missing_path(tmp_path: pathlib.Path) -> None:
+    """Non-existent socket paths should be ignored gracefully."""
+    absent = tmp_path / "absent.sock"
+
+    cleanup_stale_socket(absent)
+
+    assert not absent.exists(), "Missing socket path must not be created"
+
+
+def test_cleanup_stale_socket_removes_unbound_file(
+    bound_socket: tuple[pathlib.Path, socket.socket],
+) -> None:
+    """cleanup_stale_socket should unlink orphaned socket files."""
+    socket_path, server = bound_socket
+    server.close()
+
+    assert socket_path.exists(), "binding should leave a socket file behind"
+
+    cleanup_stale_socket(socket_path)
+
+    assert not socket_path.exists(), "an orphaned socket file should be unlinked"
+
+
+def test_cleanup_stale_socket_refuses_active_socket(
+    bound_socket: tuple[pathlib.Path, socket.socket],
+) -> None:
+    """cleanup_stale_socket should not remove sockets with active listeners."""
+    socket_path, server = bound_socket
+    server.listen()
+
+    with pytest.raises(RuntimeError, match="still in use"):
+        cleanup_stale_socket(socket_path)
+
+    assert socket_path.exists(), "an active socket must not be unlinked"
+
+
 def test_wait_for_socket_succeeds_when_server_accepts(tmp_path: pathlib.Path) -> None:
     """wait_for_socket should connect successfully once the server listens."""
     socket_path = tmp_path / "ipc.sock"
+    accepted: list[bool] = []
 
     def _serve() -> None:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
@@ -61,6 +88,7 @@ def test_wait_for_socket_succeeds_when_server_accepts(tmp_path: pathlib.Path) ->
             server.bind(str(socket_path))
             server.listen()
             conn, _ = server.accept()
+            accepted.append(True)
             conn.close()
 
     thread = threading.Thread(target=_serve)
@@ -71,6 +99,8 @@ def test_wait_for_socket_succeeds_when_server_accepts(tmp_path: pathlib.Path) ->
         thread.join()
         if socket_path.exists():
             socket_path.unlink()
+
+    assert accepted == [True], "wait_for_socket did not connect to the listener"
 
 
 def test_wait_for_socket_times_out(tmp_path: pathlib.Path) -> None:
@@ -111,4 +141,24 @@ def test_wait_for_socket_retries_until_success(
     monkeypatch.setattr("cmd_mox.ipc.socket_utils.time.sleep", lambda _duration: None)
 
     wait_for_socket(pathlib.Path("fake.sock"), timeout=0.1)
-    assert attempts[0] == 3
+    assert attempts[0] == 3, "Assertion failed"
+
+
+def test_cleanup_stale_socket_keeps_an_unreachable_socket(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """A probe denied by permissions must not delete a possibly live socket."""
+    socket_path = tmp_path / "ipc.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(socket_path))
+    server.close()
+
+    def _refuse(_self: object, _address: str) -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(socket.socket, "connect", _refuse)
+
+    with pytest.raises(PermissionError):
+        cleanup_stale_socket(socket_path)
+
+    assert socket_path.exists(), "an unreachable socket must not be unlinked"

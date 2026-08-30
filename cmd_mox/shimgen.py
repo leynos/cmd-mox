@@ -2,41 +2,72 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import logging
 import os
 import sys
+import typing as typ
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
 from cmd_mox.environment import ensure_dir_exists
 from cmd_mox.fs_retry import DEFAULT_UNLINK_RETRY, retry_unlink
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 SHIM_PATH = Path(__file__).with_name("shim.py").resolve()
-LAUNCHER_RETRY = DEFAULT_UNLINK_RETRY
 logger = logging.getLogger(__name__)
 
 
 def _escape_batch_literal(value: str) -> str:
-    """Return *value* escaped for safe inclusion inside batch quotes."""
+    """Return *value* escaped for safe inclusion inside batch quotes.
+
+    Parameters
+    ----------
+    value : str
+        Literal to escape for a Windows batch command.
+
+    Returns
+    -------
+    str
+        Escaped batch literal.
+    """
     escaped = value.replace("^", "^^").replace("%", "%%")
     return escaped.replace('"', '""')
 
 
 def _validate_not_empty(name: str, error_msg: str) -> None:
-    """Raise ``ValueError`` if *name* is empty."""
+    """Raise ``ValueError`` if *name* is empty.
+
+    Raises
+    ------
+    ValueError
+        If *name* is empty.
+    """
     if not name:
         raise ValueError(error_msg)
 
 
 def _validate_not_dot_directories(name: str, error_msg: str) -> None:
-    """Disallow ``.`` and ``..`` which change directory semantics."""
+    """Disallow ``.`` and ``..`` because they change directory semantics.
+
+    Raises
+    ------
+    ValueError
+        If *name* is ``.`` or ``..``.
+    """
     if name in {".", ".."}:
         raise ValueError(error_msg)
 
 
 def _validate_no_path_separators(name: str, error_msg: str) -> None:
-    """Ensure *name* contains no path separators for portability."""
+    """Ensure *name* contains no path separators for portability.
+
+    Raises
+    ------
+    ValueError
+        If *name* contains a host or alternate path separator.
+    """
     separators = {"/", "\\", os.sep}
     if os.altsep:
         separators.add(os.altsep)
@@ -45,13 +76,19 @@ def _validate_no_path_separators(name: str, error_msg: str) -> None:
 
 
 def _validate_no_nul_bytes(name: str, error_msg: str) -> None:
-    """Reject names containing NUL bytes to avoid truncation."""
+    """Reject names containing NUL bytes to avoid truncation.
+
+    Raises
+    ------
+    ValueError
+        If *name* contains a NUL byte.
+    """
     if "\x00" in name:
         raise ValueError(error_msg)
 
 
 def _validate_command_name(name: str) -> None:
-    """Validate *name* is a safe command filename."""
+    """Validate *name* as a safe command filename."""
     error_msg = f"Invalid command name: {name!r}"
 
     validators: list[cabc.Callable[[str, str], None]] = [
@@ -65,12 +102,18 @@ def _validate_command_name(name: str) -> None:
 
 
 def _normalize_command_name(name: str) -> str:
-    """Return a filesystem-safe comparison key for *name*."""
+    """Return a filesystem-safe comparison key for *name*."""  # ruff: ignore[docstring-missing-returns] - private normalizer has an obvious string return
     return name.casefold() if path_utils.IS_WINDOWS else name
 
 
 def _validate_command_uniqueness(commands: list[str]) -> None:
-    """Ensure *commands* do not collide when case-insensitive filesystems apply."""
+    """Ensure *commands* do not collide on case-insensitive filesystems.
+
+    Raises
+    ------
+    ValueError
+        If two command names resolve to the same comparison key.
+    """
     seen: set[str] = set()
     for name in commands:
         key = _normalize_command_name(name)
@@ -84,7 +127,20 @@ def _validate_command_uniqueness(commands: list[str]) -> None:
 
 
 def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
-    """Return the batch script contents to invoke ``shim.py`` on Windows."""
+    """Return batch script contents that invoke ``shim.py`` on Windows.
+
+    Parameters
+    ----------
+    python_executable : str
+        Python executable used by the launcher.
+    shim_path : pathlib.Path
+        Path to the generic shim script.
+
+    Returns
+    -------
+    str
+        Complete Windows batch script.
+    """
     escaped_python = _escape_batch_literal(python_executable)
     escaped_shim = _escape_batch_literal(os.fspath(shim_path))
     return (
@@ -99,14 +155,33 @@ def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
 
 
 def _validate_launcher_path(launcher: Path) -> None:
-    """Validate that *launcher* path can be used for a new .cmd file."""
+    """Validate that *launcher* can be used for a new ``.cmd`` file.
+
+    Raises
+    ------
+    FileExistsError
+        If an existing path is not a regular file.
+    """
     if launcher.exists() and not launcher.is_file():
         msg = f"{launcher} already exists and is not a file"
         raise FileExistsError(msg)
 
 
 def _launcher_unlink_error(path: Path, exc: Exception) -> FileExistsError:
-    """Return a descriptive exception when launcher removal exhausts retries."""
+    """Return an exception for an exhausted launcher-removal retry.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Launcher that could not be removed.
+    exc : Exception
+        Final error reported by the removal attempt.
+
+    Returns
+    -------
+    FileExistsError
+        Descriptive error for the caller to raise.
+    """
     msg = (
         f"Failed to remove existing launcher {path!r}: {exc}\n"
         "The file may be in use or locked. Please close any "
@@ -116,12 +191,26 @@ def _launcher_unlink_error(path: Path, exc: Exception) -> FileExistsError:
 
 
 def _create_windows_shim(directory: Path, name: str) -> Path:
-    """Create a ``.cmd`` launcher for *name* that reuses :mod:`cmd_mox.shim`."""
+    """Create a ``.cmd`` launcher for *name* using :mod:`cmd_mox.shim`.
+
+    Parameters
+    ----------
+    directory : pathlib.Path
+        Directory in which to create the launcher.
+    name : str
+        Command name represented by the launcher.
+
+    Returns
+    -------
+    pathlib.Path
+        Created launcher path.
+
+    """
     launcher = directory / f"{name}.cmd"
     _validate_launcher_path(launcher)
     retry_unlink(
         launcher,
-        config=LAUNCHER_RETRY,
+        config=DEFAULT_UNLINK_RETRY,
         logger=logger,
         exc_factory=_launcher_unlink_error,
     )
@@ -134,7 +223,25 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
 
 
 def _create_posix_symlink(directory: Path, name: str) -> Path:
-    """Create a POSIX symlink for *name* pointing at :data:`SHIM_PATH`."""
+    """Create a POSIX symlink for *name* pointing at :data:`SHIM_PATH`.
+
+    Parameters
+    ----------
+    directory : pathlib.Path
+        Directory in which to create the link.
+    name : str
+        Command name represented by the link.
+
+    Returns
+    -------
+    pathlib.Path
+        Created symlink path.
+
+    Raises
+    ------
+    FileExistsError
+        If an existing path is not a symlink.
+    """
     link = directory / name
     if os.path.lexists(link):
         if not link.is_symlink():
@@ -151,7 +258,15 @@ def _validate_shim_directory(directory: Path) -> None:
 
 
 def _ensure_shim_template_ready(shim_path: Path) -> None:
-    """Validate *shim_path* exists and is executable."""
+    """Validate *shim_path* exists and is executable.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the template does not exist.
+    PermissionError
+        If the template cannot be made executable.
+    """
     if not shim_path.exists():
         msg = f"Shim template not found: {shim_path}"
         raise FileNotFoundError(msg)
@@ -166,7 +281,14 @@ def _ensure_shim_template_ready(shim_path: Path) -> None:
 
 
 def _create_shim_for_command(directory: Path, name: str) -> Path:
-    """Create a platform-appropriate shim for *name* in *directory*."""
+    """Create a platform-appropriate shim for *name* in *directory*.
+
+    Returns
+    -------
+    pathlib.Path
+        Created launcher or symlink path.
+
+    """
     _validate_command_name(name)
     if path_utils.IS_WINDOWS:
         return _create_windows_shim(directory, name)
@@ -184,6 +306,11 @@ def create_shim_symlinks(
         Directory where shims will be created. It must already exist.
     commands:
         Command names (e.g. "git", "curl") for which to create shims.
+
+    Returns
+    -------
+    dict[str, Path]
+        The created shim path for each requested command.
     """
     _validate_shim_directory(directory)
     _ensure_shim_template_ready(SHIM_PATH)
@@ -193,3 +320,53 @@ def create_shim_symlinks(
     for name in command_list:
         mapping[name] = _create_shim_for_command(directory, name)
     return mapping
+
+
+def is_broken_symlink(path: Path) -> bool:
+    """Return ``True`` when *path* is a symlink whose target is missing.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Filesystem path to inspect.
+
+    Returns
+    -------
+    bool
+        ``True`` when *path* is a dangling symlink.
+    """
+    return path.is_symlink() and not path.exists()
+
+
+def is_shim_healthy(shim_path: Path) -> bool:
+    """Return ``True`` when the shim already points to a valid target.
+
+    Parameters
+    ----------
+    shim_path : pathlib.Path
+        Path to the shim to inspect.
+
+    Returns
+    -------
+    bool
+        ``True`` when *shim_path* is an intact symlink needing no repair.
+    """
+    if not shim_path.is_symlink():
+        return False
+    return not is_broken_symlink(shim_path)
+
+
+def has_non_symlink_collision(shim_path: Path) -> bool:
+    """Return ``True`` when a non-symlink file blocks shim creation.
+
+    Parameters
+    ----------
+    shim_path : pathlib.Path
+        Path where the shim would be created.
+
+    Returns
+    -------
+    bool
+        ``True`` when *shim_path* exists but is not a symlink.
+    """
+    return shim_path.exists() and not shim_path.is_symlink()

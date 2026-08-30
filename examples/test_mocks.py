@@ -18,14 +18,14 @@ def test_mock_enforces_args_and_call_count(cmd_mox: CmdMox) -> None:
     """Mocks require exact arguments and can enforce call counts."""
     cmd_mox.mock("git").with_args("status").returns(stdout="ok").times(2)
 
-    first = subprocess.run(  # noqa: S603 - command path derives from the shim setup
+    first = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup
         [resolve_command("git"), "status"],
         capture_output=True,
         text=True,
         check=True,
         shell=False,
     )
-    second = subprocess.run(  # noqa: S603 - command path derives from the shim setup
+    second = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup
         [resolve_command("git"), "status"],
         capture_output=True,
         text=True,
@@ -33,8 +33,8 @@ def test_mock_enforces_args_and_call_count(cmd_mox: CmdMox) -> None:
         shell=False,
     )
 
-    assert first.stdout == "ok"
-    assert second.stdout == "ok"
+    assert first.stdout == "ok", "Assertion failed"
+    assert second.stdout == "ok", "Assertion failed"
 
 
 def test_mock_with_matching_args(cmd_mox: CmdMox) -> None:
@@ -43,7 +43,7 @@ def test_mock_with_matching_args(cmd_mox: CmdMox) -> None:
         stdout="fetched"
     )
 
-    result = subprocess.run(  # noqa: S603 - command path derives from the shim setup
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup
         [resolve_command("curl"), "--url=https://example.com"],
         capture_output=True,
         text=True,
@@ -51,4 +51,4 @@ def test_mock_with_matching_args(cmd_mox: CmdMox) -> None:
         shell=False,
     )
 
-    assert result.stdout == "fetched"
+    assert result.stdout == "fetched", "Assertion failed"

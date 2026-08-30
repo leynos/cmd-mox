@@ -6,7 +6,6 @@ lets both the pytest plug-in and external test suites react consistently.
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import os
 import sys
 import typing as typ
@@ -30,12 +29,25 @@ _PYTEST_REQUIRED_MESSAGE: typ.Final[str] = (
 
 
 def _normalize_platform(platform: str) -> str:
-    """Return a lowercase version of *platform* suitable for prefix checks."""
+    """Return a normalized platform name suitable for prefix checks.
+
+    Returns
+    -------
+    str
+        *platform* stripped of surrounding whitespace and lower-cased.
+    """
     return platform.strip().lower()
 
 
 def _current_platform(platform: str | None = None) -> str:
-    """Return the effective platform name, honouring test overrides."""
+    """Return the effective platform name, honouring test overrides.
+
+    Returns
+    -------
+    str
+        The normalized explicit *platform*, the override environment variable,
+        or ``sys.platform``, in that order of precedence.
+    """
     if platform:
         return _normalize_platform(platform)
 
@@ -121,8 +133,7 @@ def skip_if_unsupported(
     except ModuleNotFoundError as exc:  # pragma: no cover - pytest is a test dep
         raise RuntimeError(_PYTEST_REQUIRED_MESSAGE) from exc
 
-    skip = typ.cast("cabc.Callable[[str], typ.NoReturn]", pytest.skip)
-    skip(skip_reason)  # ty misreads @_with_exception
+    pytest.skip(skip_reason)
 
 
 __all__ = (

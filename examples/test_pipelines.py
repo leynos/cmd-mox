@@ -23,12 +23,14 @@ def test_pipeline_composes_multiple_mocks(cmd_mox: CmdMox) -> None:
     cmd_mox.mock("grep").with_args("foo", "file.txt").returns(stdout="c a b")
     cmd_mox.mock("sort").with_args("-r").with_stdin("c a b").returns(stdout="c b a")
 
-    result = subprocess.run(  # noqa: S602
-        "grep foo file.txt | sort -r",  # noqa: S607
+    result = subprocess.run(  # ruff: ignore[subprocess-popen-with-shell-equals-true] - the example intentionally exercises shell pipeline behaviour
+        "grep foo file.txt | sort -r",  # ruff: ignore[start-process-with-partial-path] - the example intentionally validates PATH command resolution
         capture_output=True,
         text=True,
         check=True,
         shell=True,
     )
 
-    assert result.stdout.strip() == "c b a"
+    assert result.stdout.strip() == "c b a", (
+        "pipeline should output the sort -r result 'c b a'"
+    )

@@ -18,7 +18,7 @@ def test_ipc_public_api_exports_expected_symbols() -> None:
         "RetryConfig",
     }
 
-    assert expected.issubset(set(ipc.__all__))
+    assert expected.issubset(set(ipc.__all__)), "Assertion failed"
 
 
 def test_message_kinds_align_with_constants() -> None:
@@ -29,7 +29,9 @@ def test_message_kinds_align_with_constants() -> None:
         MESSAGE_KINDS,
     )
 
-    assert set(MESSAGE_KINDS) == {KIND_INVOCATION, KIND_PASSTHROUGH_RESULT}
+    assert set(MESSAGE_KINDS) == {KIND_INVOCATION, KIND_PASSTHROUGH_RESULT}, (
+        "Assertion failed"
+    )
 
 
 def test_random_alias_points_to_client_random() -> None:
@@ -37,4 +39,4 @@ def test_random_alias_points_to_client_random() -> None:
     from cmd_mox.ipc import client as client_module
     from cmd_mox.ipc import random
 
-    assert random is client_module.random
+    assert random is client_module.random, "Assertion failed"

@@ -17,7 +17,7 @@ if typ.TYPE_CHECKING:
     from pathlib import Path
 
 
-@dc.dataclass
+@dc.dataclass(slots=True)
 class RecordingSpec:
     """Optional overrides for building a RecordedInvocation."""
 
@@ -31,7 +31,13 @@ def _build_recording(
     args: list[str],
     spec: RecordingSpec | None = None,
 ) -> RecordedInvocation:
-    """Build a RecordedInvocation with sensible defaults."""
+    """Build a RecordedInvocation with sensible defaults.
+
+    Returns
+    -------
+    RecordedInvocation
+        A recording for *command* with the supplied or default overrides.
+    """
     s = spec or RecordingSpec()
     return RecordedInvocation(
         sequence=s.sequence,
@@ -51,7 +57,13 @@ def _save_fixture(
     tmp_path: Path,
     recordings: list[RecordedInvocation],
 ) -> Path:
-    """Persist a fixture file and return its path."""
+    """Persist a fixture file and return its path.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     fixture = FixtureFile(
         version=FixtureFile.SCHEMA_VERSION,
         metadata=FixtureMetadata.create(),
@@ -71,7 +83,13 @@ def _save_fixture(
     target_fixture="replay_fixture_path",
 )
 def fixture_with_single_recording(tmp_path: Path, cmd: str, args: str) -> Path:
-    """Create a fixture file with a single recording."""
+    """Create a fixture file with a single recording.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     rec = _build_recording(cmd, args.split())
     return _save_fixture(tmp_path, [rec])
 
@@ -83,7 +101,13 @@ def fixture_with_single_recording(tmp_path: Path, cmd: str, args: str) -> Path:
     target_fixture="replay_fixture_path",
 )
 def fixture_with_n_recordings(tmp_path: Path, count: int, cmd: str, args: str) -> Path:
-    """Create a fixture file with *count* identical recordings."""
+    """Create a fixture file with *count* identical recordings.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     recs = [
         _build_recording(cmd, args.split(), RecordingSpec(sequence=i))
         for i in range(count)
@@ -104,7 +128,13 @@ def fixture_with_stdin_and_env(
     stdin: str,
     env_kv: str,
 ) -> Path:
-    """Create a fixture file with specific stdin and env_subset."""
+    """Create a fixture file with specific stdin and env_subset.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     cmd, *args = invocation.split()
     key, _, value = env_kv.partition("=")
     rec = _build_recording(
@@ -121,7 +151,13 @@ def fixture_with_stdin_and_env(
     target_fixture="replay_fixture_path",
 )
 def fixture_with_env_specificity(tmp_path: Path, invocation: str) -> Path:
-    """Create a fixture with two recordings: one generic, one with env_subset."""
+    """Create a fixture with two recordings: one generic, one with env_subset.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     cmd, *args = invocation.split()
     recs = [
         # Generic recording with no env_subset
@@ -150,7 +186,13 @@ def fixture_with_env_specificity(tmp_path: Path, invocation: str) -> Path:
     target_fixture="replay_fixture_path",
 )
 def fixture_with_different_stdin(tmp_path: Path, invocation: str) -> Path:
-    """Create a fixture with two recordings: different stdin values."""
+    """Create a fixture with two recordings: different stdin values.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
     cmd, *args = invocation.split()
     recs = [
         _build_recording(cmd, args, RecordingSpec(sequence=0, stdin="other")),
@@ -167,7 +209,13 @@ def fixture_with_different_stdin(tmp_path: Path, invocation: str) -> Path:
     target_fixture="replay_session",
 )
 def replay_session_strict(replay_fixture_path: Path) -> ReplaySession:
-    """Create a strict-mode ReplaySession."""
+    """Create a strict-mode ReplaySession.
+
+    Returns
+    -------
+    ReplaySession
+        A session configured with strict matching enabled.
+    """
     return ReplaySession(replay_fixture_path, strict_matching=True)
 
 
@@ -176,7 +224,13 @@ def replay_session_strict(replay_fixture_path: Path) -> ReplaySession:
     target_fixture="replay_session",
 )
 def replay_session_fuzzy(replay_fixture_path: Path) -> ReplaySession:
-    """Create a fuzzy-mode ReplaySession."""
+    """Create a fuzzy-mode ReplaySession.
+
+    Returns
+    -------
+    ReplaySession
+        A session configured with fuzzy matching enabled.
+    """
     return ReplaySession(replay_fixture_path, strict_matching=False)
 
 
@@ -189,6 +243,35 @@ def load_replay_session(replay_session: ReplaySession) -> None:
     replay_session.load()
 
 
+@dc.dataclass(slots=True)
+class _ReplayMatchRequest:
+    """Normalized data for one replay match request."""
+
+    command: str
+    args: list[str]
+    stdin: str = ""
+    env: dict[str, str] | None = None
+
+
+def _match_replay(
+    replay_session: ReplaySession, request: _ReplayMatchRequest
+) -> Response | None:
+    """Match one normalized invocation against the replay session.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
+    invocation = Invocation(
+        command=request.command,
+        args=request.args,
+        stdin=request.stdin,
+        env={} if request.env is None else request.env,
+    )
+    return replay_session.match(invocation)
+
+
 @when(
     parsers.parse('a replay invocation of "{cmd}" with args "{args}" is matched'),
     target_fixture="replay_match_result",
@@ -196,9 +279,16 @@ def load_replay_session(replay_session: ReplaySession) -> None:
 def match_replay_invocation(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match an invocation against the replay session."""
-    inv = Invocation(command=cmd, args=args.split(), stdin="", env={})
-    return replay_session.match(inv)
+    """Match an invocation against the replay session.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
+    return _match_replay(
+        replay_session, _ReplayMatchRequest(command=cmd, args=args.split())
+    )
 
 
 @when(
@@ -208,9 +298,16 @@ def match_replay_invocation(
 def match_replay_invocation_again(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match a second invocation against the replay session."""
-    inv = Invocation(command=cmd, args=args.split(), stdin="", env={})
-    return replay_session.match(inv)
+    """Match a second invocation against the replay session.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
+    return _match_replay(
+        replay_session, _ReplayMatchRequest(command=cmd, args=args.split())
+    )
 
 
 @when(
@@ -223,14 +320,22 @@ def match_replay_invocation_again(
 def match_replay_with_different_stdin_env(
     replay_session: ReplaySession, cmd: str, args: str
 ) -> Response | None:
-    """Match an invocation with deliberately different stdin and env."""
-    inv = Invocation(
-        command=cmd,
-        args=args.split(),
-        stdin="completely different",
-        env={"OTHER_KEY": "other_value"},
+    """Match an invocation with deliberately different stdin and env.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
+    return _match_replay(
+        replay_session,
+        _ReplayMatchRequest(
+            command=cmd,
+            args=args.split(),
+            stdin="completely different",
+            env={"OTHER_KEY": "other_value"},
+        ),
     )
-    return replay_session.match(inv)
 
 
 @when(
@@ -242,11 +347,19 @@ def match_replay_with_different_stdin_env(
 def match_replay_with_env(
     replay_session: ReplaySession, invocation: str, env_kv: str
 ) -> Response | None:
-    """Match an invocation with specific environment."""
+    """Match an invocation with specific environment.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
     cmd, *args = invocation.split()
     key, _, value = env_kv.partition("=")
-    inv = Invocation(command=cmd, args=args, stdin="", env={key: value, "EXTRA": "val"})
-    return replay_session.match(inv)
+    return _match_replay(
+        replay_session,
+        _ReplayMatchRequest(command=cmd, args=args, env={key: value, "EXTRA": "val"}),
+    )
 
 
 @when(
@@ -258,10 +371,17 @@ def match_replay_with_env(
 def match_replay_with_stdin(
     replay_session: ReplaySession, invocation: str, stdin: str
 ) -> Response | None:
-    """Match an invocation with specific stdin."""
+    """Match an invocation with specific stdin.
+
+    Returns
+    -------
+    Response | None
+        The matched response, or ``None`` if no recording matched.
+    """
     cmd, *args = invocation.split()
-    inv = Invocation(command=cmd, args=args, stdin=stdin, env={})
-    return replay_session.match(inv)
+    return _match_replay(
+        replay_session, _ReplayMatchRequest(command=cmd, args=args, stdin=stdin)
+    )
 
 
 # -- Then steps ---------------------------------------------------------------
@@ -270,17 +390,17 @@ def match_replay_with_stdin(
 @then(parsers.parse('the replay match result is a response with stdout "{stdout}"'))
 def replay_result_has_stdout(replay_match_result: Response | None, stdout: str) -> None:
     """Assert the match result is a Response with expected stdout."""
-    assert replay_match_result is not None
-    assert isinstance(replay_match_result, Response)
+    assert replay_match_result is not None, "Assertion failed"
+    assert isinstance(replay_match_result, Response), "Assertion failed"
     # Gherkin passes escape sequences as literal characters.
     expected = stdout.encode("utf-8").decode("unicode_escape")
-    assert replay_match_result.stdout == expected
+    assert replay_match_result.stdout == expected, "Assertion failed"
 
 
 @then("the replay match result is None")
 def replay_result_is_none(replay_match_result: Response | None) -> None:
     """Assert the match result is None."""
-    assert replay_match_result is None
+    assert replay_match_result is None, "Assertion failed"
 
 
 @then("all replay recordings are consumed")
@@ -305,24 +425,24 @@ def verify_raises(replay_session: ReplaySession) -> None:
 @then("the replay match result is the more specific recording")
 def replay_result_is_specific(replay_match_result: Response | None) -> None:
     """Assert the match result is the recording with env_subset."""
-    assert replay_match_result is not None
-    assert replay_match_result.stdout == "specific\n"
+    assert replay_match_result is not None, "Assertion failed"
+    assert replay_match_result.stdout == "specific\n", "Assertion failed"
 
 
 @then("the generic recording remains unconsumed")
 def generic_recording_unconsumed(replay_session: ReplaySession) -> None:
     """Assert that index 0 (generic recording) was not consumed."""
-    assert not replay_session.is_consumed(0)
+    assert not replay_session.is_consumed(0), "Assertion failed"
 
 
 @then("the replay match result is the recording with matching stdin")
 def replay_result_matches_stdin(replay_match_result: Response | None) -> None:
     """Assert the match result is the recording with matching stdin."""
-    assert replay_match_result is not None
-    assert replay_match_result.stdout == "right\n"
+    assert replay_match_result is not None, "Assertion failed"
+    assert replay_match_result.stdout == "right\n", "Assertion failed"
 
 
 @then("the other recording remains unconsumed")
 def other_recording_unconsumed(replay_session: ReplaySession) -> None:
     """Assert that index 0 (the other recording) was not consumed."""
-    assert not replay_session.is_consumed(0)
+    assert not replay_session.is_consumed(0), "Assertion failed"

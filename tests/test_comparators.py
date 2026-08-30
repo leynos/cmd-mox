@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections.abc as cabc
 import re
 import typing as typ
 from types import SimpleNamespace
@@ -25,6 +24,9 @@ from cmd_mox.ipc import Invocation
 from cmd_mox.test_doubles import CommandDouble, DoubleKind
 from cmd_mox.verifiers import UnexpectedCommandVerifier
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 
 @pytest.mark.parametrize(
     ("matcher", "good", "bad", "expected_repr"),
@@ -37,15 +39,15 @@ from cmd_mox.verifiers import UnexpectedCommandVerifier
 )
 def test_matchers_match_and_repr(
     matcher: cabc.Callable[[typ.Any], bool],
-    good: typ.Any,  # noqa: ANN401
-    bad: typ.Any,  # noqa: ANN401
+    good: typ.Any,  # ruff: ignore[any-type] - test cases deliberately accept values of multiple runtime types
+    bad: typ.Any,  # ruff: ignore[any-type] - test cases deliberately accept values of multiple runtime types
     expected_repr: str,
 ) -> None:
     """Matchers evaluate values and provide helpful reprs."""
-    assert matcher(good)
+    assert matcher(good), "Assertion failed"
     if bad is not None:
-        assert not matcher(bad)
-    assert repr(matcher) == expected_repr
+        assert not matcher(bad), "Assertion failed"
+    assert repr(matcher) == expected_repr, "Assertion failed"
 
 
 class CustomType:
@@ -57,11 +59,17 @@ class CustomType:
 def test_is_a_repr_with_custom_type() -> None:
     """User-defined classes show their fully-qualified name in repr."""
     expected = f"IsA(typ=<class '{CustomType.__module__}.{CustomType.__qualname__}'>)"
-    assert repr(IsA(CustomType)) == expected
+    assert repr(IsA(CustomType)) == expected, "Assertion failed"
 
 
 def _mock_double(expectation: Expectation) -> CommandDouble:
-    """Return a typed mock CommandDouble stub exposing the provided expectation."""
+    """Return a typed mock CommandDouble stub exposing the provided expectation.
+
+    Returns
+    -------
+    CommandDouble
+        A stub double of kind ``MOCK`` carrying *expectation*.
+    """
     return typ.cast(
         "CommandDouble",
         SimpleNamespace(
@@ -76,9 +84,9 @@ def test_regex_matches_and_repr() -> None:
     """Regex matches via search and exposes its pattern."""
     pattern = r"^foo\d$"
     matcher = Regex(pattern)
-    assert matcher("foo1")
-    assert not matcher("bar")
-    assert repr(matcher) == f"Regex(pattern={pattern!r})"
+    assert matcher("foo1"), "Assertion failed"
+    assert not matcher("bar"), "Assertion failed"
+    assert repr(matcher) == f"Regex(pattern={pattern!r})", "Assertion failed"
 
 
 @pytest.mark.parametrize(
@@ -95,7 +103,7 @@ def test_regex_matches_and_repr() -> None:
 def test_is_a_edge_cases(value: object, *, expected: bool) -> None:
     """IsA handles unexpected value types gracefully."""
     matcher = IsA(int)
-    assert matcher(value) is expected  # type: ignore[arg-type, ty:invalid-argument-type]
+    assert matcher(value) is expected, "Assertion failed"  # type: ignore[arg-type, ty:invalid-argument-type]
 
 
 def test_regex_invalid_pattern_raises() -> None:
@@ -115,11 +123,11 @@ def test_regex_non_string_input(value: object) -> None:
 def test_predicate_matches_and_repr() -> None:
     """Predicate delegates to the provided function."""
     matcher = Predicate(str.isupper)
-    assert matcher("HELLO")
-    assert not matcher("hi")
+    assert matcher("HELLO"), "Assertion failed"
+    assert not matcher("hi"), "Assertion failed"
     rep = repr(matcher)
-    assert rep.startswith("Predicate(func=<")
-    assert rep.endswith(")")
+    assert rep.startswith("Predicate(func=<"), "Assertion failed"
+    assert rep.endswith(")"), "Assertion failed"
 
 
 def test_predicate_raises_exception() -> None:
@@ -137,9 +145,9 @@ def test_predicate_raises_exception() -> None:
 def test_predicate_non_boolean_return() -> None:
     """Predicate coerces the function result to bool."""
     matcher_true = Predicate(lambda _: "not a bool")
-    assert matcher_true("anything")
+    assert matcher_true("anything"), "Assertion failed"
     matcher_false = Predicate(lambda _: "")
-    assert not matcher_false("anything")
+    assert not matcher_false("anything"), "Assertion failed"
 
 
 def test_expectation_with_matchers() -> None:
@@ -158,7 +166,7 @@ def test_expectation_with_matchers() -> None:
         stdin="",
         env={},
     )
-    assert exp.matches(inv)
+    assert exp.matches(inv), "Assertion failed"
 
 
 @pytest.mark.parametrize(
@@ -173,7 +181,7 @@ def test_expectation_with_matchers_failure(args: list[str]) -> None:
     """Expectation fails when arguments do not satisfy matchers."""
     exp = Expectation("cmd").with_matching_args(IsA(int), Contains("foo"))
     inv = Invocation(command="cmd", args=args, stdin="", env={})
-    assert not exp.matches(inv)
+    assert not exp.matches(inv), "Assertion failed"
 
 
 def test_expectation_with_matchers_failure_message() -> None:
@@ -184,7 +192,9 @@ def test_expectation_with_matchers_failure_message() -> None:
     dbl = _mock_double(exp)
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
-    assert "arg[0]='oops' failed IsA(typ=<class 'int'>)" in str(excinfo.value)
+    assert "arg[0]='oops' failed IsA(typ=<class 'int'>)" in str(excinfo.value), (
+        "Assertion failed"
+    )
 
 
 def test_expectation_matcher_exception_returns_false() -> None:
@@ -195,7 +205,7 @@ def test_expectation_matcher_exception_returns_false() -> None:
 
     exp = Expectation("cmd").with_matching_args(Predicate(boom))
     inv = Invocation(command="cmd", args=["x"], stdin="", env={})
-    assert not exp.matches(inv)
+    assert not exp.matches(inv), "Assertion failed"
 
 
 def test_expectation_matcher_exception_message() -> None:
@@ -211,8 +221,8 @@ def test_expectation_matcher_exception_message() -> None:
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
     msg = str(excinfo.value)
-    assert "arg[0] predicate" in msg
-    assert "ValueError: boom" in msg
+    assert "arg[0] predicate" in msg, "Assertion failed"
+    assert "ValueError: boom" in msg, "Assertion failed"
 
 
 def test_expectation_stdin_predicate_failure_message() -> None:
@@ -223,7 +233,7 @@ def test_expectation_stdin_predicate_failure_message() -> None:
     dbl = _mock_double(exp)
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
-    assert "stdin 'nope' failed" in str(excinfo.value)
+    assert "stdin 'nope' failed" in str(excinfo.value), "Assertion failed"
 
 
 def test_expectation_env_mismatch_message() -> None:
@@ -234,11 +244,11 @@ def test_expectation_env_mismatch_message() -> None:
     dbl = _mock_double(exp)
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
-    assert "env['FOO']='baz' != 'bar'" in str(excinfo.value)
+    assert "env['FOO']='baz' != 'bar'" in str(excinfo.value), "Assertion failed"
 
 
 def test_expectation_command_mismatch_message() -> None:
     """Explain mismatch when command names differ."""
     exp = Expectation("cmd")
     inv = Invocation(command="other", args=[], stdin="", env={})
-    assert exp.explain_mismatch(inv) == "command 'other' != 'cmd'"
+    assert exp.explain_mismatch(inv) == "command 'other' != 'cmd'", "Assertion failed"
