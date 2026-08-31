@@ -294,10 +294,12 @@ which delegates to the shared reusable workflow
 `leynos/shared-actions/.github/workflows/mutation-mutmut.yml`. The heavy
 lifting — running `mutmut` and summarizing survivors — lives in
 `shared-actions`; this repository carries only declarative configuration. The
-run is **informational only**: it never gates a pull request. Survivors are
-reported through the job summary and downloadable artefacts so they can be
-triaged into tests, not enforced as a blocking check. The mutation targets and
-test selection themselves are configured in `[tool.mutmut]` in
+run is **informational only**: its results never gate pull requests. The
+separate contract test does gate pull requests when the caller drifts, as
+described below. Survivors are reported through the job summary and
+downloadable artefacts so they can be triaged into tests, not enforced as a
+blocking check. The mutation targets and test selection themselves are
+configured in `[tool.mutmut]` in
 `pyproject.toml` (`source_paths`, `pytest_add_cli_args_test_selection`,
 `runner`).
 
