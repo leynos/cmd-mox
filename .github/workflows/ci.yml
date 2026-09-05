@@ -86,7 +86,7 @@ jobs:
       # the work and the CodeScene upload for the same commit.
       - name: Generate coverage
         if: matrix.run-windows-smoke == false && github.event_name == 'pull_request'
-        uses: leynos/shared-actions/.github/actions/generate-coverage@794e4801babcf68065c660fdf4781ad62be5d061
+        uses: leynos/shared-actions/.github/actions/generate-coverage@7cb894fe62c40951cccf33819548095e64a1291e
         with:
           output-path: coverage.xml
           format: cobertura
@@ -101,7 +101,7 @@ jobs:
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: matrix.run-windows-smoke == false && env.CS_ACCESS_TOKEN != '' && github.event_name == 'pull_request'
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@794e4801babcf68065c660fdf4781ad62be5d061
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@7cb894fe62c40951cccf33819548095e64a1291e
         with:
           format: cobertura
           mode: check
