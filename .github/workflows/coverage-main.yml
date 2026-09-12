@@ -33,7 +33,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
 
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@7cb894fe62c40951cccf33819548095e64a1291e
+        uses: leynos/shared-actions/.github/actions/generate-coverage@6b5cdc2d4c0bb72cafd5a66d24d248ac25827db9
         with:
           output-path: coverage.xml
           format: cobertura
@@ -44,7 +44,7 @@ jobs:
 
       - name: Upload coverage data to CodeScene
         if: env.CS_ACCESS_TOKEN
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@7cb894fe62c40951cccf33819548095e64a1291e
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@6b5cdc2d4c0bb72cafd5a66d24d248ac25827db9
         with:
           format: cobertura
           path: coverage.xml
