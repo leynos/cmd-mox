@@ -106,9 +106,9 @@ that the committed snapshots are verified rather than rewritten.
 
 The development dependency group includes
 [Hypothesis](https://hypothesis.readthedocs.io/) (`hypothesis>=6`), which
-generates inputs for property-based tests: rather than asserting a fixed
-table of examples, a property states an invariant that must hold across a
-broad input space.
+generates inputs for property-based tests: rather than asserting a fixed table
+of examples, a property states an invariant that must hold across a broad input
+space.
 
 `cmd_mox/unittests/test_command_double_matches.py` uses it to exercise
 `CommandDouble.matches`, generating command-name pairs to check that a double
@@ -145,11 +145,10 @@ dispatch:
   standard streams, environments, socket paths, and exception messages must
   never be logged.
 
-`CommandDouble.matches` must reject an `Invocation` whose `command` differs
-from `CommandDouble.name`. It performs that command-name check before
-expectation matching and must not invoke expectation matching for a different
-command. This prevents a double from accepting an invocation owned by another
-command.
+`CommandDouble.matches` must reject an `Invocation` whose `command` differs from
+`CommandDouble.name`. It performs that command-name check before expectation
+matching and must not invoke expectation matching for a different command. This
+prevents a double from accepting an invocation owned by another command.
 
 ## Spelling policy
 
@@ -299,15 +298,14 @@ separate contract test does gate pull requests when the caller drifts, as
 described below. Survivors are reported through the job summary and
 downloadable artefacts so they can be triaged into tests, not enforced as a
 blocking check. The mutation targets and test selection themselves are
-configured in `[tool.mutmut]` in
-`pyproject.toml` (`source_paths`, `pytest_add_cli_args_test_selection`,
-`runner`).
+configured in `[tool.mutmut]` in `pyproject.toml` (`source_paths`,
+`pytest_add_cli_args_test_selection`, `runner`).
 
 The workflow runs in two modes. A **daily schedule** fires a change-scoped run
 that mutates only the source files touched within the detection window, so
 quiet days are cheap no-ops. A **manual dispatch** (the Actions "Run workflow"
-control) mutates the whole package; select a branch in that control to
-exercise a feature branch.
+control) mutates the whole package; select a branch in that control to exercise
+a feature branch.
 
 The caller passes two configuration inputs:
 
@@ -325,12 +323,11 @@ without any accompanying test edit.
 
 Because the caller is configuration rather than code, a contract test in
 `tests/test_workflow_contract.py` pins the shape it must uphold, failing the
-pull request when the caller drifts — repointing the pin at a branch,
-widening the token scope, or dropping a configuration input — rather than
-letting the breakage surface only in a scheduled run. The test module
-self-skips when the workflow file is absent (mutmut copies the sources into a
-sandbox that omits `.github/`, so the contract test does not run there). Run
-it locally with:
+pull request when the caller drifts — repointing the pin at a branch, widening
+the token scope, or dropping a configuration input — rather than letting the
+breakage surface only in a scheduled run. The test module self-skips when the
+workflow file is absent (mutmut copies the sources into a sandbox that omits
+`.github/`, so the contract test does not run there). Run it locally with:
 
 ```bash
 uv run pytest tests/test_workflow_contract.py -v

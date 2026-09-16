@@ -824,17 +824,17 @@ with CustomIPCServer(socket_path):
     ...
 ```
 
-The same dispatch contract applies to both the Unix-domain-socket transport
-and the Windows named-pipe transport. Use callbacks for simple composition and
+The same dispatch contract applies to both the Unix-domain-socket transport and
+the Windows named-pipe transport. Use callbacks for simple composition and
 subclassing for behaviour that requires overridden hooks.
 
 On Windows the transport can be forced explicitly by swapping `IPCServer` for
 :class:`NamedPipeServer`; `CmdMox` selects it automatically based on
 ``os.name``.
 
-Both transports emit bounded, structured observability events with
-correlation identifiers, and the Windows named-pipe transport bounds
-concurrent clients, message size, and per-client read time. See the
+Both transports emit bounded, structured observability events with correlation
+identifiers, and the Windows named-pipe transport bounds concurrent clients,
+message size, and per-client read time. See the
 [design document](./python-native-command-mocking-design.md) for the event
 vocabulary and the specific limits.
 

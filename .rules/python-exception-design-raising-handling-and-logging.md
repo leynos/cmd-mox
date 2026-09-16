@@ -167,16 +167,16 @@ except ParseError:
 Exception handling carries overhead on the exceptional path; hoisting the block
 can improve throughput in hot loops. Treat as a micro‑optimization guided by
 profiling, and note that hoisting changes behaviour, not just performance: the
-first `ParseError` now exits the loop entirely, so every later item is
-skipped, whereas the per‑item `except: continue` form processes all items and
-only skips the failing ones. Keep the per‑item form whenever later valid items
-must still be processed, and reserve hoisting for cases where any failure
-should abort the remaining work.
+first `ParseError` now exits the loop entirely, so every later item is skipped,
+whereas the per‑item `except: continue` form processes all items and only skips
+the failing ones. Keep the per‑item form whenever later valid items must still
+be processed, and reserve hoisting for cases where any failure should abort the
+remaining work.
 
-PERF203 (`try-except-in-loop`) only fires on Python versions before 3.11,
-which introduced zero‑cost exception handling; at this project's `py312`
-target it never triggers. Treat hoisting as manual guidance rather than a
-lint‑enforced rule at this target version.
+PERF203 (`try-except-in-loop`) only fires on Python versions before 3.11, which
+introduced zero‑cost exception handling; at this project's `py312` target it
+never triggers. Treat hoisting as manual guidance rather than a lint‑enforced
+rule at this target version.
 
 ## 6) Testing: assert specific failures (B017)
 
@@ -262,11 +262,11 @@ def parse_all(raw_items: list[str]) -> list[Record]:
 ```
 
 Hoisting here changes behaviour: the first `ParseError` aborts the loop, so
-`parsed` contains only the records processed before the failure, and every
-later `raw_items` entry is skipped rather than parsed. This is appropriate
-when a single bad record should halt the batch; retain per‑item
-`try/except: continue` handling whenever later valid items must still be
-processed despite earlier failures.
+`parsed` contains only the records processed before the failure, and every later
+`raw_items` entry is skipped rather than parsed. This is appropriate when a
+single bad record should halt the batch; retain per‑item `try/except: continue`
+handling whenever later valid items must still be processed despite earlier
+failures.
 
 ### Tests with specific exceptions (B017)
 
@@ -295,10 +295,9 @@ select = [
 ]
 ```
 
-`PERF203` (try/except in loop) is deliberately omitted: it only fires on
-Python versions before 3.11, so it is inert against this project's `py312`
-target. Treat the hoisting advice in §5 as manual guidance, not an
-enforced rule.
+`PERF203` (try/except in loop) is deliberately omitted: it only fires on Python
+versions before 3.11, so it is inert against this project's `py312` target.
+Treat the hoisting advice in §5 as manual guidance, not an enforced rule.
 
 ## 10) One‑page policy for repositories
 
@@ -313,8 +312,8 @@ enforced rule.
 
 - Ruff rules: Tryceratops (TRY), Blind Except (BLE001), flake8‑errmsg
   (EM101/EM102), flake8‑logging (LOG004/LOG007/LOG009/LOG014/LOG015), N818,
-  B904, B017. PERF203 is mentioned in §5 as manual guidance only; it is
-  inert on Python 3.11+.
+  B904, B017. PERF203 is mentioned in §5 as manual guidance only; it is inert
+  on Python 3.11+.
   - [https://docs.astral.sh/ruff/rules/#tryceratops-try](https://docs.astral.sh/ruff/rules/#tryceratops-try)
   - [https://docs.astral.sh/ruff/rules/blind-except/](https://docs.astral.sh/ruff/rules/blind-except/)
   - [https://docs.astral.sh/ruff/rules/assert-raises-exception/](https://docs.astral.sh/ruff/rules/assert-raises-exception/)

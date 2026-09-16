@@ -84,8 +84,9 @@ multiple times.
 - [x] (2026-02-13 00:14 UTC) Ran targeted validation:
   - `uv run pytest -q cmd_mox/unittests/test_controller_lifecycle.py`
     (5 passed).
-  - `uv run pytest -q cmd_mox/unittests/test_controller_lifecycle.py tests/test_controller_bdd.py -k "idempotent or out_of_order"`
-    (2 passed).
+  - `uv run pytest -q` over `cmd_mox/unittests/test_controller_lifecycle.py`
+    and `tests/test_controller_bdd.py` with
+    `-k "idempotent or out_of_order"` (2 passed).
 - [x] (2026-02-13 00:16 UTC) Ran full quality gates:
   - `make test` passed (`545 passed, 12 skipped`).
   - `make lint` passed.
