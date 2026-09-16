@@ -98,7 +98,7 @@ fmt: build ## Format sources
 	$(RUFF) format
 	$(RUFF) check --select I --fix
 	$(MDTABLEFIX) --in-place $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
-	@unset FORCE_COLOR; $(MDLINT) --fix "**/*.md"
+	$(MDLINT) --fix "**/*.md"
 
 check-fmt: build ## Verify formatting
 	$(RUFF) format --check
@@ -106,7 +106,7 @@ check-fmt: build ## Verify formatting
 	$(MDTABLEFIX) --check $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 
 markdownlint-run: ## Run markdownlint-cli2 over the repository's Markdown
-	@unset FORCE_COLOR; $(MDLINT) "**/*.md"
+	$(MDLINT) "**/*.md"
 
 lint: build ## Run linters
 	$(RUFF) check
