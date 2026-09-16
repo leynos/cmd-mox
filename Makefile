@@ -1,7 +1,6 @@
 NIXIE ?= nixie
-MDFORMAT_ALL ?= mdformat-all
 UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
-TOOLS = $(MDFORMAT_ALL) $(UV)
+TOOLS = $(UV)
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 RUFF_VERSION ?= 0.16.4
@@ -40,6 +39,16 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
+
+# `make fmt` and `make check-fmt` call mdtablefix directly. `--git` selects the
+# Markdown files Git tracks and `--include-untracked` adds the untracked files
+# Git does not ignore, so a new document is formatted before it is staged.
+# Both modes need mdtablefix 0.6.0 or later; CI pins the version at the
+# install-mdtablefix step.
+MDTABLEFIX ?= mdtablefix
+MDLINT ?= $(shell command -v markdownlint-cli2 2>/dev/null || printf '%s' "$$HOME/.bun/bin/markdownlint-cli2")
+MDTABLEFIX_SELECT = --git --include-untracked
+MDTABLEFIX_RULES = --wrap --renumber --breaks --ellipsis --fences
 
 all: build check-fmt test typecheck
 
@@ -88,18 +97,15 @@ endif
 fmt: build ## Format sources
 	$(RUFF) format
 	$(RUFF) check --select I --fix
-	$(MDFORMAT_ALL)
+	$(MDTABLEFIX) --in-place $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
+	$(MDLINT) --fix "**/*.md"
 
 check-fmt: build ## Verify formatting
 	$(RUFF) format --check
-	$(MAKE) markdownlint-run
+	$(MDTABLEFIX) --check $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 
-markdownlint-run: ## Run markdownlint-cli2 with pinned fallback
-	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
-	  markdownlint-cli2 $(MDARGS) '**/*.md'; \
-	else \
-	  npx --yes markdownlint-cli2@0.22.1 $(MDARGS) '**/*.md'; \
-	fi
+markdownlint-run: ## Run markdownlint-cli2 over the repository's Markdown
+	$(MDLINT) "**/*.md"
 
 lint: build ## Run linters
 	$(RUFF) check

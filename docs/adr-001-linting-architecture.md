@@ -98,9 +98,9 @@ CmdMox-specific Pylint baseline.
 
 CmdMox adds a third lint tier: an isolated CPython 3.14 Pylint pass configured
 in `pylintrc-df12.toml`. The `lint` target installs the DF12 plugin from a
-pinned immutable revision and enables its complete checker set. The same
-pinned distribution also provides `ambrleaks`, which scans test snapshots
-after the Pylint passes.
+pinned immutable revision and enables its complete checker set. The same pinned
+distribution also provides `ambrleaks`, which scans test snapshots after the
+Pylint passes.
 
 The driver for this amendment was to keep DF12 checker policy independent of
 the temporary PyPy baseline.

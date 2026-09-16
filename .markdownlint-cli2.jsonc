@@ -2,9 +2,30 @@
   "ignores": [
     ".rules/**",
     ".uv-cache/**",
-    "docs/python-native-command-mocking-design.md"
+    "docs/python-native-command-mocking-design.md",
+    "**/.venv/**",
+    ".vtcode/**",
+    "**/node_modules/**",
+    "**/target/**",
+    ".terraform/**",
+    "memories/**",
+    "CRUSH.md"
   ],
   "config": {
-    "MD013": false
+    "MD004": {
+      "style": "dash"
+    },
+    "MD010": {
+      "code_blocks": false
+    },
+    "MD013": {
+      "line_length": 80,
+      "code_block_line_length": 120,
+      "tables": false,
+      "headings": false
+    },
+    "MD029": {
+      "style": "ordered"
+    }
   }
 }
