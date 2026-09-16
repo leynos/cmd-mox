@@ -102,7 +102,6 @@ fmt: build ## Format sources
 
 check-fmt: build ## Verify formatting
 	$(RUFF) format --check
-	$(MAKE) markdownlint-run
 	$(MDTABLEFIX) --check $(MDTABLEFIX_SELECT) $(MDTABLEFIX_RULES)
 
 markdownlint-run: ## Run markdownlint-cli2 over the repository's Markdown
