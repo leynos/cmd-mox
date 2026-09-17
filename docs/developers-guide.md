@@ -4,6 +4,14 @@ This guide documents the local development checks for CmdMox. It is the source
 of truth for running lint, understanding the current lint baseline, and knowing
 where lint policy is configured.
 
+## Coverage ownership
+
+Pull-request CI generates coverage with the local ratchet baseline written by
+`coverage-main.yml`. It does not fetch full Git history, invoke CodeScene, or
+receive `CS_ACCESS_TOKEN`. The main-only coverage workflow owns both publishing
+the ratchet baseline and uploading the Cobertura report to CodeScene with
+`mode: upload` after a merge.
+
 ## Linting
 
 CmdMox uses a three-tier linting pipeline. Run it with:

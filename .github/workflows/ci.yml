@@ -10,7 +10,7 @@ permissions: {}
 jobs:
   quality:
     permissions:
-      contents: read # Checkout only; CodeScene uses CS_ACCESS_TOKEN, not OIDC.
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -24,18 +24,12 @@ jobs:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     env:
-      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-      CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 }}
       # Pin the Makefile validator so a new mbake release cannot fail the
       # build without a reviewed change here.
       MBAKE_VERSION: '1.4.6'
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Full history so `cs-coverage check` can reach the pull
-          # request's merge base.
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -114,18 +108,6 @@ jobs:
           # pytest-xdist once the suite is confirmed xdist-clean.
           pytest-workers: ''
           with-ratchet: 'true'
-
-      - name: Check coverage against CodeScene gates
-        env:
-          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        if: matrix.run-windows-smoke == false && env.CS_ACCESS_TOKEN != '' && github.event_name == 'pull_request'
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@6b5cdc2d4c0bb72cafd5a66d24d248ac25827db9
-        with:
-          format: cobertura
-          mode: check
-          project-url: https://api.codescene.io/v2/projects/69277
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
-          installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
 
       - name: Run Windows smoke tests
         if: matrix.run-windows-smoke
