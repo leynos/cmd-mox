@@ -119,7 +119,8 @@ fourth Python lint tier, after Ruff, PyPy-backed Pylint, and the DF12
 Pylint/ambrleaks tier. The spelling policy remains a separate quality gate.
 Skylos is a blocking production dead-code scan: it scans production modules
 only, excludes test paths, enables strict gate mode, and uses the local-only
-flags `--category dead_code --gate --format concise --no-upload --no-provenance
+flags
+`--category dead_code --gate --format concise --no-upload --no-provenance
 --no-grep-verify`.
 
 The command-only `SKYLOS_CLI` macro runs Skylos with Python 3.14. Skylos parses

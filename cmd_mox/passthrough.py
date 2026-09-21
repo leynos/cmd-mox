@@ -171,32 +171,3 @@ class PassthroughCoordinator:
             recording_session.record(invocation, resp)
 
         return double, invocation, resp
-
-    def has_pending(self, invocation_id: str) -> bool:
-        """Return whether *invocation_id* awaits a passthrough result.
-
-        Parameters
-        ----------
-        invocation_id : str
-            Identifier assigned to the pending invocation.
-
-        Returns
-        -------
-        bool
-            ``True`` when the invocation is still pending.
-        """
-        with self._lock:
-            self._prune_expired_locked()
-            return invocation_id in self._pending
-
-    def pending_count(self) -> int:
-        """Return the number of outstanding passthrough invocations.
-
-        Returns
-        -------
-        int
-            Number of non-expired requests awaiting results.
-        """
-        with self._lock:
-            self._prune_expired_locked()
-            return len(self._pending)
