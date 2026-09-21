@@ -115,7 +115,8 @@ fourth Python lint tier, after Ruff, PyPy-backed Pylint, and the DF12
 Pylint/ambrleaks tier. The spelling policy remains a separate quality gate.
 Skylos is a blocking production dead-code scan: it scans production modules
 only, excludes test paths, enables strict gate mode, and uses the local-only
-flags `--category dead_code --gate --format concise --no-upload --no-provenance
+flags
+`--category dead_code --gate --format concise --no-upload --no-provenance
 --no-grep-verify`.
 
 The command-only `SKYLOS_CLI` macro runs Skylos with Python 3.14. Skylos parses
@@ -135,8 +136,8 @@ make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 ```
 
 The `SYMBOL` name avoids WSL's `NAME` collision, and both variables are
-required, including rejection of whitespace-only values. The helper
-serialises its read-modify-write through `flock` on the ignored,
-repository-local `.skylos-whitelist.lock`; tests may override that path when
-isolating the helper from the checkout. Keep the caller-specific reason in the
-reviewed `[tool.skylos.whitelist.documented]` configuration.
+required, including rejection of whitespace-only values. The helper serializes
+its read-modify-write through `flock` on the ignored, repository-local
+`.skylos-whitelist.lock`; tests may override that path when isolating the
+helper from the checkout. Keep the caller-specific reason in the reviewed
+`[tool.skylos.whitelist.documented]` configuration.

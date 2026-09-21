@@ -397,19 +397,6 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _invoke_handler(
-        self, double: CommandDouble, invocation: Invocation
-    ) -> Response:
-        """Run ``double``'s handler within its expectation environment.
-
-        Returns
-        -------
-        Response
-            The handler response with expectation overrides applied.
-        """
-        overrides = apply_expectation_env(double, invocation)
-        return self._invoke_handler_with_overrides(double, invocation, overrides)
-
     @staticmethod
     def _invoke_handler_with_overrides(
         double: CommandDouble,

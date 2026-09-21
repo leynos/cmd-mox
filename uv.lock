@@ -27,7 +27,7 @@ requires-dist = [{ name = "pywin32", marker = "sys_platform == 'win32'", specifi
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "hypothesis", specifier = ">=6" },
+    { name = "hypothesis", specifier = ">=6.165.10,<7.0" },
     { name = "parse-type" },
     { name = "pytest" },
     { name = "pytest-bdd" },

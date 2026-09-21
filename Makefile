@@ -34,7 +34,8 @@ SKYLOS_VERSION = 4.33.2
 SKYLOS_CLI = $(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' skylos
 SKYLOS = $(SKYLOS_CLI) --config-file pyproject.toml
 SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
-SKYLOS_EXCLUDE_FOLDERS ?= tests
+SKYLOS_EXCLUDE_FOLDERS ?= tests cmd_mox/unittests
+SKYLOS_EXCLUDE_ARGS = $(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))
 SKYLOS_WHITELIST_LOCK ?= .skylos-whitelist.lock
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
@@ -121,7 +122,7 @@ lint: build ## Run linters
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
 	$(AMBRLEAKS) tests
-	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) --exclude $(SKYLOS_EXCLUDE_FOLDERS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
+	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) $(SKYLOS_EXCLUDE_ARGS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
 	+$(MAKE) spelling
 
 skylos-allow: export SKYLOS_SYMBOL = $(value SYMBOL)

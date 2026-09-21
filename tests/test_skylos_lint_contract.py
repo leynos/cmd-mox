@@ -30,7 +30,10 @@ _MAKEUTIL_REVISION: typ.Final = "29fc5a1634ffbaa18a773eed9dff1b2838a45d9c"
 _MAKEUTIL_TOOLCHAIN: typ.Final = "nightly-2026-05-28"
 _SKYLOS_VERSION_TOKENS: typ.Final = ("4.33.2",)
 _SKYLOS_PRODUCTION_TARGETS_TOKENS: typ.Final = ("cmd_mox",)
-_SKYLOS_EXCLUDE_FOLDERS_TOKENS: typ.Final = ("tests",)
+_SKYLOS_EXCLUDE_FOLDERS_TOKENS: typ.Final = ("tests", "cmd_mox/unittests")
+_SKYLOS_EXCLUDE_ARGS_RAW: typ.Final = (
+    "$(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))"
+)
 _SKYLOS_WHITELIST_LOCK: typ.Final = ".skylos-whitelist.lock"
 _SKYLOS_WHITELIST_LOCK_TOKENS: typ.Final = (_SKYLOS_WHITELIST_LOCK,)
 _SKYLOS_CLI_TOKENS: typ.Final = (
@@ -52,8 +55,7 @@ _SKYLOS_SCAN_TOKENS: typ.Final = (
 _SKYLOS_LINT_TOKENS: typ.Final = (
     "$(SKYLOS)",
     "$(SKYLOS_PRODUCTION_TARGETS)",
-    "--exclude",
-    "$(SKYLOS_EXCLUDE_FOLDERS)",
+    "$(SKYLOS_EXCLUDE_ARGS)",
     "--category",
     "dead_code",
     "--gate",
@@ -112,71 +114,111 @@ EXPECTED_ENTRYPOINT_REASONS = {
         "_get_short_path assigns this ctypes return type to GetShortPathNameW "
         "through the typed protocol."
     ),
-    "cmd_mox.ipc.server._BaseIPCServer._export_environment": (
+    "cmd_mox.ipc._server_core._BaseIPCServer._export_environment": (
         "_ServerLifecycle.start invokes this inherited hook before backend "
         "creation to export the active IPC environment."
-    ),
-    "cmd_mox.ipc.server.IPCServer._post_stop_cleanup": (
-        "_ServerLifecycle.stop invokes this Unix transport hook after joining "
-        "the backend thread to remove the socket."
     ),
     "cmd_mox.ipc.server.IPCServer._prepare_backend_start": (
         "_ServerLifecycle.start invokes this Unix transport hook before "
         "creating _InnerServer."
     ),
-    "cmd_mox.ipc.server.IPCServer._stop_backend": (
-        "_ServerLifecycle.stop invokes this Unix transport hook to shut down "
-        "_InnerServer."
-    ),
     "cmd_mox.ipc.server.IPCServer._wait_until_ready": (
         "_ServerLifecycle.start invokes this Unix transport hook after "
         "starting the backend thread to wait for the socket."
     ),
-    "cmd_mox.ipc.server.NamedPipeServer._prepare_backend_start": (
-        "_ServerLifecycle.start invokes this named-pipe hook; it is a no-op "
-        "because named pipes leave no socket artefact."
+    "cmd_mox.ipc.server.IPCServer._stop_backend": (
+        "_ServerLifecycle.stop invokes this Unix transport hook to shut down "
+        "_InnerServer."
     ),
-    "cmd_mox.ipc.server.NamedPipeServer._stop_backend": (
-        "_ServerLifecycle.stop invokes this named-pipe hook to stop the state "
-        "and join its clients."
+    "cmd_mox.ipc.server.IPCServer._post_stop_cleanup": (
+        "_ServerLifecycle.stop invokes this Unix transport hook after joining "
+        "the backend thread to remove the socket."
     ),
-    "cmd_mox.ipc.server.NamedPipeServer._wait_until_ready": (
-        "_ServerLifecycle.start invokes this named-pipe hook to wait for the "
-        "state readiness event."
-    ),
-    "cmd_mox.ipc.server.ParsedRequest.validate": (
+    "cmd_mox.ipc._server_core.ParsedRequest.validate": (
         "_request_pipeline invokes this validator before dispatch for Unix and "
         "named-pipe request ingress."
     ),
-    "cmd_mox.ipc.server._NamedPipeState._poke_pipe": (
-        "_NamedPipeState.stop invokes this helper to wake the named-pipe accept loop."
+    "cmd_mox.ipc.named_pipe.NamedPipeServer._wait_until_ready": (
+        "_ServerLifecycle.start invokes this named-pipe transport override after "
+        "starting the backend thread to await readiness."
     ),
-    "cmd_mox.ipc.server._NamedPipeState.stop": (
+    "cmd_mox.ipc.named_pipe.NamedPipeServer._stop_backend": (
+        "_ServerLifecycle.stop invokes this named-pipe transport override to stop "
+        "_NamedPipeState and join its clients."
+    ),
+    "cmd_mox.ipc.windows.PyWinErrorProtocol": (
+        "cmd_mox.ipc.windows.__all__ exports this pywintypes error protocol for "
+        "external Windows transport test doubles and adapters."
+    ),
+    "cmd_mox.ipc.named_pipe._NamedPipeState.stop": (
         "NamedPipeServer._wait_until_ready invokes this on timeout and "
         "NamedPipeServer._stop_backend invokes it during shutdown."
     ),
-    "cmd_mox.ipc.server._ServerLifecycle._stop_backend.server": (
+    "cmd_mox.ipc.named_pipe._NamedPipeState._signal_stop_handle": (
+        "_NamedPipeState.stop invokes this helper to signal the Win32 shutdown "
+        "event before waking blocking operations."
+    ),
+    "cmd_mox.ipc.named_pipe._NamedPipeState._poke_pipe": (
+        "_NamedPipeState.stop invokes this helper as a fallback wake-up for the "
+        "named-pipe accept loop."
+    ),
+    "cmd_mox.ipc._server_core._ServerLifecycle._stop_backend.server": (
         "_ServerLifecycle.stop passes the stored backend instance through this "
         "abstract lifecycle hook."
     ),
+}
+EXPECTED_ENTRYPOINT_TYPES = {
+    "cmd_mox.environment._Win32Function.argtypes": "variable",
+    "cmd_mox.environment._Win32Function.restype": "variable",
+    "cmd_mox.ipc._server_core._BaseIPCServer._export_environment": "method",
+    "cmd_mox.ipc.server.IPCServer._prepare_backend_start": "method",
+    "cmd_mox.ipc.server.IPCServer._wait_until_ready": "method",
+    "cmd_mox.ipc.server.IPCServer._stop_backend": "method",
+    "cmd_mox.ipc.server.IPCServer._post_stop_cleanup": "method",
+    "cmd_mox.ipc._server_core.ParsedRequest.validate": "method",
+    "cmd_mox.ipc.named_pipe.NamedPipeServer._wait_until_ready": "method",
+    "cmd_mox.ipc.named_pipe.NamedPipeServer._stop_backend": "method",
+    "cmd_mox.ipc.windows.PyWinErrorProtocol": "variable",
+    "cmd_mox.ipc.named_pipe._NamedPipeState.stop": "method",
+    "cmd_mox.ipc.named_pipe._NamedPipeState._signal_stop_handle": "method",
+    "cmd_mox.ipc.named_pipe._NamedPipeState._poke_pipe": "method",
+    "cmd_mox.ipc._server_core._ServerLifecycle._stop_backend.server": "parameter",
 }
 EXPECTED_ENTRYPOINT_FULL_NAMES = frozenset(EXPECTED_ENTRYPOINT_REASONS)
 
 
 def _mapping(value: object, *, subject: str) -> dict[str, object]:
-    """Return a JSON object, naming the unexpected ``subject`` on failure."""
+    """Return a JSON object, naming the unexpected ``subject`` on failure.
+
+    Returns
+    -------
+    dict[str, object]
+        The validated JSON object.
+    """
     assert isinstance(value, dict), f"Expected {subject} to be a JSON object."
     return typ.cast("dict[str, object]", value)
 
 
 def _objects(value: object, *, subject: str) -> list[dict[str, object]]:
-    """Return a JSON object array, naming the unexpected ``subject`` on failure."""
+    """Return a JSON object array, naming the unexpected ``subject`` on failure.
+
+    Returns
+    -------
+    list[dict[str, object]]
+        The validated JSON object array.
+    """
     assert isinstance(value, list), f"Expected {subject} to be a JSON array."
     return [_mapping(item, subject=f"{subject} item") for item in value]
 
 
 def _text_sequence(value: object, *, subject: str) -> tuple[str, ...]:
-    """Return a JSON string array, naming the unexpected ``subject`` on failure."""
+    """Return a JSON string array, naming the unexpected ``subject`` on failure.
+
+    Returns
+    -------
+    tuple[str, ...]
+        The validated JSON strings.
+    """
     assert isinstance(value, list), f"Expected {subject} to be a JSON array."
     assert all(isinstance(item, str) for item in value), (
         f"Expected {subject} to contain only JSON strings."
@@ -185,8 +227,14 @@ def _text_sequence(value: object, *, subject: str) -> tuple[str, ...]:
 
 
 def _makefile_report() -> dict[str, object]:
-    """Return Makeutil's complete, successfully parsed Makefile report."""
-    completed = subprocess.run(  # noqa: S603 - fixed parser command.
+    """Return Makeutil's complete, successfully parsed Makefile report.
+
+    Returns
+    -------
+    dict[str, object]
+        The parsed Makeutil report.
+    """
+    completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed parser command.
         _MAKEUTIL_COMMAND,
         capture_output=True,
         check=True,
@@ -202,7 +250,13 @@ def _makefile_report() -> dict[str, object]:
 
 
 def _sole_variable(name: str) -> dict[str, object]:
-    """Return Makeutil's sole variable fact for ``name``."""
+    """Return Makeutil's sole variable fact for ``name``.
+
+    Returns
+    -------
+    dict[str, object]
+        The sole parsed variable fact.
+    """
     variables = _objects(_makefile_report().get("variables"), subject="variables")
     matches = [variable for variable in variables if variable.get("name") == name]
     assert len(matches) == 1, (
@@ -212,7 +266,13 @@ def _sole_variable(name: str) -> dict[str, object]:
 
 
 def _sole_recipe_rule(target: str) -> dict[str, object]:
-    """Return the only parsed rule for ``target`` that has recipes."""
+    """Return the only parsed rule for ``target`` that has recipes.
+
+    Returns
+    -------
+    dict[str, object]
+        The sole recipe-bearing rule.
+    """
     rules = _objects(_makefile_report().get("rules"), subject="rules")
     matches = [
         rule
@@ -228,14 +288,26 @@ def _sole_recipe_rule(target: str) -> dict[str, object]:
 
 
 def _variable_tokens(name: str) -> tuple[str, ...]:
-    """Return shell-like tokens from Makeutil's raw variable value."""
+    """Return shell-like tokens from Makeutil's raw variable value.
+
+    Returns
+    -------
+    tuple[str, ...]
+        The parsed variable tokens.
+    """
     value = _sole_variable(name).get("raw_value")
     assert isinstance(value, str), f"Expected {name!r} to have a string value."
     return tuple(shlex.split(value))
 
 
 def _recipe_tokens(target: str) -> tuple[tuple[str, ...], ...]:
-    """Return shell-like tokens for every recipe in ``target``."""
+    """Return shell-like tokens for every recipe in ``target``.
+
+    Returns
+    -------
+    tuple[tuple[str, ...], ...]
+        The parsed recipe tokens.
+    """
     recipes = _objects(
         _sole_recipe_rule(target).get("recipes"), subject=f"{target} recipes"
     )
@@ -247,7 +319,13 @@ def _recipe_tokens(target: str) -> tuple[tuple[str, ...], ...]:
 
 
 def _workflow_job(workflow_path: str, job_name: str) -> dict[str, object]:
-    """Return the named job from a repository workflow."""
+    """Return the named job from a repository workflow.
+
+    Returns
+    -------
+    dict[str, object]
+        The named workflow job.
+    """
     workflow = yaml.safe_load((REPOSITORY_ROOT / workflow_path).read_text())
     workflow_mapping = _mapping(workflow, subject=f"{workflow_path} workflow")
     jobs = _mapping(workflow_mapping.get("jobs"), subject=f"{workflow_path} jobs")
@@ -257,7 +335,13 @@ def _workflow_job(workflow_path: str, job_name: str) -> dict[str, object]:
 def _sole_workflow_step(
     workflow_path: str, job_name: str, step_name: str
 ) -> dict[str, object]:
-    """Return the sole named CI step from ``job_name``."""
+    """Return the sole named CI step from ``job_name``.
+
+    Returns
+    -------
+    dict[str, object]
+        The named CI step.
+    """
     job = _workflow_job(workflow_path, job_name)
     steps = _objects(
         job.get("steps"), subject=f"{workflow_path} job {job_name!r} steps"
@@ -271,7 +355,13 @@ def _sole_workflow_step(
 
 
 def _run_skylos_allow(*arguments: str) -> subprocess.CompletedProcess[str]:
-    """Run the whitelist boundary for an invalid input."""
+    """Run the whitelist boundary for an invalid input.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed Make invocation.
+    """
     environment: dict[str, str] = dict(os.environ)
     environment["NAME"] = "wsl-hostname"
     environment.pop("REASON", None)
@@ -280,7 +370,7 @@ def _run_skylos_allow(*arguments: str) -> subprocess.CompletedProcess[str]:
         name, value = argument.split("=", maxsplit=1)
         environment[name] = value
     command = ["make", "skylos-allow"]
-    return subprocess.run(  # noqa: S603 - fixed local Make boundary command.
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Make boundary command.
         command,
         capture_output=True,
         check=False,
@@ -291,7 +381,13 @@ def _run_skylos_allow(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 
 def _isolated_skylos_allow_command(directory: Path, cli: Path) -> tuple[str, ...]:
-    """Return the whitelist helper command bound to ``directory``'s lock."""
+    """Return the whitelist helper command bound to ``directory``'s lock.
+
+    Returns
+    -------
+    tuple[str, ...]
+        The isolated Make command.
+    """
     return (
         "make",
         "--no-print-directory",
@@ -314,142 +410,166 @@ def _assert_makeutil_installation(command: object, *, contract: str) -> None:
 
 
 def _pyproject() -> dict[str, object]:
-    """Load the repository's Python project configuration."""
+    """Load the repository's Python project configuration.
+
+    Returns
+    -------
+    dict[str, object]
+        The parsed project configuration.
+    """
     return tomllib.loads(
         (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
 
 
 def _skylos_config() -> dict[str, object]:
-    """Return the Skylos configuration from the project file."""
+    """Return the Skylos configuration from the project file.
+
+    Returns
+    -------
+    dict[str, object]
+        The parsed Skylos configuration.
+    """
     tool_config = typ.cast("dict[str, object]", _pyproject()["tool"])
     return typ.cast("dict[str, object]", tool_config["skylos"])
 
 
-def test_lint_recipe_runs_the_production_dead_code_gate() -> None:
-    """``make lint`` must scan only production code with Skylos's strict gate."""
-    config = _pyproject()
-    dependency_groups = typ.cast("dict[str, list[str]]", config["dependency-groups"])
-    assert not any(
-        dependency.startswith("skylos") for dependency in dependency_groups["dev"]
-    ), "Skylos dependency contract must keep the detector out of the dev group."
-    assert _variable_tokens("SKYLOS_VERSION") == _SKYLOS_VERSION_TOKENS, (
-        "Skylos version contract must pin 4.33.2."
-    )
-    assert (
-        _variable_tokens("SKYLOS_PRODUCTION_TARGETS")
-        == _SKYLOS_PRODUCTION_TARGETS_TOKENS
-    ), "Skylos production-target contract must scan cmd_mox."
-    assert (
-        _variable_tokens("SKYLOS_EXCLUDE_FOLDERS") == _SKYLOS_EXCLUDE_FOLDERS_TOKENS
-    ), "Skylos exclusion contract must omit tests."
-    skylos_commands = [
-        command for command in _recipe_tokens("lint") if command[:1] == ("$(SKYLOS)",)
-    ]
-    assert skylos_commands == [_SKYLOS_LINT_TOKENS], (
-        "Skylos lint command contract must scan production dead code strictly."
-    )
+class TestSkylosLintContract:
+    """Contract tests for Skylos's production dead-code lint gate."""
 
-
-def test_whitelist_target_uses_skylos_subcommand_contract() -> None:
-    """``skylos whitelist`` must precede its arguments and scan options."""
-    assert _variable_tokens("SKYLOS_CLI") == _SKYLOS_CLI_TOKENS, (
-        "Skylos CLI contract must pin Python 3.14 and its tool release."
-    )
-    assert _variable_tokens("SKYLOS") == _SKYLOS_SCAN_TOKENS, (
-        "Skylos scan command contract must add only the configuration file."
-    )
-    assert _variable_tokens("SKYLOS_WHITELIST_LOCK") == _SKYLOS_WHITELIST_LOCK_TOKENS, (
-        "Skylos whitelist contract must use the ignored repository-local lock."
-    )
-    assert _SKYLOS_WHITELIST_LOCK in (
-        (REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    ), "Skylos whitelist contract must ignore the repository-local lock."
-    whitelist_commands = [
-        command
-        for command in _recipe_tokens("skylos-allow")
-        if command[:1] == ("flock",)
-    ]
-    assert whitelist_commands == [_SKYLOS_WHITELIST_TOKENS], (
-        "Skylos whitelist command contract must serialize the command-first "
-        "whitelist update."
-    )
-
-
-@hyp.settings(max_examples=25, deadline=None)
-@hyp.given(value=st.text(alphabet=" \t", min_size=1, max_size=8))
-def test_skylos_allow_rejects_missing_or_whitespace_values(value: str) -> None:
-    """The whitelist target must reject absent and whitespace-only inputs."""
-    for arguments, missing_name in (
-        ((), "SYMBOL"),
-        (("SYMBOL=bootstrap_shim_path",), "REASON"),
-        ((f"SYMBOL={value}", "REASON=Loaded by bootstrap shim"), "SYMBOL"),
-        (("SYMBOL=bootstrap_shim_path", f"REASON={value}"), "REASON"),
-    ):
-        completed = _run_skylos_allow(*arguments)
-
-        assert completed.returncode == 2, (
-            f"Skylos whitelist boundary must reject {missing_name}."
+    def test_lint_recipe_runs_the_production_dead_code_gate(self) -> None:
+        """``make lint`` must scan only production code with Skylos's strict gate."""
+        config = _pyproject()
+        dependency_groups = typ.cast(
+            "dict[str, list[str]]", config["dependency-groups"]
+        )
+        assert not any(
+            dependency.startswith("skylos") for dependency in dependency_groups["dev"]
+        ), "Skylos dependency contract must keep the detector out of the dev group."
+        assert _variable_tokens("SKYLOS_VERSION") == _SKYLOS_VERSION_TOKENS, (
+            "Skylos version contract must pin 4.33.2."
         )
         assert (
-            f"Error: {missing_name} is required for a named whitelist exception"
-            in completed.stderr
-        ), f"Skylos whitelist boundary must name the missing {missing_name}."
-
-
-@hyp.settings(max_examples=25, deadline=None)
-@hyp.example(symbol="$(handler);*", reason='Loaded "$plugin" | registry')
-@hyp.given(symbol=_SHELL_ARGUMENT_TEXT, reason=_SHELL_ARGUMENT_TEXT)
-def test_skylos_allow_forwards_generated_argument_boundaries(
-    symbol: str, reason: str
-) -> None:
-    """Every non-empty generated value must reach Skylos as one argument."""
-    with TemporaryDirectory() as temporary_directory:
-        isolated_directory = Path(temporary_directory)
-        recorded_arguments = isolated_directory / "arguments.json"
-        recorder = isolated_directory / "skylos-recorder"
-        pyproject_before = (REPOSITORY_ROOT / "pyproject.toml").read_bytes()
-        recorder.write_text(
-            f"#!{sys.executable}\n"
-            "import json\n"
-            "import os\n"
-            "import sys\n"
-            "from pathlib import Path\n\n"
-            'Path(os.environ["SKYLOS_ARGUMENTS_PATH"]).write_text(\n'
-            "    json.dumps(sys.argv[1:]), encoding='utf-8'\n"
-            ")\n",
-            encoding="utf-8",
+            _variable_tokens("SKYLOS_PRODUCTION_TARGETS")
+            == _SKYLOS_PRODUCTION_TARGETS_TOKENS
+        ), "Skylos production-target contract must scan cmd_mox."
+        assert (
+            _variable_tokens("SKYLOS_EXCLUDE_FOLDERS") == _SKYLOS_EXCLUDE_FOLDERS_TOKENS
+        ), "Skylos exclusion contract must omit tests."
+        exclude_args = _sole_variable("SKYLOS_EXCLUDE_ARGS").get("raw_value")
+        assert exclude_args == _SKYLOS_EXCLUDE_ARGS_RAW, (
+            "Skylos exclusion contract must repeat --exclude for each test path."
         )
-        recorder.chmod(0o755)
-        environment: dict[str, str] = {
-            **os.environ,
-            "SKYLOS_ARGUMENTS_PATH": str(recorded_arguments),
-            "SYMBOL": symbol,
-            "REASON": reason,
-        }
-        completed = subprocess.run(  # noqa: S603 - fixed local Make target and recorder.
-            (*_isolated_skylos_allow_command(isolated_directory, recorder),),
-            capture_output=True,
-            check=False,
-            cwd=isolated_directory,
-            env=environment,
-            text=True,
+        skylos_commands = [
+            command
+            for command in _recipe_tokens("lint")
+            if command[:1] == ("$(SKYLOS)",)
+        ]
+        assert skylos_commands == [_SKYLOS_LINT_TOKENS], (
+            "Skylos lint command contract must scan production dead code strictly."
         )
 
-        assert completed.returncode == 0, (
-            "Skylos whitelist boundary must accept non-empty generated values: "
-            f"{completed.stderr}"
+    def test_whitelist_target_uses_skylos_subcommand_contract(self) -> None:
+        """``skylos whitelist`` must precede its arguments and scan options."""
+        assert _variable_tokens("SKYLOS_CLI") == _SKYLOS_CLI_TOKENS, (
+            "Skylos CLI contract must pin Python 3.14 and its tool release."
         )
-        assert json.loads(recorded_arguments.read_text(encoding="utf-8")) == [
-            "whitelist",
-            symbol,
-            "--reason",
-            reason,
-        ], "Skylos must receive each generated value as exactly one argument."
-        assert (REPOSITORY_ROOT / "pyproject.toml").read_bytes() == pyproject_before, (
-            "Skylos whitelist forwarding test must not mutate the repository "
-            "configuration."
+        assert _variable_tokens("SKYLOS") == _SKYLOS_SCAN_TOKENS, (
+            "Skylos scan command contract must add only the configuration file."
         )
+        assert (
+            _variable_tokens("SKYLOS_WHITELIST_LOCK") == _SKYLOS_WHITELIST_LOCK_TOKENS
+        ), "Skylos whitelist contract must use the ignored repository-local lock."
+        assert _SKYLOS_WHITELIST_LOCK in (
+            (REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+        ), "Skylos whitelist contract must ignore the repository-local lock."
+        whitelist_commands = [
+            command
+            for command in _recipe_tokens("skylos-allow")
+            if command[:1] == ("flock",)
+        ]
+        assert whitelist_commands == [_SKYLOS_WHITELIST_TOKENS], (
+            "Skylos whitelist command contract must serialize the command-first "
+            "whitelist update."
+        )
+
+    @hyp.settings(max_examples=25, deadline=None)
+    @hyp.given(value=st.text(alphabet=" \t", max_size=8))
+    def test_skylos_allow_rejects_missing_or_whitespace_values(
+        self, value: str
+    ) -> None:
+        """The whitelist target must reject absent and whitespace-only inputs."""
+        for arguments, missing_name in (
+            ((), "SYMBOL"),
+            (("SYMBOL=bootstrap_shim_path",), "REASON"),
+            ((f"SYMBOL={value}", "REASON=Loaded by bootstrap shim"), "SYMBOL"),
+            (("SYMBOL=bootstrap_shim_path", f"REASON={value}"), "REASON"),
+        ):
+            completed = _run_skylos_allow(*arguments)
+
+            assert completed.returncode == 2, (
+                f"Skylos whitelist boundary must reject {missing_name}."
+            )
+            assert (
+                f"Error: {missing_name} is required for a named whitelist exception"
+                in completed.stderr
+            ), f"Skylos whitelist boundary must name the missing {missing_name}."
+
+    @hyp.settings(max_examples=25, deadline=None)
+    @hyp.example(symbol="$(handler);*", reason='Loaded "$plugin" | registry')
+    @hyp.given(symbol=_SHELL_ARGUMENT_TEXT, reason=_SHELL_ARGUMENT_TEXT)
+    def test_skylos_allow_forwards_generated_argument_boundaries(
+        self, symbol: str, reason: str
+    ) -> None:
+        """Every non-empty generated value must reach Skylos as one argument."""
+        with TemporaryDirectory() as temporary_directory:
+            isolated_directory = Path(temporary_directory)
+            recorded_arguments = isolated_directory / "arguments.json"
+            recorder = isolated_directory / "skylos-recorder"
+            pyproject_before = (REPOSITORY_ROOT / "pyproject.toml").read_bytes()
+            recorder.write_text(
+                f"#!{sys.executable}\n"
+                "import json\n"
+                "import os\n"
+                "import sys\n"
+                "from pathlib import Path\n\n"
+                'Path(os.environ["SKYLOS_ARGUMENTS_PATH"]).write_text(\n'
+                "    json.dumps(sys.argv[1:]), encoding='utf-8'\n"
+                ")\n",
+                encoding="utf-8",
+            )
+            recorder.chmod(0o755)
+            environment: dict[str, str] = {
+                **os.environ,
+                "SKYLOS_ARGUMENTS_PATH": str(recorded_arguments),
+                "SYMBOL": symbol,
+                "REASON": reason,
+            }
+            completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Make target and recorder.
+                (*_isolated_skylos_allow_command(isolated_directory, recorder),),
+                capture_output=True,
+                check=False,
+                cwd=isolated_directory,
+                env=environment,
+                text=True,
+            )
+
+            assert completed.returncode == 0, (
+                "Skylos whitelist boundary must accept non-empty generated values: "
+                f"{completed.stderr}"
+            )
+            assert json.loads(recorded_arguments.read_text(encoding="utf-8")) == [
+                "whitelist",
+                symbol,
+                "--reason",
+                reason,
+            ], "Skylos must receive each generated value as exactly one argument."
+            assert (
+                REPOSITORY_ROOT / "pyproject.toml"
+            ).read_bytes() == pyproject_before, (
+                "Skylos whitelist forwarding test must not mutate the repository "
+                "configuration."
+            )
 
 
 def test_skylos_allow_lock_preserves_concurrent_updates() -> None:
@@ -477,7 +597,7 @@ def test_skylos_allow_lock_preserves_concurrent_updates() -> None:
         )
         writer.chmod(0o755)
         with (
-            subprocess.Popen(  # noqa: S603 - fixed local Make target and writer.
+            subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Make target and writer.
                 _isolated_skylos_allow_command(isolated_directory, writer),
                 cwd=isolated_directory,
                 env={**os.environ, "SYMBOL": "first", "REASON": "first reason"},
@@ -485,7 +605,7 @@ def test_skylos_allow_lock_preserves_concurrent_updates() -> None:
                 stdout=subprocess.PIPE,
                 text=True,
             ) as first,
-            subprocess.Popen(  # noqa: S603 - fixed local Make target and writer.
+            subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Make target and writer.
                 _isolated_skylos_allow_command(isolated_directory, writer),
                 cwd=isolated_directory,
                 env={**os.environ, "SYMBOL": "second", "REASON": "second reason"},
@@ -553,6 +673,17 @@ def test_skylos_configuration_is_strict_and_reasoned() -> None:
     }
     assert entrypoint_reasons == EXPECTED_ENTRYPOINT_REASONS, (
         "Skylos entry-point contract must retain each verified runtime caller."
+    )
+    entrypoint_types = {
+        full_name: entrypoint_type
+        for entrypoint in entrypoints
+        if isinstance(entrypoint_type := entrypoint.get("type"), str)
+        for full_name in _text_sequence(
+            entrypoint.get("full_name"), subject="entrypoint full name"
+        )
+    }
+    assert entrypoint_types == EXPECTED_ENTRYPOINT_TYPES, (
+        "Skylos entry-point contract must retain each verified caller type."
     )
     assert all(
         isinstance(reason := entrypoint.get("reason"), str) and reason.strip()
