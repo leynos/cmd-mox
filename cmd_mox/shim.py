@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import math
 import os
+import select
 import sys
+import time
 import typing as typ
 from pathlib import Path
 
@@ -147,13 +150,65 @@ def _validate_environment() -> float:
     return timeout
 
 
-def _create_invocation(cmd_name: str) -> Invocation:
+def _exit_ipc_error(exc: Exception, exit_code: int = 1) -> typ.NoReturn:
+    """Print an IPC diagnostic and terminate with a controlled status."""
+    # A closed stderr cannot prevent the shim from returning a known status.
+    with contextlib.suppress(OSError):
+        print(f"IPC error: {exc}", file=sys.stderr)
+    sys.exit(exit_code)
+
+
+def _read_stdin_until_eof(timeout: float) -> str:
+    """Read non-interactive stdin before *timeout* elapses.
+
+    Returns
+    -------
+    str
+        The complete standard-input text.
+    """
+    if path_utils.IS_WINDOWS:
+        return sys.stdin.read()
+
+    try:
+        descriptor = sys.stdin.fileno()
+        poller = select.poll()
+        poller.register(descriptor, select.POLLIN | select.POLLHUP)
+    except (AttributeError, OSError, ValueError):
+        # Test doubles and non-file streams cannot be polled; preserve their
+        # established direct-read behaviour, including on non-Unix platforms.
+        return sys.stdin.read()
+
+    deadline = time.monotonic() + timeout
+    chunks = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _exit_ipc_error(TimeoutError("timed out reading stdin"))
+
+        events = poller.poll(max(1, math.ceil(remaining * 1_000)))
+        if not events:
+            _exit_ipc_error(TimeoutError("timed out reading stdin"))
+
+        try:
+            chunk = os.read(descriptor, 8_192)
+        except OSError as exc:
+            _exit_ipc_error(exc)
+        if not chunk:
+            encoding = sys.stdin.encoding or "utf-8"
+            errors = sys.stdin.errors or "strict"
+            return bytes(chunks).decode(encoding, errors)
+        chunks.extend(chunk)
+
+
+def _create_invocation(cmd_name: str, timeout: float) -> Invocation:
     """Create an invocation from command-line arguments and stdin.
 
     Parameters
     ----------
     cmd_name : str
         Command name associated with the shim process.
+    timeout : float
+        Maximum time available to read non-interactive standard input.
 
     Returns
     -------
@@ -162,7 +217,7 @@ def _create_invocation(cmd_name: str) -> Invocation:
     """
     import uuid
 
-    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+    stdin_data = "" if sys.stdin.isatty() else _read_stdin_until_eof(timeout)
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
     if path_utils.IS_WINDOWS:
@@ -198,8 +253,7 @@ def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
         RuntimeError,
         json.JSONDecodeError,
     ) as exc:  # pragma: no cover - network issues
-        print(f"IPC error: {exc}", file=sys.stderr)
-        sys.exit(1)
+        _exit_ipc_error(exc)
 
     if response.passthrough is not None:
         response = _handle_passthrough(invocation, response, timeout)
@@ -211,8 +265,11 @@ def _write_response(response: Response) -> None:
     if response.env:
         os.environ |= response.env
 
-    sys.stdout.write(response.stdout)
-    sys.stderr.write(response.stderr)
+    try:
+        sys.stdout.write(response.stdout)
+        sys.stderr.write(response.stderr)
+    except OSError as exc:
+        _exit_ipc_error(exc, exit_code=response.exit_code or 1)
     sys.exit(response.exit_code)
 
 
@@ -221,7 +278,7 @@ def main() -> None:
     bootstrap_shim_path()
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
-    invocation = _create_invocation(cmd_name)
+    invocation = _create_invocation(cmd_name, timeout)
     response = _execute_invocation(invocation, timeout)
     _write_response(response)
 
@@ -256,7 +313,10 @@ def _handle_passthrough(
         stderr=result_response.stderr,
         exit_code=result_response.exit_code,
     )
-    return report_passthrough_result(passthrough_result, timeout=timeout)
+    try:
+        return report_passthrough_result(passthrough_result, timeout=timeout)
+    except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+        _exit_ipc_error(exc, exit_code=result_response.exit_code or 1)
 
 
 def _shim_directory_from_env() -> Path | None:

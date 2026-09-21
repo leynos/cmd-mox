@@ -122,7 +122,7 @@ def test_create_invocation_skips_tty_stdin(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(sys, "argv", ["shim", "--flag"])
     monkeypatch.setenv("EXTRA", "value")
 
-    invocation = _create_invocation("shim")
+    invocation = _create_invocation("shim", timeout=1.0)
 
     assert invocation.command == "shim"
     assert invocation.args == ["--flag"]
@@ -139,10 +139,37 @@ def test_create_invocation_reads_stdin_when_not_tty(
     monkeypatch.setattr(sys, "stdin", dummy_stdin)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
-    invocation = _create_invocation("shim")
+    invocation = _create_invocation("shim", timeout=1.0)
 
     assert invocation.stdin == "payload"
     assert dummy_stdin.read_calls == 1
+
+
+def test_create_invocation_reports_stdin_timeout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-tty stream that never becomes readable exits with an IPC error."""
+
+    class _PollingStdin(_DummyStdin):
+        def fileno(self) -> int:
+            return 7
+
+    class _NeverReadablePoll:
+        def register(self, _fd: int, _events: int) -> None:
+            pass
+
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            return []
+
+    monkeypatch.setattr(sys, "stdin", _PollingStdin("", is_tty=False))
+    monkeypatch.setattr(shim.select, "poll", _NeverReadablePoll)
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    with pytest.raises(SystemExit) as exc:
+        _create_invocation("shim", timeout=0.01)
+
+    _assert_exit_code(exc, 1)
+    assert "IPC error: timed out reading stdin" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -173,7 +200,7 @@ def test_create_invocation_normalizes_windows_args(
     monkeypatch.setenv("EXTRA", "1")
     monkeypatch.setattr(sys, "stdin", _DummyStdin("ignored", is_tty=True))
 
-    invocation = shim._create_invocation("shim")
+    invocation = shim._create_invocation("shim", timeout=1.0)
 
     assert invocation.args == [r"foo^bar", r"arg^"]
 
@@ -321,6 +348,35 @@ def test_execute_invocation_surfaces_ipc_errors(
     assert "IPC error: boom" in capsys.readouterr().err
 
 
+def test_passthrough_report_failure_preserves_nonzero_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Reporting a failed passthrough exits through its determined status."""
+    invocation = Invocation(
+        command="cmd", args=[], stdin="", env={}, invocation_id="abc"
+    )
+    directive = PassthroughRequest(
+        invocation_id="abc", lookup_path="/bin", extra_env={}, timeout=1.0
+    )
+    response = Response(passthrough=directive)
+
+    monkeypatch.setattr(shim, "_run_real_command", lambda *_args: Response(exit_code=2))
+
+    def raise_error(*_: object, **__: object) -> typ.NoReturn:
+        msg = "server did not acknowledge passthrough"
+        raise TimeoutError(msg)
+
+    monkeypatch.setattr(shim, "report_passthrough_result", raise_error)
+
+    with pytest.raises(SystemExit) as exc:
+        shim._handle_passthrough(invocation, response, timeout=1.0)
+
+    _assert_exit_code(exc, 2)
+    assert (
+        "IPC error: server did not acknowledge passthrough" in capsys.readouterr().err
+    )
+
+
 def test_write_response_updates_environment_and_streams(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -336,6 +392,25 @@ def test_write_response_updates_environment_and_streams(
     assert captured.out == "out"
     assert captured.err == "err"
     assert os.environ["NEW"] == "value"
+
+
+def test_write_response_handles_closed_stdout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A closed output stream produces a controlled IPC failure."""
+
+    class _ClosedWriter:
+        def write(self, _text: str) -> typ.NoReturn:
+            msg = "closed stdout"
+            raise BrokenPipeError(msg)
+
+    monkeypatch.setattr(sys, "stdout", _ClosedWriter())
+
+    with pytest.raises(SystemExit) as exc:
+        _write_response(Response(stdout="out", exit_code=3))
+
+    _assert_exit_code(exc, 3)
+    assert "IPC error: closed stdout" in capsys.readouterr().err
 
 
 def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -354,7 +429,7 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shim,
         "_create_invocation",
-        lambda name: calls.append(("create", name)) or invocation,
+        lambda name, timeout: calls.append(("create", name, timeout)) or invocation,
     )
 
     response = Response(stdout="ok", stderr="", exit_code=0)
@@ -373,7 +448,7 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
         "bootstrap",
         "resolve",
         "validate",
-        ("create", "shim"),
+        ("create", "shim", 1.0),
         ("execute", invocation, 1.0),
         ("write", response),
     ]

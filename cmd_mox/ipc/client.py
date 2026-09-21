@@ -1,5 +1,7 @@
 """Client helpers for talking to the IPC server."""
 
+# pylint: disable=too-many-lines  # Unix requests share one deadline across transport steps.
+
 from __future__ import annotations
 
 import contextlib
@@ -430,6 +432,8 @@ def _run_blocking_io[T](
 def _connect_unix_with_retries(
     sock_path: Path,
     context: _ConnectionContext,
+    *,
+    deadline: float | None = None,
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`.
 
@@ -440,10 +444,13 @@ def _connect_unix_with_retries(
     """
     context.validate()
     address = str(sock_path)
+    request_deadline = (
+        deadline if deadline is not None else _compute_deadline(context.timeout)
+    )
 
     def attempt_connect(_attempt: int) -> socket.socket:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(context.timeout)
+        sock.settimeout(_remaining_time(request_deadline))
         try:
             sock.connect(address)
         except OSError:
@@ -456,10 +463,13 @@ def _connect_unix_with_retries(
         # exception message are both on the observability never-log list.
         _client_events.emit_connect_retry("unix", attempt, exc, context.correlation_id)
 
+    def bounded_sleep(delay: float) -> None:
+        time.sleep(min(delay, _remaining_time(request_deadline)))
+
     return retry_with_backoff(
         attempt_connect,
         retry_config=context.retry_config,
-        strategy=RetryStrategy(on_failure=log_failure),
+        strategy=RetryStrategy(on_failure=log_failure, sleep=bounded_sleep),
     )
 
 
@@ -483,7 +493,7 @@ def _get_validated_socket_path() -> Path:
     return Path(sock)
 
 
-def _read_all(sock: socket.socket) -> bytes:
+def _read_all(sock: socket.socket, deadline: float) -> bytes:
     """Read all data from *sock* until EOF.
 
     Returns
@@ -492,7 +502,11 @@ def _read_all(sock: socket.socket) -> bytes:
         Every byte received before the peer closed the connection.
     """
     chunks = []
-    while chunk := sock.recv(1024):
+    while True:
+        sock.settimeout(_remaining_time(deadline))
+        chunk = sock.recv(1024)
+        if not chunk:
+            break
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -502,10 +516,13 @@ def _send_unix_request(
     payload: bytes,
     context: _ConnectionContext,
 ) -> bytes:
-    with _connect_unix_with_retries(sock_path, context) as client:
+    deadline = _compute_deadline(context.timeout)
+    with _connect_unix_with_retries(sock_path, context, deadline=deadline) as client:
+        client.settimeout(_remaining_time(deadline))
         client.sendall(payload)
+        client.settimeout(_remaining_time(deadline))
         client.shutdown(socket.SHUT_WR)
-        return _read_all(client)
+        return _read_all(client, deadline)
 
 
 def _decode_response(raw: bytes) -> Response:
@@ -744,10 +761,9 @@ def invoke_server(
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
-    The *timeout* applies to each blocking connect/send/receive operation.
-    Unix clients rely on ``socket.settimeout`` so the kernel enforces the
-    limit, while Windows clients cooperatively track the deadline and close
-    the named pipe if any step exceeds *timeout*, raising ``TimeoutError``.
+    Unix clients apply *timeout* as one deadline across connecting, sending,
+    and receiving. Windows clients retain their cooperative named-pipe
+    deadline behaviour, closing the pipe when a step exceeds *timeout*.
 
     Returns
     -------
@@ -764,9 +780,8 @@ def report_passthrough_result(
 ) -> Response:
     """Send passthrough execution results back to the IPC server.
 
-    Timeout handling mirrors :func:`invoke_server`: Unix sockets enforce the
-    limit per system call, and Windows callers rely on cooperative deadlines
-    that cancel the named pipe when *timeout* expires.
+    Timeout handling mirrors :func:`invoke_server`: Unix sockets share one
+    deadline per request, and Windows callers retain cooperative deadlines.
 
     Returns
     -------
