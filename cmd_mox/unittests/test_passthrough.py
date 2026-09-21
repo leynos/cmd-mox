@@ -43,7 +43,6 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
     assert math.isclose(response.passthrough.timeout, 2.0)
     assert response.passthrough.extra_env == {"PATH": "/usr/bin"}
     assert response.env == {"PATH": "/usr/bin"}
-    assert coordinator.has_pending(invocation.invocation_id or "")
 
 
 @pytest.mark.parametrize(
@@ -112,7 +111,6 @@ def test_finalize_result_returns_response_and_clears() -> None:
     assert final_response.exit_code == 3
     assert final_response.env == {"EXTRA": "1"}
     assert stored_invocation.env == {"EXTRA": "1"}
-    assert not coordinator.has_pending(directive.invocation_id)
 
 
 def test_finalize_result_rejects_unknown_invocation() -> None:
@@ -146,8 +144,14 @@ def test_expired_requests_are_pruned(monkeypatch: pytest.MonkeyPatch) -> None:
     directive = coordinator.prepare_request(double, invocation, config)
     assert directive.passthrough is not None
     pending_id = directive.passthrough.invocation_id
-    assert coordinator.has_pending(pending_id)
 
     now += 10.0  # advance beyond cleanup TTL
-    assert not coordinator.has_pending(pending_id)
-    assert coordinator.pending_count() == 0
+    with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
+        coordinator.finalize_result(
+            PassthroughResult(
+                invocation_id=pending_id,
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        )

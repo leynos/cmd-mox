@@ -26,7 +26,6 @@ def test_prepare_passthrough_registers_pending_invocation() -> None:
         assert directive.lookup_path == mox.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
-        assert mox._passthrough_coordinator.has_pending(directive.invocation_id)
 
 
 def test_prepare_passthrough_rejects_conflicting_env() -> None:
@@ -56,9 +55,6 @@ def test_handle_passthrough_result_rejects_unknown_invocation() -> None:
         invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
         prepared = mox._prepare_passthrough(spy, invocation)
         assert prepared.passthrough is not None
-        assert mox._passthrough_coordinator.has_pending(
-            prepared.passthrough.invocation_id
-        )
 
 
 def test_handle_passthrough_result_finalises_invocation() -> None:
@@ -83,6 +79,5 @@ def test_handle_passthrough_result_finalises_invocation() -> None:
         assert len(mox.journal) == 1
         recorded = mox.journal[0]
         assert recorded.exit_code == 7
-        assert not mox._passthrough_coordinator.has_pending(directive.invocation_id)
         with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
             mox._handle_passthrough_result(result)

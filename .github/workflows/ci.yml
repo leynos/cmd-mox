@@ -29,6 +29,8 @@ jobs:
       # Pin the Makefile validator so a new mbake release cannot fail the
       # build without a reviewed change here.
       MBAKE_VERSION: '1.4.6'
+      MAKEUTIL_REVISION: '29fc5a1634ffbaa18a773eed9dff1b2838a45d9c'
+      MAKEUTIL_TOOLCHAIN: 'nightly-2026-05-28'
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,6 +55,17 @@ jobs:
           # Makefile; tests/test_toolchain_contract.py enforces the match.
           uv tool install 'ruff==0.16.4'
           uv tool install 'ty==0.0.74'
+
+      - name: Install Makefile parser
+        if: matrix.run-windows-smoke == false
+        run: |
+          rustup toolchain install "${MAKEUTIL_TOOLCHAIN}" --profile minimal
+          RUSTFLAGS="-Zpolonius=next" cargo +"${MAKEUTIL_TOOLCHAIN}" install \
+            --git https://github.com/leynos/makeutil \
+            --rev "${MAKEUTIL_REVISION}" \
+            --locked \
+            --force \
+            makeutil
 
       - name: Install make
         if: matrix.run-windows-smoke
@@ -90,7 +103,7 @@ jobs:
         with:
           globs: '**/*.md'
 
-      - name: Run ruff
+      - name: Run lint and dead-code detection
         if: matrix.run-windows-smoke == false
         run: make lint
 

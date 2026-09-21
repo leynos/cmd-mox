@@ -6,18 +6,19 @@ where lint policy is configured.
 
 ## Linting
 
-CmdMox uses a three-tier linting pipeline. Run it with:
+CmdMox uses a four-tier linting pipeline. Run it with:
 
 ```bash
 make lint
 ```
 
 The `lint` target first builds the development environment through
-`make build`. It then runs the three lint tiers in order:
+`make build`. It then runs the four lint tiers in order:
 
 1. `ruff check`
 2. PyPy-backed Pylint through `pylint-pypy-shim`
 3. CPython 3.14 Pylint with `df12_python_lints`, followed by `ambrleaks`
+4. a blocking Skylos dead-code scan of the production package
 
 Ruff is the fast first tier. It enforces import order, pycodestyle and Pyflakes
 rules, pathlib usage, docstring rules, pytest rules, selected Ruff preview
@@ -35,30 +36,43 @@ CPython 3.14. Its separate `pylintrc-df12.toml` enables every DF12 checker
 against CmdMox's supported Python 3.12 source baseline. `ambrleaks` then scans
 the test snapshot area for unredacted values.
 
+Skylos is the final production-liveness check. It is separately provisioned at
+an exact release, scans `cmd_mox` without treating test references as live
+callers, and fails the local gate and Linux CI when it reports unexplained dead
+code. The scan uses only local static analysis: uploads, provenance collection,
+and grep verification are disabled.
+
 ## Makefile lint variables
 
 The `Makefile` exposes the lint runner through variables so developers and
 Continuous Integration (CI) jobs can override the runtime without editing
 project files.
 
-| Variable                  | Default                                                                                                                            | Purpose                                                                           |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `RUFF_VERSION`            | `0.16.4`                                                                                                                           | Pins the Ruff release used by lint and format targets.                            |
-| `RUFF`                    | `$(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)`                                                                                    | Runs the pinned Ruff command via `uv tool run`.                                   |
-| `TY_VERSION`              | `0.0.74`                                                                                                                           | Pins the `ty` release used by the typecheck target.                               |
-| `TY`                      | `$(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty`                                                                                  | Overlays the pinned `ty` onto the project virtualenv so it sees dependencies.     |
-| `TYPOS_VERSION`           | `1.48.0`                                                                                                                           | Pins the `typos` release used by the spelling target.                             |
-| `PYLINT_PYTHON`           | `pypy`                                                                                                                             | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
-| `PYLINT_TARGETS`          | `cmd_mox conftest.py examples tests`                                                                                               | Lists the directories and files linted by Pylint.                                 |
-| `PYLINT_PYPY_SHIM_REF`    | `726d09f968b4d729ee4b29c71fc732e744854f3b`                                                                                         | Pins the shim repository revision.                                                |
-| `PYLINT_PYPY_SHIM`        | `git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)`                                                       | Identifies the shim package used by `uv tool run`.                                |
-| `PYLINT_BASELINE_DISABLE` | Existing cmd-mox baseline                                                                                                          | Temporarily disables legacy Pylint findings while keeping the second tier active. |
-| `PYLINT`                  | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy-backed Pylint command.                                       |
-| `DF12_PYTHON`             | `3.14`                                                                                                                             | Selects CPython for the isolated DF12 tooling tier.                               |
-| `DF12_PYTHON_LINTS_REF`   | `4cf41736cce2f7ba2778882a5c629c044568a0e5`                                                                                         | Pins the immutable DF12 lint and `ambrleaks` revision (the `v0.3.0` tag commit).  |
-| `DF12_PYTHON_LINTS`       | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                     | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
-| `DF12_PYLINT`             | uv-isolated Pylint under CPython 3.14                                                                                              | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
-| `AMBRLEAKS`               | uv-isolated `ambrleaks` under CPython 3.14                                                                                         | Scans tracked test snapshot files for unredacted values.                          |
+| Variable                    | Default                                                                                                                            | Purpose                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `RUFF_VERSION`              | `0.16.4`                                                                                                                           | Pins the Ruff release used by lint and format targets.                            |
+| `RUFF`                      | `$(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)`                                                                                    | Runs the pinned Ruff command via `uv tool run`.                                   |
+| `TY_VERSION`                | `0.0.74`                                                                                                                           | Pins the `ty` release used by the typecheck target.                               |
+| `TY`                        | `$(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty`                                                                                  | Overlays the pinned `ty` onto the project virtualenv so it sees dependencies.     |
+| `TYPOS_VERSION`             | `1.48.0`                                                                                                                           | Pins the `typos` release used by the spelling target.                             |
+| `PYLINT_PYTHON`             | `pypy`                                                                                                                             | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
+| `PYLINT_TARGETS`            | `cmd_mox conftest.py examples tests`                                                                                               | Lists the directories and files linted by Pylint.                                 |
+| `PYLINT_PYPY_SHIM_REF`      | `726d09f968b4d729ee4b29c71fc732e744854f3b`                                                                                         | Pins the shim repository revision.                                                |
+| `PYLINT_PYPY_SHIM`          | `git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)`                                                       | Identifies the shim package used by `uv tool run`.                                |
+| `PYLINT_BASELINE_DISABLE`   | Existing cmd-mox baseline                                                                                                          | Temporarily disables legacy Pylint findings while keeping the second tier active. |
+| `PYLINT`                    | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy-backed Pylint command.                                       |
+| `DF12_PYTHON`               | `3.14`                                                                                                                             | Selects CPython for the isolated DF12 tooling tier.                               |
+| `DF12_PYTHON_LINTS_REF`     | `4cf41736cce2f7ba2778882a5c629c044568a0e5`                                                                                         | Pins the immutable DF12 lint and `ambrleaks` revision (the `v0.3.0` tag commit).  |
+| `DF12_PYTHON_LINTS`         | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                     | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
+| `DF12_PYLINT`               | uv-isolated Pylint under CPython 3.14                                                                                              | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
+| `AMBRLEAKS`                 | uv-isolated `ambrleaks` under CPython 3.14                                                                                         | Scans tracked test snapshot files for unredacted values.                          |
+| `SKYLOS_VERSION`            | `4.33.2`                                                                                                                           | Pins the separately provisioned dead-code analyser.                               |
+| `SKYLOS_CLI`                | `$(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' skylos`                                                 | Command-only CLI; Python 3.14 supplies Skylos's source AST runtime.               |
+| `SKYLOS`                    | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                       | Adds scan-only global options for the blocking lint target.                       |
+| `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                          | Limits dead-code liveness analysis to production sources.                         |
+| `SKYLOS_EXCLUDE_FOLDERS`    | `tests cmd_mox/unittests`                                                                                                          | Excludes both test paths from the production liveness graph.                      |
+| `SKYLOS_EXCLUDE_ARGS`       | `$(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))`                                                                  | Expands each excluded folder to its own repeatable `--exclude` flag.              |
+| `SKYLOS_WHITELIST_LOCK`     | `.skylos-whitelist.lock`                                                                                                           | Repository-local lock serializing documented whitelist updates.                   |
 
 _Table 1: Makefile variables for the lint pipeline._
 
@@ -74,8 +88,8 @@ make lint PYLINT_TARGETS=cmd_mox/ipc PYLINT_PYTHON=pypy
 ```
 
 Do not bypass `make lint` for normal validation. Running the target keeps the
-Ruff, PyPy Pylint, DF12 Pylint, and snapshot-leak tiers ordered consistently
-with CI and preserves the shared `uv` cache configuration.
+Ruff, PyPy Pylint, DF12 Pylint, snapshot-leak, Skylos, and spelling gates
+ordered consistently with CI and preserves the shared `uv` cache configuration.
 
 ## Snapshot testing
 
@@ -150,6 +164,64 @@ dispatch:
 matching and must not invoke expectation matching for a different command. This
 prevents a double from accepting an invocation owned by another command.
 
+## Skylos dead-code policy
+
+Treat a Skylos report as genuine dead code until a runtime caller has been
+verified. Remove confirmed dead code. For a confirmed false positive that
+cannot be represented as an ordinary static reference, first add a precise
+typed entry-point rule to `[[tool.skylos.dead_code.entrypoints]]`. Add a named
+exception to `[tool.skylos.whitelist.documented]` in `pyproject.toml` only when
+an entry-point rule cannot model the verified boundary. Every exception must
+name its verified runtime caller in a caller-specific reason. Group symbols
+only when the same caller or lifecycle reaches all of them; otherwise, use
+separate entries. Do not add unexplained exceptions or use the allow list to
+avoid a removal. The `--no-grep-verify` configuration is intentional: test
+references must not keep production symbols live in the blocking scan.
+
+For a verified false positive that cannot be modelled with an entry-point rule,
+use the command-first helper:
+
+```bash
+make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
+```
+
+The target requires both variables to contain non-whitespace values and invokes
+`skylos whitelist <symbol> --reason <reason>`. `SYMBOL` avoids WSL's
+caller-owned `NAME` environment variable. Each read-modify-write is serialized
+with `flock` on the ignored repository-local `.skylos-whitelist.lock`; tests
+may override `SKYLOS_WHITELIST_LOCK` when running in an isolated temporary
+directory. Treat the helper as a reviewed write: retain the matching
+`[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
+caller-specific reason, and never use it to avoid removing genuine dead code.
+Override `SKYLOS_WHITELIST_LOCK` only when isolating helper tests from the
+checkout.
+
+Skylos parses source with the AST implementation of its own runtime. The
+command-only `SKYLOS_CLI` therefore pins Python 3.14 to prevent newer syntax
+from producing phantom findings. Scan-only global options such as
+`--config-file pyproject.toml` belong in `SKYLOS`, not in the command-only
+macro, so the `whitelist` subcommand remains first for helper dispatch.
+
+The blocking scan targets production modules only, excludes test paths from the
+liveness graph, and enables strict gate mode. Investigate every finding; remove
+genuine dead code and record only verified false positives.
+
+The contract test parses the Makefile with the pinned Makeutil executable, and
+`make test` verifies that the parser is available before running the suite. CI
+installs the same revision independently in each isolated full-suite job.
+
+For local test runs, install the same parser and toolchain before running
+`make test`:
+
+```bash
+rustup toolchain install nightly-2026-05-28 --profile minimal
+RUSTFLAGS="-Zpolonius=next" cargo +nightly-2026-05-28 install \
+  --git https://github.com/leynos/makeutil \
+  --rev 29fc5a1634ffbaa18a773eed9dff1b2838a45d9c \
+  --locked --force makeutil
+make test
+```
+
 ## Spelling policy
 
 The lint and Markdown gates run a pinned `typos` release with British English
@@ -165,13 +237,14 @@ Add repository-only proper names or quoted upstream terms to
 ## Episodic lint policy
 
 CmdMox imports its lint posture from
-[Episodic](https://github.com/leynos/episodic). The imported policy has three
+[Episodic](https://github.com/leynos/episodic). The imported policy has four
 goals:
 
 - keep Ruff as the fast, broad, first-pass linter;
-- use focused Pylint checks for problems that Ruff does not cover as well; and
+- use focused Pylint checks for problems that Ruff does not cover as well;
 - run Pylint under PyPy through the shared
-  [pylint-pypy-shim](https://github.com/leynos/pylint-pypy-shim) approach.
+  [pylint-pypy-shim](https://github.com/leynos/pylint-pypy-shim) approach; and
+- detect unused production symbols with a local, blocking Skylos scan.
 
 The DF12 extension preserves that baseline while adding an isolated CPython
 3.14 pass. Its plugin is deliberately configured separately so baseline Pylint
@@ -235,6 +308,13 @@ tier. It loads `df12_python_lints`, analyses the Python 3.12 source baseline,
 disables the general Pylint catalogue, and enables the complete DF12 checker
 list explicitly. This keeps the DF12 policy auditable and independent of the
 temporary PyPy Pylint baseline.
+
+### Skylos tables
+
+- `[tool.skylos.gate]` enables strict failure for unexplained dead-code
+  findings.
+- `[tool.skylos.whitelist.documented]` stores only reasoned false positives;
+  each entry must identify the verified runtime caller.
 
 ## Updating lint policy
 

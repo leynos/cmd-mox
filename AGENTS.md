@@ -91,7 +91,22 @@ When implementing changes, adhere to the following testing procedures:
 
     - **Testing:** Passes all relevant unit and behavioural tests according to
       the guidelines above (`make test`).
-    - **Linting:** Passes lint checks (`make lint`).
+    - **Linting:** Passes the complete `make lint` pipeline, including the
+      fourth Python lint tier: the blocking Skylos production dead-code scan.
+      Investigate every Skylos finding and remove genuine dead code. For a
+      verified false positive, first model an implicit runtime caller with a
+      precise, typed entry-point rule in
+      `[tool.skylos.dead_code.entrypoints]`; use `type = "method"` for methods
+      and include the fully qualified symbol and a caller-specific reason. Only
+      when an entry-point rule cannot describe the boundary may a documented
+      allow-list exception be added with
+      `make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"`.
+      The helper requires both variables to contain non-whitespace values and
+      serializes the whitelist read-modify-write through the ignored,
+      repository-local `.skylos-whitelist.lock`. Retain the same
+      caller-specific reason in `[tool.skylos.whitelist.documented]` in
+      `pyproject.toml`; override the lock path only when isolating helper
+      tests from the checkout.
     - **Formatting:** Adheres to formatting standards (`make check-fmt`,
       formatting can be applied by running `make fmt`).
     - **Typechecking:** Passes type checking (`make typecheck`).
