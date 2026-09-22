@@ -199,7 +199,7 @@ def _decode_stdin_chunk(decoder: io.IncrementalNewlineDecoder, chunk: bytes) -> 
         _exit_ipc_error(exc)
 
 
-def _read_stdin_until_eof(timeout: float) -> str:
+def _read_stdin_until_eof(timeout: float, *, deadline: float | None = None) -> str:
     """Read non-interactive stdin before *timeout* elapses."""  # ruff: ignore[docstring-missing-returns] - private reader has one direct result
     if path_utils.IS_WINDOWS:
         return sys.stdin.read()
@@ -213,11 +213,11 @@ def _read_stdin_until_eof(timeout: float) -> str:
         # established direct-read behaviour, including on non-Unix platforms.
         return sys.stdin.read()
 
-    deadline = time.monotonic() + timeout
+    read_deadline = deadline if deadline is not None else time.monotonic() + timeout
     decoder = _stdin_decoder()
     chunks: list[str] = []
     while True:
-        events = _poll_stdin(poller, deadline)
+        events = _poll_stdin(poller, read_deadline)
         if events is None:
             _exit_ipc_error(TimeoutError("timed out reading stdin"))
         if not events:
@@ -232,7 +232,9 @@ def _read_stdin_until_eof(timeout: float) -> str:
             return "".join(chunks)
 
 
-def _create_invocation(cmd_name: str, timeout: float) -> Invocation:
+def _create_invocation(
+    cmd_name: str, timeout: float, *, deadline: float | None = None
+) -> Invocation:
     """Create an invocation from command-line arguments and stdin.
 
     Parameters
@@ -241,6 +243,8 @@ def _create_invocation(cmd_name: str, timeout: float) -> Invocation:
         Command name associated with the shim process.
     timeout : float
         Maximum time available to read non-interactive standard input.
+    deadline : float or None, optional
+        Shared monotonic deadline for stdin and subsequent IPC on POSIX.
 
     Returns
     -------
@@ -249,7 +253,9 @@ def _create_invocation(cmd_name: str, timeout: float) -> Invocation:
     """
     import uuid
 
-    stdin_data = "" if sys.stdin.isatty() else _read_stdin_until_eof(timeout)
+    stdin_data = (
+        "" if sys.stdin.isatty() else _read_stdin_until_eof(timeout, deadline=deadline)
+    )
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
     if path_utils.IS_WINDOWS:
@@ -263,7 +269,31 @@ def _create_invocation(cmd_name: str, timeout: float) -> Invocation:
     )
 
 
-def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
+def _timeout_remaining(timeout: float, deadline: float | None) -> float:
+    """Return the remaining shared budget, or the original timeout.
+
+    Returns
+    -------
+    float
+        Remaining time before *deadline*, or *timeout* when no deadline exists.
+
+    Raises
+    ------
+    TimeoutError
+        If the shared deadline has expired.
+    """
+    if deadline is None:
+        return timeout
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        msg = "IPC operation timed out"
+        raise TimeoutError(msg)
+    return remaining
+
+
+def _execute_invocation(
+    invocation: Invocation, timeout: float, *, deadline: float | None = None
+) -> Response:
     """Execute an invocation via IPC, handling passthrough if needed.
 
     Parameters
@@ -272,6 +302,8 @@ def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
         Invocation to send to the IPC server.
     timeout : float
         IPC timeout in seconds.
+    deadline : float or None, optional
+        Shared monotonic deadline for the request and any passthrough report.
 
     Returns
     -------
@@ -279,7 +311,9 @@ def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
         Response returned by the server or passthrough command.
     """
     try:
-        response = invoke_server(invocation, timeout=timeout)
+        response = invoke_server(
+            invocation, timeout=_timeout_remaining(timeout, deadline)
+        )
     except (
         OSError,
         RuntimeError,
@@ -288,7 +322,7 @@ def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
         _exit_ipc_error(exc)
 
     if response.passthrough is not None:
-        response = _handle_passthrough(invocation, response, timeout)
+        response = _handle_passthrough(invocation, response, timeout, deadline=deadline)
     return response
 
 
@@ -310,13 +344,18 @@ def main() -> None:
     bootstrap_shim_path()
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
-    invocation = _create_invocation(cmd_name, timeout)
-    response = _execute_invocation(invocation, timeout)
+    deadline = None if path_utils.IS_WINDOWS else time.monotonic() + timeout
+    invocation = _create_invocation(cmd_name, timeout, deadline=deadline)
+    response = _execute_invocation(invocation, timeout, deadline=deadline)
     _write_response(response)
 
 
 def _handle_passthrough(
-    invocation: Invocation, response: Response, timeout: float
+    invocation: Invocation,
+    response: Response,
+    timeout: float,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Execute the real command and report its outcome to the server.
 
@@ -328,6 +367,8 @@ def _handle_passthrough(
         Server response containing the passthrough directive.
     timeout : float
         IPC timeout in seconds.
+    deadline : float or None, optional
+        Shared monotonic deadline for the passthrough report.
 
     Returns
     -------
@@ -346,7 +387,9 @@ def _handle_passthrough(
         exit_code=result_response.exit_code,
     )
     try:
-        return report_passthrough_result(passthrough_result, timeout=timeout)
+        return report_passthrough_result(
+            passthrough_result, timeout=_timeout_remaining(timeout, deadline)
+        )
     except (OSError, RuntimeError, json.JSONDecodeError) as exc:
         _exit_ipc_error(exc, exit_code=result_response.exit_code or 1)
 
