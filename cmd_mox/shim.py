@@ -527,7 +527,9 @@ def _execute_invocation(
     """
     try:
         response = invoke_server(
-            invocation, timeout=_timeout_remaining(timeout, deadline)
+            invocation,
+            timeout=_timeout_remaining(timeout, deadline),
+            deadline=deadline,
         )
     except (
         OSError,
@@ -638,7 +640,9 @@ def _handle_passthrough(
     )
     try:
         return report_passthrough_result(
-            passthrough_result, timeout=_timeout_remaining(timeout, deadline)
+            passthrough_result,
+            timeout=_timeout_remaining(timeout, deadline),
+            deadline=deadline,
         )
     except (OSError, RuntimeError, json.JSONDecodeError) as exc:
         _exit_ipc_error(exc, exit_code=result_response.exit_code or 1)
