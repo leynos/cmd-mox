@@ -93,6 +93,50 @@ class _Poller(typ.Protocol):
         """Wait up to *timeout* milliseconds for file-descriptor events."""
 
 
+class _SelectPoller:
+    """Adapt ``select.select`` to the polling interface used by the shim."""
+
+    def __init__(self, descriptor: int) -> None:
+        self.descriptor = descriptor
+
+    def poll(self, timeout: int, /) -> list[tuple[int, int]]:
+        """Wait up to *timeout* milliseconds for stdin to become readable.
+
+        Returns
+        -------
+        list[tuple[int, int]]
+            A non-empty event list when stdin is ready, or an empty list on
+            timeout.
+        """
+        readable, _, _ = select.select([self.descriptor], [], [], timeout / 1_000)
+        return [(self.descriptor, 1)] if readable else []
+
+
+def _create_stdin_poller(descriptor: int) -> _Poller | None:
+    """Choose a waitable interface or signal direct-read fallback.
+
+    Returns
+    -------
+    _Poller or None
+        A polling adapter for a waitable descriptor, or ``None`` when neither
+        available mechanism can wait on it.
+    """
+    try:
+        poller = select.poll()
+        poller.register(descriptor, select.POLLIN | select.POLLHUP)
+    except (AttributeError, OSError, TypeError, ValueError):
+        pass
+    else:
+        return poller
+
+    try:
+        poller = _SelectPoller(descriptor)
+        poller.poll(0)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+    return poller
+
+
 def _normalize_windows_arg(arg: str) -> str:
     """Collapse doubled Windows batch carets in a command argument.
 
@@ -206,18 +250,25 @@ def _read_stdin_until_eof(timeout: float, *, deadline: float | None = None) -> s
 
     try:
         descriptor = sys.stdin.fileno()
-        poller = select.poll()
-        poller.register(descriptor, select.POLLIN | select.POLLHUP)
     except (AttributeError, OSError, ValueError):
         # Test doubles and non-file streams cannot be polled; preserve their
         # established direct-read behaviour, including on non-Unix platforms.
         return sys.stdin.read()
+    poller = _create_stdin_poller(descriptor)
+    if poller is None:
+        # Keep the prior read path for descriptors unsupported by both waiters.
+        return sys.stdin.read()
 
     read_deadline = deadline if deadline is not None else time.monotonic() + timeout
+    return _read_polled_stdin(descriptor, poller, read_deadline)
+
+
+def _read_polled_stdin(descriptor: int, poller: _Poller, deadline: float) -> str:
+    """Read polled stdin through EOF before its monotonic deadline."""  # ruff: ignore[docstring-missing-returns] - private helper returns captured text
     decoder = _stdin_decoder()
     chunks: list[str] = []
     while True:
-        events = _poll_stdin(poller, read_deadline)
+        events = _poll_stdin(poller, deadline)
         if events is None:
             _exit_ipc_error(TimeoutError("timed out reading stdin"))
         if not events:
