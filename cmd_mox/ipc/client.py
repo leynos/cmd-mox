@@ -418,8 +418,8 @@ def _connect_unix_with_retries(
 
     def attempt_connect(_attempt: int) -> socket.socket:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(_remaining_time(request_deadline))
         try:
+            sock.settimeout(_remaining_time(request_deadline))
             sock.connect(address)
         except OSError:
             sock.close()
