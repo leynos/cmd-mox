@@ -8,6 +8,7 @@ import typing as typ
 
 import pytest
 
+from cmd_mox.ipc import client as ipc_client
 from cmd_mox.ipc.client import (
     RetryConfig,
     _connect_unix_with_retries,
@@ -125,11 +126,13 @@ def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, typ.Any] = {}
 
     def fake_send(
-        kind: str, data: dict[str, typ.Any], timeout: float, retry: RetryConfig | None
+        kind: str,
+        data: dict[str, typ.Any],
+        options: ipc_client._RequestOptions,
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data
-        assert retry is None, "Assertion failed"
+        assert options.retry_config is None, "Assertion failed"
         return Response(stdout="ok")
 
     monkeypatch.setattr("cmd_mox.ipc.client._send_request", fake_send)
@@ -141,6 +144,61 @@ def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["data"] == invocation.to_dict(), "Assertion failed"
 
 
+def test_invoke_server_forwards_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An absolute deadline reaches the shared request context."""
+    invocation = Invocation(command="cmd", args=[], stdin="", env={})
+    deadline = 123.5
+    captured: dict[str, object] = {}
+
+    def fake_send(
+        kind: str,
+        data: dict[str, typ.Any],
+        options: ipc_client._RequestOptions,
+    ) -> Response:
+        captured["kind"] = kind
+        captured["data"] = data
+        captured["timeout"] = options.timeout
+        captured["retry"] = options.retry_config
+        captured["deadline"] = options.deadline
+        return Response(stdout="ok")
+
+    monkeypatch.setattr(ipc_client, "_send_request", fake_send)
+
+    invoke_server(invocation, timeout=1.0, deadline=deadline)
+
+    assert captured["deadline"] == deadline, "Invocation deadline was not forwarded"
+
+
+def test_invoke_server_does_not_restart_expired_encoding_deadline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Payload encoding cannot restart a shim's absolute IPC deadline."""
+    invocation = Invocation(command="cmd", args=[], stdin="", env={})
+    now = {"value": 100.0}
+
+    def encode_after_deadline(
+        _kind: str, _data: dict[str, typ.Any]
+    ) -> tuple[bytes, str]:
+        now["value"] = 102.0
+        return b"{}", "correlation"
+
+    def unexpected_socket(*_args: object, **_kwargs: object) -> typ.NoReturn:
+        return pytest.fail("Socket creation must not follow an expired deadline")
+
+    monkeypatch.setattr(ipc_client, "_build_request_envelope", encode_after_deadline)
+    monkeypatch.setattr(
+        ipc_client, "_get_validated_socket_path", lambda: tmp_path / "ipc.sock"
+    )
+    monkeypatch.setattr(ipc_client.time, "monotonic", lambda: now["value"])
+    monkeypatch.setattr(ipc_client.path_utils, "IS_WINDOWS", False)
+    monkeypatch.setattr(ipc_client.socket, "socket", unexpected_socket)
+
+    with pytest.raises(TimeoutError):
+        invoke_server(invocation, timeout=1.0, deadline=101.0)
+
+
 def test_report_passthrough_result_uses_named_kind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -149,7 +207,9 @@ def test_report_passthrough_result_uses_named_kind(
     captured: dict[str, typ.Any] = {}
 
     def fake_send(
-        kind: str, data: dict[str, typ.Any], timeout: float, retry: RetryConfig | None
+        kind: str,
+        data: dict[str, typ.Any],
+        options: ipc_client._RequestOptions,
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data
@@ -161,3 +221,26 @@ def test_report_passthrough_result_uses_named_kind(
 
     assert captured["kind"] == KIND_PASSTHROUGH_RESULT, "Assertion failed"
     assert captured["data"] == result.to_dict(), "Assertion failed"
+
+
+def test_report_passthrough_result_forwards_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Passthrough reports can share their caller's absolute deadline."""
+    result = PassthroughResult(invocation_id="1", stdout="", stderr="", exit_code=0)
+    deadline = 123.5
+    captured: dict[str, object] = {}
+
+    def fake_send(
+        kind: str,
+        data: dict[str, typ.Any],
+        options: ipc_client._RequestOptions,
+    ) -> Response:
+        captured["deadline"] = options.deadline
+        return Response(stdout="ok")
+
+    monkeypatch.setattr(ipc_client, "_send_request", fake_send)
+
+    report_passthrough_result(result, timeout=1.0, deadline=deadline)
+
+    assert captured["deadline"] == deadline, "Passthrough deadline was not forwarded"

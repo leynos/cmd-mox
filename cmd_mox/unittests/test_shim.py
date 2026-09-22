@@ -73,6 +73,23 @@ def _assert_exit_code(exc: pytest.ExceptionInfo[BaseException], expected: int) -
     assert err.code == expected
 
 
+@pytest.fixture
+def stdin_pipe_descriptor() -> cabc.Iterator[int]:
+    """Yield an owned pipe descriptor for stdin polling tests.
+
+    Yields
+    ------
+    int
+        The read end of the pipe.
+    """
+    read_descriptor, write_descriptor = os.pipe()
+    try:
+        yield read_descriptor
+    finally:
+        os.close(read_descriptor)
+        os.close(write_descriptor)
+
+
 def test_validate_environment_returns_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -295,13 +312,19 @@ def test_create_invocation_bounds_stalled_regular_file_read(
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_reports_stdin_timeout(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin_pipe_descriptor: int,
 ) -> None:
     """A non-tty stream that never becomes readable exits with an IPC error."""
 
     class _PollingStdin(_DummyStdin):
+        def __init__(self, descriptor: int) -> None:
+            super().__init__("", is_tty=False)
+            self._descriptor = descriptor
+
         def fileno(self) -> int:
-            return 7
+            return self._descriptor
 
     class _NeverReadablePoll:
         def register(self, _fd: int, _events: int) -> None:
@@ -310,7 +333,7 @@ def test_create_invocation_reports_stdin_timeout(
         def poll(self, _timeout: int) -> list[tuple[int, int]]:
             return []
 
-    monkeypatch.setattr(sys, "stdin", _PollingStdin("", is_tty=False))
+    monkeypatch.setattr(sys, "stdin", _PollingStdin(stdin_pipe_descriptor))
     monkeypatch.setattr(shim.select, "poll", _NeverReadablePoll)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
@@ -325,13 +348,19 @@ def test_create_invocation_reports_stdin_timeout(
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_caps_large_poll_timeout(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin_pipe_descriptor: int,
 ) -> None:
     """A large valid timeout stays within the poll API's millisecond range."""
 
     class _PollingStdin(_DummyStdin):
+        def __init__(self, descriptor: int) -> None:
+            super().__init__("", is_tty=False)
+            self._descriptor = descriptor
+
         def fileno(self) -> int:
-            return 7
+            return self._descriptor
 
     class _NeverReadablePoll:
         def __init__(self) -> None:
@@ -345,7 +374,7 @@ def test_create_invocation_caps_large_poll_timeout(
             return []
 
     poller = _NeverReadablePoll()
-    monkeypatch.setattr(sys, "stdin", _PollingStdin("", is_tty=False))
+    monkeypatch.setattr(sys, "stdin", _PollingStdin(stdin_pipe_descriptor))
     monkeypatch.setattr(shim.select, "poll", lambda: poller)
     monotonic_values = iter([0.0, 0.0, 1e308])
     monkeypatch.setattr(shim.time, "monotonic", lambda: next(monotonic_values))
@@ -363,13 +392,17 @@ def test_create_invocation_caps_large_poll_timeout(
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_uses_select_when_poll_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor: int
 ) -> None:
     """A waitable POSIX descriptor remains bounded without ``select.poll``."""
 
     class _PollingStdin(_DummyStdin):
+        def __init__(self, descriptor: int) -> None:
+            super().__init__("", is_tty=False)
+            self._descriptor = descriptor
+
         def fileno(self) -> int:
-            return 7
+            return self._descriptor
 
     select_timeouts: list[float] = []
 
@@ -383,7 +416,7 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
         return readers, [], []
 
     chunks = iter([b"payload", b""])
-    monkeypatch.setattr(sys, "stdin", _PollingStdin("", is_tty=False))
+    monkeypatch.setattr(sys, "stdin", _PollingStdin(stdin_pipe_descriptor))
     monkeypatch.delattr(shim.select, "poll")
     monkeypatch.setattr(shim.select, "select", fake_select)
     monkeypatch.setattr(shim.os, "read", lambda _fd, _size: next(chunks))
@@ -398,7 +431,7 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_normalises_piped_newlines(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor: int
 ) -> None:
     """Piped text preserves TextIO newline translation across byte chunks."""
 
@@ -406,18 +439,22 @@ def test_create_invocation_normalises_piped_newlines(
         encoding = "utf-8"
         errors = "strict"
 
+        def __init__(self, descriptor: int) -> None:
+            super().__init__("", is_tty=False)
+            self._descriptor = descriptor
+
         def fileno(self) -> int:
-            return 7
+            return self._descriptor
 
     class _ReadablePoll:
         def register(self, _fd: int, _events: int) -> None:
             pass
 
         def poll(self, _timeout: int) -> list[tuple[int, int]]:
-            return [(7, shim.select.POLLIN)]
+            return [(stdin_pipe_descriptor, shim.select.POLLIN)]
 
     chunks = iter([b"first\r", b"\nsecond\rthird", b""])
-    monkeypatch.setattr(sys, "stdin", _PollingStdin("", is_tty=False))
+    monkeypatch.setattr(sys, "stdin", _PollingStdin(stdin_pipe_descriptor))
     monkeypatch.setattr(shim.select, "poll", _ReadablePoll)
     monkeypatch.setattr(shim.os, "read", lambda _fd, _size: next(chunks))
     monkeypatch.setattr(sys, "argv", ["shim"])
@@ -531,9 +568,12 @@ def test_execute_invocation_returns_response_without_passthrough(
 
     calls: dict[str, typ.Any] = {}
 
-    def fake_invoke(inv: Invocation, timeout: float) -> Response:
+    def fake_invoke(
+        inv: Invocation, timeout: float, *, deadline: float | None = None
+    ) -> Response:
         calls["invocation"] = inv
         calls["timeout"] = timeout
+        calls["deadline"] = deadline
         return expected
 
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
@@ -552,6 +592,7 @@ def test_execute_invocation_returns_response_without_passthrough(
     assert result is expected
     assert calls["invocation"] is invocation
     assert math.isclose(calls["timeout"], 1.5)
+    assert calls["deadline"] is None, "No shared deadline should be synthesized"
 
 
 def test_execute_invocation_processes_passthrough(
@@ -609,19 +650,29 @@ def test_execute_invocation_shares_deadline_with_passthrough(
     final = Response(stdout="done", stderr="", exit_code=0)
     now = {"value": 100.0}
     timeouts: list[float] = []
+    deadlines: list[float | None] = []
 
     monkeypatch.setattr(shim.time, "monotonic", lambda: now["value"])
 
-    def fake_invoke(_inv: Invocation, timeout: float) -> Response:
+    def fake_invoke(
+        _inv: Invocation, timeout: float, *, deadline: float | None = None
+    ) -> Response:
         timeouts.append(timeout)
+        deadlines.append(deadline)
         now["value"] = 100.6
         return intermediate
 
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
     monkeypatch.setattr(shim, "_run_real_command", lambda *_args: Response(exit_code=0))
 
-    def fake_report(_result: PassthroughResult, timeout: float) -> Response:
+    def fake_report(
+        _result: PassthroughResult,
+        timeout: float,
+        *,
+        deadline: float | None = None,
+    ) -> Response:
         timeouts.append(timeout)
+        deadlines.append(deadline)
         return final
 
     monkeypatch.setattr(shim, "report_passthrough_result", fake_report)
@@ -630,6 +681,7 @@ def test_execute_invocation_shares_deadline_with_passthrough(
 
     assert result is final
     assert timeouts == pytest.approx([1.0, 0.4])
+    assert deadlines == [101.0, 101.0], "The absolute deadline must span both IPC calls"
 
 
 def test_execute_invocation_surfaces_ipc_errors(
