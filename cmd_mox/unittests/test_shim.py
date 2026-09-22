@@ -6,6 +6,8 @@ import math
 import os
 import subprocess
 import sys
+import tempfile
+import threading
 import typing as typ
 from pathlib import Path
 
@@ -229,6 +231,62 @@ def test_create_invocation_checks_deadline_between_buffered_reads(
         assert os.get_blocking(read_descriptor)
     finally:
         os.close(read_descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_reads_regular_file_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regular-file stdin is read without changing its text semantics."""
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdin:
+        stdin.write("regular input")
+        stdin.seek(0)
+        monkeypatch.setattr(sys, "stdin", stdin)
+        monkeypatch.setattr(sys, "argv", ["shim"])
+
+        invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "regular input"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_bounds_stalled_regular_file_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A blocked read from poll-always-ready stdin still observes its deadline."""
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class _StalledRegularStdin(_DummyStdin):
+        def __init__(self, descriptor: int) -> None:
+            super().__init__("", is_tty=False)
+            self._descriptor = descriptor
+
+        def fileno(self) -> int:
+            return self._descriptor
+
+        def read(self) -> str:
+            started.set()
+            release.wait()
+            finished.set()
+            return ""
+
+    with tempfile.TemporaryFile() as regular_file:
+        monkeypatch.setattr(sys, "stdin", _StalledRegularStdin(regular_file.fileno()))
+        monkeypatch.setattr(sys, "argv", ["shim"])
+
+        try:
+            with pytest.raises(SystemExit) as exc:
+                _create_invocation("shim", timeout=0.05)
+
+            _assert_exit_code(exc, 1)
+            assert started.wait(timeout=1.0)
+            assert "IPC error: timed out reading stdin" in capsys.readouterr().err
+        finally:
+            release.set()
+
+        assert finished.wait(timeout=1.0)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")

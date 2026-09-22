@@ -10,8 +10,11 @@ import io
 import json
 import math
 import os
+import queue
 import select
+import stat
 import sys
+import threading
 import time
 import typing as typ
 from pathlib import Path
@@ -260,7 +263,68 @@ def _read_stdin_until_eof(timeout: float, *, deadline: float | None = None) -> s
         return sys.stdin.read()
 
     read_deadline = deadline if deadline is not None else time.monotonic() + timeout
+    try:
+        is_regular_file = stat.S_ISREG(os.fstat(descriptor).st_mode)
+    except OSError:
+        is_regular_file = False
+    if is_regular_file:
+        return _read_regular_stdin_until_deadline(read_deadline)
     return _read_polled_stdin(descriptor, poller, read_deadline)
+
+
+def _read_regular_stdin_until_deadline(deadline: float) -> str:
+    """Read regular-file stdin in a daemon worker bounded by *deadline*.
+
+    Returns
+    -------
+    str
+        The decoded contents of stdin through EOF.
+    """
+    result_queue: queue.Queue[tuple[str, Exception | None]] = queue.Queue()
+    stdin = sys.stdin
+
+    def read_stdin() -> None:
+        try:
+            result_queue.put((stdin.read(), None))
+        except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+            result_queue.put(("", exc))
+
+    try:
+        threading.Thread(
+            target=read_stdin,
+            name="cmd-mox-stdin-reader",
+            daemon=True,
+        ).start()
+    except (OSError, RuntimeError) as exc:
+        _exit_ipc_error(exc)
+
+    stdin_data, error = _await_regular_stdin_read(result_queue, deadline)
+    if error is not None:
+        _exit_ipc_error(error)
+    return stdin_data
+
+
+def _await_regular_stdin_read(
+    result_queue: queue.Queue[tuple[str, Exception | None]], deadline: float
+) -> tuple[str, Exception | None]:
+    """Wait for the regular-file reader without exceeding the deadline.
+
+    Returns
+    -------
+    tuple[str, Exception or None]
+        The read text and any error raised by the reader.
+    """
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _exit_ipc_error(TimeoutError("timed out reading stdin"))
+        try:
+            result = result_queue.get(timeout=min(remaining, threading.TIMEOUT_MAX))
+        except queue.Empty:
+            continue
+        if time.monotonic() >= deadline:
+            _exit_ipc_error(TimeoutError("timed out reading stdin"))
+        return result
 
 
 def _read_polled_stdin(descriptor: int, poller: _Poller, deadline: float) -> str:
