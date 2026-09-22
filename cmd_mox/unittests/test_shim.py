@@ -145,6 +145,7 @@ def test_create_invocation_reads_stdin_when_not_tty(
     assert dummy_stdin.read_calls == 1
 
 
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_reports_stdin_timeout(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -174,6 +175,7 @@ def test_create_invocation_reports_stdin_timeout(
     )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_caps_large_poll_timeout(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -211,6 +213,7 @@ def test_create_invocation_caps_large_poll_timeout(
     )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_normalises_piped_newlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -533,6 +536,30 @@ def test_write_response_handles_closed_stdout(
     )
 
 
+def test_write_response_handles_stdout_flush_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A deferred output failure keeps the response exit code."""
+
+    class _FlushFailure:
+        def write(self, text: str) -> int:
+            return len(text)
+
+        def flush(self) -> typ.NoReturn:
+            msg = "closed stdout during flush"
+            raise BrokenPipeError(msg)
+
+    monkeypatch.setattr(sys, "stdout", _FlushFailure())
+
+    with pytest.raises(SystemExit) as exc:
+        _write_response(Response(stdout="out", exit_code=3))
+
+    _assert_exit_code(exc, 3)
+    assert "IPC error: closed stdout during flush" in capsys.readouterr().err, (
+        "flush failures must produce a controlled IPC diagnostic"
+    )
+
+
 def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The shim entrypoint should bootstrap and delegate in order."""
     calls: list[object] = []
@@ -573,8 +600,18 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
         "bootstrap",
         "resolve",
         "validate",
-        ("create", "shim", 1.0, 101.0),
-        ("execute", invocation, 1.0, 101.0),
+        (
+            "create",
+            "shim",
+            1.0,
+            None if shim.path_utils.IS_WINDOWS else 101.0,
+        ),
+        (
+            "execute",
+            invocation,
+            1.0,
+            None if shim.path_utils.IS_WINDOWS else 101.0,
+        ),
         ("write", response),
     ]
 
