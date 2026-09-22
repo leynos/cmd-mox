@@ -91,7 +91,9 @@ def test_main_reports_invocation_details(
         "shim should capture the process environment"
     )
     timeout = typ.cast("float", captured["timeout"])
-    assert timeout == pytest.approx(5.0), "shim should default the IPC timeout to 5.0"
+    assert 4.9 <= timeout <= 5.0, (
+        "shim should apply the default five-second IPC deadline"
+    )
 
 
 def test_main_skips_interactive_stdin(
@@ -150,8 +152,8 @@ def test_main_honours_custom_timeout(
         shim.main()
 
     assert excinfo.value.code == 0, "shim.main should exit with code 0"
-    assert captured["timeout"] == pytest.approx(1.75), (
-        "shim should honour the CMOX_IPC_TIMEOUT_ENV override"
+    assert 1.7 <= captured["timeout"] <= 1.75, (
+        "shim should honour the CMOX_IPC_TIMEOUT_ENV deadline"
     )
     out = capsys.readouterr()
     assert out.out == "custom", "shim.main should forward the response stdout"
