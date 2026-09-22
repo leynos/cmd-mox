@@ -83,6 +83,14 @@ from cmd_mox.ipc import (  # ruff: ignore[module-import-not-at-top-of-file] - sh
 )
 
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
+MAX_POLL_TIMEOUT_MS: typ.Final[int] = 2_147_483_647
+
+
+class _Poller(typ.Protocol):
+    """Minimal polling interface required by the bounded stdin reader."""
+
+    def poll(self, timeout: int, /) -> list[tuple[int, int]]:
+        """Wait up to *timeout* milliseconds for file-descriptor events."""
 
 
 def _normalize_windows_arg(arg: str) -> str:
@@ -155,19 +163,36 @@ def _validate_environment() -> float:
 def _exit_ipc_error(exc: Exception, exit_code: int = 1) -> typ.NoReturn:
     """Print an IPC diagnostic and terminate with a controlled status."""
     # A closed stderr cannot prevent the shim from returning a known status.
-    with contextlib.suppress(OSError):
+    with contextlib.suppress(OSError, ValueError):
         print(f"IPC error: {exc}", file=sys.stderr)
     sys.exit(exit_code)
 
 
-def _read_stdin_until_eof(timeout: float) -> str:
-    """Read non-interactive stdin before *timeout* elapses.
+def _stdin_decoder() -> io.IncrementalNewlineDecoder:
+    """Build a TextIO-compatible decoder for piped standard input."""  # ruff: ignore[docstring-missing-returns] - private helper has one direct result
+    encoding = getattr(sys.stdin, "encoding", None) or "utf-8"
+    errors = getattr(sys.stdin, "errors", None) or "strict"
+    return io.IncrementalNewlineDecoder(
+        codecs.getincrementaldecoder(encoding)(errors=errors),
+        translate=True,
+    )
 
-    Returns
-    -------
-    str
-        The complete standard-input text.
-    """
+
+def _poll_stdin(poller: _Poller, deadline: float) -> list[tuple[int, int]] | None:
+    """Wait once for stdin, returning ``None`` only after the deadline."""  # ruff: ignore[docstring-missing-returns] - private helper has a compact tri-state result
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+
+    poll_timeout = min(remaining, MAX_POLL_TIMEOUT_MS / 1_000)
+    events = poller.poll(max(1, math.ceil(poll_timeout * 1_000)))
+    if events or time.monotonic() < deadline:
+        return events
+    return None
+
+
+def _read_stdin_until_eof(timeout: float) -> str:
+    """Read non-interactive stdin before *timeout* elapses."""  # ruff: ignore[docstring-missing-returns] - private reader has one direct result
     if path_utils.IS_WINDOWS:
         return sys.stdin.read()
 
@@ -181,21 +206,14 @@ def _read_stdin_until_eof(timeout: float) -> str:
         return sys.stdin.read()
 
     deadline = time.monotonic() + timeout
-    encoding = getattr(sys.stdin, "encoding", None) or "utf-8"
-    errors = getattr(sys.stdin, "errors", None) or "strict"
-    decoder = io.IncrementalNewlineDecoder(
-        codecs.getincrementaldecoder(encoding)(errors=errors),
-        translate=True,
-    )
+    decoder = _stdin_decoder()
     chunks: list[str] = []
     while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        events = _poll_stdin(poller, deadline)
+        if events is None:
             _exit_ipc_error(TimeoutError("timed out reading stdin"))
-
-        events = poller.poll(max(1, math.ceil(remaining * 1_000)))
         if not events:
-            _exit_ipc_error(TimeoutError("timed out reading stdin"))
+            continue
 
         try:
             chunk = os.read(descriptor, 8_192)

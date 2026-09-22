@@ -174,6 +174,43 @@ def test_create_invocation_reports_stdin_timeout(
     )
 
 
+def test_create_invocation_caps_large_poll_timeout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A large valid timeout stays within the poll API's millisecond range."""
+
+    class _PollingStdin(_DummyStdin):
+        def fileno(self) -> int:
+            return 7
+
+    class _NeverReadablePoll:
+        def __init__(self) -> None:
+            self.timeouts: list[int] = []
+
+        def register(self, _fd: int, _events: int) -> None:
+            pass
+
+        def poll(self, timeout: int) -> list[tuple[int, int]]:
+            self.timeouts.append(timeout)
+            return []
+
+    poller = _NeverReadablePoll()
+    monkeypatch.setattr(sys, "stdin", _PollingStdin("", is_tty=False))
+    monkeypatch.setattr(shim.select, "poll", lambda: poller)
+    monotonic_values = iter([0.0, 0.0, 1e308])
+    monkeypatch.setattr(shim.time, "monotonic", lambda: next(monotonic_values))
+
+    with pytest.raises(SystemExit):
+        _create_invocation("shim", timeout=1e308)
+
+    assert poller.timeouts == [shim.MAX_POLL_TIMEOUT_MS], (
+        "large timeouts must be capped before conversion to milliseconds"
+    )
+    assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+        "the capped poll path must retain the controlled timeout diagnostic"
+    )
+
+
 def test_create_invocation_normalises_piped_newlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

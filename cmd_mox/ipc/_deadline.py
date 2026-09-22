@@ -6,29 +6,12 @@ import time
 
 
 def _compute_deadline(timeout: float) -> float:
-    """Return the monotonic deadline *timeout* seconds from now.
-
-    Returns
-    -------
-    float
-        The monotonic clock value at which the timeout expires.
-    """
+    """Return the monotonic deadline *timeout* seconds from now."""  # ruff: ignore[docstring-missing-returns] - private helper has one direct result
     return time.monotonic() + timeout
 
 
 def _remaining_time(deadline: float) -> float:
-    """Return the strictly positive time remaining before *deadline*.
-
-    Returns
-    -------
-    float
-        Seconds remaining before the deadline.
-
-    Raises
-    ------
-    TimeoutError
-        If the deadline has already passed.
-    """
+    """Return the strictly positive time remaining before *deadline*."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private helper has one direct result and one direct timeout
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         msg = "IPC client operation timed out"
