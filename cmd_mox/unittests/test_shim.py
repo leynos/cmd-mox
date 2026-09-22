@@ -185,6 +185,53 @@ def test_create_invocation_preserves_buffered_stdin(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_checks_deadline_between_buffered_reads(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Buffered input cannot extend the deadline past its configured bound."""
+    clock = {"value": 0.0}
+
+    class _BufferedInput:
+        def __init__(self) -> None:
+            self.read_calls = 0
+
+        def read1(self, _size: int) -> bytes:
+            self.read_calls += 1
+            clock["value"] = 2.0
+            return b"buffered"
+
+    class _BufferedStdin(_DummyStdin):
+        encoding = "utf-8"
+        errors = "strict"
+
+        def __init__(self, descriptor: int) -> None:
+            super().__init__("", is_tty=False)
+            self._descriptor = descriptor
+            self.buffer = _BufferedInput()
+
+        def fileno(self) -> int:
+            return self._descriptor
+
+    read_descriptor, write_descriptor = os.pipe()
+    os.close(write_descriptor)
+    stdin = _BufferedStdin(read_descriptor)
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(sys, "argv", ["shim"])
+    monkeypatch.setattr(shim.time, "monotonic", lambda: clock["value"])
+
+    try:
+        with pytest.raises(SystemExit) as exc:
+            _create_invocation("shim", timeout=1.0)
+
+        _assert_exit_code(exc, 1)
+        assert stdin.buffer.read_calls == 1
+        assert "IPC error: timed out reading stdin" in capsys.readouterr().err
+        assert os.get_blocking(read_descriptor)
+    finally:
+        os.close(read_descriptor)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_reports_stdin_timeout(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

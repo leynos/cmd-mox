@@ -299,6 +299,8 @@ def _read_buffered_stdin(
     decoder = _stdin_decoder()
     chunks: list[str] = []
     while True:
+        if time.monotonic() >= deadline:
+            _exit_ipc_error(TimeoutError("timed out reading stdin"))
         chunk = _read_buffered_chunk(descriptor, poller, deadline, read_chunk)
         if chunk is None:
             continue
