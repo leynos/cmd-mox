@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import subprocess
 import sys
 import typing as typ
 from pathlib import Path
@@ -594,6 +595,43 @@ def test_write_response_handles_stdout_flush_failure(
     assert "IPC error: closed stdout during flush" in capsys.readouterr().err, (
         "flush failures must produce a controlled IPC diagnostic"
     )
+
+
+@pytest.mark.parametrize("stream_name", ["stdout", "stderr"])
+def test_write_response_preserves_exit_code_after_flush_failure(
+    stream_name: str,
+) -> None:
+    """A child process keeps the chosen status through interpreter shutdown."""
+    script = """
+import sys
+from cmd_mox.ipc import Response
+from cmd_mox.shim import _write_response
+
+class FailedStream:
+    def write(self, text):
+        return len(text)
+    def flush(self):
+        raise BrokenPipeError("closed stream")
+
+stream_name = "__STREAM_NAME__"
+failed_stream = FailedStream()
+setattr(sys, stream_name, failed_stream)
+setattr(sys, f"__{stream_name}__", failed_stream)
+_write_response(Response(exit_code=7, **{stream_name: "payload"}))
+""".replace("__STREAM_NAME__", stream_name)
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - launches a fixed local Python test script
+        [sys.executable, "-c", script],
+        capture_output=True,
+        check=False,
+        shell=False,
+        text=True,
+    )
+
+    assert result.returncode == 7, (
+        "interpreter shutdown must preserve the configured response status"
+    )
+    if stream_name == "stdout":
+        assert "IPC error: closed stream" in result.stderr
 
 
 def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
