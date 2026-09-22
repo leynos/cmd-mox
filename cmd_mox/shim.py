@@ -265,6 +265,104 @@ def _read_stdin_until_eof(timeout: float, *, deadline: float | None = None) -> s
 
 def _read_polled_stdin(descriptor: int, poller: _Poller, deadline: float) -> str:
     """Read polled stdin through EOF before its monotonic deadline."""  # ruff: ignore[docstring-missing-returns] - private helper returns captured text
+    buffered_read = getattr(getattr(sys.stdin, "buffer", None), "read1", None)
+    if not callable(buffered_read):
+        return _read_raw_polled_stdin(descriptor, poller, deadline)
+
+    try:
+        was_blocking = os.get_blocking(descriptor)
+        os.set_blocking(descriptor, False)
+    except OSError as exc:
+        _exit_ipc_error(exc)
+    try:
+        return _read_buffered_stdin(descriptor, poller, deadline, buffered_read)
+    finally:
+        try:
+            os.set_blocking(descriptor, was_blocking)
+        except OSError as exc:
+            _exit_ipc_error(exc)
+
+
+def _read_buffered_stdin(
+    descriptor: int,
+    poller: _Poller,
+    deadline: float,
+    read_chunk: cabc.Callable[[int], bytes | None],
+) -> str:
+    """Consume buffered stdin without losing text-layer read-ahead.
+
+    Returns
+    -------
+    str
+        The decoded contents of stdin through EOF.
+    """
+    decoder = _stdin_decoder()
+    chunks: list[str] = []
+    while True:
+        chunk = _read_buffered_chunk(descriptor, poller, deadline, read_chunk)
+        if chunk is None:
+            continue
+        if not chunk:
+            chunks.append(_decode_stdin_chunk(decoder, b""))
+            return "".join(chunks)
+        chunks.append(_decode_stdin_chunk(decoder, chunk))
+
+
+def _read_buffered_chunk(
+    descriptor: int,
+    poller: _Poller,
+    deadline: float,
+    read_chunk: cabc.Callable[[int], bytes | None],
+) -> bytes | None:
+    """Read a chunk while distinguishing a temporary empty read from EOF.
+
+    Returns
+    -------
+    bytes or None
+        The next chunk, empty bytes at EOF, or ``None`` after a readiness wait.
+    """
+    try:
+        chunk = read_chunk(8_192)
+    except BlockingIOError:
+        chunk = None
+    except OSError as exc:
+        _exit_ipc_error(exc)
+
+    if chunk:
+        return chunk
+    if chunk == b"":
+        return _read_raw_chunk_after_empty_buffer(descriptor, poller, deadline)
+    _wait_for_stdin(poller, deadline)
+    return None
+
+
+def _read_raw_chunk_after_empty_buffer(
+    descriptor: int, poller: _Poller, deadline: float
+) -> bytes | None:
+    """Probe the descriptor after its buffered reader reports no data.
+
+    Returns
+    -------
+    bytes or None
+        Raw input, empty bytes at EOF, or ``None`` after a readiness wait.
+    """
+    try:
+        return os.read(descriptor, 8_192)
+    except BlockingIOError:
+        _wait_for_stdin(poller, deadline)
+        return None
+    except OSError as exc:
+        _exit_ipc_error(exc)
+
+
+def _wait_for_stdin(poller: _Poller, deadline: float) -> None:
+    """Wait for stdin readiness or exit once its deadline expires."""
+    if _poll_stdin(poller, deadline) is None:
+        _exit_ipc_error(TimeoutError("timed out reading stdin"))
+
+
+def _read_raw_polled_stdin(descriptor: int, poller: _Poller, deadline: float) -> str:
+    """Read test or custom stdin descriptors that have no buffered reader."""  # ruff: ignore[docstring-missing-returns] - private helper returns captured text
     decoder = _stdin_decoder()
     chunks: list[str] = []
     while True:
