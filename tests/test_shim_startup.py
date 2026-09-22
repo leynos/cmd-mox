@@ -49,9 +49,12 @@ def test_main_reports_invocation_details(
     """``shim.main`` forwards invocation metadata and applies the response."""
     captured: dict[str, object] = {}
 
-    def fake_invoke(invocation: Invocation, timeout: float) -> Response:
+    def fake_invoke(
+        invocation: Invocation, timeout: float, *, deadline: float | None = None
+    ) -> Response:
         captured["invocation"] = invocation
         captured["timeout"] = timeout
+        captured["deadline"] = deadline
         return Response(stdout="out", stderr="err", exit_code=7, env={"EXTRA": "42"})
 
     socket_path = tmp_path / "dummy.sock"
@@ -101,7 +104,9 @@ def test_main_skips_interactive_stdin(
     """``shim.main`` does not read stdin when connected to a tty."""
     captured: dict[str, Invocation] = {}
 
-    def fake_invoke(invocation: Invocation, timeout: float) -> Response:
+    def fake_invoke(
+        invocation: Invocation, timeout: float, *, deadline: float | None = None
+    ) -> Response:
         captured["invocation"] = invocation
         return Response(stdout="", stderr="", exit_code=0)
 
@@ -133,9 +138,13 @@ def test_main_honours_custom_timeout(
 ) -> None:
     """``shim.main`` applies non-default IPC timeout overrides."""
     captured: dict[str, float] = {}
+    deadlines: list[float | None] = []
 
-    def fake_invoke(invocation: Invocation, timeout: float) -> Response:
+    def fake_invoke(
+        invocation: Invocation, timeout: float, *, deadline: float | None = None
+    ) -> Response:
         captured["timeout"] = timeout
+        deadlines.append(deadline)
         return Response(stdout="custom", stderr="", exit_code=0)
 
     socket_path = tmp_path / "dummy.sock"
@@ -152,6 +161,10 @@ def test_main_honours_custom_timeout(
     assert excinfo.value.code == 0, "shim.main should exit with code 0"
     assert 0 < captured["timeout"] <= 1.75, (
         "shim should honour the CMOX_IPC_TIMEOUT_ENV deadline"
+    )
+    assert len(deadlines) == 1, "shim should pass one IPC deadline to its client"
+    assert isinstance(deadlines[0], float), (
+        "shim should pass an absolute IPC deadline to its client"
     )
     out = capsys.readouterr()
     assert out.out == "custom", "shim.main should forward the response stdout"

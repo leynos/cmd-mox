@@ -111,10 +111,20 @@ class _ConnectionContext:
     timeout: float
     retry_config: RetryConfig
     correlation_id: str | None = None
+    deadline: float | None = None
 
     def validate(self) -> None:
         """Re-validate the retry configuration against the timeout."""
         self.retry_config.validate(self.timeout)
+
+
+@dc.dataclass(frozen=True, slots=True)
+class _RequestOptions:
+    """Caller-supplied limits shared while building a request context."""
+
+    timeout: float
+    retry_config: RetryConfig | None
+    deadline: float | None
 
 
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
@@ -413,8 +423,13 @@ def _connect_unix_with_retries(
     context.validate()
     address = str(sock_path)
     request_deadline = (
-        deadline if deadline is not None else _compute_deadline(context.timeout)
+        deadline
+        if deadline is not None
+        else context.deadline
+        if context.deadline is not None
+        else _compute_deadline(context.timeout)
     )
+    _remaining_time(request_deadline)
 
     def attempt_connect(_attempt: int) -> socket.socket:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -484,7 +499,13 @@ def _send_unix_request(
     payload: bytes,
     context: _ConnectionContext,
 ) -> bytes:
-    deadline = _compute_deadline(context.timeout)
+    context.validate()
+    deadline = (
+        context.deadline
+        if context.deadline is not None
+        else _compute_deadline(context.timeout)
+    )
+    _remaining_time(deadline)
     with _connect_unix_with_retries(sock_path, context, deadline=deadline) as client:
         client.settimeout(_remaining_time(deadline))
         client.sendall(payload)
@@ -703,8 +724,7 @@ def _perform_request(
 def _send_request(
     kind: str,
     data: dict[str, typ.Any],
-    timeout: float,
-    retry_config: RetryConfig | None,
+    options: _RequestOptions,
 ) -> Response:
     """Send a JSON request of *kind* to the IPC server.
 
@@ -715,9 +735,10 @@ def _send_request(
     """
     payload_bytes, correlation_id = _build_request_envelope(kind, data)
     context = _ConnectionContext(
-        timeout=timeout,
-        retry_config=retry_config or RetryConfig(),
+        timeout=options.timeout,
+        retry_config=options.retry_config or RetryConfig(),
         correlation_id=correlation_id,
+        deadline=options.deadline,
     )
     return _perform_request(payload_bytes, kind, context)
 
@@ -726,30 +747,65 @@ def invoke_server(
     invocation: Invocation,
     timeout: float,
     retry_config: RetryConfig | None = None,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
     Unix clients apply *timeout* as one deadline across connecting, sending,
-    and receiving. Windows clients retain their cooperative named-pipe
-    deadline behaviour, closing the pipe when a step exceeds *timeout*.
+    and receiving. When *deadline* is supplied, Unix clients use that absolute
+    monotonic deadline so a caller can share one budget across operations.
+    Windows clients retain their cooperative named-pipe deadline behaviour,
+    closing the pipe when a step exceeds *timeout*.
+
+    Parameters
+    ----------
+    invocation : Invocation
+        Invocation request to send.
+    timeout : float
+        Maximum request duration in seconds when no absolute deadline is given.
+    retry_config : RetryConfig or None, optional
+        Connection retry policy.
+    deadline : float or None, optional
+        Absolute ``time.monotonic()`` deadline to share with preceding Unix
+        shim work. Windows clients continue to use cooperative step deadlines.
 
     Returns
     -------
     Response
         The IPC server's response to the invocation.
     """
-    return _send_request(KIND_INVOCATION, invocation.to_dict(), timeout, retry_config)
+    return _send_request(
+        KIND_INVOCATION,
+        invocation.to_dict(),
+        _RequestOptions(timeout, retry_config, deadline),
+    )
 
 
 def report_passthrough_result(
     result: PassthroughResult,
     timeout: float,
     retry_config: RetryConfig | None = None,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Send passthrough execution results back to the IPC server.
 
     Timeout handling mirrors :func:`invoke_server`: Unix sockets share one
-    deadline per request, and Windows callers retain cooperative deadlines.
+    deadline per request, or use a supplied absolute monotonic *deadline*.
+    Windows callers retain cooperative deadlines.
+
+    Parameters
+    ----------
+    result : PassthroughResult
+        Result produced by the real command.
+    timeout : float
+        Maximum request duration in seconds when no absolute deadline is given.
+    retry_config : RetryConfig or None, optional
+        Connection retry policy.
+    deadline : float or None, optional
+        Absolute ``time.monotonic()`` deadline to share with preceding Unix
+        shim work. Windows clients continue to use cooperative step deadlines.
 
     Returns
     -------
@@ -759,8 +815,7 @@ def report_passthrough_result(
     return _send_request(
         KIND_PASSTHROUGH_RESULT,
         result.to_dict(),
-        timeout,
-        retry_config,
+        _RequestOptions(timeout, retry_config, deadline),
     )
 
 
