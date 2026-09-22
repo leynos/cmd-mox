@@ -1,7 +1,5 @@
 """Client helpers for talking to the IPC server."""
 
-# pylint: disable=too-many-lines  # Unix requests share one deadline across transport steps.
-
 from __future__ import annotations
 
 import contextlib
@@ -35,6 +33,7 @@ from cmd_mox.ipc.windows import (
 )
 
 from . import _client_events, _observability
+from ._deadline import _compute_deadline, _remaining_time
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
@@ -222,37 +221,6 @@ def retry_with_backoff[T](
         "without returning a value."
     )
     raise RuntimeError(msg)  # pragma: no cover
-
-
-def _compute_deadline(timeout: float) -> float:
-    """Return the absolute deadline for *timeout* seconds from now.
-
-    Returns
-    -------
-    float
-        The monotonic clock value at which *timeout* expires.
-    """
-    return time.monotonic() + timeout
-
-
-def _remaining_time(deadline: float) -> float:
-    """Return the seconds remaining before *deadline* expires.
-
-    Returns
-    -------
-    float
-        The strictly positive seconds left before *deadline*.
-
-    Raises
-    ------
-    TimeoutError
-        If *deadline* has already passed.
-    """
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        msg = "IPC client operation timed out"
-        raise TimeoutError(msg)
-    return remaining
 
 
 class _HandleCloser:

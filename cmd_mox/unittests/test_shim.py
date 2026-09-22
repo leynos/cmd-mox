@@ -169,7 +169,41 @@ def test_create_invocation_reports_stdin_timeout(
         _create_invocation("shim", timeout=0.01)
 
     _assert_exit_code(exc, 1)
-    assert "IPC error: timed out reading stdin" in capsys.readouterr().err
+    assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+        "stdin timeout must produce an IPC diagnostic"
+    )
+
+
+def test_create_invocation_normalises_piped_newlines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Piped text preserves TextIO newline translation across byte chunks."""
+
+    class _PollingStdin(_DummyStdin):
+        encoding = "utf-8"
+        errors = "strict"
+
+        def fileno(self) -> int:
+            return 7
+
+    class _ReadablePoll:
+        def register(self, _fd: int, _events: int) -> None:
+            pass
+
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            return [(7, shim.select.POLLIN)]
+
+    chunks = iter([b"first\r", b"\nsecond\rthird", b""])
+    monkeypatch.setattr(sys, "stdin", _PollingStdin("", is_tty=False))
+    monkeypatch.setattr(shim.select, "poll", _ReadablePoll)
+    monkeypatch.setattr(shim.os, "read", lambda _fd, _size: next(chunks))
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "first\nsecond\nthird", (
+        "bounded stdin reads must preserve universal-newline translation"
+    )
 
 
 @pytest.mark.parametrize(
@@ -374,7 +408,7 @@ def test_passthrough_report_failure_preserves_nonzero_exit_code(
     _assert_exit_code(exc, 2)
     assert (
         "IPC error: server did not acknowledge passthrough" in capsys.readouterr().err
-    )
+    ), "passthrough report failures must be diagnosed"
 
 
 def test_write_response_updates_environment_and_streams(
@@ -410,7 +444,9 @@ def test_write_response_handles_closed_stdout(
         _write_response(Response(stdout="out", exit_code=3))
 
     _assert_exit_code(exc, 3)
-    assert "IPC error: closed stdout" in capsys.readouterr().err
+    assert "IPC error: closed stdout" in capsys.readouterr().err, (
+        "closed output streams must produce an IPC diagnostic"
+    )
 
 
 def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:

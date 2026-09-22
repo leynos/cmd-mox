@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -179,7 +181,13 @@ def _read_stdin_until_eof(timeout: float) -> str:
         return sys.stdin.read()
 
     deadline = time.monotonic() + timeout
-    chunks = bytearray()
+    encoding = getattr(sys.stdin, "encoding", None) or "utf-8"
+    errors = getattr(sys.stdin, "errors", None) or "strict"
+    decoder = io.IncrementalNewlineDecoder(
+        codecs.getincrementaldecoder(encoding)(errors=errors),
+        translate=True,
+    )
+    chunks: list[str] = []
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -194,10 +202,9 @@ def _read_stdin_until_eof(timeout: float) -> str:
         except OSError as exc:
             _exit_ipc_error(exc)
         if not chunk:
-            encoding = sys.stdin.encoding or "utf-8"
-            errors = sys.stdin.errors or "strict"
-            return bytes(chunks).decode(encoding, errors)
-        chunks.extend(chunk)
+            chunks.append(decoder.decode(b"", final=True))
+            return "".join(chunks)
+        chunks.append(decoder.decode(chunk))
 
 
 def _create_invocation(cmd_name: str, timeout: float) -> Invocation:
