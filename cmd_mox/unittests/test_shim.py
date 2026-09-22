@@ -17,7 +17,7 @@ from cmd_mox.environment import (
     CMOX_IPC_TIMEOUT_ENV,
     CMOX_REAL_COMMAND_ENV_PREFIX,
 )
-from cmd_mox.ipc import Invocation, PassthroughRequest, Response
+from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 from cmd_mox.shim import (
     CMOX_SHIM_COMMAND_ENV,
     _create_invocation,
@@ -386,10 +386,17 @@ def test_execute_invocation_processes_passthrough(
 
     monkeypatch.setattr(shim, "invoke_server", lambda *args, **kwargs: intermediate)
 
-    def fake_passthrough(inv: Invocation, resp: Response, timeout: float) -> Response:
+    def fake_passthrough(
+        inv: Invocation,
+        resp: Response,
+        timeout: float,
+        *,
+        deadline: float | None = None,
+    ) -> Response:
         assert inv is invocation
         assert resp is intermediate
         assert math.isclose(timeout, 2.0)
+        assert deadline is None
         return final
 
     monkeypatch.setattr(shim, "_handle_passthrough", fake_passthrough)
@@ -397,6 +404,46 @@ def test_execute_invocation_processes_passthrough(
     result = _execute_invocation(invocation, timeout=2.0)
 
     assert result is final
+
+
+def test_execute_invocation_shares_deadline_with_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Passthrough reporting receives only the original request's remainder."""
+    invocation = Invocation(
+        command="cmd", args=[], stdin="", env={}, invocation_id="abc"
+    )
+    directive = PassthroughRequest(
+        invocation_id="abc",
+        lookup_path="/bin",
+        extra_env={},
+        timeout=2.0,
+    )
+    intermediate = Response(passthrough=directive)
+    final = Response(stdout="done", stderr="", exit_code=0)
+    now = {"value": 100.0}
+    timeouts: list[float] = []
+
+    monkeypatch.setattr(shim.time, "monotonic", lambda: now["value"])
+
+    def fake_invoke(_inv: Invocation, timeout: float) -> Response:
+        timeouts.append(timeout)
+        now["value"] = 100.6
+        return intermediate
+
+    monkeypatch.setattr(shim, "invoke_server", fake_invoke)
+    monkeypatch.setattr(shim, "_run_real_command", lambda *_args: Response(exit_code=0))
+
+    def fake_report(_result: PassthroughResult, timeout: float) -> Response:
+        timeouts.append(timeout)
+        return final
+
+    monkeypatch.setattr(shim, "report_passthrough_result", fake_report)
+
+    result = _execute_invocation(invocation, timeout=1.0, deadline=101.0)
+
+    assert result is final
+    assert timeouts == pytest.approx([1.0, 0.4])
 
 
 def test_execute_invocation_surfaces_ipc_errors(
@@ -489,6 +536,7 @@ def test_write_response_handles_closed_stdout(
 def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The shim entrypoint should bootstrap and delegate in order."""
     calls: list[object] = []
+    monkeypatch.setattr(shim.time, "monotonic", lambda: 100.0)
 
     monkeypatch.setattr(shim, "bootstrap_shim_path", lambda: calls.append("bootstrap"))
     monkeypatch.setattr(
@@ -502,14 +550,18 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shim,
         "_create_invocation",
-        lambda name, timeout: calls.append(("create", name, timeout)) or invocation,
+        lambda name, timeout, *, deadline: (
+            calls.append(("create", name, timeout, deadline)) or invocation
+        ),
     )
 
     response = Response(stdout="ok", stderr="", exit_code=0)
     monkeypatch.setattr(
         shim,
         "_execute_invocation",
-        lambda inv, timeout: calls.append(("execute", inv, timeout)) or response,
+        lambda inv, timeout, *, deadline: (
+            calls.append(("execute", inv, timeout, deadline)) or response
+        ),
     )
     monkeypatch.setattr(
         shim, "_write_response", lambda resp: calls.append(("write", resp))
@@ -521,8 +573,8 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
         "bootstrap",
         "resolve",
         "validate",
-        ("create", "shim", 1.0),
-        ("execute", invocation, 1.0),
+        ("create", "shim", 1.0, 101.0),
+        ("execute", invocation, 1.0, 101.0),
         ("write", response),
     ]
 
