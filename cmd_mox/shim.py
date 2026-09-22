@@ -382,14 +382,47 @@ def _write_response(response: Response) -> None:
     if response.env:
         os.environ |= response.env
 
-    try:
-        sys.stdout.write(response.stdout)
-        sys.stderr.write(response.stderr)
-        sys.stdout.flush()
-        sys.stderr.flush()
-    except (OSError, ValueError) as exc:
-        _exit_ipc_error(exc, exit_code=response.exit_code or 1)
+    _write_response_stream("stdout", response.stdout, response.exit_code)
+    _write_response_stream("stderr", response.stderr, response.exit_code)
     sys.exit(response.exit_code)
+
+
+def _write_response_stream(
+    stream_name: typ.Literal["stdout", "stderr"], text: str, exit_code: int
+) -> None:
+    """Write and flush one response stream, preserving status on failure."""
+    stream = getattr(sys, stream_name)
+    try:
+        stream.write(text)
+        stream.flush()
+    except (OSError, ValueError) as exc:
+        _replace_failed_stream_with_sink(stream_name, stream)
+        _exit_ipc_error(exc, exit_code=exit_code or 1)
+
+
+def _replace_failed_stream_with_sink(
+    stream_name: typ.Literal["stdout", "stderr"], failed_stream: object
+) -> None:
+    """Prevent interpreter shutdown from retrying a failed stream flush."""
+    original_name = f"__{stream_name}__"
+    original_stream = getattr(sys, original_name, None)
+    if failed_stream is original_stream:
+        descriptor = 1 if stream_name == "stdout" else 2
+        try:
+            sink_descriptor = os.open(os.devnull, os.O_WRONLY)
+            if sink_descriptor != descriptor:
+                try:
+                    os.dup2(sink_descriptor, descriptor)
+                finally:
+                    os.close(sink_descriptor)
+        except OSError:
+            pass
+
+        sink = io.StringIO()
+        setattr(sys, original_name, sink)
+    else:
+        sink = io.StringIO()
+    setattr(sys, stream_name, sink)
 
 
 def main() -> None:
