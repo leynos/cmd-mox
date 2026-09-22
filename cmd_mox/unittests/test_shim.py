@@ -147,6 +147,43 @@ def test_create_invocation_reads_stdin_when_not_tty(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_preserves_buffered_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bytes already buffered by stdin are included in the invocation."""
+
+    class _BufferedInput:
+        def __init__(self) -> None:
+            self.chunks = iter([b"buffered", b""])
+
+        def read1(self, _size: int) -> bytes:
+            return next(self.chunks)
+
+    class _BufferedStdin(_DummyStdin):
+        encoding = "utf-8"
+        errors = "strict"
+
+        def __init__(self, descriptor: int) -> None:
+            super().__init__("", is_tty=False)
+            self._descriptor = descriptor
+            self.buffer = _BufferedInput()
+
+        def fileno(self) -> int:
+            return self._descriptor
+
+    read_descriptor, write_descriptor = os.pipe()
+    os.close(write_descriptor)
+    monkeypatch.setattr(sys, "stdin", _BufferedStdin(read_descriptor))
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    try:
+        invocation = _create_invocation("shim", timeout=1.0)
+        assert invocation.stdin == "buffered"
+        assert os.get_blocking(read_descriptor)
+    finally:
+        os.close(read_descriptor)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_reports_stdin_timeout(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
