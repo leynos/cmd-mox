@@ -191,6 +191,14 @@ def _poll_stdin(poller: _Poller, deadline: float) -> list[tuple[int, int]] | Non
     return None
 
 
+def _decode_stdin_chunk(decoder: io.IncrementalNewlineDecoder, chunk: bytes) -> str:
+    """Decode one stdin chunk, exiting with an IPC diagnostic on failure."""  # ruff: ignore[docstring-missing-returns] - private helper has one direct result
+    try:
+        return decoder.decode(chunk, final=not chunk)
+    except UnicodeError as exc:
+        _exit_ipc_error(exc)
+
+
 def _read_stdin_until_eof(timeout: float) -> str:
     """Read non-interactive stdin before *timeout* elapses."""  # ruff: ignore[docstring-missing-returns] - private reader has one direct result
     if path_utils.IS_WINDOWS:
@@ -219,10 +227,9 @@ def _read_stdin_until_eof(timeout: float) -> str:
             chunk = os.read(descriptor, 8_192)
         except OSError as exc:
             _exit_ipc_error(exc)
+        chunks.append(_decode_stdin_chunk(decoder, chunk))
         if not chunk:
-            chunks.append(decoder.decode(b"", final=True))
             return "".join(chunks)
-        chunks.append(decoder.decode(chunk))
 
 
 def _create_invocation(cmd_name: str, timeout: float) -> Invocation:
