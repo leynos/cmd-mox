@@ -293,7 +293,7 @@ def _write_response(response: Response) -> None:
     try:
         sys.stdout.write(response.stdout)
         sys.stderr.write(response.stderr)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         _exit_ipc_error(exc, exit_code=response.exit_code or 1)
     sys.exit(response.exit_code)
 
