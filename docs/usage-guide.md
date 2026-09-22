@@ -879,9 +879,11 @@ server.
   if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
-  exported automatically (default `5.0`). Override this to tune how long
-  clients wait for each connect/send/receive attempt before raising a
-  `TimeoutError`.
+  exported automatically (default `5.0`). On POSIX, this is one deadline shared
+  by reading piped stdin, connecting to the Unix socket, sending the request,
+  receiving the response, and reporting passthrough results. On Windows, the
+  named-pipe client keeps its existing cooperative timeout behaviour. A client
+  that exceeds its available time raises `TimeoutError`.
 
 Most tests should rely on the fixture to manage these variables.
 
