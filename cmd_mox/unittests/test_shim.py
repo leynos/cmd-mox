@@ -146,6 +146,7 @@ def test_create_invocation_reads_stdin_when_not_tty(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_reports_stdin_timeout(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -211,6 +212,41 @@ def test_create_invocation_caps_large_poll_timeout(
     assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
         "the capped poll path must retain the controlled timeout diagnostic"
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_uses_select_when_poll_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A waitable POSIX descriptor remains bounded without ``select.poll``."""
+
+    class _PollingStdin(_DummyStdin):
+        def fileno(self) -> int:
+            return 7
+
+    select_timeouts: list[float] = []
+
+    def fake_select(
+        readers: list[int],
+        _writers: list[int],
+        _errors: list[int],
+        timeout: float,
+    ) -> tuple[list[int], list[int], list[int]]:
+        select_timeouts.append(timeout)
+        return readers, [], []
+
+    chunks = iter([b"payload", b""])
+    monkeypatch.setattr(sys, "stdin", _PollingStdin("", is_tty=False))
+    monkeypatch.delattr(shim.select, "poll")
+    monkeypatch.setattr(shim.select, "select", fake_select)
+    monkeypatch.setattr(shim.os, "read", lambda _fd, _size: next(chunks))
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "payload"
+    assert select_timeouts[0] == 0
+    assert all(0 < timeout <= 1.0 for timeout in select_timeouts[1:])
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
