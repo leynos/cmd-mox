@@ -180,8 +180,8 @@ def test_create_invocation_preserves_buffered_stdin(
 
     try:
         invocation = _create_invocation("shim", timeout=1.0)
-        assert invocation.stdin == "buffered"
-        assert os.get_blocking(read_descriptor)
+        assert invocation.stdin == "buffered", "Buffered stdin bytes were lost"
+        assert os.get_blocking(read_descriptor), "stdin blocking mode was not restored"
     finally:
         os.close(read_descriptor)
 
@@ -226,9 +226,11 @@ def test_create_invocation_checks_deadline_between_buffered_reads(
             _create_invocation("shim", timeout=1.0)
 
         _assert_exit_code(exc, 1)
-        assert stdin.buffer.read_calls == 1
-        assert "IPC error: timed out reading stdin" in capsys.readouterr().err
-        assert os.get_blocking(read_descriptor)
+        assert stdin.buffer.read_calls == 1, "Buffered input bypassed the deadline"
+        assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+            "Buffered-input timeout must include an IPC diagnostic"
+        )
+        assert os.get_blocking(read_descriptor), "stdin blocking mode was not restored"
     finally:
         os.close(read_descriptor)
 
@@ -246,7 +248,7 @@ def test_create_invocation_reads_regular_file_stdin(
 
         invocation = _create_invocation("shim", timeout=1.0)
 
-    assert invocation.stdin == "regular input"
+    assert invocation.stdin == "regular input", "Regular-file stdin was not captured"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
@@ -281,12 +283,14 @@ def test_create_invocation_bounds_stalled_regular_file_read(
                 _create_invocation("shim", timeout=0.05)
 
             _assert_exit_code(exc, 1)
-            assert started.wait(timeout=1.0)
-            assert "IPC error: timed out reading stdin" in capsys.readouterr().err
+            assert started.wait(timeout=1.0), "Regular-file reader did not start"
+            assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+                "Stalled regular-file input must include an IPC diagnostic"
+            )
         finally:
             release.set()
 
-        assert finished.wait(timeout=1.0)
+        assert finished.wait(timeout=1.0), "Timed-out stdin worker did not stop"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
