@@ -248,7 +248,7 @@ def test_create_invocation_checks_deadline_between_buffered_reads(
     stdin = _DescriptorStdin(stdin_pipe_descriptor_at_eof, buffer=buffer)
     monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "argv", ["shim"])
-    monkeypatch.setattr(shim.time, "monotonic", lambda: clock["value"])
+    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: clock["value"])
 
     with pytest.raises(SystemExit) as exc:
         _create_invocation("shim", timeout=1.0)
@@ -337,7 +337,7 @@ def test_create_invocation_reports_stdin_timeout(
             return []
 
     monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
-    monkeypatch.setattr(shim.select, "poll", _NeverReadablePoll)
+    monkeypatch.setattr(shim._shim_stdin.select, "poll", _NeverReadablePoll)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     with pytest.raises(SystemExit) as exc:
@@ -370,14 +370,16 @@ def test_create_invocation_caps_large_poll_timeout(
 
     poller = _NeverReadablePoll()
     monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
-    monkeypatch.setattr(shim.select, "poll", lambda: poller)
+    monkeypatch.setattr(shim._shim_stdin.select, "poll", lambda: poller)
     monotonic_values = iter([0.0, 0.0, 1e308])
-    monkeypatch.setattr(shim.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(
+        shim._shim_stdin.time, "monotonic", lambda: next(monotonic_values)
+    )
 
     with pytest.raises(SystemExit):
         _create_invocation("shim", timeout=1e308)
 
-    assert poller.timeouts == [shim.MAX_POLL_TIMEOUT_MS], (
+    assert poller.timeouts == [shim._shim_stdin.MAX_POLL_TIMEOUT_MS], (
         "large timeouts must be capped before conversion to milliseconds"
     )
     assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
@@ -403,9 +405,9 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
 
     chunks = iter([b"payload", b""])
     monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
-    monkeypatch.delattr(shim.select, "poll")
-    monkeypatch.setattr(shim.select, "select", fake_select)
-    monkeypatch.setattr(shim.os, "read", lambda _fd, _size: next(chunks))
+    monkeypatch.delattr(shim._shim_stdin.select, "poll")
+    monkeypatch.setattr(shim._shim_stdin.select, "select", fake_select)
+    monkeypatch.setattr(shim._shim_stdin.os, "read", lambda _fd, _size: next(chunks))
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     invocation = _create_invocation("shim", timeout=1.0)
@@ -428,12 +430,12 @@ def test_create_invocation_normalises_piped_newlines(
             pass
 
         def poll(self, _timeout: int) -> list[tuple[int, int]]:
-            return [(stdin_pipe_descriptor, shim.select.POLLIN)]
+            return [(stdin_pipe_descriptor, shim._shim_stdin.select.POLLIN)]
 
     chunks = iter([b"first\r", b"\nsecond\rthird", b""])
     monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
-    monkeypatch.setattr(shim.select, "poll", _ReadablePoll)
-    monkeypatch.setattr(shim.os, "read", lambda _fd, _size: next(chunks))
+    monkeypatch.setattr(shim._shim_stdin.select, "poll", _ReadablePoll)
+    monkeypatch.setattr(shim._shim_stdin.os, "read", lambda _fd, _size: next(chunks))
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     invocation = _create_invocation("shim", timeout=1.0)
@@ -810,7 +812,9 @@ _write_response(Response(exit_code=7, **{stream_name: "payload"}))
         "interpreter shutdown must preserve the configured response status"
     )
     if stream_name == "stdout":
-        assert "IPC error: closed stream" in result.stderr
+        assert "IPC error: closed stream" in result.stderr, (
+            "stdout failure must report the closed stream to stderr"
+        )
 
 
 def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
