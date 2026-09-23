@@ -66,6 +66,36 @@ class _DummyStdin:
         return self._data
 
 
+class _BufferedInput:
+    def __init__(
+        self,
+        chunks: cabc.Iterable[bytes],
+        after_read: cabc.Callable[[], None] | None = None,
+    ) -> None:
+        self._chunks = iter(chunks)
+        self._after_read = after_read
+        self.read_calls = 0
+
+    def read1(self, _size: int) -> bytes:
+        self.read_calls += 1
+        if self._after_read is not None:
+            self._after_read()
+        return next(self._chunks)
+
+
+class _DescriptorStdin(_DummyStdin):
+    encoding = "utf-8"
+    errors = "strict"
+
+    def __init__(self, descriptor: int, buffer: _BufferedInput | None = None) -> None:
+        super().__init__("", is_tty=False)
+        self._descriptor = descriptor
+        self.buffer = buffer
+
+    def fileno(self) -> int:
+        return self._descriptor
+
+
 def _assert_exit_code(exc: pytest.ExceptionInfo[BaseException], expected: int) -> None:
     """Assert that *exc* wraps a :class:`SystemExit` with the desired code."""
     err = exc.value
@@ -88,6 +118,23 @@ def stdin_pipe_descriptor() -> cabc.Iterator[int]:
     finally:
         os.close(read_descriptor)
         os.close(write_descriptor)
+
+
+@pytest.fixture
+def stdin_pipe_descriptor_at_eof() -> cabc.Iterator[int]:
+    """Yield a pipe read descriptor after closing its writer.
+
+    Yields
+    ------
+    int
+        The read end of the pipe, which returns EOF immediately.
+    """
+    read_descriptor, write_descriptor = os.pipe()
+    os.close(write_descriptor)
+    try:
+        yield read_descriptor
+    finally:
+        os.close(read_descriptor)
 
 
 def test_validate_environment_returns_timeout(
@@ -167,89 +214,53 @@ def test_create_invocation_reads_stdin_when_not_tty(
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_preserves_buffered_stdin(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor_at_eof: int
 ) -> None:
     """Bytes already buffered by stdin are included in the invocation."""
-
-    class _BufferedInput:
-        def __init__(self) -> None:
-            self.chunks = iter([b"buffered", b""])
-
-        def read1(self, _size: int) -> bytes:
-            return next(self.chunks)
-
-    class _BufferedStdin(_DummyStdin):
-        encoding = "utf-8"
-        errors = "strict"
-
-        def __init__(self, descriptor: int) -> None:
-            super().__init__("", is_tty=False)
-            self._descriptor = descriptor
-            self.buffer = _BufferedInput()
-
-        def fileno(self) -> int:
-            return self._descriptor
-
-    read_descriptor, write_descriptor = os.pipe()
-    os.close(write_descriptor)
-    monkeypatch.setattr(sys, "stdin", _BufferedStdin(read_descriptor))
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        _DescriptorStdin(
+            stdin_pipe_descriptor_at_eof,
+            buffer=_BufferedInput([b"buffered", b""]),
+        ),
+    )
     monkeypatch.setattr(sys, "argv", ["shim"])
 
-    try:
-        invocation = _create_invocation("shim", timeout=1.0)
-        assert invocation.stdin == "buffered", "Buffered stdin bytes were lost"
-        assert os.get_blocking(read_descriptor), "stdin blocking mode was not restored"
-    finally:
-        os.close(read_descriptor)
+    invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "buffered", "Buffered stdin bytes were lost"
+    assert os.get_blocking(stdin_pipe_descriptor_at_eof), (
+        "stdin blocking mode was not restored"
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_checks_deadline_between_buffered_reads(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin_pipe_descriptor_at_eof: int,
 ) -> None:
     """Buffered input cannot extend the deadline past its configured bound."""
     clock = {"value": 0.0}
 
-    class _BufferedInput:
-        def __init__(self) -> None:
-            self.read_calls = 0
-
-        def read1(self, _size: int) -> bytes:
-            self.read_calls += 1
-            clock["value"] = 2.0
-            return b"buffered"
-
-    class _BufferedStdin(_DummyStdin):
-        encoding = "utf-8"
-        errors = "strict"
-
-        def __init__(self, descriptor: int) -> None:
-            super().__init__("", is_tty=False)
-            self._descriptor = descriptor
-            self.buffer = _BufferedInput()
-
-        def fileno(self) -> int:
-            return self._descriptor
-
-    read_descriptor, write_descriptor = os.pipe()
-    os.close(write_descriptor)
-    stdin = _BufferedStdin(read_descriptor)
+    buffer = _BufferedInput([b"buffered"], lambda: clock.__setitem__("value", 2.0))
+    stdin = _DescriptorStdin(stdin_pipe_descriptor_at_eof, buffer=buffer)
     monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "argv", ["shim"])
     monkeypatch.setattr(shim.time, "monotonic", lambda: clock["value"])
 
-    try:
-        with pytest.raises(SystemExit) as exc:
-            _create_invocation("shim", timeout=1.0)
+    with pytest.raises(SystemExit) as exc:
+        _create_invocation("shim", timeout=1.0)
 
-        _assert_exit_code(exc, 1)
-        assert stdin.buffer.read_calls == 1, "Buffered input bypassed the deadline"
-        assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
-            "Buffered-input timeout must include an IPC diagnostic"
-        )
-        assert os.get_blocking(read_descriptor), "stdin blocking mode was not restored"
-    finally:
-        os.close(read_descriptor)
+    _assert_exit_code(exc, 1)
+    assert buffer.read_calls == 1, "Buffered input bypassed the deadline"
+    assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+        "Buffered-input timeout must include an IPC diagnostic"
+    )
+    assert os.get_blocking(stdin_pipe_descriptor_at_eof), (
+        "stdin blocking mode was not restored"
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
@@ -318,14 +329,6 @@ def test_create_invocation_reports_stdin_timeout(
 ) -> None:
     """A non-tty stream that never becomes readable exits with an IPC error."""
 
-    class _PollingStdin(_DummyStdin):
-        def __init__(self, descriptor: int) -> None:
-            super().__init__("", is_tty=False)
-            self._descriptor = descriptor
-
-        def fileno(self) -> int:
-            return self._descriptor
-
     class _NeverReadablePoll:
         def register(self, _fd: int, _events: int) -> None:
             pass
@@ -333,7 +336,7 @@ def test_create_invocation_reports_stdin_timeout(
         def poll(self, _timeout: int) -> list[tuple[int, int]]:
             return []
 
-    monkeypatch.setattr(sys, "stdin", _PollingStdin(stdin_pipe_descriptor))
+    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
     monkeypatch.setattr(shim.select, "poll", _NeverReadablePoll)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
@@ -354,14 +357,6 @@ def test_create_invocation_caps_large_poll_timeout(
 ) -> None:
     """A large valid timeout stays within the poll API's millisecond range."""
 
-    class _PollingStdin(_DummyStdin):
-        def __init__(self, descriptor: int) -> None:
-            super().__init__("", is_tty=False)
-            self._descriptor = descriptor
-
-        def fileno(self) -> int:
-            return self._descriptor
-
     class _NeverReadablePoll:
         def __init__(self) -> None:
             self.timeouts: list[int] = []
@@ -374,7 +369,7 @@ def test_create_invocation_caps_large_poll_timeout(
             return []
 
     poller = _NeverReadablePoll()
-    monkeypatch.setattr(sys, "stdin", _PollingStdin(stdin_pipe_descriptor))
+    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
     monkeypatch.setattr(shim.select, "poll", lambda: poller)
     monotonic_values = iter([0.0, 0.0, 1e308])
     monkeypatch.setattr(shim.time, "monotonic", lambda: next(monotonic_values))
@@ -395,15 +390,6 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
     monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor: int
 ) -> None:
     """A waitable POSIX descriptor remains bounded without ``select.poll``."""
-
-    class _PollingStdin(_DummyStdin):
-        def __init__(self, descriptor: int) -> None:
-            super().__init__("", is_tty=False)
-            self._descriptor = descriptor
-
-        def fileno(self) -> int:
-            return self._descriptor
-
     select_timeouts: list[float] = []
 
     def fake_select(
@@ -416,7 +402,7 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
         return readers, [], []
 
     chunks = iter([b"payload", b""])
-    monkeypatch.setattr(sys, "stdin", _PollingStdin(stdin_pipe_descriptor))
+    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
     monkeypatch.delattr(shim.select, "poll")
     monkeypatch.setattr(shim.select, "select", fake_select)
     monkeypatch.setattr(shim.os, "read", lambda _fd, _size: next(chunks))
@@ -424,9 +410,11 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
 
     invocation = _create_invocation("shim", timeout=1.0)
 
-    assert invocation.stdin == "payload"
-    assert select_timeouts[0] == 0
-    assert all(0 < timeout <= 1.0 for timeout in select_timeouts[1:])
+    assert invocation.stdin == "payload", "select fallback should capture stdin"
+    assert select_timeouts[0] == 0, "select fallback should probe readiness immediately"
+    assert all(0 < timeout <= 1.0 for timeout in select_timeouts[1:]), (
+        "select fallback waits should remain within the configured deadline"
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
@@ -434,17 +422,6 @@ def test_create_invocation_normalises_piped_newlines(
     monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor: int
 ) -> None:
     """Piped text preserves TextIO newline translation across byte chunks."""
-
-    class _PollingStdin(_DummyStdin):
-        encoding = "utf-8"
-        errors = "strict"
-
-        def __init__(self, descriptor: int) -> None:
-            super().__init__("", is_tty=False)
-            self._descriptor = descriptor
-
-        def fileno(self) -> int:
-            return self._descriptor
 
     class _ReadablePoll:
         def register(self, _fd: int, _events: int) -> None:
@@ -454,7 +431,7 @@ def test_create_invocation_normalises_piped_newlines(
             return [(stdin_pipe_descriptor, shim.select.POLLIN)]
 
     chunks = iter([b"first\r", b"\nsecond\rthird", b""])
-    monkeypatch.setattr(sys, "stdin", _PollingStdin(stdin_pipe_descriptor))
+    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
     monkeypatch.setattr(shim.select, "poll", _ReadablePoll)
     monkeypatch.setattr(shim.os, "read", lambda _fd, _size: next(chunks))
     monkeypatch.setattr(sys, "argv", ["shim"])
