@@ -21,7 +21,31 @@ def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:
 
 @dc.dataclass(slots=True)
 class Invocation:
-    """Information reported by a shim to the IPC server."""
+    """Information reported by a shim to the IPC server.
+
+    Attributes
+    ----------
+    command : str
+        Name associated with the shim invocation.
+    args : list of str
+        Command-line arguments passed after the executable name.
+    stdin : str
+        Standard input captured by the shim. When stdin is not a terminal, the
+        shim reads it through EOF to populate this field. If the caller
+        inherits stdin and does not close it, the shim blocks. Close or
+        redirect stdin (for example, to ``subprocess.DEVNULL``) when the caller
+        supplies no input.
+    env : dict[str, str]
+        Environment variables copied from the shim process.
+    stdout : str
+        Standard output from the configured response.
+    stderr : str
+        Standard error from the configured response.
+    exit_code : int
+        Exit status from the configured response.
+    invocation_id : str or None
+        Optional identifier used to correlate the shim request and response.
+    """
 
     command: str
     args: list[str]
