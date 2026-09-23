@@ -128,11 +128,11 @@ def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_send(
         kind: str,
         data: dict[str, typ.Any],
-        options: ipc_client._RequestOptions,
+        context: _ConnectionContext,
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data
-        assert options.retry_config is None, "Assertion failed"
+        assert context.retry_config.retries == 3, "Default retry config was not used"
         return Response(stdout="ok")
 
     monkeypatch.setattr("cmd_mox.ipc.client._send_request", fake_send)
@@ -155,13 +155,13 @@ def test_invoke_server_forwards_absolute_deadline(
     def fake_send(
         kind: str,
         data: dict[str, typ.Any],
-        options: ipc_client._RequestOptions,
+        context: _ConnectionContext,
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data
-        captured["timeout"] = options.timeout
-        captured["retry"] = options.retry_config
-        captured["deadline"] = options.deadline
+        captured["timeout"] = context.timeout
+        captured["retry"] = context.retry_config
+        captured["deadline"] = context.deadline
         return Response(stdout="ok")
 
     monkeypatch.setattr(ipc_client, "_send_request", fake_send)
@@ -209,7 +209,7 @@ def test_report_passthrough_result_uses_named_kind(
     def fake_send(
         kind: str,
         data: dict[str, typ.Any],
-        options: ipc_client._RequestOptions,
+        context: _ConnectionContext,
     ) -> Response:
         captured["kind"] = kind
         captured["data"] = data
@@ -234,9 +234,9 @@ def test_report_passthrough_result_forwards_absolute_deadline(
     def fake_send(
         kind: str,
         data: dict[str, typ.Any],
-        options: ipc_client._RequestOptions,
+        context: _ConnectionContext,
     ) -> Response:
-        captured["deadline"] = options.deadline
+        captured["deadline"] = context.deadline
         return Response(stdout="ok")
 
     monkeypatch.setattr(ipc_client, "_send_request", fake_send)
