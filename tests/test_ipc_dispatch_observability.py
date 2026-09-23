@@ -199,13 +199,22 @@ def test_request_pipeline_logs_invalid_request(
         json.dumps({"kind": _server_core.KIND_INVOCATION}).encode(),
     )
 
-    assert response is None, "Invalid request unexpectedly produced a response"
-    [event] = _dispatch_events(caplog)
-    assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
-    assert event["outcome"] == "invalid_request", "Wrong outcome"
-    assert event["error_category"] == "ValidationError", "Wrong error"
-    assert "invocation_id" not in event, "Invocation ID must be omitted"
-    _assert_bounded_duration(event)
+    assert response is not None, "Invalid request did not return an error frame"
+    payload = json.loads(response.decode("utf-8"))
+    assert payload["exit_code"] == 1, "Invalid request must fail"
+    assert payload["stderr"] == "IPC request payload failed validation", (
+        "Invalid request diagnostic was not returned"
+    )
+    events = _dispatch_events(caplog)
+    assert [event["outcome"] for event in events] == [
+        "invalid_request",
+        "rejection_frame",
+    ], "Validation rejection must keep its validation event and report the frame"
+    for event in events:
+        assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
+        assert event["error_category"] == "ValidationError", "Wrong error"
+        assert "invocation_id" not in event, "Invocation ID must be omitted"
+        _assert_bounded_duration(event)
 
 
 def test_request_pipeline_logs_handler_failure(
