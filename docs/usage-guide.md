@@ -163,6 +163,12 @@ cmd_mox.mock("git") \
     .returns(exit_code=0)
 ```
 
+Each command name maps to one double, and each double accepts one argument
+expectation. Repeating `with_args()` or `with_matching_args()`, or mixing both
+methods, raises `ExpectationConfigurationError` with the existing and attempted
+expectation configurations, with sensitive option values redacted. The error
+points to the `runs()` handler pattern for commands with several distinct calls.
+
 Argument comparators support flexible matching:
 
 ```python
@@ -183,8 +189,8 @@ The design document lists the available comparators:
 
 Each comparator is a callable that returns `True` on match.
 `with_matching_args` expects one comparator per argv element (excluding the
-program name in `argv[1:]`), and `with_stdin` accepts either an exact
-string or a predicate `Callable[[str], bool]` for flexible input checks.
+program name in `argv[1:]`), and `with_stdin` accepts either an exact string or
+a predicate `Callable[[str], bool]` for flexible input checks.
 
 ### Argument matchers (comparators)
 
@@ -766,7 +772,7 @@ the context-manager API:
 
 - `verify_on_exit` (default `True`) automatically calls `verify()` when a replay
   phase ends inside a `with CmdMox()` block. Disable it for manual verification
-  control. Verification still runs if the body raises; when both
+  control. When enabled, verification still runs if the body raises; when both
   verification and the body fail, the verification error is suppressed so the
   original exception surfaces.
 - `max_journal_entries` bounds the number of stored invocations (oldest entries
@@ -996,6 +1002,8 @@ supported surface area without navigating modules.
 ### Exceptions
 
 - `CmdMoxError` – base exception for cmd-mox errors.
+- `ExpectationConfigurationError` – raised when an argument expectation is set
+  more than once on a command double.
 - `LifecycleError` – raised on invalid record/replay/verify transitions.
 - `MissingEnvironmentError` – raised when replay cannot start due to missing
   env.
