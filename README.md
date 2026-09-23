@@ -68,29 +68,29 @@ what your misbehaving code actually did.
 ### Several calls to one command
 
 `cmd_mox.mock(name)` creates or retrieves one double for that command name.
-Calling `with_args(...)` again replaces the earlier argument expectation, so
-several distinct calls to one command need a handler instead:
+Each double accepts one argument expectation. A second `with_args(...)` call
+raises `ExpectationConfigurationError` with both expectation configurations
+(sensitive option values are redacted); it does not add another expectation.
+Several distinct calls to one command need a handler:
 
 The handler receives an invocation whose `args` field is a `list[str]`.
 
 ```python
 def handle_cargo(invocation):
     match invocation.args:
-        case ["nextest", "--version"]:
-            return "", "", 0
         case ["metadata", *_]:
             return '{"packages": []}', "", 0
         case ["nextest", "run", *_]:
             return "", "", 100
-        case unexpected:
-            raise AssertionError(f"Unexpected cargo arguments: {unexpected}")
+        case _:
+            return "", "", 0
 
 
 cargo = cmd_mox.spy("cargo").runs(handle_cargo)
 ```
 
-The usage guide shows how to assert the ordered call sequence through
-`cargo.invocations`.
+The [usage guide](docs/usage-guide.md) shows how to assert the ordered call
+sequence through `cargo.invocations`.
 
 No subshells. No flaky greps. Just clean, high-fidelity, Pythonic command
 mocking.
