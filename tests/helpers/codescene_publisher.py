@@ -55,7 +55,10 @@ PINNED_COMMIT: typ.Final[re.Pattern[str]] = re.compile(r"@[0-9a-f]{40}$")
 #: The publisher's concurrency group, exactly: keyed on the ref and
 #: nothing else. With one group per ref, runs never overlap and the
 #: survivor of any replacement is the newest trigger, whose commit is the
-#: newest main at trigger time, so uploads land in commit order. Keying on
+#: newest main at trigger time, so triggered runs (push and dispatch)
+#: upload in commit order. A manual re-run of an older main run keeps its
+#: old commit: an operator action that republishes that commit's coverage
+#: and baseline until the next push supersedes it. Keying on
 #: the event as well would let an earlier dispatch finish after a newer
 #: push and upload older coverage last; a constant group would let a
 #: branch dispatch replace main's pending run and then skip the upload.

@@ -19,10 +19,12 @@ that binds nothing, passes the secret to the upload action as `access-token`
 guards the upload on exactly
 `steps.codescene-token.outputs.available == 'true' && github.ref == 'refs/heads/main'`,
 uploads with `mode: upload`, and declares a concurrency group keyed on the ref
-alone that never cancels: GitHub keeps one pending run per group, so runs never
-overlap and the newest trigger's coverage lands last. The uploader pins the
-CodeScene CLI through its own manifest, so no checksum input or
-`CODESCENE_CLI_SHA256` variable is used.
+alone that never cancels: GitHub keeps one pending run per group, so triggered
+runs (push and dispatch) never overlap and the newest one's coverage lands
+last. A manual re-run of an older run is an operator action that republishes
+that commit's coverage and baseline until the next push supersedes it. The
+uploader pins the CodeScene CLI through its own manifest, so no checksum input
+or `CODESCENE_CLI_SHA256` variable is used.
 
 Dependabot automerge merges are made with `GITHUB_TOKEN`, which fires no push
 workflow, so they are a known exception: their coverage is published by the

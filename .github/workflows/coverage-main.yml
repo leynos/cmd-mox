@@ -17,7 +17,9 @@ on:
 # cancelled run would abandon both its upload and its ratchet baseline
 # write. The group is keyed on the ref alone: a branch dispatch cannot
 # displace a pending main run, and with one group for main, runs never
-# overlap and the newest trigger's coverage lands last. A dispatch that
+# overlap and the newest triggered run's coverage lands last. A manual
+# re-run of an older run is an operator action that republishes that
+# commit's coverage and baseline until the next push. A dispatch that
 # replaces a pending push leaves the ratchet baseline one commit behind
 # until the next push, because only a push saves it.
 concurrency:
