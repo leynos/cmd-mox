@@ -1,22 +1,29 @@
 name: Coverage (main)
 
-# CodeScene accepts `cs-coverage upload` only for analysed branches, so
-# main-branch coverage is uploaded here on push. Pull requests generate
-# coverage locally with the ratchet that this workflow advances, without
-# receiving CodeScene credentials or invoking CodeScene.
+# The single CodeScene publisher. CodeScene accepts `cs-coverage upload`
+# only for analysed branches, so main's coverage is uploaded here on
+# push. Pull requests generate coverage with the ratchet this workflow
+# advances, and nothing a pull request runs receives CodeScene
+# credentials or contacts CodeScene. tests/test_codescene_coverage_contract.py
+# holds the shape.
 
 on:
   push:
     branches: [main]
+
+# One publisher run at a time, never cancelled. GitHub keeps one pending
+# run per group, so a newer push replaces an older pending run and never
+# interrupts a running one; the newest baseline wins. A cancelled run
+# would abandon both its upload and its ratchet baseline write.
+concurrency:
+  group: coverage-main
+  cancel-in-progress: false
 
 jobs:
   coverage-upload:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN || '' }}
-      CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 || '' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,11 +47,19 @@ jobs:
           with-ratchet: 'true'
 
       - name: Upload coverage data to CodeScene
-        if: env.CS_ACCESS_TOKEN
+        # The token binds here and nowhere else in the workflow.
+        env:
+          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+        # The ref as well as the token. This workflow declares no
+        # `workflow_dispatch` today, so the ref is always main; the guard
+        # is here because a dispatch can aim at any branch, and the upload
+        # carries no ref of its own.
+        if: env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           format: cobertura
           path: coverage.xml
           mode: upload
           access-token: ${{ env.CS_ACCESS_TOKEN }}
-          installer-checksum: ${{ env.CODESCENE_CLI_SHA256 }}
+          # No checksum input: the action pins the CLI through its own
+          # manifest, and `installer-checksum` is rejected from this pin.

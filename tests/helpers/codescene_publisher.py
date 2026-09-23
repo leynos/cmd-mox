@@ -1,0 +1,288 @@
+"""What the single CodeScene publisher must look like, as readings.
+
+CV-005 gives the upload to one workflow that runs on pushes to main and
+serves no pull request. Its upload step is guarded on the ref as well as
+the token, binds the token itself and nowhere else, and its runs queue
+rather than cancel. Every reading is pure over supplied documents and
+returns the violations it finds, so a contract can drive it over a
+constructed workflow as readily as over this repository's own.
+"""
+
+from __future__ import annotations
+
+import re
+import typing as typ
+
+from tests.helpers.codescene_reach import (
+    COVERAGE_ACTION,
+    CREDENTIAL,
+    UPLOAD_ACTION,
+    upload_references,
+)
+from tests.helpers.workflow_reading import (
+    WORKFLOW_DIRECTORY,
+    WorkflowReadingError,
+    all_steps,
+    filter_names,
+    jobs,
+    scalars,
+    steps,
+    triggers,
+)
+
+if typ.TYPE_CHECKING:
+    from tests.helpers.workflow_reading import Document
+
+#: The conjuncts the upload step's ``if:`` must consist of, exactly.
+#: Exact rather than "contains": an extra conjunct such as ``false``
+#: disables the upload with nothing failing, and an ``||`` anywhere lands
+#: inside some conjunct and so fails the comparison too.
+UPLOAD_GUARD: typ.Final[frozenset[str]] = frozenset({
+    f"env.{CREDENTIAL} != ''",
+    "github.ref == 'refs/heads/main'",
+})
+
+#: The positive bindings. A guard on ``env.CS_ACCESS_TOKEN != ''`` passes
+#: with the binding deleted, because a missing property reads as ``''``
+#: and the upload then skips forever; so the binding itself is required.
+STEP_BINDING: typ.Final[str] = f"${{{{ secrets.{CREDENTIAL} }}}}"
+ACCESS_TOKEN_INPUT: typ.Final[str] = f"${{{{ env.{CREDENTIAL} }}}}"
+
+#: The triggers a publisher may declare. A dispatch can aim at any
+#: branch, which is why the ref guard is required on the step.
+PUBLISHER_TRIGGERS: typ.Final[frozenset[str]] = frozenset({
+    "push",
+    "workflow_dispatch",
+})
+
+#: A full-length commit pin.
+PINNED_COMMIT: typ.Final[re.Pattern[str]] = re.compile(r"@[0-9a-f]{40}$")
+
+
+def _normalized(text: object) -> str:
+    """Return text with runs of whitespace collapsed to single spaces.
+
+    Returns
+    -------
+    str
+        The normalized text.
+    """
+    return " ".join(str(text).split())
+
+
+def conjuncts(condition: object) -> frozenset[str]:
+    """Return an ``if:`` condition's ``&&`` terms, whitespace-normalized.
+
+    Returns
+    -------
+    frozenset[str]
+        The terms, with any ``${{ }}`` wrapper removed.
+
+    Examples
+    --------
+    >>> sorted(conjuncts("${{ a == 'b' &&  c }}"))
+    ["a == 'b'", 'c']
+    """
+    body = _normalized(condition)
+    if body.startswith("${{") and body.endswith("}}"):
+        body = body[3:-2]
+    return frozenset(_normalized(term) for term in body.split("&&"))
+
+
+def uploaders(documents: dict[str, Document]) -> list[str]:
+    """Return every document that invokes the CodeScene upload action.
+
+    Returns
+    -------
+    list[str]
+        Their keys.
+    """
+    return [name for name, document in documents.items() if upload_references(document)]
+
+
+def publisher(documents: dict[str, Document]) -> tuple[str, Document]:
+    """Return the one publisher: the only document invoking the upload.
+
+    Found rather than named, so a second uploader cannot hide beside it.
+
+    Returns
+    -------
+    tuple[str, Document]
+        Its key and document.
+
+    Raises
+    ------
+    WorkflowReadingError
+        If the upload is invoked by no document, by several, or by a
+        document that is not a workflow.
+    """
+    found = uploaders(documents)
+    if len(found) != 1 or not found[0].startswith(WORKFLOW_DIRECTORY):
+        msg = f"exactly one workflow must invoke {UPLOAD_ACTION}; found {found}"
+        raise WorkflowReadingError(msg)
+    return found[0], documents[found[0]]
+
+
+def upload_step(document: Document) -> dict[object, object]:
+    """Return a publisher's single upload step.
+
+    Returns
+    -------
+    dict[object, object]
+        The step.
+
+    Raises
+    ------
+    WorkflowReadingError
+        If the action is invoked other than by exactly one step.
+    """
+    found = [
+        step
+        for step in all_steps(document)
+        if UPLOAD_ACTION.casefold() in str(step.get("uses", "")).casefold()
+    ]
+    if len(found) != 1:
+        msg = f"the publisher must invoke the upload once; it does {len(found)} times"
+        raise WorkflowReadingError(msg)
+    return found[0]
+
+
+def trigger_violations(document: Document) -> list[str]:
+    """Return why a publisher's triggers could publish anything but main.
+
+    Returns
+    -------
+    list[str]
+        One entry per violation.
+    """
+    declared = triggers(document)
+    found = [f"trigger {name}" for name in declared if name not in PUBLISHER_TRIGGERS]
+    push = declared.get("push")
+    if not isinstance(push, dict) or set(push) - {"branches", "paths", "paths-ignore"}:
+        found.append(f"push filter {push!r} is not a branches filter")
+    elif filter_names(push.get("branches")) != ["main"]:
+        found.append(f"push branches {push.get('branches')!r} are not [main]")
+    return found
+
+
+def guard_violations(step: dict[object, object]) -> list[str]:
+    """Return why an upload step's ``if:`` is not exactly the required guard.
+
+    Returns
+    -------
+    list[str]
+        One entry when the conjuncts differ from ``UPLOAD_GUARD``.
+    """
+    found = conjuncts(step.get("if", ""))
+    if found == UPLOAD_GUARD:
+        return []
+    return [f"guard {sorted(found)} is not {sorted(UPLOAD_GUARD)}"]
+
+
+def binding_violations(document: Document, step: dict[object, object]) -> list[str]:
+    """Return why the token is not bound on the upload step alone.
+
+    Returns
+    -------
+    list[str]
+        One entry per violation.
+    """
+    env = step.get("env")
+    inputs = step.get("with")
+    found = []
+    if not isinstance(env, dict) or _normalized(env.get(CREDENTIAL)) != STEP_BINDING:
+        found.append(f"the upload step does not bind {CREDENTIAL}: {STEP_BINDING}")
+    if not isinstance(inputs, dict) or _normalized(inputs.get("access-token")) != (
+        ACCESS_TOKEN_INPUT
+    ):
+        found.append(
+            f"the upload step does not pass access-token: {ACCESS_TOKEN_INPUT}"
+        )
+    elsewhere = [
+        scalar.path
+        for scalar in scalars({**document, "jobs": _without(document, step)})
+        if CREDENTIAL.casefold() in scalar.text.casefold()
+    ]
+    found += [f"{CREDENTIAL} also reached at {path}" for path in elsewhere]
+    return found
+
+
+def _without(document: Document, step: dict[object, object]) -> dict[str, object]:
+    """Return a document's jobs with one step removed, for sweeping the rest.
+
+    Returns
+    -------
+    dict[str, object]
+        Job name to job, without the step.
+    """
+    return {
+        name: {
+            **job,
+            "steps": [other for other in steps(job) if other is not step],
+        }
+        for name, job in jobs(document).items()
+    }
+
+
+def input_violations(step: dict[object, object]) -> list[str]:
+    """Return why an upload step does not upload, pinned.
+
+    Returns
+    -------
+    list[str]
+        One entry per violation.
+    """
+    inputs = step.get("with")
+    mode = inputs.get("mode") if isinstance(inputs, dict) else None
+    found = [] if mode == "upload" else [f"mode is {mode!r}, not 'upload'"]
+    if not PINNED_COMMIT.search(str(step.get("uses", ""))):
+        found.append(f"{step.get('uses')!r} is not pinned to a commit")
+    return found
+
+
+def concurrency_violations(document: Document) -> list[str]:
+    """Return why a publisher's runs could cancel one another.
+
+    A concurrency group without ``cancel-in-progress`` keeps one pending
+    run per group: a newer push replaces an older pending run and never
+    cancels a running one, so the newest baseline wins. A cancelled run
+    abandons both its upload and its baseline write.
+
+    Returns
+    -------
+    list[str]
+        One entry per violation.
+    """
+    declared = document.get("concurrency")
+    if not isinstance(declared, dict) or not declared.get("group"):
+        return [f"no workflow-level concurrency group: {declared!r}"]
+    scopes = [declared, *(job.get("concurrency") for job in jobs(document).values())]
+    return [
+        f"cancel-in-progress {scope.get('cancel-in-progress')!r}"
+        for scope in scopes
+        if isinstance(scope, dict)
+        and _normalized(scope.get("cancel-in-progress", "false")) != "false"
+    ]
+
+
+def neutralized_steps(document: Document) -> list[str]:
+    """Return the publisher's jobs or coverage steps that a condition can skip.
+
+    The upload's own guard is held exactly by ``guard_violations``; the
+    job around it and the step writing the report must run whenever the
+    workflow does, or an ``if: false`` stops publishing with nothing red.
+
+    Returns
+    -------
+    list[str]
+        One entry per conditional job or coverage step.
+    """
+    found = [
+        f"job {name} has if:" for name, job in jobs(document).items() if "if" in job
+    ]
+    found += [
+        f"coverage step {step.get('name')!r} has if:"
+        for step in all_steps(document)
+        if COVERAGE_ACTION in str(step.get("uses", "")) and "if" in step
+    ]
+    return found

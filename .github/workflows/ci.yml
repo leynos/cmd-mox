@@ -92,10 +92,10 @@ jobs:
         if: matrix.run-windows-smoke == false
         run: make typecheck
 
-      # Coverage runs on pull requests only. Pushes to main upload their
-      # own coverage (and advance the ratchet baseline) via
-      # coverage-main.yml, so generating it here as well would duplicate
-      # the work and the CodeScene upload for the same commit.
+      # Coverage runs on pull requests only, ratcheting against the
+      # baseline coverage-main.yml writes on pushes to main; that workflow
+      # is also the only one that uploads to CodeScene. Nothing here
+      # publishes the report.
       - name: Generate coverage
         if: matrix.run-windows-smoke == false && github.event_name == 'pull_request'
         uses: leynos/shared-actions/.github/actions/generate-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
@@ -108,6 +108,7 @@ jobs:
           # pytest-xdist once the suite is confirmed xdist-clean.
           pytest-workers: ''
           with-ratchet: 'true'
+          publish-artefact: 'false'
 
       - name: Run Windows smoke tests
         if: matrix.run-windows-smoke
