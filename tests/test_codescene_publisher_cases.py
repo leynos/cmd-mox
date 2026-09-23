@@ -32,7 +32,7 @@ on:
   push:
     branches: [main]
 concurrency:
-  group: coverage-main-${{ github.ref }}
+  group: coverage-main-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: false
 jobs:
   publish:
@@ -107,16 +107,22 @@ def test_the_compliant_publisher_passes() -> None:
             id="sweep-6-cancel",
         ),
         pytest.param(
-            "group: coverage-main-${{ github.ref }}",
+            "group: coverage-main-${{ github.ref }}-${{ github.event_name }}",
             "group: coverage-main",
             "is not keyed on",
             id="sweep-6-group-shared-across-refs",
         ),
         pytest.param(
-            "group: coverage-main-${{ github.ref }}",
-            "group: coverage-main-github.ref",
+            "group: coverage-main-${{ github.ref }}-${{ github.event_name }}",
+            "group: coverage-main-github.ref-github.event_name",
             "is not keyed on",
             id="sweep-6-group-names-the-ref-unevaluated",
+        ),
+        pytest.param(
+            "group: coverage-main-${{ github.ref }}-${{ github.event_name }}",
+            "group: coverage-main-${{ github.ref }}",
+            "is not keyed on",
+            id="sweep-6-group-shared-by-push-and-dispatch",
         ),
         pytest.param(
             "    runs-on: ubuntu-latest\n",
@@ -131,7 +137,8 @@ def test_the_compliant_publisher_passes() -> None:
             id="upload-action-unpinned",
         ),
         pytest.param(
-            "concurrency:\n  group: coverage-main-${{ github.ref }}\n"
+            "concurrency:\n"
+            "  group: coverage-main-${{ github.ref }}-${{ github.event_name }}\n"
             "  cancel-in-progress: false\n",
             "",
             "no workflow-level concurrency group",
@@ -140,7 +147,8 @@ def test_the_compliant_publisher_passes() -> None:
         pytest.param(
             "    runs-on: ubuntu-latest\n",
             "    runs-on: ubuntu-latest\n    concurrency:\n"
-            "      group: x-${{ github.ref }}\n      cancel-in-progress: true\n",
+            "      group: x-${{ github.ref }}-${{ github.event_name }}\n"
+            "      cancel-in-progress: true\n",
             "cancel-in-progress 'true'",
             id="sweep-6-job-level-cancel",
         ),

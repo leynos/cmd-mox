@@ -16,9 +16,11 @@ on:
 # and never interrupts a running one; the newest baseline wins. A
 # cancelled run would abandon both its upload and its ratchet baseline
 # write. The group is keyed on the ref so that a dispatch from another
-# branch cannot displace a pending main run and then skip the upload.
+# branch cannot displace a pending main run and then skip the upload,
+# and on the event so that a dispatch on main cannot displace a pending
+# push, which is the only run that writes the baseline.
 concurrency:
-  group: coverage-main-${{ github.ref }}
+  group: coverage-main-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:

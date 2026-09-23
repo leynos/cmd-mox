@@ -15,12 +15,12 @@ or names the CodeScene host.
 `coverage-main.yml` is the single publisher. It runs on pushes to `main`, binds
 `CS_ACCESS_TOKEN` on its upload step alone, guards that step on exactly
 `env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'`, uploads with
-`mode: upload`, and declares a concurrency group, keyed on the ref, that never
-cancels: GitHub keeps one pending run per group, so a newer push replaces an
-older pending run and the newest baseline wins, and a dispatch from another
-branch cannot displace a pending main run. The uploader pins the CodeScene CLI
-through its own manifest, so no checksum input or `CODESCENE_CLI_SHA256`
-variable is used.
+`mode: upload`, and declares a concurrency group, keyed on the ref and the
+event, that never cancels: GitHub keeps one pending run per group, so a newer
+push replaces an older pending run and the newest baseline wins, while a
+dispatch cannot displace a pending push to main. The uploader pins the
+CodeScene CLI through its own manifest, so no checksum input or
+`CODESCENE_CLI_SHA256` variable is used.
 
 The reason is the call, not the artefact: the CLI talks to CodeScene's API,
 whose answers have changed shape and failed every pull request at once, and a

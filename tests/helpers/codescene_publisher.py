@@ -58,10 +58,16 @@ PUBLISHER_TRIGGERS: typ.Final[frozenset[str]] = frozenset({
 #: A full-length commit pin.
 PINNED_COMMIT: typ.Final[re.Pattern[str]] = re.compile(r"@[0-9a-f]{40}$")
 
-#: An evaluated ref in a concurrency group. The expression, not the
-#: words: a literal ``coverage-main-github.ref`` names the ref and
-#: evaluates nothing, so every ref would still share one group.
-_REF_KEY: typ.Final[re.Pattern[str]] = re.compile(r"\$\{\{\s*github\.ref\s*\}\}")
+#: The expressions every publisher concurrency group must evaluate. The
+#: ref keeps a branch dispatch out of main's group; the event keeps a
+#: dispatch on main from replacing a pending push, since only a push
+#: writes the ratchet baseline. The expressions, not the words: a
+#: literal ``coverage-main-github.ref-github.event_name`` names both and
+#: evaluates neither, so every run would still share one group.
+_GROUP_KEYS: typ.Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"\$\{\{\s*github\.ref\s*\}\}"),
+    re.compile(r"\$\{\{\s*github\.event_name\s*\}\}"),
+)
 
 
 def _normalized(text: object) -> str:
@@ -252,10 +258,12 @@ def concurrency_violations(document: Document) -> list[str]:
     run per group: a newer push replaces an older pending run and never
     cancels a running one, so the newest baseline wins. A cancelled run
     abandons both its upload and its baseline write. Every group, at
-    workflow and job level, must evaluate ``${{ github.ref }}``: a
-    dispatch from another branch would otherwise join main's group,
-    replace main's pending run, and then skip the ref-guarded upload, so
-    that main commit never publishes. A constant group at either level
+    workflow and job level, must evaluate ``${{ github.ref }}`` and
+    ``${{ github.event_name }}``: a dispatch from another branch would
+    otherwise join main's group, replace main's pending run, and then
+    skip the ref-guarded upload, so that main commit never publishes;
+    and a dispatch on main would replace a pending push without writing
+    the baseline, which only a push saves. A constant group at either level
     collides, whatever the other level is keyed on.
 
     Returns
@@ -269,9 +277,9 @@ def concurrency_violations(document: Document) -> list[str]:
     scopes = [declared, *(job.get("concurrency") for job in jobs(document).values())]
     groups = [scope for scope in scopes if isinstance(scope, dict) and "group" in scope]
     found = [
-        f"concurrency group {scope['group']!r} is not keyed on ${{{{ github.ref }}}}"
+        f"concurrency group {scope['group']!r} is not keyed on the ref and event"
         for scope in groups
-        if not _REF_KEY.search(str(scope["group"]))
+        if not all(key.search(str(scope["group"])) for key in _GROUP_KEYS)
     ]
     return found + [
         f"cancel-in-progress {scope.get('cancel-in-progress')!r}"
