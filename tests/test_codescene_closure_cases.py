@@ -11,6 +11,8 @@ everything fails here as well. The publisher's cases are in
 
 from __future__ import annotations
 
+import typing as typ
+
 import pytest
 import yaml
 
@@ -24,6 +26,9 @@ from tests.helpers.workflow_reading import (
     load_document,
     triggers,
 )
+
+if typ.TYPE_CHECKING:
+    from tests.helpers.workflow_reading import Document
 
 REPOSITORY = "leynos/example"
 
@@ -263,24 +268,34 @@ def test_both_trigger_keys_are_refused() -> None:
         triggers(document)
 
 
-def test_a_workflow_run_chain_is_on_the_surface() -> None:
-    """A workflow chained onto a pull-request run serves that pull request."""
+def _entry_surface(trigger: str) -> dict[str, Document]:
+    """Return the surface of a tree whose ``entry.yml`` curls CodeScene.
+
+    ``entry.yml`` declares ``trigger`` and nothing calls it, so it is on
+    the surface only if its own trigger makes it a seed.
+
+    Returns
+    -------
+    dict[str, Document]
+        The pull-request surface of the tree.
+    """
     documents = {
         ".github/workflows/ci.yml": load_document(CALLER.replace("probe.yml", "x.yml")),
         ".github/workflows/x.yml": load_document(PROBE),
-        ".github/workflows/after.yml": load_document(
-            PROBE.replace("workflow_call:", "workflow_run:").replace(
+        ".github/workflows/entry.yml": load_document(
+            PROBE.replace("workflow_call:", trigger).replace(
                 "echo probe", "curl codescene.io"
             )
         ),
     }
-    breaches = pull_request_breaches(pull_request_surface(documents, REPOSITORY))
-    assert any("after.yml: host" in breach for breach in breaches), breaches
+    return pull_request_surface(documents, REPOSITORY)
 
 
 @pytest.mark.parametrize(
     "trigger",
     [
+        pytest.param("workflow_run:", id="workflow-run"),
+        pytest.param("issue_comment:", id="issue-comment"),
         pytest.param("merge_group:", id="merge-group"),
         pytest.param("pull_request_review:", id="pull-request-review"),
         pytest.param("pull_request_review_comment:", id="review-comment"),
@@ -296,16 +311,7 @@ def test_a_workflow_run_chain_is_on_the_surface() -> None:
 )
 def test_every_pull_request_entry_point_is_a_seed(trigger: str) -> None:
     """A workflow on any trigger that runs pull-request code is on the surface."""
-    documents = {
-        ".github/workflows/ci.yml": load_document(CALLER.replace("probe.yml", "x.yml")),
-        ".github/workflows/x.yml": load_document(PROBE),
-        ".github/workflows/entry.yml": load_document(
-            PROBE.replace("workflow_call:", trigger).replace(
-                "echo probe", "curl codescene.io"
-            )
-        ),
-    }
-    breaches = pull_request_breaches(pull_request_surface(documents, REPOSITORY))
+    breaches = pull_request_breaches(_entry_surface(trigger))
     assert any("entry.yml: host" in breach for breach in breaches), breaches
 
 
@@ -323,14 +329,5 @@ def test_main_only_entry_points_stay_off_the_surface(trigger: str) -> None:
     Without this half, a seed reading that swept every workflow onto the
     surface would pass the case above and condemn the publisher.
     """
-    documents = {
-        ".github/workflows/ci.yml": load_document(CALLER.replace("probe.yml", "x.yml")),
-        ".github/workflows/x.yml": load_document(PROBE),
-        ".github/workflows/entry.yml": load_document(
-            PROBE.replace("workflow_call:", trigger).replace(
-                "echo probe", "curl codescene.io"
-            )
-        ),
-    }
-    surface = pull_request_surface(documents, REPOSITORY)
+    surface = _entry_surface(trigger)
     assert ".github/workflows/entry.yml" not in surface, sorted(surface)

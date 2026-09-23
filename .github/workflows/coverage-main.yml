@@ -11,12 +11,14 @@ on:
   push:
     branches: [main]
 
-# One publisher run at a time, never cancelled. GitHub keeps one pending
-# run per group, so a newer push replaces an older pending run and never
-# interrupts a running one; the newest baseline wins. A cancelled run
-# would abandon both its upload and its ratchet baseline write.
+# One publisher run per ref at a time, never cancelled. GitHub keeps one
+# pending run per group, so a newer push replaces an older pending run
+# and never interrupts a running one; the newest baseline wins. A
+# cancelled run would abandon both its upload and its ratchet baseline
+# write. The group is keyed on the ref so that a dispatch from another
+# branch cannot displace a pending main run and then skip the upload.
 concurrency:
-  group: coverage-main
+  group: coverage-main-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

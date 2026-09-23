@@ -241,12 +241,15 @@ def input_violations(step: dict[object, object]) -> list[str]:
 
 
 def concurrency_violations(document: Document) -> list[str]:
-    """Return why a publisher's runs could cancel one another.
+    """Return why a publisher's runs could cancel or displace one another.
 
     A concurrency group without ``cancel-in-progress`` keeps one pending
     run per group: a newer push replaces an older pending run and never
     cancels a running one, so the newest baseline wins. A cancelled run
-    abandons both its upload and its baseline write.
+    abandons both its upload and its baseline write. The group must be
+    keyed on ``github.ref``: a dispatch from another branch would
+    otherwise join main's group, replace main's pending run, and then
+    skip the ref-guarded upload, so that main commit never publishes.
 
     Returns
     -------
@@ -256,8 +259,13 @@ def concurrency_violations(document: Document) -> list[str]:
     declared = document.get("concurrency")
     if not isinstance(declared, dict) or not declared.get("group"):
         return [f"no workflow-level concurrency group: {declared!r}"]
+    found = (
+        []
+        if "github.ref" in str(declared["group"])
+        else [f"concurrency group {declared['group']!r} is not keyed on github.ref"]
+    )
     scopes = [declared, *(job.get("concurrency") for job in jobs(document).values())]
-    return [
+    return found + [
         f"cancel-in-progress {scope.get('cancel-in-progress')!r}"
         for scope in scopes
         if isinstance(scope, dict)

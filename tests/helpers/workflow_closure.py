@@ -26,12 +26,16 @@ if typ.TYPE_CHECKING:
 
 #: Triggers that put a workflow on the pull-request surface. The
 #: ``pull_request*`` family and ``merge_group`` run a pull request's code
-#: or run for it; ``workflow_run`` is included because a workflow chained
+#: or run for it. ``workflow_run`` is included because a workflow chained
 #: onto a pull-request workflow runs for that pull request, and reading
-#: which workflows it names would be one more reading to get wrong. A
-#: push to a branch other than main is read separately, by
+#: which workflows it names would be one more reading to get wrong.
+#: ``issue_comment`` fires for comments on pull requests, holds the
+#: repository's secrets, and is often written to check out the pull
+#: request's head, so it is included rather than argued away. A push to
+#: a branch other than main is read separately, by
 #: ``_pushes_other_branches``.
 PULL_REQUEST_TRIGGERS: typ.Final[frozenset[str]] = frozenset({
+    "issue_comment",
     "merge_group",
     "pull_request",
     "pull_request_review",

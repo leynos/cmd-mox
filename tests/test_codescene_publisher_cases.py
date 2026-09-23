@@ -29,7 +29,7 @@ on:
   push:
     branches: [main]
 concurrency:
-  group: coverage-main
+  group: coverage-main-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   publish:
@@ -103,7 +103,14 @@ def test_the_compliant_publisher_passes() -> None:
             id="sweep-6-cancel",
         ),
         pytest.param(
-            "concurrency:\n  group: coverage-main\n  cancel-in-progress: false\n",
+            "group: coverage-main-${{ github.ref }}",
+            "group: coverage-main",
+            "not keyed on github.ref",
+            id="sweep-6-group-shared-across-refs",
+        ),
+        pytest.param(
+            "concurrency:\n  group: coverage-main-${{ github.ref }}\n"
+            "  cancel-in-progress: false\n",
             "",
             "no workflow-level concurrency group",
             id="sweep-6-no-group",
