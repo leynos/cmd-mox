@@ -28,8 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.codescene_binding import binding_violations
 from tests.helpers.codescene_publisher import (
-    binding_violations,
     concurrency_violations,
     conjuncts,
     guard_violations,

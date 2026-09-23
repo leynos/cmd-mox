@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.helpers.codescene_binding import binding_violations
 from tests.helpers.codescene_publisher import (
-    binding_violations,
     concurrency_violations,
     guard_violations,
     input_violations,

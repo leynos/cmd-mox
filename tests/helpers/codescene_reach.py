@@ -60,6 +60,22 @@ _WHOLE_SECRETS: typ.Final[re.Pattern[str]] = re.compile(
 )
 
 
+def normalized(text: object) -> str:
+    """Return text with runs of whitespace collapsed to single spaces.
+
+    Returns
+    -------
+    str
+        The normalized text.
+
+    Examples
+    --------
+    >>> normalized("a  &&  b")
+    'a && b'
+    """
+    return " ".join(str(text).split())
+
+
 def _expressions(scalar: Scalar) -> list[str]:
     """Return the expression text in one value; an ``if:`` is all expression.
 

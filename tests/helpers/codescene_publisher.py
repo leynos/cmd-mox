@@ -13,10 +13,11 @@ from __future__ import annotations
 import re
 import typing as typ
 
+from tests.helpers.codescene_binding import CHECK_STEP_ID
 from tests.helpers.codescene_reach import (
     COVERAGE_ACTION,
-    CREDENTIAL,
     UPLOAD_ACTION,
+    normalized,
     upload_references,
 )
 from tests.helpers.workflow_reading import (
@@ -25,27 +26,12 @@ from tests.helpers.workflow_reading import (
     all_steps,
     filter_names,
     jobs,
-    scalars,
     steps,
     triggers,
 )
 
 if typ.TYPE_CHECKING:
     from tests.helpers.workflow_reading import Document
-
-#: The id of the step that reports whether the token is available. The
-#: token is not bound in the upload step's ``env``: the upload action is
-#: composite and hands that ``env`` to its nested upload-artifact and
-#: cache steps, while binding the token itself from ``access-token``. So
-#: a separate step binds it, runs one exact command, and publishes only
-#: whether it is set.
-CHECK_STEP_ID: typ.Final[str] = "codescene-token"
-
-#: The check step's command, exactly. Held whole because ``false && X``
-#: contains ``X``: a looser match accepts a command that never reports.
-CHECK_COMMAND: typ.Final[str] = (
-    f'if [ -n "${CREDENTIAL}" ]; then echo "available=true" >> "$GITHUB_OUTPUT"; fi'
-)
 
 #: The conjuncts the upload step's ``if:`` must consist of, exactly.
 #: Exact rather than "contains": an extra conjunct such as ``false``
@@ -55,13 +41,6 @@ UPLOAD_GUARD: typ.Final[frozenset[str]] = frozenset({
     f"steps.{CHECK_STEP_ID}.outputs.available == 'true'",
     "github.ref == 'refs/heads/main'",
 })
-
-#: The positive bindings: the check step's ``env`` and the upload's
-#: ``access-token``. A guard that reads a binding passes with the binding
-#: deleted, because a missing value reads as empty and the upload then
-#: skips forever; so each binding itself is required.
-STEP_BINDING: typ.Final[str] = f"${{{{ secrets.{CREDENTIAL} }}}}"
-ACCESS_TOKEN_INPUT: typ.Final[str] = STEP_BINDING
 
 #: The triggers a publisher may declare. A dispatch can aim at any
 #: branch, which is why the ref guard is required on the step.
@@ -85,17 +64,6 @@ _GROUP_KEYS: typ.Final[tuple[re.Pattern[str], ...]] = (
 )
 
 
-def _normalized(text: object) -> str:
-    """Return text with runs of whitespace collapsed to single spaces.
-
-    Returns
-    -------
-    str
-        The normalized text.
-    """
-    return " ".join(str(text).split())
-
-
 def conjuncts(condition: object) -> frozenset[str]:
     """Return an ``if:`` condition's ``&&`` terms, whitespace-normalized.
 
@@ -109,10 +77,10 @@ def conjuncts(condition: object) -> frozenset[str]:
     >>> sorted(conjuncts("${{ a == 'b' &&  c }}"))
     ["a == 'b'", 'c']
     """
-    body = _normalized(condition)
+    body = normalized(condition)
     if body.startswith("${{") and body.endswith("}}"):
         body = body[3:-2]
-    return frozenset(_normalized(term) for term in body.split("&&"))
+    return frozenset(normalized(term) for term in body.split("&&"))
 
 
 def uploaders(documents: dict[str, Document]) -> list[str]:
@@ -205,143 +173,6 @@ def guard_violations(step: dict[object, object]) -> list[str]:
     return [f"guard {sorted(found)} is not {sorted(UPLOAD_GUARD)}"]
 
 
-def check_step(
-    document: Document, upload: dict[object, object]
-) -> dict[object, object] | None:
-    """Return the check step that precedes the upload in its job, if any.
-
-    Returns
-    -------
-    dict[object, object] or None
-        The step with ``CHECK_STEP_ID``, or ``None`` when the upload's job
-        runs none before it.
-    """
-    for job in jobs(document).values():
-        job_steps = steps(job)
-        positions = [index for index, step in enumerate(job_steps) if step is upload]
-        if positions:
-            earlier = job_steps[: positions[0]]
-            found = [step for step in earlier if step.get("id") == CHECK_STEP_ID]
-            return found[0] if found else None
-    return None
-
-
-def _stray_mentions(step: dict[object, object], allowed: set[str]) -> list[str]:
-    """Return the paths in one step that name the token outside ``allowed``.
-
-    Returns
-    -------
-    list[str]
-        The paths.
-    """
-    return [
-        scalar.path
-        for scalar in scalars(step)
-        if CREDENTIAL.casefold() in scalar.text.casefold()
-        and scalar.path not in allowed
-    ]
-
-
-def _check_violations(check: dict[object, object] | None) -> list[str]:
-    """Return why the check step does not bind the token and report it.
-
-    Returns
-    -------
-    list[str]
-        One entry per violation.
-    """
-    if check is None:
-        return [f"no step with id {CHECK_STEP_ID!r} precedes the upload in its job"]
-    env = check.get("env")
-    bound = (
-        {str(key): _normalized(value) for key, value in env.items()}
-        if isinstance(env, dict)
-        else {}
-    )
-    found = (
-        []
-        if bound == {CREDENTIAL: STEP_BINDING}
-        else [f"the check step does not bind exactly {CREDENTIAL}: {STEP_BINDING}"]
-    )
-    if _normalized(check.get("run")) != CHECK_COMMAND:
-        found.append(f"the check step does not run exactly {CHECK_COMMAND!r}")
-    if "if" in check:
-        found.append("the check step has if:")
-    stray = _stray_mentions(check, {f"env.{CREDENTIAL}", "run"})
-    return found + [f"{CREDENTIAL} also reached at check step {path}" for path in stray]
-
-
-def _upload_violations(step: dict[object, object]) -> list[str]:
-    """Return why the upload step does not take the token as its input alone.
-
-    Returns
-    -------
-    list[str]
-        One entry per violation.
-    """
-    inputs = step.get("with")
-    passed = inputs.get("access-token") if isinstance(inputs, dict) else None
-    found = (
-        []
-        if _normalized(passed) == ACCESS_TOKEN_INPUT
-        else [f"the upload step does not pass access-token: {ACCESS_TOKEN_INPUT}"]
-    )
-    stray = _stray_mentions(step, {"with.access-token"})
-    found += [
-        f"the upload step's {path} holds {CREDENTIAL}; the composite action "
-        f"passes its env to nested steps"
-        if path.startswith("env")
-        else f"{CREDENTIAL} also reached at upload step {path}"
-        for path in stray
-    ]
-    return found
-
-
-def binding_violations(document: Document, step: dict[object, object]) -> list[str]:
-    """Return why the token is not bound on the check step and passed as input.
-
-    Returns
-    -------
-    list[str]
-        One entry per violation.
-    """
-    check = check_step(document, step)
-    held = [step] if check is None else [step, check]
-    elsewhere = [
-        scalar.path
-        for scalar in scalars({**document, "jobs": _without(document, held)})
-        if CREDENTIAL.casefold() in scalar.text.casefold()
-    ]
-    return (
-        _check_violations(check)
-        + _upload_violations(step)
-        + [f"{CREDENTIAL} also reached at {path}" for path in elsewhere]
-    )
-
-
-def _without(
-    document: Document, removed: list[dict[object, object]]
-) -> dict[str, object]:
-    """Return a document's jobs with some steps removed, for sweeping the rest.
-
-    Returns
-    -------
-    dict[str, object]
-        Job name to job, without those steps.
-    """
-    return {
-        name: {
-            **job,
-            "steps": [
-                other
-                for other in steps(job)
-                if not any(other is gone for gone in removed)
-            ],
-        }
-        for name, job in jobs(document).items()
-    }
-
-
 def input_violations(step: dict[object, object]) -> list[str]:
     """Return why an upload step does not upload, pinned.
 
@@ -413,7 +244,7 @@ def _cancelling_scopes(scopes: list[dict[object, object]]) -> list[str]:
     return [
         f"cancel-in-progress {scope.get('cancel-in-progress')!r}"
         for scope in scopes
-        if _normalized(scope.get("cancel-in-progress", "false")) != "false"
+        if normalized(scope.get("cancel-in-progress", "false")) != "false"
     ]
 
 
@@ -448,7 +279,7 @@ def _swallows_failure(item: dict[object, object]) -> bool:
     bool
         True when a failure there would not fail the run.
     """
-    return _normalized(item.get("continue-on-error", "false")) != "false"
+    return normalized(item.get("continue-on-error", "false")) != "false"
 
 
 def swallowed_failures(document: Document) -> list[str]:
