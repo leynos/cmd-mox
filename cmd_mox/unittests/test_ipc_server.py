@@ -9,6 +9,7 @@ import socket
 import socketserver
 import threading
 import time
+import types
 import typing as typ
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from cmd_mox.ipc import (
     Response,
     RetryConfig,
     _client_events,
+    _deadline,
     _unix_server_base,
     invoke_server,
 )
@@ -164,6 +166,37 @@ def test_ipc_server_bounds_incomplete_request_read(
     assert response.stdout == "after-timeout", "Timed-out client stalled the server"
 
 
+def test_ipc_handler_uses_remaining_time_for_each_receive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slow request chunks cannot renew the connection's read budget."""
+    now = {"value": 5.0}
+    monkeypatch.setattr(_deadline.time, "monotonic", lambda: now["value"])
+
+    class SlowRequest:
+        def __init__(self) -> None:
+            self.chunks = iter([b"first", b"second", b""])
+            self.timeouts: list[float] = []
+
+        def settimeout(self, timeout: float) -> None:
+            self.timeouts.append(timeout)
+
+        def recv(self, _size: int) -> bytes:
+            now["value"] += 0.25
+            return next(self.chunks)
+
+    request = SlowRequest()
+    fake_handler = typ.cast(
+        "_ipc_server._IPCHandler",
+        types.SimpleNamespace(request=request, _read_deadline=6.0),
+    )
+
+    payload = _ipc_server._IPCHandler._read_request_payload(fake_handler)
+
+    assert payload == b"firstsecond"
+    assert request.timeouts == pytest.approx([1.0, 0.75, 0.5])
+
+
 def test_handler_logs_connection_reset_during_reply_at_debug(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -172,16 +205,17 @@ def test_handler_logs_connection_reset_during_reply_at_debug(
     caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
     writer = _FailingReplyWriter(
         "flush", ConnectionResetError(errno.ECONNRESET, "Connection reset")
-    )
 
     def response_pipeline(_server: object, _raw: bytes, _transport: str) -> bytes:
         return b"response"
 
     monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
     handler = SimpleNamespace(
-        rfile=io.BytesIO(b"request"),
+        request=SimpleNamespace(settimeout=lambda _timeout: None),
+        _read_request_payload=lambda: b"request",
+        _read_deadline=time.monotonic() + 1.0,
+        server=SimpleNamespace(outer=SimpleNamespace(timeout=1.0)),
         wfile=writer,
-        server=SimpleNamespace(outer=object()),
     )
 
     _ipc_server._IPCHandler.handle(typ.cast("_ipc_server._IPCHandler", handler))
