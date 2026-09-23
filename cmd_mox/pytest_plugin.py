@@ -264,6 +264,13 @@ class _CmdMoxManager:
             verify_on_exit=False,
             environment=EnvironmentManager(prefix=_build_worker_prefix(self.config)),
         )
+        if self._auto_lifecycle:
+            self.mox._lifecycle_hint = (
+                "Pass --no-cmd-mox-auto-lifecycle, set the "
+                "cmd_mox_auto_lifecycle ini option to false, or use "
+                "@pytest.mark.cmd_mox(auto_lifecycle=False) to drive the "
+                "lifecycle manually."
+            )
         # CmdMox wires its command runner to the provided environment during
         # initialisation, so injecting the worker-scoped manager here ensures the
         # replay lifecycle observes the correct PATH mutations once entered.

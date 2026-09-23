@@ -18,11 +18,21 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used for type checking only
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
 pytestmark = [pytest.mark.requires_unix_sockets]
+pytest_plugins = ("pytester",)
 
 
 @scenario(str(FEATURES_DIR / "pytest_plugin.feature"), "cmd_mox fixture basic usage")
 def test_cmd_mox_plugin() -> None:
     """Bind scenario steps for the pytest plugin."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "pytest_plugin.feature"),
+    "automatic lifecycle errors explain how to opt out",
+)
+def test_auto_lifecycle_error_hint() -> None:
+    """Bind the automatic lifecycle error hint scenario."""
     pass
 
 
@@ -76,6 +86,41 @@ def create_test_file(pytester: Pytester) -> Path:
     return pytester.makepyfile(TEST_CODE)
 
 
+@given(
+    "a pytest test that manually replays with auto lifecycle",
+    target_fixture="test_file",
+)
+def create_manual_replay_test_file(pytester: Pytester) -> Path:
+    """Write a test that replays after explicitly verifying.
+
+    Returns
+    -------
+    Path
+        The generated pytest module.
+    """
+    test_code = textwrap.dedent(
+        """
+        import subprocess
+        import pytest
+        from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def test_manual_replay_after_verify(cmd_mox):
+            cmd_mox.mock("hello").with_args().returns(stdout="hi")
+            subprocess.run(
+                [str(_shim_cmd_path(cmd_mox, "hello"))],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            cmd_mox.verify()
+            cmd_mox.replay()
+        """
+    )
+    return pytester.makepyfile(test_code)
+
+
 @when("I run pytest on the file", target_fixture="result")
 def run_pytest(pytester: Pytester, test_file: Path) -> RunResult:
     """Run the inner pytest instance.
@@ -92,6 +137,19 @@ def run_pytest(pytester: Pytester, test_file: Path) -> RunResult:
 def assert_success(result: RunResult) -> None:
     """Assert that the test passed."""
     result.assert_outcomes(passed=1)
+
+
+@then("the failure should explain how to disable auto lifecycle")
+def assert_auto_lifecycle_error_hint(result: RunResult) -> None:
+    """Assert that the lifecycle error names every manual-mode opt-out."""
+    result.assert_outcomes(failed=1)
+    expected_hint_parts = (
+        "Cannot call replay(): not in 'record' phase (current phase: verify)",
+        "--no-cmd-mox-auto-lifecycle",
+        "cmd_mox_auto_lifecycle",
+        "@pytest.mark.cmd_mox(auto_lifecycle=False)",
+    )
+    result.stdout.fnmatch_lines([f"*{'*'.join(expected_hint_parts)}*"])
 
 
 @given(

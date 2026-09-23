@@ -95,6 +95,7 @@ class CmdMox:
         self._runner = CommandRunner(self.environment)
         self._entered = False
         self._phase = Phase.RECORD
+        self._lifecycle_hint: str | None = None
         self._passthrough_coordinator = PassthroughCoordinator()
 
         if max_journal_entries is not None and max_journal_entries <= 0:
@@ -618,6 +619,8 @@ class CmdMox:
                 f"Cannot call {action}(): not in '{expected.name.lower()}' phase "
                 f"(current phase: {self._phase.name.lower()})"
             )
+            if self._lifecycle_hint is not None:
+                msg = f"{msg}; {self._lifecycle_hint}"
             raise LifecycleError(msg)
 
     def _require_env_attrs(self, *attrs: str) -> None:
@@ -658,6 +661,8 @@ class CmdMox:
                 "replay() called without entering context "
                 f"(current phase: {self._phase.name.lower()})"
             )
+            if self._lifecycle_hint is not None:
+                msg = f"{msg}; {self._lifecycle_hint}"
             raise LifecycleError(msg)
         self._require_env_attrs("shim_dir", "socket_path")
 
