@@ -274,18 +274,39 @@ def concurrency_violations(document: Document) -> list[str]:
     declared = document.get("concurrency")
     if not isinstance(declared, dict) or not declared.get("group"):
         return [f"no workflow-level concurrency group: {declared!r}"]
-    scopes = [declared, *(job.get("concurrency") for job in jobs(document).values())]
-    groups = [scope for scope in scopes if isinstance(scope, dict) and "group" in scope]
-    found = [
+    job_scopes = (job.get("concurrency") for job in jobs(document).values())
+    scopes = [scope for scope in [declared, *job_scopes] if isinstance(scope, dict)]
+    return _unkeyed_groups(scopes) + _cancelling_scopes(scopes)
+
+
+def _unkeyed_groups(scopes: list[dict[object, object]]) -> list[str]:
+    """Return the concurrency groups that do not evaluate the ref and event.
+
+    Returns
+    -------
+    list[str]
+        One entry per unkeyed group.
+    """
+    return [
         f"concurrency group {scope['group']!r} is not keyed on the ref and event"
-        for scope in groups
-        if not all(key.search(str(scope["group"])) for key in _GROUP_KEYS)
+        for scope in scopes
+        if "group" in scope
+        and not all(key.search(str(scope["group"])) for key in _GROUP_KEYS)
     ]
-    return found + [
+
+
+def _cancelling_scopes(scopes: list[dict[object, object]]) -> list[str]:
+    """Return the concurrency scopes that cancel a run in progress.
+
+    Returns
+    -------
+    list[str]
+        One entry per cancelling scope.
+    """
+    return [
         f"cancel-in-progress {scope.get('cancel-in-progress')!r}"
         for scope in scopes
-        if isinstance(scope, dict)
-        and _normalized(scope.get("cancel-in-progress", "false")) != "false"
+        if _normalized(scope.get("cancel-in-progress", "false")) != "false"
     ]
 
 
