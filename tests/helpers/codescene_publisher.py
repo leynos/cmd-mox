@@ -331,3 +331,44 @@ def neutralized_steps(document: Document) -> list[str]:
         if COVERAGE_ACTION in str(step.get("uses", "")) and "if" in step
     ]
     return found
+
+
+def _swallows_failure(item: dict[object, object]) -> bool:
+    """Return whether a job or step declares a ``continue-on-error`` other than false.
+
+    Returns
+    -------
+    bool
+        True when a failure there would not fail the run.
+    """
+    return _normalized(item.get("continue-on-error", "false")) != "false"
+
+
+def swallowed_failures(document: Document) -> list[str]:
+    """Return the coverage or upload work whose failure cannot fail the run.
+
+    ``continue-on-error`` silences a ratchet failure or a failed upload as
+    surely as ``if: false`` skips it, so it is refused on every coverage
+    and upload step and on every job holding one.
+
+    Returns
+    -------
+    list[str]
+        One entry per job or step that swallows its failure.
+    """
+    found: list[str] = []
+    for name, job in jobs(document).items():
+        watched = [
+            step
+            for step in steps(job)
+            if COVERAGE_ACTION in str(step.get("uses", ""))
+            or UPLOAD_ACTION in str(step.get("uses", ""))
+        ]
+        if watched and _swallows_failure(job):
+            found.append(f"job {name} has continue-on-error")
+        found += [
+            f"step {step.get('name')!r} has continue-on-error"
+            for step in watched
+            if _swallows_failure(step)
+        ]
+    return found

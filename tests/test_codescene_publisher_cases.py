@@ -18,6 +18,7 @@ from tests.helpers.codescene_publisher import (
     input_violations,
     neutralized_steps,
     publisher,
+    swallowed_failures,
     trigger_violations,
     upload_step,
 )
@@ -70,6 +71,7 @@ def _publisher_violations(text: str) -> list[str]:
         + concurrency_violations(document)
         + neutralized_steps(document)
         + input_violations(step)
+        + swallowed_failures(document)
     )
 
 
@@ -188,6 +190,24 @@ def test_the_compliant_publisher_passes() -> None:
             "        if: false\n        with:\n          with-ratchet",
             "coverage step",
             id="sweep-8-coverage-step-condition",
+        ),
+        pytest.param(
+            "    runs-on: ubuntu-latest\n",
+            "    runs-on: ubuntu-latest\n    continue-on-error: true\n",
+            "job publish has continue-on-error",
+            id="sweep-8-job-swallows-failure",
+        ),
+        pytest.param(
+            "      - name: Upload\n",
+            "      - name: Upload\n        continue-on-error: true\n",
+            "step 'Upload' has continue-on-error",
+            id="sweep-8-upload-swallows-failure",
+        ),
+        pytest.param(
+            "      - name: Generate coverage\n",
+            "      - name: Generate coverage\n        continue-on-error: true\n",
+            "step 'Generate coverage' has continue-on-error",
+            id="sweep-8-coverage-swallows-failure",
         ),
         pytest.param(
             "branches: [main]",

@@ -36,6 +36,7 @@ from tests.helpers.codescene_publisher import (
     input_violations,
     neutralized_steps,
     publisher,
+    swallowed_failures,
     trigger_violations,
     upload_step,
 )
@@ -218,6 +219,20 @@ def test_nothing_in_the_publisher_can_skip_the_measurement(
     _, document = publisher(documents)
     violations = neutralized_steps(document)
     assert not violations, f"conditional publisher work: {violations}"
+
+
+def test_no_coverage_or_upload_failure_is_swallowed(
+    documents: dict[str, Document],
+) -> None:
+    """``continue-on-error`` silences a ratchet or an upload like ``if: false``."""
+    _, document = publisher(documents)
+    surface = pull_request_surface(documents, REPOSITORY)
+    found = [
+        f"{name}: {site}"
+        for name, lane in [*surface.items(), ("publisher", document)]
+        for site in swallowed_failures(lane)
+    ]
+    assert not found, f"coverage or upload failures are swallowed: {found}"
 
 
 def test_no_document_carries_the_retired_checksum(
