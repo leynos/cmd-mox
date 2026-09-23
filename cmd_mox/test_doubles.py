@@ -140,6 +140,14 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     ) -> typ.Self:
         """Use *handler* to generate responses dynamically.
 
+        The handler runs in the test process on the IPC server thread, not in
+        the shim subprocess. Relative paths in ``Invocation.args`` are relative
+        to the invoking process's working directory. Resolve those paths
+        against that working directory rather than the test process's working
+        directory. ``Invocation`` does not include the invoking working
+        directory, so provide it separately (for example, through a closure)
+        or use absolute paths.
+
         Parameters
         ----------
         handler : collections.abc.Callable
