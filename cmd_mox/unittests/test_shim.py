@@ -740,10 +740,14 @@ def test_write_response_handles_closed_stdout(
     monkeypatch.setattr(sys, "stdout", _ClosedWriter())
 
     with pytest.raises(SystemExit) as exc:
-        _write_response(Response(stdout="out", exit_code=3))
+        _write_response(Response(stdout="out", stderr="server diagnostic", exit_code=3))
 
     _assert_exit_code(exc, 3)
-    assert "IPC error: closed stdout" in capsys.readouterr().err, (
+    stderr = capsys.readouterr().err
+    assert "server diagnostic" in stderr, (
+        "stdout failure must not discard the response stderr"
+    )
+    assert "IPC error: closed stdout" in stderr, (
         "closed output streams must produce an IPC diagnostic"
     )
 
