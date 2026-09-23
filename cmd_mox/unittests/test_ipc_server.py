@@ -1,5 +1,6 @@
 """Unit tests for the IPC server component."""
 
+import contextlib
 import logging
 import os
 import socket
@@ -222,11 +223,12 @@ def test_server_logs_client_disconnect_during_reply_write(
 
     observer = _DisconnectObserver()
     server_logger = logging.getLogger("cmd_mox.ipc.server")
-    server_logger.addHandler(observer)
-    caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
     socket_path = tmp_path / "ipc.sock"
 
-    try:
+    with contextlib.ExitStack() as stack:
+        server_logger.addHandler(observer)
+        stack.callback(server_logger.removeHandler, observer)
+        caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
         with IPCServer(socket_path, handlers=IPCHandlers(handler=slow_handler)):
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.connect(str(socket_path))
@@ -235,8 +237,6 @@ def test_server_logs_client_disconnect_during_reply_write(
             assert disconnect_logged.wait(timeout=3.0), (
                 "The reply write did not report the disconnected client"
             )
-    finally:
-        server_logger.removeHandler(observer)
 
     assert any(
         record.getMessage() == disconnect_message and record.levelno == logging.DEBUG
