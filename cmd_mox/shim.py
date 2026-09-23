@@ -548,22 +548,31 @@ def _write_response(response: Response) -> None:
     if response.env:
         os.environ |= response.env
 
-    _write_response_stream("stdout", response.stdout, response.exit_code)
-    _write_response_stream("stderr", response.stderr, response.exit_code)
+    write_failures = [
+        failure
+        for stream_name, text in (
+            ("stdout", response.stdout),
+            ("stderr", response.stderr),
+        )
+        if (failure := _write_response_stream(stream_name, text)) is not None
+    ]
+    if write_failures:
+        _exit_ipc_error(write_failures[0], exit_code=response.exit_code or 1)
     sys.exit(response.exit_code)
 
 
 def _write_response_stream(
-    stream_name: typ.Literal["stdout", "stderr"], text: str, exit_code: int
-) -> None:
-    """Write and flush one response stream, preserving status on failure."""
+    stream_name: typ.Literal["stdout", "stderr"], text: str
+) -> Exception | None:
+    """Write one response stream and return its failure, if any."""  # ruff: ignore[docstring-missing-returns] - the annotation makes the optional failure explicit
     stream = getattr(sys, stream_name)
     try:
         stream.write(text)
         stream.flush()
     except (OSError, ValueError) as exc:
         _replace_failed_stream_with_sink(stream_name, stream)
-        _exit_ipc_error(exc, exit_code=exit_code or 1)
+        return exc
+    return None
 
 
 def _replace_failed_stream_with_sink(
