@@ -144,6 +144,11 @@ dispatch:
   results, and an `error_category` only on failure. Payloads, arguments,
   standard streams, environments, socket paths, and exception messages must
   never be logged.
+- Outcomes are `success`, `invalid_request` for validation failures,
+  `rejection_frame` for parse failures, and `handler_error`. Parse failures
+  return a bounded error response with `RequestParseError` as their category;
+  validation failures keep the existing `ValidationError` outcome while also
+  returning an error response.
 
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs from
 `CommandDouble.name`. It performs that command-name check before expectation
