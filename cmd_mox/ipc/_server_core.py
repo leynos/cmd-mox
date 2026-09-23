@@ -587,21 +587,9 @@ def _request_pipeline(
                 transport=transport,
             )
         )
-        response_bytes = _encode_response(
+        return _encode_response(
             Response(stderr="IPC request payload failed validation", exit_code=1)
         )
-        _emit_dispatch_outcome(
-            _DispatchRecord(
-                kind=parsed.kind,
-                request=None,
-                outcome="rejection_frame",
-                duration_ms=_observability.elapsed_ms(started),
-                error_category="ValidationError",
-                correlation_id=parsed.correlation_id,
-                transport=transport,
-            )
-        )
-        return response_bytes
 
     response, error_category = _execute_request(server, parsed.processor, obj)
     outcome: _DispatchOutcome = "success"
