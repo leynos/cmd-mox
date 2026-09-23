@@ -1,8 +1,12 @@
 """Unit tests for the IPC server component."""
 
+import io
+import logging
 import os
 import socket
 import threading
+import time
+import types
 import typing as typ
 from pathlib import Path
 
@@ -20,6 +24,8 @@ from cmd_mox.ipc import (
     RetryConfig,
     invoke_server,
 )
+from cmd_mox.ipc import server as ipc_server_module
+from cmd_mox.ipc.server import _IPCHandler
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -68,6 +74,97 @@ def test_ipc_server_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         invocation = Invocation(command="ls", args=["-l"], stdin="", env={})
         response = invoke_server(invocation, timeout=2.0)
         assert response.stdout == "ls"
+
+
+def test_ipc_server_readiness_probe_is_a_closed_connection(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Readiness probes close cleanly without being logged as malformed JSON."""
+    caplog.set_level(logging.INFO, logger="cmd_mox.ipc._server_core")
+
+    with IPCServer(tmp_path / "ipc.sock"):
+        deadline = time.monotonic() + 1.0
+        while "connection closed" not in caplog.text and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    assert "connection closed" in caplog.text, "Readiness probe closure was not named"
+    assert "malformed JSON" not in caplog.text, "Readiness probe was called malformed"
+
+
+def test_ipc_server_bounds_incomplete_request_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A client that sends nothing times out and does not block later requests."""
+    socket_path = tmp_path / "ipc.sock"
+    caplog.set_level(logging.INFO, logger="cmd_mox.ipc.server")
+
+    with IPCServer(socket_path, timeout=0.1):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as incomplete:
+            incomplete.settimeout(1.0)
+            incomplete.connect(str(socket_path))
+            deadline = time.monotonic() + 1.0
+            while (
+                "timed out while receiving request" not in caplog.text
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+
+        assert "timed out while receiving request" in caplog.text, (
+            "Incomplete request did not hit its per-connection read timeout"
+        )
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        response = invoke_server(
+            Invocation(command="after-timeout", args=[], stdin="", env={}),
+            timeout=1.0,
+        )
+
+    assert response.stdout == "after-timeout", "Timed-out client stalled the server"
+
+
+@pytest.mark.parametrize(
+    ("stage", "failure_type"),
+    [
+        ("write", BrokenPipeError),
+        ("flush", ConnectionResetError),
+        ("flush", OSError),
+    ],
+)
+def test_ipc_handler_logs_response_connection_drop(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stage: str,
+    failure_type: type[OSError],
+) -> None:
+    """Response write and flush failures become bounded connection-drop logs."""
+
+    class BrokenWriter:
+        def write(self, _text: str) -> int:
+            if stage == "write":
+                raise failure_type
+            return 1
+
+        def flush(self) -> None:
+            if stage == "flush":
+                raise failure_type
+
+    fake_handler = typ.cast(
+        "_IPCHandler",
+        types.SimpleNamespace(
+            rfile=io.BytesIO(b"request"),
+            server=types.SimpleNamespace(outer=object()),
+            wfile=BrokenWriter(),
+        ),
+    )
+    caplog.set_level(logging.INFO, logger="cmd_mox.ipc.server")
+    monkeypatch.setattr(ipc_server_module, "_request_pipeline", lambda *_args: b"reply")
+
+    _IPCHandler.handle(fake_handler)
+
+    assert "connection closed" in caplog.text, (
+        "Dropped response connection was not logged"
+    )
 
 
 def test_ipc_server_start_fails_if_in_use(tmp_path: Path) -> None:
