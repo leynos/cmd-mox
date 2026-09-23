@@ -252,7 +252,7 @@ def test_a_duplicate_key_is_refused() -> None:
 def test_every_trigger_form_is_read(
     document: dict[object, object], expected: set[str]
 ) -> None:
-    """Scalar, sequence and mapping forms, under either key, are read."""
+    """Scalar, sequence, and mapping forms, under either key, are read."""
     assert set(triggers(document)) == expected, f"read {triggers(document)}"
 
 
@@ -276,3 +276,61 @@ def test_a_workflow_run_chain_is_on_the_surface() -> None:
     }
     breaches = pull_request_breaches(pull_request_surface(documents, REPOSITORY))
     assert any("after.yml: host" in breach for breach in breaches), breaches
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        pytest.param("merge_group:", id="merge-group"),
+        pytest.param("pull_request_review:", id="pull-request-review"),
+        pytest.param("pull_request_review_comment:", id="review-comment"),
+        pytest.param("push:", id="push-every-branch"),
+        pytest.param("push:\n    paths: ['src/**']", id="push-paths-only"),
+        pytest.param("push:\n    branches: [dev]", id="push-other-branch"),
+        pytest.param("push:\n    branches-ignore: [main]", id="push-branches-ignore"),
+        pytest.param(
+            "push:\n    branches-ignore: [main]\n    tags: ['v*']",
+            id="push-branches-ignore-with-tags",
+        ),
+    ],
+)
+def test_every_pull_request_entry_point_is_a_seed(trigger: str) -> None:
+    """A workflow on any trigger that runs pull-request code is on the surface."""
+    documents = {
+        ".github/workflows/ci.yml": load_document(CALLER.replace("probe.yml", "x.yml")),
+        ".github/workflows/x.yml": load_document(PROBE),
+        ".github/workflows/entry.yml": load_document(
+            PROBE.replace("workflow_call:", trigger).replace(
+                "echo probe", "curl codescene.io"
+            )
+        ),
+    }
+    breaches = pull_request_breaches(pull_request_surface(documents, REPOSITORY))
+    assert any("entry.yml: host" in breach for breach in breaches), breaches
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        pytest.param("push:\n    branches: [main]", id="push-main"),
+        pytest.param("push:\n    tags: ['v*']", id="push-tags"),
+        pytest.param("schedule:\n    - cron: '0 0 * * *'", id="schedule"),
+    ],
+)
+def test_main_only_entry_points_stay_off_the_surface(trigger: str) -> None:
+    """The publisher's own trigger shapes are not read as pull-request ones.
+
+    Without this half, a seed reading that swept every workflow onto the
+    surface would pass the case above and condemn the publisher.
+    """
+    documents = {
+        ".github/workflows/ci.yml": load_document(CALLER.replace("probe.yml", "x.yml")),
+        ".github/workflows/x.yml": load_document(PROBE),
+        ".github/workflows/entry.yml": load_document(
+            PROBE.replace("workflow_call:", trigger).replace(
+                "echo probe", "curl codescene.io"
+            )
+        ),
+    }
+    surface = pull_request_surface(documents, REPOSITORY)
+    assert ".github/workflows/entry.yml" not in surface, sorted(surface)

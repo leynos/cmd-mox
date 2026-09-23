@@ -34,12 +34,14 @@ constructed documents, one breach each, so every clause is shown to catch what
 it names. The readings live in `tests/helpers/`:
 
 - `workflow_reading.py` parses workflows and local actions with a loader that
-  refuses duplicate keys, reads `on:` in scalar, sequence and mapping form
+  refuses duplicate keys, reads `on:` in scalar, sequence, and mapping form
   under either key, and walks every key and value of a document.
 - `workflow_closure.py` computes the pull-request surface: workflows triggered
-  by `pull_request`, `pull_request_target` or `workflow_run`, and every local
-  workflow or composite action they reach through `./` or `$/` references. It
-  refuses qualified self-calls and local references carrying `@ref`.
+  by `pull_request`, `pull_request_target`, `pull_request_review`,
+  `pull_request_review_comment`, `merge_group`, or `workflow_run`, or by a push
+  to any branch other than `main`, and every local workflow or composite action
+  they reach through `./` or `$/` references. It refuses qualified self-calls
+  and local references carrying `@ref`.
 - `codescene_reach.py` and `codescene_publisher.py` hold the CodeScene clauses.
 
 The two generic modules know nothing about CodeScene and may be reused by any

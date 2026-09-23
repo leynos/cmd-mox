@@ -16,6 +16,7 @@ from tests.helpers.workflow_reading import (
     ACTION_FILES,
     WORKFLOW_DIRECTORY,
     WorkflowReadingError,
+    filter_names,
     triggers,
     uses_references,
 )
@@ -23,12 +24,18 @@ from tests.helpers.workflow_reading import (
 if typ.TYPE_CHECKING:
     from tests.helpers.workflow_reading import Document
 
-#: Triggers that put a workflow on the pull-request surface.
-#: ``workflow_run`` is included because a workflow chained onto a
-#: pull-request workflow runs for that pull request, and reading which
-#: workflows it names would be one more reading to get wrong.
+#: Triggers that put a workflow on the pull-request surface. The
+#: ``pull_request*`` family and ``merge_group`` run a pull request's code
+#: or run for it; ``workflow_run`` is included because a workflow chained
+#: onto a pull-request workflow runs for that pull request, and reading
+#: which workflows it names would be one more reading to get wrong. A
+#: push to a branch other than main is read separately, by
+#: ``_pushes_other_branches``.
 PULL_REQUEST_TRIGGERS: typ.Final[frozenset[str]] = frozenset({
+    "merge_group",
     "pull_request",
+    "pull_request_review",
+    "pull_request_review_comment",
     "pull_request_target",
     "workflow_run",
 })
@@ -154,6 +161,42 @@ def local_target(
     return found[0]
 
 
+def _pushes_other_branches(filters: object) -> bool:
+    """Return whether a push trigger fires for a branch other than main.
+
+    A pull request's head branch in this repository is pushed before the
+    pull request runs anything, so a workflow answering that push runs the
+    same code with the repository's secrets. Only an exact ``[main]``
+    branch filter or a tags-only filter keeps a push off the surface;
+    every other shape, ``branches-ignore`` included, is read as reaching
+    other branches, since failing closed is the safe direction here.
+
+    Returns
+    -------
+    bool
+        False only for a main-only or tags-only push filter.
+    """
+    if not isinstance(filters, dict):
+        return True
+    if "branches" in filters:
+        return filter_names(filters["branches"]) != ["main"]
+    return "branches-ignore" in filters or not {"tags", "tags-ignore"} & set(filters)
+
+
+def _serves_pull_requests(document: Document) -> bool:
+    """Return whether a workflow's own triggers run pull-request code.
+
+    Returns
+    -------
+    bool
+        True for a pull-request trigger or a push beyond main.
+    """
+    declared = triggers(document)
+    if PULL_REQUEST_TRIGGERS & declared.keys():
+        return True
+    return "push" in declared and _pushes_other_branches(declared["push"])
+
+
 def pull_request_seeds(documents: dict[str, Document]) -> list[str]:
     """Return the workflows whose own triggers serve a pull request.
 
@@ -171,8 +214,7 @@ def pull_request_seeds(documents: dict[str, Document]) -> list[str]:
     seeds = [
         name
         for name, document in documents.items()
-        if name.startswith(WORKFLOW_DIRECTORY)
-        and PULL_REQUEST_TRIGGERS & triggers(document).keys()
+        if name.startswith(WORKFLOW_DIRECTORY) and _serves_pull_requests(document)
     ]
     if not seeds:
         msg = "no workflow serves a pull request; the trigger reader is broken"

@@ -5,7 +5,7 @@ upload action, the ``cs-coverage`` command, the ``CS_ACCESS_TOKEN``
 secret, and the service's host. Each reading here is pure over one
 parsed document and reads every key and value in it, case-folded, rather
 than the scopes a breach is expected in: a workflow-level
-``defaults.run.shell``, a ``workflow_call`` secret declaration and a
+``defaults.run.shell``, a ``workflow_call`` secret declaration, and a
 reusable-workflow input all reach a process, and a reading that
 enumerated scopes left the rest as a way round the rule. Comments are not
 read, because the parser discards them, so prose explaining the policy

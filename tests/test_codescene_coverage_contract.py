@@ -3,7 +3,7 @@
 One workflow uploads coverage to CodeScene: ``coverage-main.yml``, on
 pushes to main. Nothing a pull request can run, directly or through a
 local reusable workflow or action, names the upload action, runs
-``cs-coverage``, reaches ``CS_ACCESS_TOKEN`` or names the CodeScene host.
+``cs-coverage``, reaches ``CS_ACCESS_TOKEN``, or names the CodeScene host.
 The pull-request lane keeps ``generate-coverage`` with the ratchet,
 against the baseline the publisher writes, and publishes nothing.
 
@@ -205,7 +205,7 @@ def test_nothing_in_the_publisher_can_skip_the_measurement(
 def test_no_document_carries_the_retired_checksum(
     documents: dict[str, Document],
 ) -> None:
-    """The checksum variable, its refresher and the input it fed are gone."""
+    """The checksum variable, its refresher, and the input it fed are gone."""
     found = [
         f"{name}: {site}"
         for name, document in documents.items()

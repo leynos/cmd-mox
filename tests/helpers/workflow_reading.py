@@ -1,7 +1,7 @@
 """Read GitHub Actions workflows fallibly, and name what they reach.
 
 Generic: nothing here knows about CodeScene. The loader, the trigger
-grammar, the reading of local ``uses:`` references and the one
+grammar, the reading of local ``uses:`` references, and the one
 filesystem call live together so that a contract about any subject can
 use them. Every reading except ``read_workflow_tree`` is pure over
 supplied documents, which is what lets a contract ask what a rule makes
@@ -133,7 +133,7 @@ def _trigger_value(document: Document) -> object:
 def triggers(document: Document) -> dict[str, object]:
     r"""Return a workflow's triggers, mapped to their filters.
 
-    ``on:`` may be a scalar, a sequence or a mapping, and a reader that
+    ``on:`` may be a scalar, a sequence, or a mapping, and a reader that
     handles only the mapping reads ``on: [push, pull_request]`` as one
     trigger named after the whole list.
 
@@ -150,7 +150,7 @@ def triggers(document: Document) -> dict[str, object]:
     Raises
     ------
     WorkflowReadingError
-        If ``on`` is absent, doubly declared, or of no recognised form.
+        If ``on`` is absent, doubly declared, or of no recognized form.
 
     Examples
     --------
@@ -165,7 +165,7 @@ def triggers(document: Document) -> dict[str, object]:
         case dict() as mapping:
             return {str(name): value for name, value in mapping.items()}
         case other:
-            msg = f"unrecognised trigger declaration {other!r}"
+            msg = f"unrecognized trigger declaration {other!r}"
             raise WorkflowReadingError(msg)
 
 
