@@ -10,6 +10,7 @@ import typing as typ
 
 from cmd_mox import _path_utils as path_utils
 
+from ._deadline import _compute_deadline, _remaining_time
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -120,14 +121,31 @@ class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
     def setup(self) -> None:
-        self.request.settimeout(
+        self._read_deadline = _compute_deadline(
             self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
         )
+        self.request.settimeout(_remaining_time(self._read_deadline))
         super().setup()
+
+    def _read_request_payload(self) -> bytes:
+        """Read through EOF without renewing the accepted connection budget.
+
+        Returns
+        -------
+        bytes
+            The request payload received before the connection reaches EOF.
+        """
+        chunks: list[bytes] = []
+        while True:
+            self.request.settimeout(_remaining_time(self._read_deadline))
+            chunk = self.request.recv(64 * 1024)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
 
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
         try:
-            raw = self.rfile.read()
+            raw = self._read_request_payload()
         except TimeoutError:
             logger.info("IPC connection timed out while receiving request")
             return
@@ -138,6 +156,9 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         if response_bytes is None:
             return
         try:
+            self.request.settimeout(
+                self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
+            )
             self.wfile.write(response_bytes)
             self.wfile.flush()
         except OSError:

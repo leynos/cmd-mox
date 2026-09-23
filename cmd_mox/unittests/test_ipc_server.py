@@ -1,6 +1,5 @@
 """Unit tests for the IPC server component."""
 
-import io
 import logging
 import os
 import socket
@@ -22,6 +21,7 @@ from cmd_mox.ipc import (
     Invocation,
     IPCServer,
     RetryConfig,
+    _deadline,
     invoke_server,
 )
 from cmd_mox.ipc import server as ipc_server_module
@@ -123,6 +123,37 @@ def test_ipc_server_bounds_incomplete_request_read(
     assert response.stdout == "after-timeout", "Timed-out client stalled the server"
 
 
+def test_ipc_handler_uses_remaining_time_for_each_receive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slow request chunks cannot renew the connection's read budget."""
+    now = {"value": 5.0}
+    monkeypatch.setattr(_deadline.time, "monotonic", lambda: now["value"])
+
+    class SlowRequest:
+        def __init__(self) -> None:
+            self.chunks = iter([b"first", b"second", b""])
+            self.timeouts: list[float] = []
+
+        def settimeout(self, timeout: float) -> None:
+            self.timeouts.append(timeout)
+
+        def recv(self, _size: int) -> bytes:
+            now["value"] += 0.25
+            return next(self.chunks)
+
+    request = SlowRequest()
+    fake_handler = typ.cast(
+        "_IPCHandler",
+        types.SimpleNamespace(request=request, _read_deadline=6.0),
+    )
+
+    payload = _IPCHandler._read_request_payload(fake_handler)
+
+    assert payload == b"firstsecond"
+    assert request.timeouts == pytest.approx([1.0, 0.75, 0.5])
+
+
 @pytest.mark.parametrize(
     ("stage", "failure_type"),
     [
@@ -149,11 +180,18 @@ def test_ipc_handler_logs_response_connection_drop(
             if stage == "flush":
                 raise failure_type
 
+    request_chunks = iter([b"request", b""])
+    fake_request = types.SimpleNamespace(
+        settimeout=lambda _timeout: None,
+        recv=lambda _size: next(request_chunks),
+    )
     fake_handler = typ.cast(
         "_IPCHandler",
         types.SimpleNamespace(
-            rfile=io.BytesIO(b"request"),
-            server=types.SimpleNamespace(outer=object()),
+            request=fake_request,
+            _read_request_payload=lambda: b"request",
+            _read_deadline=time.monotonic() + 1.0,
+            server=types.SimpleNamespace(outer=types.SimpleNamespace(timeout=1.0)),
             wfile=BrokenWriter(),
         ),
     )
