@@ -386,6 +386,10 @@ def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
     dict[str, typ.Any] or None
         The decoded payload, or ``None`` when *raw* is not a JSON mapping.
     """
+    if not raw:
+        logger.debug("IPC received empty read")
+        return None
+
     payload = parse_json_safely(raw)
     if payload is not None:
         return payload
