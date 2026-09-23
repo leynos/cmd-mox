@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import queue
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,14 @@ class _DummyStdin:
     def read(self) -> str:
         self.read_calls += 1
         return self._data
+
+
+class _InjectedOSError(OSError):
+    """Represent an I/O failure raised by a test double."""
+
+
+class _InjectedRuntimeError(RuntimeError):
+    """Represent a worker failure raised by a test double."""
 
 
 class _BufferedInput:
@@ -417,6 +426,206 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
     assert all(0 < timeout <= 1.0 for timeout in select_timeouts[1:]), (
         "select fallback waits should remain within the configured deadline"
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_falls_back_to_direct_read_when_unpollable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsupported descriptors retain the established direct-read behaviour."""
+
+    class _UnpollableStdin(_DummyStdin):
+        def fileno(self) -> int:
+            return 123
+
+    def fail_poll() -> typ.NoReturn:
+        raise _InjectedOSError
+
+    def fail_select(*_args: object) -> typ.NoReturn:
+        raise _InjectedOSError
+
+    stdin = _UnpollableStdin("payload", is_tty=False)
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(shim._shim_stdin.select, "poll", fail_poll)
+    monkeypatch.setattr(shim._shim_stdin.select, "select", fail_select)
+
+    invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "payload"
+    assert stdin.read_calls == 1
+
+
+def test_create_invocation_keeps_windows_stdin_read_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows continues to read standard input directly."""
+    stdin = _DummyStdin("payload", is_tty=False)
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(shim._shim_stdin.path_utils, "IS_WINDOWS", True)
+
+    assert (
+        shim._shim_stdin._read_stdin_until_eof(
+            1.0,
+            deadline=None,
+            on_error=shim._exit_ipc_error,
+        )
+        == "payload"
+    )
+    assert stdin.read_calls == 1
+
+
+def test_decode_stdin_chunk_reports_invalid_text() -> None:
+    """Decode failures flow through the shim's controlled error callback."""
+
+    def raise_error(exc: Exception) -> typ.NoReturn:
+        raise exc
+
+    with pytest.raises(UnicodeDecodeError):
+        shim._shim_stdin._decode_stdin_chunk(
+            shim._shim_stdin._stdin_decoder(), b"\xff", raise_error
+        )
+
+
+def test_regular_stdin_read_error_uses_controlled_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Errors from the regular-file worker return a diagnostic to the shim."""
+
+    class _FailingRegularStdin:
+        def __init__(self, descriptor: int) -> None:
+            self._descriptor = descriptor
+
+        def fileno(self) -> int:
+            return self._descriptor
+
+        def read(self) -> str:
+            raise _InjectedOSError
+
+    with tempfile.TemporaryFile() as regular_file:
+        monkeypatch.setattr(sys, "stdin", _FailingRegularStdin(regular_file.fileno()))
+        with pytest.raises(SystemExit) as exc:
+            shim._shim_stdin._read_stdin_until_eof(
+                1.0,
+                deadline=None,
+                on_error=shim._exit_ipc_error,
+            )
+
+    _assert_exit_code(exc, 1)
+    assert "IPC error:" in capsys.readouterr().err
+
+
+def test_regular_stdin_thread_start_error_uses_controlled_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Failure to start the bounded reader does not escape as a traceback."""
+
+    class _FailingThread:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> typ.NoReturn:
+            raise _InjectedRuntimeError
+
+    monkeypatch.setattr(shim._shim_stdin.threading, "Thread", _FailingThread)
+    with pytest.raises(SystemExit) as exc:
+        shim._shim_stdin._read_regular_stdin_until_deadline(
+            1.0,
+            shim._exit_ipc_error,
+        )
+
+    _assert_exit_code(exc, 1)
+    assert "IPC error:" in capsys.readouterr().err
+
+
+def test_await_regular_stdin_read_rejects_result_after_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker result arriving at the deadline is treated as a timeout."""
+    result_queue: queue.Queue[tuple[str, Exception | None]] = queue.Queue()
+    result_queue.put(("late input", None))
+    monotonic_values = iter([0.0, 1.0])
+    monkeypatch.setattr(
+        shim._shim_stdin.time,
+        "monotonic",
+        lambda: next(monotonic_values),
+    )
+
+    def raise_error(exc: Exception) -> typ.NoReturn:
+        raise exc
+
+    with pytest.raises(TimeoutError, match="timed out reading stdin"):
+        shim._shim_stdin._await_regular_stdin_read(result_queue, 1.0, raise_error)
+
+
+@pytest.mark.parametrize(
+    ("read_error", "expected_error"),
+    [
+        (BlockingIOError("try again"), None),
+        (OSError("raw stdin failed"), OSError),
+    ],
+)
+def test_read_raw_chunk_after_empty_buffer_handles_read_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    read_error: Exception,
+    expected_error: type[Exception] | None,
+) -> None:
+    """Non-blocking raw reads wait or report failures without escaping."""
+
+    class _ReadyPoller:
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            return [(123, 1)]
+
+    def raise_error(exc: Exception) -> typ.NoReturn:
+        raise exc
+
+    context = shim._shim_stdin._ReadContext(
+        descriptor=123,
+        poller=_ReadyPoller(),
+        deadline=1.0,
+        on_error=raise_error,
+    )
+    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: 0.0)
+
+    def fail_read(_descriptor: int, _size: int) -> bytes:
+        raise read_error
+
+    monkeypatch.setattr(shim._shim_stdin.os, "read", fail_read)
+
+    if expected_error is None:
+        assert shim._shim_stdin._read_raw_chunk_after_empty_buffer(context) is None
+    else:
+        with pytest.raises(expected_error, match="raw stdin failed"):
+            shim._shim_stdin._read_raw_chunk_after_empty_buffer(context)
+
+
+def test_read_raw_polled_stdin_reports_descriptor_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Errors from raw descriptor reads use the shim's error policy."""
+
+    class _ReadyPoller:
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            return [(123, 1)]
+
+    def raise_error(exc: Exception) -> typ.NoReturn:
+        raise exc
+
+    context = shim._shim_stdin._ReadContext(
+        descriptor=123,
+        poller=_ReadyPoller(),
+        deadline=1.0,
+        on_error=raise_error,
+    )
+    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: 0.0)
+
+    def fail_read(_descriptor: int, _size: int) -> bytes:
+        raise _InjectedOSError
+
+    monkeypatch.setattr(shim._shim_stdin.os, "read", fail_read)
+    with pytest.raises(_InjectedOSError):
+        shim._shim_stdin._read_raw_polled_stdin(context)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
