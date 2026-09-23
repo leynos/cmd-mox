@@ -85,6 +85,37 @@ def _local_path(reference: str) -> str | None:
     return None
 
 
+def _candidates(path: str) -> list[str]:
+    """Return the document keys a local path can name.
+
+    Returns
+    -------
+    list[str]
+        The path itself under the workflow directory, otherwise the
+        action metadata files of the directory it names.
+    """
+    if path.startswith(WORKFLOW_DIRECTORY):
+        return [path]
+    return [f"{path}/{name}" for name in ACTION_FILES]
+
+
+def _local_targets(
+    document: Document, documents: dict[str, Document], repository: str
+) -> list[str]:
+    """Return the local documents one document's ``uses:`` references run.
+
+    Returns
+    -------
+    list[str]
+        Their keys, in reference order.
+    """
+    targets = (
+        local_target(reference, documents, repository)
+        for reference in uses_references(document)
+    )
+    return [target for target in targets if target is not None]
+
+
 def local_target(
     reference: str, documents: dict[str, Document], repository: str
 ) -> str | None:
@@ -116,11 +147,7 @@ def local_target(
     path = _local_path(reference)
     if path is None or refusal(reference, repository):
         return None
-    if path.startswith(WORKFLOW_DIRECTORY):
-        candidates = [path]
-    else:
-        candidates = [f"{path}/{name}" for name in ACTION_FILES]
-    found = [candidate for candidate in candidates if candidate in documents]
+    found = [candidate for candidate in _candidates(path) if candidate in documents]
     if not found:
         msg = f"{reference!r} names nothing in this tree"
         raise WorkflowReadingError(msg)
@@ -174,13 +201,9 @@ def pull_request_surface(
     pending = pull_request_seeds(documents)
     while pending:
         name = pending.pop()
-        if name in found:
-            continue
-        found[name] = documents[name]
-        for reference in uses_references(documents[name]):
-            target = local_target(reference, documents, repository)
-            if target is not None:
-                pending.append(target)
+        if name not in found:
+            found[name] = documents[name]
+            pending.extend(_local_targets(documents[name], documents, repository))
     return found
 
 
