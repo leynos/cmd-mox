@@ -1,4 +1,14 @@
-"""Deadline helpers shared by IPC client transports."""
+"""Keep one monotonic timeout budget across IPC client operations.
+
+Compute a deadline once for a request and pass it through connection retries
+and response reads. Ask ``_remaining_time`` before each blocking operation so
+the timeout applied to each attempt is limited by the original budget.
+
+Examples
+--------
+``deadline = _compute_deadline(timeout)``
+``sock.settimeout(_remaining_time(deadline))``
+"""
 
 from __future__ import annotations
 

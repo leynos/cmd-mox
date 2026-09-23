@@ -1,4 +1,16 @@
-"""Bounded stdin reading for the command shim."""
+"""Read the command shim's stdin within its IPC deadline.
+
+On POSIX, pollable streams wait with ``poll()`` and fall back to ``select()``;
+regular files use a daemon worker because readiness polling cannot bound a file
+read. Windows streams, streams without a file descriptor, and descriptors
+unsupported by both pollers retain direct reads. ``on_error`` handles timeout,
+I/O, and decode failures, and must not return because the shim cannot safely
+continue without complete stdin.
+
+Examples
+--------
+``stdin_text = _read_stdin_until_eof(timeout, deadline=None, on_error=fail_ipc)``
+"""
 
 from __future__ import annotations
 
