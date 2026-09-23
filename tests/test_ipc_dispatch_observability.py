@@ -206,15 +206,34 @@ def test_request_pipeline_logs_invalid_request(
         "Invalid request diagnostic was not returned"
     )
     events = _dispatch_events(caplog)
-    assert [event["outcome"] for event in events] == [
-        "invalid_request",
-        "rejection_frame",
-    ], "Validation rejection must keep its validation event and report the frame"
-    for event in events:
-        assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
-        assert event["error_category"] == "ValidationError", "Wrong error"
-        assert "invocation_id" not in event, "Invocation ID must be omitted"
-        _assert_bounded_duration(event)
+    [event] = events
+    assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
+    assert event["outcome"] == "invalid_request", "Wrong dispatch outcome"
+    assert event["error_category"] == "ValidationError", "Wrong error"
+    assert "invocation_id" not in event, "Invocation ID must be omitted"
+    _assert_bounded_duration(event)
+
+
+def test_request_pipeline_logs_rejection_frame(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Parse failures should return an error frame and one bounded outcome."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    ipc_server = IPCServer(tmp_path / "ipc.sock")
+
+    response = _server_core._request_pipeline(ipc_server, b"not-json")
+
+    assert response is not None, "Parse failure did not return an error frame"
+    payload = json.loads(response.decode("utf-8"))
+    assert payload["exit_code"] == 1, "Parse failure must fail"
+    assert payload["stderr"] == "IPC request could not be parsed", (
+        "Parse failure diagnostic was not returned"
+    )
+    [event] = _dispatch_events(caplog)
+    assert event["kind"] == "unknown", "Parse failure kind must be bounded"
+    assert event["outcome"] == "rejection_frame", "Wrong dispatch outcome"
+    assert event["error_category"] == "RequestParseError", "Wrong error"
+    _assert_bounded_duration(event)
 
 
 def test_request_pipeline_logs_handler_failure(
