@@ -101,12 +101,7 @@ class RetryStrategy:
 
 @dc.dataclass(frozen=True, slots=True)
 class _ConnectionContext:
-    """Per-request connection parameters shared by both client transports.
-
-    Bundling the timeout, retry configuration, and correlation identifier keeps
-    the transport helpers within the project's argument-count limit and lets the
-    identifier reach the retry seam without widening any public signature.
-    """
+    """Transport settings and metadata shared throughout one client request."""
 
     timeout: float
     retry_config: RetryConfig
@@ -116,15 +111,6 @@ class _ConnectionContext:
     def validate(self) -> None:
         """Re-validate the retry configuration against the timeout."""
         self.retry_config.validate(self.timeout)
-
-
-@dc.dataclass(frozen=True, slots=True)
-class _RequestOptions:
-    """Caller-supplied limits shared while building a request context."""
-
-    timeout: float
-    retry_config: RetryConfig | None
-    deadline: float | None
 
 
 def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
@@ -422,13 +408,9 @@ def _connect_unix_with_retries(
     """
     context.validate()
     address = str(sock_path)
-    request_deadline = (
-        deadline
-        if deadline is not None
-        else context.deadline
-        if context.deadline is not None
-        else _compute_deadline(context.timeout)
-    )
+    request_deadline = deadline if deadline is not None else context.deadline
+    if request_deadline is None:
+        request_deadline = _compute_deadline(context.timeout)
     _remaining_time(request_deadline)
 
     def attempt_connect(_attempt: int) -> socket.socket:
@@ -500,11 +482,9 @@ def _send_unix_request(
     context: _ConnectionContext,
 ) -> bytes:
     context.validate()
-    deadline = (
-        context.deadline
-        if context.deadline is not None
-        else _compute_deadline(context.timeout)
-    )
+    deadline = context.deadline
+    if deadline is None:
+        deadline = _compute_deadline(context.timeout)
     _remaining_time(deadline)
     with _connect_unix_with_retries(sock_path, context, deadline=deadline) as client:
         client.settimeout(_remaining_time(deadline))
@@ -724,22 +704,16 @@ def _perform_request(
 def _send_request(
     kind: str,
     data: dict[str, typ.Any],
-    options: _RequestOptions,
+    context: _ConnectionContext,
 ) -> Response:
     """Send a JSON request of *kind* to the IPC server.
 
     Returns
     -------
     Response
-        The decoded server response.
     """
     payload_bytes, correlation_id = _build_request_envelope(kind, data)
-    context = _ConnectionContext(
-        timeout=options.timeout,
-        retry_config=options.retry_config or RetryConfig(),
-        correlation_id=correlation_id,
-        deadline=options.deadline,
-    )
+    context = dc.replace(context, correlation_id=correlation_id)
     return _perform_request(payload_bytes, kind, context)
 
 
@@ -752,23 +726,18 @@ def invoke_server(
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
-    Unix clients apply *timeout* as one deadline across connecting, sending,
-    and receiving. When *deadline* is supplied, Unix clients use that absolute
-    monotonic deadline so a caller can share one budget across operations.
-    Windows clients retain their cooperative named-pipe deadline behaviour,
-    closing the pipe when a step exceeds *timeout*.
+    Unix shares one deadline across I/O; Windows uses per-step pipe timeouts.
 
     Parameters
     ----------
     invocation : Invocation
-        Invocation request to send.
+        Request to send.
     timeout : float
-        Maximum request duration in seconds when no absolute deadline is given.
+        Request limit in seconds.
     retry_config : RetryConfig or None, optional
         Connection retry policy.
     deadline : float or None, optional
-        Absolute ``time.monotonic()`` deadline to share with preceding Unix
-        shim work. Windows clients continue to use cooperative step deadlines.
+        Absolute Unix deadline shared with preceding shim work.
 
     Returns
     -------
@@ -778,7 +747,7 @@ def invoke_server(
     return _send_request(
         KIND_INVOCATION,
         invocation.to_dict(),
-        _RequestOptions(timeout, retry_config, deadline),
+        _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
     )
 
 
@@ -791,21 +760,18 @@ def report_passthrough_result(
 ) -> Response:
     """Send passthrough execution results back to the IPC server.
 
-    Timeout handling mirrors :func:`invoke_server`: Unix sockets share one
-    deadline per request, or use a supplied absolute monotonic *deadline*.
-    Windows callers retain cooperative deadlines.
+    Unix shares the shim deadline; Windows retains per-step pipe timeouts.
 
     Parameters
     ----------
     result : PassthroughResult
-        Result produced by the real command.
+        Command result to report.
     timeout : float
-        Maximum request duration in seconds when no absolute deadline is given.
+        Request limit in seconds.
     retry_config : RetryConfig or None, optional
         Connection retry policy.
     deadline : float or None, optional
-        Absolute ``time.monotonic()`` deadline to share with preceding Unix
-        shim work. Windows clients continue to use cooperative step deadlines.
+        Absolute Unix deadline shared with preceding shim work.
 
     Returns
     -------
@@ -815,7 +781,7 @@ def report_passthrough_result(
     return _send_request(
         KIND_PASSTHROUGH_RESULT,
         result.to_dict(),
-        _RequestOptions(timeout, retry_config, deadline),
+        _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
     )
 
 

@@ -5,13 +5,14 @@ from __future__ import annotations
 import importlib
 import io
 import os
+import subprocess
 import sys
 import typing as typ
 
 import pytest
 
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
-from cmd_mox.ipc import Invocation, Response
+from cmd_mox.ipc import Invocation, IPCServer, Response
 
 pytestmark = [pytest.mark.requires_unix_sockets]
 
@@ -163,12 +164,45 @@ def test_main_honours_custom_timeout(
         "shim should honour the CMOX_IPC_TIMEOUT_ENV deadline"
     )
     assert len(deadlines) == 1, "shim should pass one IPC deadline to its client"
-    assert isinstance(deadlines[0], float), (
-        "shim should pass an absolute IPC deadline to its client"
-    )
+    if os.name == "nt":
+        assert deadlines[0] is None, "Windows should retain its cooperative timeout"
+    else:
+        assert isinstance(deadlines[0], float), (
+            "shim should pass an absolute IPC deadline to its client"
+        )
     out = capsys.readouterr()
     assert out.out == "custom", "shim.main should forward the response stdout"
     assert not out.err, "shim.main should not emit stderr for an empty response"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shim symlink behaviour")
+def test_python_shim_name_does_not_shadow_stdlib_queue(tmp_path: Path) -> None:
+    """A command named ``queue.py`` must not shadow queue during shim startup."""
+    shim_module = importlib.import_module("cmd_mox.shim")
+    shim_path = tmp_path / "queue.py"
+    shim_path.symlink_to(shim_module.__file__)
+    stdin_path = tmp_path / "stdin.txt"
+    stdin_path.write_text("regular input", encoding="utf-8")
+    socket_path = tmp_path / "ipc.sock"
+    env = os.environ.copy()
+    env[CMOX_IPC_SOCKET_ENV] = str(socket_path)
+    env[CMOX_IPC_TIMEOUT_ENV] = "2.0"
+
+    with IPCServer(socket_path), stdin_path.open(encoding="utf-8") as stdin:
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - executable path is a test-created local symlink
+            [str(shim_path)],
+            shell=False,
+            stdin=stdin,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
+            check=False,
+        )
+
+    assert result.returncode == 0, f"queue.py shim failed with stderr: {result.stderr}"
+    assert result.stdout == "queue.py", "Shim did not receive its IPC response"
+    assert not result.stderr, "Queue module shadowing emitted an error"
 
 
 def test_main_requires_socket_env(
