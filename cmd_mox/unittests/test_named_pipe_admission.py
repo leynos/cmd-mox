@@ -267,7 +267,10 @@ def test_completed_client_releases_capacity(
     state = build_state()
     state._client_slots = threading.BoundedSemaphore(1)
     monkeypatch.setattr(state, "_read_request", lambda _handle: b"{}")
-    monkeypatch.setattr(named_pipe, "_request_pipeline", lambda *_args: None)
+    monkeypatch.setattr(named_pipe, "_request_pipeline", lambda *_args: b"response")
+    monkeypatch.setattr(
+        named_pipe, "write_pipe_payload", lambda *_args, **_kwargs: None
+    )
     handle = object()
 
     with _observability.capture_events() as events:
