@@ -120,6 +120,12 @@ my_tool.clone_repo("repo")
 # Replay begins automatically before the test function executes; verification runs during teardown.
 ```
 
+The pytest fixture starts replay automatically and verifies expectations during
+teardown. To control the record → replay → verify lifecycle explicitly while
+using the fixture, disable that automatic lifecycle with
+`@pytest.mark.cmd_mox(auto_lifecycle=False)`; otherwise the fixture has already
+entered replay before the test body runs.
+
 ## Stubs, mocks and spies
 
 Use the controller to register doubles:
