@@ -12,23 +12,23 @@ publishes no coverage artefact (`publish-artefact: 'false'`). Nothing a pull
 request runs invokes CodeScene, runs `cs-coverage`, receives `CS_ACCESS_TOKEN`,
 or names the CodeScene host.
 
-`coverage-main.yml` is the single publisher. It runs on pushes to `main`, binds
-`CS_ACCESS_TOKEN` only in a `codescene-token` check step that reports whether
-it is set, passes it to the upload action as `access-token` (never in the
-upload step's `env`, which the composite action hands to its nested steps),
+`coverage-main.yml` is the single publisher. It runs on pushes to `main`,
+reports whether `CS_ACCESS_TOKEN` is set from a `codescene-token` check step
+that binds nothing, passes the secret to the upload action as `access-token`
+(never in any `env`, which the composite action hands to its nested steps),
 guards the upload on exactly
 `steps.codescene-token.outputs.available == 'true' && github.ref == 'refs/heads/main'`,
-uploads with `mode: upload`, and declares a concurrency group, keyed on the
-ref and the event, that never cancels: GitHub keeps one pending run per group,
-so a newer push replaces an older pending run and the newest baseline wins,
-while a dispatch cannot displace a pending push to main. The uploader pins the
+uploads with `mode: upload`, and declares a concurrency group keyed on the ref
+alone that never cancels: GitHub keeps one pending run per group, so runs never
+overlap and the newest trigger's coverage lands last. The uploader pins the
 CodeScene CLI through its own manifest, so no checksum input or
 `CODESCENE_CLI_SHA256` variable is used.
 
 Dependabot automerge merges are made with `GITHUB_TOKEN`, which fires no push
 workflow, so they are a known exception: their coverage is published by the
-next push to `main`. The shared fix is tracked as issue 518 in
-leynos/shared-actions.
+next push to `main`. A dispatch that replaces a pending push leaves the ratchet
+baseline one commit behind until the next push, because only a push saves it.
+Both are tracked as issue 518 in leynos/shared-actions.
 
 The reason is the call, not the artefact: the CLI talks to CodeScene's API,
 whose answers have changed shape and failed every pull request at once, and a

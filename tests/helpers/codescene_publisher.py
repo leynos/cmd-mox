@@ -52,16 +52,14 @@ PUBLISHER_TRIGGERS: typ.Final[frozenset[str]] = frozenset({
 #: A full-length commit pin.
 PINNED_COMMIT: typ.Final[re.Pattern[str]] = re.compile(r"@[0-9a-f]{40}$")
 
-#: The expressions every publisher concurrency group must evaluate. The
-#: ref keeps a branch dispatch out of main's group; the event keeps a
-#: dispatch on main from replacing a pending push, since only a push
-#: writes the ratchet baseline. The expressions, not the words: a
-#: literal ``coverage-main-github.ref-github.event_name`` names both and
-#: evaluates neither, so every run would still share one group.
-_GROUP_KEYS: typ.Final[tuple[re.Pattern[str], ...]] = (
-    re.compile(r"\$\{\{\s*github\.ref\s*\}\}"),
-    re.compile(r"\$\{\{\s*github\.event_name\s*\}\}"),
-)
+#: The publisher's concurrency group, exactly: keyed on the ref and
+#: nothing else. With one group per ref, runs never overlap and the
+#: survivor of any replacement is the newest trigger, whose commit is the
+#: newest main at trigger time, so uploads land in commit order. Keying on
+#: the event as well would let an earlier dispatch finish after a newer
+#: push and upload older coverage last; a constant group would let a
+#: branch dispatch replace main's pending run and then skip the upload.
+PUBLISHER_GROUP: typ.Final[str] = "coverage-main-${{ github.ref }}"
 
 
 def conjuncts(condition: object) -> frozenset[str]:
@@ -195,14 +193,9 @@ def concurrency_violations(document: Document) -> list[str]:
     A concurrency group without ``cancel-in-progress`` keeps one pending
     run per group: a newer push replaces an older pending run and never
     cancels a running one, so the newest baseline wins. A cancelled run
-    abandons both its upload and its baseline write. Every group, at
-    workflow and job level, must evaluate ``${{ github.ref }}`` and
-    ``${{ github.event_name }}``: a dispatch from another branch would
-    otherwise join main's group, replace main's pending run, and then
-    skip the ref-guarded upload, so that main commit never publishes;
-    and a dispatch on main would replace a pending push without writing
-    the baseline, which only a push saves. A constant group at either level
-    collides, whatever the other level is keyed on.
+    abandons both its upload and its baseline write. The workflow's group
+    must be exactly ``PUBLISHER_GROUP``, and no job may declare a group of
+    its own, since a second group would let runs overlap.
 
     Returns
     -------
@@ -214,22 +207,27 @@ def concurrency_violations(document: Document) -> list[str]:
         return [f"no workflow-level concurrency group: {declared!r}"]
     job_scopes = (job.get("concurrency") for job in jobs(document).values())
     scopes = [scope for scope in [declared, *job_scopes] if isinstance(scope, dict)]
-    return _unkeyed_groups(scopes) + _cancelling_scopes(scopes)
+    return _group_violations(document, declared) + _cancelling_scopes(scopes)
 
 
-def _unkeyed_groups(scopes: list[dict[object, object]]) -> list[str]:
-    """Return the concurrency groups that do not evaluate the ref and event.
+def _group_violations(document: Document, declared: dict[object, object]) -> list[str]:
+    """Return why the publisher's runs do not share exactly one group per ref.
 
     Returns
     -------
     list[str]
-        One entry per unkeyed group.
+        One entry for a wrong workflow group and one per job-level group.
     """
-    return [
-        f"concurrency group {scope['group']!r} is not keyed on the ref and event"
-        for scope in scopes
-        if "group" in scope
-        and not all(key.search(str(scope["group"])) for key in _GROUP_KEYS)
+    group = normalized(declared.get("group"))
+    found = (
+        []
+        if group == PUBLISHER_GROUP
+        else [f"concurrency group {group!r} is not exactly {PUBLISHER_GROUP!r}"]
+    )
+    return found + [
+        f"job {name} declares its own concurrency"
+        for name, job in jobs(document).items()
+        if "concurrency" in job
     ]
 
 

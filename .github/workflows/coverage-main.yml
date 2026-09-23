@@ -15,12 +15,13 @@ on:
 # pending run per group, so a newer push replaces an older pending run
 # and never interrupts a running one; the newest baseline wins. A
 # cancelled run would abandon both its upload and its ratchet baseline
-# write. The group is keyed on the ref so that a dispatch from another
-# branch cannot displace a pending main run and then skip the upload,
-# and on the event so that a dispatch on main cannot displace a pending
-# push, which is the only run that writes the baseline.
+# write. The group is keyed on the ref alone: a branch dispatch cannot
+# displace a pending main run, and with one group for main, runs never
+# overlap and the newest trigger's coverage lands last. A dispatch that
+# replaces a pending push leaves the ratchet baseline one commit behind
+# until the next push, because only a push saves it.
 concurrency:
-  group: coverage-main-${{ github.ref }}-${{ github.event_name }}
+  group: coverage-main-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -50,17 +51,13 @@ jobs:
           pytest-workers: ''
           with-ratchet: 'true'
 
-      # Whether the token is set, as a plain output. The token is bound
-      # here and not on the upload step: the upload action is composite
-      # and passes its step env to nested upload-artifact and cache
-      # steps, while taking the token itself from `access-token`.
+      # Whether the token is set, as a plain output. The expression is
+      # evaluated before the shell runs, so this step binds nothing: the
+      # token is in no step's env, because the upload action is composite
+      # and passes its step env to nested upload-artifact and cache steps.
       - name: Check CodeScene token
         id: codescene-token
-        env:
-          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        run: >-
-          if [ -n "$CS_ACCESS_TOKEN" ];
-          then echo "available=true" >> "$GITHUB_OUTPUT"; fi
+        run: echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
 
       - name: Upload coverage data to CodeScene
         # The ref as well as the token. This workflow declares no

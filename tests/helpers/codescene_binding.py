@@ -20,25 +20,23 @@ if typ.TYPE_CHECKING:
     from tests.helpers.workflow_reading import Document
 
 #: The id of the step that reports whether the token is available. The
-#: token is not bound in the upload step's ``env``: the upload action is
-#: composite and hands that ``env`` to its nested upload-artifact and
-#: cache steps, while binding the token itself from ``access-token``. So
-#: a separate step binds it, runs one exact command, and publishes only
-#: whether it is set.
+#: token is in no step's ``env``: the upload action is composite and
+#: hands its step ``env`` to nested upload-artifact and cache steps,
+#: while binding the token itself from ``access-token``. So a separate
+#: step publishes only whether the token is set.
 CHECK_STEP_ID: typ.Final[str] = "codescene-token"
 
-#: The check step's command, exactly. Held whole because ``false && X``
-#: contains ``X``: a looser match accepts a command that never reports.
+#: The check step's sole command, exactly. The expression evaluates to
+#: ``true`` or ``false`` before the shell runs, so the check binds
+#: nothing and needs no shell conditional. Held whole because
+#: ``false && X`` contains ``X``: a looser match accepts a command that
+#: never reports, and the upload then skips forever.
 CHECK_COMMAND: typ.Final[str] = (
-    f'if [ -n "${CREDENTIAL}" ]; then echo "available=true" >> "$GITHUB_OUTPUT"; fi'
+    f'echo "available=${{{{ secrets.{CREDENTIAL} != \'\' }}}}" >> "$GITHUB_OUTPUT"'
 )
 
-#: The positive bindings: the check step's ``env`` and the upload's
-#: ``access-token``. A guard that reads a binding passes with the binding
-#: deleted, because a missing value reads as empty and the upload then
-#: skips forever; so each binding itself is required.
-STEP_BINDING: typ.Final[str] = f"${{{{ secrets.{CREDENTIAL} }}}}"
-ACCESS_TOKEN_INPUT: typ.Final[str] = STEP_BINDING
+#: The upload's ``access-token`` input, the one place the token is passed.
+ACCESS_TOKEN_INPUT: typ.Final[str] = f"${{{{ secrets.{CREDENTIAL} }}}}"
 
 
 def check_step(
@@ -79,7 +77,7 @@ def _stray_mentions(step: dict[object, object], allowed: set[str]) -> list[str]:
 
 
 def _check_violations(check: dict[object, object] | None) -> list[str]:
-    """Return why the check step does not bind the token and report it.
+    """Return why the check step does not report the token's presence alone.
 
     Returns
     -------
@@ -88,22 +86,12 @@ def _check_violations(check: dict[object, object] | None) -> list[str]:
     """
     if check is None:
         return [f"no step with id {CHECK_STEP_ID!r} precedes the upload in its job"]
-    env = check.get("env")
-    bound = (
-        {str(key): normalized(value) for key, value in env.items()}
-        if isinstance(env, dict)
-        else {}
-    )
-    found = (
-        []
-        if bound == {CREDENTIAL: STEP_BINDING}
-        else [f"the check step does not bind exactly {CREDENTIAL}: {STEP_BINDING}"]
-    )
+    found = ["the check step declares env; it binds nothing"] if "env" in check else []
     if normalized(check.get("run")) != CHECK_COMMAND:
         found.append(f"the check step does not run exactly {CHECK_COMMAND!r}")
     if "if" in check:
         found.append("the check step has if:")
-    stray = _stray_mentions(check, {f"env.{CREDENTIAL}", "run"})
+    stray = _stray_mentions(check, {"run"})
     return found + [f"{CREDENTIAL} also reached at check step {path}" for path in stray]
 
 
