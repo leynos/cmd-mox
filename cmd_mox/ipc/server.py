@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import socketserver
 import threading
 import typing as typ
@@ -16,6 +17,8 @@ from ._server_core import (
     _request_pipeline,
 )
 from .socket_utils import cleanup_stale_socket, wait_for_socket
+
+logger = logging.getLogger(__name__)
 
 
 def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
@@ -116,13 +119,29 @@ class CallbackIPCServer(IPCServer):
 class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
+    def setup(self) -> None:
+        self.request.settimeout(
+            self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
+        )
+        super().setup()
+
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
-        raw = self.rfile.read()
+        try:
+            raw = self.rfile.read()
+        except TimeoutError:
+            logger.info("IPC connection timed out while receiving request")
+            return
+        except OSError:
+            logger.info("IPC connection closed while receiving request")
+            return
         response_bytes = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
         if response_bytes is None:
             return
-        self.wfile.write(response_bytes)
-        self.wfile.flush()
+        try:
+            self.wfile.write(response_bytes)
+            self.wfile.flush()
+        except OSError:
+            logger.info("IPC connection closed while sending response")
 
 
 class _InnerServer(_BaseUnixServer):
