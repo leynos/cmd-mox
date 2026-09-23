@@ -79,6 +79,7 @@ from cmd_mox.ipc import (  # ruff: ignore[module-import-not-at-top-of-file] - sh
     invoke_server,
     report_passthrough_result,
 )
+from cmd_mox.ipc._deadline import _remaining_time  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
 
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
 
@@ -214,11 +215,11 @@ def _timeout_remaining(timeout: float, deadline: float | None) -> float:
     """
     if deadline is None:
         return timeout
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    try:
+        return _remaining_time(deadline)
+    except TimeoutError:
         msg = "IPC operation timed out"
-        raise TimeoutError(msg)
-    return remaining
+        raise TimeoutError(msg) from None
 
 
 def _execute_invocation(

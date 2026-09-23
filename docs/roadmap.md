@@ -48,8 +48,9 @@ inter-process communication (IPC).
 - [x] 2.3.2. Start and stop the IPC server in sync with lifecycle transitions.
 - [x] 2.3.3. Use structured JSON communication for invocation and response
   payloads.
-- [x] 2.3.4. Bound pollable POSIX shim stdin and Unix IPC waits by
-  `CMOX_IPC_TIMEOUT` and clean up IPC resources after failures.
+- [x] 2.3.4. Bound pollable POSIX shim stdin, Unix IPC waits, and per-connection
+  server reads by `CMOX_IPC_TIMEOUT`; return diagnostic frames for rejected
+  requests and clean up IPC resources after failures.
 
 ## 3. CmdMox controller and public API
 
