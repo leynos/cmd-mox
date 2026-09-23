@@ -486,6 +486,7 @@ def test_decode_stdin_chunk_reports_invalid_text() -> None:
         )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="regular-file worker is POSIX-specific")
 def test_regular_stdin_read_error_uses_controlled_exit(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
