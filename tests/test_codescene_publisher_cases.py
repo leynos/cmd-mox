@@ -28,7 +28,32 @@ from tests.helpers.workflow_reading import WorkflowReadingError, load_document
 #: A full-length commit pin, as the publisher rules require.
 PIN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-PUBLISHER = """\
+#: The check step: binds the token and reports only whether it is set.
+CHECK = """\
+      - name: Check CodeScene token
+        id: codescene-token
+        env:
+          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+        run: >-
+          if [ -n "$CS_ACCESS_TOKEN" ];
+          then echo "available=true" >> "$GITHUB_OUTPUT"; fi
+"""
+
+#: The upload step: guarded on the check's output and the ref, and handed
+#: the token as its input alone.
+UPLOAD = """\
+      - name: Upload
+        if: >-
+          steps.codescene-token.outputs.available == 'true'
+          && github.ref == 'refs/heads/main'
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@<pin>
+        with:
+          mode: upload
+          access-token: ${{ secrets.CS_ACCESS_TOKEN }}
+"""
+
+PUBLISHER = (
+    """\
 on:
   push:
     branches: [main]
@@ -43,15 +68,10 @@ jobs:
         uses: leynos/shared-actions/.github/actions/generate-coverage@<pin>
         with:
           with-ratchet: 'true'
-      - name: Upload
-        env:
-          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        if: env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@<pin>
-        with:
-          mode: upload
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
-""".replace("<pin>", PIN)
+"""
+    + CHECK
+    + UPLOAD
+).replace("<pin>", PIN)
 
 
 def _publisher_violations(text: str) -> list[str]:
@@ -97,10 +117,16 @@ def test_the_compliant_publisher_passes() -> None:
             id="sweep-3-neutralizing-conjunct",
         ),
         pytest.param(
-            " && github.ref == 'refs/heads/main'",
+            "\n          && github.ref == 'refs/heads/main'",
             "",
             "guard",
             id="sweep-3-ref-guard-deleted",
+        ),
+        pytest.param(
+            "steps.codescene-token.outputs.available == 'true'",
+            "env.CS_ACCESS_TOKEN != ''",
+            "guard",
+            id="sweep-8-guard-reads-an-unbound-env",
         ),
         pytest.param(
             "  cancel-in-progress: false",
@@ -157,7 +183,7 @@ def test_the_compliant_publisher_passes() -> None:
         pytest.param(
             "        env:\n          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}\n",
             "",
-            "does not bind",
+            "check step does not bind",
             id="sweep-8-binding-deleted",
         ),
         pytest.param(
@@ -167,7 +193,7 @@ def test_the_compliant_publisher_passes() -> None:
             id="sweep-8-binding-emptied",
         ),
         pytest.param(
-            "          access-token: ${{ env.CS_ACCESS_TOKEN }}\n",
+            "          access-token: ${{ secrets.CS_ACCESS_TOKEN }}\n",
             "",
             "does not pass access-token",
             id="sweep-8-access-token-deleted",
@@ -178,6 +204,44 @@ def test_the_compliant_publisher_passes() -> None:
             "      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}\n",
             "also reached at jobs.publish.env",
             id="sweep-8-token-also-in-job-env",
+        ),
+        pytest.param(
+            "      - name: Upload\n",
+            "      - name: Upload\n        env:\n"
+            "          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}\n",
+            "the upload step's env",
+            id="sweep-8-token-in-upload-env",
+        ),
+        pytest.param(
+            "        id: codescene-token\n",
+            "        id: codescene-token\n        if: false\n",
+            "the check step has if:",
+            id="sweep-8-check-step-condition",
+        ),
+        pytest.param(
+            'echo "available=true"',
+            'echo "available=false"',
+            "does not run exactly",
+            id="sweep-8-check-command-changed",
+        ),
+        pytest.param(
+            "      - name: Check CodeScene token\n",
+            "      - name: Check CodeScene token\n        with:\n"
+            "          echo: ${{ secrets.CS_ACCESS_TOKEN }}\n",
+            "also reached at check step with.echo",
+            id="sweep-8-token-elsewhere-in-check-step",
+        ),
+        pytest.param(
+            "        id: codescene-token\n",
+            "        id: token-check\n",
+            "no step with id",
+            id="sweep-8-check-step-missing",
+        ),
+        pytest.param(
+            CHECK + UPLOAD.replace("<pin>", PIN),
+            UPLOAD.replace("<pin>", PIN) + CHECK,
+            "no step with id",
+            id="sweep-8-check-after-upload",
         ),
         pytest.param(
             "    runs-on: ubuntu-latest\n",

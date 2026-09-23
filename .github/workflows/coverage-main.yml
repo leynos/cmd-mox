@@ -50,20 +50,31 @@ jobs:
           pytest-workers: ''
           with-ratchet: 'true'
 
-      - name: Upload coverage data to CodeScene
-        # The token binds here and nowhere else in the workflow.
+      # Whether the token is set, as a plain output. The token is bound
+      # here and not on the upload step: the upload action is composite
+      # and passes its step env to nested upload-artifact and cache
+      # steps, while taking the token itself from `access-token`.
+      - name: Check CodeScene token
+        id: codescene-token
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+        run: >-
+          if [ -n "$CS_ACCESS_TOKEN" ];
+          then echo "available=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Upload coverage data to CodeScene
         # The ref as well as the token. This workflow declares no
         # `workflow_dispatch` today, so the ref is always main; the guard
         # is here because a dispatch can aim at any branch, and the upload
         # carries no ref of its own.
-        if: env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'
+        if: >-
+          steps.codescene-token.outputs.available == 'true'
+          && github.ref == 'refs/heads/main'
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           format: cobertura
           path: coverage.xml
           mode: upload
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          access-token: ${{ secrets.CS_ACCESS_TOKEN }}
           # No checksum input: the action pins the CLI through its own
           # manifest, and `installer-checksum` is rejected from this pin.
