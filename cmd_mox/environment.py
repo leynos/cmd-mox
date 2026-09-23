@@ -315,10 +315,11 @@ class EnvironmentManager:
     ----------
     shim_dir : Path or None
         Directory containing generated shims after ``__enter__``; ``None``
-        before entry. The path ``shim_dir / "<command_name>"`` is an
-        executable shim that records invocations when called by absolute path.
-        It locates the IPC server through ``CMOX_IPC_SOCKET``, so invocation
-        does not depend on ``PATH``.
+        before entry. On POSIX, ``shim_dir / "<command_name>"`` is an
+        executable shim; on Windows, the launcher is
+        ``shim_dir / "<command_name>.cmd"``. Both record invocations when
+        called by absolute path and locate the IPC server through
+        ``CMOX_IPC_SOCKET``, so invocation does not depend on ``PATH``.
     socket_path : Path or None
         IPC endpoint path exported for shims after entry; ``None`` before
         entry.

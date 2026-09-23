@@ -708,9 +708,10 @@ def test_pipeline(cmd_mox):
 Some tools accept a configured executable path instead of resolving a command
 name through `PATH`. Examples include Git merge and diff drivers, `sudoers`
 command rules, systemd unit settings, and continuous integration (CI)
-configuration. Pass an `EnvironmentManager` to `CmdMox`, then use
-`env_mgr.shim_dir / "<name>"` as the absolute shim path in the tool's
-configuration:
+configuration. Pass an `EnvironmentManager` to `CmdMox`, then use the generated
+launcher under `env_mgr.shim_dir` as the absolute shim path in the tool's
+configuration. Its filename has a `.cmd` suffix on Windows and no suffix on
+POSIX:
 
 ```python
 import os
@@ -730,6 +731,8 @@ with CmdMox(environment=env_mgr) as mox:
 
     assert env_mgr.shim_dir is not None
     shim = env_mgr.shim_dir / "stub-merge-driver"
+    if os.name == "nt":
+        shim = shim.with_suffix(".cmd")
     path_without_shims = os.pathsep.join(
         path
         for path in os.environ["PATH"].split(os.pathsep)
@@ -755,9 +758,8 @@ Shims read non-terminal standard input until EOF to populate
 driver, inherits stdin and leaves it open, the shim waits and may hang until
 the caller's timeout. The only server-side symptom may be an
 `IPC received malformed JSON` error, which does not identify stdin as the
-cause.
-Pass `stdin=subprocess.DEVNULL`, or otherwise close or redirect stdin, unless
-the caller intends to supply input.
+cause. Pass `stdin=subprocess.DEVNULL`, or otherwise close or redirect stdin,
+unless the caller intends to supply input.
 
 ## Controller configuration and journals
 
@@ -803,8 +805,8 @@ few common ones are:
 - `with_args(*args)` – require exact arguments.
 - `with_matching_args(*matchers)` – match arguments using comparators.
 - `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
-  validate it with a predicate `Callable[[str], bool]`. Shims read stdin
-  until EOF, so close or redirect it when no input is intended. See the
+  validate it with a predicate `Callable[[str], bool]`. Shims read stdin until
+  EOF, so close or redirect it when no input is intended. See the
   [shim path guidance](#wiring-a-tool-to-a-shim-by-absolute-path).
 - `with_env(mapping)` – inject additional environment variables into the
   invocation. The mapping is merged into the recorded `Invocation.env`, applied
@@ -817,12 +819,12 @@ few common ones are:
   boundary (e.g., base64) so handlers exchange `str`.
 - `runs(handler)` – call a function to produce dynamic output. The handler
   receives an `Invocation` and should return either a
-  `(stdout, stderr, exit_code)` tuple or a `Response` instance. The handler runs
-  in the test process on the IPC server thread, not in the shim subprocess.
-  Relative paths in `Invocation.args` are relative to the invoking process's
-  working directory. `Invocation` does not carry that directory, so provide it
-  separately or use absolute paths. For example, write a Git merge result with
-  `(repository / inv.args[1]).write_text(result)`.
+  `(stdout, stderr, exit_code)` tuple or a `Response` instance. The handler
+  runs in the test process on the IPC server thread, not in the shim
+  subprocess. Relative paths in `Invocation.args` are relative to the invoking
+  process's working directory. `Invocation` does not carry that directory, so
+  provide it separately or use absolute paths. For example, write a Git merge
+  result with `(repository / inv.args[1]).write_text(result)`.
 
   Example:
 
