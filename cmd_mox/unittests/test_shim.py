@@ -663,6 +663,19 @@ def test_execute_invocation_shares_deadline_with_passthrough(
     assert deadlines == [101.0, 101.0], "The absolute deadline must span both IPC calls"
 
 
+def test_timeout_remaining_without_deadline_returns_configured_timeout() -> None:
+    """No shared deadline preserves the cooperative timeout value."""
+    assert shim._timeout_remaining(2.5, None) == pytest.approx(2.5), (
+        "A missing deadline must leave the configured timeout unchanged"
+    )
+
+
+def test_timeout_remaining_keeps_shim_timeout_diagnostic() -> None:
+    """An expired shared deadline retains the shim's established message."""
+    with pytest.raises(TimeoutError, match="IPC operation timed out"):
+        shim._timeout_remaining(2.5, 0.0)
+
+
 def test_execute_invocation_surfaces_ipc_errors(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
