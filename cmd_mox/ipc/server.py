@@ -6,8 +6,7 @@ import contextlib
 import socketserver
 import threading
 import typing as typ
-
-from cmd_mox import _path_utils as path_utils
+from functools import cache
 
 from ._server_core import (
     IPCHandlers,
@@ -15,60 +14,25 @@ from ._server_core import (
     _BaseIPCServer,
     _request_pipeline,
 )
+from ._unix_server_base import resolve_unix_server_base
 from .socket_utils import cleanup_stale_socket, wait_for_socket
-
-
-def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
-    class _UnsupportedUnixServer(socketserver.BaseServer):
-        """Placeholder that raises when Unix sockets are requested on Windows."""
-
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            msg = "Unix domain socket servers are unavailable on Windows"
-            raise RuntimeError(msg)
-
-    return _UnsupportedUnixServer
-
-
-def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
-    if path_utils.IS_WINDOWS:
-        return _create_unsupported_unix_server()
-    threading_server = getattr(socketserver, "ThreadingUnixStreamServer", None)
-    if threading_server is not None:
-        return threading_server
-    unix_server = getattr(socketserver, "UnixStreamServer", None)
-    if unix_server is not None:
-
-        class _ThreadingUnixCompat(
-            socketserver.ThreadingMixIn,
-            unix_server,
-        ):
-            """Threading shim for platforms lacking ThreadingUnixStreamServer."""
-
-            pass
-
-        return _ThreadingUnixCompat
-    msg = "Unix domain socket servers are not supported on this platform"
-    raise RuntimeError(msg)
-
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
     from pathlib import Path
-    from socketserver import ThreadingUnixStreamServer as _BaseUnixServer
 
     from .models import Invocation, PassthroughResult, Response
-else:
-    _BaseUnixServer = _resolve_unix_server_base()
 
 
-class IPCServer(_BaseIPCServer["_InnerServer"]):
+class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
     """Run a Unix domain socket server for shims."""
 
     def _prepare_backend_start(self) -> None:
         cleanup_stale_socket(self.socket_path)
 
-    def _create_backend(self) -> tuple[_InnerServer, threading.Thread]:
-        server = _InnerServer(self.socket_path, self)
+    def _create_backend(self) -> tuple[socketserver.BaseServer, threading.Thread]:
+        inner_server_cls = _inner_server_cls()
+        server = inner_server_cls(self.socket_path, self)
         server.timeout = self.accept_timeout
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         return server, thread
@@ -77,7 +41,7 @@ class IPCServer(_BaseIPCServer["_InnerServer"]):
         wait_for_socket(self.socket_path, self.timeout)
 
     @staticmethod
-    def _stop_backend(server: _InnerServer | None) -> None:
+    def _stop_backend(server: socketserver.BaseServer | None) -> None:
         if server is None:
             return
         server.shutdown()
@@ -125,13 +89,29 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         self.wfile.flush()
 
 
-class _InnerServer(_BaseUnixServer):
-    """Threaded Unix stream server passing requests to :class:`IPCServer`."""
+@cache
+def _inner_server_cls() -> cabc.Callable[[Path, IPCServer], socketserver.BaseServer]:
+    """Build the transport server class after resolving its platform base.
 
-    def __init__(self, socket_path: Path, outer: IPCServer) -> None:
-        self.outer = outer
-        super().__init__(str(socket_path), _IPCHandler)
-        self.daemon_threads = True
+    Returns
+    -------
+    cabc.Callable[[Path, IPCServer], socketserver.BaseServer]
+        The inner server class configured for this platform.
+    """
+    base_server = typ.cast("typ.Any", resolve_unix_server_base())
+
+    class _InnerServer(base_server):
+        """Threaded Unix stream server passing requests to :class:`IPCServer`."""
+
+        def __init__(self, socket_path: Path, outer: IPCServer) -> None:
+            self.outer = outer
+            super().__init__(str(socket_path), _IPCHandler)
+            self.daemon_threads = True
+
+    return typ.cast(
+        "cabc.Callable[[Path, IPCServer], socketserver.BaseServer]",
+        _InnerServer,
+    )
 
 
 __all__ = [
