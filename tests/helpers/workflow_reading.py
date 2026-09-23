@@ -289,7 +289,7 @@ def _read_one(path: Path) -> Document:
     """
     try:
         return load_document(path.read_text(encoding="utf-8"))
-    except (OSError, WorkflowReadingError) as error:
+    except (OSError, UnicodeDecodeError, WorkflowReadingError) as error:
         msg = f"{path} is not a readable workflow document: {error}"
         raise WorkflowReadingError(msg) from error
 
@@ -305,12 +305,51 @@ def _is_yaml(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in {".yml", ".yaml"}
 
 
+def _discover(root: Path) -> list[Path]:
+    """Return every workflow and local action file under a repository root.
+
+    Discovery is part of the reading boundary: a directory that cannot be
+    listed raises rather than reading as empty, since an empty reading
+    satisfies every refusal built on it.
+
+    Returns
+    -------
+    list[Path]
+        Workflows, then local action metadata files, each sorted.
+
+    Raises
+    ------
+    WorkflowReadingError
+        If a directory cannot be listed or a path cannot be inspected.
+    """
+    try:
+        workflows = sorted(
+            path for path in (root / WORKFLOW_DIRECTORY).iterdir() if _is_yaml(path)
+        )
+        actions = sorted(
+            path
+            for name in ACTION_FILES
+            for path in (root / ".github").rglob(name)
+            if _is_yaml(path)
+        )
+    except OSError as error:
+        msg = f"the workflows under {root} could not be listed: {error}"
+        raise WorkflowReadingError(msg) from error
+    if not workflows:
+        msg = f"no workflow was read under {root}; the reader is broken"
+        raise WorkflowReadingError(msg)
+    return [*workflows, *actions]
+
+
 def read_workflow_tree(root: Path) -> dict[str, Document]:
     """Return every workflow and local action under a repository root.
 
     The only filesystem access here. Workflows are read under both
     suffixes in any case, since GitHub runs ``ci.YML``; local actions are
-    read from each ``action.yml`` below ``.github``.
+    read from each ``action.yml`` below ``.github``. A tree with no
+    workflow, a directory that cannot be listed, and a file that cannot
+    be read or parsed all raise ``WorkflowReadingError`` from the helpers
+    this calls.
 
     Parameters
     ----------
@@ -321,25 +360,7 @@ def read_workflow_tree(root: Path) -> dict[str, Document]:
     -------
     dict[str, Document]
         Repository-relative POSIX path to parsed document.
-
-    Raises
-    ------
-    WorkflowReadingError
-        If no workflow is found, or one cannot be read.
     """
-    workflows = sorted(
-        path for path in (root / WORKFLOW_DIRECTORY).iterdir() if _is_yaml(path)
-    )
-    if not workflows:
-        msg = f"no workflow was read under {root}; the reader is broken"
-        raise WorkflowReadingError(msg)
-    actions = sorted(
-        path
-        for name in ACTION_FILES
-        for path in (root / ".github").rglob(name)
-        if _is_yaml(path)
-    )
     return {
-        path.relative_to(root).as_posix(): _read_one(path)
-        for path in [*workflows, *actions]
+        path.relative_to(root).as_posix(): _read_one(path) for path in _discover(root)
     }

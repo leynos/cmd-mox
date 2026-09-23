@@ -58,6 +58,11 @@ PUBLISHER_TRIGGERS: typ.Final[frozenset[str]] = frozenset({
 #: A full-length commit pin.
 PINNED_COMMIT: typ.Final[re.Pattern[str]] = re.compile(r"@[0-9a-f]{40}$")
 
+#: An evaluated ref in a concurrency group. The expression, not the
+#: words: a literal ``coverage-main-github.ref`` names the ref and
+#: evaluates nothing, so every ref would still share one group.
+_REF_KEY: typ.Final[re.Pattern[str]] = re.compile(r"\$\{\{\s*github\.ref\s*\}\}")
+
 
 def _normalized(text: object) -> str:
     """Return text with runs of whitespace collapsed to single spaces.
@@ -246,10 +251,12 @@ def concurrency_violations(document: Document) -> list[str]:
     A concurrency group without ``cancel-in-progress`` keeps one pending
     run per group: a newer push replaces an older pending run and never
     cancels a running one, so the newest baseline wins. A cancelled run
-    abandons both its upload and its baseline write. The group must be
-    keyed on ``github.ref``: a dispatch from another branch would
-    otherwise join main's group, replace main's pending run, and then
-    skip the ref-guarded upload, so that main commit never publishes.
+    abandons both its upload and its baseline write. Every group, at
+    workflow and job level, must evaluate ``${{ github.ref }}``: a
+    dispatch from another branch would otherwise join main's group,
+    replace main's pending run, and then skip the ref-guarded upload, so
+    that main commit never publishes. A constant group at either level
+    collides, whatever the other level is keyed on.
 
     Returns
     -------
@@ -259,12 +266,13 @@ def concurrency_violations(document: Document) -> list[str]:
     declared = document.get("concurrency")
     if not isinstance(declared, dict) or not declared.get("group"):
         return [f"no workflow-level concurrency group: {declared!r}"]
-    found = (
-        []
-        if "github.ref" in str(declared["group"])
-        else [f"concurrency group {declared['group']!r} is not keyed on github.ref"]
-    )
     scopes = [declared, *(job.get("concurrency") for job in jobs(document).values())]
+    groups = [scope for scope in scopes if isinstance(scope, dict) and "group" in scope]
+    found = [
+        f"concurrency group {scope['group']!r} is not keyed on ${{{{ github.ref }}}}"
+        for scope in groups
+        if not _REF_KEY.search(str(scope["group"]))
+    ]
     return found + [
         f"cancel-in-progress {scope.get('cancel-in-progress')!r}"
         for scope in scopes

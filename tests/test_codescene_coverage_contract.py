@@ -45,7 +45,7 @@ from tests.helpers.codescene_reach import (
     retired_names,
 )
 from tests.helpers.workflow_closure import pull_request_surface, refused_references
-from tests.helpers.workflow_reading import all_steps, read_workflow_tree
+from tests.helpers.workflow_reading import all_steps, read_workflow_tree, triggers
 
 if typ.TYPE_CHECKING:
     from tests.helpers.workflow_reading import Document
@@ -67,6 +67,20 @@ PULL_REQUEST_COVERAGE_GUARD: typ.Final[frozenset[str]] = frozenset({
     "matrix.run-windows-smoke == false",
     "github.event_name == 'pull_request'",
 })
+
+#: The publisher's triggers, exactly. Dropping one is as silent as adding
+#: one: a publisher that loses its push trigger never publishes again.
+PUBLISHER_TRIGGERS: typ.Final[frozenset[str]] = frozenset({"push"})
+
+#: What both coverage lanes measure, exactly. The lanes are held equal to
+#: each other below; this pins the shared selection itself, so a change
+#: made to both at once is still a reviewed change here.
+COVERAGE_SELECTION: typ.Final[dict[object, object]] = {
+    "output-path": "coverage.xml",
+    "format": "cobertura",
+    "pytest-workers": "",
+    "with-ratchet": "true",
+}
 
 #: Inputs that change what happens to a report rather than what it
 #: measures; the lanes may differ on these and nothing else.
@@ -155,6 +169,10 @@ def test_the_publisher_serves_main_alone(documents: dict[str, Document]) -> None
     assert name not in surface, f"{name} is reachable from a pull request"
     violations = trigger_violations(document)
     assert not violations, f"{name} can publish more than main: {violations}"
+    declared = frozenset(triggers(document))
+    assert declared == PUBLISHER_TRIGGERS, (
+        f"{name} declares {sorted(declared)}, not {sorted(PUBLISHER_TRIGGERS)}"
+    )
 
 
 def test_the_upload_is_guarded_on_the_ref_and_the_token(
@@ -248,6 +266,9 @@ def test_the_pull_request_lane_measures_what_the_baseline_measures(
     assert len(baseline) == 1, f"the publisher runs {len(baseline)} coverage steps"
     assert _inputs(baseline[0]).get("with-ratchet") == "true", (
         "the publisher must write the ratchet baseline"
+    )
+    assert _selection(baseline[0]) == COVERAGE_SELECTION, (
+        f"the baseline measures {_selection(baseline[0])}, not {COVERAGE_SELECTION}"
     )
     surface = pull_request_surface(documents, REPOSITORY)
     for lane_document in surface.values():

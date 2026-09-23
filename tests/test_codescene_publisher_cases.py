@@ -24,6 +24,9 @@ from tests.helpers.codescene_publisher import (
 from tests.helpers.codescene_reach import retired_names
 from tests.helpers.workflow_reading import WorkflowReadingError, load_document
 
+#: A full-length commit pin, as the publisher rules require.
+PIN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
 PUBLISHER = """\
 on:
   push:
@@ -36,18 +39,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@abc
+        uses: leynos/shared-actions/.github/actions/generate-coverage@<pin>
         with:
           with-ratchet: 'true'
       - name: Upload
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@abc
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@<pin>
         with:
           mode: upload
           access-token: ${{ env.CS_ACCESS_TOKEN }}
-"""
+""".replace("<pin>", PIN)
 
 
 def _publisher_violations(text: str) -> list[str]:
@@ -66,6 +69,7 @@ def _publisher_violations(text: str) -> list[str]:
         + binding_violations(document, step)
         + concurrency_violations(document)
         + neutralized_steps(document)
+        + input_violations(step)
     )
 
 
@@ -105,8 +109,26 @@ def test_the_compliant_publisher_passes() -> None:
         pytest.param(
             "group: coverage-main-${{ github.ref }}",
             "group: coverage-main",
-            "not keyed on github.ref",
+            "is not keyed on",
             id="sweep-6-group-shared-across-refs",
+        ),
+        pytest.param(
+            "group: coverage-main-${{ github.ref }}",
+            "group: coverage-main-github.ref",
+            "is not keyed on",
+            id="sweep-6-group-names-the-ref-unevaluated",
+        ),
+        pytest.param(
+            "    runs-on: ubuntu-latest\n",
+            "    runs-on: ubuntu-latest\n    concurrency:\n      group: publish\n",
+            "'publish' is not keyed on",
+            id="sweep-6-constant-job-group",
+        ),
+        pytest.param(
+            f"upload-codescene-coverage@{PIN}",
+            "upload-codescene-coverage@main",
+            "is not pinned to a commit",
+            id="upload-action-unpinned",
         ),
         pytest.param(
             "concurrency:\n  group: coverage-main-${{ github.ref }}\n"
@@ -118,7 +140,7 @@ def test_the_compliant_publisher_passes() -> None:
         pytest.param(
             "    runs-on: ubuntu-latest\n",
             "    runs-on: ubuntu-latest\n    concurrency:\n"
-            "      group: x\n      cancel-in-progress: true\n",
+            "      group: x-${{ github.ref }}\n      cancel-in-progress: true\n",
             "cancel-in-progress 'true'",
             id="sweep-6-job-level-cancel",
         ),

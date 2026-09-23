@@ -24,10 +24,13 @@ from tests.helpers.workflow_closure import (
 from tests.helpers.workflow_reading import (
     WorkflowReadingError,
     load_document,
+    read_workflow_tree,
     triggers,
 )
 
 if typ.TYPE_CHECKING:
+    from pathlib import Path
+
     from tests.helpers.workflow_reading import Document
 
 REPOSITORY = "leynos/example"
@@ -331,3 +334,25 @@ def test_main_only_entry_points_stay_off_the_surface(trigger: str) -> None:
     """
     surface = _entry_surface(trigger)
     assert ".github/workflows/entry.yml" not in surface, sorted(surface)
+
+
+def test_an_unlistable_workflow_directory_is_refused(tmp_path: Path) -> None:
+    """A tree whose workflows cannot be listed raises rather than reads empty."""
+    with pytest.raises(WorkflowReadingError, match="could not be listed"):
+        read_workflow_tree(tmp_path)
+
+
+def test_an_empty_workflow_directory_is_refused(tmp_path: Path) -> None:
+    """A tree with no workflow is the reader failing, not a compliant repository."""
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    with pytest.raises(WorkflowReadingError, match="no workflow was read"):
+        read_workflow_tree(tmp_path)
+
+
+def test_an_undecodable_workflow_is_refused(tmp_path: Path) -> None:
+    """A workflow that is not UTF-8 is refused by name at the boundary."""
+    directory = tmp_path / ".github" / "workflows"
+    directory.mkdir(parents=True)
+    (directory / "ci.yml").write_bytes(b"on: push\n\xff\xfe\n")
+    with pytest.raises(WorkflowReadingError, match=r"ci\.yml"):
+        read_workflow_tree(tmp_path)
