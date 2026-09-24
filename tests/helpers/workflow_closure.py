@@ -72,10 +72,14 @@ def refusal(reference: str, repository: str) -> str | None:
     --------
     >>> refusal("leynos/x/.github/workflows/a.yml@main", "leynos/x")
     'a qualified self-call runs at its ref, not at this checkout'
+    >>> refusal("leynos/x@main", "leynos/x")
+    'a qualified self-call runs at its ref, not at this checkout'
     >>> refusal("./.github/workflows/a.yml", "leynos/x") is None
     True
     """
-    if reference.casefold().startswith(f"{repository.casefold()}/"):
+    target = reference.casefold().split("@", 1)[0]
+    own = repository.casefold()
+    if target == own or target.startswith(f"{own}/"):
         return "a qualified self-call runs at its ref, not at this checkout"
     if reference.startswith(_LOCAL_PREFIXES) and "@" in reference:
         return "a local reference cannot name a ref"
