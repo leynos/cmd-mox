@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import math
 import os
+import queue
+import subprocess
 import sys
+import tempfile
+import threading
 import typing as typ
 from pathlib import Path
 
@@ -17,7 +21,7 @@ from cmd_mox.environment import (
     CMOX_IPC_TIMEOUT_ENV,
     CMOX_REAL_COMMAND_ENV_PREFIX,
 )
-from cmd_mox.ipc import Invocation, PassthroughRequest, Response
+from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 from cmd_mox.shim import (
     CMOX_SHIM_COMMAND_ENV,
     _create_invocation,
@@ -63,11 +67,83 @@ class _DummyStdin:
         return self._data
 
 
+class _InjectedOSError(OSError):
+    """Represent an I/O failure raised by a test double."""
+
+
+class _InjectedRuntimeError(RuntimeError):
+    """Represent a worker failure raised by a test double."""
+
+
+class _BufferedInput:
+    def __init__(
+        self,
+        chunks: cabc.Iterable[bytes],
+        after_read: cabc.Callable[[], None] | None = None,
+    ) -> None:
+        self._chunks = iter(chunks)
+        self._after_read = after_read
+        self.read_calls = 0
+
+    def read1(self, _size: int) -> bytes:
+        self.read_calls += 1
+        if self._after_read is not None:
+            self._after_read()
+        return next(self._chunks)
+
+
+class _DescriptorStdin(_DummyStdin):
+    encoding = "utf-8"
+    errors = "strict"
+
+    def __init__(self, descriptor: int, buffer: _BufferedInput | None = None) -> None:
+        super().__init__("", is_tty=False)
+        self._descriptor = descriptor
+        self.buffer = buffer
+
+    def fileno(self) -> int:
+        return self._descriptor
+
+
 def _assert_exit_code(exc: pytest.ExceptionInfo[BaseException], expected: int) -> None:
     """Assert that *exc* wraps a :class:`SystemExit` with the desired code."""
     err = exc.value
     assert isinstance(err, SystemExit)
     assert err.code == expected
+
+
+@pytest.fixture
+def stdin_pipe_descriptor() -> cabc.Iterator[int]:
+    """Yield an owned pipe descriptor for stdin polling tests.
+
+    Yields
+    ------
+    int
+        The read end of the pipe.
+    """
+    read_descriptor, write_descriptor = os.pipe()
+    try:
+        yield read_descriptor
+    finally:
+        os.close(read_descriptor)
+        os.close(write_descriptor)
+
+
+@pytest.fixture
+def stdin_pipe_descriptor_at_eof() -> cabc.Iterator[int]:
+    """Yield a pipe read descriptor after closing its writer.
+
+    Yields
+    ------
+    int
+        The read end of the pipe, which returns EOF immediately.
+    """
+    read_descriptor, write_descriptor = os.pipe()
+    os.close(write_descriptor)
+    try:
+        yield read_descriptor
+    finally:
+        os.close(read_descriptor)
 
 
 def test_validate_environment_returns_timeout(
@@ -122,7 +198,7 @@ def test_create_invocation_skips_tty_stdin(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(sys, "argv", ["shim", "--flag"])
     monkeypatch.setenv("EXTRA", "value")
 
-    invocation = _create_invocation("shim")
+    invocation = _create_invocation("shim", timeout=1.0)
 
     assert invocation.command == "shim"
     assert invocation.args == ["--flag"]
@@ -139,10 +215,444 @@ def test_create_invocation_reads_stdin_when_not_tty(
     monkeypatch.setattr(sys, "stdin", dummy_stdin)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
-    invocation = _create_invocation("shim")
+    invocation = _create_invocation("shim", timeout=1.0)
 
     assert invocation.stdin == "payload"
     assert dummy_stdin.read_calls == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_preserves_buffered_stdin(
+    monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor_at_eof: int
+) -> None:
+    """Bytes already buffered by stdin are included in the invocation."""
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        _DescriptorStdin(
+            stdin_pipe_descriptor_at_eof,
+            buffer=_BufferedInput([b"buffered", b""]),
+        ),
+    )
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "buffered", "Buffered stdin bytes were lost"
+    assert os.get_blocking(stdin_pipe_descriptor_at_eof), (
+        "stdin blocking mode was not restored"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_checks_deadline_between_buffered_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin_pipe_descriptor_at_eof: int,
+) -> None:
+    """Buffered input cannot extend the deadline past its configured bound."""
+    clock = {"value": 0.0}
+
+    buffer = _BufferedInput([b"buffered"], lambda: clock.__setitem__("value", 2.0))
+    stdin = _DescriptorStdin(stdin_pipe_descriptor_at_eof, buffer=buffer)
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(sys, "argv", ["shim"])
+    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: clock["value"])
+
+    with pytest.raises(SystemExit) as exc:
+        _create_invocation("shim", timeout=1.0)
+
+    _assert_exit_code(exc, 1)
+    assert buffer.read_calls == 1, "Buffered input bypassed the deadline"
+    assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+        "Buffered-input timeout must include an IPC diagnostic"
+    )
+    assert os.get_blocking(stdin_pipe_descriptor_at_eof), (
+        "stdin blocking mode was not restored"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_reads_regular_file_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regular-file stdin is read without changing its text semantics."""
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdin:
+        stdin.write("regular input")
+        stdin.seek(0)
+        monkeypatch.setattr(sys, "stdin", stdin)
+        monkeypatch.setattr(sys, "argv", ["shim"])
+
+        invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "regular input", "Regular-file stdin was not captured"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_bounds_stalled_regular_file_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A blocked read from poll-always-ready stdin still observes its deadline."""
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class _StalledRegularStdin(_DummyStdin):
+        def __init__(self, descriptor: int) -> None:
+            super().__init__("", is_tty=False)
+            self._descriptor = descriptor
+
+        def fileno(self) -> int:
+            return self._descriptor
+
+        def read(self) -> str:
+            started.set()
+            release.wait()
+            finished.set()
+            return ""
+
+    with tempfile.TemporaryFile() as regular_file:
+        monkeypatch.setattr(sys, "stdin", _StalledRegularStdin(regular_file.fileno()))
+        monkeypatch.setattr(sys, "argv", ["shim"])
+
+        try:
+            with pytest.raises(SystemExit) as exc:
+                _create_invocation("shim", timeout=0.05)
+
+            _assert_exit_code(exc, 1)
+            assert started.wait(timeout=1.0), "Regular-file reader did not start"
+            assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+                "Stalled regular-file input must include an IPC diagnostic"
+            )
+        finally:
+            release.set()
+
+        assert finished.wait(timeout=1.0), "Timed-out stdin worker did not stop"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_reports_stdin_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin_pipe_descriptor: int,
+) -> None:
+    """A non-tty stream that never becomes readable exits with an IPC error."""
+
+    class _NeverReadablePoll:
+        def register(self, _fd: int, _events: int) -> None:
+            pass
+
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            return []
+
+    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
+    monkeypatch.setattr(shim._shim_stdin.select, "poll", _NeverReadablePoll)
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    with pytest.raises(SystemExit) as exc:
+        _create_invocation("shim", timeout=0.01)
+
+    _assert_exit_code(exc, 1)
+    assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+        "stdin timeout must produce an IPC diagnostic"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_caps_large_poll_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin_pipe_descriptor: int,
+) -> None:
+    """A large valid timeout stays within the poll API's millisecond range."""
+
+    class _NeverReadablePoll:
+        def __init__(self) -> None:
+            self.timeouts: list[int] = []
+
+        def register(self, _fd: int, _events: int) -> None:
+            pass
+
+        def poll(self, timeout: int) -> list[tuple[int, int]]:
+            self.timeouts.append(timeout)
+            return []
+
+    poller = _NeverReadablePoll()
+    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
+    monkeypatch.setattr(shim._shim_stdin.select, "poll", lambda: poller)
+    monotonic_values = iter([0.0, 0.0, 1e308])
+    monkeypatch.setattr(
+        shim._shim_stdin.time, "monotonic", lambda: next(monotonic_values)
+    )
+
+    with pytest.raises(SystemExit):
+        _create_invocation("shim", timeout=1e308)
+
+    assert poller.timeouts == [shim._shim_stdin.MAX_POLL_TIMEOUT_MS], (
+        "large timeouts must be capped before conversion to milliseconds"
+    )
+    assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
+        "the capped poll path must retain the controlled timeout diagnostic"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_uses_select_when_poll_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor: int
+) -> None:
+    """A waitable POSIX descriptor remains bounded without ``select.poll``."""
+    select_timeouts: list[float] = []
+
+    def fake_select(
+        readers: list[int],
+        _writers: list[int],
+        _errors: list[int],
+        timeout: float,
+    ) -> tuple[list[int], list[int], list[int]]:
+        select_timeouts.append(timeout)
+        return readers, [], []
+
+    chunks = iter([b"payload", b""])
+    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
+    monkeypatch.delattr(shim._shim_stdin.select, "poll")
+    monkeypatch.setattr(shim._shim_stdin.select, "select", fake_select)
+    monkeypatch.setattr(shim._shim_stdin.os, "read", lambda _fd, _size: next(chunks))
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "payload", "select fallback should capture stdin"
+    assert select_timeouts[0] == 0, "select fallback should probe readiness immediately"
+    assert all(0 < timeout <= 1.0 for timeout in select_timeouts[1:]), (
+        "select fallback waits should remain within the configured deadline"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_falls_back_to_direct_read_when_unpollable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsupported descriptors retain the established direct-read behaviour."""
+
+    class _UnpollableStdin(_DummyStdin):
+        def fileno(self) -> int:
+            return 123
+
+    def fail_poll() -> typ.NoReturn:
+        raise _InjectedOSError
+
+    def fail_select(*_args: object) -> typ.NoReturn:
+        raise _InjectedOSError
+
+    stdin = _UnpollableStdin("payload", is_tty=False)
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(shim._shim_stdin.select, "poll", fail_poll)
+    monkeypatch.setattr(shim._shim_stdin.select, "select", fail_select)
+
+    invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "payload"
+    assert stdin.read_calls == 1
+
+
+def test_create_invocation_keeps_windows_stdin_read_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows continues to read standard input directly."""
+    stdin = _DummyStdin("payload", is_tty=False)
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(shim._shim_stdin.path_utils, "IS_WINDOWS", True)
+
+    assert (
+        shim._shim_stdin._read_stdin_until_eof(
+            1.0,
+            deadline=None,
+            on_error=shim._exit_ipc_error,
+        )
+        == "payload"
+    )
+    assert stdin.read_calls == 1
+
+
+def test_decode_stdin_chunk_reports_invalid_text() -> None:
+    """Decode failures flow through the shim's controlled error callback."""
+
+    def raise_error(exc: Exception) -> typ.NoReturn:
+        raise exc
+
+    with pytest.raises(UnicodeDecodeError):
+        shim._shim_stdin._decode_stdin_chunk(
+            shim._shim_stdin._stdin_decoder(), b"\xff", raise_error
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="regular-file worker is POSIX-specific")
+def test_regular_stdin_read_error_uses_controlled_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Errors from the regular-file worker return a diagnostic to the shim."""
+
+    class _FailingRegularStdin:
+        def __init__(self, descriptor: int) -> None:
+            self._descriptor = descriptor
+
+        def fileno(self) -> int:
+            return self._descriptor
+
+        def read(self) -> str:
+            raise _InjectedOSError
+
+    with tempfile.TemporaryFile() as regular_file:
+        monkeypatch.setattr(sys, "stdin", _FailingRegularStdin(regular_file.fileno()))
+        with pytest.raises(SystemExit) as exc:
+            shim._shim_stdin._read_stdin_until_eof(
+                1.0,
+                deadline=None,
+                on_error=shim._exit_ipc_error,
+            )
+
+    _assert_exit_code(exc, 1)
+    assert "IPC error:" in capsys.readouterr().err
+
+
+def test_regular_stdin_thread_start_error_uses_controlled_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Failure to start the bounded reader does not escape as a traceback."""
+
+    class _FailingThread:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> typ.NoReturn:
+            raise _InjectedRuntimeError
+
+    monkeypatch.setattr(shim._shim_stdin.threading, "Thread", _FailingThread)
+    with pytest.raises(SystemExit) as exc:
+        shim._shim_stdin._read_regular_stdin_until_deadline(
+            1.0,
+            shim._exit_ipc_error,
+        )
+
+    _assert_exit_code(exc, 1)
+    assert "IPC error:" in capsys.readouterr().err
+
+
+def test_await_regular_stdin_read_rejects_result_after_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker result arriving at the deadline is treated as a timeout."""
+    result_queue: queue.Queue[tuple[str, Exception | None]] = queue.Queue()
+    result_queue.put(("late input", None))
+    monotonic_values = iter([0.0, 1.0])
+    monkeypatch.setattr(
+        shim._shim_stdin.time,
+        "monotonic",
+        lambda: next(monotonic_values),
+    )
+
+    def raise_error(exc: Exception) -> typ.NoReturn:
+        raise exc
+
+    with pytest.raises(TimeoutError, match="timed out reading stdin"):
+        shim._shim_stdin._await_regular_stdin_read(result_queue, 1.0, raise_error)
+
+
+@pytest.mark.parametrize(
+    ("read_error", "expected_error"),
+    [
+        (BlockingIOError("try again"), None),
+        (OSError("raw stdin failed"), OSError),
+    ],
+)
+def test_read_raw_chunk_after_empty_buffer_handles_read_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    read_error: Exception,
+    expected_error: type[Exception] | None,
+) -> None:
+    """Non-blocking raw reads wait or report failures without escaping."""
+
+    class _ReadyPoller:
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            return [(123, 1)]
+
+    def raise_error(exc: Exception) -> typ.NoReturn:
+        raise exc
+
+    context = shim._shim_stdin._ReadContext(
+        descriptor=123,
+        poller=_ReadyPoller(),
+        deadline=1.0,
+        on_error=raise_error,
+    )
+    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: 0.0)
+
+    def fail_read(_descriptor: int, _size: int) -> bytes:
+        raise read_error
+
+    monkeypatch.setattr(shim._shim_stdin.os, "read", fail_read)
+
+    if expected_error is None:
+        assert shim._shim_stdin._read_raw_chunk_after_empty_buffer(context) is None
+    else:
+        with pytest.raises(expected_error, match="raw stdin failed"):
+            shim._shim_stdin._read_raw_chunk_after_empty_buffer(context)
+
+
+def test_read_raw_polled_stdin_reports_descriptor_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Errors from raw descriptor reads use the shim's error policy."""
+
+    class _ReadyPoller:
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            return [(123, 1)]
+
+    def raise_error(exc: Exception) -> typ.NoReturn:
+        raise exc
+
+    context = shim._shim_stdin._ReadContext(
+        descriptor=123,
+        poller=_ReadyPoller(),
+        deadline=1.0,
+        on_error=raise_error,
+    )
+    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: 0.0)
+
+    def fail_read(_descriptor: int, _size: int) -> bytes:
+        raise _InjectedOSError
+
+    monkeypatch.setattr(shim._shim_stdin.os, "read", fail_read)
+    with pytest.raises(_InjectedOSError):
+        shim._shim_stdin._read_raw_polled_stdin(context)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_normalises_piped_newlines(
+    monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor: int
+) -> None:
+    """Piped text preserves TextIO newline translation across byte chunks."""
+
+    class _ReadablePoll:
+        def register(self, _fd: int, _events: int) -> None:
+            pass
+
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            return [(stdin_pipe_descriptor, shim._shim_stdin.select.POLLIN)]
+
+    chunks = iter([b"first\r", b"\nsecond\rthird", b""])
+    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
+    monkeypatch.setattr(shim._shim_stdin.select, "poll", _ReadablePoll)
+    monkeypatch.setattr(shim._shim_stdin.os, "read", lambda _fd, _size: next(chunks))
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "first\nsecond\nthird", (
+        "bounded stdin reads must preserve universal-newline translation"
+    )
 
 
 @pytest.mark.parametrize(
@@ -173,7 +683,7 @@ def test_create_invocation_normalizes_windows_args(
     monkeypatch.setenv("EXTRA", "1")
     monkeypatch.setattr(sys, "stdin", _DummyStdin("ignored", is_tty=True))
 
-    invocation = shim._create_invocation("shim")
+    invocation = shim._create_invocation("shim", timeout=1.0)
 
     assert invocation.args == [r"foo^bar", r"arg^"]
 
@@ -247,9 +757,12 @@ def test_execute_invocation_returns_response_without_passthrough(
 
     calls: dict[str, typ.Any] = {}
 
-    def fake_invoke(inv: Invocation, timeout: float) -> Response:
+    def fake_invoke(
+        inv: Invocation, timeout: float, *, deadline: float | None = None
+    ) -> Response:
         calls["invocation"] = inv
         calls["timeout"] = timeout
+        calls["deadline"] = deadline
         return expected
 
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
@@ -268,6 +781,7 @@ def test_execute_invocation_returns_response_without_passthrough(
     assert result is expected
     assert calls["invocation"] is invocation
     assert math.isclose(calls["timeout"], 1.5)
+    assert calls["deadline"] is None, "No shared deadline should be synthesized"
 
 
 def test_execute_invocation_processes_passthrough(
@@ -288,10 +802,17 @@ def test_execute_invocation_processes_passthrough(
 
     monkeypatch.setattr(shim, "invoke_server", lambda *args, **kwargs: intermediate)
 
-    def fake_passthrough(inv: Invocation, resp: Response, timeout: float) -> Response:
+    def fake_passthrough(
+        inv: Invocation,
+        resp: Response,
+        timeout: float,
+        *,
+        deadline: float | None = None,
+    ) -> Response:
         assert inv is invocation
         assert resp is intermediate
         assert math.isclose(timeout, 2.0)
+        assert deadline is None
         return final
 
     monkeypatch.setattr(shim, "_handle_passthrough", fake_passthrough)
@@ -299,6 +820,70 @@ def test_execute_invocation_processes_passthrough(
     result = _execute_invocation(invocation, timeout=2.0)
 
     assert result is final
+
+
+def test_execute_invocation_shares_deadline_with_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Passthrough reporting receives only the original request's remainder."""
+    invocation = Invocation(
+        command="cmd", args=[], stdin="", env={}, invocation_id="abc"
+    )
+    directive = PassthroughRequest(
+        invocation_id="abc",
+        lookup_path="/bin",
+        extra_env={},
+        timeout=2.0,
+    )
+    intermediate = Response(passthrough=directive)
+    final = Response(stdout="done", stderr="", exit_code=0)
+    now = {"value": 100.0}
+    timeouts: list[float] = []
+    deadlines: list[float | None] = []
+
+    monkeypatch.setattr(shim.time, "monotonic", lambda: now["value"])
+
+    def fake_invoke(
+        _inv: Invocation, timeout: float, *, deadline: float | None = None
+    ) -> Response:
+        timeouts.append(timeout)
+        deadlines.append(deadline)
+        now["value"] = 100.6
+        return intermediate
+
+    monkeypatch.setattr(shim, "invoke_server", fake_invoke)
+    monkeypatch.setattr(shim, "_run_real_command", lambda *_args: Response(exit_code=0))
+
+    def fake_report(
+        _result: PassthroughResult,
+        timeout: float,
+        *,
+        deadline: float | None = None,
+    ) -> Response:
+        timeouts.append(timeout)
+        deadlines.append(deadline)
+        return final
+
+    monkeypatch.setattr(shim, "report_passthrough_result", fake_report)
+
+    result = _execute_invocation(invocation, timeout=1.0, deadline=101.0)
+
+    assert result is final
+    assert timeouts == pytest.approx([1.0, 0.4])
+    assert deadlines == [101.0, 101.0], "The absolute deadline must span both IPC calls"
+
+
+def test_timeout_remaining_without_deadline_returns_configured_timeout() -> None:
+    """No shared deadline preserves the cooperative timeout value."""
+    assert shim._timeout_remaining(2.5, None) == pytest.approx(2.5), (
+        "A missing deadline must leave the configured timeout unchanged"
+    )
+
+
+def test_timeout_remaining_keeps_shim_timeout_diagnostic() -> None:
+    """An expired shared deadline retains the shim's established message."""
+    with pytest.raises(TimeoutError, match="IPC operation timed out"):
+        shim._timeout_remaining(2.5, 0.0)
 
 
 def test_execute_invocation_surfaces_ipc_errors(
@@ -321,6 +906,35 @@ def test_execute_invocation_surfaces_ipc_errors(
     assert "IPC error: boom" in capsys.readouterr().err
 
 
+def test_passthrough_report_failure_preserves_nonzero_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Reporting a failed passthrough exits through its determined status."""
+    invocation = Invocation(
+        command="cmd", args=[], stdin="", env={}, invocation_id="abc"
+    )
+    directive = PassthroughRequest(
+        invocation_id="abc", lookup_path="/bin", extra_env={}, timeout=1.0
+    )
+    response = Response(passthrough=directive)
+
+    monkeypatch.setattr(shim, "_run_real_command", lambda *_args: Response(exit_code=2))
+
+    def raise_error(*_: object, **__: object) -> typ.NoReturn:
+        msg = "server did not acknowledge passthrough"
+        raise TimeoutError(msg)
+
+    monkeypatch.setattr(shim, "report_passthrough_result", raise_error)
+
+    with pytest.raises(SystemExit) as exc:
+        shim._handle_passthrough(invocation, response, timeout=1.0)
+
+    _assert_exit_code(exc, 2)
+    assert (
+        "IPC error: server did not acknowledge passthrough" in capsys.readouterr().err
+    ), "passthrough report failures must be diagnosed"
+
+
 def test_write_response_updates_environment_and_streams(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -338,9 +952,98 @@ def test_write_response_updates_environment_and_streams(
     assert os.environ["NEW"] == "value"
 
 
+def test_write_response_handles_closed_stdout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A closed output stream produces a controlled IPC failure."""
+
+    class _ClosedWriter:
+        def write(self, _text: str) -> typ.NoReturn:
+            msg = "closed stdout"
+            raise BrokenPipeError(msg)
+
+    monkeypatch.setattr(sys, "stdout", _ClosedWriter())
+
+    with pytest.raises(SystemExit) as exc:
+        _write_response(Response(stdout="out", stderr="server diagnostic", exit_code=3))
+
+    _assert_exit_code(exc, 3)
+    stderr = capsys.readouterr().err
+    assert "server diagnostic" in stderr, (
+        "stdout failure must not discard the response stderr"
+    )
+    assert "IPC error: closed stdout" in stderr, (
+        "closed output streams must produce an IPC diagnostic"
+    )
+
+
+def test_write_response_handles_stdout_flush_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A deferred output failure keeps the response exit code."""
+
+    class _FlushFailure:
+        def write(self, text: str) -> int:
+            return len(text)
+
+        def flush(self) -> typ.NoReturn:
+            msg = "closed stdout during flush"
+            raise BrokenPipeError(msg)
+
+    monkeypatch.setattr(sys, "stdout", _FlushFailure())
+
+    with pytest.raises(SystemExit) as exc:
+        _write_response(Response(stdout="out", exit_code=3))
+
+    _assert_exit_code(exc, 3)
+    assert "IPC error: closed stdout during flush" in capsys.readouterr().err, (
+        "flush failures must produce a controlled IPC diagnostic"
+    )
+
+
+@pytest.mark.parametrize("stream_name", ["stdout", "stderr"])
+def test_write_response_preserves_exit_code_after_flush_failure(
+    stream_name: str,
+) -> None:
+    """A child process keeps the chosen status through interpreter shutdown."""
+    script = """
+import sys
+from cmd_mox.ipc import Response
+from cmd_mox.shim import _write_response
+
+class FailedStream:
+    def write(self, text):
+        return len(text)
+    def flush(self):
+        raise BrokenPipeError("closed stream")
+
+stream_name = "__STREAM_NAME__"
+failed_stream = FailedStream()
+setattr(sys, stream_name, failed_stream)
+setattr(sys, f"__{stream_name}__", failed_stream)
+_write_response(Response(exit_code=7, **{stream_name: "payload"}))
+""".replace("__STREAM_NAME__", stream_name)
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - launches a fixed local Python test script
+        [sys.executable, "-c", script],
+        capture_output=True,
+        check=False,
+        shell=False,
+        text=True,
+    )
+
+    assert result.returncode == 7, (
+        "interpreter shutdown must preserve the configured response status"
+    )
+    if stream_name == "stdout":
+        assert "IPC error: closed stream" in result.stderr, (
+            "stdout failure must report the closed stream to stderr"
+        )
+
+
 def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The shim entrypoint should bootstrap and delegate in order."""
     calls: list[object] = []
+    monkeypatch.setattr(shim.time, "monotonic", lambda: 100.0)
 
     monkeypatch.setattr(shim, "bootstrap_shim_path", lambda: calls.append("bootstrap"))
     monkeypatch.setattr(
@@ -354,14 +1057,18 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shim,
         "_create_invocation",
-        lambda name: calls.append(("create", name)) or invocation,
+        lambda name, timeout, *, deadline: (
+            calls.append(("create", name, timeout, deadline)) or invocation
+        ),
     )
 
     response = Response(stdout="ok", stderr="", exit_code=0)
     monkeypatch.setattr(
         shim,
         "_execute_invocation",
-        lambda inv, timeout: calls.append(("execute", inv, timeout)) or response,
+        lambda inv, timeout, *, deadline: (
+            calls.append(("execute", inv, timeout, deadline)) or response
+        ),
     )
     monkeypatch.setattr(
         shim, "_write_response", lambda resp: calls.append(("write", resp))
@@ -373,8 +1080,18 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
         "bootstrap",
         "resolve",
         "validate",
-        ("create", "shim"),
-        ("execute", invocation, 1.0),
+        (
+            "create",
+            "shim",
+            1.0,
+            None if shim.path_utils.IS_WINDOWS else 101.0,
+        ),
+        (
+            "execute",
+            invocation,
+            1.0,
+            None if shim.path_utils.IS_WINDOWS else 101.0,
+        ),
         ("write", response),
     ]
 

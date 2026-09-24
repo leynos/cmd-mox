@@ -200,6 +200,28 @@ dispatch:
   results, and an `error_category` only on failure. Payloads, arguments,
   standard streams, environments, socket paths, and exception messages must
   never be logged.
+- Outcomes are `success`, `invalid_request` for validation failures,
+  `rejection_frame` for parse failures, and `handler_error`. Parse failures
+  return a bounded error response and use `RequestParseError` as their error
+  category; validation failures keep the `invalid_request` outcome and use
+  `ValidationError`. An empty read is treated as a closed connection, so
+  readiness probes emit neither a dispatch record nor a response frame.
+
+## IPC deadlines and stdin reads
+
+On POSIX, the shim carries one monotonic deadline through stdin reading, Unix
+socket connection retries, request sending, response reads, and passthrough
+reporting. The client stores that deadline in `_ConnectionContext` and applies
+only the remaining time before each blocking socket operation. The Unix server
+also keeps one read deadline per accepted connection and updates the socket
+timeout before each receive, so a client that slowly streams a request cannot
+renew its full wait budget with every byte.
+
+The shim polls pipe-like stdin descriptors when possible. It reads regular-file
+stdin on a daemon worker because regular files cannot provide a bounded poll
+wait. Windows streams and descriptors that cannot be polled retain direct
+reads; the Windows named-pipe IPC client keeps its existing cooperative timeout
+behaviour.
 
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs from
 `CommandDouble.name`. It performs that command-name check before expectation

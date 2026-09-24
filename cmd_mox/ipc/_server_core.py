@@ -287,7 +287,9 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
 
 
 type _RequestProcessor = typ.Literal["handle_invocation", "handle_passthrough_result"]
-type _DispatchOutcome = typ.Literal["success", "invalid_request", "handler_error"]
+type _DispatchOutcome = typ.Literal[
+    "success", "invalid_request", "rejection_frame", "handler_error"
+]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
     KIND_INVOCATION: (validate_invocation_payload, "handle_invocation"),
@@ -386,6 +388,10 @@ def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
     dict[str, typ.Any] or None
         The decoded payload, or ``None`` when *raw* is not a JSON mapping.
     """
+    if raw == b"":
+        logger.info("IPC connection closed before request was received")
+        return None
+
     payload = parse_json_safely(raw)
     if payload is not None:
         return payload
@@ -544,15 +550,29 @@ def _request_pipeline(
     Returns
     -------
     bytes or None
-        The encoded response, or ``None`` when the request was unparseable or
-        failed validation.
+        The encoded response, or ``None`` when the connection closed without
+        sending a request.
     """
     # Scope the measurement to the whole pipeline so parsing, validation, and
     # hook execution are all attributed to the dispatch record.
     started = time.perf_counter()
     parsed = _parse_payload(raw)
     if parsed is None:
-        return None
+        if raw == b"":
+            return None
+        _emit_dispatch_outcome(
+            _DispatchRecord(
+                kind="unknown",
+                request=None,
+                outcome="rejection_frame",
+                duration_ms=_observability.elapsed_ms(started),
+                error_category="RequestParseError",
+                transport=transport,
+            )
+        )
+        return _encode_response(
+            Response(stderr="IPC request could not be parsed", exit_code=1)
+        )
 
     obj = parsed.validate()
     if obj is None:
@@ -567,7 +587,9 @@ def _request_pipeline(
                 transport=transport,
             )
         )
-        return None
+        return _encode_response(
+            Response(stderr="IPC request payload failed validation", exit_code=1)
+        )
 
     response, error_category = _execute_request(server, parsed.processor, obj)
     outcome: _DispatchOutcome = "success"

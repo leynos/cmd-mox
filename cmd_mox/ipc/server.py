@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import socketserver
 import threading
 import typing as typ
 
 from cmd_mox import _path_utils as path_utils
 
+from ._deadline import _compute_deadline, _remaining_time
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -16,6 +18,8 @@ from ._server_core import (
     _request_pipeline,
 )
 from .socket_utils import cleanup_stale_socket, wait_for_socket
+
+logger = logging.getLogger(__name__)
 
 
 def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
@@ -116,13 +120,49 @@ class CallbackIPCServer(IPCServer):
 class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
+    def setup(self) -> None:
+        self._read_deadline = _compute_deadline(
+            self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
+        )
+        self.request.settimeout(_remaining_time(self._read_deadline))
+        super().setup()
+
+    def _read_request_payload(self) -> bytes:
+        """Read through EOF without renewing the accepted connection budget.
+
+        Returns
+        -------
+        bytes
+            The request payload received before the connection reaches EOF.
+        """
+        chunks: list[bytes] = []
+        while True:
+            self.request.settimeout(_remaining_time(self._read_deadline))
+            chunk = self.request.recv(64 * 1024)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
-        raw = self.rfile.read()
+        try:
+            raw = self._read_request_payload()
+        except TimeoutError:
+            logger.info("IPC connection timed out while receiving request")
+            return
+        except OSError:
+            logger.info("IPC connection closed while receiving request")
+            return
         response_bytes = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
         if response_bytes is None:
             return
-        self.wfile.write(response_bytes)
-        self.wfile.flush()
+        try:
+            self.request.settimeout(
+                self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
+            )
+            self.wfile.write(response_bytes)
+            self.wfile.flush()
+        except OSError:
+            logger.info("IPC connection closed while sending response")
 
 
 class _InnerServer(_BaseUnixServer):

@@ -120,6 +120,12 @@ my_tool.clone_repo("repo")
 # Replay begins automatically before the test function executes; verification runs during teardown.
 ```
 
+The pytest fixture starts replay automatically and verifies expectations during
+teardown. To control the record → replay → verify lifecycle explicitly while
+using the fixture, disable that automatic lifecycle with
+`@pytest.mark.cmd_mox(auto_lifecycle=False)`; otherwise the fixture has already
+entered replay before the test body runs.
+
 ## Stubs, mocks and spies
 
 Use the controller to register doubles:
@@ -879,9 +885,15 @@ server.
   if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
-  exported automatically (default `5.0`). Override this to tune how long
-  clients wait for each connect/send/receive attempt before raising a
-  `TimeoutError`.
+  exported automatically (default `5.0`). On POSIX, this is one deadline shared
+  by reading piped or regular-file stdin, connecting to the Unix socket,
+  sending the request, receiving the response, and reporting passthrough
+  results. If stdin cannot be polled, the shim retains its direct-read
+  behaviour. On Windows, the named-pipe client keeps its existing cooperative
+  timeout behaviour. The IPC client raises `TimeoutError` when its available
+  time expires; the shim reports `IPC error: ...` to stderr and exits non-zero.
+  If a passthrough report fails, the shim preserves the real command's non-zero
+  exit status.
 
 Most tests should rely on the fixture to manage these variables.
 

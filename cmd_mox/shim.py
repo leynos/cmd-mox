@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import math
 import os
 import sys
+import time
 import typing as typ
 from pathlib import Path
 
@@ -57,7 +60,7 @@ if __name__ == "__main__":
 else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
 
-from cmd_mox import _path_utils as path_utils  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
+from cmd_mox import _path_utils as path_utils, _shim_stdin  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
 from cmd_mox.command_runner import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
     execute_command,
     prepare_environment,
@@ -76,6 +79,7 @@ from cmd_mox.ipc import (  # ruff: ignore[module-import-not-at-top-of-file] - sh
     invoke_server,
     report_passthrough_result,
 )
+from cmd_mox.ipc._deadline import _remaining_time  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
 
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
 
@@ -147,13 +151,27 @@ def _validate_environment() -> float:
     return timeout
 
 
-def _create_invocation(cmd_name: str) -> Invocation:
+def _exit_ipc_error(exc: Exception, exit_code: int = 1) -> typ.NoReturn:
+    """Print an IPC diagnostic and terminate with a controlled status."""
+    # A closed stderr cannot prevent the shim from returning a known status.
+    with contextlib.suppress(OSError, ValueError):
+        print(f"IPC error: {exc}", file=sys.stderr)
+    sys.exit(exit_code)
+
+
+def _create_invocation(
+    cmd_name: str, timeout: float, *, deadline: float | None = None
+) -> Invocation:
     """Create an invocation from command-line arguments and stdin.
 
     Parameters
     ----------
     cmd_name : str
         Command name associated with the shim process.
+    timeout : float
+        Maximum time available to read non-interactive standard input.
+    deadline : float or None, optional
+        Shared monotonic deadline for stdin and subsequent IPC on POSIX.
 
     Returns
     -------
@@ -162,7 +180,13 @@ def _create_invocation(cmd_name: str) -> Invocation:
     """
     import uuid
 
-    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+    stdin_data = (
+        ""
+        if sys.stdin.isatty()
+        else _shim_stdin._read_stdin_until_eof(
+            timeout, deadline=deadline, on_error=_exit_ipc_error
+        )
+    )
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
     if path_utils.IS_WINDOWS:
@@ -176,7 +200,31 @@ def _create_invocation(cmd_name: str) -> Invocation:
     )
 
 
-def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
+def _timeout_remaining(timeout: float, deadline: float | None) -> float:
+    """Return the remaining shared budget, or the original timeout.
+
+    Returns
+    -------
+    float
+        Remaining time before *deadline*, or *timeout* when no deadline exists.
+
+    Raises
+    ------
+    TimeoutError
+        If the shared deadline has expired.
+    """
+    if deadline is None:
+        return timeout
+    try:
+        return _remaining_time(deadline)
+    except TimeoutError:
+        msg = "IPC operation timed out"
+        raise TimeoutError(msg) from None
+
+
+def _execute_invocation(
+    invocation: Invocation, timeout: float, *, deadline: float | None = None
+) -> Response:
     """Execute an invocation via IPC, handling passthrough if needed.
 
     Parameters
@@ -185,6 +233,8 @@ def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
         Invocation to send to the IPC server.
     timeout : float
         IPC timeout in seconds.
+    deadline : float or None, optional
+        Shared monotonic deadline for the request and any passthrough report.
 
     Returns
     -------
@@ -192,17 +242,20 @@ def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
         Response returned by the server or passthrough command.
     """
     try:
-        response = invoke_server(invocation, timeout=timeout)
+        response = invoke_server(
+            invocation,
+            timeout=_timeout_remaining(timeout, deadline),
+            deadline=deadline,
+        )
     except (
         OSError,
         RuntimeError,
         json.JSONDecodeError,
     ) as exc:  # pragma: no cover - network issues
-        print(f"IPC error: {exc}", file=sys.stderr)
-        sys.exit(1)
+        _exit_ipc_error(exc)
 
     if response.passthrough is not None:
-        response = _handle_passthrough(invocation, response, timeout)
+        response = _handle_passthrough(invocation, response, timeout, deadline=deadline)
     return response
 
 
@@ -211,9 +264,56 @@ def _write_response(response: Response) -> None:
     if response.env:
         os.environ |= response.env
 
-    sys.stdout.write(response.stdout)
-    sys.stderr.write(response.stderr)
+    write_failures = [
+        failure
+        for stream_name, text in (
+            ("stdout", response.stdout),
+            ("stderr", response.stderr),
+        )
+        if (failure := _write_response_stream(stream_name, text)) is not None
+    ]
+    if write_failures:
+        _exit_ipc_error(write_failures[0], exit_code=response.exit_code or 1)
     sys.exit(response.exit_code)
+
+
+def _write_response_stream(
+    stream_name: typ.Literal["stdout", "stderr"], text: str
+) -> Exception | None:
+    """Write one response stream and return its failure, if any."""  # ruff: ignore[docstring-missing-returns] - the annotation makes the optional failure explicit
+    stream = getattr(sys, stream_name)
+    try:
+        stream.write(text)
+        stream.flush()
+    except (OSError, ValueError) as exc:
+        _replace_failed_stream_with_sink(stream_name, stream)
+        return exc
+    return None
+
+
+def _replace_failed_stream_with_sink(
+    stream_name: typ.Literal["stdout", "stderr"], failed_stream: object
+) -> None:
+    """Prevent interpreter shutdown from retrying a failed stream flush."""
+    original_name = f"__{stream_name}__"
+    original_stream = getattr(sys, original_name, None)
+    if failed_stream is original_stream:
+        descriptor = 1 if stream_name == "stdout" else 2
+        try:
+            sink_descriptor = os.open(os.devnull, os.O_WRONLY)
+            if sink_descriptor != descriptor:
+                try:
+                    os.dup2(sink_descriptor, descriptor)
+                finally:
+                    os.close(sink_descriptor)
+        except OSError:
+            pass
+
+        sink = io.StringIO()
+        setattr(sys, original_name, sink)
+    else:
+        sink = io.StringIO()
+    setattr(sys, stream_name, sink)
 
 
 def main() -> None:
@@ -221,13 +321,18 @@ def main() -> None:
     bootstrap_shim_path()
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
-    invocation = _create_invocation(cmd_name)
-    response = _execute_invocation(invocation, timeout)
+    deadline = None if path_utils.IS_WINDOWS else time.monotonic() + timeout
+    invocation = _create_invocation(cmd_name, timeout, deadline=deadline)
+    response = _execute_invocation(invocation, timeout, deadline=deadline)
     _write_response(response)
 
 
 def _handle_passthrough(
-    invocation: Invocation, response: Response, timeout: float
+    invocation: Invocation,
+    response: Response,
+    timeout: float,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Execute the real command and report its outcome to the server.
 
@@ -239,6 +344,8 @@ def _handle_passthrough(
         Server response containing the passthrough directive.
     timeout : float
         IPC timeout in seconds.
+    deadline : float or None, optional
+        Shared monotonic deadline for the passthrough report.
 
     Returns
     -------
@@ -256,7 +363,14 @@ def _handle_passthrough(
         stderr=result_response.stderr,
         exit_code=result_response.exit_code,
     )
-    return report_passthrough_result(passthrough_result, timeout=timeout)
+    try:
+        return report_passthrough_result(
+            passthrough_result,
+            timeout=_timeout_remaining(timeout, deadline),
+            deadline=deadline,
+        )
+    except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+        _exit_ipc_error(exc, exit_code=result_response.exit_code or 1)
 
 
 def _shim_directory_from_env() -> Path | None:
