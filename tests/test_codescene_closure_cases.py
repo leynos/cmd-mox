@@ -105,6 +105,12 @@ def test_the_compliant_closure_passes() -> None:
             id="sweep-1-qualified-self-call",
         ),
         pytest.param(
+            CALLER.replace("./.github/workflows/probe.yml", "leynos/example@main"),
+            PROBE,
+            "qualified self-call",
+            id="sweep-1-qualified-root-self-call",
+        ),
+        pytest.param(
             CALLER.replace("probe.yml", "probe.yml@main").replace("./", "$/"),
             PROBE,
             "cannot name a ref",
@@ -302,6 +308,7 @@ def _entry_surface(trigger: str) -> dict[str, Document]:
         pytest.param("merge_group:", id="merge-group"),
         pytest.param("pull_request_review:", id="pull-request-review"),
         pytest.param("pull_request_review_comment:", id="review-comment"),
+        pytest.param("pull_request_target:", id="pull-request-target"),
         pytest.param("push:", id="push-every-branch"),
         pytest.param("push:\n    paths: ['src/**']", id="push-paths-only"),
         pytest.param("push:\n    branches: [dev]", id="push-other-branch"),
