@@ -1,25 +1,36 @@
 name: Coverage (main)
 
-# CodeScene accepts `cs-coverage upload` only for analysed branches, so
-# main-branch coverage is uploaded here on push; pull requests run the
-# coverage generation (and, in a future fast-follow, the changed-line
-# `cs-coverage check` gate) in ci.yml instead. This workflow also
-# advances the coverage ratchet baseline: caches saved on main are
-# readable by every pull-request run, so the baseline written here is
-# the one PR ratchet checks compare against.
+# The single CodeScene publisher. CodeScene accepts `cs-coverage upload`
+# only for analysed branches, so main's coverage is uploaded here on
+# push. Pull requests generate coverage with the ratchet this workflow
+# advances, and nothing a pull request runs receives CodeScene
+# credentials or contacts CodeScene. tests/test_codescene_coverage_contract.py
+# holds the shape.
 
 on:
   push:
     branches: [main]
+
+# One publisher run per ref at a time, never cancelled. GitHub keeps one
+# pending run per group, so a newer push replaces an older pending run
+# and never interrupts a running one; the newest baseline wins. A
+# cancelled run would abandon both its upload and its ratchet baseline
+# write. The group is keyed on the ref alone: a branch dispatch cannot
+# displace a pending main run, and with one group for main, runs never
+# overlap and the newest triggered run's coverage lands last. A manual
+# re-run of an older run is an operator action that republishes that
+# commit's coverage and baseline until the next push. A dispatch that
+# replaces a pending push leaves the ratchet baseline one commit behind
+# until the next push, because only a push saves it.
+concurrency:
+  group: coverage-main-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   coverage-upload:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN || '' }}
-      CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 || '' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,11 +53,27 @@ jobs:
           pytest-workers: ''
           with-ratchet: 'true'
 
+      # Whether the token is set, as a plain output. The expression is
+      # evaluated before the shell runs, so this step binds nothing: the
+      # token is in no step's env, because the upload action is composite
+      # and passes its step env to nested upload-artifact and cache steps.
+      - name: Check CodeScene token
+        id: codescene-token
+        run: echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
       - name: Upload coverage data to CodeScene
-        if: env.CS_ACCESS_TOKEN
+        # The ref as well as the token. This workflow declares no
+        # `workflow_dispatch` today, so the ref is always main; the guard
+        # is here because a dispatch can aim at any branch, and the upload
+        # carries no ref of its own.
+        if: >-
+          steps.codescene-token.outputs.available == 'true'
+          && github.ref == 'refs/heads/main'
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           format: cobertura
           path: coverage.xml
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
-          installer-checksum: ${{ env.CODESCENE_CLI_SHA256 }}
+          mode: upload
+          access-token: ${{ secrets.CS_ACCESS_TOKEN }}
+          # No checksum input: the action pins the CLI through its own
+          # manifest, and `installer-checksum` is rejected from this pin.
