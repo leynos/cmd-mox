@@ -39,7 +39,7 @@ repository's own baseline.
 
 ### Workflow contract helpers
 
-`tests/helpers/test_codescene_coverage_contract.py` holds the rule over this
+`tests/test_codescene_coverage_contract.py` holds the rule over this
 repository's workflows. `test_codescene_closure_cases.py` and
 `test_codescene_publisher_cases.py` beside it drive the same readings over
 constructed documents, one breach each, so every clause is shown to catch what
@@ -54,7 +54,8 @@ it names. The readings live in `tests/helpers/`:
   `workflow_run`, or by a push to any branch other than `main`, and every local
   workflow or composite action they reach through `./` or `$/` references. It
   refuses qualified self-calls and local references carrying `@ref`.
-- `codescene_reach.py` and `codescene_publisher.py` hold the CodeScene clauses.
+- `codescene_reach.py`, `codescene_publisher.py`, and `codescene_binding.py`
+  hold the CodeScene clauses.
 
 The two generic modules know nothing about CodeScene and may be reused by any
 workflow contract in this repository. They are test support only: nothing under
