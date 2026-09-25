@@ -8,6 +8,10 @@ second lint tier.
 Amended 2026-08-27 to add a third lint tier; see
 [Amendment (2026-08-27): third lint tier](#amendment-2026-08-27-third-lint-tier).
 
+Amended 2026-09-25 to retire `pylint-pypy-shim` and to stop disabling
+`syntax-error`; see
+[Amendment (2026-09-25): plain Pylint on PyPy 3.12](#amendment-2026-09-25-plain-pylint-on-pypy-312).
+
 ## Date
 
 2026-05-15.
@@ -107,3 +111,24 @@ the temporary PyPy baseline.
 
 Consequence: the DF12 plugin and snapshot scanner run on CPython 3.14 without
 changing the PyPy-backed Pylint baseline.
+
+## Amendment (2026-09-25): plain Pylint on PyPy 3.12
+
+PyPy 8 implements Python 3.12, and uv provides it as a managed interpreter.
+Pylint runs on it without the object-build patch that `pylint-pypy-shim`
+supplied, so the second tier now runs a pinned Pylint directly:
+
+```sh
+uv tool run --managed-python --python pypy@3.12 \
+  --from 'pylint==$(PYLINT_VERSION)' pylint
+```
+
+The interpreter is pinned to `pypy@3.12` rather than a bare `pypy`, so a new
+PyPy release cannot change the lint grammar without a commit.
+
+The `syntax-error` disable is removed. While it was in place, every module the
+PyPy 3.11 runtime could not parse (PEP 695 type aliases, for example) produced
+no messages at all and the tier passed. Those modules were never linted.
+Removing the disable makes a parse failure a lint failure, and the findings
+that PyPy 3.12 then reported in previously skipped modules are fixed in the
+same change.
