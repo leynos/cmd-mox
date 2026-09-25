@@ -29,6 +29,10 @@ concurrency:
 jobs:
   coverage-upload:
     runs-on: ubuntu-latest
+    # The CodeScene token lives in this environment, whose deployment policy
+    # admits `main` alone; the codescene_environment contract holds it to
+    # this job.
+    environment: codescene
     permissions:
       contents: read
     steps:
