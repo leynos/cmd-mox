@@ -115,7 +115,7 @@ def test_ipcserver_default_invocation_behaviour(
         response = invoke_server(invocation, timeout=1.0)
 
     assert response.stdout == "cmd", "Assertion failed"
-    assert response.stderr == "", "Assertion failed"
+    assert not response.stderr, "Assertion failed"
     assert response.exit_code == 0, "Assertion failed"
 
 
@@ -168,7 +168,7 @@ def test_ipcserver_handler_exception(
 
     assert response.exit_code == 1, "Assertion failed"
     assert "handler failed" in response.stderr, "Assertion failed"
-    assert response.stdout == "", "Assertion failed"
+    assert not response.stdout, "Assertion failed"
 
 
 @pytest.mark.usefixtures("tmp_path")
@@ -190,7 +190,7 @@ def test_ipcserver_default_passthrough_error(
 
     assert response.exit_code == 1, "Assertion failed"
     assert "Unhandled passthrough result for 123" in response.stderr, "Assertion failed"
-    assert response.stdout == "", "Assertion failed"
+    assert not response.stdout, "Assertion failed"
 
 
 @pytest.mark.usefixtures("tmp_path")
@@ -244,7 +244,7 @@ def test_handle_invocation_default(tmp_path: Path) -> None:
     response = server.handle_invocation(invocation)
 
     assert response.stdout == "cmd", "Assertion failed"
-    assert response.stderr == "", "Assertion failed"
+    assert not response.stderr, "Assertion failed"
     assert response.exit_code == 0, "Assertion failed"
 
 
@@ -478,7 +478,7 @@ def test_request_pipeline_validation_failure_returns_none(
     response_bytes = _server_core._request_pipeline(ipc_server, raw)
 
     assert response_bytes is None, "Validation failure should suppress the response"
-    assert calls == [], "Validation failure should prevent processor dispatch"
+    assert not calls, "Validation failure should prevent processor dispatch"
 
 
 def test_decode_payload_rejects_non_mapping(caplog: pytest.LogCaptureFixture) -> None:

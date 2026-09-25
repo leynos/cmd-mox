@@ -102,7 +102,7 @@ def test_emit_counts_events_by_bounded_key() -> None:
     key = _observability.EventKey("ipc.test", "unix", "success")
     assert _observability.counter_snapshot()[key] == 2, "Counter must aggregate"
     _observability.reset_counters()
-    assert _observability.counter_snapshot() == {}, "Reset must clear counters"
+    assert not _observability.counter_snapshot(), "Reset must clear counters"
 
 
 def test_capture_events_collects_emissions() -> None:

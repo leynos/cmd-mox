@@ -84,7 +84,9 @@ class DoubleKind(enum.StrEnum):
 
 
 # ruff: ignore[too-many-public-methods] - deliberately wide fluent stub/mock/spy
-# builder API; splitting it would fragment a single cohesive DSL.
+# builder API; splitting it would fragment a single cohesive DSL. Pylint's
+# R0904 is the same finding, so it carries the same rationale.
+# pylint: disable-next=too-many-public-methods
 class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-base]  # runtime proxy; satisfies typing-only protocol
     """Configuration for a stub, mock, or spy command."""
 

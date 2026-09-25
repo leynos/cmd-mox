@@ -11,16 +11,15 @@ RUFF = $(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)
 TY = $(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty
 TYPOS_VERSION ?= 1.48.0
 TYPOS := $(UV) tool run typos@$(TYPOS_VERSION)
-PYLINT_PYTHON ?= pypy
+PYLINT_PYTHON ?= pypy@3.12
+PYLINT_VERSION ?= 4.0.9
 PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
-PYLINT_PYPY_SHIM_REF ?= 726d09f968b4d729ee4b29c71fc732e744854f3b
-PYLINT_PYPY_SHIM = git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)
 # too-many-lines is enforced by the df12 tier at its 800-line review ceiling
 # (pylintrc-df12.toml); too-many-arguments/too-many-positional-arguments
 # remain for pytest-bdd step wrappers, mirroring the Ruff per-file ignores
 # for tests/steps.
 PYLINT_BASELINE_DISABLE = too-many-lines,too-many-arguments,too-many-positional-arguments
-PYLINT = $(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)
+PYLINT = $(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' pylint --disable=$(PYLINT_BASELINE_DISABLE)
 DF12_PYTHON ?= 3.14
 # Commit SHA of the df12-python-lints v0.3.0 tag.
 DF12_PYTHON_LINTS_REF ?= 4cf41736cce2f7ba2778882a5c629c044568a0e5

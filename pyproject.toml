@@ -210,10 +210,6 @@ max-positional-arguments = 4
 # Keep this Pylint pass focused on the explicitly selected messages.
 disable = [
     "all",
-    # Managed PyPy currently parses a narrower Python grammar than this
-    # project uses for PEP 695 type aliases. Keep the PyPy-backed Pylint tier
-    # useful for files it can parse.
-    "syntax-error",
 ]
 enable = [
     # Logging format safety.

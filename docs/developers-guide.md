@@ -73,7 +73,7 @@ The `lint` target first builds the development environment through
 `make build`. It then runs the three lint tiers in order:
 
 1. `ruff check`
-2. PyPy-backed Pylint through `pylint-pypy-shim`
+2. Pylint on uv-managed PyPy 3.12
 3. CPython 3.14 Pylint with `df12_python_lints`, followed by `ambrleaks`
 
 Ruff is the fast first tier. It enforces import order, pycodestyle and Pyflakes
@@ -98,24 +98,23 @@ The `Makefile` exposes the lint runner through variables so developers and
 Continuous Integration (CI) jobs can override the runtime without editing
 project files.
 
-| Variable                  | Default                                                                                                                            | Purpose                                                                           |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `RUFF_VERSION`            | `0.16.4`                                                                                                                           | Pins the Ruff release used by lint and format targets.                            |
-| `RUFF`                    | `$(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)`                                                                                    | Runs the pinned Ruff command via `uv tool run`.                                   |
-| `TY_VERSION`              | `0.0.74`                                                                                                                           | Pins the `ty` release used by the typecheck target.                               |
-| `TY`                      | `$(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty`                                                                                  | Overlays the pinned `ty` onto the project virtualenv so it sees dependencies.     |
-| `TYPOS_VERSION`           | `1.48.0`                                                                                                                           | Pins the `typos` release used by the spelling target.                             |
-| `PYLINT_PYTHON`           | `pypy`                                                                                                                             | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
-| `PYLINT_TARGETS`          | `cmd_mox conftest.py examples tests`                                                                                               | Lists the directories and files linted by Pylint.                                 |
-| `PYLINT_PYPY_SHIM_REF`    | `726d09f968b4d729ee4b29c71fc732e744854f3b`                                                                                         | Pins the shim repository revision.                                                |
-| `PYLINT_PYPY_SHIM`        | `git+https://github.com/leynos/pylint-pypy-shim.git@$(PYLINT_PYPY_SHIM_REF)`                                                       | Identifies the shim package used by `uv tool run`.                                |
-| `PYLINT_BASELINE_DISABLE` | Existing cmd-mox baseline                                                                                                          | Temporarily disables legacy Pylint findings while keeping the second tier active. |
-| `PYLINT`                  | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from '$(PYLINT_PYPY_SHIM)' pylint-pypy --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy-backed Pylint command.                                       |
-| `DF12_PYTHON`             | `3.14`                                                                                                                             | Selects CPython for the isolated DF12 tooling tier.                               |
-| `DF12_PYTHON_LINTS_REF`   | `4cf41736cce2f7ba2778882a5c629c044568a0e5`                                                                                         | Pins the immutable DF12 lint and `ambrleaks` revision (the `v0.3.0` tag commit).  |
-| `DF12_PYTHON_LINTS`       | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                     | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
-| `DF12_PYLINT`             | uv-isolated Pylint under CPython 3.14                                                                                              | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
-| `AMBRLEAKS`               | uv-isolated `ambrleaks` under CPython 3.14                                                                                         | Scans tracked test snapshot files for unredacted values.                          |
+| Variable                  | Default                                                                                                                             | Purpose                                                                           |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `RUFF_VERSION`            | `0.16.4`                                                                                                                            | Pins the Ruff release used by lint and format targets.                            |
+| `RUFF`                    | `$(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)`                                                                                     | Runs the pinned Ruff command via `uv tool run`.                                   |
+| `TY_VERSION`              | `0.0.74`                                                                                                                            | Pins the `ty` release used by the typecheck target.                               |
+| `TY`                      | `$(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty`                                                                                   | Overlays the pinned `ty` onto the project virtualenv so it sees dependencies.     |
+| `TYPOS_VERSION`           | `1.48.0`                                                                                                                            | Pins the `typos` release used by the spelling target.                             |
+| `PYLINT_PYTHON`           | `pypy@3.12`                                                                                                                         | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
+| `PYLINT_TARGETS`          | `cmd_mox conftest.py examples tests`                                                                                                | Lists the directories and files linted by Pylint.                                 |
+| `PYLINT_VERSION`          | `4.0.9`                                                                                                                             | Pins the Pylint release run by the second tier.                                   |
+| `PYLINT_BASELINE_DISABLE` | Existing cmd-mox baseline                                                                                                           | Temporarily disables legacy Pylint findings while keeping the second tier active. |
+| `PYLINT`                  | `$(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' pylint --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy Pylint command.                                              |
+| `DF12_PYTHON`             | `3.14`                                                                                                                              | Selects CPython for the isolated DF12 tooling tier.                               |
+| `DF12_PYTHON_LINTS_REF`   | `4cf41736cce2f7ba2778882a5c629c044568a0e5`                                                                                          | Pins the immutable DF12 lint and `ambrleaks` revision (the `v0.3.0` tag commit).  |
+| `DF12_PYTHON_LINTS`       | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                      | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
+| `DF12_PYLINT`             | uv-isolated Pylint under CPython 3.14                                                                                               | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
+| `AMBRLEAKS`               | uv-isolated `ambrleaks` under CPython 3.14                                                                                          | Scans tracked test snapshot files for unredacted values.                          |
 
 _Table 1: Makefile variables for the lint pipeline._
 
@@ -127,7 +126,7 @@ Override variables on the command line when a local investigation needs a
 different target set or interpreter:
 
 ```bash
-make lint PYLINT_TARGETS=cmd_mox/ipc PYLINT_PYTHON=pypy
+make lint PYLINT_TARGETS=cmd_mox/ipc PYLINT_PYTHON=pypy@3.12
 ```
 
 Do not bypass `make lint` for normal validation. Running the target keeps the
@@ -227,8 +226,7 @@ goals:
 
 - keep Ruff as the fast, broad, first-pass linter;
 - use focused Pylint checks for problems that Ruff does not cover as well; and
-- run Pylint under PyPy through the shared
-  [pylint-pypy-shim](https://github.com/leynos/pylint-pypy-shim) approach.
+- run a pinned Pylint under uv-managed PyPy 3.12 as an isolated tool.
 
 The DF12 extension preserves that baseline while adding an isolated CPython
 3.14 pass. Its plugin is deliberately configured separately so baseline Pylint
@@ -278,9 +276,9 @@ Most lint policy lives in `pyproject.toml`.
 - `[tool.pylint.design]` aligns Pylint design thresholds with the Ruff policy
   while keeping a wider legacy allowance where needed.
 - `[tool.pylint."messages control"]` disables all messages by default, then
-  enables only the selected second-tier checks. It also disables `syntax-error`
-  because the managed PyPy runtime can parse a narrower grammar than the
-  project source uses for modern type-alias syntax.
+  enables only the selected second-tier checks. `syntax-error` stays enabled,
+  so a module the PyPy runtime cannot parse fails the lint instead of being
+  skipped silently.
 
 The `Makefile` currently supplies `PYLINT_BASELINE_DISABLE` in addition to the
 `pyproject.toml` tables. That split is intentional: `pyproject.toml` documents
