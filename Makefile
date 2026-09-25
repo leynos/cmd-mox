@@ -19,7 +19,7 @@ PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
 # remain for pytest-bdd step wrappers, mirroring the Ruff per-file ignores
 # for tests/steps.
 PYLINT_BASELINE_DISABLE = too-many-lines,too-many-arguments,too-many-positional-arguments
-PYLINT = $(UV_ENV) $(UV) tool run --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' pylint --disable=$(PYLINT_BASELINE_DISABLE)
+PYLINT = $(UV_ENV) $(UV) tool run --managed-python --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' pylint --disable=$(PYLINT_BASELINE_DISABLE)
 DF12_PYTHON ?= 3.14
 # Commit SHA of the df12-python-lints v0.3.0 tag.
 DF12_PYTHON_LINTS_REF ?= 4cf41736cce2f7ba2778882a5c629c044568a0e5

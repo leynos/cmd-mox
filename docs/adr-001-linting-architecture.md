@@ -86,9 +86,9 @@ CmdMox-specific Pylint baseline.
 - Pylint adds second-tier checks without becoming a separate manual workflow.
 - The project carries an explicit baseline for existing findings. This makes
   future clean-up incremental rather than hiding the stricter policy.
-- The managed PyPy runtime may lag the syntax used by CmdMox. This
-  consequence was originally absorbed by disabling `syntax-error`; the
-  2026-09-25 amendment reverses that, so a parse gap now fails the lint.
+- The managed PyPy runtime may lag the syntax used by CmdMox. The Pylint
+  configuration disables `syntax-error` so parse gaps do not prevent useful
+  checks on files that Pylint can analyse.
 
 ## Follow-up work
 
@@ -117,9 +117,14 @@ changing the PyPy-backed Pylint baseline.
 PyPy 8 implements Python 3.12, and uv provides it as a managed interpreter.
 Pylint runs on it without the object-build patch that `pylint-pypy-shim`
 supplied, so the second tier now runs a pinned Pylint directly:
-`uv tool run --python pypy@3.12 --from 'pylint==$(PYLINT_VERSION)' pylint`. The
-interpreter is pinned to `pypy@3.12` rather than a bare `pypy`, so a new PyPy
-release cannot change the lint grammar without a commit.
+
+```sh
+uv tool run --managed-python --python pypy@3.12 \
+  --from 'pylint==$(PYLINT_VERSION)' pylint
+```
+
+The interpreter is pinned to `pypy@3.12` rather than a bare `pypy`, so a new
+PyPy release cannot change the lint grammar without a commit.
 
 The `syntax-error` disable is removed. While it was in place, every module the
 PyPy 3.11 runtime could not parse (PEP 695 type aliases, for example) produced

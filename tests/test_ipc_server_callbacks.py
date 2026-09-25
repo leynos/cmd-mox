@@ -115,6 +115,7 @@ def test_ipcserver_default_invocation_behaviour(
         response = invoke_server(invocation, timeout=1.0)
 
     assert response.stdout == "cmd", "Assertion failed"
+    assert isinstance(response.stderr, str), "stderr must be a string"
     assert not response.stderr, "Assertion failed"
     assert response.exit_code == 0, "Assertion failed"
 
@@ -168,6 +169,7 @@ def test_ipcserver_handler_exception(
 
     assert response.exit_code == 1, "Assertion failed"
     assert "handler failed" in response.stderr, "Assertion failed"
+    assert isinstance(response.stdout, str), "stdout must be a string"
     assert not response.stdout, "Assertion failed"
 
 
@@ -190,6 +192,7 @@ def test_ipcserver_default_passthrough_error(
 
     assert response.exit_code == 1, "Assertion failed"
     assert "Unhandled passthrough result for 123" in response.stderr, "Assertion failed"
+    assert isinstance(response.stdout, str), "stdout must be a string"
     assert not response.stdout, "Assertion failed"
 
 
@@ -244,6 +247,7 @@ def test_handle_invocation_default(tmp_path: Path) -> None:
     response = server.handle_invocation(invocation)
 
     assert response.stdout == "cmd", "Assertion failed"
+    assert isinstance(response.stderr, str), "stderr must be a string"
     assert not response.stderr, "Assertion failed"
     assert response.exit_code == 0, "Assertion failed"
 
