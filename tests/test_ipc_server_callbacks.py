@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import json
+import logging
 import threading
 import typing as typ
 
@@ -282,6 +283,31 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
 
     assert result is None, "Assertion failed"
     assert "malformed JSON" in caplog.text, "Assertion failed"
+
+
+def test_decode_payload_logs_empty_read_at_debug(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An empty request should be logged as a quiet disconnect."""
+    caplog.set_level("DEBUG", logger="cmd_mox.ipc._server_core")
+
+    result = _server_core._decode_payload(b"")
+
+    assert result is None, "Assertion failed"
+    assert any(
+        record.getMessage() == "IPC received empty read"
+        and record.levelno == logging.DEBUG
+        for record in caplog.records
+    ), "Empty reads were not logged at DEBUG"
+    assert not any(
+        "malformed JSON" in record.getMessage() for record in caplog.records
+    ), "An empty read was logged as malformed JSON"
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records), (
+        "An empty read emitted an ERROR record"
+    )
+    assert not any(record.exc_info is not None for record in caplog.records), (
+        "An empty read emitted an exception record"
+    )
 
 
 @pytest.mark.parametrize(
