@@ -4,6 +4,11 @@ Feature: Pytest plugin
     When I run pytest on the file
     Then the run should pass
 
+  Scenario: automatic lifecycle errors explain how to opt out
+    Given a pytest test that manually replays with auto lifecycle
+    When I run pytest on the file
+    Then the failure should explain how to disable auto lifecycle
+
   Scenario: parallel tests use isolated shim directories and sockets
     Given a pytest suite exercising concurrent cmd_mox tests
     When I run pytest with 2 workers

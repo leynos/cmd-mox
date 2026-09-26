@@ -6,6 +6,8 @@ import dataclasses as dc
 import re
 import typing as typ
 
+from .errors import ExpectationConfigurationError
+
 SENSITIVE_ENV_KEY_TOKENS: typ.Final[tuple[str, ...]] = (
     "secret",
     "token",
@@ -17,11 +19,10 @@ _SENSITIVE_TOKENS: typ.Final[tuple[str, ...]] = tuple(
     tok.casefold() for tok in SENSITIVE_ENV_KEY_TOKENS
 )
 
-# Comprehensive regex for secret-bearing env key segments.  Matches KEY,
-# TOKEN, SECRET, PASSWORD, CREDENTIALS, PASS, and PWD as word segments
-# delimited by underscores, hyphens, or string boundaries.
+# Comprehensive regex for secret-bearing env key segments. Also recognizes the
+# compact ``APIKEY`` spelling used by some command-line options.
 _SECRET_ENV_KEY_RE: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?i)(^|[_-])(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?"
+    r"(?i)(^|[_-])(?:API)?(KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?"
     r"|PASS(?:WORD)?|PWD)(?=[_-]|\d|$)"
 )
 
@@ -53,6 +54,51 @@ def is_sensitive_recording_env_key(key: str) -> bool:
     return _is_sensitive_env_key(key) or bool(_SECRET_ENV_KEY_RE.search(key))
 
 
+def _iter_redacted_argument_values(args: list[str]) -> cabc.Iterator[str]:
+    """Yield arguments with values for secret-like options hidden.
+
+    Parameters
+    ----------
+    args : list[str]
+        Command arguments to make safe for diagnostic output.
+
+    Yields
+    ------
+    str
+        Original arguments or ``<redacted>`` placeholders, preserving positions.
+    """
+    redact_next_value = False
+    for arg in args:
+        option, separator, _value = arg.partition("=")
+        is_option = arg.startswith("-") or bool(separator)
+        is_sensitive_option = is_option and bool(_SECRET_ENV_KEY_RE.search(option))
+        if redact_next_value:
+            yield "<redacted>"
+            # If the value is itself another sensitive option, redact its value too.
+            redact_next_value = is_sensitive_option and not separator
+        elif is_sensitive_option and separator:
+            yield f"{option}=<redacted>"
+        else:
+            yield arg
+            redact_next_value = is_sensitive_option
+
+
+def _redact_sensitive_argument_values(args: list[str]) -> list[str]:
+    """Return diagnostic-safe arguments with sensitive option values masked.
+
+    Parameters
+    ----------
+    args : list[str]
+        Command arguments to make safe for diagnostic output.
+
+    Returns
+    -------
+    list[str]
+        Arguments with sensitive option values replaced by ``<redacted>``.
+    """
+    return list(_iter_redacted_argument_values(args))
+
+
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
 
@@ -78,8 +124,18 @@ class Expectation:
         -------
         Expectation
             This expectation, allowing further fluent configuration.
+
+        Raises
+        ------
+        ExpectationConfigurationError
+            If an argument expectation is already configured.
         """
-        self.args = list(args)
+        configured_args = list(args)
+        attempted = f"args={_redact_sensitive_argument_values(configured_args)!r}"
+        error_message = self._argument_expectation_conflict(attempted)
+        if error_message is not None:
+            raise ExpectationConfigurationError(error_message)
+        self.args = configured_args
         return self
 
     def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Expectation:
@@ -89,9 +145,46 @@ class Expectation:
         -------
         Expectation
             This expectation, allowing further fluent configuration.
+
+        Raises
+        ------
+        ExpectationConfigurationError
+            If an argument expectation is already configured.
         """
-        self.match_args = list(matchers)
+        configured_matchers = list(matchers)
+        matcher_types = [type(matcher).__name__ for matcher in configured_matchers]
+        error_message = self._argument_expectation_conflict(
+            f"match_args={matcher_types!r}"
+        )
+        if error_message is not None:
+            raise ExpectationConfigurationError(error_message)
+        self.match_args = configured_matchers
         return self
+
+    def _argument_expectation_conflict(self, attempted: str) -> str | None:
+        """Return a conflict message, if an argument expectation is set.
+
+        Returns
+        -------
+        str or None
+            Conflict message, if one exists.
+        """
+        if self.args is None and self.match_args is None:
+            return None
+
+        if self.args is not None:
+            safe_args = _redact_sensitive_argument_values(self.args)
+            existing = f"args={safe_args!r}"
+        else:
+            matcher_types = [
+                type(matcher).__name__ for matcher in self.match_args or []
+            ]
+            existing = f"match_args={matcher_types!r}"
+        return (
+            f"Command {self.name!r} already has {existing}; cannot set "
+            f"{attempted}. Use `cmd_mox.spy({self.name!r}).runs(handler)` "
+            "for multiple invocations of one command."
+        )
 
     def with_stdin(self, data: str | cabc.Callable[[str], object]) -> Expectation:
         """Expect ``stdin`` to equal ``data`` or satisfy a predicate.
