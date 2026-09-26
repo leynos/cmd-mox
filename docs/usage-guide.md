@@ -703,6 +703,64 @@ def test_pipeline(cmd_mox):
     assert result.stdout.strip() == "c b a"
 ```
 
+### Wiring a tool to a shim by absolute path
+
+Some tools accept a configured executable path instead of resolving a command
+name through `PATH`. Examples include Git merge and diff drivers, `sudoers`
+command rules, systemd unit settings, and continuous integration (CI)
+configuration. Pass an `EnvironmentManager` to `CmdMox`, then use the generated
+launcher under `env_mgr.shim_dir` as the absolute shim path in the tool's
+configuration. Its filename has a `.cmd` suffix on Windows and no suffix on
+POSIX:
+
+```python
+import os
+import subprocess
+
+from cmd_mox import CmdMox, EnvironmentManager, Invocation
+
+
+def handler(inv: Invocation) -> tuple[str, str, int]:
+    return "", "", 0
+
+
+env_mgr = EnvironmentManager()
+with CmdMox(environment=env_mgr) as mox:
+    spy = mox.spy("stub-merge-driver").runs(handler)
+    mox.replay()
+
+    assert env_mgr.shim_dir is not None
+    shim = env_mgr.shim_dir / "stub-merge-driver"
+    if os.name == "nt":
+        shim = shim.with_suffix(".cmd")
+    path_without_shims = os.pathsep.join(
+        path
+        for path in os.environ["PATH"].split(os.pathsep)
+        if path != str(env_mgr.shim_dir)
+    )
+    subprocess.run(
+        [str(shim), "O", "A", "B", "7", "p.py"],
+        env=os.environ | {"PATH": path_without_shims},
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    assert spy.call_count == 1
+```
+
+The shim finds the IPC server through `CMOX_IPC_SOCKET`, so it records the
+invocation even when called by absolute path and the shim directory is absent
+from `PATH`. Setting the tool's executable to this path removes `PATH` order
+from the result: a failed interception cannot silently fall through to a real
+binary with the same name.
+
+Shims read non-terminal standard input until EOF to populate
+`Invocation.stdin`. If an intermediary process, such as Git invoking a merge
+driver, inherits stdin and leaves it open, the shim waits and may hang until
+the caller's timeout. The only server-side symptom may be an
+`IPC received malformed JSON` error, which does not identify stdin as the
+cause. Pass `stdin=subprocess.DEVNULL`, or otherwise close or redirect stdin,
+unless the caller intends to supply input.
+
 ## Controller configuration and journals
 
 `CmdMox` offers configuration hooks that surface through both the fixture and
@@ -747,7 +805,9 @@ few common ones are:
 - `with_args(*args)` – require exact arguments.
 - `with_matching_args(*matchers)` – match arguments using comparators.
 - `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
-  validate it with a predicate `Callable[[str], bool]`.
+  validate it with a predicate `Callable[[str], bool]`. Shims read stdin until
+  EOF, so close or redirect it when no input is intended. See the
+  [shim path guidance](#wiring-a-tool-to-a-shim-by-absolute-path).
 - `with_env(mapping)` – inject additional environment variables into the
   invocation. The mapping is merged into the recorded `Invocation.env`, applied
   when custom handlers or canned responses run, and does not mutate the test
@@ -759,13 +819,18 @@ few common ones are:
   boundary (e.g., base64) so handlers exchange `str`.
 - `runs(handler)` – call a function to produce dynamic output. The handler
   receives an `Invocation` and should return either a
-  `(stdout, stderr, exit_code)` tuple or a `Response` instance.
+  `(stdout, stderr, exit_code)` tuple or a `Response` instance. The handler
+  runs in the test process on the IPC server thread, not in the shim
+  subprocess. Relative paths in `Invocation.args` are relative to the invoking
+  process's working directory. `Invocation` does not carry that directory, so
+  provide it separately or use absolute paths. For example, write a Git merge
+  result with `(repository / inv.args[1]).write_text(result)`.
 
   Example:
 
   ```python
   def handler(inv: Invocation) -> tuple[str, str, int]:
-      if "--fail" in inv.argv:
+      if "--fail" in inv.args:
           return ("", "boom", 2)  # non-zero exit
       return ("ok", "", 0)
 
