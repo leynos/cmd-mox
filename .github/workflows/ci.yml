@@ -65,7 +65,7 @@ jobs:
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@a5765019912a8ab6882b12db049c7cde635f3a85
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@2a910bfcfd1ea4216419f9290331785f05b33320
         with:
           version: "0.6.0"
 
@@ -98,7 +98,7 @@ jobs:
       # publishes the report.
       - name: Generate coverage
         if: matrix.run-windows-smoke == false && github.event_name == 'pull_request'
-        uses: leynos/shared-actions/.github/actions/generate-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
+        uses: leynos/shared-actions/.github/actions/generate-coverage@2a910bfcfd1ea4216419f9290331785f05b33320
         with:
           output-path: coverage.xml
           format: cobertura
