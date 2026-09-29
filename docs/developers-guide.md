@@ -50,7 +50,8 @@ clause against breaching fixtures in its own suite, so this repository keeps no
 copy of the readers. The repository's parameters are in `.github/cv005.toml`:
 its one `[[pairing]]` declares that the pull-request coverage step, which the
 Windows smoke leg of the `quality` matrix skips, measures what the publisher
-measures.
+measures, and its `[selection]` pins the publisher's exact inputs, so a change
+made to the generators and the uploader together is still a reviewed change.
 
 ## Linting
 

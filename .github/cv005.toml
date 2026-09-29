@@ -7,3 +7,12 @@ repository = "leynos/cmd-mox"
 lane = "ci.yml:quality:Generate coverage"
 publisher = "coverage-main.yml:coverage-upload:Generate coverage"
 guards = ["matrix.run-windows-smoke == false"]
+
+# What the publisher's ratcheting generator measures, exactly. The shared rules
+# hold every lane equal to the publisher; this pins the publisher's own value,
+# so a change made to both at once is still a reviewed change.
+[selection]
+output-path = "coverage.xml"
+format = "cobertura"
+pytest-workers = ""
+with-ratchet = "true"
