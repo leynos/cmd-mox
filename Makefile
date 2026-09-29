@@ -3,6 +3,13 @@ UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
 TOOLS = $(UV)
 VENV_TOOLS = pytest
 UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
+# The CV-005 CodeScene contracts live in shared-actions and run from a full
+# commit, so a fix is a pin bump. `.github/cv005.toml` holds this repository's
+# only parameters.
+CV005_CONTRACTS_REF ?= a38feb9be25755c30eca5bda96bd3786a5b89c6b
+CV005_CONTRACTS = $(UV_ENV) $(UV) tool run --python 3.13 \
+	--from 'git+https://github.com/leynos/shared-actions@$(CV005_CONTRACTS_REF)\#subdirectory=packages/cv005-contracts' \
+	cv005-contracts
 RUFF_VERSION ?= 0.16.4
 TY_VERSION ?= 0.0.74
 RUFF = $(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)
@@ -34,7 +41,7 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 .PHONY: help all clean build build-release lint fmt check-fmt
-.PHONY: markdownlint markdownlint-run nixie spelling test typecheck
+.PHONY: markdownlint markdownlint-run nixie spelling test test-workflow-contracts typecheck
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
@@ -131,8 +138,11 @@ spelling: ## Enforce en-GB-oxendict spelling in Markdown prose
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
 
-test: build $(UV) $(VENV_TOOLS) ## Run tests
+test: build $(UV) $(VENV_TOOLS) test-workflow-contracts ## Run tests
 	$(UV_ENV) $(UV) run pytest -v -n auto
+
+test-workflow-contracts: $(UV) ## Run the shared CV-005 CodeScene contracts
+	$(CV005_CONTRACTS) check --repository .
 
 windows-smoke: build $(UV) $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
 	$(UV_ENV) $(UV) run pytest -v $(WINDOWS_SMOKE_ARGS)

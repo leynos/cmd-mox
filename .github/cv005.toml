@@ -1,0 +1,9 @@
+repository = "leynos/cmd-mox"
+
+# The pull-request coverage step is skipped on the Windows smoke leg of the
+# `quality` matrix, so its condition is the pull-request guard plus that
+# matrix term. It measures what the publisher measures.
+[[pairing]]
+lane = "ci.yml:quality:Generate coverage"
+publisher = "coverage-main.yml:coverage-upload:Generate coverage"
+guards = ["matrix.run-windows-smoke == false"]

@@ -37,29 +37,20 @@ whose answers have changed shape and failed every pull request at once, and a
 fork cannot read the token anyway. The ratchet applies the same gate from this
 repository's own baseline.
 
-### Workflow contract helpers
+### Workflow contracts
 
-`tests/test_codescene_coverage_contract.py` holds the rule over this
-repository's workflows. `test_codescene_closure_cases.py` and
-`test_codescene_publisher_cases.py` beside it drive the same readings over
-constructed documents, one breach each, so every clause is shown to catch what
-it names. The readings live in `tests/helpers/`:
-
-- `workflow_reading.py` parses workflows and local actions with a loader that
-  refuses duplicate keys, reads `on:` in scalar, sequence, and mapping form
-  under either key, and walks every key and value of a document.
-- `workflow_closure.py` computes the pull-request surface: workflows triggered
-  by `pull_request`, `pull_request_target`, `pull_request_review`,
-  `pull_request_review_comment`, `merge_group`, `issue_comment`, or
-  `workflow_run`, or by a push to any branch other than `main`, and every local
-  workflow or composite action they reach through `./` or `$/` references. It
-  refuses qualified self-calls and local references carrying `@ref`.
-- `codescene_reach.py`, `codescene_publisher.py`, and `codescene_binding.py`
-  hold the CodeScene clauses.
-
-The two generic modules know nothing about CodeScene and may be reused by any
-workflow contract in this repository. They are test support only: nothing under
-`cmd_mox/` may import them.
+`make test-workflow-contracts`, a prerequisite of `make test`, holds the
+CodeScene coverage shape over this repository's workflows and local actions by
+running `cv005-contracts check`, the shared contract library in
+`leynos/shared-actions`, from the full commit named by `CV005_CONTRACTS_REF` in
+the Makefile; a fix to the rules is a pin bump. The library reads workflows
+with a loader that refuses duplicate keys, follows the pull-request surface
+through local `./` and `$/` calls and composite actions, and drives every
+clause against breaching fixtures in its own suite, so this repository keeps no
+copy of the readers. The repository's parameters are in `.github/cv005.toml`:
+its one `[[pairing]]` declares that the pull-request coverage step, which the
+Windows smoke leg of the `quality` matrix skips, measures what the publisher
+measures.
 
 ## Linting
 
