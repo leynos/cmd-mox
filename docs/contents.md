@@ -7,5 +7,7 @@
 - [Design Doc](./python-native-command-mocking-design.md): Design rationale.
 - [Fake Capabilities Design](./cmd-mox-fake-capabilities-design.md):
   Durable fixture writes and reusable helpers for stateful command fakes.
+- [RFC 001](./rfc-001-act-execution-environment.md): Proposed container
+  execution environment and Act integration for workflow command doubles.
 - [Roadmap](./roadmap.md): Planned features and progression.
 - [ADR 001](./adr-001-linting-architecture.md): Two-tier linting architecture.
