@@ -434,6 +434,19 @@ def _skylos_config() -> dict[str, object]:
     return typ.cast("dict[str, object]", tool_config["skylos"])
 
 
+def _skylos_entrypoints() -> list[dict[str, object]]:
+    """Return validated Skylos entry-point records.
+
+    Returns
+    -------
+    list[dict[str, object]]
+        The configured entry-point records.
+    """
+    skylos = _skylos_config()
+    dead_code = _mapping(skylos.get("dead_code"), subject="Skylos dead-code config")
+    return _objects(dead_code.get("entrypoints"), subject="Skylos entrypoints")
+
+
 class TestSkylosLintContract:
     """Contract tests for Skylos's production dead-code lint gate."""
 
@@ -637,8 +650,8 @@ def test_skylos_allow_lock_preserves_concurrent_updates() -> None:
         )
 
 
-def test_skylos_configuration_is_strict_and_reasoned() -> None:
-    """Require exact, caller-specific reasons for every Skylos exception."""
+def test_skylos_whitelist_is_reviewed_and_reasoned() -> None:
+    """Require exact, documented reasons for every Skylos whitelist entry."""
     skylos = _skylos_config()
     whitelist = _mapping(skylos.get("whitelist"), subject="Skylos whitelist")
     documented = typ.cast("dict[str, str]", whitelist["documented"])
@@ -652,8 +665,11 @@ def test_skylos_configuration_is_strict_and_reasoned() -> None:
     assert all(reason.strip() for reason in documented.values()), (
         "Skylos whitelist contract must give every exception a reason."
     )
-    dead_code = _mapping(skylos.get("dead_code"), subject="Skylos dead-code config")
-    entrypoints = _objects(dead_code.get("entrypoints"), subject="Skylos entrypoints")
+
+
+def test_skylos_entrypoints_are_reviewed_and_reasoned() -> None:
+    """Require exact full names and caller-specific reasons for entry points."""
+    entrypoints = _skylos_entrypoints()
     entrypoint_full_names = frozenset(
         full_name
         for entrypoint in entrypoints
@@ -674,6 +690,15 @@ def test_skylos_configuration_is_strict_and_reasoned() -> None:
     assert entrypoint_reasons == EXPECTED_ENTRYPOINT_REASONS, (
         "Skylos entry-point contract must retain each verified runtime caller."
     )
+    assert all(
+        isinstance(reason := entrypoint.get("reason"), str) and reason.strip()
+        for entrypoint in entrypoints
+    ), "Skylos entry-point contract must give every exception a reason."
+
+
+def test_skylos_entrypoint_types_match_reviewed_callers() -> None:
+    """Require each reviewed entry point to retain its configured type."""
+    entrypoints = _skylos_entrypoints()
     entrypoint_types = {
         full_name: entrypoint_type
         for entrypoint in entrypoints
@@ -685,11 +710,11 @@ def test_skylos_configuration_is_strict_and_reasoned() -> None:
     assert entrypoint_types == EXPECTED_ENTRYPOINT_TYPES, (
         "Skylos entry-point contract must retain each verified caller type."
     )
-    assert all(
-        isinstance(reason := entrypoint.get("reason"), str) and reason.strip()
-        for entrypoint in entrypoints
-    ), "Skylos entry-point contract must give every exception a reason."
-    gate = _mapping(skylos.get("gate"), subject="Skylos gate config")
+
+
+def test_skylos_gate_is_strict() -> None:
+    """Require Skylos gate failures to remain blocking."""
+    gate = _mapping(_skylos_config().get("gate"), subject="Skylos gate config")
     assert gate.get("strict") is True, (
         "Skylos gate configuration must enable strict mode."
     )
