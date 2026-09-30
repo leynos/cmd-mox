@@ -136,8 +136,8 @@ using a caller-specific reason. Add a documented allow-list entry only when an
 entry-point rule cannot model the verified boundary, and retain its
 caller-specific reason in `[tool.skylos.whitelist.documented]`. Review
 exceptions whenever the runtime lifecycle, ctypes protocol, or bootstrap
-behaviour changes, and update Skylos only after a clean production scan and lint
-contract run.
+behaviour changes, and update Skylos only after a clean production scan and
+lint contract run.
 
 For a verified false positive that needs a documented exception, use:
 
@@ -146,7 +146,7 @@ make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 ```
 
 The helper requires non-whitespace values for both variables. `SYMBOL` avoids
-WSL's injected `NAME` hostname variable. Its read-modify-write is serialised
+WSL's injected `NAME` hostname variable. Its read-modify-write is serialized
 with `flock` on the ignored, repository-local `.skylos-whitelist.lock`; tests
 may override that path when isolating the helper from the checkout. Keep the
 caller-specific reason in the reviewed `[tool.skylos.whitelist.documented]`
