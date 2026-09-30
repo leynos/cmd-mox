@@ -119,8 +119,8 @@ project files.
 | `SKYLOS`                    | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                                         | Adds scan-only global options for the blocking lint target.                       |
 | `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                                            | Limits dead-code liveness analysis to production sources.                         |
 | `SKYLOS_EXCLUDE_FOLDERS`    | `tests cmd_mox/unittests`                                                                                                                            | Excludes both test paths from the production liveness graph.                      |
-| `SKYLOS_EXCLUDE_ARGS`       | `$(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))`                                                                    | Expands each excluded folder to its own repeatable `--exclude` flag.              |
-| `SKYLOS_WHITELIST_LOCK`     | `.skylos-whitelist.lock`                                                                                                                             | Repository-local lock serialising documented whitelist updates.                   |
+| `SKYLOS_EXCLUDE_ARGS`       | `$(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))`                                                                                    | Expands each excluded folder to its own repeatable `--exclude` flag.              |
+| `SKYLOS_WHITELIST_LOCK`     | `.skylos-whitelist.lock`                                                                                                                             | Repository-local lock serializing documented whitelist updates.                   |
 
 _Table 1: Makefile variables for the lint pipeline._
 
