@@ -102,7 +102,7 @@ jobs:
       # publishes the report.
       - name: Generate coverage
         if: matrix.run-windows-smoke == false && github.event_name == 'pull_request'
-        uses: leynos/shared-actions/.github/actions/generate-coverage@2a910bfcfd1ea4216419f9290331785f05b33320
+        uses: leynos/shared-actions/.github/actions/generate-coverage@013346ccfd37bd1e02eb430525233f1a4cd942b8
         with:
           output-path: coverage.xml
           format: cobertura
