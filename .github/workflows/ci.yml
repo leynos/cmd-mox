@@ -65,7 +65,7 @@ jobs:
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@b7d70b5d3ff0ac0199416b9678ea7af25bb3254e
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@013346ccfd37bd1e02eb430525233f1a4cd942b8
         with:
           version: "0.6.0"
 
