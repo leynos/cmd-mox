@@ -503,10 +503,210 @@ should graduate from internal utility to documented public API.
     router dispatch, and executable side effects without leaking files between
     tests.
 
+## 15. Container execution and Act integration
+
+Status: Proposed, post-MVP. This phase implements
+[RFC 001](rfc-001-act-execution-environment.md), not an already supported
+execution mode. It adds controlled command dependencies to real Act workflow
+tests while retaining the existing local environment and black-box validation.
+Existing task numbers and completion states remain unchanged.
+
+Steps 15.1-15.5 form the first usable Linux/Python plateau. They require only the
+explicit dependencies below, including atomic JSON persistence from 14.1.1 for
+failure records, not completion of phases 13 or 14. Steps 15.6-15.8 are separate
+extensions, not prerequisites for that plateau. This proposed phase does not add
+a first-release gate.
+
+### 15.1. Separate local and target execution environments
+
+Outcome: the controller can prepare a container target without redirecting host
+commands. All tasks in this step implement RFC 001 §Execution environment
+contract and §Matching, concurrency, and callback environment.
+
+- [ ] 15.1.1. Introduce the prepared-environment contract through the existing
+  `environment=` injection seam, separating preparation, activation, and cleanup.
+  - Success: existing local context-manager and environment-restoration tests
+    pass without changes to their observable expectations.
+- [ ] 15.1.2. Delegate launcher and endpoint preparation to environment
+  capabilities and isolate container callback environment handling.
+  - Requires 15.1.1.
+  - Success: container preparation and callbacks leave host `PATH`, `PATHEXT`,
+    working directory, and process environment unchanged; Linux, macOS, and
+    Windows local-backend regression tests remain green.
+- [ ] 15.1.3. Add explicit runner working-directory and execution-scope metadata
+  with backward-compatible local serialization and command-set freezing.
+  - Requires 15.1.1.
+  - Success: host and runner paths remain distinct, local payloads and fixtures
+    still load, and late container command registration fails explicitly.
+
+### 15.2. Deliver the local Linux bridge
+
+Outcome: a qualified local Linux container executes relocatable Python shims
+against the host controller. All tasks implement RFC 001 §Resource layout and
+endpoint mapping, §Relocatable launcher bundle, §Invocation and protocol contract,
+and §Failure reporting and session lifecycle.
+
+- [ ] 15.2.1. Build a relocatable Python launcher bundle with relative references,
+  a manifest, and an absolute runner-interpreter setting.
+  - Requires 15.1.2.
+  - Success: shims work without a host installation mount; missing dependencies,
+    Python below the package minimum, and interpreter recursion fail preflight.
+- [ ] 15.2.2. Implement separate bundle, socket-directory, and status mounts with
+  explicit host/runner endpoint mapping and resource ownership.
+  - Requires 15.1.1.
+  - Success: short socket allocation handles deep pytest paths; unsafe mounts,
+    incompatible permissions, and unsupported daemon topologies fail clearly.
+- [ ] 15.2.3. Add authenticated capability negotiation, bounded bridge messages,
+  explicit invocation identities, and safe connection-retry semantics.
+  - Requires 15.1.3, 15.2.1, and 15.2.2.
+  - Success: incompatible peers, malformed payloads, oversized input, duplicate
+    IDs, and ambiguous submissions cannot yield success or repeat consumption.
+- [ ] 15.2.4. Persist and reconcile launcher start/completion/failure records
+  independently of IPC, keeping controller failure state outside bounded logs.
+  - Requires 15.2.3 and 14.1.1.
+  - Success: lost sockets, corrupt or incomplete records, callback errors, and
+    journal eviction still fail verification when the workflow catches errors.
+
+### 15.3. Bind prepared environments to Act
+
+Outcome: the existing pytest harness can configure the runner without adopting a
+new workflow executor. All tasks implement RFC 001 §Act adapter and activation.
+
+- [ ] 15.3.1. Implement a provisional `ActBinding` that produces validated Act
+  arguments and explicit host/environment-file configuration.
+  - Requires 15.2.1, 15.2.2, and 15.2.3.
+  - Success: quoting tests cover unusual paths; conflicting container options,
+    implicit credential files, ambient `.actrc` settings, and unsupported job
+    graphs cannot silently change the requested session.
+- [ ] 15.3.2. Generate the opt-in activation script and control-plane readiness
+  check, including `$GITHUB_PATH` propagation and command-resolution validation.
+  - Requires 15.3.1 and 15.2.4.
+  - Success: the next workflow step resolves every exported double; missing
+    activation fails even with only optional stubs; path-shadowing regression
+    tests demonstrate explicit reactivation rather than assumed coverage.
+- [ ] 15.3.3. Expose activation/completion diagnostics and owned-resource metadata
+  without moving subprocess or artefact-server ownership into CmdMox core.
+  - Requires 15.3.2.
+  - Success: the guide's harness accepts a binding, while ordinary CmdMox imports
+    and unit tests require neither Act nor a running container daemon.
+
+### 15.4. Establish concurrency, cancellation, and isolation guarantees
+
+Outcome: workflow success cannot hide bridge failures and parallel scenarios do
+not share state. All tasks implement RFC 001 §Matching, concurrency, and callback
+environment, §Failure reporting and session lifecycle, and §Security, portability,
+and isolation.
+
+- [ ] 15.4.1. Make matching, reservation, callback dispatch, and journal updates
+  safe for concurrent commands, with explicit re-entry and ordering semantics.
+  - Requires 15.1.2, 15.1.3, and 15.2.3.
+  - Success: concurrent requests consume each expectation at most once; callback
+    re-entry fails without deadlock; completion timing does not invent ordering.
+- [ ] 15.4.2. Add bounded draining and stable verification, preserving workflow
+  failures and mock failures together through context and pytest teardown.
+  - Requires 15.2.4, 15.3.3, and 15.4.1.
+  - Success: swallowed mismatches, unfinished invocations, failed drains, and
+    omitted explicit health assertions still invalidate the test.
+- [ ] 15.4.3. Extend the example harness with deadline-driven, ownership-scoped
+  cancellation and cleanup of exact Act/runtime resources.
+  - Requires 15.3.3 and 15.4.2.
+  - Success: timeout and interruption tests leave no owned containers or sockets,
+    preserve unrelated containers, and retain redacted failure diagnostics.
+- [ ] 15.4.4. Isolate parallel worktrees, artefact/status paths, container
+  identities, writable caches, and server-port allocation.
+  - Requires 15.4.3.
+  - Success: at least two simultaneous pytest workers pass independent Act
+    scenarios without cross-session requests, port collisions, or leaked state.
+
+### 15.5. Publish the first usable workflow-validation plateau
+
+Outcome: users can test a real workflow with selected command doubles and clear
+support boundaries. All tasks implement RFC 001 §Illustrative pytest integration
+and §Validation and adoption.
+
+- [ ] 15.5.1. Add a real Act `gh` workflow example with shell redirection and
+  positive and negative behavioural acceptance tests.
+  - Requires steps 15.1-15.4.
+  - Success: tests verify arguments and produced JSON; the negative scenario
+    fails pytest despite Act exiting zero after a swallowed mock failure.
+- [ ] 15.5.2. Add a resource-bounded integration CI lane with pinned Act/image
+  profiles, cached bundles, and redacted diagnostic artefacts.
+  - Requires 15.5.1.
+  - Success: daemon-independent unit tests remain fast and unchanged in scope;
+    the dedicated lane exercises failures, isolation, and cleanup without live
+    service credentials or per-scenario dependency builds.
+- [ ] 15.5.3. Document the provisional APIs, troubleshooting, trust boundaries,
+  validation ladder, and explicit unsupported topologies.
+  - Requires 15.5.1 and 15.5.2.
+  - Success: the usage guide names the supported profile and API status; a
+    companion change extends agent-helper-scripts' local-validation guide
+    without replacing its black-box tests or GitHub-runner certification.
+
+### 15.6. Reuse native launchers and runner-local recordings
+
+Outcome: optional native launchers and passthrough spies obey the same runner
+contract. These tasks implement RFC 001 §Relocatable launcher bundle and
+§Runner-local passthrough and fixture reuse; they do not gate step 15.5.
+
+- [ ] 15.6.1. Extend phase 13 asset selection and packaging for explicit Linux
+  runner targets, with bundle-level backend parity tests.
+  - Requires 15.5.1, 13.2.1, 13.3.1, 13.3.2, and 13.4.1.
+  - Success: Python/native acceptance scenarios agree; wrong-architecture or
+    broken requested binaries fail clearly; scenarios do not compile Rust.
+- [ ] 15.6.2. Enable runner-local passthrough using the invocation's effective
+  path, explicit shim exclusions, runner `cwd`, and result acknowledgement.
+  - Requires 15.5.1 and 15.4.1.
+  - Success: a runner-only executable wins over a host decoy; new tool paths are
+    retained; recursive overrides and ambiguous retries cannot re-execute it.
+  - Native passthrough parity additionally requires 15.6.1 and 13.3.3.
+- [ ] 15.6.3. Reuse recording/replay sessions with explicit workspace
+  normalization, scrubbing, and fixture-consumption verification.
+  - Requires 15.6.2, 12.1.4, 12.2.5, 12.2.6, 12.3.1, 12.3.3, and 12.3.5.
+  - Success: a runner recording replays without live dependencies; ephemeral
+    session data does not constrain matching; persisted fixtures redact secrets
+    and unused recordings fail verification without an Act-only schema.
+
+### 15.7. Add explicit mapped workspace effects
+
+Outcome: host callbacks can intentionally create runner-visible workspace files
+without confusing host and container-private paths. All tasks implement RFC 001
+§Observable filesystem and workflow effects; they do not gate step 15.5.
+
+- [ ] 15.7.1. Implement explicit runner-to-host workspace mappings with permitted
+  roots, traversal rejection, and symlink-escape protection.
+  - Requires 15.5.1, 15.1.3, and 14.5.1.
+  - Success: a callback writes a runner-visible fixture through the declared
+    mapping; unmapped/private paths and escapes fail without host side effects.
+- [ ] 15.7.2. Add stateful fake examples using mapped effects and optional phase
+  14 state helpers, with correct workflow-output and environment-file semantics.
+  - Requires 15.7.1, 14.3.1, and 14.5.2.
+  - Success: later runner commands observe intentional files/state, while tests
+    show that response environment values cannot mutate a parent shell or later
+    step; no arbitrary remote evaluation API is introduced.
+
+### 15.8. Qualify additional execution profiles
+
+Outcome: support expands only after explicit compatibility and security evidence.
+All tasks implement RFC 001 §Security, portability, and isolation and §Delivery
+plan and open decisions; they do not gate the initial Linux/Docker plateau.
+
+- [ ] 15.8.1. Qualify a same-host rootless Podman profile, including user/group
+  mappings, socket permissions, and SELinux volume-label behaviour.
+  - Requires 15.5.2.
+  - Success: the common acceptance/cleanup suite passes on the declared profile,
+    or documentation retains a precise unsupported status without insecure
+    permission workarounds.
+- [ ] 15.8.2. Record separate adoption decisions for Docker actions, nested
+  containers, remote/VM-backed daemons, and multi-job scope routing.
+  - Requires 15.5.3.
+  - Success: each proposed expansion identifies a concrete use case, transport
+    and trust boundaries, propagation rules, and acceptance tests; none becomes
+    supported implicitly through the job-container adapter.
+
 <!-- markdownlint-disable-next-line MD036 -->
 **Legend**
 
 - Each unchecked box represents an implementable, trackable unit suitable for
   project management tools.
 - [ ] All MVP checkboxes above this point should be completed before first
-  public release.
+  public release. Proposed phase 15 is post-MVP and adds no release prerequisite.
