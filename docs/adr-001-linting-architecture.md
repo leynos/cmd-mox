@@ -112,6 +112,46 @@ the temporary PyPy baseline.
 Consequence: the DF12 plugin and snapshot scanner run on CPython 3.14 without
 changing the PyPy-backed Pylint baseline.
 
+## Addendum — 2026-08-24: Skylos fourth Python lint tier
+
+The original two-tier decision is historical. CmdMox now records Skylos as the
+fourth Python lint tier, after Ruff, PyPy-backed Pylint, and the DF12
+Pylint/ambrleaks tier. The spelling policy remains a separate quality gate.
+Skylos is a blocking production dead-code scan: it scans production modules
+only, excludes test paths, enables strict gate mode, and uses the local-only
+flags
+`--category dead_code --gate --format concise --no-upload --no-provenance
+--no-grep-verify`.
+
+The command-only `SKYLOS_CLI` macro runs Skylos with Python 3.14. Skylos parses
+source with the AST implementation of its own runtime, so pinning Python 3.14
+prevents phantom findings when newer Python syntax is present. Scan-only global
+options, including `--config-file pyproject.toml`, remain in a separate macro
+used by the lint target; this leaves the `whitelist` subcommand first in the
+documented helper invocation.
+
+Investigate every finding and remove genuine dead code. Model verified implicit
+runtime callers with typed `[[tool.skylos.dead_code.entrypoints]]` rules first,
+using a caller-specific reason. Add a documented allow-list entry only when an
+entry-point rule cannot model the verified boundary, and retain its
+caller-specific reason in `[tool.skylos.whitelist.documented]`. Review
+exceptions whenever the runtime lifecycle, ctypes protocol, or bootstrap
+behaviour changes, and update Skylos only after a clean production scan and
+lint contract run.
+
+For a verified false positive that needs a documented exception, use:
+
+```sh
+make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
+```
+
+The helper requires non-whitespace values for both variables. `SYMBOL` avoids
+WSL's injected `NAME` hostname variable. Its read-modify-write is serialized
+with `flock` on the ignored, repository-local `.skylos-whitelist.lock`; tests
+may override that path when isolating the helper from the checkout. Keep the
+caller-specific reason in the reviewed `[tool.skylos.whitelist.documented]`
+configuration.
+
 ## Amendment (2026-09-25): plain Pylint on PyPy 3.12
 
 PyPy 8 implements Python 3.12, and uv provides it as a managed interpreter.

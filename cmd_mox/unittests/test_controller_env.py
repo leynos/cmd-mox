@@ -44,7 +44,7 @@ def test_mock_with_env_rejects_non_string_key() -> None:
         mox.mock("envcmd").with_env({42: "value"})  # type: ignore[arg-type, ty:invalid-argument-type]
 
 
-def test_invoke_handler_preserves_handler_env_override() -> None:
+def test_response_for_regular_preserves_handler_env_override() -> None:
     """Handler-provided env entries should not be clobbered by expectation env."""
 
     def handler(inv: Invocation) -> Response:
@@ -56,13 +56,13 @@ def test_invoke_handler_preserves_handler_env_override() -> None:
     double = mox.stub("envcmd").with_env({"EXPECT_ENV": "expected"}).runs(handler)
     invocation = Invocation(command="envcmd", args=[], stdin="", env={})
 
-    resp = mox._invoke_handler(double, invocation)
+    resp = mox._response_for_regular(double, invocation)
 
     assert invocation.env["EXPECT_ENV"] == "expected"
     assert resp.env["EXPECT_ENV"] == "handler"
 
 
-def test_invoke_handler_rejects_conflicting_env() -> None:
+def test_response_for_regular_rejects_conflicting_env() -> None:
     """Invocations providing conflicting env should raise an error."""
     key = "EXPECT_ENV"
     mox = CmdMox()
@@ -70,11 +70,11 @@ def test_invoke_handler_rejects_conflicting_env() -> None:
     invocation = Invocation(command="envcmd", args=[], stdin="", env={key: "DIFF"})
 
     with pytest.raises(UnexpectedCommandError, match="conflicting environment"):
-        mox._invoke_handler(double, invocation)
+        mox._response_for_regular(double, invocation)
 
 
-def test_invoke_handler_applies_env() -> None:
-    """_invoke_handler uses temporary_env and propagates env in Response."""
+def test_response_for_regular_applies_env() -> None:
+    """_response_for_regular uses temporary_env and propagates env in Response."""
     key = "SOME_VAR"
     mox = CmdMox()
 
@@ -85,14 +85,14 @@ def test_invoke_handler_applies_env() -> None:
     inv = Invocation(command="demo", args=[], stdin="", env={})
 
     assert key not in os.environ
-    resp = mox._invoke_handler(dbl, inv)
+    resp = mox._response_for_regular(dbl, inv)
     assert resp.stdout == "VAL"
     assert key not in os.environ
     assert resp.env == {key: "VAL"}
     assert inv.env[key] == "VAL"
 
 
-def test_invoke_handler_applies_env_to_static_response() -> None:
+def test_response_for_regular_applies_env_to_static_response() -> None:
     """Environment overrides apply when returning a canned response."""
     key = "STATIC_VAR"
     mox = CmdMox()
@@ -100,7 +100,7 @@ def test_invoke_handler_applies_env_to_static_response() -> None:
     inv = Invocation(command="demo", args=[], stdin="", env={})
 
     assert key not in os.environ
-    resp = mox._invoke_handler(dbl, inv)
+    resp = mox._response_for_regular(dbl, inv)
     assert resp.stdout == "ok"
     assert resp.env == {key: "VAL"}
     assert key not in os.environ
