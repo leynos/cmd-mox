@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import socket
 import subprocess
+import threading
+import time
 import typing as typ
 
 import pytest
 
 from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
+from cmd_mox.ipc._server_core import _encode_response
+from cmd_mox.ipc.models import Response
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
 pytestmark = [pytest.mark.requires_unix_sockets]
@@ -97,6 +103,66 @@ def _invoke_command_via_ipc(
         return _run_shim(env, command)
 
 
+def _run_shim_against_socket_peer(
+    env: EnvironmentManager,
+    command: str,
+    *,
+    response_bytes: bytes | None,
+) -> tuple[subprocess.CompletedProcess[str], float]:
+    """Run a generated shim against a peer that replies or stalls.
+
+    Returns
+    -------
+    tuple[subprocess.CompletedProcess[str], float]
+        The subprocess result and its elapsed wall-clock duration in seconds.
+    """
+    assert env.shim_dir is not None, "Assertion failed"
+    socket_path = env.socket_path
+    assert socket_path is not None, "Assertion failed"
+    create_shim_symlinks(env.shim_dir, [command])
+
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen(1)
+    accepted = threading.Event()
+    release = threading.Event()
+
+    def serve() -> None:
+        try:
+            connection, _address = listener.accept()
+            with connection:
+                while connection.recv(64 * 1024):
+                    pass
+                accepted.set()
+                if response_bytes is None:
+                    release.wait(2.0)
+                else:
+                    connection.sendall(response_bytes)
+        except OSError:
+            # The shim closes the connection after a timeout or decoded reply.
+            pass
+
+    server_thread = threading.Thread(target=serve, daemon=True)
+    server_thread.start()
+    started = time.monotonic()
+    try:
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a generated shim path
+            [str(_shim_cmd_path(env, command))],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2.0,
+        )
+    finally:
+        release.set()
+        listener.close()
+        server_thread.join(timeout=1.0)
+
+    assert accepted.is_set(), "Unix peer did not receive a complete shim request"
+    assert not server_thread.is_alive(), "Unix peer did not stop"
+    return result, time.monotonic() - started
+
+
 def test_shim_invokes_via_ipc() -> None:
     """End-to-end shim invocation using the IPC server."""
     with EnvironmentManager() as env:
@@ -133,6 +199,82 @@ def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None
         assert not result.stdout, "Assertion failed"
         assert "invalid timeout: 'nan'" in result.stderr, "Assertion failed"
         assert result.returncode == 1, "Assertion failed"
+
+
+def test_generated_shim_reports_server_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejection response crosses the Unix socket into the shim diagnostic."""
+    with EnvironmentManager() as env:
+        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
+        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "1.0")
+        response_bytes = _encode_response(
+            Response(stderr="IPC request payload failed validation\n", exit_code=1)
+        )
+
+        result, elapsed = _run_shim_against_socket_peer(
+            env,
+            "rejected-command",
+            response_bytes=response_bytes,
+        )
+
+    assert result.returncode == 1, "Shim did not preserve the rejection status"
+    assert result.stderr == "IPC request payload failed validation\n", (
+        "Shim did not print the server rejection diagnostic"
+    )
+    assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
+
+
+def test_generated_shim_reports_unix_response_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real Unix peer that withholds its reply produces a bounded IPC error."""
+    with EnvironmentManager() as env:
+        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
+        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "0.2")
+
+        result, elapsed = _run_shim_against_socket_peer(
+            env,
+            "stalled-command",
+            response_bytes=None,
+        )
+
+    assert result.returncode == 1, "Timed-out shim did not exit non-zero"
+    assert result.stderr.startswith("IPC error: "), (
+        "Timed-out shim did not print a controlled IPC diagnostic"
+    )
+    assert elapsed < 1.5, "Shim exceeded its configured IPC timeout by too much"
+
+
+def test_raw_malformed_request_gets_a_rejection_frame(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Malformed wire bytes receive an error frame through the real server."""
+    socket_path = tmp_path / "raw-ipc.sock"
+    caplog.set_level(logging.INFO, logger="cmd_mox.ipc._server_core")
+
+    with (
+        IPCServer(socket_path),
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
+    ):
+        client.connect(str(socket_path))
+        client.sendall(b"private malformed payload")
+        client.shutdown(socket.SHUT_WR)
+        response_chunks: list[bytes] = []
+        while chunk := client.recv(1024):
+            response_chunks.append(chunk)
+
+    response = Response.from_payload(json.loads(b"".join(response_chunks)))
+    assert response.stderr == "IPC request could not be parsed", (
+        "Malformed request did not receive the bounded server diagnostic"
+    )
+    assert response.exit_code == 1, "Malformed request did not receive failure status"
+    assert "private malformed payload" not in caplog.text, (
+        "Server logging leaked malformed request content"
+    )
 
 
 def test_environment_manager_warns_when_shim_replaced(
