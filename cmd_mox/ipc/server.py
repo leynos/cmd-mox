@@ -7,6 +7,7 @@ import errno
 import logging
 import socketserver
 import threading
+import time
 import typing as typ
 from functools import cache
 
@@ -29,6 +30,54 @@ _CLIENT_DISCONNECT_ERRNOS = frozenset({
     errno.ECONNABORTED,
     errno.ENOTCONN,
 })
+
+type _ConnectionOutcome = typ.Literal[
+    "receive_timeout", "receive_closed", "response_dropped"
+]
+type _ConnectionErrorCategory = typ.Literal[
+    "ConnectionClosed", "ConnectionError", "OSError", "TimeoutError"
+]
+
+_CONNECTION_OPERATION: typ.Final[str] = "ipc.server.connection"
+_CONNECTION_EVENT_MESSAGE: typ.Final[str] = "IPC server connection outcome"
+
+
+def _emit_connection_outcome(
+    outcome: _ConnectionOutcome,
+    error_category: _ConnectionErrorCategory,
+    started: float,
+) -> None:
+    """Emit bounded metadata for a closed or stalled Unix connection."""
+    _observability.emit(
+        _observability.IPCEvent(
+            operation=_CONNECTION_OPERATION,
+            transport="unix",
+            outcome=outcome,
+            error_category=error_category,
+            duration_ms=_observability.elapsed_ms(started),
+        ),
+        logger=logger,
+        message=_CONNECTION_EVENT_MESSAGE,
+    )
+
+
+def _connection_error_category(
+    error: OSError,
+) -> _ConnectionErrorCategory:
+    """Map socket exceptions to a bounded observability category.
+
+    Returns
+    -------
+    _ConnectionErrorCategory
+        The fixed category used for the socket exception.
+    """
+    match error:
+        case TimeoutError():
+            return "TimeoutError"
+        case ConnectionError():
+            return "ConnectionError"
+        case _:
+            return "OSError"
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -293,16 +342,22 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             chunks.append(chunk)
 
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
+        started = time.perf_counter()
         try:
             raw = self._read_request_payload()
         except TimeoutError:
+            _emit_connection_outcome("receive_timeout", "TimeoutError", started)
             logger.info("IPC connection timed out while receiving request")
             return
-        except OSError:
+        except OSError as exc:
+            _emit_connection_outcome(
+                "receive_closed", _connection_error_category(exc), started
+            )
             logger.info("IPC connection closed while receiving request")
             return
         response_bytes = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
         if response_bytes is None:
+            _emit_connection_outcome("receive_closed", "ConnectionClosed", started)
             return
         try:
             self.request.settimeout(
@@ -310,8 +365,11 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             )
             self.wfile.write(response_bytes)
             self.wfile.flush()
-        except OSError as error:
-            if error.errno in _CLIENT_DISCONNECT_ERRNOS:
+        except OSError as exc:
+            _emit_connection_outcome(
+                "response_dropped", _connection_error_category(exc), started
+            )
+            if exc.errno in _CLIENT_DISCONNECT_ERRNOS:
                 logger.debug("IPC client disconnected before reply was written")
             else:
                 # Keep the failure visible without exposing exception details.

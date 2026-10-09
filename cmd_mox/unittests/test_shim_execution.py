@@ -220,6 +220,45 @@ def test_passthrough_report_failure_preserves_nonzero_exit_code(
     )
 
 
+def test_passthrough_report_failure_survives_stdout_write_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed output write must not hide the passthrough IPC failure."""
+    invocation = Invocation(command="cmd", args=[], stdin="", env={})
+    directive = PassthroughRequest(
+        invocation_id="abc", lookup_path="/bin", extra_env={}, timeout=1.0
+    )
+    monkeypatch.setattr(
+        shim,
+        "_run_real_command",
+        lambda *_args: Response(stdout="command output", exit_code=2),
+    )
+
+    def raise_error(*_: object, **__: object) -> typ.NoReturn:
+        raise TimeoutError("timeout")
+
+    class _ClosedWriter:
+        def write(self, _text: str) -> typ.NoReturn:
+            raise BrokenPipeError("closed")
+
+    monkeypatch.setattr(shim, "report_passthrough_result", raise_error)
+    monkeypatch.setattr(sys, "stdout", _ClosedWriter())
+
+    with pytest.raises(SystemExit) as exc:
+        shim._handle_passthrough(
+            invocation,
+            Response(passthrough=directive),
+            timeout=1.0,
+        )
+
+    _assert_exit_code(exc, 2)
+    stderr = capsys.readouterr().err
+    assert "IPC error: timeout" in stderr, (
+        "passthrough IPC failure was hidden by the output write failure"
+    )
+
+
 def test_write_response_updates_environment_and_streams(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
