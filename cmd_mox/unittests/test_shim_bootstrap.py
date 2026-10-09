@@ -67,7 +67,7 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
             None if shim.path_utils.IS_WINDOWS else 101.0,
         ),
         ("write", response),
-    ]
+    ], "shim startup steps did not run in the expected order"
 
 
 def test_bootstrap_shim_path_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,8 +82,10 @@ def test_bootstrap_shim_path_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> N
 
     _shim_bootstrap.bootstrap_shim_path()
 
-    assert sys.path == path_after_first
-    assert sys.modules["platform"].__name__ == "platform"
+    assert sys.path == path_after_first, "repeated bootstrap changed sys.path"
+    assert sys.modules["platform"].__name__ == "platform", (
+        "bootstrap did not leave the standard-library platform module loaded"
+    )
 
 
 def test_bootstrap_shim_path_prefers_stdlib_platform(
@@ -103,13 +105,19 @@ def test_bootstrap_shim_path_prefers_stdlib_platform(
 
     monkeypatch.delitem(sys.modules, "platform", raising=False)
     fake_platform = typ.cast("typ.Any", importlib.import_module("platform"))
-    assert fake_platform.MARKER == "fake"
+    assert fake_platform.MARKER == "fake", (
+        "test setup did not import the editable module"
+    )
 
     _shim_bootstrap.bootstrap_shim_path()
 
     std_platform = sys.modules["platform"]
-    assert not hasattr(std_platform, "MARKER")
-    assert "__editable__site" in sys.path
+    assert not hasattr(std_platform, "MARKER"), (
+        "bootstrap retained the editable platform module"
+    )
+    assert "__editable__site" in sys.path, (
+        "bootstrap removed the editable application path"
+    )
 
 
 def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
@@ -131,5 +139,7 @@ def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
     with pytest.raises(RuntimeError, match="platform load failed"):
         _shim_bootstrap.bootstrap_shim_path()
 
-    assert sys.path == original_path
-    assert not _shim_bootstrap._BOOTSTRAP_DONE
+    assert sys.path == original_path, "failed bootstrap did not restore sys.path"
+    assert not _shim_bootstrap._BOOTSTRAP_DONE, (
+        "failed bootstrap marked itself complete"
+    )

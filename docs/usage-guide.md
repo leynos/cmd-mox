@@ -108,8 +108,9 @@ The three phases are defined in the design document:
    happened.
 
 These phases form a strict sequence for reliable command-line tests. Calling
-`replay()` more than once during the replay phase is explicitly idempotent:
-subsequent calls are no-ops.
+`replay()` again while the controller context is entered and already in the
+replay phase is idempotent. After leaving that context, another call raises
+`LifecycleError: Cannot call replay(): not in 'record' phase (current phase: replay)`.
 
 A typical test brings the three phases together:
 
@@ -121,10 +122,11 @@ my_tool.clone_repo("repo")
 ```
 
 The pytest fixture starts replay automatically and verifies expectations during
-teardown. To control the record → replay → verify lifecycle explicitly while
-using the fixture, disable that automatic lifecycle with
-`@pytest.mark.cmd_mox(auto_lifecycle=False)`; otherwise the fixture has already
-entered replay before the test body runs.
+teardown. A repeated `replay()` call in the active fixture context is an
+idempotent no-op. To control the record → replay → verify lifecycle explicitly
+while using the fixture, disable that automatic lifecycle with
+`@pytest.mark.cmd_mox(auto_lifecycle=False)`; otherwise the fixture already
+owns replay and verification.
 
 ## Stubs, mocks and spies
 
