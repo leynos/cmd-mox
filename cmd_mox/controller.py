@@ -183,16 +183,6 @@ class CmdMox:
         """
         return set(self._doubles)
 
-    def _expected_commands(self) -> set[str]:
-        """Return commands that must be called during replay.
-
-        Returns
-        -------
-        set[str]
-            The names of doubles carrying a mandatory expectation.
-        """
-        return {name for name, dbl in self._doubles.items() if dbl.is_expected}
-
     # ------------------------------------------------------------------
     # Context manager protocol
     # ------------------------------------------------------------------
@@ -407,19 +397,6 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _invoke_handler(
-        self, double: CommandDouble, invocation: Invocation
-    ) -> Response:
-        """Run ``double``'s handler within its expectation environment.
-
-        Returns
-        -------
-        Response
-            The handler response with expectation overrides applied.
-        """
-        overrides = apply_expectation_env(double, invocation)
-        return self._invoke_handler_with_overrides(double, invocation, overrides)
-
     @staticmethod
     def _invoke_handler_with_overrides(
         double: CommandDouble,
