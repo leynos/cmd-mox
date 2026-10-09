@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import errno
 import os
 import queue
 import sys
@@ -152,43 +151,38 @@ def test_create_invocation_checks_deadline_between_buffered_reads(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
-def test_create_invocation_preserves_timeout_when_mode_restore_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    stdin_pipe_descriptor_at_eof: int,
+def test_create_invocation_does_not_change_inherited_stdin_mode(
+    monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor_at_eof: int
 ) -> None:
-    """A restoration error must not replace the original read failure."""
-    clock = {"value": 0.0}
-    buffer = _BufferedInput([b"buffered"], lambda: clock.__setitem__("value", 2.0))
+    """Reading piped stdin never changes the parent's shared file status flags."""
     monkeypatch.setattr(
         sys,
         "stdin",
-        _DescriptorStdin(stdin_pipe_descriptor_at_eof, buffer=buffer),
+        _DescriptorStdin(
+            stdin_pipe_descriptor_at_eof,
+            buffer=_BufferedInput([b"buffered", b""]),
+        ),
     )
     monkeypatch.setattr(sys, "argv", ["shim"])
-    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: clock["value"])
 
     original_set_blocking = os.set_blocking
-    blocking_modes: list[bool] = []
+    blocking_mode_changes: list[bool] = []
 
     def set_blocking(
         descriptor: int,
         blocking: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - mirrors os.set_blocking
     ) -> None:
-        blocking_modes.append(blocking)
-        if blocking:
-            raise OSError(errno.EIO, "unable to restore blocking mode")
+        blocking_mode_changes.append(blocking)
         original_set_blocking(descriptor, blocking)
 
     monkeypatch.setattr(shim._shim_stdin.os, "set_blocking", set_blocking)
 
-    with pytest.raises(SystemExit) as exc:
-        _create_invocation("shim", timeout=1.0)
+    invocation = _create_invocation("shim", timeout=1.0)
 
-    _assert_exit_code(exc, 1)
-    assert blocking_modes == [False, True], "Unexpected stdin blocking-mode changes"
-    assert capsys.readouterr().err == "IPC error: timed out reading stdin\n", (
-        "A restoration failure must not add a second diagnostic"
+    assert invocation.stdin == "buffered", "Buffered stdin bytes were lost"
+    assert blocking_mode_changes == [], "The shim changed the inherited descriptor mode"
+    assert os.get_blocking(stdin_pipe_descriptor_at_eof), (
+        "The parent stdin descriptor must remain blocking"
     )
 
 
@@ -273,7 +267,12 @@ def test_create_invocation_reports_stdin_timeout(
         def poll(self, _timeout: int) -> list[tuple[int, int]]:
             return []
 
-    monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
+    buffer = _BufferedInput([b"unexpected payload"])
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        _DescriptorStdin(stdin_pipe_descriptor, buffer=buffer),
+    )
     monkeypatch.setattr(shim._shim_stdin.select, "poll", _NeverReadablePoll)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
@@ -281,6 +280,7 @@ def test_create_invocation_reports_stdin_timeout(
         _create_invocation("shim", timeout=0.01)
 
     _assert_exit_code(exc, 1)
+    assert buffer.read_calls == 0, "Buffered input was read before readiness"
     assert "IPC error: timed out reading stdin" in capsys.readouterr().err, (
         "stdin timeout must produce an IPC diagnostic"
     )
@@ -541,45 +541,29 @@ def test_await_regular_stdin_read_rejects_result_after_deadline(
         shim._shim_stdin._await_regular_stdin_read(result_queue, 1.0, raise_error)
 
 
-@pytest.mark.parametrize(
-    ("read_error", "expected_error"),
-    [
-        (BlockingIOError("try again"), None),
-        (OSError("raw stdin failed"), OSError),
-    ],
-)
-def test_read_raw_chunk_after_empty_buffer_handles_read_errors(
+def test_read_buffered_chunk_treats_empty_read_as_eof(
     monkeypatch: pytest.MonkeyPatch,
-    read_error: Exception,
-    expected_error: type[Exception] | None,
 ) -> None:
-    """Non-blocking raw reads wait or report failures without escaping."""
-
-    class _ReadyPoller:
-        def poll(self, _timeout: int) -> list[tuple[int, int]]:
-            return [(123, 1)]
+    """A blocking buffered reader reports EOF with an empty byte string."""
 
     def raise_error(exc: Exception) -> typ.NoReturn:
         raise exc
 
     context = shim._shim_stdin._ReadContext(
         descriptor=123,
-        poller=_ReadyPoller(),
+        poller=shim._shim_stdin._SelectPoller(123),
         deadline=1.0,
         on_error=raise_error,
     )
+
     monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        shim._shim_stdin.os,
+        "read",
+        lambda *_args: pytest.fail("EOF must not trigger another descriptor read"),
+    )
 
-    def fail_read(_descriptor: int, _size: int) -> bytes:
-        raise read_error
-
-    monkeypatch.setattr(shim._shim_stdin.os, "read", fail_read)
-
-    if expected_error is None:
-        assert shim._shim_stdin._read_raw_chunk_after_empty_buffer(context) is None
-    else:
-        with pytest.raises(expected_error, match="raw stdin failed"):
-            shim._shim_stdin._read_raw_chunk_after_empty_buffer(context)
+    assert shim._shim_stdin._read_buffered_chunk(context, lambda _size: b"") == b""
 
 
 def test_read_raw_polled_stdin_reports_descriptor_error(
