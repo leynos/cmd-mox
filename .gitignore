@@ -208,6 +208,14 @@ target/
 # Untracked shared spelling-policy cache and freshness metadata.
 .typos-oxendict-base.json
 .typos-oxendict-base.toml
+
+# Locally installed tool binaries (the pinned nose duplication detector) and
+# the sidecar lock guarding allowlist updates. Neither is a first-party source
+# artefact: the detector is re-provisioned by `make install-nose`, and the lock
+# is recreated on demand. Keeping `.tools/` ignored also stops the binary from
+# leaking into the duplication scan surface.
+.tools/
+.*.duplication-gate.lock
 .vtcode/
 .claude/
 .memdb/
