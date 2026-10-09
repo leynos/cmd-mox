@@ -56,6 +56,52 @@ def test_create_invocation_reads_stdin_when_not_tty(
     assert dummy_stdin.read_calls == 1
 
 
+@pytest.mark.parametrize("fallback", ["windows", "missing-fd", "unpollable"])
+def test_direct_stdin_fallback_routes_read_errors(
+    monkeypatch: pytest.MonkeyPatch, fallback: str
+) -> None:
+    """Direct-read fallbacks report I/O errors through the shim boundary."""
+
+    class _FailingStdin:
+        def read(self) -> str:
+            raise _InjectedOSError
+
+    class _UnpollableStdin(_FailingStdin):
+        def fileno(self) -> int:
+            return 123
+
+    if fallback == "windows":
+        monkeypatch.setattr(shim._shim_stdin.path_utils, "IS_WINDOWS", True)
+        stdin = _FailingStdin()
+    elif fallback == "missing-fd":
+        stdin = _FailingStdin()
+    else:
+        stdin = _UnpollableStdin()
+        monkeypatch.setattr(
+            shim._shim_stdin, "_create_stdin_poller", lambda _descriptor: None
+        )
+
+    monkeypatch.setattr(sys, "stdin", stdin)
+    reported: list[Exception] = []
+
+    class _ErrorReportedError(Exception):
+        pass
+
+    def record_error(exc: Exception) -> typ.NoReturn:
+        reported.append(exc)
+        raise _ErrorReportedError
+
+    with pytest.raises(_ErrorReportedError):
+        shim._shim_stdin._read_stdin_until_eof(
+            1.0, deadline=None, on_error=record_error
+        )
+
+    assert len(reported) == 1, "Direct-read error was not reported exactly once"
+    assert isinstance(reported[0], _InjectedOSError), (
+        "Direct-read error changed before reaching the error handler"
+    )
+
+
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_preserves_buffered_stdin(
     monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor_at_eof: int
