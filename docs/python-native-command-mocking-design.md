@@ -758,7 +758,9 @@ request, which includes the server's readiness probes; it is logged as a closed
 connection and receives no response frame. If the peer closes while a response
 is being written, the server logs the same connection-drop class. Shim-side IPC
 failures, including response writes and passthrough reporting, produce a
-controlled diagnostic and exit status rather than an unhandled traceback.
+controlled diagnostic and exit status rather than an unhandled traceback. If
+passthrough reporting fails, the shim still writes the captured command output
+before exiting.
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background

@@ -14,7 +14,7 @@ import pytest
 
 from cmd_mox import shim
 from cmd_mox.shim import _create_invocation
-from cmd_mox.unittests.test_shim_support import (
+from cmd_mox.unittests._shim_test_support import (
     _assert_exit_code,
     _BufferedInput,
     _DescriptorStdin,
@@ -22,8 +22,6 @@ from cmd_mox.unittests.test_shim_support import (
     _InjectedOSError,
     _InjectedRuntimeError,
 )
-
-pytest_plugins = ("cmd_mox.unittests.test_shim_support",)
 
 
 def test_create_invocation_skips_tty_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,7 +212,7 @@ def test_create_invocation_reads_regular_file_stdin(
 def test_create_invocation_bounds_stalled_regular_file_read(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A blocked read from poll-always-ready stdin still observes its deadline."""
+    """A blocked raw regular-file read still observes the invocation deadline."""
     started = threading.Event()
     release = threading.Event()
     finished = threading.Event()
@@ -227,14 +225,22 @@ def test_create_invocation_bounds_stalled_regular_file_read(
         def fileno(self) -> int:
             return self._descriptor
 
-        def read(self) -> str:
-            started.set()
-            release.wait()
-            finished.set()
-            return ""
+    def stalled_read(_descriptor: int, _size: int) -> bytes:
+        """Hold the raw read until the test releases the worker.
+
+        Returns
+        -------
+        bytes
+            EOF once the test releases the blocked worker.
+        """
+        started.set()
+        release.wait()
+        finished.set()
+        return b""
 
     with tempfile.TemporaryFile() as regular_file:
         monkeypatch.setattr(sys, "stdin", _StalledRegularStdin(regular_file.fileno()))
+        monkeypatch.setattr(shim._shim_stdin.os, "read", stalled_read)
         monkeypatch.setattr(sys, "argv", ["shim"])
 
         try:
@@ -409,11 +415,59 @@ def test_decode_stdin_chunk_reports_invalid_text() -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="regular-file worker is POSIX-specific")
+def test_regular_stdin_reads_descriptor_without_buffered_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regular-file worker uses raw reads and preserves text decoding."""
+    chunks = iter([b"\xe2\x82", b"\xac\r\n", b""])
+    descriptors: list[int] = []
+
+    class _RegularStdin:
+        encoding = "utf-8"
+        errors = "strict"
+
+        def __init__(self, descriptor: int) -> None:
+            self.descriptor = descriptor
+            self.read_calls = 0
+
+        def fileno(self) -> int:
+            return self.descriptor
+
+        def read(self) -> str:
+            self.read_calls += 1
+            return "buffered text"
+
+    with tempfile.TemporaryFile() as regular_file:
+        stdin = _RegularStdin(regular_file.fileno())
+        monkeypatch.setattr(sys, "stdin", stdin)
+
+        def read_raw(descriptor: int, _size: int) -> bytes:
+            descriptors.append(descriptor)
+            return next(chunks)
+
+        monkeypatch.setattr(shim._shim_stdin.os, "read", read_raw)
+        result = shim._shim_stdin._read_stdin_until_eof(
+            1.0,
+            deadline=None,
+            on_error=shim._exit_ipc_error,
+        )
+
+    assert result == "\N{EURO SIGN}\n", (
+        "Raw stdin chunks were not incrementally decoded and newline-normalised"
+    )
+    assert descriptors, "Regular stdin reader did not call os.read"
+    assert all(descriptor == stdin.descriptor for descriptor in descriptors), (
+        "Regular stdin reads did not use its file descriptor"
+    )
+    assert stdin.read_calls == 0, "The buffered stdin wrapper was read"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="regular-file worker is POSIX-specific")
 def test_regular_stdin_read_error_uses_controlled_exit(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Errors from the regular-file worker return a diagnostic to the shim."""
+    """Raw regular-file read errors return a diagnostic to the shim."""
 
     class _FailingRegularStdin:
         def __init__(self, descriptor: int) -> None:
@@ -423,10 +477,14 @@ def test_regular_stdin_read_error_uses_controlled_exit(
             return self._descriptor
 
         def read(self) -> str:
-            raise _InjectedOSError
+            return "buffered text"
+
+    def fail_read(_descriptor: int, _size: int) -> typ.NoReturn:
+        raise _InjectedOSError
 
     with tempfile.TemporaryFile() as regular_file:
         monkeypatch.setattr(sys, "stdin", _FailingRegularStdin(regular_file.fileno()))
+        monkeypatch.setattr(shim._shim_stdin.os, "read", fail_read)
         with pytest.raises(SystemExit) as exc:
             shim._shim_stdin._read_stdin_until_eof(
                 1.0,
@@ -454,6 +512,7 @@ def test_regular_stdin_thread_start_error_uses_controlled_exit(
     monkeypatch.setattr(shim._shim_stdin.threading, "Thread", _FailingThread)
     with pytest.raises(SystemExit) as exc:
         shim._shim_stdin._read_regular_stdin_until_deadline(
+            123,
             1.0,
             shim._exit_ipc_error,
         )
