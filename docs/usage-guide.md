@@ -124,6 +124,12 @@ def test_clone_repo(cmd_mox):
     my_tool.clone_repo("repo")
 ```
 
+Calling `replay()` while the controller context is active and in the replay
+phase is an idempotent no-op. A manually managed controller created with
+`verify_on_exit=False` remains in replay after its context exits; calling
+`replay()` again then raises
+`LifecycleError: Cannot call replay(): not in 'record' phase (current phase: replay)`.
+
 For manual lifecycle control, disable automatic replay and verification with
 one of these settings:
 
@@ -142,12 +148,6 @@ def test_manual_lifecycle(cmd_mox):
     my_tool.clone_repo("repo")
     cmd_mox.verify()
 ```
-
-The pytest fixture starts replay automatically and verifies expectations during
-teardown. To control the record → replay → verify lifecycle explicitly while
-using the fixture, disable that automatic lifecycle with
-`@pytest.mark.cmd_mox(auto_lifecycle=False)`; otherwise the fixture has already
-entered replay before the test body runs.
 
 ## Stubs, mocks and spies
 
