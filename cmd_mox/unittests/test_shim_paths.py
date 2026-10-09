@@ -57,7 +57,9 @@ def test_normalize_windows_arg_respects_platform(
     """Caret normalisation should only collapse carets on Windows."""
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", is_windows)
 
-    assert shim._normalize_windows_arg(r"^^^literal^^^^") == expected
+    assert shim._normalize_windows_arg(r"^^^literal^^^^") == expected, (
+        "caret normalization did not match the current platform"
+    )
 
 
 def test_create_invocation_normalizes_windows_args(
@@ -71,7 +73,9 @@ def test_create_invocation_normalizes_windows_args(
 
     invocation = shim._create_invocation("shim", timeout=1.0)
 
-    assert invocation.args == [r"foo^bar", r"arg^"]
+    assert invocation.args == [r"foo^bar", r"arg^"], (
+        "Windows invocation arguments retained doubled carets"
+    )
 
 
 def test_build_search_path_posix_merges_with_colon_pathsep(
@@ -86,7 +90,12 @@ def test_build_search_path_posix_merges_with_colon_pathsep(
 
     result = shim._build_search_path(merged_path, lookup_path, shim_dir=None)
 
-    assert result == ":".join(["/opt/bin", "/custom/bin", "/usr/local/bin", "/usr/bin"])
+    assert result == ":".join([
+        "/opt/bin",
+        "/custom/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+    ]), "POSIX PATH entries were not merged and deduplicated"
 
 
 def test_build_search_path_trims_and_preserves_order(
@@ -104,7 +113,7 @@ def test_build_search_path_trims_and_preserves_order(
         "/usr/local/bin",
         "/custom/bin",
         "/another/bin",
-    ]
+    ], "PATH trimming changed entry order or retained empty entries"
 
 
 def test_build_search_path_filters_shim_directory(
@@ -118,7 +127,9 @@ def test_build_search_path_filters_shim_directory(
 
     result = shim._build_search_path(merged_path, lookup_path, shim_dir=shim_dir)
 
-    assert result.split(os.pathsep) == ["/usr/local/bin", "/custom/bin"]
+    assert result.split(os.pathsep) == ["/usr/local/bin", "/custom/bin"], (
+        "the shim directory was not filtered from PATH"
+    )
 
 
 def test_build_search_path_handles_missing_env_path(
@@ -128,8 +139,12 @@ def test_build_search_path_handles_missing_env_path(
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", False)
     lookup_path = os.pathsep.join(["/bin", "/usr/bin"])
 
-    assert shim._build_search_path(None, lookup_path, shim_dir=None) == lookup_path
-    assert shim._build_search_path("", lookup_path, shim_dir=None) == lookup_path
+    assert shim._build_search_path(None, lookup_path, shim_dir=None) == lookup_path, (
+        "missing PATH should fall back to the command lookup path"
+    )
+    assert shim._build_search_path("", lookup_path, shim_dir=None) == lookup_path, (
+        "empty PATH should fall back to the command lookup path"
+    )
 
 
 @pytest.mark.parametrize(
@@ -158,9 +173,15 @@ def test_validate_override_path_reports_missing_or_invalid_targets(
     target = factory(tmp_path)
     result = _validate_override_path("tool", os.fspath(target))
 
-    assert isinstance(result, Response)
-    assert result.exit_code == expected_exit
-    assert expected_message in result.stderr
+    assert isinstance(result, Response), (
+        "invalid override did not produce an error response"
+    )
+    assert result.exit_code == expected_exit, (
+        "invalid override returned the wrong status"
+    )
+    assert expected_message in result.stderr, (
+        "invalid override response was not diagnostic"
+    )
 
 
 def test_validate_override_path_rejects_directory_symlink(
@@ -169,9 +190,11 @@ def test_validate_override_path_rejects_directory_symlink(
     """Symlinks pointing at directories should be rejected as executables."""
     result = _validate_override_path("tool", os.fspath(directory_symlink))
 
-    assert isinstance(result, Response)
-    assert result.exit_code == 126
-    assert "invalid executable path" in result.stderr
+    assert isinstance(result, Response), "directory symlink was not rejected"
+    assert result.exit_code == 126, "directory symlink returned the wrong status"
+    assert "invalid executable path" in result.stderr, (
+        "directory symlink error was unclear"
+    )
 
 
 def test_validate_override_path_rejects_non_executable_file(tmp_path: Path) -> None:
@@ -182,9 +205,11 @@ def test_validate_override_path_rejects_non_executable_file(tmp_path: Path) -> N
 
     result = _validate_override_path("tool", os.fspath(script))
 
-    assert isinstance(result, Response)
-    assert result.exit_code == 126
-    assert "not executable" in result.stderr
+    assert isinstance(result, Response), "non-executable override was not rejected"
+    assert result.exit_code == 126, "non-executable override returned the wrong status"
+    assert "not executable" in result.stderr, (
+        "non-executable override error was unclear"
+    )
 
 
 def test_validate_override_path_accepts_relative_executable(
@@ -198,9 +223,9 @@ def test_validate_override_path_accepts_relative_executable(
 
     result = _validate_override_path("tool", "tool")
 
-    assert isinstance(result, Path)
-    assert result == script
-    assert result.is_absolute()
+    assert isinstance(result, Path), "relative executable did not resolve to a path"
+    assert result == script, "relative executable resolved to the wrong target"
+    assert result.is_absolute(), "resolved executable path was not absolute"
 
 
 def test_merge_passthrough_path_filters_shim_directory(
@@ -217,7 +242,9 @@ def test_merge_passthrough_path_filters_shim_directory(
 
     merged = _merge_passthrough_path(env_path, lookup_path)
 
-    assert merged.split(os.pathsep) == ["/usr/bin", "/opt/tools", "/custom/bin"]
+    assert merged.split(os.pathsep) == ["/usr/bin", "/opt/tools", "/custom/bin"], (
+        "passthrough PATH merge retained the shim or lost a command directory"
+    )
 
 
 def test_merge_passthrough_path_is_case_insensitive(
@@ -237,7 +264,9 @@ def test_merge_passthrough_path_is_case_insensitive(
 
     merged = shim._merge_passthrough_path(env_path, lookup_path)
 
-    assert merged.split(separator) == [r"C:\Tools", r"C:\Other"]
+    assert merged.split(separator) == [r"C:\Tools", r"C:\Other"], (
+        "Windows PATH merge did not deduplicate case-insensitive entries"
+    )
 
 
 def test_resolve_passthrough_target_prefers_override(
@@ -261,7 +290,7 @@ def test_resolve_passthrough_target_prefers_override(
 
     resolved = _resolve_passthrough_target(invocation, directive, env)
 
-    assert resolved == script
+    assert resolved == script, "configured executable override was not selected"
 
 
 def test_resolve_passthrough_target_merges_paths(
@@ -292,12 +321,14 @@ def test_resolve_passthrough_target_merges_paths(
     def fake_resolve(command: str, path: str, override: str | None = None) -> Path:
         nonlocal captured_path
         captured_path = path
-        assert override is None
+        assert override is None, "unexpected override bypassed PATH resolution"
         return Path("/usr/bin/echo")
 
     monkeypatch.setattr(shim, "resolve_command_with_override", fake_resolve)
 
     resolved = _resolve_passthrough_target(invocation, directive, env)
 
-    assert isinstance(resolved, Path)
-    assert captured_path == env["PATH"]
+    assert isinstance(resolved, Path), "PATH lookup did not return an executable path"
+    assert captured_path == env["PATH"], (
+        "resolved lookup path was not passed to PATH search"
+    )

@@ -50,9 +50,9 @@ def test_execute_invocation_returns_response_without_passthrough(
 
     result = _execute_invocation(invocation, timeout=1.5)
 
-    assert result is expected
-    assert calls["invocation"] is invocation
-    assert math.isclose(calls["timeout"], 1.5)
+    assert result is expected, "regular invocation response was not returned"
+    assert calls["invocation"] is invocation, "IPC received a different invocation"
+    assert math.isclose(calls["timeout"], 1.5), "configured IPC timeout was changed"
     assert calls["deadline"] is None, "No shared deadline should be synthesized"
 
 
@@ -81,17 +81,17 @@ def test_execute_invocation_processes_passthrough(
         *,
         deadline: float | None = None,
     ) -> Response:
-        assert inv is invocation
-        assert resp is intermediate
-        assert math.isclose(timeout, 2.0)
-        assert deadline is None
+        assert inv is invocation, "passthrough received a different invocation"
+        assert resp is intermediate, "passthrough received a different response"
+        assert math.isclose(timeout, 2.0), "passthrough timeout was changed"
+        assert deadline is None, "an absent request deadline should remain absent"
         return final
 
     monkeypatch.setattr(shim, "_handle_passthrough", fake_passthrough)
 
     result = _execute_invocation(invocation, timeout=2.0)
 
-    assert result is final
+    assert result is final, "passthrough result was not returned"
 
 
 def test_execute_invocation_shares_deadline_with_passthrough(
@@ -140,8 +140,10 @@ def test_execute_invocation_shares_deadline_with_passthrough(
 
     result = _execute_invocation(invocation, timeout=1.0, deadline=101.0)
 
-    assert result is final
-    assert timeouts == pytest.approx([1.0, 0.4])
+    assert result is final, "passthrough report response was not returned"
+    assert timeouts == pytest.approx([1.0, 0.4]), (
+        "passthrough reporting did not receive the original deadline's remainder"
+    )
     assert deadlines == [101.0, 101.0], "The absolute deadline must span both IPC calls"
 
 
@@ -175,7 +177,9 @@ def test_execute_invocation_surfaces_ipc_errors(
         _execute_invocation(invocation, timeout=1.0)
 
     _assert_exit_code(exc, 1)
-    assert "IPC error: boom" in capsys.readouterr().err
+    assert "IPC error: boom" in capsys.readouterr().err, (
+        "IPC failure did not produce a controlled diagnostic"
+    )
 
 
 def test_passthrough_report_failure_preserves_nonzero_exit_code(
@@ -271,9 +275,9 @@ def test_write_response_updates_environment_and_streams(
 
     _assert_exit_code(exc, 3)
     captured = capsys.readouterr()
-    assert captured.out == "out"
-    assert captured.err == "err"
-    assert os.environ["NEW"] == "value"
+    assert captured.out == "out", "response stdout was not written"
+    assert captured.err == "err", "response stderr was not written"
+    assert os.environ["NEW"] == "value", "response environment was not applied"
 
 
 def test_write_response_handles_closed_stdout(
