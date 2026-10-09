@@ -11,7 +11,7 @@ import pytest
 from cmd_mox import shim
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.shim import CMOX_SHIM_COMMAND_ENV, _validate_environment
-from cmd_mox.unittests.test_shim_support import _assert_exit_code
+from cmd_mox.unittests._shim_test_support import _assert_exit_code
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
