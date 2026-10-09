@@ -584,168 +584,166 @@ class TestSkylosLintContract:
                 "configuration."
             )
 
+    def test_skylos_allow_lock_preserves_concurrent_updates(self) -> None:
+        """The whitelist lock must retain each concurrent documented exception."""
+        with TemporaryDirectory() as temporary_directory:
+            isolated_directory = Path(temporary_directory)
+            (isolated_directory / "pyproject.toml").write_text(
+                "[tool.skylos.whitelist.documented]\n", encoding="utf-8"
+            )
+            writer = isolated_directory / "write-whitelist-entry"
+            writer.write_text(
+                f"#!{sys.executable}\n"
+                "from pathlib import Path\n"
+                "import sys\n"
+                "import time\n\n"
+                "symbol = sys.argv[2]\n"
+                "reason = sys.argv[4]\n"
+                "configuration_path = Path('pyproject.toml')\n"
+                "contents = configuration_path.read_text(encoding='utf-8')\n"
+                "time.sleep(0.2)\n"
+                "configuration_path.write_text(\n"
+                "    contents + f'{symbol} = {reason!r}\\n', encoding='utf-8'\n"
+                ")\n",
+                encoding="utf-8",
+            )
+            writer.chmod(0o755)
+            with (
+                subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Make target and writer.
+                    _isolated_skylos_allow_command(isolated_directory, writer),
+                    cwd=isolated_directory,
+                    env={**os.environ, "SYMBOL": "first", "REASON": "first reason"},
+                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    text=True,
+                ) as first,
+                subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Make target and writer.
+                    _isolated_skylos_allow_command(isolated_directory, writer),
+                    cwd=isolated_directory,
+                    env={**os.environ, "SYMBOL": "second", "REASON": "second reason"},
+                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    text=True,
+                ) as second,
+            ):
+                first_stdout, first_stderr = first.communicate()
+                second_stdout, second_stderr = second.communicate()
 
-def test_skylos_allow_lock_preserves_concurrent_updates() -> None:
-    """The whitelist lock must retain each concurrent documented exception."""
-    with TemporaryDirectory() as temporary_directory:
-        isolated_directory = Path(temporary_directory)
-        (isolated_directory / "pyproject.toml").write_text(
-            "[tool.skylos.whitelist.documented]\n", encoding="utf-8"
+            assert first.returncode == 0, (
+                "First concurrent Skylos whitelist update must succeed: "
+                f"{first_stdout}{first_stderr}"
+            )
+            assert second.returncode == 0, (
+                "Second concurrent Skylos whitelist update must succeed: "
+                f"{second_stdout}{second_stderr}"
+            )
+            configuration = tomllib.loads(
+                (isolated_directory / "pyproject.toml").read_text(encoding="utf-8")
+            )
+            documented = typ.cast(
+                "dict[str, str]",
+                configuration["tool"]["skylos"]["whitelist"]["documented"],
+            )
+            assert documented == {
+                "first": "first reason",
+                "second": "second reason",
+            }, (
+                "Skylos whitelist lock must preserve every concurrent documented "
+                "exception."
+            )
+
+    def test_skylos_whitelist_is_reviewed_and_reasoned(self) -> None:
+        """Require exact, documented reasons for every Skylos whitelist entry."""
+        skylos = _skylos_config()
+        whitelist = _mapping(skylos.get("whitelist"), subject="Skylos whitelist")
+        documented = typ.cast("dict[str, str]", whitelist["documented"])
+        whitelist_names = frozenset(typ.cast("list[str]", whitelist["names"]))
+        assert whitelist_names == EXPECTED_WHITELIST_NAMES, (
+            "Skylos whitelist contract must keep reviewed names enabled."
         )
-        writer = isolated_directory / "write-whitelist-entry"
-        writer.write_text(
-            f"#!{sys.executable}\n"
-            "from pathlib import Path\n"
-            "import sys\n"
-            "import time\n\n"
-            "symbol = sys.argv[2]\n"
-            "reason = sys.argv[4]\n"
-            "configuration_path = Path('pyproject.toml')\n"
-            "contents = configuration_path.read_text(encoding='utf-8')\n"
-            "time.sleep(0.2)\n"
-            "configuration_path.write_text(\n"
-            "    contents + f'{symbol} = {reason!r}\\n', encoding='utf-8'\n"
-            ")\n",
-            encoding="utf-8",
+        assert frozenset(documented) == whitelist_names, (
+            "Skylos whitelist contract must document every enabled exception."
         )
-        writer.chmod(0o755)
-        with (
-            subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Make target and writer.
-                _isolated_skylos_allow_command(isolated_directory, writer),
-                cwd=isolated_directory,
-                env={**os.environ, "SYMBOL": "first", "REASON": "first reason"},
-                stderr=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                text=True,
-            ) as first,
-            subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed local Make target and writer.
-                _isolated_skylos_allow_command(isolated_directory, writer),
-                cwd=isolated_directory,
-                env={**os.environ, "SYMBOL": "second", "REASON": "second reason"},
-                stderr=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                text=True,
-            ) as second,
+        assert all(reason.strip() for reason in documented.values()), (
+            "Skylos whitelist contract must give every exception a reason."
+        )
+
+    def test_skylos_entrypoints_are_reviewed_and_reasoned(self) -> None:
+        """Require exact full names and caller-specific reasons for entry points."""
+        entrypoints = _skylos_entrypoints()
+        entrypoint_full_names = frozenset(
+            full_name
+            for entrypoint in entrypoints
+            for full_name in _text_sequence(
+                entrypoint.get("full_name"), subject="entrypoint full name"
+            )
+        )
+        assert entrypoint_full_names == EXPECTED_ENTRYPOINT_FULL_NAMES, (
+            "Skylos entry-point contract must keep reviewed runtime callers enabled."
+        )
+        entrypoint_reasons = {
+            full_name: typ.cast("str", entrypoint["reason"])
+            for entrypoint in entrypoints
+            for full_name in _text_sequence(
+                entrypoint.get("full_name"), subject="entrypoint full name"
+            )
+        }
+        assert entrypoint_reasons == EXPECTED_ENTRYPOINT_REASONS, (
+            "Skylos entry-point contract must retain each verified runtime caller."
+        )
+        assert all(
+            isinstance(reason := entrypoint.get("reason"), str) and reason.strip()
+            for entrypoint in entrypoints
+        ), "Skylos entry-point contract must give every exception a reason."
+
+    def test_skylos_entrypoint_types_match_reviewed_callers(self) -> None:
+        """Require each reviewed entry point to retain its configured type."""
+        entrypoints = _skylos_entrypoints()
+        entrypoint_types = {
+            full_name: entrypoint_type
+            for entrypoint in entrypoints
+            if isinstance(entrypoint_type := entrypoint.get("type"), str)
+            for full_name in _text_sequence(
+                entrypoint.get("full_name"), subject="entrypoint full name"
+            )
+        }
+        assert entrypoint_types == EXPECTED_ENTRYPOINT_TYPES, (
+            "Skylos entry-point contract must retain each verified caller type."
+        )
+
+    def test_skylos_gate_is_strict(self) -> None:
+        """Require Skylos gate failures to remain blocking."""
+        gate = _mapping(_skylos_config().get("gate"), subject="Skylos gate config")
+        assert gate.get("strict") is True, (
+            "Skylos gate configuration must enable strict mode."
+        )
+
+    def test_ci_runs_the_lint_target_and_installs_makeutil(self) -> None:
+        """Full-suite CI jobs must install the same pinned Makefile parser."""
+        lint_step = _sole_workflow_step(
+            ".github/workflows/ci.yml", "quality", "Run lint and dead-code detection"
+        )
+        assert lint_step.get("run") == "make lint", (
+            "CI lint-step contract must invoke the shared make lint target."
+        )
+        for workflow_path, job_name in (
+            (".github/workflows/ci.yml", "quality"),
+            (".github/workflows/coverage-main.yml", "coverage-upload"),
         ):
-            first_stdout, first_stderr = first.communicate()
-            second_stdout, second_stderr = second.communicate()
-
-        assert first.returncode == 0, (
-            "First concurrent Skylos whitelist update must succeed: "
-            f"{first_stdout}{first_stderr}"
-        )
-        assert second.returncode == 0, (
-            "Second concurrent Skylos whitelist update must succeed: "
-            f"{second_stdout}{second_stderr}"
-        )
-        configuration = tomllib.loads(
-            (isolated_directory / "pyproject.toml").read_text(encoding="utf-8")
-        )
-        documented = typ.cast(
-            "dict[str, str]",
-            configuration["tool"]["skylos"]["whitelist"]["documented"],
-        )
-        assert documented == {"first": "first reason", "second": "second reason"}, (
-            "Skylos whitelist lock must preserve every concurrent documented exception."
-        )
-
-
-def test_skylos_whitelist_is_reviewed_and_reasoned() -> None:
-    """Require exact, documented reasons for every Skylos whitelist entry."""
-    skylos = _skylos_config()
-    whitelist = _mapping(skylos.get("whitelist"), subject="Skylos whitelist")
-    documented = typ.cast("dict[str, str]", whitelist["documented"])
-    whitelist_names = frozenset(typ.cast("list[str]", whitelist["names"]))
-    assert whitelist_names == EXPECTED_WHITELIST_NAMES, (
-        "Skylos whitelist contract must keep reviewed names enabled."
-    )
-    assert frozenset(documented) == whitelist_names, (
-        "Skylos whitelist contract must document every enabled exception."
-    )
-    assert all(reason.strip() for reason in documented.values()), (
-        "Skylos whitelist contract must give every exception a reason."
-    )
-
-
-def test_skylos_entrypoints_are_reviewed_and_reasoned() -> None:
-    """Require exact full names and caller-specific reasons for entry points."""
-    entrypoints = _skylos_entrypoints()
-    entrypoint_full_names = frozenset(
-        full_name
-        for entrypoint in entrypoints
-        for full_name in _text_sequence(
-            entrypoint.get("full_name"), subject="entrypoint full name"
-        )
-    )
-    assert entrypoint_full_names == EXPECTED_ENTRYPOINT_FULL_NAMES, (
-        "Skylos entry-point contract must keep reviewed runtime callers enabled."
-    )
-    entrypoint_reasons = {
-        full_name: typ.cast("str", entrypoint["reason"])
-        for entrypoint in entrypoints
-        for full_name in _text_sequence(
-            entrypoint.get("full_name"), subject="entrypoint full name"
-        )
-    }
-    assert entrypoint_reasons == EXPECTED_ENTRYPOINT_REASONS, (
-        "Skylos entry-point contract must retain each verified runtime caller."
-    )
-    assert all(
-        isinstance(reason := entrypoint.get("reason"), str) and reason.strip()
-        for entrypoint in entrypoints
-    ), "Skylos entry-point contract must give every exception a reason."
-
-
-def test_skylos_entrypoint_types_match_reviewed_callers() -> None:
-    """Require each reviewed entry point to retain its configured type."""
-    entrypoints = _skylos_entrypoints()
-    entrypoint_types = {
-        full_name: entrypoint_type
-        for entrypoint in entrypoints
-        if isinstance(entrypoint_type := entrypoint.get("type"), str)
-        for full_name in _text_sequence(
-            entrypoint.get("full_name"), subject="entrypoint full name"
-        )
-    }
-    assert entrypoint_types == EXPECTED_ENTRYPOINT_TYPES, (
-        "Skylos entry-point contract must retain each verified caller type."
-    )
-
-
-def test_skylos_gate_is_strict() -> None:
-    """Require Skylos gate failures to remain blocking."""
-    gate = _mapping(_skylos_config().get("gate"), subject="Skylos gate config")
-    assert gate.get("strict") is True, (
-        "Skylos gate configuration must enable strict mode."
-    )
-
-
-def test_ci_runs_the_lint_target_and_installs_makeutil() -> None:
-    """Full-suite CI jobs must install the same pinned Makefile parser."""
-    lint_step = _sole_workflow_step(
-        ".github/workflows/ci.yml", "quality", "Run lint and dead-code detection"
-    )
-    assert lint_step.get("run") == "make lint", (
-        "CI lint-step contract must invoke the shared make lint target."
-    )
-    for workflow_path, job_name in (
-        (".github/workflows/ci.yml", "quality"),
-        (".github/workflows/coverage-main.yml", "coverage-upload"),
-    ):
-        job = _workflow_job(workflow_path, job_name)
-        environment = _mapping(
-            job.get("env"), subject=f"{workflow_path} {job_name} environment"
-        )
-        assert environment.get("MAKEUTIL_REVISION") == _MAKEUTIL_REVISION, (
-            f"{workflow_path} {job_name} must pin the Makeutil revision."
-        )
-        assert environment.get("MAKEUTIL_TOOLCHAIN") == _MAKEUTIL_TOOLCHAIN, (
-            f"{workflow_path} {job_name} must pin the Makeutil toolchain."
-        )
-        parser_step = _sole_workflow_step(
-            workflow_path, job_name, "Install Makefile parser"
-        )
-        _assert_makeutil_installation(
-            parser_step.get("run"),
-            contract=f"{workflow_path} {job_name} Makeutil-install contract",
-        )
+            job = _workflow_job(workflow_path, job_name)
+            environment = _mapping(
+                job.get("env"), subject=f"{workflow_path} {job_name} environment"
+            )
+            assert environment.get("MAKEUTIL_REVISION") == _MAKEUTIL_REVISION, (
+                f"{workflow_path} {job_name} must pin the Makeutil revision."
+            )
+            assert environment.get("MAKEUTIL_TOOLCHAIN") == _MAKEUTIL_TOOLCHAIN, (
+                f"{workflow_path} {job_name} must pin the Makeutil toolchain."
+            )
+            parser_step = _sole_workflow_step(
+                workflow_path, job_name, "Install Makefile parser"
+            )
+            _assert_makeutil_installation(
+                parser_step.get("run"),
+                contract=f"{workflow_path} {job_name} Makeutil-install contract",
+            )
