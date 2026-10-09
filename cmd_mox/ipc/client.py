@@ -414,6 +414,7 @@ def _connect_unix_with_retries(
     _remaining_time(request_deadline)
 
     def attempt_connect(_attempt: int) -> socket.socket:
+        _remaining_time(request_deadline)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             sock.settimeout(_remaining_time(request_deadline))

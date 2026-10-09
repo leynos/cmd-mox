@@ -163,17 +163,17 @@ def _read_stdin_until_eof(
         The decoded text read through EOF.
     """
     if path_utils.IS_WINDOWS:
-        return sys.stdin.read()
+        return _read_direct_stdin(on_error)
 
     try:
         descriptor = sys.stdin.fileno()
     except (AttributeError, OSError, ValueError):
         # Test doubles and non-file streams retain their established direct read.
-        return sys.stdin.read()
+        return _read_direct_stdin(on_error)
     poller = _create_stdin_poller(descriptor)
     if poller is None:
         # Preserve direct reads for descriptors unsupported by both waiters.
-        return sys.stdin.read()
+        return _read_direct_stdin(on_error)
 
     read_deadline = deadline if deadline is not None else time.monotonic() + timeout
     try:
@@ -183,6 +183,20 @@ def _read_stdin_until_eof(
     if is_regular_file:
         return _read_regular_stdin_until_deadline(read_deadline, on_error)
     return _read_polled_stdin(_ReadContext(descriptor, poller, read_deadline, on_error))
+
+
+def _read_direct_stdin(on_error: _ErrorHandler) -> str:
+    """Route failures from an unpolled text read through the shim boundary.
+
+    Returns
+    -------
+    str
+        Captured stdin text or the value returned by the error handler.
+    """
+    try:
+        return sys.stdin.read()
+    except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+        return on_error(exc)
 
 
 def _read_regular_stdin_until_deadline(deadline: float, on_error: _ErrorHandler) -> str:
