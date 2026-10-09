@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import socket
+import threading
+import time
 import typing as typ
 
 import pytest
 
+from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc import client as ipc_client
 from cmd_mox.ipc.client import (
     RetryConfig,
@@ -197,6 +201,117 @@ def test_invoke_server_does_not_restart_expired_encoding_deadline(
 
     with pytest.raises(TimeoutError):
         invoke_server(invocation, timeout=1.0, deadline=101.0)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix socket deadline behaviour")
+def test_invoke_server_bounds_fragmented_response_to_one_deadline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Slow response chunks cannot renew the Unix client's I/O budget."""
+    socket_path = tmp_path / "delayed-response.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen(1)
+    accepted = threading.Event()
+    release = threading.Event()
+
+    def serve() -> None:
+        try:
+            connection, _address = listener.accept()
+            with connection:
+                while connection.recv(64 * 1024):
+                    pass
+                accepted.set()
+                for chunk in (
+                    b'{"stdout":',
+                    b'"slow"',
+                    b',"stderr":""',
+                    b',"exit_code":0,"env":{}}',
+                ):
+                    if release.wait(0.05):
+                        return
+                    connection.sendall(chunk)
+        except OSError:
+            # The client closes its side when its shared deadline expires.
+            pass
+
+    server_thread = threading.Thread(target=serve, daemon=True)
+    server_thread.start()
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+    invocation = Invocation(command="cmd", args=[], stdin="", env={})
+    started = time.monotonic()
+
+    try:
+        with pytest.raises(TimeoutError):
+            invoke_server(
+                invocation,
+                timeout=0.12,
+                retry_config=RetryConfig(retries=1, backoff=0.0, jitter=0.0),
+            )
+
+        elapsed = time.monotonic() - started
+        assert accepted.wait(1.0), "Unix peer did not receive the request"
+        assert elapsed < 0.8, "Client response read exceeded its single deadline"
+    finally:
+        release.set()
+        listener.close()
+        server_thread.join(timeout=1.0)
+
+    assert not server_thread.is_alive(), "Unix response peer did not stop"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix socket retry behaviour")
+def test_unix_connect_retry_sleep_is_capped_by_the_deadline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Retry backoff stays within one deadline and skips later attempts."""
+    clock = {"value": 10.0}
+    created: list[float] = []
+    connected: list[float] = []
+    timeouts: list[float] = []
+    sleeps: list[float] = []
+
+    class _ClockedSocket:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            created.append(clock["value"])
+
+        def settimeout(self, timeout: float) -> None:
+            timeouts.append(timeout)
+
+        def connect(self, _address: str) -> None:
+            connected.append(clock["value"])
+            raise ConnectionRefusedError
+
+        def close(self) -> None:
+            pass
+
+    def advance_clock(delay: float) -> None:
+        sleeps.append(delay)
+        clock["value"] += delay
+
+    monkeypatch.setattr(ipc_client.time, "monotonic", lambda: clock["value"])
+    monkeypatch.setattr(ipc_client.time, "sleep", advance_clock)
+    monkeypatch.setattr(ipc_client.socket, "socket", _ClockedSocket)
+    context = _ConnectionContext(
+        timeout=0.05,
+        retry_config=RetryConfig(retries=5, backoff=0.04, jitter=0.0),
+    )
+
+    with pytest.raises(TimeoutError):
+        _connect_unix_with_retries(tmp_path / "missing.sock", context)
+
+    assert created == pytest.approx([10.0, 10.04]), (
+        "A new socket attempt started after the deadline"
+    )
+    assert connected == pytest.approx([10.0, 10.04]), (
+        "A connection attempt started after the deadline"
+    )
+    assert timeouts == pytest.approx([0.05, 0.01]), (
+        "Connect timeouts did not use the remaining deadline"
+    )
+    assert sleeps == pytest.approx([0.04, 0.01]), (
+        "Retry sleeps were not capped to the remaining deadline"
+    )
 
 
 def test_report_passthrough_result_uses_named_kind(

@@ -101,7 +101,7 @@ def test_bootstrap_shim_path_prefers_stdlib_platform(
     monkeypatch.setattr(sys, "path", ["__editable__site", "/usr/lib/python3.12"])
     monkeypatch.setattr(_shim_bootstrap, "_BOOTSTRAP_DONE", False)
 
-    original_platform = sys.modules.pop("platform", None)
+    monkeypatch.delitem(sys.modules, "platform", raising=False)
     fake_platform = typ.cast("typ.Any", importlib.import_module("platform"))
     assert fake_platform.MARKER == "fake"
 
@@ -110,11 +110,6 @@ def test_bootstrap_shim_path_prefers_stdlib_platform(
     std_platform = sys.modules["platform"]
     assert not hasattr(std_platform, "MARKER")
     assert "__editable__site" in sys.path
-
-    if original_platform is not None:
-        sys.modules["platform"] = original_platform
-    else:
-        sys.modules.pop("platform", None)
 
 
 def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
