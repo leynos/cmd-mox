@@ -13,7 +13,7 @@ import pytest
 from cmd_mox import shim
 from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 from cmd_mox.shim import _execute_invocation, _write_response
-from cmd_mox.unittests.test_shim_support import (
+from cmd_mox.unittests._shim_test_support import (
     _assert_exit_code,
 )
 
@@ -190,7 +190,13 @@ def test_passthrough_report_failure_preserves_nonzero_exit_code(
     )
     response = Response(passthrough=directive)
 
-    monkeypatch.setattr(shim, "_run_real_command", lambda *_args: Response(exit_code=2))
+    monkeypatch.setattr(
+        shim,
+        "_run_real_command",
+        lambda *_args: Response(
+            stdout="command output", stderr="command error", exit_code=2
+        ),
+    )
 
     def raise_error(*_: object, **__: object) -> typ.NoReturn:
         msg = "server did not acknowledge passthrough"
@@ -202,9 +208,16 @@ def test_passthrough_report_failure_preserves_nonzero_exit_code(
         shim._handle_passthrough(invocation, response, timeout=1.0)
 
     _assert_exit_code(exc, 2)
-    assert (
-        "IPC error: server did not acknowledge passthrough" in capsys.readouterr().err
-    ), "passthrough report failures must be diagnosed"
+    captured = capsys.readouterr()
+    assert captured.out == "command output", (
+        "A report failure must not discard passthrough stdout"
+    )
+    assert "command error" in captured.err, (
+        "A report failure must not discard passthrough stderr"
+    )
+    assert "IPC error: server did not acknowledge passthrough" in captured.err, (
+        "passthrough report failures must be diagnosed"
+    )
 
 
 def test_write_response_updates_environment_and_streams(

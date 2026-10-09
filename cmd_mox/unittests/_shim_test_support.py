@@ -1,14 +1,13 @@
-"""Shared test doubles, fixtures, and assertions for shim unit tests."""
+"""Shared test doubles and assertions for shim unit tests."""
 
 from __future__ import annotations
 
-import os
 import typing as typ
-
-import pytest
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+    import pytest
 
 
 class _DummyStdin:
@@ -66,41 +65,19 @@ class _DescriptorStdin(_DummyStdin):
 
 
 def _assert_exit_code(exc: pytest.ExceptionInfo[BaseException], expected: int) -> None:
-    """Assert that *exc* wraps a :class:`SystemExit` with the desired code."""
+    """Assert that *exc* wraps a :class:`SystemExit` with the desired code.
+
+    Raises
+    ------
+    TypeError
+        If the wrapped exception is not a :class:`SystemExit`.
+    AssertionError
+        If the wrapped exit code does not match *expected*.
+    """
     err = exc.value
-    assert isinstance(err, SystemExit)
-    assert err.code == expected
-
-
-@pytest.fixture
-def stdin_pipe_descriptor() -> cabc.Iterator[int]:
-    """Yield an owned pipe descriptor for stdin polling tests.
-
-    Yields
-    ------
-    int
-        The read end of the pipe.
-    """
-    read_descriptor, write_descriptor = os.pipe()
-    try:
-        yield read_descriptor
-    finally:
-        os.close(read_descriptor)
-        os.close(write_descriptor)
-
-
-@pytest.fixture
-def stdin_pipe_descriptor_at_eof() -> cabc.Iterator[int]:
-    """Yield a pipe read descriptor after closing its writer.
-
-    Yields
-    ------
-    int
-        The read end of the pipe, which returns EOF immediately.
-    """
-    read_descriptor, write_descriptor = os.pipe()
-    os.close(write_descriptor)
-    try:
-        yield read_descriptor
-    finally:
-        os.close(read_descriptor)
+    if not isinstance(err, SystemExit):
+        msg = "Expected a SystemExit exception"
+        raise TypeError(msg)
+    if err.code != expected:
+        msg = f"Expected exit code {expected}, got {err.code}"
+        raise AssertionError(msg)

@@ -14,7 +14,7 @@ from cmd_mox.command_runner import validate_override_path as _validate_override_
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_REAL_COMMAND_ENV_PREFIX
 from cmd_mox.ipc import Invocation, PassthroughRequest, Response
 from cmd_mox.shim import _merge_passthrough_path, _resolve_passthrough_target
-from cmd_mox.unittests.test_shim_support import _DummyStdin
+from cmd_mox.unittests._shim_test_support import _DummyStdin
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
