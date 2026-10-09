@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import codecs
 import collections.abc as cabc
-import contextlib
 import dataclasses
 import io
 import math
@@ -276,24 +275,7 @@ def _read_polled_stdin(context: _ReadContext) -> str:
     if not callable(buffered_read):
         return _read_raw_polled_stdin(context)
 
-    try:
-        was_blocking = os.get_blocking(context.descriptor)
-        os.set_blocking(context.descriptor, False)
-    except OSError as exc:
-        context.on_error(exc)
-    try:
-        text = _read_buffered_stdin(context, buffered_read)
-    except BaseException:
-        # Keep a failed cleanup from replacing the selected shim error.
-        with contextlib.suppress(OSError):
-            os.set_blocking(context.descriptor, was_blocking)
-        raise
-
-    try:
-        os.set_blocking(context.descriptor, was_blocking)
-    except OSError as exc:
-        context.on_error(exc)
-    return text
+    return _read_buffered_stdin(context, buffered_read)
 
 
 def _read_buffered_stdin(
@@ -312,6 +294,11 @@ def _read_buffered_stdin(
     while True:
         if time.monotonic() >= context.deadline:
             context.on_error(TimeoutError("timed out reading stdin"))
+        events = _poll_stdin(context.poller, context.deadline)
+        if events is None or time.monotonic() >= context.deadline:
+            context.on_error(TimeoutError("timed out reading stdin"))
+        if not events:
+            continue
         chunk = _read_buffered_chunk(context, read_chunk)
         if chunk is None:
             continue
@@ -342,26 +329,9 @@ def _read_buffered_chunk(
     if chunk:
         return chunk
     if chunk == b"":
-        return _read_raw_chunk_after_empty_buffer(context)
+        return b""
     _wait_for_stdin(context)
     return None
-
-
-def _read_raw_chunk_after_empty_buffer(context: _ReadContext) -> bytes | None:
-    """Probe the descriptor after its buffered reader reports no data.
-
-    Returns
-    -------
-    bytes or None
-        Raw input, empty bytes at EOF, or None after a readiness wait.
-    """
-    try:
-        return os.read(context.descriptor, 8_192)
-    except BlockingIOError:
-        _wait_for_stdin(context)
-        return None
-    except OSError as exc:
-        return context.on_error(exc)
 
 
 def _wait_for_stdin(context: _ReadContext) -> None:

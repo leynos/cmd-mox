@@ -741,7 +741,7 @@ higher-level context manager.
 
 #### Shared POSIX deadline and request rejection (2026-10-09)
 
-On POSIX the shim creates one monotonic deadline from CMOX_IPC_TIMEOUT. It
+On POSIX, the shim creates one monotonic deadline from CMOX_IPC_TIMEOUT. It
 applies that deadline to waitable stdin capture, Unix socket connection
 attempts and retry backoff, request sending, response reads, and passthrough
 reporting. Each socket wait receives only the remaining budget, so partial
