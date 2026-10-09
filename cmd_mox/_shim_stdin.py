@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import codecs
 import collections.abc as cabc
+import contextlib
 import dataclasses
 import io
 import math
@@ -259,12 +260,18 @@ def _read_polled_stdin(context: _ReadContext) -> str:
     except OSError as exc:
         context.on_error(exc)
     try:
-        return _read_buffered_stdin(context, buffered_read)
-    finally:
-        try:
+        text = _read_buffered_stdin(context, buffered_read)
+    except BaseException:
+        # Keep a failed cleanup from replacing the selected shim error.
+        with contextlib.suppress(OSError):
             os.set_blocking(context.descriptor, was_blocking)
-        except OSError as exc:
-            context.on_error(exc)
+        raise
+
+    try:
+        os.set_blocking(context.descriptor, was_blocking)
+    except OSError as exc:
+        context.on_error(exc)
+    return text
 
 
 def _read_buffered_stdin(

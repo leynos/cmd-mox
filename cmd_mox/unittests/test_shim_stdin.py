@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import queue
 import sys
@@ -103,6 +104,47 @@ def test_create_invocation_checks_deadline_between_buffered_reads(
     )
     assert os.get_blocking(stdin_pipe_descriptor_at_eof), (
         "stdin blocking mode was not restored"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_create_invocation_preserves_timeout_when_mode_restore_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stdin_pipe_descriptor_at_eof: int,
+) -> None:
+    """A restoration error must not replace the original read failure."""
+    clock = {"value": 0.0}
+    buffer = _BufferedInput([b"buffered"], lambda: clock.__setitem__("value", 2.0))
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        _DescriptorStdin(stdin_pipe_descriptor_at_eof, buffer=buffer),
+    )
+    monkeypatch.setattr(sys, "argv", ["shim"])
+    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: clock["value"])
+
+    original_set_blocking = os.set_blocking
+    blocking_modes: list[bool] = []
+
+    def set_blocking(
+        descriptor: int,
+        blocking: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - mirrors os.set_blocking
+    ) -> None:
+        blocking_modes.append(blocking)
+        if blocking:
+            raise OSError(errno.EIO, "unable to restore blocking mode")
+        original_set_blocking(descriptor, blocking)
+
+    monkeypatch.setattr(shim._shim_stdin.os, "set_blocking", set_blocking)
+
+    with pytest.raises(SystemExit) as exc:
+        _create_invocation("shim", timeout=1.0)
+
+    _assert_exit_code(exc, 1)
+    assert blocking_modes == [False, True], "Unexpected stdin blocking-mode changes"
+    assert capsys.readouterr().err == "IPC error: timed out reading stdin\n", (
+        "A restoration failure must not add a second diagnostic"
     )
 
 
