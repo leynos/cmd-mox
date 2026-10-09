@@ -370,7 +370,18 @@ def _handle_passthrough(
             deadline=deadline,
         )
     except (OSError, RuntimeError, json.JSONDecodeError) as exc:
-        _exit_ipc_error(exc, exit_code=result_response.exit_code or 1)
+        write_failures = [
+            failure
+            for stream_name, text in (
+                ("stdout", result_response.stdout),
+                ("stderr", result_response.stderr),
+            )
+            if (failure := _write_response_stream(stream_name, text)) is not None
+        ]
+        _exit_ipc_error(
+            write_failures[0] if write_failures else exc,
+            exit_code=result_response.exit_code or 1,
+        )
 
 
 def _shim_directory_from_env() -> Path | None:

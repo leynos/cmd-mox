@@ -181,7 +181,7 @@ def _read_stdin_until_eof(
     except OSError:
         is_regular_file = False
     if is_regular_file:
-        return _read_regular_stdin_until_deadline(read_deadline, on_error)
+        return _read_regular_stdin_until_deadline(descriptor, read_deadline, on_error)
     return _read_polled_stdin(_ReadContext(descriptor, poller, read_deadline, on_error))
 
 
@@ -199,7 +199,9 @@ def _read_direct_stdin(on_error: _ErrorHandler) -> str:
         return on_error(exc)
 
 
-def _read_regular_stdin_until_deadline(deadline: float, on_error: _ErrorHandler) -> str:
+def _read_regular_stdin_until_deadline(
+    descriptor: int, deadline: float, on_error: _ErrorHandler
+) -> str:
     """Read regular-file stdin in a daemon worker bounded by deadline.
 
     Returns
@@ -208,11 +210,17 @@ def _read_regular_stdin_until_deadline(deadline: float, on_error: _ErrorHandler)
         The text read from stdin through EOF.
     """
     result_queue: queue.Queue[tuple[str, Exception | None]] = queue.Queue()
-    stdin = sys.stdin
+    decoder = _stdin_decoder()
 
     def read_stdin() -> None:
         try:
-            result_queue.put((stdin.read(), None))
+            chunks: list[str] = []
+            # Raw reads avoid holding TextIOWrapper's buffer lock if this worker
+            # outlives the deadline and the main thread exits the interpreter.
+            while chunk := os.read(descriptor, 64 * 1024):
+                chunks.append(decoder.decode(chunk))
+            chunks.append(decoder.decode(b"", final=True))
+            result_queue.put(("".join(chunks), None))
         except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
             result_queue.put(("", exc))
 
