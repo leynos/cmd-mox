@@ -22,6 +22,7 @@ from cmd_mox.ipc import (
     IPCServer,
     RetryConfig,
     _deadline,
+    _observability,
     invoke_server,
 )
 from cmd_mox.ipc import server as ipc_server_module
@@ -82,13 +83,19 @@ def test_ipc_server_readiness_probe_is_a_closed_connection(
     """Readiness probes close cleanly without being logged as malformed JSON."""
     caplog.set_level(logging.INFO, logger="cmd_mox.ipc._server_core")
 
-    with IPCServer(tmp_path / "ipc.sock"):
+    with _observability.capture_events() as events, IPCServer(tmp_path / "ipc.sock"):
         deadline = time.monotonic() + 1.0
         while "connection closed" not in caplog.text and time.monotonic() < deadline:
             time.sleep(0.01)
 
     assert "connection closed" in caplog.text, "Readiness probe closure was not named"
     assert "malformed JSON" not in caplog.text, "Readiness probe was called malformed"
+    assert any(
+        event.operation == "ipc.server.connection"
+        and event.outcome == "receive_closed"
+        and event.error_category == "ConnectionClosed"
+        for event in events
+    ), "Readiness probe closure did not emit a bounded connection event"
 
 
 def test_ipc_server_bounds_incomplete_request_read(
@@ -100,7 +107,7 @@ def test_ipc_server_bounds_incomplete_request_read(
     socket_path = tmp_path / "ipc.sock"
     caplog.set_level(logging.INFO, logger="cmd_mox.ipc.server")
 
-    with IPCServer(socket_path, timeout=0.1):
+    with _observability.capture_events() as events, IPCServer(socket_path, timeout=0.1):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as incomplete:
             incomplete.settimeout(1.0)
             incomplete.connect(str(socket_path))
@@ -121,6 +128,12 @@ def test_ipc_server_bounds_incomplete_request_read(
         )
 
     assert response.stdout == "after-timeout", "Timed-out client stalled the server"
+    assert any(
+        event.operation == "ipc.server.connection"
+        and event.outcome == "receive_timeout"
+        and event.error_category == "TimeoutError"
+        for event in events
+    ), "Request timeout did not emit a bounded connection event"
 
 
 def test_ipc_handler_uses_remaining_time_for_each_receive(
@@ -198,11 +211,43 @@ def test_ipc_handler_logs_response_connection_drop(
     caplog.set_level(logging.INFO, logger="cmd_mox.ipc.server")
     monkeypatch.setattr(ipc_server_module, "_request_pipeline", lambda *_args: b"reply")
 
-    _IPCHandler.handle(fake_handler)
+    with _observability.capture_events() as events:
+        _IPCHandler.handle(fake_handler)
 
     assert "connection closed" in caplog.text, (
         "Dropped response connection was not logged"
     )
+    assert any(
+        event.operation == "ipc.server.connection"
+        and event.outcome == "response_dropped"
+        and event.error_category in {"ConnectionError", "OSError"}
+        for event in events
+    ), "Dropped response did not emit a bounded connection event"
+
+
+def test_ipc_handler_records_receive_connection_drop() -> None:
+    """A reset while reading emits a bounded closed-connection event."""
+
+    def fail_read() -> bytes:
+        raise ConnectionResetError
+
+    fake_handler = typ.cast(
+        "_IPCHandler",
+        types.SimpleNamespace(
+            _read_request_payload=fail_read,
+            server=types.SimpleNamespace(outer=types.SimpleNamespace(timeout=1.0)),
+        ),
+    )
+
+    with _observability.capture_events() as events:
+        _IPCHandler.handle(fake_handler)
+
+    assert any(
+        event.operation == "ipc.server.connection"
+        and event.outcome == "receive_closed"
+        and event.error_category == "ConnectionError"
+        for event in events
+    ), "Receive-side connection reset did not emit a bounded event"
 
 
 def test_ipc_server_start_fails_if_in_use(tmp_path: Path) -> None:
