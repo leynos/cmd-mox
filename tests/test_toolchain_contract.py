@@ -97,7 +97,7 @@ def test_makefile_and_ci_pin_the_same_version(tool: str) -> None:
     ("tool", "usage_re"),
     [
         ("ruff", r"ruff@\$\(RUFF_VERSION\)"),
-        ("ty", r"ty==\$\(TY_VERSION\)"),
+        ("ty", r"ty@\$\(TY_VERSION\)"),
     ],
 )
 def test_makefile_commands_use_the_pinned_version(tool: str, usage_re: str) -> None:

@@ -1,24 +1,28 @@
 NIXIE ?= nixie
+# Every uv call goes through the vendored helper, which cleans the environment,
+# uses the global uv cache, runs offline first and goes online at most once. See
+# https://github.com/leynos/shared-actions/tree/main/uv_gate for the contract.
+UV_GATE ?= python3 scripts/uv_gate.py
 UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
 TOOLS = $(UV)
 VENV_TOOLS = pytest
 MAKEUTIL = makeutil
-UV_ENV = UV_CACHE_DIR=.uv-cache UV_TOOL_DIR=.uv-tools
 # The CV-005 CodeScene contracts live in shared-actions and run from a full
 # commit, so a fix is a pin bump. `.github/cv005.toml` holds this repository's
 # only parameters.
 CV005_CONTRACTS_REF ?= a38feb9be25755c30eca5bda96bd3786a5b89c6b
-CV005_CONTRACTS = $(UV_ENV) $(UV) tool run --python 3.13 \
+CV005_CONTRACTS = $(UV_GATE) tool --python 3.13 \
 	--from 'git+https://github.com/leynos/shared-actions@$(CV005_CONTRACTS_REF)\#subdirectory=packages/cv005-contracts' \
-	cv005-contracts
+	-- cv005-contracts
 RUFF_VERSION ?= 0.16.4
 TY_VERSION ?= 0.0.74
-RUFF = $(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)
-# Run ty with --with so the pinned version overlays the project virtualenv;
-# an isolated tool environment would not see the project's dependencies.
-TY = $(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty
+RUFF = $(UV_GATE) tool --from ruff@$(RUFF_VERSION) -- ruff
+# ty runs as a pinned tool and reads the project's packages from the prepared
+# virtualenv through --python, since an isolated tool environment would not see
+# them.
+TY = $(UV_GATE) tool --from ty@$(TY_VERSION) -- ty
 TYPOS_VERSION ?= 1.48.0
-TYPOS := $(UV) tool run typos@$(TYPOS_VERSION)
+TYPOS := $(UV_GATE) tool --from typos@$(TYPOS_VERSION) -- typos
 PYLINT_PYTHON ?= pypy@3.12
 PYLINT_VERSION ?= 4.0.9
 PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
@@ -27,17 +31,17 @@ PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
 # remain for pytest-bdd step wrappers, mirroring the Ruff per-file ignores
 # for tests/steps.
 PYLINT_BASELINE_DISABLE = too-many-lines,too-many-arguments,too-many-positional-arguments
-PYLINT = $(UV_ENV) $(UV) tool run --managed-python --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' pylint --disable=$(PYLINT_BASELINE_DISABLE)
+PYLINT = $(UV_GATE) tool --managed-python --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' -- pylint --disable=$(PYLINT_BASELINE_DISABLE)
 DF12_PYTHON ?= 3.14
 # Commit SHA of the df12-python-lints v0.3.0 tag.
 DF12_PYTHON_LINTS_REF ?= 4cf41736cce2f7ba2778882a5c629c044568a0e5
 DF12_PYTHON_LINTS = git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)
-DF12_PYLINT = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' pylint
-AMBRLEAKS = $(UV_ENV) UV_PYTHON_PREFERENCE=only-managed $(UV) run --isolated --python $(DF12_PYTHON) --with '$(DF12_PYTHON_LINTS)' ambrleaks
+DF12_PYLINT = UV_PYTHON_PREFERENCE=only-managed $(UV_GATE) tool --python $(DF12_PYTHON) --from '$(DF12_PYTHON_LINTS)' -- pylint
+AMBRLEAKS = UV_PYTHON_PREFERENCE=only-managed $(UV_GATE) tool --python $(DF12_PYTHON) --from '$(DF12_PYTHON_LINTS)' -- ambrleaks
 SKYLOS_VERSION = 4.33.2
 # Skylos parses source using its own Python AST. Python 3.14 avoids phantom
 # dead-code findings from newer syntax that older tool runtimes cannot parse.
-SKYLOS_CLI = $(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' skylos
+SKYLOS_CLI = $(UV_GATE) tool --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' -- skylos
 SKYLOS = $(SKYLOS_CLI) --config-file pyproject.toml
 SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
 SKYLOS_EXCLUDE_FOLDERS ?= tests cmd_mox/unittests
@@ -50,7 +54,7 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	--log-file-level=DEBUG \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
-.PHONY: help all clean build build-release lint fmt check-fmt
+.PHONY: help all clean build prepare build-release lint fmt check-fmt
 .PHONY: makeutil markdownlint markdownlint-run nixie spelling skylos-allow test test-workflow-contracts typecheck
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
@@ -68,11 +72,10 @@ MDTABLEFIX_RULES = --wrap --renumber --breaks --ellipsis --fences
 
 all: build check-fmt test typecheck
 
-.venv: pyproject.toml
-	$(UV_ENV) $(UV) venv --clear
+prepare: $(UV) ## Install the locked development environment, offline first
+	$(UV_GATE) prepare --group dev
 
-build: $(UV) .venv ## Build virtual-env and install deps
-	$(UV_ENV) $(UV) sync --group dev
+build: prepare ## Build virtual-env and install deps
 
 build-release: ## Build artefacts (sdist & wheel)
 	python -m build --sdist --wheel
@@ -92,7 +95,7 @@ define ensure_tool
 endef
 
 define ensure_tool_venv
-	$(UV_ENV) $(UV) run which $(1) >/dev/null 2>&1 || { \
+	$(UV_GATE) run --group dev -- which $(1) >/dev/null 2>&1 || { \
 	  printf "Error: '%s' is required in the virtualenv, but is not installed\n" "$(1)" >&2; \
 	  exit 1; \
 	}
@@ -142,14 +145,14 @@ typecheck: build ## Run typechecking
 	$(TY) --version
 	# --extra-search-path duplicates tool.ty.environment.extra-paths because
 	# ty 0.0.74 drops config-sourced extra paths when its resolver re-runs.
-	$(TY) check --extra-search-path scripts
+	$(TY) check --python .venv --extra-search-path scripts
 
 markdownlint: ## Lint Markdown files
 	$(MAKE) markdownlint-run
 	+$(MAKE) spelling
 
 spelling: ## Enforce en-GB-oxendict spelling in Markdown prose
-	@$(UV) run scripts/generate_typos_config.py
+	@$(UV_GATE) run --group dev -- python scripts/generate_typos_config.py
 	@find . -type f -name '*.md' -not -path './.venv/*' -print0 | \
 		xargs -0 -r $(TYPOS) --config typos.toml --force-exclude
 
@@ -160,13 +163,13 @@ makeutil: ## Verify the Makefile parser used by contract tests
 	$(call ensure_tool,$@)
 
 test: build $(UV) $(VENV_TOOLS) makeutil test-workflow-contracts ## Run tests
-	$(UV_ENV) $(UV) run pytest -v -n auto
+	$(UV_GATE) run --group dev -- pytest -v -n auto
 
 test-workflow-contracts: $(UV) ## Run the shared CV-005 CodeScene contracts
 	$(CV005_CONTRACTS) check --repository .
 
 windows-smoke: build $(UV) $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
-	$(UV_ENV) $(UV) run pytest -v $(WINDOWS_SMOKE_ARGS)
+	$(UV_GATE) run --group dev -- pytest -v $(WINDOWS_SMOKE_ARGS)
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \

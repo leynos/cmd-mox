@@ -31,6 +31,9 @@ line-length = 88
 preview = true
 target-version = "py312"
 extend-exclude = [
+    # Vendored byte for byte from shared-actions; its digest is audited, so Ruff
+    # must neither lint nor reformat it.
+    "scripts/uv_gate.py",
     # Estate-shared typos rollout tooling; linted upstream, mirrored here
     # to match the Episodic configuration and avoid local drift.
     "scripts/generate_typos_config.py",
