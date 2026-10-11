@@ -425,11 +425,11 @@ def _connect_unix_with_retries(
         return sock
 
     def log_failure(attempt: int, exc: Exception) -> None:
-        # The bounded event is the only report: the socket path and the
-        # exception message are both on the observability never-log list.
+        # Log only bounded fields; omit socket paths and exception messages.
         _client_events.emit_connect_retry("unix", attempt, exc, context.correlation_id)
 
     def bounded_sleep(delay: float) -> None:
+        """Limit retry backoff to the remaining request deadline."""
         time.sleep(min(delay, _remaining_time(request_deadline)))
 
     return retry_with_backoff(

@@ -101,6 +101,13 @@ def test_oversized_read_is_rejected_without_dispatch(
     monkeypatch.setattr(state, "_read_request", reject_read)
 
     def record_dispatch(_outer: object, raw: bytes, _transport: str) -> bytes:
+        """Record any request that incorrectly reaches the dispatcher.
+
+        Returns
+        -------
+        bytes
+            A sentinel response if the oversized request is dispatched.
+        """
         dispatched.append(raw)
         return b"response"
 

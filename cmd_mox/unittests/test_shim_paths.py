@@ -319,6 +319,13 @@ def test_resolve_passthrough_target_merges_paths(
     captured_path: str | None = None
 
     def fake_resolve(command: str, path: str, override: str | None = None) -> Path:
+        """Capture the lookup path and return the expected executable.
+
+        Returns
+        -------
+        Path
+            The executable path expected by the resolution test.
+        """
         nonlocal captured_path
         captured_path = path
         assert override is None, "unexpected override bypassed PATH resolution"
