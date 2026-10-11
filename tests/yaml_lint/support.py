@@ -14,7 +14,11 @@ targets.
 from __future__ import annotations
 
 import re
+import typing as typ
 from pathlib import Path
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = "leynos/shared-actions/.github/actions/install-yaml-lint"
@@ -25,23 +29,6 @@ HAND_ROLLED = re.compile(
 )
 PIPE = "git ls-files -z '*.yml' '*.yaml' | xargs -0 -r"
 GATE_COMMAND = re.compile(r"^(- )?run: (/usr/bin/)?make( \S+)* lint( \S+)*$")
-
-
-def code_lines(text: str) -> list[str]:
-    """Drop comments and blank lines, trimming each line.
-
-    Parameters
-    ----------
-    text : str
-        The file text.
-
-    Returns
-    -------
-    list[str]
-        The remaining lines, stripped.
-    """
-    lines = (line.split(" #")[0].strip() for line in text.splitlines())
-    return [line for line in lines if line and not line.startswith("#")]
 
 
 def opens_a_rule(line: str) -> bool:
@@ -109,16 +96,49 @@ def lint_closure(makefile: str) -> list[str]:
         if target in seen:
             continue
         seen.add(target)
-        for targets, prerequisites, recipe in rules:
-            if target in targets:
-                pending.extend(prerequisites)
-                pending.extend(
-                    line.removeprefix("$(MAKE) ")
-                    for line in recipe
-                    if line.startswith("$(MAKE) ")
-                )
-                lines.extend(recipe)
+        for _, prerequisites, recipe in rules_of(rules, target):
+            pending.extend(prerequisites)
+            pending.extend(delegated_targets(recipe))
+            lines.extend(recipe)
     return lines
+
+
+def rules_of(
+    rules: list[tuple[list[str], list[str], list[str]]], target: str
+) -> list[tuple[list[str], list[str], list[str]]]:
+    """Select the rules that define a target.
+
+    Parameters
+    ----------
+    rules : list[tuple[list[str], list[str], list[str]]]
+        The parsed rules.
+    target : str
+        The target name.
+
+    Returns
+    -------
+    list[tuple[list[str], list[str], list[str]]]
+        The rules whose target list names ``target``.
+    """
+    return [rule for rule in rules if target in rule[0]]
+
+
+def delegated_targets(recipe: list[str]) -> list[str]:
+    """List the targets a recipe delegates to with a literal ``$(MAKE) target``.
+
+    Parameters
+    ----------
+    recipe : list[str]
+        The recipe lines.
+
+    Returns
+    -------
+    list[str]
+        The delegated target names.
+    """
+    return [
+        line.removeprefix("$(MAKE) ") for line in recipe if line.startswith("$(MAKE) ")
+    ]
 
 
 def is_bypassed(line: str) -> bool:
@@ -220,8 +240,8 @@ def jobs(workflow: str) -> list[list[str]]:
     found: list[list[str]] = []
     in_jobs = False
     for raw in workflow.splitlines():
-        code = raw.split(" #")[0]
-        if not code.strip() or code.lstrip().startswith("#"):
+        code = workflow_code(raw)
+        if code is None:
             continue
         if not code.startswith(" "):
             in_jobs = code.rstrip() == "jobs:"
@@ -230,6 +250,25 @@ def jobs(workflow: str) -> list[list[str]]:
         elif in_jobs and found:
             found[-1].append(code.strip())
     return found
+
+
+def workflow_code(raw: str) -> str | None:
+    """Strip a workflow line's trailing comment, dropping blank and comment lines.
+
+    Parameters
+    ----------
+    raw : str
+        One raw workflow line.
+
+    Returns
+    -------
+    str | None
+        The line without its trailing comment, or ``None`` when nothing is left.
+    """
+    code = raw.split(" #")[0]
+    if not code.strip() or code.lstrip().startswith("#"):
+        return None
+    return code
 
 
 def pins_the_installer(line: str) -> bool:
@@ -252,6 +291,83 @@ def pins_the_installer(line: str) -> bool:
     return step.startswith(f"uses: {INSTALLER}@") and bool(SHA_PIN.match(reference))
 
 
+def first_index(
+    items: list[str], predicate: cabc.Callable[[str], object]
+) -> int | None:
+    """Find the first item a predicate accepts.
+
+    Parameters
+    ----------
+    items : list[str]
+        The items to search in order.
+    predicate : cabc.Callable[[str], object]
+        The test.
+
+    Returns
+    -------
+    int | None
+        The position of the first match, or ``None``.
+    """
+    return next((index for index, item in enumerate(items) if predicate(item)), None)
+
+
+def step_ignores_failure(line: str) -> bool:
+    """Say whether a step line lets a failing step pass.
+
+    Parameters
+    ----------
+    line : str
+        One stripped step line.
+
+    Returns
+    -------
+    bool
+        ``True`` for ``continue-on-error: true`` or a bypassed ``run`` command.
+    """
+    if line.startswith("continue-on-error"):
+        return "true" in line
+    if line.startswith(("- run:", "run:")):
+        return is_bypassed(line.removeprefix("- run: ").removeprefix("run: "))
+    return False
+
+
+def job_is_sound(job: list[str]) -> bool:
+    """Say whether a gated job installs the tools first, without bypass.
+
+    Parameters
+    ----------
+    job : list[str]
+        The job's stripped code lines.
+
+    Returns
+    -------
+    bool
+        ``True`` when the pinned installer precedes the gate command and no
+        step ignores failure.
+    """
+    install = first_index(job, pins_the_installer)
+    gate_step = first_index(job, lambda line: bool(GATE_COMMAND.match(line)))
+    if install is None or gate_step is None:
+        return False
+    return install < gate_step and not any(step_ignores_failure(x) for x in job)
+
+
+def mentions_the_gate(line: str) -> bool:
+    """Say whether a line mentions both ``make`` and the ``lint`` target.
+
+    Parameters
+    ----------
+    line : str
+        One stripped line.
+
+    Returns
+    -------
+    bool
+        ``True`` when the line looks like it runs ``make lint``.
+    """
+    return "make" in line and re.search(r"\blint\b", line) is not None
+
+
 def ci_installs_before_lint(workflow: str) -> bool:
     """Say whether each job running ``make lint`` installs the tools first.
 
@@ -266,84 +382,5 @@ def ci_installs_before_lint(workflow: str) -> bool:
         ``True`` when some job runs ``make lint`` and every such job pins the
         installer earlier in the same job without ignoring any failure.
     """
-    gated = [
-        job
-        for job in jobs(workflow)
-        if any("make" in line and re.search(r"\blint\b", line) for line in job)
-    ]
-
-    def sound(job: list[str]) -> bool:
-        install = next((i for i, x in enumerate(job) if pins_the_installer(x)), None)
-        gate = next((i for i, x in enumerate(job) if GATE_COMMAND.match(x)), None)
-        ignored = any(
-            "continue-on-error: true" in line
-            or is_bypassed(line.removeprefix("- run: "))
-            for line in job
-            if line.startswith(("- run:", "run:", "continue-on-error"))
-        )
-        return (
-            install is not None and gate is not None and install < gate and not ignored
-        )
-
-    return bool(gated) and all(sound(job) for job in gated)
-
-
-GOOD = (
-    "lint: yamllint actionlint\n"
-    "yamllint:\n"
-    f"\t{PIPE} $(YAMLLINT) --strict --\n"
-    "actionlint:\n"
-    "\t$(ACTIONLINT)\n"
-)
-PINNED = f"{INSTALLER}@0123456789abcdef0123456789abcdef01234567"
-
-
-def gate(*steps: str, extra_job: str = "") -> str:
-    """Build a one-job workflow, optionally preceded by another job.
-
-    Parameters
-    ----------
-    *steps : str
-        Step lines, such as ``"- run: make lint"``.
-    extra_job : str
-        Text of a job placed before the gate job, indented as a job.
-
-    Returns
-    -------
-    str
-        The workflow text.
-    """
-    body = "".join(f"      {step}\n" for step in steps)
-    return f"jobs:\n{extra_job}  gate:\n    steps:\n{body}"
-
-
-CANONICAL_ESTATE_BASE = [
-    "---",
-    "extends: default",
-    "ignore: |",
-    "  **/charts/**/templates/",
-    "rules:",
-    "  document-start: disable",
-    "  comments:",
-    "    min-spaces-from-content: 1",
-    "  indentation:",
-    "    spaces: consistent",
-    "    indent-sequences: consistent",
-    "    check-multi-line-strings: false",
-    "  braces:",
-    "    min-spaces-inside: 0",
-    "    max-spaces-inside: 1",
-    "  brackets:",
-    "    min-spaces-inside: 0",
-    "    max-spaces-inside: 1",
-    "  line-length:",
-    "    max: 120",
-    "    allow-non-breakable-words: true",
-    "    allow-non-breakable-inline-mappings: true",
-    "    ignore: |",
-    "      .github/workflows/",
-    "      .github/actions/",
-    "  truthy:",
-    "    allowed-values: ['true', 'false']",
-    "    check-keys: false",
-]
+    gated = [job for job in jobs(workflow) if any(map(mentions_the_gate, job))]
+    return bool(gated) and all(job_is_sound(job) for job in gated)

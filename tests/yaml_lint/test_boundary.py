@@ -9,6 +9,7 @@ untracked one does not.
 
 from __future__ import annotations
 
+import os
 import shutil
 import stat
 import subprocess
@@ -38,8 +39,21 @@ def run(program: str, *arguments: str, cwd: Path) -> subprocess.CompletedProcess
     """
     executable = shutil.which(program)
     assert executable is not None, f"{program} is not on PATH"
+    # An outer `make test` exports MAKEFLAGS and MAKELEVEL, which change what a
+    # nested `make` prints and which jobserver it joins; the targets under test
+    # run in a clean Make environment.
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in {"MAKEFLAGS", "MAKELEVEL", "MFLAGS", "MAKEOVERRIDES"}
+    }
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
-        [executable, *arguments], cwd=cwd, capture_output=True, text=True, check=False
+        [executable, *arguments],
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -138,11 +152,9 @@ def test_a_failing_tool_fails_its_make_target(tmp_path: Path, target: str) -> No
     assert result.returncode != 0, "a failing tool did not fail the target"
 
 
-def test_make_lint_reaches_both_tools(tmp_path: Path) -> None:
+def test_make_lint_reaches_both_tools() -> None:
     """A dry run of ``lint`` names both tools, so the closure includes them."""
-    repo = git_repo(tmp_path / "repo", {"a.yml": "a: 1\n"}, {})
-
-    result = run("make", "-n", "-f", str(REPO_ROOT / "Makefile"), "lint", cwd=repo)
+    result = run("make", "-n", "lint", cwd=REPO_ROOT)
 
     assert "yamllint --strict" in result.stdout, result.stdout
     assert "\nactionlint\n" in f"\n{result.stdout}", result.stdout

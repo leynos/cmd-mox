@@ -11,18 +11,14 @@ from __future__ import annotations
 
 import pytest
 
+from .fixtures import CANONICAL_ESTATE_BASE, GOOD, PINNED, code_lines, gate
 from .support import (
-    CANONICAL_ESTATE_BASE,
     GATE_COMMAND,
-    GOOD,
     HAND_ROLLED,
     INSTALLER,
-    PINNED,
     PIPE,
     REPO_ROOT,
     ci_installs_before_lint,
-    code_lines,
-    gate,
     gate_is_wired,
     jobs,
 )
