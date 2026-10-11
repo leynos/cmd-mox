@@ -238,13 +238,14 @@ dispatch:
 
 ## IPC deadlines and stdin reads
 
-On POSIX, the shim carries one monotonic deadline through stdin reading, Unix
-socket connection retries, request sending, response reads, and passthrough
-reporting. The client stores that deadline in `_ConnectionContext` and applies
-only the remaining time before each blocking socket operation. The Unix server
-also keeps one read deadline per accepted connection and updates the socket
-timeout before each receive, so a client that slowly streams a request cannot
-renew its full wait budget with every byte.
+On POSIX, the shim carries one monotonic deadline through Unix socket
+connection retries, request sending, response reads, and passthrough reporting.
+Stdin capture uses that deadline when the stream can be waited on. The client
+stores the deadline in `_ConnectionContext` and applies only the remaining time
+before each blocking socket operation. The Unix server also keeps one read
+deadline per accepted connection and updates the socket timeout before each
+receive, so a client that slowly streams a request cannot renew its full wait
+budget with every byte.
 
 The shim polls pipe-like stdin descriptors when possible. It reads regular-file
 stdin on a daemon worker because regular files cannot provide a bounded poll

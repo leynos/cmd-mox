@@ -1,4 +1,4 @@
-"""Read the command shim's stdin within its IPC deadline.
+"""Read the command shim's stdin, bounding waits where supported.
 
 On POSIX, pollable streams wait with ``poll()`` and fall back to ``select()``;
 regular files use a daemon worker because readiness polling cannot bound a file
@@ -154,7 +154,7 @@ def _read_stdin_until_eof(
     deadline: float | None,
     on_error: _ErrorHandler,
 ) -> str:
-    """Read non-interactive stdin before its shared monotonic deadline.
+    """Read non-interactive stdin, applying the deadline where supported.
 
     Returns
     -------
