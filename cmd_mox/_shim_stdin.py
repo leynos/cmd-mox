@@ -55,6 +55,7 @@ class _SelectPoller:
     """Adapt select.select to the polling interface used by the shim."""
 
     def __init__(self, descriptor: int) -> None:
+        """Bind the descriptor watched by this polling adapter."""
         self.descriptor = descriptor
 
     def poll(self, timeout: int, /) -> list[tuple[int, int]]:
@@ -125,7 +126,7 @@ def _poll_stdin(poller: _Poller, deadline: float) -> list[tuple[int, int]] | Non
 
     poll_timeout = min(remaining, MAX_POLL_TIMEOUT_MS / 1_000)
     events = poller.poll(max(1, math.ceil(poll_timeout * 1_000)))
-    if events or time.monotonic() < deadline:
+    if time.monotonic() < deadline:
         return events
     return None
 
@@ -212,6 +213,7 @@ def _read_regular_stdin_until_deadline(
     decoder = _stdin_decoder()
 
     def read_stdin() -> None:
+        """Queue decoded descriptor input or its read error for the caller."""
         try:
             chunks: list[str] = []
             # Raw reads avoid holding TextIOWrapper's buffer lock if this worker

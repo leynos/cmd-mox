@@ -131,6 +131,13 @@ def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
     monkeypatch.setattr(sys, "path", list(original_path))
 
     def raise_runtime_error() -> typ.NoReturn:
+        """Fail platform loading to exercise bootstrap path restoration.
+
+        Raises
+        ------
+        RuntimeError
+            Simulates a platform-loader failure.
+        """
         msg = "platform load failed"
         raise RuntimeError(msg)
 

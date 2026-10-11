@@ -32,6 +32,13 @@ def test_execute_invocation_returns_response_without_passthrough(
     def fake_invoke(
         inv: Invocation, timeout: float, *, deadline: float | None = None
     ) -> Response:
+        """Capture invocation arguments and return the expected response.
+
+        Returns
+        -------
+        Response
+            The regular IPC response expected by the test.
+        """
         calls["invocation"] = inv
         calls["timeout"] = timeout
         calls["deadline"] = deadline
@@ -40,6 +47,13 @@ def test_execute_invocation_returns_response_without_passthrough(
     monkeypatch.setattr(shim, "invoke_server", fake_invoke)
 
     def fail_passthrough(*_args: object, **_kwargs: object) -> typ.NoReturn:
+        """Fail if a regular invocation unexpectedly enters passthrough.
+
+        Returns
+        -------
+        NoReturn
+            Never returns; ``pytest.fail`` fails the test if called.
+        """
         return pytest.fail("passthrough handler should not run")
 
     monkeypatch.setattr(
@@ -81,6 +95,13 @@ def test_execute_invocation_processes_passthrough(
         *,
         deadline: float | None = None,
     ) -> Response:
+        """Check forwarded passthrough arguments and return the final response.
+
+        Returns
+        -------
+        Response
+            The final response expected from passthrough handling.
+        """
         assert inv is invocation, "passthrough received a different invocation"
         assert resp is intermediate, "passthrough received a different response"
         assert math.isclose(timeout, 2.0), "passthrough timeout was changed"
@@ -118,6 +139,13 @@ def test_execute_invocation_shares_deadline_with_passthrough(
     def fake_invoke(
         _inv: Invocation, timeout: float, *, deadline: float | None = None
     ) -> Response:
+        """Record the initial IPC budget and advance the fake clock.
+
+        Returns
+        -------
+        Response
+            The intermediate response that requests passthrough handling.
+        """
         timeouts.append(timeout)
         deadlines.append(deadline)
         now["value"] = 100.6
@@ -132,6 +160,13 @@ def test_execute_invocation_shares_deadline_with_passthrough(
         *,
         deadline: float | None = None,
     ) -> Response:
+        """Record the remaining budget passed to passthrough reporting.
+
+        Returns
+        -------
+        Response
+            The completed response returned by passthrough reporting.
+        """
         timeouts.append(timeout)
         deadlines.append(deadline)
         return final
@@ -169,6 +204,13 @@ def test_execute_invocation_surfaces_ipc_errors(
     )
 
     def raise_error(*_: object, **__: object) -> typ.NoReturn:
+        """Simulate an IPC transport error for the controlled-exit check.
+
+        Raises
+        ------
+        OSError
+            The transport failure handled by the shim.
+        """
         raise OSError("boom")
 
     monkeypatch.setattr(shim, "invoke_server", raise_error)
@@ -203,6 +245,13 @@ def test_passthrough_report_failure_preserves_nonzero_exit_code(
     )
 
     def raise_error(*_: object, **__: object) -> typ.NoReturn:
+        """Simulate a server that fails to acknowledge the passthrough result.
+
+        Raises
+        ------
+        TimeoutError
+            The missing acknowledgement reported by the shim.
+        """
         msg = "server did not acknowledge passthrough"
         raise TimeoutError(msg)
 
@@ -240,10 +289,24 @@ def test_passthrough_report_failure_survives_stdout_write_failure(
     )
 
     def raise_error(*_: object, **__: object) -> typ.NoReturn:
+        """Simulate a passthrough timeout before stdout also fails.
+
+        Raises
+        ------
+        TimeoutError
+            The timeout whose diagnostic must be preserved.
+        """
         raise TimeoutError("timeout")
 
     class _ClosedWriter:
         def write(self, _text: str) -> typ.NoReturn:
+            """Simulate stdout closing while the response is written.
+
+            Raises
+            ------
+            BrokenPipeError
+                Indicates that the output stream is closed.
+            """
             raise BrokenPipeError("closed")
 
     monkeypatch.setattr(shim, "report_passthrough_result", raise_error)
@@ -287,6 +350,13 @@ def test_write_response_handles_closed_stdout(
 
     class _ClosedWriter:
         def write(self, _text: str) -> typ.NoReturn:
+            """Simulate stdout closing while the response is written.
+
+            Raises
+            ------
+            BrokenPipeError
+                Indicates that the output stream is closed.
+            """
             msg = "closed stdout"
             raise BrokenPipeError(msg)
 
@@ -312,9 +382,23 @@ def test_write_response_handles_stdout_flush_failure(
 
     class _FlushFailure:
         def write(self, text: str) -> int:
+            """Accept response text before the flush failure is exercised.
+
+            Returns
+            -------
+            int
+                The number of characters accepted by the fake output stream.
+            """
             return len(text)
 
         def flush(self) -> typ.NoReturn:
+            """Simulate stdout closing after a successful write.
+
+            Raises
+            ------
+            BrokenPipeError
+                Indicates that the output stream closed before flushing.
+            """
             msg = "closed stdout during flush"
             raise BrokenPipeError(msg)
 

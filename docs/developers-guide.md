@@ -235,6 +235,15 @@ dispatch:
   category; validation failures keep the `invalid_request` outcome and use
   `ValidationError`. An empty read is treated as a closed connection, so
   readiness probes emit neither a dispatch record nor a response frame.
+- Unix connection failures emit a bounded `ipc.server.connection` event with
+  one of three outcomes: `receive_timeout`, `receive_closed`, or
+  `response_dropped`. Its `error_category` is one of `ConnectionClosed`,
+  `ConnectionError`, `OSError`, or `TimeoutError`; exception messages are not
+  included. The event carries a nonnegative `duration_ms` and includes
+  `correlation_id` only when a validated request identifier is available.
+  Connection counters use only the fixed `operation`, `transport`, and
+  `outcome` dimensions, so correlation identifiers and payload data never
+  increase the number of counter keys.
 
 ## IPC deadlines and stdin reads
 

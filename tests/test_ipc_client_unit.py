@@ -134,6 +134,13 @@ def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
         data: dict[str, typ.Any],
         context: _ConnectionContext,
     ) -> Response:
+        """Capture the serialized request context and return a test response.
+
+        Returns
+        -------
+        Response
+            The successful response expected by the invocation test.
+        """
         captured["kind"] = kind
         captured["data"] = data
         assert context.retry_config.retries == 3, "Default retry config was not used"
@@ -161,6 +168,13 @@ def test_invoke_server_forwards_absolute_deadline(
         data: dict[str, typ.Any],
         context: _ConnectionContext,
     ) -> Response:
+        """Capture the forwarded request and return a successful response.
+
+        Returns
+        -------
+        Response
+            The successful response expected by the invocation test.
+        """
         captured["kind"] = kind
         captured["data"] = data
         captured["timeout"] = context.timeout
@@ -185,10 +199,24 @@ def test_invoke_server_does_not_restart_expired_encoding_deadline(
     def encode_after_deadline(
         _kind: str, _data: dict[str, typ.Any]
     ) -> tuple[bytes, str]:
+        """Advance fake time during encoding before returning an envelope.
+
+        Returns
+        -------
+        tuple[bytes, str]
+            A minimal encoded request and its correlation identifier.
+        """
         now["value"] = 102.0
         return b"{}", "correlation"
 
     def unexpected_socket(*_args: object, **_kwargs: object) -> typ.NoReturn:
+        """Fail if an expired request proceeds to socket creation.
+
+        Returns
+        -------
+        NoReturn
+            Never returns; ``pytest.fail`` fails the test if called.
+        """
         return pytest.fail("Socket creation must not follow an expired deadline")
 
     monkeypatch.setattr(ipc_client, "_build_request_envelope", encode_after_deadline)
@@ -216,6 +244,7 @@ def test_invoke_server_bounds_fragmented_response_to_one_deadline(
     release = threading.Event()
 
     def serve() -> None:
+        """Receive the request and stream a response in delayed fragments."""
         try:
             connection, _address = listener.accept()
             with connection:
@@ -273,19 +302,30 @@ def test_unix_connect_retry_sleep_is_capped_by_the_deadline(
 
     class _ClockedSocket:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
+            """Record when each retry attempt creates its socket."""
             created.append(clock["value"])
 
         def settimeout(self, timeout: float) -> None:
+            """Record the remaining timeout assigned to the socket."""
             timeouts.append(timeout)
 
         def connect(self, _address: str) -> None:
+            """Record the attempt time and simulate a refused connection.
+
+            Raises
+            ------
+            ConnectionRefusedError
+                Simulates the unavailable Unix socket at each retry attempt.
+            """
             connected.append(clock["value"])
             raise ConnectionRefusedError
 
         def close(self) -> None:
+            """Accept cleanup after the simulated connection refusal."""
             pass
 
     def advance_clock(delay: float) -> None:
+        """Replace retry sleeping with deterministic fake-clock progress."""
         sleeps.append(delay)
         clock["value"] += delay
 
@@ -351,6 +391,13 @@ def test_report_passthrough_result_forwards_absolute_deadline(
         data: dict[str, typ.Any],
         context: _ConnectionContext,
     ) -> Response:
+        """Capture the passthrough request deadline and return a response.
+
+        Returns
+        -------
+        Response
+            The successful response expected by the passthrough test.
+        """
         captured["deadline"] = context.deadline
         return Response(stdout="ok")
 

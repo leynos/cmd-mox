@@ -427,7 +427,9 @@ def _connect_unix_with_retries(
         return sock
 
     def bounded_sleep(delay: float) -> None:
+        """Limit retry backoff to the remaining request deadline."""
         time.sleep(min(delay, _remaining_time(request_deadline)))
+
     return retry_with_backoff(
         attempt_connect,
         retry_config=context.retry_config,

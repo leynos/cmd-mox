@@ -128,7 +128,7 @@ def test_request_pipeline_logs_successful_invocation_dispatch(
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    response = _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
             "kind": _server_core.KIND_INVOCATION,
@@ -139,7 +139,10 @@ def test_request_pipeline_logs_successful_invocation_dispatch(
         }).encode(),
     )
 
-    assert response is not None, "Successful dispatch did not return a response"
+    assert result.response_bytes is not None, (
+        "Successful dispatch did not return a response"
+    )
+    assert result.correlation_id is None, "Legacy invocation must not gain correlation"
     [event] = _dispatch_events(caplog)
     assert event["operation"] == "ipc.dispatch", "Wrong operation"
     assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
@@ -166,7 +169,7 @@ def test_request_pipeline_logs_successful_passthrough_dispatch(
         ),
     )
 
-    response = _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
             "kind": _server_core.KIND_PASSTHROUGH_RESULT,
@@ -177,7 +180,10 @@ def test_request_pipeline_logs_successful_passthrough_dispatch(
         }).encode(),
     )
 
-    assert response is not None, "Successful dispatch did not return a response"
+    assert result.response_bytes is not None, (
+        "Successful dispatch did not return a response"
+    )
+    assert result.correlation_id == "passthrough-123", "Wrong resolved correlation id"
     [event] = _dispatch_events(caplog)
     assert event["kind"] == _server_core.KIND_PASSTHROUGH_RESULT, "Wrong kind"
     assert event["invocation_id"] == "passthrough-123", "Wrong ID"
@@ -194,13 +200,18 @@ def test_request_pipeline_logs_invalid_request(
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    response = _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
         json.dumps({"kind": _server_core.KIND_INVOCATION}).encode(),
     )
 
-    assert response is not None, "Invalid request did not return an error frame"
-    payload = json.loads(response.decode("utf-8"))
+    assert result.response_bytes is not None, (
+        "Invalid request did not return an error frame"
+    )
+    assert result.correlation_id is None, (
+        "Invalid legacy request must not gain correlation"
+    )
+    payload = json.loads(result.response_bytes.decode("utf-8"))
     assert payload["exit_code"] == 1, "Invalid request must fail"
     assert payload["stderr"] == "IPC request payload failed validation", (
         "Invalid request diagnostic was not returned"
@@ -221,10 +232,15 @@ def test_request_pipeline_logs_rejection_frame(
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    response = _server_core._request_pipeline(ipc_server, b"not-json")
+    result = _server_core._request_pipeline(ipc_server, b"not-json")
 
-    assert response is not None, "Parse failure did not return an error frame"
-    payload = json.loads(response.decode("utf-8"))
+    assert result.response_bytes is not None, (
+        "Parse failure did not return an error frame"
+    )
+    assert result.correlation_id is None, (
+        "Unparseable request must not carry correlation"
+    )
+    payload = json.loads(result.response_bytes.decode("utf-8"))
     assert payload["exit_code"] == 1, "Parse failure must fail"
     assert payload["stderr"] == "IPC request could not be parsed", (
         "Parse failure diagnostic was not returned"
@@ -325,7 +341,7 @@ def test_request_pipeline_logs_handler_failure(
         tmp_path / "ipc.sock",
         handlers=IPCHandlers(handler=failing_handler),
     )
-    response = _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
             "kind": _server_core.KIND_INVOCATION,
@@ -336,7 +352,9 @@ def test_request_pipeline_logs_handler_failure(
         }).encode(),
     )
 
-    assert response is not None, "Handler failure did not return an error response"
+    assert result.response_bytes is not None, (
+        "Handler failure did not return an error response"
+    )
     [event] = _dispatch_events(caplog)
     assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
     assert event["outcome"] == "handler_error", "Wrong outcome"
@@ -349,7 +367,7 @@ def test_request_pipeline_records_transport_and_correlation_id(
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    response = _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
             "kind": _server_core.KIND_INVOCATION,
@@ -362,7 +380,10 @@ def test_request_pipeline_records_transport_and_correlation_id(
         "unix",
     )
 
-    assert response is not None, "Successful dispatch did not return a response"
+    assert result.response_bytes is not None, (
+        "Successful dispatch did not return a response"
+    )
+    assert result.correlation_id == "corr-abc", "Wrong resolved correlation id"
     [event] = _dispatch_events(caplog)
     assert event["transport"] == "unix", "Wrong transport"
     assert event["correlation_id"] == "corr-abc", "Wrong correlation id"
@@ -376,7 +397,7 @@ def test_request_pipeline_omits_correlation_id_for_legacy_invocations(
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
             "kind": _server_core.KIND_INVOCATION,
@@ -388,6 +409,7 @@ def test_request_pipeline_omits_correlation_id_for_legacy_invocations(
     )
 
     [event] = _dispatch_events(caplog)
+    assert result.correlation_id is None, "No identifier may be manufactured"
     assert "correlation_id" not in event, "No identifier may be manufactured"
     assert "transport" not in event, "Unknown transport must be omitted"
 
@@ -408,7 +430,7 @@ def test_request_pipeline_falls_back_to_model_invocation_id(
         ),
     )
 
-    _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
             "kind": _server_core.KIND_PASSTHROUGH_RESULT,
@@ -420,6 +442,7 @@ def test_request_pipeline_falls_back_to_model_invocation_id(
     )
 
     [event] = _dispatch_events(caplog)
+    assert result.correlation_id == "passthrough-123", "Wrong resolved correlation id"
     assert event["correlation_id"] == "passthrough-123", "Wrong correlation id"
     assert event["invocation_id"] == "passthrough-123", "Wrong invocation id"
 
@@ -484,7 +507,7 @@ def test_dispatch_record_omits_an_unusable_invocation_identifier(
         handlers=IPCHandlers(passthrough_handler=passthrough_handler),
     )
 
-    _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
         json.dumps({
             "kind": _server_core.KIND_PASSTHROUGH_RESULT,
@@ -496,5 +519,6 @@ def test_dispatch_record_omits_an_unusable_invocation_identifier(
     )
 
     [event] = _dispatch_events(caplog)
+    assert result.correlation_id is None, "Invalid identifier must not be retained"
     assert "invocation_id" not in event, "Unusable identifier must be omitted"
     assert "correlation_id" not in event, "Unusable fallback must be omitted"
