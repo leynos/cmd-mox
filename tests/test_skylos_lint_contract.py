@@ -37,14 +37,13 @@ _SKYLOS_EXCLUDE_ARGS_RAW: typ.Final = (
 _SKYLOS_WHITELIST_LOCK: typ.Final = ".skylos-whitelist.lock"
 _SKYLOS_WHITELIST_LOCK_TOKENS: typ.Final = (_SKYLOS_WHITELIST_LOCK,)
 _SKYLOS_CLI_TOKENS: typ.Final = (
-    "$(UV_ENV)",
-    "$(UV)",
+    "$(UV_GATE)",
     "tool",
-    "run",
     "--python",
     "3.14",
     "--from",
     "skylos==$(SKYLOS_VERSION)",
+    "--",
     "skylos",
 )
 _SKYLOS_SCAN_TOKENS: typ.Final = (
