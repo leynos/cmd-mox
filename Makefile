@@ -5,6 +5,9 @@ NIXIE ?= nixie
 UV_GATE ?= python3 scripts/uv_gate.py
 UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
 TOOLS = $(UV)
+# The helper finds uv on PATH, so put the directory of the selected uv (a caller's
+# UV=..., or the fallback in $$HOME/.local/bin) on PATH for every recipe.
+export PATH := $(patsubst %/,%,$(dir $(UV))):$(PATH)
 VENV_TOOLS = pytest
 MAKEUTIL = makeutil
 # The CV-005 CodeScene contracts live in shared-actions and run from a full
