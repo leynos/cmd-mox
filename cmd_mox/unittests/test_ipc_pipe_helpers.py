@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from cmd_mox.ipc import client
+from cmd_mox.ipc._server_core import _RequestResult
 from cmd_mox.ipc.client import RetryConfig, _ConnectionContext, _send_pipe_request
 from cmd_mox.ipc.named_pipe import _NamedPipeState
 from cmd_mox.ipc.windows import (
@@ -124,10 +125,10 @@ def test_named_pipe_handler_uses_shared_helpers(
     def fake_write(handle_obj: object, payload: bytes, *, win32file: object) -> None:
         writes.append(payload)
 
-    def fake_process(_outer: object, raw: bytes, transport: str) -> bytes:
+    def fake_process(_outer: object, raw: bytes, transport: str) -> _RequestResult:
         assert raw == b"raw-request"
         assert transport == "named_pipe"
-        return b"processed"
+        return _RequestResult(response_bytes=b"processed", correlation_id=None)
 
     class _FakeWin32File:
         def CloseHandle(self, h: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing

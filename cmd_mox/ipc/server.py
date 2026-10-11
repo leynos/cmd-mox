@@ -38,6 +38,7 @@ def _emit_connection_outcome(
     outcome: _ConnectionOutcome,
     error_category: _ConnectionErrorCategory,
     started: float,
+    correlation_id: str | None = None,
 ) -> None:
     """Emit bounded metadata for a closed or stalled Unix connection."""
     _observability.emit(
@@ -47,6 +48,7 @@ def _emit_connection_outcome(
             outcome=outcome,
             error_category=error_category,
             duration_ms=_observability.elapsed_ms(started),
+            correlation_id=correlation_id,
         ),
         logger=logger,
         message=_CONNECTION_EVENT_MESSAGE,
@@ -171,6 +173,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
     def setup(self) -> None:
+        """Start the connection's receive deadline before reading begins."""
         self._read_deadline = _compute_deadline(
             self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
         )
@@ -207,19 +210,27 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             )
             logger.info("IPC connection closed while receiving request")
             return
-        response_bytes = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
-        if response_bytes is None:
-            _emit_connection_outcome("receive_closed", "ConnectionClosed", started)
+        result = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
+        if result.response_bytes is None:
+            _emit_connection_outcome(
+                "receive_closed",
+                "ConnectionClosed",
+                started,
+                result.correlation_id,
+            )
             return
         try:
             self.request.settimeout(
                 self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
             )
-            self.wfile.write(response_bytes)
+            self.wfile.write(result.response_bytes)
             self.wfile.flush()
         except OSError as exc:
             _emit_connection_outcome(
-                "response_dropped", _connection_error_category(exc), started
+                "response_dropped",
+                _connection_error_category(exc),
+                started,
+                result.correlation_id,
             )
             logger.info("IPC connection closed while sending response")
 

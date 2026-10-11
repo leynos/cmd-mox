@@ -128,6 +128,7 @@ def _run_shim_against_socket_peer(
     release = threading.Event()
 
     def serve() -> None:
+        """Receive the shim request and send its reply or hold the peer open."""
         try:
             connection, _address = listener.accept()
             with connection:
