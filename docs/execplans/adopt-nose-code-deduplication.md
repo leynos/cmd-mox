@@ -167,7 +167,8 @@ Success is observable when:
       Lint findings raised by the deduplication work"); `check-fmt`,
       `duplication-test`, `duplication`, `typecheck`, Markdown lint and nixie
       were already green and unchanged.
-- [ ] Commit, push over SSH, open a draft PR. Do not merge.
+- [x] (2026-10-14) Committed as `878bc54`, pushed over SSH, and opened draft
+  PR [#315](https://github.com/leynos/cmd-mox/pull/315). Not merged.
 
 ## Surprises & Discoveries
 
