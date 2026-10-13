@@ -10,6 +10,9 @@ from .models import Invocation, PassthroughResult
 
 logger = logging.getLogger(__name__)
 
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
+
 
 def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
     """Return a JSON object parsed from *data* or ``None`` on failure.
@@ -28,6 +31,37 @@ def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
     return payload
 
 
+def _build_payload[PayloadT](
+    payload: dict[str, typ.Any],
+    model: cabc.Callable[..., PayloadT],
+    *,
+    description: str,
+) -> PayloadT | None:
+    """Build *model* from *payload*, reporting malformed payloads once.
+
+    Parameters
+    ----------
+    payload : dict[str, typing.Any]
+        Decoded JSON object received from the IPC peer.
+    model : collections.abc.Callable[..., PayloadT]
+        IPC model whose keyword arguments the payload must supply.
+    description : str
+        Human-readable payload kind used when logging the failure.
+
+    Returns
+    -------
+    PayloadT or None
+        The built model, or ``None`` when the payload did not fit it.
+    """
+    try:
+        return model(**payload)
+    except TypeError:
+        logger.exception(
+            "IPC %s payload missing required fields: %r", description, payload
+        )
+        return None
+
+
 def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | None:
     """Return an :class:`Invocation` if *payload* has the required fields.
 
@@ -36,11 +70,7 @@ def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | Non
     Invocation or None
         The validated invocation, or ``None`` for malformed payloads.
     """
-    try:
-        return Invocation(**payload)
-    except TypeError:
-        logger.exception("IPC payload missing required fields: %r", payload)
-        return None
+    return _build_payload(payload, Invocation, description="invocation")
 
 
 def validate_passthrough_payload(
@@ -53,11 +83,7 @@ def validate_passthrough_payload(
     PassthroughResult or None
         The validated result, or ``None`` for malformed payloads.
     """
-    try:
-        return PassthroughResult(**payload)
-    except TypeError:
-        logger.exception("IPC passthrough payload missing required fields: %r", payload)
-        return None
+    return _build_payload(payload, PassthroughResult, description="passthrough")
 
 
 __all__ = [
