@@ -13,18 +13,17 @@ from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
     _BaseIPCServer,
+    _CallbackServerBase,
     _request_pipeline,
 )
 from ._unix_server_base import _selection_mode, resolve_unix_server_base
 from .socket_utils import cleanup_stale_socket, wait_for_socket
 
 if typ.TYPE_CHECKING:
-    import collections.abc as cabc
     from pathlib import Path
 
     from ._observability import _BackendErrorCategory as _ErrorCategory
     from ._unix_server_base import _SelectionMode
-    from .models import Invocation, PassthroughResult, Response
 
 
 BACKEND_SELECTION_OPERATION: typ.Final[str] = "ipc.backend_selection"
@@ -242,10 +241,7 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
         wait_for_socket(self.socket_path, self.timeout)
 
     @staticmethod
-    def _stop_backend(server: socketserver.BaseServer | None) -> None:
-        """Shut down and close a backend when one was created."""
-        if server is None:
-            return
+    def _stop_backend(server: socketserver.BaseServer) -> None:
         server.shutdown()
         server.server_close()
 
@@ -255,28 +251,8 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
                 self.socket_path.unlink()
 
 
-class CallbackIPCServer(IPCServer):
+class CallbackIPCServer(_CallbackServerBase[socketserver.BaseServer], IPCServer):
     """IPCServer variant that delegates to callbacks."""
-
-    def __init__(
-        self,
-        socket_path: Path,
-        handler: cabc.Callable[[Invocation], Response],
-        passthrough_handler: cabc.Callable[[PassthroughResult], Response],
-        *,
-        timeouts: TimeoutConfig | None = None,
-    ) -> None:
-        """Initialise a callback-driven IPC server."""
-        timeouts = timeouts or TimeoutConfig()
-        super().__init__(
-            socket_path,
-            timeout=timeouts.timeout,
-            accept_timeout=timeouts.accept_timeout,
-            handlers=IPCHandlers(
-                handler=handler,
-                passthrough_handler=passthrough_handler,
-            ),
-        )
 
 
 class _IPCHandler(socketserver.StreamRequestHandler):

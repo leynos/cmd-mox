@@ -29,6 +29,8 @@ if typ.TYPE_CHECKING:
 
     from syrupy.assertion import SnapshotAssertion
 
+    from cmd_mox.ipc.server import _InnerServer
+
 type _RequestPayload = dict[
     str, str | int | float | bool | list[str] | dict[str, str] | None
 ]
@@ -554,6 +556,48 @@ def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
     assert not failures, f"concurrent stop() raised: {failures}"
     assert server._server is None, "stop() should clear the backend reference"
     assert server._thread is None, "stop() should clear the thread reference"
+
+
+def test_stop_without_a_started_backend_skips_transport_hooks(
+    tmp_path: Path,
+) -> None:
+    """Stopping a never-started server must not hand ``None`` to the hooks.
+
+    The transport hooks receive a concrete backend, so their own bodies work
+    with the live type instead of re-deriving the missing-backend case.
+    """
+    server = IPCServer(tmp_path / "ipc.sock")
+    calls: list[str] = []
+
+    def record_stop(backend: object) -> None:
+        calls.append(f"stop:{backend!r}")
+
+    server._stop_backend = record_stop  # type: ignore[method-assign, ty:invalid-assignment]
+
+    server.stop()
+
+    assert not calls, "hooks ran for a backend that was never created"
+
+
+def test_stop_joins_the_live_backend_thread(tmp_path: Path) -> None:
+    """A started server still joins its backend thread on the way out."""
+    server = IPCServer(tmp_path / "ipc.sock")
+    backend = typ.cast("_InnerServer", object())
+    thread = threading.Thread(target=lambda: None)
+    thread.start()
+    server._server = backend
+    server._thread = thread
+    stopped: list[object] = []
+
+    def record_stop(instance: object) -> None:
+        stopped.append(instance)
+
+    server._stop_backend = record_stop  # type: ignore[method-assign, ty:invalid-assignment]
+
+    server.stop()
+
+    assert stopped == [backend], "stop did not forward the live backend"
+    assert not thread.is_alive(), "stop did not join the backend thread"
 
 
 def test_handle_passthrough_default(tmp_path: Path) -> None:

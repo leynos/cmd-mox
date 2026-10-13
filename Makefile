@@ -51,6 +51,35 @@ SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
 SKYLOS_EXCLUDE_FOLDERS ?= tests cmd_mox/unittests
 SKYLOS_EXCLUDE_ARGS = $(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))
 SKYLOS_WHITELIST_LOCK ?= .skylos-whitelist.lock
+# Keep this pin in sync with the CI install step and [tool.nose] in
+# pyproject.toml; tests/test_toolchain_contract.py enforces the match.
+NOSE_VERSION ?= 0.20.0
+NOSE_TOOLS_DIR ?= .tools/nose
+NOSE_BIN ?= $(NOSE_TOOLS_DIR)/nose
+CARGO_BINSTALL ?= cargo-binstall
+# The gate is PEP 723 tooling with its own dependencies and a CPython 3.14
+# floor, so it needs a tool environment rather than the application
+# virtualenv. It goes through `uv_gate tool` and not `uv_gate run` for two
+# reasons: `run` always adds `--frozen`, which a PEP 723 script cannot satisfy
+# without a committed script lockfile, and `run` never goes online, so a cold
+# cache could never bootstrap the environment at all. `tool` warms once on a
+# proven cache miss and refuses an unpinned spec, which is also why the
+# interpreter is requested as `python@<version>` rather than a bare `--python`.
+# tests/test_toolchain_contract.py keeps these pins equal to the script's own
+# PEP 723 block, which stays the authored source for direct `uv run` use.
+DUPLICATION_PYTHON ?= 3.14
+CYCLOPTS_VERSION ?= 4.25.2
+TOMLKIT_VERSION ?= 0.15.1
+DUPLICATION_TEST_PYTEST ?= 9.0.2
+DUPLICATION_TEST_HYPOTHESIS ?= 6.165.6
+# A relative NOSE_BIN is resolved against the repository root by the gate.
+DUPLICATION_GATE = NOSE_BIN=$(NOSE_BIN) $(UV_GATE) tool \
+	--from 'python@$(DUPLICATION_PYTHON)' \
+	--with cyclopts==$(CYCLOPTS_VERSION) --with tomlkit==$(TOMLKIT_VERSION) \
+	-- python scripts/duplication_gate.py
+DUPLICATION_TEST_PYTHON ?= $(DUPLICATION_PYTHON)
+DUPLICATION_TEST_PYTEST ?= 9.0.2
+DUPLICATION_TEST_HYPOTHESIS ?= 6.165.6
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	tests/test_named_pipe_server.py \
@@ -60,6 +89,7 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 
 .PHONY: help all clean build prepare build-release lint fmt check-fmt
 .PHONY: makeutil markdownlint markdownlint-run nixie spelling skylos-allow test test-workflow-contracts typecheck
+.PHONY: install-nose duplication duplication-test duplication-allow
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
@@ -130,13 +160,66 @@ check-fmt: build ## Verify formatting
 markdownlint-run: ## Run markdownlint-cli2 over the repository's Markdown
 	$(MDLINT) "**/*.md"
 
-lint: build ## Run linters
+lint: build install-nose ## Run linters
 	$(RUFF) check
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
 	$(AMBRLEAKS) tests
 	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) $(SKYLOS_EXCLUDE_ARGS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
+	$(DUPLICATION_GATE) check
 	+$(MAKE) spelling
+
+install-nose: ## Install the pinned nose duplication detector
+	@if [ "$$($(NOSE_BIN) --version 2>/dev/null)" = "nose $(NOSE_VERSION)" ]; then \
+	  printf "nose %s already installed at %s\n" "$(NOSE_VERSION)" "$(NOSE_BIN)"; \
+	else \
+	  printf "Installing nose %s into %s\n" "$(NOSE_VERSION)" "$(NOSE_TOOLS_DIR)"; \
+	  mkdir -p "$(NOSE_TOOLS_DIR)"; \
+	  $(CARGO_BINSTALL) --no-confirm --install-path "$(NOSE_TOOLS_DIR)" \
+	    --disable-strategies compile,quick-install \
+	    --git https://github.com/corca-ai/nose 'nose-cli@$(NOSE_VERSION)'; \
+	  test "$$($(NOSE_BIN) --version 2>/dev/null)" = "nose $(NOSE_VERSION)" || { \
+	    printf "Error: %s did not report 'nose %s' after install\n" \
+	      "$(NOSE_BIN)" "$(NOSE_VERSION)" >&2; \
+	    exit 1; \
+	  }; \
+	fi
+
+duplication: install-nose ## Run the blocking code-duplication gate
+	$(DUPLICATION_GATE) check
+
+duplication-test: ## Run the duplication-gate helper tests
+	$(UV_GATE) tool --from 'python@$(DUPLICATION_TEST_PYTHON)' \
+		--with pytest==$(DUPLICATION_TEST_PYTEST) \
+		--with cyclopts==$(CYCLOPTS_VERSION) \
+		--with tomlkit==$(TOMLKIT_VERSION) \
+		--with hypothesis==$(DUPLICATION_TEST_HYPOTHESIS) \
+		-- python -m pytest -c /dev/null --rootdir=. -p no:cacheprovider \
+		scripts/tests/test_atomic_write.py \
+		scripts/tests/test_duplication_gate.py \
+		scripts/tests/test_duplication_gate_commands.py \
+		scripts/tests/test_duplication_gate_make.py \
+		scripts/tests/test_duplication_gate_persistence.py \
+		scripts/tests/test_duplication_gate_properties.py \
+		scripts/tests/test_make_install_nose.py \
+		scripts/tests/test_nose_detector.py
+
+# Accept FIRST/SECOND/REASON (and skylos SYMBOL) only from the make command
+# line. `cli_value` filters on `$(origin ...)` rather than `$(value ...)`
+# because an ambient FIRST or REASON in the environment must not silently
+# create an exception; the Skylos interface below predates this and keeps
+# `$(value ...)` plus its own empty-value guards.
+cli_value = $(if $(filter command line,$(origin $(1))),$(value $(1)))
+
+duplication-allow: export DUPLICATION_FIRST = $(call cli_value,FIRST)
+duplication-allow: export DUPLICATION_SECOND = $(call cli_value,SECOND)
+duplication-allow: export DUPLICATION_REASON = $(call cli_value,REASON)
+duplication-allow: ## Record one reasoned duplication exception
+	@test -n "$${DUPLICATION_FIRST}" || { printf "Error: FIRST is required (path[::name])\\n" >&2; exit 2; }
+	@test -n "$${DUPLICATION_REASON}" || { printf "Error: REASON is required for a duplication exception\\n" >&2; exit 2; }
+	$(DUPLICATION_GATE) allow --first "$${DUPLICATION_FIRST}" \
+		$(if $(call cli_value,SECOND),--second "$${DUPLICATION_SECOND}",) \
+		--reason "$${DUPLICATION_REASON}"
 
 skylos-allow: export SKYLOS_SYMBOL = $(value SYMBOL)
 skylos-allow: export SKYLOS_REASON = $(value REASON)
@@ -149,7 +232,12 @@ typecheck: build ## Run typechecking
 	$(TY) --version
 	# --extra-search-path duplicates tool.ty.environment.extra-paths because
 	# ty 0.0.74 drops config-sourced extra paths when its resolver re-runs.
-	$(TY) check --python .venv --extra-search-path scripts
+	# scripts/ is excluded here and checked by the second invocation below:
+	# those files are PEP 723 tooling on a CPython 3.14 floor, so checking them
+	# against the application's 3.12 assumption reports interpreter mismatches
+	# rather than defects. scripts/ty.toml carries that pass's own settings.
+	$(TY) check --python .venv --extra-search-path scripts --exclude scripts
+	$(TY) check --python .venv --config-file scripts/ty.toml --extra-search-path scripts scripts
 
 markdownlint: ## Lint Markdown files
 	$(MAKE) markdownlint-run
