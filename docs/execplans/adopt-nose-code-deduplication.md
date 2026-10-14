@@ -275,15 +275,42 @@ Success is observable when:
   explicitly, so a further environment variable carrying the same spelling is
   still reported. `typos.toml` is regenerated from the overlay, so the
   exception is tracked in both files. Date/Author: 2026-10-14 / Claude Code.
-- Finding (pre-existing, not introduced here): the vendored `scripts/uv_gate.py`
-  classifies uv failures with regexes that do not tolerate ANSI escapes. Under
-  `FORCE_COLOR=1` uv wraps and colourizes its cache-miss message, `classify`
-  returns `unknown`, and the single online retry never fires, so `make build`
-  fails on a cold cache even though the miss is recoverable. Verified by
-  comparing the plain and colourized strings against the `Kind.CACHE_MISS`
-  pattern. The file is vendored byte-for-byte and its digest is audited, so it
-  was not edited here; local runs use `NO_COLOR=1`. Reported for upstream
-  follow-up. Date/Author: 2026-10-14 / Claude Code.
+- Note (2026-10-14, same day): this exemption was re-tested after the colour
+  theory below was retracted, because that theory was part of why the variables
+  were discussed at all. It is still required: the correction prose names both
+  variables, and removing the pattern makes `make spelling` demand the British
+  spelling at each citation. The exemption stands on the identifier argument
+  alone. Date/Author: 2026-10-14 / Claude Code.
+- Finding (pre-existing, not introduced here): when uv colourizes its output,
+  the vendored `scripts/uv_gate.py` adopts a cache path containing ANSI escape
+  bytes, so every later `uv` call is pointed at a directory that does not exist
+  and the tool fails. `_query_cache_dir` runs `uv --no-config cache dir` and
+  takes `Path(stdout.strip())` verbatim; under `FORCE_COLOR=1` uv prints
+  `\x1b[36m/home/leynos/.cache/uv\x1b[39m`, so the cache becomes
+  `'\x1b[36m/home/leynos/.cache/uv\x1b[39m'`. The helper then exports that as
+  `UV_CACHE_DIR`, uv finds nothing there, and it reports the resulting offline
+  miss as the bare sentence "Git operation failed" — which is also its wording
+  for a genuinely failed fetch, so `classify` returns `unknown` and the single
+  online retry never fires. Verified directly: the context's `cache` attribute
+  carries `\x1b[36m…\x1b[39m` under `FORCE_COLOR=1` and the plain path under
+  `NO_COLOR=1`, and `uv --no-config cache dir` itself prints the escapes. A
+  stray directory literally named `\x1b[36m` was created in the worktree root
+  (248 MiB) by uv writing into that bogus path, because the escape-prefixed
+  value is relative and so resolves inside the repository; it was untracked and
+  was removed. The file is vendored byte-for-byte with an audited digest, so it
+  was not edited here; local runs use `NO_COLOR=1`, which is a genuine
+  workaround rather than a superstition. Reported for upstream follow-up.
+  Date/Author: 2026-10-14 / Claude Code.
+- Correction (2026-10-14, same day): two earlier revisions of the finding above
+  were wrong and are retracted. The first blamed the classifier regexes for not
+  tolerating ANSI; the second blamed missing `DEBUG` output. Both were
+  falsified rather than argued away: stripping ANSI from the captured failure
+  text still classified as `unknown`, and `--verbose` was never the
+  differentiator. The discriminator is the colourized `cache dir` query above,
+  which is upstream of every uv call and explains all of the observed evidence.
+  A third revision then retracted the `NO_COLOR=1` workaround along with them;
+  that retraction was itself wrong, because the workaround does fix the real
+  mechanism, and it is reinstated. Date/Author: 2026-10-14 / Claude Code.
 
 ## Outcomes & Retrospective
 
