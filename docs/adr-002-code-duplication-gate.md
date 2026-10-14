@@ -181,8 +181,14 @@ them degrades to an empty findings list or a skipped successful check.
   strategies. A platform with no prebuilt release binary is an explicit
   provisioning failure rather than a silent, costly source build or a fetch
   from an unapproved binary source.
-- The gate runs as isolated CPython 3.14 tooling through its PEP 723 inline
-  script metadata, which pins `cyclopts==4.25.2` and `tomlkit==0.15.1`. It
+- The gate runs as isolated CPython 3.14 tooling. The Makefile provisions that
+  environment through the vendored `uv_gate` helper's tool channel, naming the
+  interpreter and the two dependencies (`cyclopts==4.25.2`, `tomlkit==0.15.1`)
+  explicitly; the script keeps its own PEP 723 block for direct `uv run` use,
+  and a contract test fails if the two copies drift. The tool channel is used
+  rather than `uv_gate run` because `run` always adds `--frozen`, which a PEP
+  723 script cannot satisfy without a committed script lockfile, and it never
+  goes online, so a cold cache could never provision the environment. The gate
   neither installs nor imports the application, builds no native extension and
   starts no application service. The application's own floor stays at 3.12 and
   its runtime dependencies are unchanged.

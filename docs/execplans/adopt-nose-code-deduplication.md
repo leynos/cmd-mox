@@ -245,6 +245,45 @@ Success is observable when:
   adding them to the project would be a runtime-dependency change the
   application does not need. Verified that an unlisted import still fails.
   Date/Author: 2026-10-09 / Claude Code.
+- Decision: run the gate through `uv_gate tool --from 'python@3.14' --with ...`,
+  not `uv_gate run`, after rebasing onto the vendored-`uv_gate` migration.
+  Rationale: `uv_gate run` always adds `--frozen`, which a PEP 723 script
+  cannot satisfy without a committed script lockfile, and it never goes online,
+  so a cold cache could never provision the environment at all. The tool
+  channel warms once on a proven cache miss and refuses an unpinned spec, which
+  is why the interpreter is requested as `python@3.14` rather than through a
+  bare `--python`. Date/Author: 2026-10-14 / Claude Code.
+- Decision: keep the Makefile pins and the script's PEP 723 block as two
+  authored copies, guarded by a contract test. Rationale: direct
+  `uv run scripts/duplication_gate.py` is a documented workflow that needs the
+  inline block, while the Makefile must name the same pins explicitly for the
+  tool channel. `test_duplication_gate_pins_match_the_script_metadata` fails if
+  they drift, so neither copy can be updated alone. Date/Author: 2026-10-14 /
+  Claude Code.
+- Decision: CI caches only `.tools/nose`, not the former repository-local
+  `.uv-cache` and `.uv-tools` directories. Rationale: every uv call now goes
+  through the vendored helper, which uses the global uv cache that `setup-uv`
+  already caches by default. The old paths would have been a cache that never
+  hits. Date/Author: 2026-10-14 / Claude Code.
+- Decision: exempt uv's `FORCE_COLOR` and `NO_COLOR` environment variables from
+  the spelling gate with a narrow pattern in `typos.local.toml`, rather than
+  rewording the prose around them. Rationale: the names are literal external
+  identifiers, and renaming them in prose would make the finding
+  unreproducible. The base dictionary states that repository-specific
+  identifiers belong in the local overlay, and it already exempts command-line
+  `--color*` flags for the same reason. The pattern names the two variables
+  explicitly, so a further environment variable carrying the same spelling is
+  still reported. `typos.toml` is regenerated from the overlay, so the
+  exception is tracked in both files. Date/Author: 2026-10-14 / Claude Code.
+- Finding (pre-existing, not introduced here): the vendored `scripts/uv_gate.py`
+  classifies uv failures with regexes that do not tolerate ANSI escapes. Under
+  `FORCE_COLOR=1` uv wraps and colourizes its cache-miss message, `classify`
+  returns `unknown`, and the single online retry never fires, so `make build`
+  fails on a cold cache even though the miss is recoverable. Verified by
+  comparing the plain and colourized strings against the `Kind.CACHE_MISS`
+  pattern. The file is vendored byte-for-byte and its digest is audited, so it
+  was not edited here; local runs use `NO_COLOR=1`. Reported for upstream
+  follow-up. Date/Author: 2026-10-14 / Claude Code.
 
 ## Outcomes & Retrospective
 
