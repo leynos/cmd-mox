@@ -3,6 +3,11 @@ NIXIE ?= nixie
 # uses the global uv cache, runs offline first and goes online at most once. See
 # https://github.com/leynos/shared-actions/tree/main/uv_gate for the contract.
 UV_GATE ?= python3 scripts/uv_gate.py
+# The helper asks uv for its cache directory and takes the answer verbatim, so a
+# colourized answer (uv wraps it when FORCE_COLOR is set) would become a cache
+# path containing ANSI escapes and every later uv call would miss. Keep uv's
+# output plain for all recipes, whatever the caller's terminal advertises.
+export NO_COLOR := 1
 UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
 TOOLS = $(UV)
 # The helper finds uv on PATH, so put the directory of the selected uv (a caller's
