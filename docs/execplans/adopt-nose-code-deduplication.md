@@ -297,9 +297,13 @@ Success is observable when:
   stray directory literally named `\x1b[36m` was created in the worktree root
   (248 MiB) by uv writing into that bogus path, because the escape-prefixed
   value is relative and so resolves inside the repository; it was untracked and
-  was removed. The file is vendored byte-for-byte with an audited digest, so it
-  was not edited here; local runs use `NO_COLOR=1`, which is a genuine
-  workaround rather than a superstition. Reported for upstream follow-up.
+  was removed. `scripts/uv_gate.py` itself is vendored byte-for-byte with an
+  audited digest and was not edited; the fix is the `export NO_COLOR := 1`
+  added to the Makefile, which keeps uv's answer plain for every recipe. It was
+  confirmed against the failing command that `NO_COLOR` is the operative input:
+  with it set, the cache query returns the plain path even when `FORCE_COLOR=1`
+  is also set. The helper itself is still worth fixing upstream, since any
+  consumer that sets `FORCE_COLOR` without an override re-triggers this.
   Date/Author: 2026-10-14 / Claude Code.
 - Correction (2026-10-14, same day): two earlier revisions of the finding above
   were wrong and are retracted. The first blamed the classifier regexes for not
@@ -308,9 +312,10 @@ Success is observable when:
   text still classified as `unknown`, and `--verbose` was never the
   differentiator. The discriminator is the colourized `cache dir` query above,
   which is upstream of every uv call and explains all of the observed evidence.
-  A third revision then retracted the `NO_COLOR=1` workaround along with them;
+  A third revision then retracted the `NO_COLOR` workaround along with them;
   that retraction was itself wrong, because the workaround does fix the real
-  mechanism, and it is reinstated. Date/Author: 2026-10-14 / Claude Code.
+  mechanism, and it is reinstated as the Makefile export. Date/Author:
+  2026-10-14 / Claude Code.
 
 ## Outcomes & Retrospective
 
