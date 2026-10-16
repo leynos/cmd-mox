@@ -206,6 +206,38 @@ dispatch:
   results, and an `error_category` only on failure. Payloads, arguments,
   standard streams, environments, socket paths, and exception messages must
   never be logged.
+- Outcomes are `success`, `invalid_request` for validation failures,
+  `rejection_frame` for parse failures, and `handler_error`. Parse failures
+  return a bounded error response and use `RequestParseError` as their error
+  category; validation failures keep the `invalid_request` outcome and use
+  `ValidationError`. An empty read is treated as a closed connection, so
+  readiness probes emit neither a dispatch record nor a response frame.
+- Unix connection failures emit a bounded `ipc.server.connection` event with
+  one of three outcomes: `receive_timeout`, `receive_closed`, or
+  `response_dropped`. Its `error_category` is one of `ConnectionClosed`,
+  `ConnectionError`, `OSError`, or `TimeoutError`; exception messages are not
+  included. The event carries a nonnegative `duration_ms` and includes
+  `correlation_id` only when a validated request identifier is available.
+  Connection counters use only the fixed `operation`, `transport`, and
+  `outcome` dimensions, so correlation identifiers and payload data never
+  increase the number of counter keys.
+
+## IPC deadlines and stdin reads
+
+On POSIX, the shim carries one monotonic deadline through Unix socket
+connection retries, request sending, response reads, and passthrough reporting.
+Stdin capture uses that deadline when the stream can be waited on. The client
+stores the deadline in `_ConnectionContext` and applies only the remaining time
+before each blocking socket operation. The Unix server also keeps one read
+deadline per accepted connection and updates the socket timeout before each
+receive, so a client that slowly streams a request cannot renew its full wait
+budget with every byte.
+
+The shim polls pipe-like stdin descriptors when possible. It reads regular-file
+stdin on a daemon worker because regular files cannot provide a bounded poll
+wait. Windows streams and descriptors that cannot be polled retain direct
+reads; the Windows named-pipe IPC client keeps its existing cooperative timeout
+behaviour.
 
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs from
 `CommandDouble.name`. It performs that command-name check before expectation

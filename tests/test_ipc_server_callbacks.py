@@ -358,8 +358,9 @@ def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
         "env": {},
     }).encode()
 
-    response_bytes = _server_core._request_pipeline(ipc_server, raw)
+    result = _server_core._request_pipeline(ipc_server, raw)
 
+    response_bytes = result.response_bytes
     assert response_bytes is not None, "Assertion failed"
     assert handled == ["echo"], "Assertion failed"
     payload = json.loads(response_bytes.decode("utf-8"))
@@ -401,10 +402,9 @@ def test_request_pipeline_dispatches_to_overridden_handlers(
     """Network request dispatch should honour overridden public handler hooks."""
     ipc_server = _OverridingIPCServer(tmp_path / "ipc.sock")
 
-    response_bytes = _server_core._request_pipeline(
-        ipc_server, json.dumps(payload).encode()
-    )
+    result = _server_core._request_pipeline(ipc_server, json.dumps(payload).encode())
 
+    response_bytes = result.response_bytes
     assert response_bytes is not None, "Request pipeline did not return a response"
     response = json.loads(response_bytes.decode("utf-8"))
     assert response["stdout"] == expected_stdout, "Override was bypassed by dispatch"
@@ -449,18 +449,32 @@ def test_socket_dispatches_to_overridden_passthrough_hook(
     )
 
 
-def test_request_pipeline_validation_failure_returns_none(
+def test_request_pipeline_validation_failure_returns_error_frame(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Validation failures should short-circuit dispatch."""
+    """Validation failures should return a safe error frame without dispatch."""
     calls: list[Invocation] = []
 
     def failing_validator(_payload: _RequestPayload) -> Invocation | None:
+        """Reject the payload so dispatch must be skipped.
+
+        Returns
+        -------
+        None
+            Always, to exercise the invalid-request path.
+        """
         return None
 
     def spy_processor(
         _server: IPCServer, invocation: Invocation
     ) -> Response:  # pragma: no cover - guarded by validation
+        """Record any unexpected dispatch after validation failure.
+
+        Returns
+        -------
+        Response
+            A placeholder response if validation unexpectedly dispatches.
+        """
         calls.append(invocation)
         return Response(stdout="ok")
 
@@ -479,9 +493,15 @@ def test_request_pipeline_validation_failure_returns_none(
         "env": {},
     }).encode()
 
-    response_bytes = _server_core._request_pipeline(ipc_server, raw)
+    result = _server_core._request_pipeline(ipc_server, raw)
 
-    assert response_bytes is None, "Validation failure should suppress the response"
+    response_bytes = result.response_bytes
+    assert response_bytes is not None, "Validation failure should return an error frame"
+    payload = json.loads(response_bytes.decode("utf-8"))
+    assert payload["exit_code"] == 1, "Validation failures must be non-zero"
+    assert payload["stderr"] == "IPC request payload failed validation", (
+        "Validation errors should be described without request contents"
+    )
     assert not calls, "Validation failure should prevent processor dispatch"
 
 
@@ -512,17 +532,60 @@ def test_encode_response_serialises_response_fields(
 def test_request_pipeline_rejects_unknown_kind(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Unknown IPC kinds should be logged and ignored without dispatch."""
+    """Unknown IPC kinds should return a bounded error frame."""
     caplog.set_level("ERROR", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    response = _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         ipc_server,
-        json.dumps({"kind": "mystery"}).encode(),
+        json.dumps({"kind": "mystery", "correlation_id": "unparsed-123"}).encode(),
     )
 
-    assert response is None, "Assertion failed"
+    response_bytes = result.response_bytes
+    assert response_bytes is not None, "Unknown kind did not return an error frame"
+    assert result.correlation_id is None, "Unknown kind must not retain an unparsed ID"
+    response = json.loads(response_bytes.decode("utf-8"))
+    assert response["exit_code"] == 1, "Unknown request kind must fail"
+    assert "could not be parsed" in response["stderr"], (
+        "Unknown request kind did not receive a diagnostic"
+    )
     assert "Unknown IPC payload kind" in caplog.text, "Assertion failed"
+
+
+def test_request_pipeline_rejects_malformed_json_without_leaking_payload(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Malformed requests receive a safe response frame and bounded log."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    ipc_server = IPCServer(tmp_path / "ipc.sock")
+    secret = b'{"token":"secret-value"'
+
+    result = _server_core._request_pipeline(ipc_server, secret)
+
+    response_bytes = result.response_bytes
+    assert response_bytes is not None, "Malformed JSON did not return an error frame"
+    assert result.correlation_id is None, "Malformed JSON must not carry correlation"
+    response = json.loads(response_bytes.decode("utf-8"))
+    assert response["exit_code"] == 1, "Malformed JSON must fail"
+    assert "could not be parsed" in response["stderr"], "Missing parse diagnostic"
+    assert "secret-value" not in caplog.text, "Malformed payload leaked into logs"
+
+
+def test_request_pipeline_treats_empty_payload_as_closed_connection(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Empty readiness probes are closed connections, not malformed requests."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    ipc_server = IPCServer(tmp_path / "ipc.sock")
+
+    result = _server_core._request_pipeline(ipc_server, b"")
+
+    assert result.response_bytes is None, "An empty connection must not receive a frame"
+    assert result.correlation_id is None, (
+        "An empty connection must not carry correlation"
+    )
+    assert "connection closed" in caplog.text, "Closed connection was not identified"
+    assert "malformed JSON" not in caplog.text, "Empty read was called malformed JSON"
 
 
 def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
