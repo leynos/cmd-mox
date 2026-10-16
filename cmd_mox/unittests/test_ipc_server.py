@@ -1,8 +1,11 @@
 """Unit tests for the IPC server component."""
 
+import contextlib
+import logging
 import os
 import socket
 import threading
+import time
 import typing as typ
 from pathlib import Path
 
@@ -16,7 +19,9 @@ from cmd_mox.environment import (
 from cmd_mox.ipc import (
     DEFAULT_CONNECT_JITTER,
     Invocation,
+    IPCHandlers,
     IPCServer,
+    Response,
     RetryConfig,
     invoke_server,
 )
@@ -196,3 +201,50 @@ def test_invoke_server_invalid_json(
     with pytest.raises(RuntimeError, match="Invalid JSON"):
         invoke_server(invocation, timeout=1.0)
     thread.join()
+
+
+def test_server_logs_client_disconnect_during_reply_write(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A client closing before the reply should not produce an error log."""
+    disconnect_message = "IPC client disconnected before reply was written"
+    disconnect_logged = threading.Event()
+
+    class _DisconnectObserver(logging.Handler):
+        """Signal when the reply-write failure is logged."""
+
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.getMessage() == disconnect_message:
+                disconnect_logged.set()
+
+    def slow_handler(_invocation: Invocation) -> Response:
+        time.sleep(0.5)
+        return Response(stdout="complete")
+
+    observer = _DisconnectObserver()
+    server_logger = logging.getLogger("cmd_mox.ipc.server")
+    socket_path = tmp_path / "ipc.sock"
+
+    with contextlib.ExitStack() as stack:
+        server_logger.addHandler(observer)
+        stack.callback(server_logger.removeHandler, observer)
+        caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
+        with IPCServer(socket_path, handlers=IPCHandlers(handler=slow_handler)):
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.connect(str(socket_path))
+                client.sendall(b'{"command":"ls","args":[],"stdin":"","env":{}}')
+
+            assert disconnect_logged.wait(timeout=3.0), (
+                "The reply write did not report the disconnected client"
+            )
+
+    assert any(
+        record.getMessage() == disconnect_message and record.levelno == logging.DEBUG
+        for record in caplog.records
+    ), "The disconnect was not logged at DEBUG"
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records), (
+        "The client disconnect emitted an ERROR record"
+    )
+    assert not any(record.exc_info is not None for record in caplog.records), (
+        "The client disconnect emitted an exception record"
+    )
