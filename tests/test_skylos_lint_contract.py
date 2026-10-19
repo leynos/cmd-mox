@@ -162,8 +162,9 @@ EXPECTED_ENTRYPOINT_REASONS = {
         "named-pipe accept loop."
     ),
     "cmd_mox.ipc._server_core._ServerLifecycle._stop_backend.server": (
-        "_ServerLifecycle.stop passes the stored backend instance through this "
-        "abstract lifecycle hook."
+        "_ServerLifecycle.stop invokes this lifecycle hook with the stored "
+        "backend instance, which the Unix and named-pipe transports override "
+        "to stop their backend."
     ),
 }
 EXPECTED_ENTRYPOINT_TYPES = {

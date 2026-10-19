@@ -13,6 +13,7 @@ from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
     _BaseIPCServer,
+    _CallbackServerBase,
     _request_pipeline,
 )
 from .socket_utils import cleanup_stale_socket, wait_for_socket
@@ -52,11 +53,8 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
 
 
 if typ.TYPE_CHECKING:
-    import collections.abc as cabc
     from pathlib import Path
     from socketserver import ThreadingUnixStreamServer as _BaseUnixServer
-
-    from .models import Invocation, PassthroughResult, Response
 else:
     _BaseUnixServer = _resolve_unix_server_base()
 
@@ -77,9 +75,7 @@ class IPCServer(_BaseIPCServer["_InnerServer"]):
         wait_for_socket(self.socket_path, self.timeout)
 
     @staticmethod
-    def _stop_backend(server: _InnerServer | None) -> None:
-        if server is None:
-            return
+    def _stop_backend(server: _InnerServer) -> None:
         server.shutdown()
         server.server_close()
 
@@ -89,28 +85,8 @@ class IPCServer(_BaseIPCServer["_InnerServer"]):
                 self.socket_path.unlink()
 
 
-class CallbackIPCServer(IPCServer):
+class CallbackIPCServer(_CallbackServerBase["_InnerServer"], IPCServer):
     """IPCServer variant that delegates to callbacks."""
-
-    def __init__(
-        self,
-        socket_path: Path,
-        handler: cabc.Callable[[Invocation], Response],
-        passthrough_handler: cabc.Callable[[PassthroughResult], Response],
-        *,
-        timeouts: TimeoutConfig | None = None,
-    ) -> None:
-        """Initialise a callback-driven IPC server."""
-        timeouts = timeouts or TimeoutConfig()
-        super().__init__(
-            socket_path,
-            timeout=timeouts.timeout,
-            accept_timeout=timeouts.accept_timeout,
-            handlers=IPCHandlers(
-                handler=handler,
-                passthrough_handler=passthrough_handler,
-            ),
-        )
 
 
 class _IPCHandler(socketserver.StreamRequestHandler):

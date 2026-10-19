@@ -148,6 +148,11 @@ class Expectation:
         self.count = count
         return self
 
+    # Deliberate public API: `times` is the documented fluent DSL verb. Its
+    # body forwards to `times_called` because the two identical count-setter
+    # bodies were what nose reported as a clone family; one implementation
+    # cannot drift from the other.
+    # pylint: disable-next=trivial-attribute-wrapper
     def times(self, count: int) -> Expectation:
         """Alias for :meth:`times_called` matching the fluent DSL.
 
@@ -156,8 +161,7 @@ class Expectation:
         Expectation
             This expectation, allowing further fluent configuration.
         """
-        self.count = count
-        return self
+        return self.times_called(count)
 
     def in_order(self) -> Expectation:
         """Mark this expectation as ordered relative to others.

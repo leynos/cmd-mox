@@ -10,3 +10,5 @@
 - [Roadmap](./roadmap.md): Planned features and progression.
 - [ADR 001](./adr-001-linting-architecture.md): Python linting architecture,
   including the dated addendum for the fourth Skylos tier.
+- [ADR 002](./adr-002-code-duplication-gate.md): The nose code-duplication
+  gate, its scan scope, its exception contract and its provisioning.
