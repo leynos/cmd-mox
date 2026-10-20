@@ -703,6 +703,72 @@ def test_pipeline(cmd_mox):
     assert result.stdout.strip() == "c b a"
 ```
 
+### Wiring a tool to a shim by absolute path
+
+Some tools accept a configured executable path instead of resolving a command
+name through `PATH`. Examples include Git merge and diff drivers, `sudoers`
+command rules, systemd unit settings, and continuous integration (CI)
+configuration. Pass an `EnvironmentManager` to `CmdMox`, then use the launcher
+under `env_mgr.shim_dir` as the absolute shim path in the tool's configuration.
+`__enter__` creates the directory; `mox.replay()` creates launchers for
+registered commands. The filename has a `.cmd` suffix on Windows and no suffix
+on POSIX:
+
+```python
+import os
+import subprocess
+
+from cmd_mox import CmdMox, EnvironmentManager, Invocation
+
+
+def handler(inv: Invocation) -> tuple[str, str, int]:
+    return "", "", 0
+
+
+env_mgr = EnvironmentManager()
+with CmdMox(environment=env_mgr) as mox:
+    spy = mox.spy("stub-merge-driver").runs(handler)
+    mox.replay()
+
+    assert env_mgr.shim_dir is not None
+    shim = env_mgr.shim_dir / "stub-merge-driver"
+    if os.name == "nt":
+        shim = shim.with_suffix(".cmd")
+    path_without_shims = os.pathsep.join(
+        path
+        for path in os.environ["PATH"].split(os.pathsep)
+        if path != str(env_mgr.shim_dir)
+    )
+    subprocess.run(
+        [str(shim), "O", "A", "B", "7", "p.py"],
+        env=os.environ | {"PATH": path_without_shims},
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    assert spy.call_count == 1
+```
+
+The shim finds the IPC server through `CMOX_IPC_SOCKET`, so it records the
+invocation even when called by absolute path and the shim directory is absent
+from `PATH`. Setting the tool's executable to this path removes `PATH` order
+from the result: a failed interception cannot silently fall through to a real
+binary with the same name.
+
+The process that starts the shim must receive `CMOX_IPC_SOCKET` and be able to
+access the IPC endpoint. A launcher such as `sudo` or systemd may filter or
+replace the environment, so configure it to pass this variable through and
+preserve endpoint access. An absolute path alone is not sufficient when that
+environment is missing; the shim exits with `IPC socket not specified`.
+
+Shims read non-terminal standard input until EOF to populate
+`Invocation.stdin`; terminal input is skipped. If an intermediary process, such
+as Git invoking a merge driver, inherits non-terminal stdin and leaves it open,
+the shim waits and may hang until the caller's timeout. Because the shim reads
+stdin before opening IPC, that block cannot itself produce a server-side
+`IPC received malformed JSON` error. If that error appears, it does not
+identify stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise
+close or redirect stdin, unless the caller intends to supply input.
+
 ## Controller configuration and journals
 
 `CmdMox` offers configuration hooks that surface through both the fixture and
@@ -747,7 +813,10 @@ few common ones are:
 - `with_args(*args)` – require exact arguments.
 - `with_matching_args(*matchers)` – match arguments using comparators.
 - `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
-  validate it with a predicate `Callable[[str], bool]`.
+  validate it with a predicate `Callable[[str], bool]`. Shims read non-terminal
+  standard input until EOF; terminal input is skipped. Close or redirect
+  standard input when no input is intended. See the
+  [shim path guidance](#wiring-a-tool-to-a-shim-by-absolute-path).
 - `with_env(mapping)` – inject additional environment variables into the
   invocation. The mapping is merged into the recorded `Invocation.env`, applied
   when custom handlers or canned responses run, and does not mutate the test
@@ -759,17 +828,29 @@ few common ones are:
   boundary (e.g., base64) so handlers exchange `str`.
 - `runs(handler)` – call a function to produce dynamic output. The handler
   receives an `Invocation` and should return either a
-  `(stdout, stderr, exit_code)` tuple or a `Response` instance.
+  `(stdout, stderr, exit_code)` tuple or a `Response` instance. The handler
+  runs in the test process on an IPC request-handler worker thread, not in the
+  shim subprocess. Path arguments may be relative to the invoked command's
+  working directory, but `Invocation` does not carry that directory. Opening a
+  relative argument directly in the handler resolves it against the test
+  process's working directory. Provide the invoking working directory
+  separately or use absolute paths. For a Git merge handler, capture the
+  invoking repository path as `repository` and compute the merged text as
+  `result`; then write the target with the fragment
+  `(repository / inv.args[1]).write_text(result)`.
 
   Example:
 
+  Without a `with_args` constraint, this double accepts any argument list, so
+  both `tool run` and `tool run --fail` reach the handler.
+
   ```python
   def handler(inv: Invocation) -> tuple[str, str, int]:
-      if "--fail" in inv.argv:
+      if "--fail" in inv.args:
           return ("", "boom", 2)  # non-zero exit
       return ("ok", "", 0)
 
-  cmd_mox.mock("tool").with_args("run").runs(handler)
+  cmd_mox.mock("tool").runs(handler)
   ```
 
 - `times(count)` – expect the command exactly `count` times.

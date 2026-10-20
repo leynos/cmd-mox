@@ -277,6 +277,10 @@ only when the authority is newer and merges `typos.local.toml`. The generated
 `typos.toml` is reviewed and committed so a clean network-restricted checkout
 can still enforce the last known-good policy.
 
+`make spelling` checks existing `*.md` files that are tracked by Git or
+untracked and not ignored. Standard Git ignore rules exclude generated caches
+and other ignored files, while new Markdown is checked before it is staged.
+
 Add repository-only proper names or quoted upstream terms to
 `typos.local.toml`; never edit generated entries in `typos.toml` by hand.
 

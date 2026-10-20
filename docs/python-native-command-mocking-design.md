@@ -549,34 +549,66 @@ workflow is as follows:
    by any child processes, including the code under test and, consequently, the
    shims it invokes.
 
-3. **Shim Connection:** When a shim is executed by the OS, its first action is
-   to read the `CMOX_IPC_SOCKET` environment variable and connect to the
-   listening server thread in the main test process.
+3. **Shim Setup:** The shim bootstraps its launcher, resolves the command name,
+   checks that `CMOX_IPC_SOCKET` is set, and validates the IPC timeout. If the
+   socket variable is unset or the timeout is invalid, the shim exits before
+   reading standard input.
 
-4. **Invocation Reporting:** The shim gathers all relevant invocation data: the
-   command name, the list of arguments (`sys.argv[1:]`), the complete content
-   of its standard input, and a copy of its current environment variables.
-   Large payloads may require future streaming or truncation. It serializes
-   this data into a structured format like JSON and sends it over the socket to
-   the server.
+4. **Invocation Reporting:** Before opening IPC, the shim gathers the command
+   name, the list of arguments (`sys.argv[1:]`), the complete content of its
+   standard input, and a copy of its current environment variables. Reading
+   non-terminal standard input continues until end-of-file. Large payloads may
+   require future streaming or truncation.
 
-5. **Server-Side Processing:** The server thread in the main process receives
-   the JSON payload. It deserializes it into an `Invocation` object and records
-   it in the in-memory Invocation Journal after the handler runs. At that point
-   the invocation also captures the resulting `stdout`, `stderr`, and
-   `exit_code`. The server then searches its list of `Expectation` objects to
-   find a match for this invocation.
+5. **Shim Connection:** After creating the invocation, the shim connects to the
+   listening server thread in the main test process and sends the serialized
+   invocation over the socket.
 
-6. **Response Delivery:** Once a matching expectation is found, the server
-   determines the prescribed response. If it's a static `.returns()` value, it
-   serializes this data and sends it back to the shim. If it's a dynamic
-   `.runs(handler)`, the server thread executes the handler function (which is
-   in the same process and has access to all test state) and sends its result
-   back.
+6. **Server-Side Processing:** An IPC request-handler worker thread in the main
+   process receives the JSON payload and deserializes it into an `Invocation`
+   object. The controller resolves the invocation against its configured double
+   and expectations, then selects the response. A configured `.runs(handler)`
+   callback runs on an IPC request-handler worker thread in the main test
+   process.
 
-7. **Shim Action:** The shim receives the response payload from the server. It
+7. **Response Delivery:** The controller applies the response to the invocation
+   and appends it to the in-memory Invocation Journal only when it is
+   non-passthrough. Passthrough invocations are appended after the shim reports
+   the command result. The server serializes the response and sends it back to
+   the shim.
+
+8. **Shim Action:** The shim receives the response payload from the server. It
    writes the `stdout` and `stderr` data to its own standard streams and then
    terminates with the specified `exit_code`.
+
+#### Absolute-path shim invocation
+
+Diagram description: The configured tool starts the shim by its absolute path
+and passes the exported `CMOX_IPC_SOCKET` environment variable to it. When
+standard input is not a terminal, the shim reads it until end-of-file; terminal
+input is skipped. It sends the invocation to the IPC server through
+`CMOX_IPC_SOCKET`. The server invokes the handler configured with
+`runs(handler)` and returns its response to the shim, which applies standard
+output, standard error, and the exit code to the configured tool.
+
+```mermaid
+sequenceDiagram
+    participant Tool as Configured tool
+    participant Shim as Absolute shim path
+    participant Server as IPC server
+    participant Handler as runs(handler)
+
+    Tool->>Shim: Execute launcher by absolute path
+    Shim->>Shim: Read stdin until EOF
+    Shim->>Server: Send invocation via CMOX_IPC_SOCKET
+    Server->>Handler: runs(invocation)
+    Handler-->>Server: Return response
+    Server-->>Shim: Return response
+    Shim-->>Tool: Apply stdout, stderr, and exit_code
+```
+
+_Figure: Absolute-path invocation from the configured tool through the IPC
+server and handler._
 
 This socket-based IPC architecture is the key technical differentiator for
 `CmdMox`. It is transactional, inherently process-safe, and allows for the
@@ -905,12 +937,14 @@ each `CmdMox` controller instance. A `collections.deque` backs the journal,
 preserving call order and enabling efficient pruning when bounded. It stores a
 chronological record of command calls during replay.
 
-Each time the IPC server thread receives an invocation report from a shim, it
+Each time the IPC server receives an invocation report from a shim, it
 constructs an `Invocation` object containing the command name, arguments,
-`stdin`, and environment. After the handler runs, the controller attaches the
-resulting `stdout`, `stderr`, and `exit_code` to the `Invocation` and appends
-it to the journal. `verify()` uses this enriched journal as the definitive
-record, comparing it against predefined expectations to detect discrepancies.
+`stdin`, and environment. The controller selects and applies a response before
+appending non-passthrough invocations to the journal, so those entries also
+contain the resulting `stdout`, `stderr`, and `exit_code`. Passthrough
+invocations are appended after the shim reports their command results.
+`verify()` uses this enriched journal as the definitive record, comparing it
+against predefined expectations to detect discrepancies.
 
 ## IV. Feature Deep Dive: Stubbing
 
@@ -967,11 +1001,11 @@ The implementation of this feature leverages the IPC architecture:
    server identifies that the corresponding stub is configured with a `.runs()`
    handler.
 
-3. The IPC server thread—which runs within the main test process and therefore
-   has direct access to `my_date_handler`—executes the handler. It passes the
-   structured `Invocation` object as an argument to the handler and, after the
-   handler returns, records the resulting output streams and exit code on that
-   invocation.
+3. An IPC request-handler worker thread—which runs within the main test process
+   and therefore has direct access to `my_date_handler`—executes the handler.
+   It passes the structured `Invocation` object as an argument to the handler;
+   after the handler returns, the controller applies the resulting output
+   streams and exit code to that invocation.
 
 4. The handler performs its logic (which can involve accessing or modifying
    state within the test function's scope) and returns a result tuple:

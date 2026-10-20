@@ -309,7 +309,30 @@ class EnvironmentManager:
 
     The manager is not re-entrant; nested usage is unsupported and will raise
     ``RuntimeError``. This keeps the restore logic simple and prevents
-    inadvertent environment leakage.
+    inadvertent environment leakage. The active-manager marker is thread-local,
+    so nesting detection checks the current thread.
+
+    Attributes
+    ----------
+    shim_dir : Path or None
+        Temporary directory for generated shims; ``None`` before entry.
+        ``__enter__`` creates the directory, and ``CmdMox.replay()`` creates
+        launchers for registered commands. On POSIX,
+        ``shim_dir / "<command_name>"`` is an executable shim; on Windows,
+        the launcher is ``shim_dir / "<command_name>.cmd"``. Both record
+        invocations when called by absolute path, provided the invoking
+        process passes ``CMOX_IPC_SOCKET`` and can access its endpoint. Shim
+        command names are resolved through ``PATH``; the running shim locates
+        the IPC endpoint through ``CMOX_IPC_SOCKET`` rather than ``PATH``.
+    socket_path : Path or None
+        IPC endpoint path exported for shims after entry; ``None`` before
+        entry.
+    ipc_timeout : float or None
+        Optional override for shim/server communication timeouts, in seconds.
+        ``None`` means no explicit override is exported.
+    original_environment : dict[str, str]
+        Environment snapshot captured on entry and restored on exit. The
+        property returns an empty dictionary outside an active environment.
     """
 
     # Track the active manager per thread to avoid cross-thread interference.
