@@ -754,12 +754,12 @@ from the result: a failed interception cannot silently fall through to a real
 binary with the same name.
 
 Shims read non-terminal standard input until EOF to populate
-`Invocation.stdin`; terminal input is skipped. If an intermediary process,
-such as Git invoking a merge driver, inherits non-terminal stdin and leaves it
-open, the shim waits and may hang until the caller's timeout. The only
-server-side symptom may be an `IPC received malformed JSON` error, which does
-not identify stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise
-close or redirect stdin, unless the caller intends to supply input.
+`Invocation.stdin`; terminal input is skipped. If an intermediary process, such
+as Git invoking a merge driver, inherits non-terminal stdin and leaves it open,
+the shim waits and may hang until the caller's timeout. The only server-side
+symptom may be an `IPC received malformed JSON` error, which does not identify
+stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise close or
+redirect stdin, unless the caller intends to supply input.
 
 ## Controller configuration and journals
 
