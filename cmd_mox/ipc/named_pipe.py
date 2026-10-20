@@ -400,7 +400,10 @@ class _NamedPipeState:
             self._refuse_client(handle, slot, "ServerStopping")
 
     def _refuse_client(
-        self, handle: object, slot: ClientSlot | None, error_category: str
+        self,
+        handle: object,
+        slot: ClientSlot | None,
+        error_category: _observability._NamedPipeErrorCategory,
     ) -> None:
         """Report a refused admission and release everything it reserved.
 
@@ -620,7 +623,9 @@ class _NamedPipeState:
         )
 
     @staticmethod
-    def _pipe_error_category(exc: BaseException) -> str:
+    def _pipe_error_category(
+        exc: BaseException,
+    ) -> _observability._NamedPipeErrorCategory:
         """Map a pywin32 error to a closed-set failure label.
 
         Returns

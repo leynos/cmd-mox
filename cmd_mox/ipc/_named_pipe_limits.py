@@ -68,7 +68,7 @@ class WorkerEvent:
     """
 
     outcome: WorkerOutcome
-    error_category: str | None = None
+    error_category: _observability._NamedPipeErrorCategory | None = None
     duration_ms: float | None = None
     message_size: int | None = None
 

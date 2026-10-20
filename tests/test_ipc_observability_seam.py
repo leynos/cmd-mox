@@ -169,16 +169,7 @@ def test_counter_key_preserves_fixed_backend_error_categories() -> None:
 
 def test_counter_key_preserves_fixed_named_pipe_error_categories() -> None:
     """Keep closed named-pipe failure labels available for diagnosis."""
-    categories = {
-        "ThreadStartFailed",
-        "ServerStopping",
-        "PipeMessageTooLargeError",
-        "BrokenPipe",
-        "NoData",
-        "PipeError",
-        "ReadTimeout",
-        "ServerStopped",
-    }
+    categories = set(typ.get_args(_observability._NamedPipeErrorCategory.__value__))
     _observability.reset_counters()
     try:
         for error_category in categories:

@@ -725,11 +725,12 @@ dimensions — `operation`, `transport`, `kind`, `selection_mode`, `outcome`,
 `message_size`, and `correlation_id` — renders applicable values as structured
 logging fields and logs them at INFO. The in-process registry uses a narrower
 counter key: message kinds and caller-defined exception class names remain
-available in logs but do not label counters; fixed backend error categories do.
-Tests assert on emissions through `capture_events()` and `counter_snapshot()`
-rather than an external metrics collector. The module documents a never-log
-list: command names, arguments, standard streams, environments, socket paths,
-exception messages, and raw payloads must never become fields.
+available in logs but do not label counters; closed backend and named-pipe
+error categories do. Tests assert on emissions through `capture_events()` and
+`counter_snapshot()` rather than an external metrics collector. The module
+documents a never-log list: command names, arguments, standard streams,
+environments, socket paths, exception messages, and raw payloads must never
+become fields.
 
 Requests carry an opaque `correlation_id` as a top-level envelope field beside
 `kind`. The client reuses the model's `invocation_id` when the request already

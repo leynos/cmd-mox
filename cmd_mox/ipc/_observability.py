@@ -61,6 +61,7 @@ _BACKEND_ERROR_CATEGORIES: typ.Final[frozenset[str]] = frozenset(
     typ.get_args(_BackendErrorCategory.__value__)
 )
 type _NamedPipeErrorCategory = typ.Literal[
+    "ClientLimitReached",
     "ThreadStartFailed",
     "ServerStopping",
     "PipeMessageTooLargeError",
