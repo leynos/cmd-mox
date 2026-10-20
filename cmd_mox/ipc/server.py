@@ -113,58 +113,28 @@ def _resolve_unix_server_base_for_inner_server() -> tuple[
     return base_server, selection_mode
 
 
-def _inner_server_cls_for_backend() -> tuple[_InnerServerClass, _CacheOutcome]:
-    """Return the cached server class and record its bounded cache outcome.
+def _inner_server_cls_for_backend() -> tuple[
+    _InnerServerClass,
+    _CacheOutcome,
+    _CacheOutcome,
+]:
+    """Return the cached server class and its bounded cache outcomes.
 
     Returns
     -------
-    tuple[_InnerServerClass, _CacheOutcome]
-        The cached class and whether this access hit or missed.
-
-    Raises
-    ------
-    RuntimeError
-        If the platform does not provide a Unix server base.
+    tuple[_InnerServerClass, _CacheOutcome, _CacheOutcome]
+        The cached class, its cache outcome, and the base-class cache outcome.
     """
     with _INNER_SERVER_CLASS_CACHE_LOCK:
         before = _inner_server_cls.cache_info()
         base_before = resolve_unix_server_base.cache_info()
-        try:
-            inner_server_cls = _inner_server_cls()
-        except RuntimeError:
-            _emit_backend_event(
-                "unsupported_platform",
-                "resolution_failed",
-                _CacheObservation(
-                    "unix_server_base",
-                    _cache_outcome(
-                        base_before,
-                        resolve_unix_server_base.cache_info(),
-                    ),
-                ),
-                "unsupported_platform",
-            )
-            raise
+        inner_server_cls = _inner_server_cls()
         after = _inner_server_cls.cache_info()
         base_after = resolve_unix_server_base.cache_info()
 
     cache_outcome = _cache_outcome(before, after)
-    selection_mode = inner_server_cls._cmd_mox_selection_mode
-    if cache_outcome == "miss" and selection_mode in {"native", "compatibility"}:
-        _emit_backend_event(
-            selection_mode,
-            "selected",
-            _CacheObservation(
-                "unix_server_base",
-                _cache_outcome(base_before, base_after),
-            ),
-        )
-    _emit_backend_event(
-        selection_mode,
-        "cache_access",
-        _CacheObservation("inner_server_class", cache_outcome),
-    )
-    return inner_server_cls, cache_outcome
+    base_cache_outcome = _cache_outcome(base_before, base_after)
+    return inner_server_cls, cache_outcome, base_cache_outcome
 
 
 def _backend_error_category(
@@ -223,8 +193,32 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
         ValueError
             If the backend rejects its constructor configuration.
         """
-        inner_server_cls, cache_outcome = _inner_server_cls_for_backend()
+        try:
+            inner_server_cls, cache_outcome, base_cache_outcome = (
+                _inner_server_cls_for_backend()
+            )
+        except RuntimeError:
+            # Failed resolutions are not retained by functools.cache.
+            _emit_backend_event(
+                "unsupported_platform",
+                "resolution_failed",
+                _CacheObservation("unix_server_base", "miss"),
+                "unsupported_platform",
+            )
+            raise
+
         selection_mode = inner_server_cls._cmd_mox_selection_mode
+        if cache_outcome == "miss" and selection_mode in {"native", "compatibility"}:
+            _emit_backend_event(
+                selection_mode,
+                "selected",
+                _CacheObservation("unix_server_base", base_cache_outcome),
+            )
+        _emit_backend_event(
+            selection_mode,
+            "cache_access",
+            _CacheObservation("inner_server_class", cache_outcome),
+        )
         try:
             server = inner_server_cls(self.socket_path, self)
             server.timeout = self.accept_timeout

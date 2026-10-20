@@ -77,18 +77,29 @@ def test_direct_inner_server_factory_emits_no_observability(
     assert events == [], "Direct factory access must not emit backend telemetry"
 
 
-def test_direct_inner_server_factory_failure_emits_no_observability(
+def test_direct_backend_class_lookup_emits_no_observability(
+    unix_server_base_cache: None,
+    native_unix_server_platform: None,
+) -> None:
+    """Keep telemetry on the backend-creation command, not class lookup."""
+    with _observability.capture_events() as events:
+        unix_server._inner_server_cls_for_backend()
+
+    assert events == [], "Class lookup must not emit backend telemetry"
+
+
+def test_direct_backend_class_lookup_failure_emits_no_observability(
     unix_server_base_cache: None,
     unsupported_unix_server_platform: None,
 ) -> None:
-    """Propagate resolution errors without emitting from the cached factory."""
+    """Propagate resolution errors without emitting backend telemetry."""
     with (
         _observability.capture_events() as events,
         pytest.raises(RuntimeError, match="not supported on this platform"),
     ):
-        unix_server._inner_server_cls()
+        unix_server._inner_server_cls_for_backend()
 
-    assert events == [], "Direct factory failure must not emit backend telemetry"
+    assert events == [], "Failed class lookup must not emit backend telemetry"
 
 
 def test_resolution_builds_threaded_compatibility_server(
@@ -140,17 +151,18 @@ def test_resolution_builds_threaded_compatibility_server(
 
 
 def test_server_class_cache_hit_is_observable(
+    tmp_path: Path,
     unix_server_base_cache: None,
     native_unix_server_platform: None,
 ) -> None:
-    """Record reuse of the cached server class without opening a socket."""
+    """Record cache reuse during backend creation without opening a socket."""
+    server = unix_server.IPCServer(tmp_path / "unused.sock")
     with _observability.capture_events() as events:
-        first_class, first_outcome = unix_server._inner_server_cls_for_backend()
-        second_class, second_outcome = unix_server._inner_server_cls_for_backend()
+        first_backend, _ = server._create_backend()
+        second_backend, _ = server._create_backend()
 
-    assert second_class is first_class, "The class factory must remain cached"
-    assert (first_outcome, second_outcome) == ("miss", "hit"), (
-        "The factory cache outcome must be reported"
+    assert type(second_backend) is type(first_backend), (
+        "The class factory must remain cached"
     )
     class_cache_events = [
         event
@@ -167,15 +179,17 @@ def test_server_class_cache_hit_is_observable(
 
 
 def test_unix_base_cache_hit_is_observable_after_factory_reset(
+    tmp_path: Path,
     unix_server_base_cache: None,
     native_unix_server_platform: None,
 ) -> None:
     """Report reuse of the base class when the inner class is rebuilt."""
-    unix_server._inner_server_cls_for_backend()
+    server = unix_server.IPCServer(tmp_path / "unused.sock")
+    server._create_backend()
     unix_server._inner_server_cls.cache_clear()
 
     with _observability.capture_events() as events:
-        unix_server._inner_server_cls_for_backend()
+        server._create_backend()
 
     selection = _single_selection(events)
     assert selection.selection_mode == "native", "The native choice must be observed"

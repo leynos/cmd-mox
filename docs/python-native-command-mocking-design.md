@@ -689,14 +689,15 @@ process lifetime when resolution succeeds. The resolver prefers Python's
 `RuntimeError`, and that failure is not cached, so a later backend start
 retries resolution. Starting the Unix server directly on Windows also raises
 `RuntimeError`; the controller selects the named-pipe transport there. Incoming
-JSON messages are parsed into `Invocation` objects and processed in background
-threads with reasonable timeouts (default: 5.0s). Callers can pass an
-`IPCHandlers` dataclass to provide invocation and passthrough callbacks when
-constructing the server for simple composition. Subclassing remains supported
-when custom behaviour requires overriding the public handler hooks. The
-`CallbackIPCServer` compatibility wrapper forwards a `TimeoutConfig` dataclass,
-so callers can continue to customize startup and accept timeouts without
-exceeding the four-argument limit. On Windows hosts the controller constructs a
+JSON messages are dispatched by their `kind` field to `Invocation` or
+`PassthroughResult` objects and processed in background threads with reasonable
+timeouts (default: 5.0s). Callers can pass an `IPCHandlers` dataclass to
+provide invocation and passthrough callbacks when constructing the server for
+simple composition. Subclassing remains supported when custom behaviour
+requires overriding the public handler hooks. The `CallbackIPCServer`
+compatibility wrapper forwards a `TimeoutConfig` dataclass, so callers can
+continue to customize startup and accept timeouts without exceeding the
+four-argument limit. On Windows hosts the controller constructs a
 `NamedPipeServer`, which shares the same handler plumbing but uses `win32pipe`/
 `win32file` (via `pywin32`) to host a duplex named pipe that mirrors the Unix
 socket behaviour. The named pipe name is derived from the logical socket path,
