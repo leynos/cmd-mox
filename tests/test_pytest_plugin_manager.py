@@ -188,7 +188,13 @@ class _ExitSpyCmdMoxManager(_CmdMoxManager):
 
 @pytest.fixture
 def reset_exit_spy_manager_state() -> cabc.Iterator[None]:
-    """Clear the spy's shared instance reference before and after each test."""
+    """Clear the spy's shared instance reference before and after each test.
+
+    Yields
+    ------
+    None
+        Test execution between the initial reset and the teardown reset.
+    """
     _ExitSpyCmdMoxManager.last_instance = None
     yield
     _ExitSpyCmdMoxManager.last_instance = None
