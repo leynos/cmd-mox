@@ -488,6 +488,31 @@ def main() -> None:
     _write_response(response, correlation_id=invocation.invocation_id)
 
 
+def _passthrough_report_timeout(
+    timeout: float,
+    deadline: float | None,
+    failure: _ShimFailureContext,
+) -> float:
+    """Check the reporting budget and record expiry before client dispatch.
+
+    Returns
+    -------
+    float
+        The remaining budget under the original shared deadline.
+
+    Raises
+    ------
+    TimeoutError
+        When the shared deadline expires before a client request can start.
+    """
+    try:
+        return _timeout_remaining(timeout, deadline)
+    except TimeoutError as exc:
+        # The client cannot record failures that occur before dispatch.
+        _emit_shim_failure(failure, exc)
+        raise
+
+
 def _handle_passthrough(
     invocation: Invocation,
     response: Response,
@@ -512,18 +537,17 @@ def _handle_passthrough(
     -------
     Response
         Response returned after the real command's result is reported.
-
-    Raises
-    ------
-    TimeoutError
-        Raised internally when the shared deadline expires before reporting;
-        recorded and converted into a controlled IPC exit.
     """
     directive = response.passthrough
     if directive is None:  # pragma: no cover - defensive guard
         return response
 
-    started = time.perf_counter()
+    failure = _ShimFailureContext(
+        _SHIM_PASSTHROUGH_REPORT_OPERATION,
+        "deadline_expired",
+        time.perf_counter(),
+        invocation.invocation_id,
+    )
     result_response = _run_real_command(invocation, directive)
     passthrough_result = PassthroughResult(
         invocation_id=directive.invocation_id,
@@ -532,23 +556,9 @@ def _handle_passthrough(
         exit_code=result_response.exit_code,
     )
     try:
-        try:
-            remaining = _timeout_remaining(timeout, deadline)
-        except TimeoutError as exc:
-            # The client cannot record failures that occur before dispatch.
-            _emit_shim_failure(
-                _ShimFailureContext(
-                    _SHIM_PASSTHROUGH_REPORT_OPERATION,
-                    "deadline_expired",
-                    started,
-                    invocation.invocation_id,
-                ),
-                exc,
-            )
-            raise
         return report_passthrough_result(
             passthrough_result,
-            timeout=remaining,
+            timeout=_passthrough_report_timeout(timeout, deadline, failure),
             deadline=deadline,
         )
     except (OSError, RuntimeError, json.JSONDecodeError) as exc:
