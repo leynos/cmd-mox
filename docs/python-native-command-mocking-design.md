@@ -679,17 +679,23 @@ flowchart TD
     H --> Z["Resulting PATH is cross-platform, deduplicated, shim-filtered, and normalized"]
 ```
 
-The initial implementation ships with a lightweight `IPCServer` class. It uses
-Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
-socket path provided by the `EnvironmentManager`. Incoming JSON messages are
-parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts (default: 5.0s). Callers can pass an `IPCHandlers`
-dataclass to provide invocation and passthrough callbacks when constructing the
-server for simple composition. Subclassing remains supported when custom
-behaviour requires overriding the public handler hooks. The `CallbackIPCServer`
-compatibility wrapper forwards a `TimeoutConfig` dataclass so callers can
-continue to customize startup and accept timeouts without exceeding the
-four-argument limit. On Windows hosts the controller constructs a
+The Unix transport ships with a lightweight `IPCServer` class. It resolves its
+`socketserver` base class lazily, when backend creation first needs it, and
+caches both that class selection and the generated inner-server class for the
+process lifetime. The resolver prefers Python's
+`socketserver.ThreadingUnixStreamServer`; when that class is unavailable but
+`socketserver.UnixStreamServer` exists, it composes the latter with
+`socketserver.ThreadingMixIn`. If neither class exists, resolution raises
+`RuntimeError`. Directly constructing the Unix server on Windows also raises
+`RuntimeError`; the controller selects the named-pipe transport there. Incoming
+JSON messages are parsed into `Invocation` objects and processed in background
+threads with reasonable timeouts (default: 5.0s). Callers can pass an
+`IPCHandlers` dataclass to provide invocation and passthrough callbacks when
+constructing the server for simple composition. Subclassing remains supported
+when custom behaviour requires overriding the public handler hooks. The
+`CallbackIPCServer` compatibility wrapper forwards a `TimeoutConfig` dataclass
+so callers can continue to customize startup and accept timeouts without
+exceeding the four-argument limit. On Windows hosts the controller constructs a
 `NamedPipeServer`, which shares the same handler plumbing but uses `win32pipe`/
 `win32file` (via `pywin32`) to host a duplex named pipe that mirrors the Unix
 socket behaviour. The named pipe name is derived from the logical socket path,
@@ -801,13 +807,21 @@ classDiagram
     class IPCServer {
         - Path socket_path
         - float timeout
-        - _InnerServer _server
+        - BaseServer _server
         - Thread _thread
         + __enter__() IPCServer
         + __exit__(exc_type, exc, tb) None
         + start() None
         + stop() None
         + handle_invocation(invocation: Invocation) Response
+    }
+    class InnerServerFactory {
+        <<cached function>>
+        + _inner_server_cls()
+    }
+    class UnixServerBaseResolver {
+        <<cached function>>
+        + resolve_unix_server_base()
     }
     class _InnerServer {
         - IPCServer outer
@@ -831,7 +845,9 @@ classDiagram
         + str stderr
         + int exit_code
     }
-    IPCServer --> _InnerServer : manages
+    IPCServer --> InnerServerFactory : requests class when creating backend
+    InnerServerFactory ..> UnixServerBaseResolver : resolves platform base
+    InnerServerFactory ..> _InnerServer : creates and caches
     _InnerServer --> _IPCHandler : uses
     _IPCHandler --> Invocation : parses
     _IPCHandler --> Response : returns
@@ -867,12 +883,22 @@ sequenceDiagram
     participant UnixSocket as "Unix Domain Socket (POSIX only)"
     Controller->>Server: Start IPC server
     alt Windows
+        Controller->>Server: Select NamedPipeServer
         Server->>WindowsPipe: Create named pipe (derive name from socket path)
         WindowsPipe-->>Server: Ready event set
         Client->>WindowsPipe: Connect to named pipe
         WindowsPipe->>Server: Forward request
         Server->>Client: Send response
     else POSIX
+        Server->>Server: Call cached inner-server factory
+        Server->>Server: Resolve and cache Unix server base
+        alt ThreadingUnixStreamServer available
+            Server-->>Server: Use native threaded server class
+        else Only UnixStreamServer available
+            Server-->>Server: Compose UnixStreamServer with ThreadingMixIn
+        else No Unix server class available
+            Server-->>Controller: Raise RuntimeError
+        end
         Server->>UnixSocket: Create Unix domain socket
         UnixSocket-->>Server: Socket ready
         Client->>UnixSocket: Connect to socket
@@ -880,6 +906,12 @@ sequenceDiagram
         Server->>Client: Send response
     end
 ```
+
+The Unix resolver records a bounded `ipc.unix_server_base.resolve` event for
+the native, compatibility, and unsupported-platform outcomes. Backend creation
+also records bounded cache `hit` and `miss` outcomes for the resolver and
+inner-server factory. The event dimensions are fixed labels and never include
+socket paths, request data, or exception messages.
 
 The relationships between the Windows transport helpers are summarized below.
 

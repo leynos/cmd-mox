@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import socketserver
 import threading
 import typing as typ
 from functools import cache
 
+from . import _observability
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -16,6 +18,9 @@ from ._server_core import (
 )
 from ._unix_server_base import resolve_unix_server_base
 from .socket_utils import cleanup_stale_socket, wait_for_socket
+
+_LOGGER = logging.getLogger(__name__)
+_INNER_SERVER_FACTORY_LOCK = threading.Lock()
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -31,7 +36,14 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
         cleanup_stale_socket(self.socket_path)
 
     def _create_backend(self) -> tuple[socketserver.BaseServer, threading.Thread]:
-        inner_server_cls = _inner_server_cls()
+        """Build the cached Unix socket backend and its daemon thread.
+
+        Returns
+        -------
+        tuple[socketserver.BaseServer, threading.Thread]
+            The server instance and its daemon serving thread.
+        """
+        inner_server_cls = _inner_server_cls_for_backend()
         server = inner_server_cls(self.socket_path, self)
         server.timeout = self.accept_timeout
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -42,6 +54,7 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
 
     @staticmethod
     def _stop_backend(server: socketserver.BaseServer | None) -> None:
+        """Shut down and close a backend when one was created."""
         if server is None:
             return
         server.shutdown()
@@ -104,6 +117,7 @@ def _inner_server_cls() -> cabc.Callable[[Path, IPCServer], socketserver.BaseSer
         """Threaded Unix stream server passing requests to :class:`IPCServer`."""
 
         def __init__(self, socket_path: Path, outer: IPCServer) -> None:
+            """Bind the server to its path and public IPC handler owner."""
             self.outer = outer
             super().__init__(str(socket_path), _IPCHandler)
             self.daemon_threads = True
@@ -112,6 +126,53 @@ def _inner_server_cls() -> cabc.Callable[[Path, IPCServer], socketserver.BaseSer
         "cabc.Callable[[Path, IPCServer], socketserver.BaseServer]",
         _InnerServer,
     )
+
+
+def _emit_cache_event(
+    operation: typ.Literal[
+        "ipc.unix_server_base.cache",
+        "ipc.unix_server_factory.cache",
+    ],
+    *,
+    cache_missed: bool,
+) -> None:
+    """Record one bounded lazy-cache outcome."""
+    outcome = "miss" if cache_missed else "hit"
+    _observability.emit(
+        _observability.IPCEvent(
+            operation=operation,
+            transport="unix",
+            outcome=outcome,
+        ),
+        logger=_LOGGER,
+    )
+
+
+def _inner_server_cls_for_backend() -> cabc.Callable[
+    [Path, IPCServer], socketserver.BaseServer
+]:
+    """Return the cached factory class and count bounded cache outcomes.
+
+    Returns
+    -------
+    cabc.Callable[[Path, IPCServer], socketserver.BaseServer]
+        The inner server class configured for this platform.
+    """
+    with _INNER_SERVER_FACTORY_LOCK:
+        resolver_before = resolve_unix_server_base.cache_info()
+        factory_before = _inner_server_cls.cache_info()
+        inner_server_cls = _inner_server_cls()
+        resolver_after = resolve_unix_server_base.cache_info()
+        factory_after = _inner_server_cls.cache_info()
+        _emit_cache_event(
+            "ipc.unix_server_base.cache",
+            cache_missed=resolver_after.misses > resolver_before.misses,
+        )
+        _emit_cache_event(
+            "ipc.unix_server_factory.cache",
+            cache_missed=factory_after.misses > factory_before.misses,
+        )
+    return inner_server_cls
 
 
 __all__ = [

@@ -207,6 +207,25 @@ dispatch:
   standard streams, environments, socket paths, and exception messages must
   never be logged.
 
+### Unix server-base selection
+
+`IPCServer` defers Unix server-class selection until backend creation. Its
+cached `_inner_server_cls()` factory asks the cached
+`resolve_unix_server_base()` accessor for the platform base class, then creates
+the inner server class. The resolver prefers
+`socketserver.ThreadingUnixStreamServer`; when only `UnixStreamServer` exists,
+it composes that class with `ThreadingMixIn`. On Windows the resolver returns a
+placeholder whose construction raises `RuntimeError`, while a platform with
+neither Unix server class raises `RuntimeError` during resolution. Both caches
+last for the process lifetime.
+
+The resolver emits the bounded `ipc.unix_server_base.resolve` event with one of
+the `native`, `compatibility`, `windows_unsupported`, or `unsupported`
+outcomes. Backend creation also records `hit` or `miss` outcomes for the
+resolver and factory caches. These records carry only the `unix` transport,
+fixed operation/outcome labels, and the `RuntimeError` category where
+applicable; they never include socket paths or exception messages.
+
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs from
 `CommandDouble.name`. It performs that command-name check before expectation
 matching and must not invoke expectation matching for a different command. This
@@ -232,6 +251,12 @@ use the command-first helper:
 ```bash
 make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 ```
+
+When a runtime entry point is reached through a cached factory, declare the
+precise function and generated class types in
+`[[tool.skylos.dead_code.entrypoints]]`, and name the factory or lifecycle that
+reaches them in each reason. Keep a contract test for these dynamic boundaries
+so a renamed symbol cannot silently stale the rule.
 
 The target requires both variables to contain non-whitespace values and invokes
 `skylos whitelist <symbol> --reason <reason>`. `SYMBOL` avoids WSL's
