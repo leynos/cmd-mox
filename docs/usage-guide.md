@@ -763,10 +763,11 @@ environment is missing; the shim exits with `IPC socket not specified`.
 Shims read non-terminal standard input until EOF to populate
 `Invocation.stdin`; terminal input is skipped. If an intermediary process, such
 as Git invoking a merge driver, inherits non-terminal stdin and leaves it open,
-the shim waits and may hang until the caller's timeout. The only server-side
-symptom may be an `IPC received malformed JSON` error, which does not identify
-stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise close or
-redirect stdin, unless the caller intends to supply input.
+the shim waits and may hang until the caller's timeout. Because the shim reads
+stdin before opening IPC, that block cannot itself produce a server-side
+`IPC received malformed JSON` error. If that error appears, it does not
+identify stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise
+close or redirect stdin, unless the caller intends to supply input.
 
 ## Controller configuration and journals
 
@@ -844,7 +845,7 @@ few common ones are:
           return ("", "boom", 2)  # non-zero exit
       return ("ok", "", 0)
 
-  cmd_mox.mock("tool").with_args("run").runs(handler)
+  cmd_mox.mock("tool").runs(handler)
   ```
 
 - `times(count)` – expect the command exactly `count` times.
