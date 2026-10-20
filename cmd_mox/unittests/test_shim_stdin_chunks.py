@@ -358,7 +358,7 @@ def _read_stdin_chunks(chunks: list[bytes], *, buffered: bool) -> str:
     Returns
     -------
     str
-        Decoded text with universal newlines translated.
+        Decoded text with carriage-return and line-feed sequences preserved.
     """
 
     class _ReadyPoller:
