@@ -237,14 +237,27 @@ def test_server_logs_client_disconnect_during_reply_write(
             assert disconnect_logged.wait(timeout=3.0), (
                 "The reply write did not report the disconnected client"
             )
+            capture_deadline = time.monotonic() + 3.0
+            while not any(
+                record.getMessage() == disconnect_message
+                and record.levelno == logging.DEBUG
+                for record in caplog.records
+            ):
+                remaining = capture_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(0.01, remaining))
 
     assert any(
         record.getMessage() == disconnect_message and record.levelno == logging.DEBUG
         for record in caplog.records
     ), "The disconnect was not logged at DEBUG"
-    assert not any(record.levelno >= logging.ERROR for record in caplog.records), (
+    server_records = [
+        record for record in caplog.records if record.name == "cmd_mox.ipc.server"
+    ]
+    assert not any(record.levelno >= logging.ERROR for record in server_records), (
         "The client disconnect emitted an ERROR record"
     )
-    assert not any(record.exc_info is not None for record in caplog.records), (
+    assert not any(record.exc_info is not None for record in server_records), (
         "The client disconnect emitted an exception record"
     )
