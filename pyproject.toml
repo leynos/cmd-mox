@@ -454,6 +454,7 @@ path = "cmd_mox/ipc/server.py"
 reason = "IPCServer._create_backend calls this cache helper during _ServerLifecycle.start."
 
 [[tool.skylos.dead_code.entrypoints]]
+# Skylos flattens this local class name; the source contract verifies its scope.
 type = "class"
 full_name = ["cmd_mox.ipc.server._InnerServer"]
 path = "cmd_mox/ipc/server.py"

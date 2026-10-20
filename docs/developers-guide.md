@@ -207,6 +207,11 @@ dispatch:
   standard streams, environments, socket paths, and exception messages must
   never be logged.
 
+`CommandDouble.matches` must reject an `Invocation` whose `command` differs from
+`CommandDouble.name`. It performs that command-name check before expectation
+matching and must not invoke expectation matching for a different command. This
+prevents a double from accepting an invocation owned by another command.
+
 ### Unix server-base selection
 
 `IPCServer` defers Unix server-class selection until backend creation. Its
@@ -217,19 +222,17 @@ the inner server class. The resolver prefers
 it composes that class with `ThreadingMixIn`. On Windows the resolver returns a
 placeholder whose construction raises `RuntimeError`, while a platform with
 neither Unix server class raises `RuntimeError` during resolution. Both caches
-last for the process lifetime.
+retain a successful result for the process lifetime. A resolution failure is
+not cached: each backend creation repeats resolution, emits a new `unsupported`
+event, and records no cache outcome.
 
 The resolver emits the bounded `ipc.unix_server_base.resolve` event with one of
 the `native`, `compatibility`, `windows_unsupported`, or `unsupported`
-outcomes. Backend creation also records `hit` or `miss` outcomes for the
-resolver and factory caches. These records carry only the `unix` transport,
-fixed operation/outcome labels, and the `RuntimeError` category where
-applicable; they never include socket paths or exception messages.
-
-`CommandDouble.matches` must reject an `Invocation` whose `command` differs from
-`CommandDouble.name`. It performs that command-name check before expectation
-matching and must not invoke expectation matching for a different command. This
-prevents a double from accepting an invocation owned by another command.
+outcomes. Backend creation records `hit` or `miss` outcomes only for caches it
+consults; a factory cache hit does not consult the base resolver. These records
+carry only the `unix` transport, fixed operation/outcome labels, and the
+`RuntimeError` category where applicable; they never include socket paths or
+exception messages.
 
 ## Skylos dead-code policy
 
@@ -252,12 +255,6 @@ use the command-first helper:
 make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 ```
 
-When a runtime entry point is reached through a cached factory, declare the
-precise function and generated class types in
-`[[tool.skylos.dead_code.entrypoints]]`, and name the factory or lifecycle that
-reaches them in each reason. Keep a contract test for these dynamic boundaries
-so a renamed symbol cannot silently stale the rule.
-
 The target requires both variables to contain non-whitespace values and invokes
 `skylos whitelist <symbol> --reason <reason>`. `SYMBOL` avoids WSL's
 caller-owned `NAME` environment variable. Each read-modify-write is serialized
@@ -266,6 +263,12 @@ may override `SKYLOS_WHITELIST_LOCK` when running in an isolated temporary
 directory. Treat the helper as a reviewed write: retain the matching
 `[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
 caller-specific reason, and never use it to avoid removing genuine dead code.
+
+When a runtime entry point is reached through a cached factory, declare the
+precise function and generated class types in
+`[[tool.skylos.dead_code.entrypoints]]`, and name the factory or lifecycle that
+reaches them in each reason. Keep a contract test for these dynamic boundaries
+so a renamed symbol cannot silently make the rule stale.
 
 Skylos parses source with the AST implementation of its own runtime. The
 command-only `SKYLOS_CLI` therefore pins Python 3.14 to prevent newer syntax

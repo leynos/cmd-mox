@@ -164,10 +164,13 @@ def _inner_server_cls_for_backend() -> cabc.Callable[
         inner_server_cls = _inner_server_cls()
         resolver_after = resolve_unix_server_base.cache_info()
         factory_after = _inner_server_cls.cache_info()
-        _emit_cache_event(
-            "ipc.unix_server_base.cache",
-            cache_missed=resolver_after.misses > resolver_before.misses,
-        )
+        resolver_missed = resolver_after.misses > resolver_before.misses
+        resolver_hit = resolver_after.hits > resolver_before.hits
+        if resolver_missed or resolver_hit:
+            _emit_cache_event(
+                "ipc.unix_server_base.cache",
+                cache_missed=resolver_missed,
+            )
         _emit_cache_event(
             "ipc.unix_server_factory.cache",
             cache_missed=factory_after.misses > factory_before.misses,
