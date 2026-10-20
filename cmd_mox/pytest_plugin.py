@@ -555,14 +555,18 @@ def cmd_mox(request: pytest.FixtureRequest) -> cabc.Generator[CmdMox, None, None
     try:
         try:
             manager.enter()
-        except Exception:
+        except BaseException:
+            # KeyboardInterrupt and xdist worker SystemExit must set body_failed
+            # before they propagate; this observer immediately re-raises.
             body_failed = True
             logger.exception("Error during cmd_mox fixture setup or test execution")
             raise
 
         try:
             yield manager.mox
-        except Exception:
+        except BaseException:
+            # KeyboardInterrupt and xdist worker SystemExit must set body_failed
+            # before they propagate; this observer immediately re-raises.
             body_failed = True
             logger.debug(
                 "Error during cmd_mox fixture setup or test execution",
