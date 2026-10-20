@@ -366,24 +366,24 @@ assert [invocation.args for invocation in cargo.invocations] == [
 Plumbum snapshots `os.environ` when imported, so commands launched through
 Plumbum can miss the shim on `PATH` and the IPC address installed by replay.
 This can appear as `0 invocations recorded` or malformed JSON on the server.
-With manual lifecycle control, disable automatic lifecycle and call `replay()`
-before overlaying the live environment with `local.env(**os.environ)`:
+With the pytest plugin's default automatic lifecycle, declare expectations
+before the test body; the plugin replays before the body begins. Overlay the
+live environment around the Plumbum call:
 
 ```python
 import os
 
-import pytest
 from plumbum import local
 
-@pytest.mark.cmd_mox(auto_lifecycle=False)
 def test_with_plumbum(cmd_mox):
     spy = cmd_mox.spy("tool").returns(stdout="ok")
-    cmd_mox.replay()
     with local.env(**os.environ):
         run_with_plumbum()
-    cmd_mox.verify()
     assert spy.invocations
 ```
+
+Tests that disable automatic lifecycle must call `replay()` before entering
+`local.env(**os.environ)` and call `verify()` after exercising the code.
 
 A spy can also forward to the real command while recording everything:
 

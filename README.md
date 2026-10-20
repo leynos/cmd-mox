@@ -67,32 +67,18 @@ what your misbehaving code actually did.
 
 ### Several calls to one command
 
-Repeated `mock(name)` calls retrieve the same double; a second `with_args(...)`
-raises `ExpectationConfigurationError` rather than replacing its expectation.
-For several distinct calls, use a `runs(handler)` function that dispatches on
-`invocation.args` (`list[str]`):
+`mock(name)` retrieves one double per name; a second `with_args(...)` raises
+`ExpectationConfigurationError` rather than adding another expectation. For
+several calls, use a `runs(handler)` function that dispatches on
+`invocation.args` (`list[str]`) with `match`:
 
 ```python
-unexpected_calls: list[list[str]] = []
-
-def handler(invocation):
-    match invocation.args:
-        case ["metadata", *_]:
-            return '{"packages": []}', "", 0
-        case ["nextest", "run", *_]:
-            return "", "", 100
-        case unexpected:
-            unexpected_calls.append(unexpected)
-            return "", "unexpected cargo arguments", 1
-
-cargo = cmd_mox.spy("cargo").runs(handler)
-
-# After exercising the code under test:
-assert unexpected_calls == []
+cargo = cmd_mox.spy("cargo").runs(handle_cargo)
 ```
 
-See the [usage guide](docs/usage-guide.md#spies-and-passthrough-mode) for a
-fuller example and ordered invocation assertions.
+The `handle_cargo(invocation)` handler can match on `invocation.args`. See the
+[usage guide](docs/usage-guide.md#spies-and-passthrough-mode) for a full
+handler and assertions on the ordered `spy.invocations` sequence.
 
 No subshells. No flaky greps. Just clean, high-fidelity, Pythonic command
 mocking.
