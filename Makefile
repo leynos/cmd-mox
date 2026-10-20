@@ -3,6 +3,7 @@ NIXIE ?= nixie
 # uses the global uv cache, runs offline first and goes online at most once. See
 # https://github.com/leynos/shared-actions/tree/main/uv_gate for the contract.
 UV_GATE ?= python3 scripts/uv_gate.py
+PROJECT_ROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
 UV ?= $(shell command -v uv 2>/dev/null || printf '%s' "$$HOME/.local/bin/uv")
 TOOLS = $(UV)
 # The helper finds uv on PATH, so put the directory of the selected uv (a caller's
@@ -156,8 +157,17 @@ markdownlint: ## Lint Markdown files
 
 spelling: ## Enforce en-GB-oxendict spelling in Markdown prose
 	@$(UV_GATE) run --group dev -- python scripts/generate_typos_config.py
-	@git ls-files --cached --others --exclude-standard -z -- '*.md' | \
-		xargs -0 -r $(TYPOS) --config typos.toml --force-exclude
+	@set -eu; \
+		markdown_paths=$$(mktemp); \
+		trap 'rm -f "$$markdown_paths"' EXIT; \
+		existing_paths=$$(mktemp); \
+		trap 'rm -f "$$markdown_paths" "$$existing_paths"' EXIT; \
+		git ls-files --cached --others --exclude-standard \
+			--deduplicate -z -- '*.md' > "$$markdown_paths"; \
+		$(UV_GATE) run --group dev -- python \
+			"$(PROJECT_ROOT)/scripts/filter_existing_markdown.py" \
+			< "$$markdown_paths" > "$$existing_paths"; \
+		xargs -0 -r $(TYPOS) --config typos.toml --force-exclude < "$$existing_paths"
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox

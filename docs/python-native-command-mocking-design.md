@@ -549,32 +549,36 @@ workflow is as follows:
    by any child processes, including the code under test and, consequently, the
    shims it invokes.
 
-3. **Shim Connection:** When a shim is executed by the OS, its first action is
-   to read the `CMOX_IPC_SOCKET` environment variable and connect to the
-   listening server thread in the main test process.
+3. **Shim Setup:** The shim bootstraps its launcher, resolves the command name,
+   checks that `CMOX_IPC_SOCKET` is set, and validates the IPC timeout. If the
+   socket variable is unset or the timeout is invalid, the shim exits before
+   reading standard input.
 
-4. **Invocation Reporting:** The shim gathers all relevant invocation data: the
-   command name, the list of arguments (`sys.argv[1:]`), the complete content
-   of its standard input, and a copy of its current environment variables.
-   Large payloads may require future streaming or truncation. It serializes
-   this data into a structured format like JSON and sends it over the socket to
-   the server.
+4. **Invocation Reporting:** Before opening IPC, the shim gathers the command
+   name, the list of arguments (`sys.argv[1:]`), the complete content of its
+   standard input, and a copy of its current environment variables. Reading
+   non-terminal standard input continues until end-of-file. Large payloads may
+   require future streaming or truncation.
 
-5. **Server-Side Processing:** The server thread in the main process receives
+5. **Shim Connection:** After creating the invocation, the shim connects to the
+   listening server thread in the main test process and sends the serialized
+   invocation over the socket.
+
+6. **Server-Side Processing:** The server thread in the main process receives
    the JSON payload. It deserializes it into an `Invocation` object and records
    it in the in-memory Invocation Journal after the handler runs. At that point
    the invocation also captures the resulting `stdout`, `stderr`, and
    `exit_code`. The server then searches its list of `Expectation` objects to
    find a match for this invocation.
 
-6. **Response Delivery:** Once a matching expectation is found, the server
+7. **Response Delivery:** Once a matching expectation is found, the server
    determines the prescribed response. If it's a static `.returns()` value, it
    serializes this data and sends it back to the shim. If it's a dynamic
    `.runs(handler)`, the server thread executes the handler function (which is
    in the same process and has access to all test state) and sends its result
    back.
 
-7. **Shim Action:** The shim receives the response payload from the server. It
+8. **Shim Action:** The shim receives the response payload from the server. It
    writes the `stdout` and `stderr` data to its own standard streams and then
    terminates with the specified `exit_code`.
 
