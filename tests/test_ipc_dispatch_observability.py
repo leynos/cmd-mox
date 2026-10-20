@@ -213,7 +213,7 @@ def test_request_pipeline_logs_invalid_request(
     )
     payload = json.loads(result.response_bytes.decode("utf-8"))
     assert payload["exit_code"] == 1, "Invalid request must fail"
-    assert payload["stderr"] == "IPC request payload failed validation", (
+    assert payload["stderr"] == "IPC request payload failed validation\n", (
         "Invalid request diagnostic was not returned"
     )
     events = _dispatch_events(caplog)
@@ -242,7 +242,7 @@ def test_request_pipeline_logs_rejection_frame(
     )
     payload = json.loads(result.response_bytes.decode("utf-8"))
     assert payload["exit_code"] == 1, "Parse failure must fail"
-    assert payload["stderr"] == "IPC request could not be parsed", (
+    assert payload["stderr"] == "IPC request could not be parsed\n", (
         "Parse failure diagnostic was not returned"
     )
     [event] = _dispatch_events(caplog)

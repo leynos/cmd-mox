@@ -270,7 +270,7 @@ def test_raw_malformed_request_gets_a_rejection_frame(
                 response_chunks.append(chunk)
 
     response = Response.from_payload(json.loads(b"".join(response_chunks)))
-    assert response.stderr == "IPC request could not be parsed", (
+    assert response.stderr == "IPC request could not be parsed\n", (
         "Malformed request did not receive the bounded server diagnostic"
     )
     assert response.exit_code == 1, "Malformed request did not receive failure status"

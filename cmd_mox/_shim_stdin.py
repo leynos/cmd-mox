@@ -107,7 +107,8 @@ def _stdin_decoder() -> io.IncrementalNewlineDecoder:
     errors = getattr(sys.stdin, "errors", None) or "strict"
     return io.IncrementalNewlineDecoder(
         codecs.getincrementaldecoder(encoding)(errors=errors),
-        translate=True,
+        # POSIX sys.stdin retains carriage returns rather than translating them.
+        translate=False,
     )
 
 
