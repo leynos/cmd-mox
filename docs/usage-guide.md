@@ -1,4 +1,4 @@
-# CmdMox Usage Guide
+# CmdMox usage guide
 
 CmdMox provides a fluent API for mocking, stubbing and spying on external
 commands in test suites. This guide shows common patterns for everyday use.
@@ -366,15 +366,23 @@ assert [invocation.args for invocation in cargo.invocations] == [
 Plumbum snapshots `os.environ` when imported, so commands launched through
 Plumbum can miss the shim on `PATH` and the IPC address installed by replay.
 This can appear as `0 invocations recorded` or malformed JSON on the server.
-After replay, overlay the live environment with `local.env(**os.environ)`:
+With manual lifecycle control, disable automatic lifecycle and call `replay()`
+before overlaying the live environment with `local.env(**os.environ)`:
 
 ```python
 import os
 
+import pytest
 from plumbum import local
 
-with local.env(**os.environ):
-    run_with_plumbum()
+@pytest.mark.cmd_mox(auto_lifecycle=False)
+def test_with_plumbum(cmd_mox):
+    spy = cmd_mox.spy("tool").returns(stdout="ok")
+    cmd_mox.replay()
+    with local.env(**os.environ):
+        run_with_plumbum()
+    cmd_mox.verify()
+    assert spy.invocations
 ```
 
 A spy can also forward to the real command while recording everything:
@@ -908,14 +916,14 @@ few common ones are:
   boundary (e.g., base64) so handlers exchange `str`.
 - `runs(handler)` – call a function to produce dynamic output. The handler
   receives an `Invocation`; `invocation.args` is a `list[str]`. The handler
-  returns either a `(stdout, stderr, exit_code)` tuple or a `Response` instance.
-  It runs in the test process on an IPC request-handler worker thread, not in
-  the shim subprocess. Path arguments may be relative to the invoked command's
-  working directory, but `Invocation` does not carry that directory. Opening a
-  relative argument directly in the handler resolves it against the test
-  process's working directory. Provide the invoking working directory
-  separately or use absolute paths. For a Git merge handler, capture the
-  invoking repository path as `repository` and compute the merged text as
+  returns either a `(stdout, stderr, exit_code)` tuple or a `Response`
+  instance. It runs in the test process on an IPC request-handler worker
+  thread, not in the shim subprocess. Path arguments may be relative to the
+  invoked command's working directory, but `Invocation` does not carry that
+  directory. Opening a relative argument directly in the handler resolves it
+  against the test process's working directory. Provide the invoking working
+  directory separately or use absolute paths. For a Git merge handler, capture
+  the invoking repository path as `repository` and compute the merged text as
   `result`; then write the target with
   `(repository / invocation.args[1]).write_text(result)`.
 
@@ -931,6 +939,8 @@ few common ones are:
               return "", "boom", 2
           case ["run", *_]:
               return "ok", "", 0
+          case _:
+              return "", "unexpected tool arguments", 1
 
   cmd_mox.spy("tool").runs(handler)
   ```
