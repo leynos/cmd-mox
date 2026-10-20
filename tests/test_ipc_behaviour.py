@@ -149,6 +149,7 @@ def _run_shim_against_socket_peer(
     try:
         result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a generated shim path
             [str(_shim_cmd_path(env, command))],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,
