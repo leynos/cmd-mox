@@ -828,11 +828,13 @@ few common ones are:
 - `runs(handler)` – call a function to produce dynamic output. The handler
   receives an `Invocation` and should return either a
   `(stdout, stderr, exit_code)` tuple or a `Response` instance. The handler
-  runs in the test process on the IPC server thread, not in the shim
-  subprocess. Relative paths in `Invocation.args` are relative to the invoking
-  process's working directory. `Invocation` does not carry that directory, so
-  provide it separately or use absolute paths. For example, write a Git merge
-  result with `(repository / inv.args[1]).write_text(result)`.
+  runs in the test process on an IPC request-handler worker thread, not in the
+  shim subprocess. Path arguments may be relative to the invoked command's
+  working directory, but `Invocation` does not carry that directory. Opening a
+  relative argument directly in the handler resolves it against the test
+  process's working directory. Provide the invoking working directory
+  separately or use absolute paths. For example, write a Git merge result with
+  `(repository / inv.args[1]).write_text(result)`.
 
   Example:
 
