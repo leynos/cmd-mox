@@ -52,7 +52,7 @@ def test_create_invocation_checks_deadline_between_buffered_reads(
     stdin = _DescriptorStdin(stdin_pipe_descriptor_at_eof, buffer=buffer)
     monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "argv", ["shim"])
-    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: clock["value"])
+    monkeypatch.setattr(shim.time, "monotonic", lambda: clock["value"])
 
     with pytest.raises(SystemExit) as exc:
         _create_invocation("shim", timeout=1.0)

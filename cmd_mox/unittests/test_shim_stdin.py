@@ -158,7 +158,13 @@ def test_direct_stdin_fallback_routes_read_errors(
 
     with pytest.raises(_ErrorReportedError):
         shim._shim_stdin._read_stdin_until_eof(
-            1.0, deadline=None, on_error=record_error
+            1.0,
+            deadline=None,
+            on_error=record_error,
+            dependencies=shim._shim_stdin._StdinReadDependencies(
+                source=shim._shim_stdin._system_stdin_source(),
+                clock=lambda: 0.0,
+            ),
         )
 
     assert len(reported) == 1, "Direct-read error was not reported exactly once"
@@ -226,6 +232,10 @@ def test_create_invocation_keeps_windows_stdin_read_unchanged(
             1.0,
             deadline=None,
             on_error=shim._exit_ipc_error,
+            dependencies=shim._shim_stdin._StdinReadDependencies(
+                source=shim._shim_stdin._system_stdin_source(),
+                clock=lambda: 0.0,
+            ),
         )
         == "payload"
     ), "Windows stdin direct read did not preserve its payload"

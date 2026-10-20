@@ -175,6 +175,7 @@ def _assert_poll_progression(scenario: _PollScenario) -> None:
     deadline_ticks, clock_ticks = _build_clock_progression(scenario)
     poller = _ScriptedPoller([_poll_events(kind) for kind in scenario.event_kinds])
     deadline = deadline_ticks / 1024
+    clock_samples = iter(ticks / 1024 for ticks in clock_ticks)
     progression = _PollProgression(
         scenario=scenario,
         deadline_ticks=deadline_ticks,
@@ -185,16 +186,15 @@ def _assert_poll_progression(scenario: _PollScenario) -> None:
             poller=poller,
             deadline=deadline,
             on_error=lambda exc: pytest.fail(f"Unexpected poll error: {exc}"),
+            dependencies=shim._shim_stdin._StdinReadDependencies(
+                source=shim._shim_stdin._system_stdin_source(),
+                clock=clock_samples.__next__,
+            ),
         ),
     )
-    with mock.patch.object(
-        shim._shim_stdin.time,
-        "monotonic",
-        side_effect=[ticks / 1024 for ticks in progression.clock_ticks],
-    ):
-        for poll_index in range(len(scenario.event_kinds)):
-            if _assert_poll_progression_step(progression, poll_index):
-                break
+    for poll_index in range(len(scenario.event_kinds)):
+        if _assert_poll_progression_step(progression, poll_index):
+            break
     assert progression.clock_ticks == sorted(progression.clock_ticks), (
         "Controlled monotonic time went backwards"
     )
@@ -329,15 +329,18 @@ def test_raw_stdin_readiness_at_deadline_reports_timeout_once(
         raw_reads.append((descriptor, size))
         return b""
 
+    monkeypatch.setattr(sys, "stdin", _UnbufferedStdin())
+    monkeypatch.setattr(shim._shim_stdin.os, "read", read_eof)
     context = shim._shim_stdin._ReadContext(
         descriptor=123,
         poller=_ReadyAtExpiryPoll(),
         deadline=1.0,
         on_error=record_error,
+        dependencies=shim._shim_stdin._StdinReadDependencies(
+            source=shim._shim_stdin._system_stdin_source(),
+            clock=lambda: clock["value"],
+        ),
     )
-    monkeypatch.setattr(sys, "stdin", _UnbufferedStdin())
-    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: clock["value"])
-    monkeypatch.setattr(shim._shim_stdin.os, "read", read_eof)
 
     with pytest.raises(_ErrorReportedError):
         shim._shim_stdin._read_raw_polled_stdin(context)
@@ -397,14 +400,18 @@ def _read_stdin_chunks(chunks: list[bytes], *, buffered: bool) -> str:
         raise exc
 
     stdin = _Stdin()
-    context = shim._shim_stdin._ReadContext(
-        descriptor=123,
-        poller=_ReadyPoller(),
-        deadline=time.monotonic() + 10.0,
-        on_error=fail_read,
-    )
     with mock.patch.object(sys, "stdin", stdin):
         if buffered:
+            context = shim._shim_stdin._ReadContext(
+                descriptor=123,
+                poller=_ReadyPoller(),
+                deadline=time.monotonic() + 10.0,
+                on_error=fail_read,
+                dependencies=shim._shim_stdin._StdinReadDependencies(
+                    source=shim._shim_stdin._system_stdin_source(),
+                    clock=time.monotonic,
+                ),
+            )
             return shim._shim_stdin._read_buffered_stdin(context, stdin.buffer.read1)
 
         raw_chunks = iter([*chunks, b""])
@@ -413,6 +420,16 @@ def _read_stdin_chunks(chunks: list[bytes], *, buffered: bool) -> str:
             "read",
             side_effect=lambda _descriptor, _size: next(raw_chunks),
         ):
+            context = shim._shim_stdin._ReadContext(
+                descriptor=123,
+                poller=_ReadyPoller(),
+                deadline=time.monotonic() + 10.0,
+                on_error=fail_read,
+                dependencies=shim._shim_stdin._StdinReadDependencies(
+                    source=shim._shim_stdin._system_stdin_source(),
+                    clock=time.monotonic,
+                ),
+            )
             return shim._shim_stdin._read_raw_polled_stdin(context)
 
 
@@ -425,7 +442,7 @@ def test_decode_stdin_chunk_reports_invalid_text() -> None:
 
     with pytest.raises(UnicodeDecodeError):
         shim._shim_stdin._decode_stdin_chunk(
-            shim._shim_stdin._stdin_decoder(), b"\xff", raise_error
+            shim._shim_stdin._stdin_decoder(sys.stdin), b"\xff", raise_error
         )
 
 
@@ -487,6 +504,10 @@ def test_regular_stdin_reads_descriptor_without_buffered_stream(
             1.0,
             deadline=None,
             on_error=shim._exit_ipc_error,
+            dependencies=shim._shim_stdin._StdinReadDependencies(
+                source=shim._shim_stdin._system_stdin_source(),
+                clock=time.monotonic,
+            ),
         )
 
     assert result == "\N{EURO SIGN}\r\n", (
@@ -549,6 +570,10 @@ def test_regular_stdin_read_error_uses_controlled_exit(
                 1.0,
                 deadline=None,
                 on_error=shim._exit_ipc_error,
+                dependencies=shim._shim_stdin._StdinReadDependencies(
+                    source=shim._shim_stdin._system_stdin_source(),
+                    clock=time.monotonic,
+                ),
             )
 
     _assert_exit_code(exc, 1)
@@ -584,6 +609,10 @@ def test_regular_stdin_thread_start_error_uses_controlled_exit(
             123,
             1.0,
             shim._exit_ipc_error,
+            dependencies=shim._shim_stdin._StdinReadDependencies(
+                source=shim._shim_stdin._system_stdin_source(),
+                clock=lambda: 0.0,
+            ),
         )
 
     _assert_exit_code(exc, 1)
@@ -592,25 +621,20 @@ def test_regular_stdin_thread_start_error_uses_controlled_exit(
     )
 
 
-def test_await_regular_stdin_read_rejects_result_after_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_await_regular_stdin_read_rejects_result_after_deadline() -> None:
     """A worker result arriving at the deadline is treated as a timeout."""
     result_queue: queue.Queue[tuple[str, Exception | None]] = queue.Queue()
     result_queue.put(("late input", None))
     monotonic_values = iter([0.0, 1.0])
-    monkeypatch.setattr(
-        shim._shim_stdin.time,
-        "monotonic",
-        lambda: next(monotonic_values),
-    )
 
     def raise_error(exc: Exception) -> typ.NoReturn:
         """Propagate the timeout produced for a late worker result."""
         raise exc
 
     with pytest.raises(TimeoutError, match="timed out reading stdin"):
-        shim._shim_stdin._await_regular_stdin_read(result_queue, 1.0, raise_error)
+        shim._shim_stdin._await_regular_stdin_read(
+            result_queue, 1.0, raise_error, clock=lambda: next(monotonic_values)
+        )
 
 
 def test_read_buffered_chunk_treats_empty_read_as_eof(
@@ -627,9 +651,12 @@ def test_read_buffered_chunk_treats_empty_read_as_eof(
         poller=shim._shim_stdin._SelectPoller(123),
         deadline=1.0,
         on_error=raise_error,
+        dependencies=shim._shim_stdin._StdinReadDependencies(
+            source=shim._shim_stdin._system_stdin_source(),
+            clock=lambda: 0.0,
+        ),
     )
 
-    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: 0.0)
     monkeypatch.setattr(
         shim._shim_stdin.os,
         "read",
@@ -661,14 +688,6 @@ def test_read_raw_polled_stdin_reports_descriptor_error(
         """Propagate descriptor errors through the configured callback."""
         raise exc
 
-    context = shim._shim_stdin._ReadContext(
-        descriptor=123,
-        poller=_ReadyPoller(),
-        deadline=1.0,
-        on_error=raise_error,
-    )
-    monkeypatch.setattr(shim._shim_stdin.time, "monotonic", lambda: 0.0)
-
     def fail_read(_descriptor: int, _size: int) -> bytes:
         """Raise an I/O error after the fake poller reports readiness.
 
@@ -680,5 +699,15 @@ def test_read_raw_polled_stdin_reports_descriptor_error(
         raise _InjectedOSError
 
     monkeypatch.setattr(shim._shim_stdin.os, "read", fail_read)
+    context = shim._shim_stdin._ReadContext(
+        descriptor=123,
+        poller=_ReadyPoller(),
+        deadline=1.0,
+        on_error=raise_error,
+        dependencies=shim._shim_stdin._StdinReadDependencies(
+            source=shim._shim_stdin._system_stdin_source(),
+            clock=lambda: 0.0,
+        ),
+    )
     with pytest.raises(_InjectedOSError):
         shim._shim_stdin._read_raw_polled_stdin(context)

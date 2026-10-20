@@ -9,7 +9,9 @@ continue without complete stdin.
 
 Examples
 --------
-``stdin_text = _read_stdin_until_eof(timeout, deadline=None, on_error=fail_ipc)``
+``stdin_text = _read_stdin_until_eof(
+    timeout, deadline=None, on_error=fail_ipc, dependencies=dependencies
+)``
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ import select
 import stat
 import sys
 import threading
-import time
 import typing as typ
 
 from cmd_mox import _path_utils as path_utils
@@ -41,6 +42,61 @@ class _Poller(typ.Protocol):
         """Wait up to timeout milliseconds for file-descriptor events."""
 
 
+class _StdinStream(typ.Protocol):
+    """Minimal text stream interface used by the stdin source."""
+
+    @property
+    def encoding(self) -> str | None:
+        """Text encoding used by the stream."""
+
+    @property
+    def errors(self) -> str | None:
+        """Error handler used by the stream's decoder."""
+
+    def fileno(self) -> int:
+        """Return the descriptor used by the stream."""
+
+    def read(self) -> str:
+        """Read text directly when descriptor polling is unavailable."""
+
+
+type _MonotonicClock = cabc.Callable[[], float]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _StdinSource:
+    """Bundle process stdin operations behind one narrow testable boundary."""
+
+    stream: _StdinStream
+    create_poller: cabc.Callable[[int], _Poller | None]
+    read_descriptor: cabc.Callable[[int, int], bytes]
+    stat_descriptor: cabc.Callable[[int], os.stat_result]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _StdinReadDependencies:
+    """Bind stdin operations and the clock used by one bounded read."""
+
+    source: _StdinSource
+    clock: _MonotonicClock
+
+
+def _system_stdin_source() -> _StdinSource:
+    """Bind the live stdin stream and operating-system adapters.
+
+    Returns
+    -------
+    _StdinSource
+        Source using process stdin and the operating-system adapters.
+    """
+    return _StdinSource(
+        stream=sys.stdin,
+        create_poller=_create_stdin_poller,
+        read_descriptor=os.read,
+        stat_descriptor=os.fstat,
+    )
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class _ReadContext:
     """Shared descriptor, deadline, and failure policy for one stdin read."""
@@ -49,6 +105,7 @@ class _ReadContext:
     poller: _Poller
     deadline: float
     on_error: _ErrorHandler
+    dependencies: _StdinReadDependencies
 
 
 class _SelectPoller:
@@ -95,16 +152,16 @@ def _create_stdin_poller(descriptor: int) -> _Poller | None:
     return poller
 
 
-def _stdin_decoder() -> io.IncrementalNewlineDecoder:
-    """Build a TextIO-compatible decoder for piped standard input.
+def _stdin_decoder(stream: _StdinStream) -> io.IncrementalNewlineDecoder:
+    """Build a decoder using the supplied stream's text settings.
 
     Returns
     -------
     io.IncrementalNewlineDecoder
         Decoder configured for the current stdin encoding and newline rules.
     """
-    encoding = getattr(sys.stdin, "encoding", None) or "utf-8"
-    errors = getattr(sys.stdin, "errors", None) or "strict"
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    errors = getattr(stream, "errors", None) or "strict"
     return io.IncrementalNewlineDecoder(
         codecs.getincrementaldecoder(encoding)(errors=errors),
         # POSIX sys.stdin retains carriage returns rather than translating them.
@@ -121,7 +178,7 @@ def _poll_stdin(context: _ReadContext) -> list[tuple[int, int]] | None:
         Readiness events, an empty list on an intermediate timeout, or None
         after the deadline.
     """
-    remaining = context.deadline - time.monotonic()
+    remaining = context.deadline - context.dependencies.clock()
     if remaining <= 0:
         return None
 
@@ -130,7 +187,7 @@ def _poll_stdin(context: _ReadContext) -> list[tuple[int, int]] | None:
         events = context.poller.poll(max(1, math.ceil(poll_timeout * 1_000)))
     except OSError as exc:
         context.on_error(exc)
-    if time.monotonic() < context.deadline:
+    if context.dependencies.clock() < context.deadline:
         return events
     return None
 
@@ -158,6 +215,7 @@ def _read_stdin_until_eof(
     *,
     deadline: float | None,
     on_error: _ErrorHandler,
+    dependencies: _StdinReadDependencies,
 ) -> str:
     """Read non-interactive stdin, applying the deadline where supported.
 
@@ -166,30 +224,40 @@ def _read_stdin_until_eof(
     str
         The decoded text read through EOF.
     """
+    stdin_source = dependencies.source
+    monotonic = dependencies.clock
+
     if path_utils.IS_WINDOWS:
-        return _read_direct_stdin(on_error)
+        return _read_direct_stdin(stdin_source.stream, on_error)
 
     try:
-        descriptor = sys.stdin.fileno()
+        descriptor = stdin_source.stream.fileno()
     except (AttributeError, OSError, ValueError):
         # Test doubles and non-file streams retain their established direct read.
-        return _read_direct_stdin(on_error)
-    poller = _create_stdin_poller(descriptor)
+        return _read_direct_stdin(stdin_source.stream, on_error)
+    poller = stdin_source.create_poller(descriptor)
     if poller is None:
         # Preserve direct reads for descriptors unsupported by both waiters.
-        return _read_direct_stdin(on_error)
+        return _read_direct_stdin(stdin_source.stream, on_error)
 
-    read_deadline = deadline if deadline is not None else time.monotonic() + timeout
+    read_deadline = deadline if deadline is not None else monotonic() + timeout
     try:
-        is_regular_file = stat.S_ISREG(os.fstat(descriptor).st_mode)
+        is_regular_file = stat.S_ISREG(stdin_source.stat_descriptor(descriptor).st_mode)
     except OSError:
         is_regular_file = False
     if is_regular_file:
-        return _read_regular_stdin_until_deadline(descriptor, read_deadline, on_error)
-    return _read_polled_stdin(_ReadContext(descriptor, poller, read_deadline, on_error))
+        return _read_regular_stdin_until_deadline(
+            descriptor,
+            read_deadline,
+            on_error,
+            dependencies=dependencies,
+        )
+    return _read_polled_stdin(
+        _ReadContext(descriptor, poller, read_deadline, on_error, dependencies)
+    )
 
 
-def _read_direct_stdin(on_error: _ErrorHandler) -> str:
+def _read_direct_stdin(stream: _StdinStream, on_error: _ErrorHandler) -> str:
     """Route failures from an unpolled text read through the shim boundary.
 
     Returns
@@ -198,13 +266,17 @@ def _read_direct_stdin(on_error: _ErrorHandler) -> str:
         Captured stdin text or the value returned by the error handler.
     """
     try:
-        return sys.stdin.read()
+        return stream.read()
     except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
         return on_error(exc)
 
 
 def _read_regular_stdin_until_deadline(
-    descriptor: int, deadline: float, on_error: _ErrorHandler
+    descriptor: int,
+    deadline: float,
+    on_error: _ErrorHandler,
+    *,
+    dependencies: _StdinReadDependencies,
 ) -> str:
     """Read regular-file stdin in a daemon worker bounded by deadline.
 
@@ -214,7 +286,7 @@ def _read_regular_stdin_until_deadline(
         The text read from stdin through EOF.
     """
     result_queue: queue.Queue[tuple[str, Exception | None]] = queue.Queue()
-    decoder = _stdin_decoder()
+    decoder = _stdin_decoder(dependencies.source.stream)
 
     def read_stdin() -> None:
         """Queue decoded descriptor input or its read error for the caller."""
@@ -222,7 +294,7 @@ def _read_regular_stdin_until_deadline(
             chunks: list[str] = []
             # Raw reads avoid holding TextIOWrapper's buffer lock if this worker
             # outlives the deadline and the main thread exits the interpreter.
-            while chunk := os.read(descriptor, 64 * 1024):
+            while chunk := dependencies.source.read_descriptor(descriptor, 64 * 1024):
                 chunks.append(decoder.decode(chunk))
             chunks.append(decoder.decode(b"", final=True))
             result_queue.put(("".join(chunks), None))
@@ -238,7 +310,9 @@ def _read_regular_stdin_until_deadline(
     except (OSError, RuntimeError) as exc:
         on_error(exc)
 
-    stdin_data, error = _await_regular_stdin_read(result_queue, deadline, on_error)
+    stdin_data, error = _await_regular_stdin_read(
+        result_queue, deadline, on_error, clock=dependencies.clock
+    )
     if error is not None:
         on_error(error)
     return stdin_data
@@ -248,6 +322,8 @@ def _await_regular_stdin_read(
     result_queue: queue.Queue[tuple[str, Exception | None]],
     deadline: float,
     on_error: _ErrorHandler,
+    *,
+    clock: _MonotonicClock,
 ) -> tuple[str, Exception | None]:
     """Wait for the regular-file reader without exceeding the deadline.
 
@@ -257,14 +333,14 @@ def _await_regular_stdin_read(
         The read text and any error raised by the reader.
     """
     while True:
-        remaining = deadline - time.monotonic()
+        remaining = deadline - clock()
         if remaining <= 0:
             on_error(TimeoutError("timed out reading stdin"))
         try:
             result = result_queue.get(timeout=min(remaining, threading.TIMEOUT_MAX))
         except queue.Empty:
             continue
-        if time.monotonic() >= deadline:
+        if clock() >= deadline:
             on_error(TimeoutError("timed out reading stdin"))
         return result
 
@@ -277,7 +353,8 @@ def _read_polled_stdin(context: _ReadContext) -> str:
     str
         The decoded text read through EOF.
     """
-    buffered_read = getattr(getattr(sys.stdin, "buffer", None), "read1", None)
+    stream = context.dependencies.source.stream
+    buffered_read = getattr(getattr(stream, "buffer", None), "read1", None)
     if not callable(buffered_read):
         return _read_raw_polled_stdin(context)
 
@@ -295,13 +372,13 @@ def _read_buffered_stdin(
     str
         The decoded text read through EOF.
     """
-    decoder = _stdin_decoder()
+    decoder = _stdin_decoder(context.dependencies.source.stream)
     chunks: list[str] = []
     while True:
-        if time.monotonic() >= context.deadline:
+        if context.dependencies.clock() >= context.deadline:
             context.on_error(TimeoutError("timed out reading stdin"))
         events = _poll_stdin(context)
-        if events is None or time.monotonic() >= context.deadline:
+        if events is None or context.dependencies.clock() >= context.deadline:
             context.on_error(TimeoutError("timed out reading stdin"))
         if not events:
             continue
@@ -354,7 +431,8 @@ def _read_raw_polled_stdin(context: _ReadContext) -> str:
     str
         The decoded text read through EOF.
     """
-    decoder = _stdin_decoder()
+    source = context.dependencies.source
+    decoder = _stdin_decoder(source.stream)
     chunks: list[str] = []
     while True:
         events = _poll_stdin(context)
@@ -364,7 +442,7 @@ def _read_raw_polled_stdin(context: _ReadContext) -> str:
             continue
 
         try:
-            chunk = os.read(context.descriptor, 8_192)
+            chunk = source.read_descriptor(context.descriptor, 8_192)
         except OSError as exc:
             context.on_error(exc)
         chunks.append(_decode_stdin_chunk(decoder, chunk, context.on_error))
