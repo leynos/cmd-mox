@@ -195,6 +195,95 @@ def test_timeout_remaining_without_deadline_returns_configured_timeout() -> None
     )
 
 
+@pytest.mark.parametrize("finished_at", [101.0, 101.25], ids=["at", "after"])
+@pytest.mark.parametrize(
+    "exit_code", [0, 7], ids=["successful-command", "failed-command"]
+)
+def test_passthrough_deadline_expiry_emits_bounded_event(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    finished_at: float,
+    exit_code: int,
+) -> None:
+    """Expiry before dispatch records one event and preserves command output."""
+    invocation = Invocation(
+        command="private-command", args=[], stdin="", env={}, invocation_id="abc"
+    )
+    directive = PassthroughRequest(
+        invocation_id="abc", lookup_path="/bin", extra_env={}, timeout=2.0
+    )
+    now = {"value": 100.0}
+    monkeypatch.setattr(shim.time, "monotonic", lambda: now["value"])
+    monkeypatch.setattr(shim.time, "perf_counter", lambda: now["value"])
+    monkeypatch.setattr(shim.path_utils, "IS_WINDOWS", False)
+
+    def finish_command(*_args: object) -> Response:
+        """Return command output after the shared reporting deadline expires.
+
+        Returns
+        -------
+        Response
+            The completed command's output and configured status.
+        """
+        now["value"] = finished_at
+        return Response(
+            stdout="private-output", stderr="private-error", exit_code=exit_code
+        )
+
+    monkeypatch.setattr(shim, "_run_real_command", finish_command)
+
+    def unexpected_report(*_args: object, **_kwargs: object) -> typ.NoReturn:
+        """Reject any report attempted after its original deadline.
+
+        Returns
+        -------
+        NoReturn
+            Never returns because dispatch after expiry is a test failure.
+        """
+        return pytest.fail("expired passthrough report must not be dispatched")
+
+    monkeypatch.setattr(shim, "report_passthrough_result", unexpected_report)
+    counters_before = _observability.counter_snapshot()
+    with (
+        caplog.at_level("INFO", logger="cmd_mox.shim"),
+        _observability.capture_events() as events,
+        pytest.raises(SystemExit) as exc,
+    ):
+        shim._handle_passthrough(
+            invocation, Response(passthrough=directive), timeout=1.0, deadline=101.0
+        )
+
+    _assert_exit_code(exc, exit_code or 1)
+    captured = capsys.readouterr()
+    assert captured.out == "private-output", "Expiry discarded passthrough stdout"
+    assert (
+        captured.err == "private-errorIPC error: timed out reporting passthrough\n"
+    ), "Expiry discarded stderr or changed the controlled timeout diagnostic"
+    [event] = events
+    assert event.operation == "ipc.shim.passthrough_report", "Wrong expiry operation"
+    assert event.outcome == "deadline_expired", "Wrong expiry outcome"
+    assert event.error_category == "TimeoutError", "Wrong expiry error category"
+    assert event.transport == "unix", "Expiry lost its transport"
+    assert event.correlation_id == "abc", "Expiry lost its validated correlation id"
+    assert event.duration_ms == pytest.approx((finished_at - 100.0) * 1000), (
+        "Expiry duration must include the time spent running the command"
+    )
+    counts_after = _observability.counter_snapshot()
+    assert (
+        counts_after.get(event.key(), 0) == counters_before.get(event.key(), 0) + 1
+    ), "Expiry must increment exactly one bounded event counter"
+    assert not any(
+        text in caplog.text
+        for text in (
+            "private-command",
+            "private-output",
+            "private-error",
+            "IPC operation timed out",
+        )
+    ), "Passthrough command or exception content leaked into logs"
+
+
 def test_timeout_remaining_keeps_shim_timeout_diagnostic() -> None:
     """An expired shared deadline retains the shim's established message."""
     with pytest.raises(TimeoutError, match="IPC operation timed out"):
@@ -265,10 +354,14 @@ def test_passthrough_report_failure_preserves_nonzero_exit_code(
 
     monkeypatch.setattr(shim, "report_passthrough_result", raise_error)
 
-    with pytest.raises(SystemExit) as exc:
+    with (
+        _observability.capture_events() as events,
+        pytest.raises(SystemExit) as exc,
+    ):
         shim._handle_passthrough(invocation, response, timeout=1.0)
 
     _assert_exit_code(exc, 2)
+    assert not events, "Client-path failures must not gain a duplicate shim event"
     captured = capsys.readouterr()
     assert captured.out == "command output", (
         "A report failure must not discard passthrough stdout"
