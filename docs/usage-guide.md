@@ -1062,7 +1062,7 @@ server.
   exported automatically (default `5.0`). On POSIX, one deadline covers
   pollable piped stdin, regular-file stdin, connecting to the Unix socket,
   sending the request, receiving the response, and reporting passthrough
-  results. Regular-file reads use a worker so the shim can stop waiting at the
+  results. Regular-file reads use a worker, so the shim can stop waiting at the
   deadline. Streams that cannot be polled retain direct-read behaviour, so the
   stdin read itself may wait beyond this timeout. On Windows, stdin retains
   direct-read behaviour and named-pipe communication uses its existing

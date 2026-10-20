@@ -7,9 +7,10 @@ import logging
 import os
 import socket
 import subprocess
+import tempfile
 import threading
 import time
-import typing as typ
+from pathlib import Path
 
 import pytest
 
@@ -20,9 +21,6 @@ from cmd_mox.ipc.models import Response
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
 pytestmark = [pytest.mark.requires_unix_sockets]
-
-if typ.TYPE_CHECKING:  # pragma: no cover - imported for type checking only
-    from pathlib import Path
 
 
 def _execute_shim(
@@ -253,23 +251,23 @@ def test_generated_shim_reports_unix_response_timeout(
 
 
 def test_raw_malformed_request_gets_a_rejection_frame(
-    tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Malformed wire bytes receive an error frame through the real server."""
-    socket_path = tmp_path / "raw-ipc.sock"
     caplog.set_level(logging.INFO, logger="cmd_mox.ipc._server_core")
 
-    with (
-        IPCServer(socket_path),
-        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
-    ):
-        client.connect(str(socket_path))
-        client.sendall(b"private malformed payload")
-        client.shutdown(socket.SHUT_WR)
-        response_chunks: list[bytes] = []
-        while chunk := client.recv(1024):
-            response_chunks.append(chunk)
+    with tempfile.TemporaryDirectory(prefix="cmox-") as short_dir:
+        socket_path = Path(short_dir) / "ipc.sock"
+        with (
+            IPCServer(socket_path),
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
+        ):
+            client.connect(str(socket_path))
+            client.sendall(b"private malformed payload")
+            client.shutdown(socket.SHUT_WR)
+            response_chunks: list[bytes] = []
+            while chunk := client.recv(1024):
+                response_chunks.append(chunk)
 
     response = Response.from_payload(json.loads(b"".join(response_chunks)))
     assert response.stderr == "IPC request could not be parsed", (

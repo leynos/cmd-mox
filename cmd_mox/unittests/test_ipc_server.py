@@ -86,11 +86,25 @@ def test_ipc_server_readiness_probe_is_a_closed_connection(
 
     with _observability.capture_events() as events, IPCServer(tmp_path / "ipc.sock"):
         deadline = time.monotonic() + 1.0
-        while "connection closed" not in caplog.text and time.monotonic() < deadline:
+        while (
+            not any(
+                event.operation == "ipc.server.connection"
+                and event.outcome == "receive_closed"
+                and event.error_category == "ConnectionClosed"
+                for event in events
+            )
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.01)
 
     assert "connection closed" in caplog.text, "Readiness probe closure was not named"
     assert "malformed JSON" not in caplog.text, "Readiness probe was called malformed"
+    assert any(
+        event.operation == "ipc.server.connection"
+        and event.outcome == "receive_closed"
+        and event.error_category == "ConnectionClosed"
+        for event in events
+    ), "Readiness probe did not emit its connection event"
     [event] = [
         event
         for event in events
@@ -182,11 +196,11 @@ def test_ipc_handler_uses_remaining_time_for_each_receive(
 
 
 @pytest.mark.parametrize(
-    ("stage", "failure_type"),
+    ("stage", "failure_type", "expected_category"),
     [
-        ("write", BrokenPipeError),
-        ("flush", ConnectionResetError),
-        ("flush", OSError),
+        ("write", BrokenPipeError, "ConnectionError"),
+        ("flush", ConnectionResetError, "ConnectionError"),
+        ("flush", OSError, "OSError"),
     ],
 )
 def test_ipc_handler_logs_response_connection_drop(
@@ -194,6 +208,7 @@ def test_ipc_handler_logs_response_connection_drop(
     caplog: pytest.LogCaptureFixture,
     stage: str,
     failure_type: type[OSError],
+    expected_category: str,
 ) -> None:
     """Response write and flush failures become bounded connection-drop logs."""
 
@@ -215,10 +230,8 @@ def test_ipc_handler_logs_response_connection_drop(
             if stage == "flush":
                 raise failure_type
 
-    request_chunks = iter([b"request", b""])
     fake_request = types.SimpleNamespace(
         settimeout=lambda _timeout: None,
-        recv=lambda _size: next(request_chunks),
     )
     fake_handler = typ.cast(
         "_IPCHandler",
@@ -245,12 +258,16 @@ def test_ipc_handler_logs_response_connection_drop(
     assert "connection closed" in caplog.text, (
         "Dropped response connection was not logged"
     )
-    assert any(
-        event.operation == "ipc.server.connection"
-        and event.outcome == "response_dropped"
-        and event.error_category in {"ConnectionError", "OSError"}
+    drops = [
+        event
         for event in events
-    ), "Dropped response did not emit a bounded connection event"
+        if event.operation == "ipc.server.connection"
+        and event.outcome == "response_dropped"
+    ]
+    assert len(drops) == 1, "Dropped response must emit exactly one connection event"
+    assert drops[0].error_category == expected_category, (
+        "Dropped response reported the wrong bounded error category"
+    )
 
 
 def test_ipc_handler_records_receive_connection_drop() -> None:
