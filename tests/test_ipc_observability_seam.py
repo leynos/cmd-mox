@@ -167,6 +167,41 @@ def test_counter_key_preserves_fixed_backend_error_categories() -> None:
         _observability.reset_counters()
 
 
+def test_counter_key_preserves_fixed_named_pipe_error_categories() -> None:
+    """Keep closed named-pipe failure labels available for diagnosis."""
+    categories = {
+        "ThreadStartFailed",
+        "ServerStopping",
+        "PipeMessageTooLargeError",
+        "BrokenPipe",
+        "NoData",
+        "PipeError",
+        "ReadTimeout",
+        "ServerStopped",
+    }
+    _observability.reset_counters()
+    try:
+        for error_category in categories:
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.named_pipe.worker",
+                    transport="named_pipe",
+                    outcome="rejected",
+                    error_category=error_category,
+                )
+            )
+
+        counter_categories = {
+            key.error_category for key in _observability.counter_snapshot()
+        }
+
+        assert counter_categories == categories, (
+            "Fixed named-pipe categories must remain separate counter dimensions"
+        )
+    finally:
+        _observability.reset_counters()
+
+
 def test_capture_events_collects_emissions() -> None:
     """The capture context manager should collect events without a collector."""
     with _observability.capture_events() as events:

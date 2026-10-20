@@ -22,10 +22,6 @@ if typ.TYPE_CHECKING:
     from pathlib import Path
 
 
-class _StubUnixStreamServer(socketserver.BaseServer):
-    """Stand-in Unix server base for testing the compatibility class."""
-
-
 class _ServerWithThreadSettings(typ.Protocol):
     """Generated backend attributes needed by lifecycle assertions."""
 
@@ -83,7 +79,9 @@ def _run_concurrent_first_access[T](
         resolver_started.set()
         if not release_resolver.wait(timeout=5):
             raise TimeoutError
-        return _StubUnixStreamServer
+        threading_server = getattr(socketserver, "ThreadingUnixStreamServer", None)
+        assert threading_server is not None, "The test platform must provide a stub"
+        return typ.cast("type[socketserver.BaseServer]", threading_server)
 
     monkeypatch.setattr(_unix_server_base, "_resolve_unix_server_base", resolve_base)
 
@@ -104,24 +102,6 @@ def _run_concurrent_first_access[T](
         results = [future.result(timeout=5) for future in futures]
 
     return resolver_calls, results
-
-
-@pytest.fixture
-def unsupported_unix_server_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch away both Unix server classes for unsupported-platform tests."""
-    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(
-        socketserver,
-        "ThreadingUnixStreamServer",
-        None,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        socketserver,
-        "UnixStreamServer",
-        None,
-        raising=False,
-    )
 
 
 def test_windows_resolution_returns_unsupported_server(
@@ -169,6 +149,7 @@ def test_resolution_reuses_cached_base_after_platform_changes(
 def test_inner_server_class_is_cached(
     monkeypatch: pytest.MonkeyPatch,
     unix_server_base_cache: None,
+    stub_unix_stream_server: type[socketserver.BaseServer],
 ) -> None:
     """Reuse the generated class and resolve its platform base only once."""
     resolver_calls = 0
@@ -176,7 +157,7 @@ def test_inner_server_class_is_cached(
     def resolve_base() -> type[socketserver.BaseServer]:
         nonlocal resolver_calls
         resolver_calls += 1
-        return _StubUnixStreamServer
+        return stub_unix_stream_server
 
     monkeypatch.setattr(_unix_server_base, "_resolve_unix_server_base", resolve_base)
 
@@ -193,13 +174,14 @@ def test_generated_server_class_keeps_daemon_threads_enabled(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     unix_server_base_cache: None,
+    stub_unix_stream_server: type[socketserver.BaseServer],
 ) -> None:
     """Retain threaded lifecycle settings without opening a listening socket."""
     monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
     monkeypatch.setattr(
         socketserver,
         "ThreadingUnixStreamServer",
-        _StubUnixStreamServer,
+        stub_unix_stream_server,
         raising=False,
     )
     outer_server = unix_server.IPCServer(tmp_path / "unused.sock")
@@ -218,6 +200,7 @@ def test_generated_server_class_keeps_daemon_threads_enabled(
 def test_concurrent_server_class_access_resolves_once(
     monkeypatch: pytest.MonkeyPatch,
     unix_server_base_cache: None,
+    native_unix_server_platform: None,
 ) -> None:
     """Serialize concurrent first access to the cached backend class."""
     resolver_calls, server_classes = _run_concurrent_first_access(
@@ -236,13 +219,14 @@ def test_concurrent_server_class_access_resolves_once(
 def test_concurrent_unix_base_access_resolves_once(
     monkeypatch: pytest.MonkeyPatch,
     unix_server_base_cache: None,
+    stub_unix_stream_server: type[socketserver.BaseServer],
 ) -> None:
     """Serialize concurrent first access to the cached Unix base resolver."""
     monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
     monkeypatch.setattr(
         socketserver,
         "ThreadingUnixStreamServer",
-        _StubUnixStreamServer,
+        stub_unix_stream_server,
         raising=False,
     )
     resolver_calls, server_bases = _run_concurrent_first_access(
@@ -254,7 +238,8 @@ def test_concurrent_unix_base_access_resolves_once(
 
     assert resolver_calls == 1, "Concurrent first access must resolve the base once"
     assert all(
-        server_base == (_StubUnixStreamServer, "native") for server_base in server_bases
+        server_base == (stub_unix_stream_server, "native")
+        for server_base in server_bases
     ), "Concurrent callers must share the same resolved base and mode"
 
 

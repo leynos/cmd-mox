@@ -749,15 +749,14 @@ carrying `transport` and `correlation_id`.
 
 Unix backend creation emits `ipc.backend_selection` events at the cached
 inner-class lookup and backend construction boundaries. The `selection_mode`
-dimension is one of `native`,
-`compatibility`, `windows_unsupported`, or `unsupported_platform`; cache
-observations name either `unix_server_base` or `inner_server_class` and report
-`hit` or `miss`. Outcomes distinguish selected bases, cache accesses, failed
-resolution, Windows rejection, and backend-construction failure. Error
-categories are fixed values such as `unsupported_platform`,
-`windows_unsupported`, and `os_error`; exception messages and socket paths
-never enter logs or counters. The cached resolver itself remains free of
-logging side effects.
+dimension is one of `native`, `compatibility`, `windows_unsupported`, or
+`unsupported_platform`; cache observations name either `unix_server_base` or
+`inner_server_class` and report `hit` or `miss`. Outcomes distinguish selected
+bases, cache accesses, failed resolution, Windows rejection, and
+backend-construction failure. Error categories are fixed values such as
+`unsupported_platform`, `windows_unsupported`, and `os_error`; exception
+messages and socket paths never enter logs or counters. The cached resolver
+itself remains free of logging side effects.
 
 #### Named-pipe resource bounds (2026-08-28)
 

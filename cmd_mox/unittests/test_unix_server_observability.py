@@ -20,45 +20,11 @@ if typ.TYPE_CHECKING:
     from syrupy.assertion import SnapshotAssertion
 
 
-class _StubUnixStreamServer(socketserver.BaseServer):
-    """Stand-in Unix server base for backend event tests."""
-
-
 class _BackendFailureCase(typ.NamedTuple):
     """Pair a construction exception with its bounded telemetry category."""
 
     exception_type: type[Exception]
     expected_category: str
-
-
-@pytest.fixture
-def unsupported_unix_server_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch away both Unix server classes for unsupported-platform tests."""
-    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(
-        socketserver,
-        "ThreadingUnixStreamServer",
-        None,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        socketserver,
-        "UnixStreamServer",
-        None,
-        raising=False,
-    )
-
-
-@pytest.fixture
-def native_unix_server_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Select a stand-in native Unix server without opening sockets."""
-    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(
-        socketserver,
-        "ThreadingUnixStreamServer",
-        _StubUnixStreamServer,
-        raising=False,
-    )
 
 
 def _single_selection(
@@ -83,18 +49,22 @@ def _single_selection(
 def test_direct_base_resolution_emits_no_observability(
     unix_server_base_cache: None,
     native_unix_server_platform: None,
+    stub_unix_stream_server: type[socketserver.BaseServer],
 ) -> None:
     """Keep telemetry at backend creation rather than in the pure resolver."""
     with _observability.capture_events() as events:
         base_server = resolve_unix_server_base()
 
-    assert base_server is _StubUnixStreamServer, "The configured base was not returned"
+    assert base_server is stub_unix_stream_server, (
+        "The configured base was not returned"
+    )
     assert events == [], "Direct resolution must remain free of telemetry side effects"
 
 
 def test_direct_inner_server_factory_emits_no_observability(
     unix_server_base_cache: None,
     native_unix_server_platform: None,
+    stub_unix_stream_server: type[socketserver.BaseServer],
 ) -> None:
     """Keep the cached class factory free of backend telemetry side effects."""
     with _observability.capture_events() as events:
@@ -102,7 +72,7 @@ def test_direct_inner_server_factory_emits_no_observability(
 
     assert issubclass(
         typ.cast("type[socketserver.BaseServer]", inner_server_cls),
-        _StubUnixStreamServer,
+        stub_unix_stream_server,
     ), "The factory must subclass the resolved platform base"
     assert events == [], "Direct factory access must not emit backend telemetry"
 
@@ -125,6 +95,7 @@ def test_resolution_builds_threaded_compatibility_server(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     unix_server_base_cache: None,
+    stub_unix_stream_server: type[socketserver.BaseServer],
 ) -> None:
     """Add threading when only the basic Unix server class is available."""
     monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
@@ -137,7 +108,7 @@ def test_resolution_builds_threaded_compatibility_server(
     monkeypatch.setattr(
         socketserver,
         "UnixStreamServer",
-        _StubUnixStreamServer,
+        stub_unix_stream_server,
         raising=False,
     )
 
@@ -149,7 +120,7 @@ def test_resolution_builds_threaded_compatibility_server(
     assert issubclass(compat_server, socketserver.ThreadingMixIn), (
         "Compatibility server must add ThreadingMixIn"
     )
-    assert issubclass(compat_server, _StubUnixStreamServer), (
+    assert issubclass(compat_server, stub_unix_stream_server), (
         "Compatibility server must extend the available Unix server"
     )
     selection = _single_selection(events)

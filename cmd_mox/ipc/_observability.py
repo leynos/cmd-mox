@@ -24,9 +24,9 @@ metrics collector.
 
 Counters are keyed by :class:`EventKey`. Message kinds and exception class
 names remain available in structured logs but are excluded from counter keys,
-because callers may add new values. Backend error categories come from a
-closed set and retain separate counters. This keeps the registry bounded while
-preserving the backend-selection dimensions needed to diagnose startup.
+because callers may add new values. Error categories from the closed backend
+and named-pipe vocabularies retain separate counters. This keeps the registry
+bounded while preserving the failure dimensions needed to diagnose IPC.
 """
 
 from __future__ import annotations
@@ -59,6 +59,19 @@ type _BackendErrorCategory = typ.Literal[
 
 _BACKEND_ERROR_CATEGORIES: typ.Final[frozenset[str]] = frozenset(
     typ.get_args(_BackendErrorCategory.__value__)
+)
+type _NamedPipeErrorCategory = typ.Literal[
+    "ThreadStartFailed",
+    "ServerStopping",
+    "PipeMessageTooLargeError",
+    "BrokenPipe",
+    "NoData",
+    "PipeError",
+    "ReadTimeout",
+    "ServerStopped",
+]
+_COUNTER_ERROR_CATEGORIES: typ.Final[frozenset[str]] = _BACKEND_ERROR_CATEGORIES | (
+    frozenset(typ.get_args(_NamedPipeErrorCategory.__value__))
 )
 
 
@@ -96,7 +109,7 @@ class IPCEvent:
         Whether the named cache access was a hit or miss.
     error_category:
         Failure label used in structured logs. Counter keys retain only the
-        closed set of backend-selection categories; arbitrary exception class
+        closed backend and named-pipe categories; arbitrary exception class
         names stay in logs and are omitted from counters.
     attempt:
         1-based attempt counter for retried operations.
@@ -159,7 +172,7 @@ class IPCEvent:
         """
         counter_error_category = (
             self.error_category
-            if self.error_category in _BACKEND_ERROR_CATEGORIES
+            if self.error_category in _COUNTER_ERROR_CATEGORIES
             else None
         )
         return EventKey(

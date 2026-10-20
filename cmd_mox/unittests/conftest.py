@@ -2,16 +2,67 @@
 
 from __future__ import annotations
 
+import socketserver
 import subprocess
 import typing as typ
 
 import pytest
 
+from cmd_mox import _path_utils as path_utils
 from cmd_mox.ipc import server as unix_server
 from cmd_mox.ipc._unix_server_base import resolve_unix_server_base
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+
+class _StubUnixStreamServer(socketserver.BaseServer):
+    """Stand-in Unix server base for socket-free backend tests."""
+
+
+@pytest.fixture
+def stub_unix_stream_server() -> type[socketserver.BaseServer]:
+    """Provide the shared Unix server stub.
+
+    Returns
+    -------
+    type[socketserver.BaseServer]
+        The stand-in class used by socket-free backend tests.
+    """
+    return _StubUnixStreamServer
+
+
+@pytest.fixture
+def unsupported_unix_server_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch away both Unix server classes for unsupported-platform tests."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
+    monkeypatch.setattr(
+        socketserver,
+        "ThreadingUnixStreamServer",
+        None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        socketserver,
+        "UnixStreamServer",
+        None,
+        raising=False,
+    )
+
+
+@pytest.fixture
+def native_unix_server_platform(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_unix_stream_server: type[socketserver.BaseServer],
+) -> None:
+    """Select the stand-in native Unix server without opening sockets."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
+    monkeypatch.setattr(
+        socketserver,
+        "ThreadingUnixStreamServer",
+        stub_unix_stream_server,
+        raising=False,
+    )
 
 
 def run_subprocess(
