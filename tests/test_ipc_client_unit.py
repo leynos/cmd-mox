@@ -366,6 +366,13 @@ def test_report_passthrough_result_uses_named_kind(
         data: dict[str, typ.Any],
         context: _ConnectionContext,
     ) -> Response:
+        """Capture a passthrough report without opening an IPC socket.
+
+        Returns
+        -------
+        Response
+            A representative successful response.
+        """
         captured["kind"] = kind
         captured["data"] = data
         return Response(stdout="ok")

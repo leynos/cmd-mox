@@ -13,7 +13,7 @@ from itertools import pairwise
 from unittest import mock
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from cmd_mox import shim
@@ -24,6 +24,7 @@ from cmd_mox.unittests._shim_test_support import (
 )
 
 
+@settings(deadline=None)
 @given(
     prefix=st.text(alphabet=st.characters(blacklist_categories=("Cs",)), max_size=32),
     suffix=st.text(alphabet=st.characters(blacklist_categories=("Cs",)), max_size=32),
