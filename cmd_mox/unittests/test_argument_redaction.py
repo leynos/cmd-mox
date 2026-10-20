@@ -474,6 +474,13 @@ def test_duplicate_argument_error_redacts_sensitive_values(
             ("oldopaque123", "newopaque456"),
             "--authorization=<redacted>",
         ),
+        _DuplicateArgumentRedactionCase(
+            "detached-option-authorization",
+            ("--authorization", "Bearer oldopaque123"),
+            ("--authorization", "Bearer newopaque456"),
+            ("oldopaque123", "newopaque456"),
+            "'<redacted>'",
+        ),
     ],
     ids=lambda case: case.identifier,
 )

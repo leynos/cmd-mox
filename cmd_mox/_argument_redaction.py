@@ -35,6 +35,7 @@ _AUTHENTICATION_ARGUMENT_OPTIONS: typ.Final[frozenset[str]] = frozenset({
     "--proxy-user",
     "--oauth2-bearer",
     "--cookie",
+    "--authorization",
 })
 _SHORT_AUTHENTICATION_ARGUMENT_OPTIONS: typ.Final[frozenset[str]] = frozenset({
     "-u",
