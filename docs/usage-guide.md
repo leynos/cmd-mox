@@ -979,6 +979,13 @@ with IPCServer(socket_path, handlers=handlers):
 Providing `passthrough_handler=` to `IPCHandlers` intercepts passthrough
 completions in the same fashion. When no callbacks are supplied the server
 keeps its default echo behaviour, so existing code continues to work unchanged.
+On Unix, the server selects its threaded socket base when the backend first
+starts and caches a successful selection for the process lifetime. It prefers
+`socketserver.ThreadingUnixStreamServer` and falls back to combining
+`socketserver.UnixStreamServer` with `socketserver.ThreadingMixIn`. If neither
+class is available, starting the Unix server raises `RuntimeError`; the failed
+selection is retried on a later start. Direct Unix-server use on Windows also
+raises `RuntimeError`, while `CmdMox` selects the Windows named-pipe transport.
 Request dispatch invokes the public `handle_invocation()` and
 `handle_passthrough_result()` hooks. Subclass `IPCServer` when server behaviour
 requires overriding those hooks:
@@ -1009,7 +1016,9 @@ Both transports emit bounded, structured observability events with correlation
 identifiers, and the Windows named-pipe transport bounds concurrent clients,
 message size, and per-client read time. See the
 [design document](./python-native-command-mocking-design.md) for the event
-vocabulary and the specific limits.
+vocabulary and the specific limits. Unix backend selection also emits bounded
+startup events before a request exists, so those records do not carry a
+correlation identifier.
 
 Projects that rely on :class:`CallbackIPCServer` can still customize startup
 and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
@@ -1089,7 +1098,7 @@ supported surface area without navigating modules.
 
 ### IPC servers
 
-- `IPCServer` – IPC server (Unix socket on POSIX, named pipe on Windows).
+- `IPCServer` – Unix-domain-socket IPC server; use `NamedPipeServer` on Windows.
 - `NamedPipeServer` – explicit Windows named-pipe transport implementation.
 
 ### Shims and environment helpers

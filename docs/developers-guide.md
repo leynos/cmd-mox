@@ -212,6 +212,24 @@ dispatch:
 matching and must not invoke expectation matching for a different command. This
 prevents a double from accepting an invocation owned by another command.
 
+### Unix server-base selection
+
+`IPCServer` defers Unix server-class selection until backend creation. Its
+cached `_inner_server_cls()` factory asks the cached
+`resolve_unix_server_base()` accessor for the platform base class, then creates
+the inner server class. The resolver prefers
+`socketserver.ThreadingUnixStreamServer`; when only `UnixStreamServer` exists,
+it composes that class with `ThreadingMixIn`. On Windows the resolver returns a
+placeholder whose construction raises `RuntimeError`, while a platform with
+neither Unix server class raises `RuntimeError` during resolution. Both caches
+retain a successful result for the process lifetime. A resolution failure is
+not cached, so a later backend start retries resolution. Direct resolver calls
+have no observability side effects. The server's backend-creation boundary
+emits bounded `ipc.backend_selection` events for native or compatibility
+selection, cache hits and misses, unsupported platforms, Windows rejection, and
+backend-construction failures. Events use fixed selection and error categories;
+they never include socket paths or exception messages.
+
 ## Skylos dead-code policy
 
 Treat a Skylos report as genuine dead code until a runtime caller has been
@@ -241,6 +259,12 @@ may override `SKYLOS_WHITELIST_LOCK` when running in an isolated temporary
 directory. Treat the helper as a reviewed write: retain the matching
 `[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
 caller-specific reason, and never use it to avoid removing genuine dead code.
+
+When a runtime entry point is reached through a cached factory, declare the
+precise function and generated class types in
+`[[tool.skylos.dead_code.entrypoints]]`, and name the factory or lifecycle that
+reaches them in each reason. Keep a contract test for these dynamic boundaries
+so a renamed symbol cannot silently make the rule stale.
 
 Skylos parses source with the AST implementation of its own runtime. The
 command-only `SKYLOS_CLI` therefore pins Python 3.14 to prevent newer syntax

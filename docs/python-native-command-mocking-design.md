@@ -679,15 +679,23 @@ flowchart TD
     H --> Z["Resulting PATH is cross-platform, deduplicated, shim-filtered, and normalized"]
 ```
 
-The initial implementation ships with a lightweight `IPCServer` class. It uses
-Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
-socket path provided by the `EnvironmentManager`. Incoming JSON messages are
-parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts (default: 5.0s). Callers can pass an `IPCHandlers`
-dataclass to provide invocation and passthrough callbacks when constructing the
-server for simple composition. Subclassing remains supported when custom
-behaviour requires overriding the public handler hooks. The `CallbackIPCServer`
-compatibility wrapper forwards a `TimeoutConfig` dataclass so callers can
+The Unix transport ships with a lightweight `IPCServer` class. It resolves its
+`socketserver` base class lazily, when backend creation first needs it, and
+retains both that class selection and the generated inner-server class for the
+process lifetime when resolution succeeds. The resolver prefers Python's
+`socketserver.ThreadingUnixStreamServer`; when that class is unavailable but
+`socketserver.UnixStreamServer` exists, it composes the latter with
+`socketserver.ThreadingMixIn`. If neither class exists, resolution raises
+`RuntimeError`, and that failure is not cached, so a later backend start
+retries resolution. Starting the Unix server directly on Windows also raises
+`RuntimeError`; the controller selects the named-pipe transport there. Incoming
+JSON messages are dispatched by their `kind` field to `Invocation` or
+`PassthroughResult` objects and processed in background threads with reasonable
+timeouts (default: 5.0s). Callers can pass an `IPCHandlers` dataclass to
+provide invocation and passthrough callbacks when constructing the server for
+simple composition. Subclassing remains supported when custom behaviour
+requires overriding the public handler hooks. The `CallbackIPCServer`
+compatibility wrapper forwards a `TimeoutConfig` dataclass, so callers can
 continue to customize startup and accept timeouts without exceeding the
 four-argument limit. On Windows hosts the controller constructs a
 `NamedPipeServer`, which shares the same handler plumbing but uses `win32pipe`/
@@ -713,14 +721,17 @@ bounded request metadata and never payload data.
 
 `cmd_mox.ipc._observability` is a dependency-free seam shared by the client and
 both server transports. It defines a frozen `IPCEvent` carrying only bounded
-dimensions — `operation`, `transport`, `kind`, `outcome`, `error_category`,
-`attempt`, `duration_ms`, `message_size`, and `correlation_id` — renders them
-as structured logging fields, logs them at INFO, and counts them in an
-in-process registry keyed by `(operation, transport, outcome)`. Tests assert on
-emissions through `capture_events()` and `counter_snapshot()` rather than an
-external metrics collector. The module documents a never-log list: command
-names, arguments, standard streams, environments, socket paths, exception
-messages, and raw payloads must never become fields.
+dimensions — `operation`, `transport`, `kind`, `selection_mode`, `outcome`,
+`cache_name`, `cache_outcome`, `error_category`, `attempt`, `duration_ms`,
+`message_size`, and `correlation_id` — renders applicable values as structured
+logging fields and logs them at INFO. The in-process registry uses a narrower
+counter key: message kinds and caller-defined exception class names remain
+available in logs but do not label counters; closed backend and named-pipe
+error categories do. Tests assert on emissions through `capture_events()` and
+`counter_snapshot()` rather than an external metrics collector. The module
+documents a never-log list: command names, arguments, standard streams,
+environments, socket paths, exception messages, and raw payloads must never
+become fields.
 
 Requests carry an opaque `correlation_id` as a top-level envelope field beside
 `kind`. The client reuses the model's `invocation_id` when the request already
@@ -737,6 +748,17 @@ Client events use the operations `ipc.client.request` (outcomes `started`,
 with a 1-based `attempt`). Server dispatch keeps the existing
 `IPC dispatch outcome` record under the `ipc.dispatch` operation, now also
 carrying `transport` and `correlation_id`.
+
+Unix backend creation emits `ipc.backend_selection` events at the cached
+inner-class lookup and backend construction boundaries. The `selection_mode`
+dimension is one of `native`, `compatibility`, `windows_unsupported`, or
+`unsupported_platform`; cache observations name either `unix_server_base` or
+`inner_server_class` and report `hit` or `miss`. Outcomes distinguish selected
+bases, cache accesses, failed resolution, Windows rejection, and
+backend-construction failure. Error categories are fixed values such as
+`unsupported_platform`, `windows_unsupported`, and `os_error`; exception
+messages and socket paths never enter logs or counters. The cached resolver
+itself remains free of logging side effects.
 
 #### Named-pipe resource bounds (2026-08-28)
 
@@ -801,13 +823,21 @@ classDiagram
     class IPCServer {
         - Path socket_path
         - float timeout
-        - _InnerServer _server
+        - BaseServer _server
         - Thread _thread
         + __enter__() IPCServer
         + __exit__(exc_type, exc, tb) None
         + start() None
         + stop() None
         + handle_invocation(invocation: Invocation) Response
+    }
+    class InnerServerFactory {
+        <<cached function>>
+        + _inner_server_cls()
+    }
+    class UnixServerBaseResolver {
+        <<cached function>>
+        + resolve_unix_server_base()
     }
     class _InnerServer {
         - IPCServer outer
@@ -831,7 +861,9 @@ classDiagram
         + str stderr
         + int exit_code
     }
-    IPCServer --> _InnerServer : manages
+    IPCServer --> InnerServerFactory : requests class when creating backend
+    InnerServerFactory ..> UnixServerBaseResolver : resolves platform base
+    InnerServerFactory ..> _InnerServer : creates and caches
     _InnerServer --> _IPCHandler : uses
     _IPCHandler --> Invocation : parses
     _IPCHandler --> Response : returns
@@ -867,12 +899,22 @@ sequenceDiagram
     participant UnixSocket as "Unix Domain Socket (POSIX only)"
     Controller->>Server: Start IPC server
     alt Windows
+        Controller->>Server: Select NamedPipeServer
         Server->>WindowsPipe: Create named pipe (derive name from socket path)
         WindowsPipe-->>Server: Ready event set
         Client->>WindowsPipe: Connect to named pipe
         WindowsPipe->>Server: Forward request
         Server->>Client: Send response
     else POSIX
+        Server->>Server: Call cached inner-server factory
+        Server->>Server: Resolve and cache Unix server base
+        alt ThreadingUnixStreamServer available
+            Server-->>Server: Use native threaded server class
+        else Only UnixStreamServer available
+            Server-->>Server: Compose UnixStreamServer with ThreadingMixIn
+        else No Unix server class available
+            Server-->>Controller: Raise RuntimeError
+        end
         Server->>UnixSocket: Create Unix domain socket
         UnixSocket-->>Server: Socket ready
         Client->>UnixSocket: Connect to socket

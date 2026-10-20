@@ -2,6 +2,7 @@
 
 import os
 import socket
+import socketserver
 import threading
 import typing as typ
 from pathlib import Path
@@ -18,6 +19,7 @@ from cmd_mox.ipc import (
     Invocation,
     IPCServer,
     RetryConfig,
+    _unix_server_base,
     invoke_server,
 )
 
@@ -70,6 +72,41 @@ def test_ipc_server_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         assert response.stdout == "ls"
 
 
+def test_ipc_server_resolves_unix_base_on_first_backend_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unix_server_base_cache: None,
+) -> None:
+    """Resolve the Unix base lazily and preserve the public IPC roundtrip."""
+    original_resolver = _unix_server_base._resolve_unix_server_base
+    resolver_calls = 0
+
+    def count_resolution() -> type[socketserver.BaseServer]:
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return original_resolver()
+
+    monkeypatch.setattr(
+        _unix_server_base,
+        "_resolve_unix_server_base",
+        count_resolution,
+    )
+    socket_path = tmp_path / "ipc-lazy.sock"
+    server = IPCServer(socket_path)
+    assert resolver_calls == 0, "Creating IPCServer must not resolve its base."
+
+    with server:
+        assert resolver_calls == 1, "Backend start must resolve its base once."
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        response = invoke_server(
+            Invocation(command="ls", args=["-l"], stdin="", env={}),
+            timeout=2.0,
+        )
+        assert response.stdout == "ls", "Server must echo the command name"
+
+    assert resolver_calls == 1, "The successful base resolution must be cached."
+
+
 def test_ipc_server_start_fails_if_in_use(tmp_path: Path) -> None:
     """Starting a second server on the same socket raises RuntimeError."""
     socket_path = tmp_path / "ipc.sock"
@@ -108,10 +145,11 @@ def test_invoke_server_retries_connection_parametrized(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     try:
+        # Leave room for the delayed server thread to be scheduled under xdist.
         if jitter is None:
-            retry_config = RetryConfig(retries=5, backoff=0.01)
+            retry_config = RetryConfig(retries=20, backoff=0.01)
         else:
-            retry_config = RetryConfig(retries=5, backoff=0.01, jitter=jitter)
+            retry_config = RetryConfig(retries=20, backoff=0.01, jitter=jitter)
         response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
         assert response.stdout == "ls"
     finally:

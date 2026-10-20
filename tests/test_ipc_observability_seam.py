@@ -35,6 +35,26 @@ if typ.TYPE_CHECKING:
 
 pytestmark = [pytest.mark.requires_unix_sockets]
 
+_EXPECTED_BACKEND_ERROR_CATEGORIES = frozenset({
+    "unsupported_platform",
+    "windows_unsupported",
+    "os_error",
+    "runtime_error",
+    "type_error",
+    "value_error",
+})
+_EXPECTED_NAMED_PIPE_ERROR_CATEGORIES = frozenset({
+    "ClientLimitReached",
+    "ThreadStartFailed",
+    "ServerStopping",
+    "PipeMessageTooLargeError",
+    "BrokenPipe",
+    "NoData",
+    "PipeError",
+    "ReadTimeout",
+    "ServerStopped",
+})
+
 
 class _AlwaysRefusedSocket:
     """Socket double whose every connection attempt is refused."""
@@ -87,22 +107,152 @@ def test_event_as_extra_omits_inapplicable_fields() -> None:
 
 
 def test_emit_counts_events_by_bounded_key() -> None:
-    """The registry should count events by operation, transport, and outcome."""
+    """Counter keys retain selection/cache dimensions and ignore correlation."""
     _observability.reset_counters()
     event = _observability.IPCEvent(
         operation="ipc.test",
         transport="unix",
+        selection_mode="native",
         outcome="success",
+        cache_name="unix_server_base",
+        cache_outcome="miss",
         correlation_id="corr-1",
     )
+    events = (
+        event,
+        dc.replace(event, correlation_id="corr-2"),
+        dc.replace(event, cache_outcome="hit", correlation_id="corr-3"),
+        dc.replace(event, selection_mode="compatibility", correlation_id="corr-4"),
+        dc.replace(event, cache_name="inner_server_class", correlation_id="corr-5"),
+    )
+    expected_counters = {
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "unix_server_base",
+            "miss",
+            None,
+        ): 2,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "unix_server_base",
+            "hit",
+            None,
+        ): 1,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "compatibility",
+            "success",
+            "unix_server_base",
+            "miss",
+            None,
+        ): 1,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "inner_server_class",
+            "miss",
+            None,
+        ): 1,
+    }
+    try:
+        for event in events:
+            _observability.emit(event)
 
-    _observability.emit(event)
-    _observability.emit(dc.replace(event, correlation_id="corr-2"))
+        assert _observability.counter_snapshot() == expected_counters, (
+            "Counters must distinguish bounded selection/cache dimensions and "
+            "aggregate equivalent events"
+        )
+    finally:
+        _observability.reset_counters()
 
-    key = _observability.EventKey("ipc.test", "unix", "success")
-    assert _observability.counter_snapshot()[key] == 2, "Counter must aggregate"
+
+def test_counter_key_omits_unbounded_message_kinds_and_error_categories() -> None:
+    """Dynamic exception classes and message kinds must not expand counters."""
     _observability.reset_counters()
-    assert not _observability.counter_snapshot(), "Reset must clear counters"
+    try:
+        for index in range(4):
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.dispatch",
+                    transport="unix",
+                    kind=f"plugin_kind_{index}",
+                    outcome="handler_error",
+                    error_category=f"PluginException{index}",
+                )
+            )
+
+        counters = _observability.counter_snapshot()
+
+        assert len(counters) == 1, "Unbounded values must collapse to one counter key"
+        [key] = counters
+        assert key.error_category is None, (
+            "Dynamic exception names must not label counters"
+        )
+        assert counters[key] == 4, "All equivalent dispatch errors must aggregate"
+    finally:
+        _observability.reset_counters()
+
+
+def test_counter_key_preserves_fixed_backend_error_categories() -> None:
+    """Keep bounded backend error labels available for diagnosis."""
+    categories = _EXPECTED_BACKEND_ERROR_CATEGORIES
+    _observability.reset_counters()
+    try:
+        for error_category in categories:
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.backend_selection",
+                    transport="unix",
+                    selection_mode="native",
+                    outcome="backend_construction_failed",
+                    cache_name="inner_server_class",
+                    cache_outcome="miss",
+                    error_category=error_category,
+                )
+            )
+
+        counters = _observability.counter_snapshot()
+
+        assert {key.error_category for key in counters} == categories, (
+            "Fixed backend categories must remain separate counter dimensions"
+        )
+    finally:
+        _observability.reset_counters()
+
+
+def test_counter_key_preserves_fixed_named_pipe_error_categories() -> None:
+    """Keep closed named-pipe failure labels available for diagnosis."""
+    categories = _EXPECTED_NAMED_PIPE_ERROR_CATEGORIES
+    _observability.reset_counters()
+    try:
+        for error_category in categories:
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.named_pipe.worker",
+                    transport="named_pipe",
+                    outcome="rejected",
+                    error_category=error_category,
+                )
+            )
+
+        counter_categories = {
+            key.error_category for key in _observability.counter_snapshot()
+        }
+
+        assert counter_categories == categories, (
+            "Fixed named-pipe categories must remain separate counter dimensions"
+        )
+    finally:
+        _observability.reset_counters()
 
 
 def test_capture_events_collects_emissions() -> None:

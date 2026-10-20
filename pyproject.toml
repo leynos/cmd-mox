@@ -441,6 +441,31 @@ type = "parameter"
 full_name = ["cmd_mox.ipc._server_core._ServerLifecycle._stop_backend.server"]
 reason = "_ServerLifecycle.stop passes the stored backend instance through this abstract lifecycle hook."
 
+[[tool.skylos.dead_code.entrypoints]]
+type = "function"
+full_name = ["cmd_mox.ipc.server._inner_server_cls_for_backend"]
+path = "cmd_mox/ipc/server.py"
+reason = "IPCServer._create_backend records the cached inner-class lookup and its hit/miss outcome; Skylos reports this lifecycle call path as unreachable."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "function"
+full_name = ["cmd_mox.ipc.server._backend_error_category"]
+path = "cmd_mox/ipc/server.py"
+reason = "IPCServer._create_backend maps backend failures to bounded categories at its exception boundary; Skylos does not reach the lifecycle failure path."
+
+[[tool.skylos.dead_code.entrypoints]]
+type = "function"
+full_name = ["cmd_mox.ipc.server._inner_server_cls"]
+path = "cmd_mox/ipc/server.py"
+reason = "_inner_server_cls_for_backend calls this cached factory when IPCServer._create_backend runs during _ServerLifecycle.start; Skylos reports the dynamic class use as unreachable."
+
+[[tool.skylos.dead_code.entrypoints]]
+# Skylos flattens this local class name; the source contract verifies its scope.
+type = "class"
+full_name = ["cmd_mox.ipc.server._InnerServer"]
+path = "cmd_mox/ipc/server.py"
+reason = "_create_backend instantiates the cached class; Skylos misses the dynamic edge."
+
 [tool.skylos.whitelist]
 names = ["bootstrap_shim_path"]
 
