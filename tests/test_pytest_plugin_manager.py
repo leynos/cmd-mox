@@ -6,6 +6,7 @@ import dataclasses as dc
 import os
 import textwrap
 import typing as typ
+from unittest import mock
 
 import pytest
 
@@ -17,6 +18,11 @@ from cmd_mox.pytest_plugin import STASH_CALL_FAILED, _CmdMoxManager
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
     from pathlib import Path
+
+    type _CmdMoxFixtureGenerator = cabc.Callable[
+        [pytest.FixtureRequest],
+        cabc.Generator[pytest_plugin.CmdMox, None, None],
+    ]
 
 _VERIFY_ERROR_MESSAGE = "verify boom"
 _EXIT_ERROR_MESSAGE = "exit boom"
@@ -81,6 +87,12 @@ class _RequestKwargs(typ.TypedDict, total=False):
 
     node: _StubNode
     param: dict[str, bool]
+
+
+class _FixtureWithWrapped(typ.Protocol):
+    """Describe pytest's runtime wrapper around a fixture function."""
+
+    __wrapped__: _CmdMoxFixtureGenerator
 
 
 class _StubRequest:
@@ -155,6 +167,37 @@ class _StubMox:
         if self.raise_on_exit:
             raise OSError(_EXIT_ERROR_MESSAGE)
         self.phase = Phase.VERIFY
+
+
+class _ExitSpyCmdMoxManager(_CmdMoxManager):
+    """Record the fixture's body-failure decision before teardown."""
+
+    last_instance: _ExitSpyCmdMoxManager | None = None
+
+    @typ.override
+    def __init__(self, request: pytest.FixtureRequest) -> None:
+        super().__init__(request)
+        self.body_failed_values: list[bool] = []
+        type(self).last_instance = self
+
+    @typ.override
+    def exit(self, *, body_failed: bool) -> None:
+        self.body_failed_values.append(body_failed)
+        super().exit(body_failed=body_failed)
+
+
+@pytest.fixture
+def reset_exit_spy_manager_state() -> cabc.Iterator[None]:
+    """Clear the spy's shared instance reference before and after each test.
+
+    Yields
+    ------
+    None
+        Test execution between the initial reset and the teardown reset.
+    """
+    _ExitSpyCmdMoxManager.last_instance = None
+    yield
+    _ExitSpyCmdMoxManager.last_instance = None
 
 
 def _assert_teardown_sections(node: _StubNode, *expected: tuple[str, str, str]) -> None:
@@ -318,6 +361,33 @@ def test_cmd_mox_fixture_restores_path_on_replay_failure(
     assert recorded_path != original_path, "Assertion failed"
     assert "cmdmox-" in recorded_path, "Assertion failed"
     assert os.environ.get("PATH", "") == original_path, "Assertion failed"
+
+
+@pytest.mark.usefixtures("reset_exit_spy_manager_state")
+def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """An injected generator interruption is recorded before propagation."""
+    request = _StubRequest(config=_StubConfig())
+    # Install the _StubMox factory used when the fixture creates the spy manager.
+    make_manager(request)
+
+    with (
+        mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
+        mock.patch.object(pytest_plugin, "_CmdMoxManager", _ExitSpyCmdMoxManager),
+    ):
+        fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
+        generator = fixture(typ.cast("pytest.FixtureRequest", request))
+        next(generator)
+        interruption = KeyboardInterrupt()
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            generator.throw(interruption)
+
+    manager = _ExitSpyCmdMoxManager.last_instance
+    assert manager is not None, "Assertion failed"
+    assert manager.body_failed_values == [True], "Assertion failed"
+    assert raised.value is interruption, "Assertion failed"
 
 
 def test_enter_cmd_mox_replays_when_enabled(

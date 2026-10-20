@@ -156,7 +156,11 @@ markdownlint: ## Lint Markdown files
 
 spelling: ## Enforce en-GB-oxendict spelling in Markdown prose
 	@$(UV_GATE) run --group dev -- python scripts/generate_typos_config.py
-	@find . -type f -name '*.md' -not -path './.venv/*' -print0 | \
+	@find . -type d \( \
+		-name .git -o -name .cache -o -name .hypothesis -o -name .pytest_cache \
+		-o -name .terraform -o -name .tox -o -name .uv-cache -o -name .uv-tools \
+		-o -name .venv -o -name dist -o -name node_modules -o -name target \
+	\) -prune -o -type f -name '*.md' -print0 | \
 		xargs -0 -r $(TYPOS) --config typos.toml --force-exclude
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
