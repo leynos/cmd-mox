@@ -11,6 +11,7 @@ import typing as typ
 import pytest
 
 from cmd_mox import shim
+from cmd_mox.ipc import _observability
 from cmd_mox.shim import _create_invocation
 from cmd_mox.unittests._shim_test_support import (
     _assert_exit_code,
@@ -49,6 +50,52 @@ def test_create_invocation_reads_stdin_when_not_tty(
 
     assert invocation.stdin == "payload"
     assert dummy_stdin.read_calls == 1
+
+
+def test_create_invocation_observes_stdin_failure_without_error_text(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed stdin read emits bounded, correlated telemetry and diagnostics."""
+
+    class _FailingStdin:
+        def isatty(self) -> bool:
+            return False
+
+        def read(self) -> typ.NoReturn:
+            raise OSError("leak")
+
+    monkeypatch.setattr(sys, "stdin", _FailingStdin())
+    monkeypatch.setattr(sys, "argv", ["shim"])
+    counters_before = _observability.counter_snapshot()
+
+    with (
+        caplog.at_level("INFO", logger="cmd_mox.shim"),
+        _observability.capture_events() as events,
+        pytest.raises(SystemExit) as exc,
+    ):
+        _create_invocation("shim", timeout=1.0)
+
+    _assert_exit_code(exc, 1)
+    diagnostic = capsys.readouterr().err
+    assert "IPC error: stdin read failed" in diagnostic, (
+        "stdin failure did not produce a bounded diagnostic"
+    )
+    assert "leak" not in diagnostic, "stdin exception details must not reach stderr"
+    assert "leak" not in caplog.text, "stdin exception details must not reach logs"
+    [event] = events
+    assert event.operation == "ipc.shim.stdin_read", "Wrong stdin event operation"
+    assert event.outcome == "read_failed", "Stdin failure outcome was not recorded"
+    assert event.error_category == "OSError", "Wrong stdin error category"
+    assert event.correlation_id is not None, "Stdin failure lost its correlation id"
+    assert len(event.correlation_id) == 32, "Stdin correlation id is not opaque"
+    assert event.duration_ms is not None, "Stdin failure lost its duration"
+    assert event.duration_ms >= 0, "Stdin failure duration is negative"
+    counts_after = _observability.counter_snapshot()
+    assert (
+        counts_after.get(event.key(), 0) == counters_before.get(event.key(), 0) + 1
+    ), "Stdin failure did not increment its bounded event counter"
 
 
 @pytest.mark.parametrize("fallback", ["windows", "missing-fd", "unpollable"])
@@ -480,7 +527,7 @@ def test_create_invocation_keeps_windows_stdin_read_unchanged(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
-def test_create_invocation_normalises_piped_newlines(
+def test_create_invocation_normalizes_piped_newlines(
     monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor: int
 ) -> None:
     """Piped text preserves TextIO newline translation across byte chunks."""

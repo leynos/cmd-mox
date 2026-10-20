@@ -45,7 +45,13 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        shim, "_write_response", lambda resp: calls.append(("write", resp))
+        shim,
+        "_write_response",
+        lambda resp, *, correlation_id=None: calls.append((
+            "write",
+            resp,
+            correlation_id,
+        )),
     )
 
     shim.main()
@@ -66,7 +72,7 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
             1.0,
             None if shim.path_utils.IS_WINDOWS else 101.0,
         ),
-        ("write", response),
+        ("write", response, invocation.invocation_id),
     ], "shim startup steps did not run in the expected order"
 
 

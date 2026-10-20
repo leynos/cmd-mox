@@ -485,7 +485,7 @@ def test_regular_stdin_reads_descriptor_without_buffered_stream(
         )
 
     assert result == "\N{EURO SIGN}\n", (
-        "Raw stdin chunks were not incrementally decoded and newline-normalised"
+        "Raw stdin chunks were not incrementally decoded and newline-translated"
     )
     assert descriptors, "Regular stdin reader did not call os.read"
     assert all(descriptor == stdin.descriptor for descriptor in descriptors), (

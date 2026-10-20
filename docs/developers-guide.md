@@ -239,6 +239,16 @@ wait. Windows streams and descriptors that cannot be polled retain direct
 reads; the Windows named-pipe IPC client keeps its existing cooperative timeout
 behaviour.
 
+The shim emits bounded IPC observability events when stdin reading or writing
+and flushing a response stream fails. These use the existing dependency-free
+observability seam and record fixed operation, outcome, and error-category
+values, elapsed duration, and a correlation identifier when one is available.
+They do not include exception messages or stream contents. Passthrough request
+reporting is covered by `ipc.client.request` events, and Unix server response
+writes by `ipc.server.connection` events. The seam writes structured logging
+records and keeps in-process counters; it does not export to an external
+collector.
+
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs from
 `CommandDouble.name`. It performs that command-name check before expectation
 matching and must not invoke expectation matching for a different command. This

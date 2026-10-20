@@ -11,7 +11,13 @@ import typing as typ
 import pytest
 
 from cmd_mox import shim
-from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult, Response
+from cmd_mox.ipc import (
+    Invocation,
+    PassthroughRequest,
+    PassthroughResult,
+    Response,
+    _observability,
+)
 from cmd_mox.shim import _execute_invocation, _write_response
 from cmd_mox.unittests._shim_test_support import (
     _assert_exit_code,
@@ -219,9 +225,11 @@ def test_execute_invocation_surfaces_ipc_errors(
         _execute_invocation(invocation, timeout=1.0)
 
     _assert_exit_code(exc, 1)
-    assert "IPC error: boom" in capsys.readouterr().err, (
-        "IPC failure did not produce a controlled diagnostic"
+    diagnostic = capsys.readouterr().err
+    assert "IPC error: IPC operation failed" in diagnostic, (
+        "IPC failure did not produce a bounded diagnostic"
     )
+    assert "boom" not in diagnostic, "Exception messages must not reach stderr"
 
 
 def test_passthrough_report_failure_preserves_nonzero_exit_code(
@@ -268,8 +276,11 @@ def test_passthrough_report_failure_preserves_nonzero_exit_code(
     assert "command error" in captured.err, (
         "A report failure must not discard passthrough stderr"
     )
-    assert "IPC error: server did not acknowledge passthrough" in captured.err, (
-        "passthrough report failures must be diagnosed"
+    assert "IPC error: timed out reporting passthrough" in captured.err, (
+        "passthrough report timeout must have a bounded diagnostic"
+    )
+    assert "server did not acknowledge" not in captured.err, (
+        "passthrough exception details must not reach stderr"
     )
 
 
@@ -321,7 +332,7 @@ def test_passthrough_report_failure_survives_stdout_write_failure(
 
     _assert_exit_code(exc, 2)
     stderr = capsys.readouterr().err
-    assert "IPC error: timeout" in stderr, (
+    assert "IPC error: timed out reporting passthrough" in stderr, (
         "passthrough IPC failure was hidden by the output write failure"
     )
 
@@ -344,7 +355,9 @@ def test_write_response_updates_environment_and_streams(
 
 
 def test_write_response_handles_closed_stdout(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A closed output stream produces a controlled IPC failure."""
 
@@ -361,22 +374,45 @@ def test_write_response_handles_closed_stdout(
             raise BrokenPipeError(msg)
 
     monkeypatch.setattr(sys, "stdout", _ClosedWriter())
+    counters_before = _observability.counter_snapshot()
 
-    with pytest.raises(SystemExit) as exc:
-        _write_response(Response(stdout="out", stderr="server diagnostic", exit_code=3))
+    with (
+        caplog.at_level("INFO", logger="cmd_mox.shim"),
+        _observability.capture_events() as events,
+        pytest.raises(SystemExit) as exc,
+    ):
+        _write_response(
+            Response(stdout="out", stderr="server diagnostic", exit_code=3),
+            correlation_id="abc",
+        )
 
     _assert_exit_code(exc, 3)
     stderr = capsys.readouterr().err
     assert "server diagnostic" in stderr, (
         "stdout failure must not discard the response stderr"
     )
-    assert "IPC error: closed stdout" in stderr, (
-        "closed output streams must produce an IPC diagnostic"
+    assert "IPC error: response stream write failed" in stderr, (
+        "closed output streams must produce a bounded IPC diagnostic"
     )
+    assert "closed stdout" not in stderr, "Exception details must not reach stderr"
+    assert "closed stdout" not in caplog.text, "Exception details must not reach logs"
+    [event] = events
+    assert event.operation == "ipc.shim.response_stream", "Wrong event operation"
+    assert event.outcome == "write_failed", "Write failure outcome was not recorded"
+    assert event.error_category == "BrokenPipeError", "Wrong write error category"
+    assert event.correlation_id == "abc", "Response failure lost its correlation id"
+    assert event.duration_ms is not None, "Write failure lost its duration"
+    assert event.duration_ms >= 0, "Write failure duration is negative"
+    counts_after = _observability.counter_snapshot()
+    assert (
+        counts_after.get(event.key(), 0) == counters_before.get(event.key(), 0) + 1
+    ), "Response write failure did not increment its bounded event counter"
 
 
 def test_write_response_handles_stdout_flush_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A deferred output failure keeps the response exit code."""
 
@@ -403,14 +439,37 @@ def test_write_response_handles_stdout_flush_failure(
             raise BrokenPipeError(msg)
 
     monkeypatch.setattr(sys, "stdout", _FlushFailure())
+    counters_before = _observability.counter_snapshot()
 
-    with pytest.raises(SystemExit) as exc:
-        _write_response(Response(stdout="out", exit_code=3))
+    with (
+        caplog.at_level("INFO", logger="cmd_mox.shim"),
+        _observability.capture_events() as events,
+        pytest.raises(SystemExit) as exc,
+    ):
+        _write_response(Response(stdout="out", exit_code=3), correlation_id="abc")
 
     _assert_exit_code(exc, 3)
-    assert "IPC error: closed stdout during flush" in capsys.readouterr().err, (
-        "flush failures must produce a controlled IPC diagnostic"
+    diagnostic = capsys.readouterr().err
+    assert "IPC error: response stream flush failed" in diagnostic, (
+        "flush failures must produce a bounded IPC diagnostic"
     )
+    assert "closed stdout during flush" not in diagnostic, (
+        "Flush exception details must not reach stderr"
+    )
+    assert "closed stdout during flush" not in caplog.text, (
+        "Flush exception details must not reach logs"
+    )
+    [event] = events
+    assert event.operation == "ipc.shim.response_stream", "Wrong event operation"
+    assert event.outcome == "flush_failed", "Flush failure outcome was not recorded"
+    assert event.error_category == "BrokenPipeError", "Wrong flush error category"
+    assert event.correlation_id == "abc", "Flush failure lost its correlation id"
+    assert event.duration_ms is not None, "Flush failure lost its duration"
+    assert event.duration_ms >= 0, "Flush failure duration is negative"
+    counts_after = _observability.counter_snapshot()
+    assert (
+        counts_after.get(event.key(), 0) == counters_before.get(event.key(), 0) + 1
+    ), "Response flush failure did not increment its bounded event counter"
 
 
 @pytest.mark.parametrize("stream_name", ["stdout", "stderr"])
@@ -447,6 +506,6 @@ _write_response(Response(exit_code=7, **{stream_name: "payload"}))
         "interpreter shutdown must preserve the configured response status"
     )
     if stream_name == "stdout":
-        assert "IPC error: closed stream" in result.stderr, (
+        assert "IPC error: response stream flush failed" in result.stderr, (
             "stdout failure must report the closed stream to stderr"
         )

@@ -74,4 +74,4 @@ def test_validate_environment_rejects_invalid_timeout(
         _validate_environment()
 
     _assert_exit_code(exc, 1)
-    assert "invalid timeout" in capsys.readouterr().err
+    assert capsys.readouterr().err == "IPC error: invalid CMOX_IPC_TIMEOUT\n"

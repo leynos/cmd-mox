@@ -738,6 +738,15 @@ with a 1-based `attempt`). Server dispatch keeps the existing
 `IPC dispatch outcome` record under the `ipc.dispatch` operation, now also
 carrying `transport` and `correlation_id`.
 
+Shim failures while reading stdin or writing and flushing response streams use
+the same seam with fixed operation, outcome, and error-category values, a
+duration, and a correlation identifier when available. Passthrough reporting
+already emits `ipc.client.request` events, while Unix server response-write
+failures emit `ipc.server.connection` events. These additions retain the
+never-log rules: event fields contain no exception messages or stream content.
+Events are sent to structured logging and counted in process; the seam has no
+external metrics or tracing collector.
+
 #### Named-pipe resource bounds (2026-08-28)
 
 The Windows named-pipe transport bounds concurrency, message size, and client
