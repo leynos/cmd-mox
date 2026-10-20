@@ -16,6 +16,7 @@ import pytest
 
 from cmd_mox.ipc import _observability, named_pipe
 from cmd_mox.ipc._named_pipe_limits import acquire_client_slot
+from cmd_mox.ipc._server_core import _RequestResult
 from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import] - re-exported pytest fixtures
     UNEXPECTED_WINERROR,
     FakeWin32File,
@@ -267,7 +268,14 @@ def test_completed_client_releases_capacity(
     state = build_state()
     state._client_slots = threading.BoundedSemaphore(1)
     monkeypatch.setattr(state, "_read_request", lambda _handle: b"{}")
-    monkeypatch.setattr(named_pipe, "_request_pipeline", lambda *_args: None)
+    monkeypatch.setattr(
+        named_pipe,
+        "_request_pipeline",
+        lambda *_args: _RequestResult(response_bytes=b"response", correlation_id=None),
+    )
+    monkeypatch.setattr(
+        named_pipe, "write_pipe_payload", lambda *_args, **_kwargs: None
+    )
     handle = object()
 
     with _observability.capture_events() as events:

@@ -571,9 +571,11 @@ class _NamedPipeState:
         try:
             raw = self._read_request(handle)
             if raw is not None:
-                response_bytes = _request_pipeline(self.outer, raw, "named_pipe")
-                if response_bytes is not None:
-                    write_pipe_payload(handle, response_bytes, win32file=win32file)
+                result = _request_pipeline(self.outer, raw, "named_pipe")
+                if result.response_bytes is not None:
+                    write_pipe_payload(
+                        handle, result.response_bytes, win32file=win32file
+                    )
         except PipeMessageTooLargeError as exc:
             # The limit trips before any envelope is parsed, so no correlation
             # id exists; only the byte count is reported, never the bytes.

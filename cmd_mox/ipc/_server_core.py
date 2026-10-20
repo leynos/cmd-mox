@@ -287,7 +287,9 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
 
 
 type _RequestProcessor = typ.Literal["handle_invocation", "handle_passthrough_result"]
-type _DispatchOutcome = typ.Literal["success", "invalid_request", "handler_error"]
+type _DispatchOutcome = typ.Literal[
+    "success", "invalid_request", "rejection_frame", "handler_error"
+]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
     KIND_INVOCATION: (validate_invocation_payload, "handle_invocation"),
@@ -386,6 +388,10 @@ def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
     dict[str, typ.Any] or None
         The decoded payload, or ``None`` when *raw* is not a JSON mapping.
     """
+    if raw == b"":
+        logger.info("IPC connection closed before request was received")
+        return None
+
     payload = parse_json_safely(raw)
     if payload is not None:
         return payload
@@ -534,42 +540,80 @@ def _resolve_correlation_id(
     return bounded_correlation_id(getattr(obj, "invocation_id", None))
 
 
+@dc.dataclass(frozen=True, slots=True)
+class _RequestResult:
+    """Encoded response and bounded request metadata for a transport."""
+
+    response_bytes: bytes | None
+    correlation_id: str | None
+
+
+def _rejection_result(
+    parsed: ParsedRequest | None,
+    started: float,
+    transport: _observability.Transport | None,
+) -> _RequestResult:
+    """Emit bounded rejection metadata and return its safe response frame.
+
+    Returns
+    -------
+    _RequestResult
+        The encoded rejection response and its bounded correlation identifier.
+    """
+    is_parse_error = parsed is None
+    kind = parsed.kind if parsed is not None else "unknown"
+    correlation_id = parsed.correlation_id if parsed is not None else None
+    _emit_dispatch_outcome(
+        _DispatchRecord(
+            kind=kind,
+            request=None,
+            outcome="rejection_frame" if is_parse_error else "invalid_request",
+            duration_ms=_observability.elapsed_ms(started),
+            error_category="RequestParseError" if is_parse_error else "ValidationError",
+            correlation_id=correlation_id,
+            transport=transport,
+        )
+    )
+    message = (
+        "IPC request could not be parsed"
+        if is_parse_error
+        else "IPC request payload failed validation"
+    )
+    return _RequestResult(
+        response_bytes=_encode_response(Response(stderr=f"{message}\n", exit_code=1)),
+        correlation_id=correlation_id,
+    )
+
+
 def _request_pipeline(
     server: _BaseIPCServer[typ.Any],
     raw: bytes,
     transport: _observability.Transport | None = None,
-) -> bytes | None:
+) -> _RequestResult:
     """Parse, validate, dispatch, and encode an IPC request in order.
 
     Returns
     -------
-    bytes or None
-        The encoded response, or ``None`` when the request was unparseable or
-        failed validation.
+    _RequestResult
+        The encoded response and its validated correlation identifier, or an
+        empty response and no identifier when the connection closed without a
+        request.
     """
     # Scope the measurement to the whole pipeline so parsing, validation, and
     # hook execution are all attributed to the dispatch record.
     started = time.perf_counter()
     parsed = _parse_payload(raw)
     if parsed is None:
-        return None
+        if raw == b"":
+            return _RequestResult(response_bytes=None, correlation_id=None)
+        return _rejection_result(parsed, started, transport)
 
     obj = parsed.validate()
     if obj is None:
-        _emit_dispatch_outcome(
-            _DispatchRecord(
-                kind=parsed.kind,
-                request=None,
-                outcome="invalid_request",
-                duration_ms=_observability.elapsed_ms(started),
-                error_category="ValidationError",
-                correlation_id=parsed.correlation_id,
-                transport=transport,
-            )
-        )
-        return None
+        return _rejection_result(parsed, started, transport)
 
     response, error_category = _execute_request(server, parsed.processor, obj)
+    correlation_id = _resolve_correlation_id(parsed, obj)
     outcome: _DispatchOutcome = "success"
     if error_category is not None:
         outcome = "handler_error"
@@ -580,11 +624,14 @@ def _request_pipeline(
             outcome=outcome,
             duration_ms=_observability.elapsed_ms(started),
             error_category=error_category,
-            correlation_id=_resolve_correlation_id(parsed, obj),
+            correlation_id=correlation_id,
             transport=transport,
         )
     )
-    return _encode_response(response)
+    return _RequestResult(
+        response_bytes=_encode_response(response),
+        correlation_id=correlation_id,
+    )
 
 
 def _raise_invalid_request_dispatch(
