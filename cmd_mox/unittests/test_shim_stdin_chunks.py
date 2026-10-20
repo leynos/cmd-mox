@@ -84,6 +84,7 @@ class _PollProgression:
     deadline_ticks: int
     clock_ticks: list[int]
     poller: _ScriptedPoller
+    context: shim._shim_stdin._ReadContext
 
 
 class _ScriptedPoller:
@@ -142,9 +143,7 @@ def _assert_poll_progression_step(
     """
     before = progression.clock_ticks[2 * poll_index]
     if before >= progression.deadline_ticks:
-        result = shim._shim_stdin._poll_stdin(
-            progression.poller, progression.deadline_ticks / 1024
-        )
+        result = shim._shim_stdin._poll_stdin(progression.context)
         assert len(progression.poller.timeouts) == poll_index, (
             "Expired poll waited past its deadline"
         )
@@ -156,9 +155,7 @@ def _assert_poll_progression_step(
         shim._shim_stdin.MAX_POLL_TIMEOUT_MS,
         (remaining_ticks * 1_000 + 1_023) // 1_024,
     )
-    result = shim._shim_stdin._poll_stdin(
-        progression.poller, progression.deadline_ticks / 1024
-    )
+    result = shim._shim_stdin._poll_stdin(progression.context)
     assert progression.poller.timeouts[-1] == expected_timeout, (
         "Poll wait did not ceil and cap the remaining deadline budget"
     )
@@ -176,11 +173,19 @@ def _assert_poll_progression_step(
 def _assert_poll_progression(scenario: _PollScenario) -> None:
     """Exercise generated poll outcomes against a controlled monotonic clock."""
     deadline_ticks, clock_ticks = _build_clock_progression(scenario)
+    poller = _ScriptedPoller([_poll_events(kind) for kind in scenario.event_kinds])
+    deadline = deadline_ticks / 1024
     progression = _PollProgression(
         scenario=scenario,
         deadline_ticks=deadline_ticks,
         clock_ticks=clock_ticks,
-        poller=_ScriptedPoller([_poll_events(kind) for kind in scenario.event_kinds]),
+        poller=poller,
+        context=shim._shim_stdin._ReadContext(
+            descriptor=123,
+            poller=poller,
+            deadline=deadline,
+            on_error=lambda exc: pytest.fail(f"Unexpected poll error: {exc}"),
+        ),
     )
     with mock.patch.object(
         shim._shim_stdin.time,
