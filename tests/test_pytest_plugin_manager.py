@@ -188,6 +188,14 @@ class _ExitSpyCmdMoxManager(_CmdMoxManager):
         super().exit(body_failed=body_failed)
 
 
+@pytest.fixture
+def reset_exit_spy_manager_state() -> cabc.Iterator[None]:
+    """Clear the spy's shared instance reference before and after each test."""
+    _ExitSpyCmdMoxManager.last_instance = None
+    yield
+    _ExitSpyCmdMoxManager.last_instance = None
+
+
 def _assert_teardown_sections(node: _StubNode, *expected: tuple[str, str, str]) -> None:
     """Assert the node recorded exactly the expected teardown report sections."""
     assert node.sections == list(expected), "Assertion failed"
@@ -353,13 +361,14 @@ def test_cmd_mox_fixture_restores_path_on_replay_failure(
     assert os.environ.get("PATH", "") == original_path, "Assertion failed"
 
 
+@pytest.mark.usefixtures("reset_exit_spy_manager_state")
 def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """An injected generator interruption is recorded before propagation."""
     request = _StubRequest(config=_StubConfig())
+    # Install the _StubMox factory used when the fixture creates the spy manager.
     make_manager(request)
-    _ExitSpyCmdMoxManager.last_instance = None
 
     with (
         mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
@@ -368,13 +377,15 @@ def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
         fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
         generator = fixture(typ.cast("pytest.FixtureRequest", request))
         next(generator)
+        interruption = KeyboardInterrupt()
 
-        with pytest.raises(KeyboardInterrupt):
-            generator.throw(KeyboardInterrupt)
+        with pytest.raises(KeyboardInterrupt) as raised:
+            generator.throw(interruption)
 
     manager = _ExitSpyCmdMoxManager.last_instance
     assert manager is not None, "Assertion failed"
     assert manager.body_failed_values == [True], "Assertion failed"
+    assert raised.value is interruption, "Assertion failed"
 
 
 def test_enter_cmd_mox_replays_when_enabled(
