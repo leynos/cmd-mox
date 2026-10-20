@@ -195,18 +195,40 @@ def test_timeout_remaining_without_deadline_returns_configured_timeout() -> None
     )
 
 
-@pytest.mark.parametrize("finished_at", [101.0, 101.25], ids=["at", "after"])
+def _assert_passthrough_expiry_event(
+    events: list[_observability.IPCEvent],
+    finished_at: float,
+    counters_before: dict[_observability.EventKey, int],
+) -> None:
+    """Verify the single bounded event and its command-inclusive duration."""
+    [event] = events
+    assert event.operation == "ipc.shim.passthrough_report", "Wrong expiry operation"
+    assert event.outcome == "deadline_expired", "Wrong expiry outcome"
+    assert event.error_category == "TimeoutError", "Wrong expiry error category"
+    assert event.transport == "unix", "Expiry lost its transport"
+    assert event.correlation_id == "abc", "Expiry lost its validated correlation id"
+    assert event.duration_ms == pytest.approx((finished_at - 100.0) * 1000), (
+        "Expiry duration must include the time spent running the command"
+    )
+    counts_after = _observability.counter_snapshot()
+    assert (
+        counts_after.get(event.key(), 0) == counters_before.get(event.key(), 0) + 1
+    ), "Expiry must increment exactly one bounded event counter"
+
+
 @pytest.mark.parametrize(
-    "exit_code", [0, 7], ids=["successful-command", "failed-command"]
+    "case",
+    [(101.0, 0), (101.25, 0), (101.0, 7), (101.25, 7)],
+    ids=["successful-at", "successful-after", "failed-at", "failed-after"],
 )
 def test_passthrough_deadline_expiry_emits_bounded_event(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
-    finished_at: float,
-    exit_code: int,
+    case: tuple[float, int],
 ) -> None:
     """Expiry before dispatch records one event and preserves command output."""
+    finished_at, exit_code = case
     invocation = Invocation(
         command="private-command", args=[], stdin="", env={}, invocation_id="abc"
     )
@@ -260,19 +282,7 @@ def test_passthrough_deadline_expiry_emits_bounded_event(
     assert (
         captured.err == "private-errorIPC error: timed out reporting passthrough\n"
     ), "Expiry discarded stderr or changed the controlled timeout diagnostic"
-    [event] = events
-    assert event.operation == "ipc.shim.passthrough_report", "Wrong expiry operation"
-    assert event.outcome == "deadline_expired", "Wrong expiry outcome"
-    assert event.error_category == "TimeoutError", "Wrong expiry error category"
-    assert event.transport == "unix", "Expiry lost its transport"
-    assert event.correlation_id == "abc", "Expiry lost its validated correlation id"
-    assert event.duration_ms == pytest.approx((finished_at - 100.0) * 1000), (
-        "Expiry duration must include the time spent running the command"
-    )
-    counts_after = _observability.counter_snapshot()
-    assert (
-        counts_after.get(event.key(), 0) == counters_before.get(event.key(), 0) + 1
-    ), "Expiry must increment exactly one bounded event counter"
+    _assert_passthrough_expiry_event(events, finished_at, counters_before)
     assert not any(
         text in caplog.text
         for text in (
