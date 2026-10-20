@@ -329,6 +329,8 @@ can still enforce the last known-good policy.
 `make spelling` checks existing `*.md` files that are tracked by Git or
 untracked and not ignored. Standard Git ignore rules exclude generated caches
 and other ignored files, while new Markdown is checked before it is staged.
+Because it uses `git ls-files`, `make spelling` must run inside a Git working
+tree and stops if Git file enumeration fails.
 
 Add repository-only proper names or quoted upstream terms to
 `typos.local.toml`; never edit generated entries in `typos.toml` by hand.
