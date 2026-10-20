@@ -1098,7 +1098,7 @@ supported surface area without navigating modules.
 
 ### IPC servers
 
-- `IPCServer` – IPC server (Unix socket on POSIX, named pipe on Windows).
+- `IPCServer` – Unix-domain-socket IPC server; use `NamedPipeServer` on Windows.
 - `NamedPipeServer` – explicit Windows named-pipe transport implementation.
 
 ### Shims and environment helpers
