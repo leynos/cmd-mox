@@ -28,7 +28,7 @@ def test_redaction_preserves_safe_arguments_and_positions(
     """Ordinary positional arguments retain their values and positions."""
     redacted = redact_sensitive_argument_values(arguments)
 
-    assert redacted == arguments
+    assert redacted == arguments, "safe arguments must remain unchanged"
 
 
 @given(
@@ -48,17 +48,19 @@ def test_redaction_masks_generated_detached_credentials(
 
     redacted = redact_sensitive_argument_values(arguments)
 
-    assert len(redacted) == len(arguments)
-    assert redacted == ["before", option, "<redacted>", "after"]
-    assert credential not in repr(redacted)
+    assert len(redacted) == len(arguments), "redaction must preserve positions"
+    assert redacted == ["before", option, "<redacted>", "after"], (
+        "only the detached credential must be masked"
+    )
+    assert credential not in repr(redacted), "credential must be hidden"
 
     expectation = Expectation("cargo").with_args(*arguments)
     with pytest.raises(ExpectationConfigurationError) as exc_info:
         expectation.with_args("replacement")
 
     message = str(exc_info.value)
-    assert f"args={redacted!r}" in message
-    assert credential not in message
+    assert f"args={redacted!r}" in message, "message must show redacted args"
+    assert credential not in message, "credential must be hidden in the error"
 
 
 @given(arguments=st.lists(st.text(max_size=32), max_size=24))
@@ -68,8 +70,10 @@ def test_redaction_preserves_argument_count_and_is_idempotent(
     """Redaction preserves list shape and remains stable on safe output."""
     redacted = redact_sensitive_argument_values(arguments)
 
-    assert len(redacted) == len(arguments)
-    assert redact_sensitive_argument_values(redacted) == redacted
+    assert len(redacted) == len(arguments), "redaction must preserve list shape"
+    assert redact_sensitive_argument_values(redacted) == redacted, (
+        "redaction must be idempotent"
+    )
 
 
 @pytest.mark.parametrize(

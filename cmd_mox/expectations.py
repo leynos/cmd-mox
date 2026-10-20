@@ -6,15 +6,6 @@ import dataclasses as dc
 import typing as typ
 
 from ._argument_redaction import (
-    _SECRET_ENV_KEY_RE as _SECRET_ENV_KEY_RE,
-)
-from ._argument_redaction import (
-    SENSITIVE_ENV_KEY_TOKENS as SENSITIVE_ENV_KEY_TOKENS,
-)
-from ._argument_redaction import (
-    _is_sensitive_env_key as _is_sensitive_env_key,
-)
-from ._argument_redaction import (
     is_sensitive_recording_env_key,
 )
 from ._argument_redaction import (
