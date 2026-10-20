@@ -747,8 +747,9 @@ with a 1-based `attempt`). Server dispatch keeps the existing
 `IPC dispatch outcome` record under the `ipc.dispatch` operation, now also
 carrying `transport` and `correlation_id`.
 
-Unix backend creation emits `ipc.backend_selection` events at the resolver and
-construction boundaries. The `selection_mode` dimension is one of `native`,
+Unix backend creation emits `ipc.backend_selection` events at the cached
+inner-class lookup and backend construction boundaries. The `selection_mode`
+dimension is one of `native`,
 `compatibility`, `windows_unsupported`, or `unsupported_platform`; cache
 observations name either `unix_server_base` or `inner_server_class` and report
 `hit` or `miss`. Outcomes distinguish selected bases, cache accesses, failed
