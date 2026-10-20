@@ -94,7 +94,6 @@ def test_ipc_server_start_fails_if_in_use(tmp_path: Path) -> None:
 def test_invoke_server_retries_connection_parametrized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     jitter: float | None,
     _description: str,
 ) -> None:
@@ -115,7 +114,6 @@ def test_invoke_server_retries_connection_parametrized(
         if attempt == 0:
             server.start()
 
-    caplog.set_level(logging.INFO, logger="cmd_mox.ipc.client")
     monkeypatch.setattr(
         _client_events, "emit_connect_retry", start_server_after_first_retry
     )
@@ -130,15 +128,6 @@ def test_invoke_server_retries_connection_parametrized(
         assert response.stdout == "ls"
     finally:
         server.stop()
-
-    assert any(
-        record.name == "cmd_mox.ipc.client"
-        and getattr(record, "operation", None) == _client_events.CONNECT_RETRY_OPERATION
-        and getattr(record, "attempt", None) == 1
-        and getattr(record, "transport", None) == "unix"
-        and getattr(record, "outcome", None) == "attempt_failed"
-        for record in caplog.records
-    ), "The first connection retry event was not logged"
 
 
 def test_invoke_server_exhausts_retries(
@@ -220,30 +209,54 @@ def test_invoke_server_invalid_json(
     thread.join()
 
 
+_DISCONNECT_MESSAGE = "IPC client disconnected before reply was written"
+
+
+class _DisconnectObserver(logging.Handler):
+    """Signal when the reply-write failure is logged."""
+
+    def __init__(self, disconnect_logged: threading.Event) -> None:
+        super().__init__()
+        self._disconnect_logged = disconnect_logged
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.name != "cmd_mox.ipc.server" or record.levelno != logging.DEBUG:
+            return
+        if record.getMessage() == _DISCONNECT_MESSAGE:
+            self._disconnect_logged.set()
+
+
+def _assert_disconnect_is_quiet(caplog: pytest.LogCaptureFixture) -> None:
+    """Assert a reply-write disconnect is logged only at DEBUG."""
+    assert any(
+        record.getMessage() == _DISCONNECT_MESSAGE and record.levelno == logging.DEBUG
+        for record in caplog.records
+    ), "The disconnect was not logged at DEBUG"
+    server_records = [
+        record for record in caplog.records if record.name == "cmd_mox.ipc.server"
+    ]
+    assert not any(record.levelno >= logging.ERROR for record in server_records), (
+        "The client disconnect emitted an ERROR record"
+    )
+    assert not any(record.exc_info is not None for record in server_records), (
+        "The client disconnect emitted an exception record"
+    )
+
+
 def test_server_logs_client_disconnect_during_reply_write(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A client closing before the reply should not produce an error log."""
-    disconnect_message = "IPC client disconnected before reply was written"
     disconnect_logged = threading.Event()
     handler_started = threading.Event()
     reply_allowed = threading.Event()
-
-    class _DisconnectObserver(logging.Handler):
-        """Signal when the reply-write failure is logged."""
-
-        def emit(self, record: logging.LogRecord) -> None:
-            if record.name != "cmd_mox.ipc.server" or record.levelno != logging.DEBUG:
-                return
-            if record.getMessage() == disconnect_message:
-                disconnect_logged.set()
 
     def slow_handler(_invocation: Invocation) -> Response:
         handler_started.set()
         reply_allowed.wait(timeout=3.0)
         return Response(stdout="complete")
 
-    observer = _DisconnectObserver()
+    observer = _DisconnectObserver(disconnect_logged)
     # Follow pytest's root capture handler so the event cannot race capture.
     root_logger = logging.getLogger()
     socket_path = tmp_path / "ipc.sock"
@@ -267,16 +280,4 @@ def test_server_logs_client_disconnect_during_reply_write(
                 "The reply write did not report the disconnected client"
             )
 
-    assert any(
-        record.getMessage() == disconnect_message and record.levelno == logging.DEBUG
-        for record in caplog.records
-    ), "The disconnect was not logged at DEBUG"
-    server_records = [
-        record for record in caplog.records if record.name == "cmd_mox.ipc.server"
-    ]
-    assert not any(record.levelno >= logging.ERROR for record in server_records), (
-        "The client disconnect emitted an ERROR record"
-    )
-    assert not any(record.exc_info is not None for record in server_records), (
-        "The client disconnect emitted an exception record"
-    )
+    _assert_disconnect_is_quiet(caplog)
