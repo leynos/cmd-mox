@@ -165,6 +165,16 @@ EXPECTED_ENTRYPOINT_REASONS = {
         "_ServerLifecycle.stop passes the stored backend instance through this "
         "abstract lifecycle hook."
     ),
+    "cmd_mox.ipc.server._inner_server_cls": (
+        "_ServerLifecycle.start dispatches to IPCServer._create_backend, which "
+        "calls this cached factory; Skylos records that caller edge but still "
+        "reports the private function as unreachable."
+    ),
+    "cmd_mox.ipc.server._InnerServer": (
+        "IPCServer._create_backend instantiates the cached class returned by "
+        "_inner_server_cls, but Skylos does not connect that dynamic constructor "
+        "call to the local class definition."
+    ),
 }
 EXPECTED_ENTRYPOINT_TYPES = {
     "cmd_mox.environment._Win32Function.argtypes": "variable",
@@ -182,6 +192,8 @@ EXPECTED_ENTRYPOINT_TYPES = {
     "cmd_mox.ipc.named_pipe._NamedPipeState._signal_stop_handle": "method",
     "cmd_mox.ipc.named_pipe._NamedPipeState._poke_pipe": "method",
     "cmd_mox.ipc._server_core._ServerLifecycle._stop_backend.server": "parameter",
+    "cmd_mox.ipc.server._inner_server_cls": "function",
+    "cmd_mox.ipc.server._InnerServer": "class",
 }
 EXPECTED_ENTRYPOINT_FULL_NAMES = frozenset(EXPECTED_ENTRYPOINT_REASONS)
 
