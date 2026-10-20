@@ -5,7 +5,6 @@ import logging
 import os
 import socket
 import threading
-import time
 import typing as typ
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from cmd_mox.ipc import (
     IPCServer,
     Response,
     RetryConfig,
+    _client_events,
     invoke_server,
 )
 
@@ -94,6 +94,7 @@ def test_ipc_server_start_fails_if_in_use(tmp_path: Path) -> None:
 def test_invoke_server_retries_connection_parametrized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     jitter: float | None,
     _description: str,
 ) -> None:
@@ -102,14 +103,22 @@ def test_invoke_server_retries_connection_parametrized(
 
     server = IPCServer(socket_path)
 
-    def delayed_start() -> None:
-        import time
+    emit_connect_retry = _client_events.emit_connect_retry
 
-        time.sleep(0.05)
-        server.start()
+    def start_server_after_first_retry(
+        transport: typ.Literal["unix", "named_pipe"],
+        attempt: int,
+        exc: Exception,
+        correlation_id: str | None,
+    ) -> None:
+        emit_connect_retry(transport, attempt, exc, correlation_id)
+        if attempt == 0:
+            server.start()
 
-    thread = threading.Thread(target=delayed_start)
-    thread.start()
+    caplog.set_level(logging.INFO, logger="cmd_mox.ipc.client")
+    monkeypatch.setattr(
+        _client_events, "emit_connect_retry", start_server_after_first_retry
+    )
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     try:
@@ -120,8 +129,16 @@ def test_invoke_server_retries_connection_parametrized(
         response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
         assert response.stdout == "ls"
     finally:
-        thread.join()
         server.stop()
+
+    assert any(
+        record.name == "cmd_mox.ipc.client"
+        and getattr(record, "operation", None) == _client_events.CONNECT_RETRY_OPERATION
+        and getattr(record, "attempt", None) == 1
+        and getattr(record, "transport", None) == "unix"
+        and getattr(record, "outcome", None) == "attempt_failed"
+        for record in caplog.records
+    ), "The first connection retry event was not logged"
 
 
 def test_invoke_server_exhausts_retries(
@@ -209,44 +226,46 @@ def test_server_logs_client_disconnect_during_reply_write(
     """A client closing before the reply should not produce an error log."""
     disconnect_message = "IPC client disconnected before reply was written"
     disconnect_logged = threading.Event()
+    handler_started = threading.Event()
+    reply_allowed = threading.Event()
 
     class _DisconnectObserver(logging.Handler):
         """Signal when the reply-write failure is logged."""
 
         def emit(self, record: logging.LogRecord) -> None:
+            if record.name != "cmd_mox.ipc.server" or record.levelno != logging.DEBUG:
+                return
             if record.getMessage() == disconnect_message:
                 disconnect_logged.set()
 
     def slow_handler(_invocation: Invocation) -> Response:
-        time.sleep(0.5)
+        handler_started.set()
+        reply_allowed.wait(timeout=3.0)
         return Response(stdout="complete")
 
     observer = _DisconnectObserver()
-    server_logger = logging.getLogger("cmd_mox.ipc.server")
+    # Follow pytest's root capture handler so the event cannot race capture.
+    root_logger = logging.getLogger()
     socket_path = tmp_path / "ipc.sock"
 
     with contextlib.ExitStack() as stack:
-        server_logger.addHandler(observer)
-        stack.callback(server_logger.removeHandler, observer)
+        root_logger.addHandler(observer)
+        stack.callback(root_logger.removeHandler, observer)
         caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
         with IPCServer(socket_path, handlers=IPCHandlers(handler=slow_handler)):
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.connect(str(socket_path))
                 client.sendall(b'{"command":"ls","args":[],"stdin":"","env":{}}')
+                client.shutdown(socket.SHUT_WR)
+                assert handler_started.wait(timeout=3.0), (
+                    "The server did not start handling the request"
+                )
+
+            reply_allowed.set()
 
             assert disconnect_logged.wait(timeout=3.0), (
                 "The reply write did not report the disconnected client"
             )
-            capture_deadline = time.monotonic() + 3.0
-            while not any(
-                record.getMessage() == disconnect_message
-                and record.levelno == logging.DEBUG
-                for record in caplog.records
-            ):
-                remaining = capture_deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                time.sleep(min(0.01, remaining))
 
     assert any(
         record.getMessage() == disconnect_message and record.levelno == logging.DEBUG

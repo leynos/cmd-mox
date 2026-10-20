@@ -293,7 +293,7 @@ def test_decode_payload_logs_empty_read_at_debug(
 
     result = _server_core._decode_payload(b"")
 
-    assert result is None, "Assertion failed"
+    assert result is None, "An empty read must decode to None"
     assert any(
         record.getMessage() == "IPC received empty read"
         and record.levelno == logging.DEBUG
