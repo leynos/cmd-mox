@@ -841,8 +841,8 @@ few common ones are:
 
   Example:
 
-  With no `with_args(...)` constraint, this double accepts any argument list,
-  so both `tool run` and `tool run --fail` reach the handler.
+  Without a `with_args` constraint, this double accepts any argument list, so
+  both `tool run` and `tool run --fail` reach the handler.
 
   ```python
   def handler(inv: Invocation) -> tuple[str, str, int]:
