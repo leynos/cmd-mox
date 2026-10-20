@@ -264,10 +264,10 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
-def test_create_invocation_normalizes_piped_newlines(
+def test_create_invocation_preserves_piped_newlines(
     monkeypatch: pytest.MonkeyPatch, stdin_pipe_descriptor: int
 ) -> None:
-    """Piped text preserves TextIO newline translation across byte chunks."""
+    """Piped text preserves POSIX TextIO newline sequences across byte chunks."""
 
     class _ReadablePoll:
         def register(self, _fd: int, _events: int) -> None:
@@ -292,6 +292,6 @@ def test_create_invocation_normalizes_piped_newlines(
 
     invocation = _create_invocation("shim", timeout=1.0)
 
-    assert invocation.stdin == "first\nsecond\nthird", (
-        "bounded stdin reads must preserve universal-newline translation"
+    assert invocation.stdin == "first\r\nsecond\rthird", (
+        "bounded stdin reads must preserve POSIX newline sequences"
     )

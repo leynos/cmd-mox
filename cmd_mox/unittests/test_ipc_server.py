@@ -26,10 +26,57 @@ from cmd_mox.ipc import (
     _observability,
     invoke_server,
 )
+from cmd_mox.ipc import client as ipc_client_module
 from cmd_mox.ipc import server as ipc_server_module
 from cmd_mox.ipc.server import _IPCHandler
 
 pytestmark = pytest.mark.requires_unix_sockets
+
+
+def _is_readiness_close_event(event: _observability.IPCEvent) -> bool:
+    """Return whether an event represents a closed readiness probe.
+
+    Returns
+    -------
+    bool
+        Whether *event* records a readiness probe that closed without a request.
+    """
+    if event.operation != "ipc.server.connection":
+        return False
+    if event.outcome != "receive_closed":
+        return False
+    return event.error_category == "ConnectionClosed"
+
+
+def _wait_for_readiness_close_event(
+    events: list[_observability.IPCEvent], timeout: float = 1.0
+) -> _observability.IPCEvent:
+    """Wait for the connection event emitted by a readiness probe.
+
+    Parameters
+    ----------
+    events:
+        Events captured while the IPC server is running.
+    timeout:
+        Maximum time to wait for the readiness connection event.
+
+    Returns
+    -------
+    _observability.IPCEvent
+        The event emitted when the readiness probe closes.
+
+    Raises
+    ------
+    AssertionError
+        If no matching event is captured before *timeout* expires.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        event = next((item for item in events if _is_readiness_close_event(item)), None)
+        if event is not None:
+            return event
+        time.sleep(0.01)
+    raise AssertionError
 
 
 def test_ipc_server_start_stop(tmp_path: Path) -> None:
@@ -85,33 +132,10 @@ def test_ipc_server_readiness_probe_is_a_closed_connection(
     caplog.set_level(logging.INFO, logger="cmd_mox.ipc._server_core")
 
     with _observability.capture_events() as events, IPCServer(tmp_path / "ipc.sock"):
-        deadline = time.monotonic() + 1.0
-        while (
-            not any(
-                event.operation == "ipc.server.connection"
-                and event.outcome == "receive_closed"
-                and event.error_category == "ConnectionClosed"
-                for event in events
-            )
-            and time.monotonic() < deadline
-        ):
-            time.sleep(0.01)
+        event = _wait_for_readiness_close_event(events)
 
     assert "connection closed" in caplog.text, "Readiness probe closure was not named"
     assert "malformed JSON" not in caplog.text, "Readiness probe was called malformed"
-    assert any(
-        event.operation == "ipc.server.connection"
-        and event.outcome == "receive_closed"
-        and event.error_category == "ConnectionClosed"
-        for event in events
-    ), "Readiness probe did not emit its connection event"
-    [event] = [
-        event
-        for event in events
-        if event.operation == "ipc.server.connection"
-        and event.outcome == "receive_closed"
-        and event.error_category == "ConnectionClosed"
-    ]
     assert event.correlation_id is None, "Readiness probe must not carry correlation"
 
 
@@ -196,7 +220,7 @@ def test_ipc_handler_uses_remaining_time_for_each_receive(
 
 
 @pytest.mark.parametrize(
-    ("stage", "failure_type", "expected_category"),
+    "failure_case",
     [
         ("write", BrokenPipeError, "ConnectionError"),
         ("flush", ConnectionResetError, "ConnectionError"),
@@ -206,11 +230,10 @@ def test_ipc_handler_uses_remaining_time_for_each_receive(
 def test_ipc_handler_logs_response_connection_drop(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
-    stage: str,
-    failure_type: type[OSError],
-    expected_category: str,
+    failure_case: tuple[str, type[OSError], str],
 ) -> None:
     """Response write and flush failures become bounded connection-drop logs."""
+    stage, failure_type, expected_category = failure_case
 
     class BrokenWriter:
         def write(self, _text: str) -> int:
@@ -434,15 +457,26 @@ def test_invoke_server_retries_connection_parametrized(
     socket_path = tmp_path / "ipc.sock"
 
     server = IPCServer(socket_path)
+    emit_connect_retry = ipc_client_module._client_events.emit_connect_retry
+    server_started = False
 
-    def delayed_start() -> None:
-        import time
+    def start_server_after_first_failure(
+        transport: _observability.Transport,
+        attempt: int,
+        exception: Exception,
+        correlation_id: str | None,
+    ) -> None:
+        nonlocal server_started
+        emit_connect_retry(transport, attempt, exception, correlation_id)
+        if not server_started:
+            server_started = True
+            server.start()
 
-        time.sleep(0.05)
-        server.start()
-
-    thread = threading.Thread(target=delayed_start)
-    thread.start()
+    monkeypatch.setattr(
+        ipc_client_module._client_events,
+        "emit_connect_retry",
+        start_server_after_first_failure,
+    )
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     try:
@@ -453,7 +487,6 @@ def test_invoke_server_retries_connection_parametrized(
         response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
         assert response.stdout == "ls"
     finally:
-        thread.join()
         server.stop()
 
 

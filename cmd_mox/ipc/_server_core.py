@@ -580,7 +580,7 @@ def _rejection_result(
         else "IPC request payload failed validation"
     )
     return _RequestResult(
-        response_bytes=_encode_response(Response(stderr=message, exit_code=1)),
+        response_bytes=_encode_response(Response(stderr=f"{message}\n", exit_code=1)),
         correlation_id=correlation_id,
     )
 

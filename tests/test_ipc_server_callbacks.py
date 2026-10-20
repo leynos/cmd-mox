@@ -499,7 +499,7 @@ def test_request_pipeline_validation_failure_returns_error_frame(
     assert response_bytes is not None, "Validation failure should return an error frame"
     payload = json.loads(response_bytes.decode("utf-8"))
     assert payload["exit_code"] == 1, "Validation failures must be non-zero"
-    assert payload["stderr"] == "IPC request payload failed validation", (
+    assert payload["stderr"] == "IPC request payload failed validation\n", (
         "Validation errors should be described without request contents"
     )
     assert not calls, "Validation failure should prevent processor dispatch"

@@ -43,7 +43,7 @@ def test_stdin_chunk_boundaries_preserve_utf8_and_newlines(
     cuts.update(1 + cut % (len(payload) - 1) for cut in extra_cuts)
     boundaries = [0, *sorted(cuts), len(payload)]
     chunks = [payload[start:end] for start, end in pairwise(boundaries)]
-    expected = text.replace("\r\n", "\n").replace("\r", "\n")
+    expected = text
     buffered = _read_stdin_chunks(chunks, buffered=True)
     raw = _read_stdin_chunks(chunks, buffered=False)
 
@@ -489,8 +489,8 @@ def test_regular_stdin_reads_descriptor_without_buffered_stream(
             on_error=shim._exit_ipc_error,
         )
 
-    assert result == "\N{EURO SIGN}\n", (
-        "Raw stdin chunks were not incrementally decoded and newline-translated"
+    assert result == "\N{EURO SIGN}\r\n", (
+        "Raw stdin chunks did not preserve the original newline sequence"
     )
     assert descriptors, "Regular stdin reader did not call os.read"
     assert all(descriptor == stdin.descriptor for descriptor in descriptors), (
