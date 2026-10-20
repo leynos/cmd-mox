@@ -580,9 +580,10 @@ workflow is as follows:
 
 #### Absolute-path shim invocation
 
-For screen readers: The configured tool starts the shim by its absolute path.
-When standard input is not a terminal, the shim reads it until end-of-file;
-terminal input is skipped. It sends the invocation to the IPC server through
+For screen readers: The configured tool starts the shim by its absolute path
+and passes the exported `CMOX_IPC_SOCKET` environment variable to it. When
+standard input is not a terminal, the shim reads it until end-of-file; terminal
+input is skipped. It sends the invocation to the IPC server through
 `CMOX_IPC_SOCKET`. The server invokes the handler configured with
 `runs(handler)` and returns its response to the shim, which applies standard
 output, standard error, and the exit code to the configured tool.

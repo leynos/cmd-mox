@@ -708,10 +708,11 @@ def test_pipeline(cmd_mox):
 Some tools accept a configured executable path instead of resolving a command
 name through `PATH`. Examples include Git merge and diff drivers, `sudoers`
 command rules, systemd unit settings, and continuous integration (CI)
-configuration. Pass an `EnvironmentManager` to `CmdMox`, then use the generated
-launcher under `env_mgr.shim_dir` as the absolute shim path in the tool's
-configuration. Its filename has a `.cmd` suffix on Windows and no suffix on
-POSIX:
+configuration. Pass an `EnvironmentManager` to `CmdMox`, then use the launcher
+under `env_mgr.shim_dir` as the absolute shim path in the tool's configuration.
+`__enter__` creates the directory; `mox.replay()` creates launchers for
+registered commands. The filename has a `.cmd` suffix on Windows and no suffix
+on POSIX:
 
 ```python
 import os
@@ -752,6 +753,12 @@ invocation even when called by absolute path and the shim directory is absent
 from `PATH`. Setting the tool's executable to this path removes `PATH` order
 from the result: a failed interception cannot silently fall through to a real
 binary with the same name.
+
+The process that starts the shim must receive `CMOX_IPC_SOCKET` and be able to
+access the IPC endpoint. A launcher such as `sudo` or systemd may filter or
+replace the environment, so configure it to pass this variable through and
+preserve endpoint access. An absolute path alone is not sufficient when that
+environment is missing; the shim exits with `IPC socket not specified`.
 
 Shims read non-terminal standard input until EOF to populate
 `Invocation.stdin`; terminal input is skipped. If an intermediary process, such

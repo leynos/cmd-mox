@@ -314,12 +314,14 @@ class EnvironmentManager:
     Attributes
     ----------
     shim_dir : Path or None
-        Directory containing generated shims after ``__enter__``; ``None``
-        before entry. On POSIX, ``shim_dir / "<command_name>"`` is an
-        executable shim; on Windows, the launcher is
-        ``shim_dir / "<command_name>.cmd"``. Both record invocations when
-        called by absolute path and locate the IPC server through
-        ``CMOX_IPC_SOCKET``, so invocation does not depend on ``PATH``.
+        Temporary directory for generated shims; ``None`` before entry.
+        ``__enter__`` creates the directory, and ``CmdMox.replay()`` creates
+        launchers for registered commands. On POSIX,
+        ``shim_dir / "<command_name>"`` is an executable shim; on Windows,
+        the launcher is ``shim_dir / "<command_name>.cmd"``. Both record
+        invocations when called by absolute path, provided the invoking
+        process passes ``CMOX_IPC_SOCKET`` and can access its endpoint. Shim
+        lookup uses ``CMOX_IPC_SOCKET`` rather than ``PATH``.
     socket_path : Path or None
         IPC endpoint path exported for shims after entry; ``None`` before
         entry.
