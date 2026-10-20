@@ -322,7 +322,8 @@ class EnvironmentManager:
         the launcher is ``shim_dir / "<command_name>.cmd"``. Both record
         invocations when called by absolute path, provided the invoking
         process passes ``CMOX_IPC_SOCKET`` and can access its endpoint. Shim
-        lookup uses ``CMOX_IPC_SOCKET`` rather than ``PATH``.
+        command names are resolved through ``PATH``; the running shim locates
+        the IPC endpoint through ``CMOX_IPC_SOCKET`` rather than ``PATH``.
     socket_path : Path or None
         IPC endpoint path exported for shims after entry; ``None`` before
         entry.

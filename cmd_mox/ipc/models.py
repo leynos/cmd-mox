@@ -44,7 +44,9 @@ class Invocation:
     exit_code : int
         Exit status from the configured response.
     invocation_id : str or None
-        Optional identifier used to correlate the shim request and response.
+        Optional identifier used for client/server observability correlation
+        and to match passthrough results. It is not returned in an ordinary
+        ``Response``.
     """
 
     command: str
