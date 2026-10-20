@@ -156,6 +156,12 @@ def test_argument_expectation_rejects_reconfiguration(
             "'--header=<redacted>'",
         ),
         (
+            ("--header", "X-API-Key: old-secret"),
+            ("--header", "X-Auth-Token: new-secret"),
+            "'--header', '<redacted>'",
+            "'--header', '<redacted>'",
+        ),
+        (
             ("--token:old-secret",),
             ("--token:new-secret",),
             "--token:<redacted>",

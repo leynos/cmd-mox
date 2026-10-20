@@ -28,6 +28,9 @@ _SECRET_ENV_KEY_RE: typ.Final[re.Pattern[str]] = re.compile(
 _AUTHORIZATION_CREDENTIAL_RE: typ.Final[re.Pattern[str]] = re.compile(
     r"(?i)\bauthorization\s*[:=]\s*[^,;]+"
 )
+_CREDENTIAL_HEADER_NAME_RE: typ.Final[re.Pattern[str]] = re.compile(
+    r"(?i)^\s*(?P<name>[a-z0-9][a-z0-9_-]*)\s*:"
+)
 
 
 def _is_sensitive_env_key(key: str) -> bool:
@@ -87,7 +90,11 @@ def _contains_sensitive_argument_value(arg: str) -> bool:
             _SECRET_ENV_KEY_RE.search(value)
             or _AUTHORIZATION_CREDENTIAL_RE.search(value)
         )
-    return bool(_AUTHORIZATION_CREDENTIAL_RE.search(arg))
+    header = _CREDENTIAL_HEADER_NAME_RE.match(arg)
+    return bool(
+        _AUTHORIZATION_CREDENTIAL_RE.search(arg)
+        or (header is not None and _SECRET_ENV_KEY_RE.search(header.group("name")))
+    )
 
 
 def _format_redacted_argument_value(option: str, separator: str) -> str:
