@@ -6,6 +6,7 @@ import dataclasses as dc
 import os
 import textwrap
 import typing as typ
+from unittest import mock
 
 import pytest
 
@@ -173,11 +174,13 @@ class _ExitSpyCmdMoxManager(_CmdMoxManager):
 
     last_instance: _ExitSpyCmdMoxManager | None = None
 
+    @typ.override
     def __init__(self, request: pytest.FixtureRequest) -> None:
         super().__init__(request)
         self.body_failed_values: list[bool] = []
         type(self).last_instance = self
 
+    @typ.override
     def exit(self, *, body_failed: bool) -> None:
         self.body_failed_values.append(body_failed)
         super().exit(body_failed=body_failed)
@@ -346,23 +349,24 @@ def test_cmd_mox_fixture_restores_path_on_replay_failure(
     assert os.environ.get("PATH", "") == original_path, "Assertion failed"
 
 
-def test_cmd_mox_fixture_marks_keyboardinterrupt_as_body_failure(
-    monkeypatch: pytest.MonkeyPatch,
+def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
-    """The fixture records KeyboardInterrupt before propagating it."""
+    """An injected generator interruption is recorded before propagation."""
     request = _StubRequest(config=_StubConfig())
     make_manager(request)
-    monkeypatch.setattr(pytest_plugin, "skip_if_unsupported", lambda: None)
-    monkeypatch.setattr(pytest_plugin, "_CmdMoxManager", _ExitSpyCmdMoxManager)
     _ExitSpyCmdMoxManager.last_instance = None
 
-    fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
-    generator = fixture(typ.cast("pytest.FixtureRequest", request))
-    next(generator)
+    with (
+        mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
+        mock.patch.object(pytest_plugin, "_CmdMoxManager", _ExitSpyCmdMoxManager),
+    ):
+        fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
+        generator = fixture(typ.cast("pytest.FixtureRequest", request))
+        next(generator)
 
-    with pytest.raises(KeyboardInterrupt):
-        generator.throw(KeyboardInterrupt)
+        with pytest.raises(KeyboardInterrupt):
+            generator.throw(KeyboardInterrupt)
 
     manager = _ExitSpyCmdMoxManager.last_instance
     assert manager is not None, "Assertion failed"
