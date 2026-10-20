@@ -3,12 +3,65 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import string
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cmd_mox import ExpectationConfigurationError
 from cmd_mox._argument_redaction import redact_sensitive_argument_values
 from cmd_mox.expectations import Expectation
+
+
+@given(
+    arguments=st.lists(
+        st.text(alphabet=string.ascii_letters + string.digits, max_size=32).map(
+            lambda suffix: f"argument-{suffix}"
+        ),
+        max_size=24,
+    )
+)
+def test_redaction_preserves_safe_arguments_and_positions(
+    arguments: list[str],
+) -> None:
+    """Ordinary positional arguments retain their values and positions."""
+    redacted = redact_sensitive_argument_values(arguments)
+
+    assert redacted == arguments
+
+
+@given(
+    option=st.sampled_from(("--authorization", "--token", "--password", "--api-key")),
+    credential=st.text(
+        alphabet=string.ascii_letters + string.digits,
+        min_size=1,
+        max_size=48,
+    ).map(lambda suffix: f"credential-{suffix}"),
+)
+def test_redaction_masks_generated_detached_credentials(
+    option: str,
+    credential: str,
+) -> None:
+    """Detached sensitive options hide generated values without shifting args."""
+    arguments = ["before", option, credential, "after"]
+
+    redacted = redact_sensitive_argument_values(arguments)
+
+    assert len(redacted) == len(arguments)
+    assert redacted == ["before", option, "<redacted>", "after"]
+    assert credential not in repr(redacted)
+
+
+@given(arguments=st.lists(st.text(max_size=32), max_size=24))
+def test_redaction_preserves_argument_count_and_is_idempotent(
+    arguments: list[str],
+) -> None:
+    """Redaction preserves list shape and remains stable on safe output."""
+    redacted = redact_sensitive_argument_values(arguments)
+
+    assert len(redacted) == len(arguments)
+    assert redact_sensitive_argument_values(redacted) == redacted
 
 
 @pytest.mark.parametrize(
