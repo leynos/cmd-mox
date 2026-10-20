@@ -45,6 +45,9 @@ class _Poller(typ.Protocol):
 class _StdinStream(typ.Protocol):
     """Minimal text stream interface used by the stdin source."""
 
+    def isatty(self) -> bool:
+        """Return whether the stream is attached to a terminal."""
+
     @property
     def encoding(self) -> str | None:
         """Text encoding used by the stream."""
@@ -202,7 +205,7 @@ def _decode_stdin_chunk(
     Returns
     -------
     str
-        Decoded text with universal newlines translated.
+        Decoded text with carriage-return and line-feed sequences preserved.
     """
     try:
         return decoder.decode(chunk, final=not chunk)

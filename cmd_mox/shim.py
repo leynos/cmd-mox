@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import importlib.util
 import json
 import math
@@ -92,6 +93,31 @@ _SHIM_PASSTHROUGH_REPORT_OPERATION = "ipc.shim.passthrough_report"
 _SHIM_IPC_REQUEST_OPERATION = "ipc.shim.ipc_request"
 
 
+@dc.dataclass(frozen=True, slots=True)
+class _InvocationDependencies:
+    """Bind stdin operations and clocks for one invocation."""
+
+    stdin_read: _shim_stdin._StdinReadDependencies
+    duration_clock: cabc.Callable[[], float]
+
+
+def _system_invocation_dependencies() -> _InvocationDependencies:
+    """Bind process stdin operations and clocks at the system boundary.
+
+    Returns
+    -------
+    _InvocationDependencies
+        Dependencies backed by process stdin and the system clocks.
+    """
+    return _InvocationDependencies(
+        stdin_read=_shim_stdin._StdinReadDependencies(
+            source=_shim_stdin._system_stdin_source(),
+            clock=time.monotonic,
+        ),
+        duration_clock=time.perf_counter,
+    )
+
+
 def _normalize_windows_arg(arg: str) -> str:
     """Collapse doubled Windows batch carets in a command argument.
 
@@ -160,7 +186,11 @@ def _validate_environment() -> float:
 
 
 def _create_invocation(
-    cmd_name: str, timeout: float, *, deadline: float | None = None
+    cmd_name: str,
+    timeout: float,
+    *,
+    deadline: float | None = None,
+    dependencies: _InvocationDependencies | None = None,
 ) -> Invocation:
     """Create an invocation from command-line arguments and stdin.
 
@@ -172,6 +202,8 @@ def _create_invocation(
         Maximum time available to read non-interactive standard input.
     deadline : float or None, optional
         Shared monotonic deadline for stdin and subsequent IPC on POSIX.
+    dependencies : _InvocationDependencies or None, optional
+        Stdin operations and clocks, or process-backed dependencies when omitted.
 
     Returns
     -------
@@ -180,8 +212,11 @@ def _create_invocation(
     """
     invocation_id = uuid.uuid4().hex
     stdin_data = ""
-    if not sys.stdin.isatty():
-        stdin_started = time.perf_counter()
+    if dependencies is None:
+        dependencies = _system_invocation_dependencies()
+    stdin_source = dependencies.stdin_read.source
+    if not stdin_source.stream.isatty():
+        stdin_started = dependencies.duration_clock()
 
         def report_stdin_error(exc: Exception) -> typ.NoReturn:
             """Record a bounded stdin failure before exiting the shim."""
@@ -196,15 +231,11 @@ def _create_invocation(
             )
             _exit_ipc_error(exc, operation="stdin_read")
 
-        stdin_dependencies = _shim_stdin._StdinReadDependencies(
-            source=_shim_stdin._system_stdin_source(),
-            clock=time.monotonic,
-        )
         stdin_data = _shim_stdin._read_stdin_until_eof(
             timeout,
             deadline=deadline,
             on_error=report_stdin_error,
-            dependencies=stdin_dependencies,
+            dependencies=dependencies.stdin_read,
         )
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]

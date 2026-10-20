@@ -46,6 +46,16 @@ class _InjectedStdin:
         self._descriptor = descriptor
         self.buffer = _InjectedBufferedReader()
 
+    def isatty(self) -> bool:
+        """Report the injected pipe as non-interactive stdin.
+
+        Returns
+        -------
+        bool
+            False because the injected stream represents a pipe.
+        """
+        return False
+
     @property
     def encoding(self) -> str:
         """Decoder encoding for the scripted input bytes."""

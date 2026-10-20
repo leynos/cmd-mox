@@ -48,6 +48,63 @@ def test_create_invocation_reads_stdin_when_not_tty(
     assert dummy_stdin.read_calls == 1, "non-TTY stdin was not read exactly once"
 
 
+def test_create_invocation_accepts_stdin_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invocation construction uses its injected stdin source and clocks."""
+
+    class _InjectedStdin(_DummyStdin):
+        @property
+        def encoding(self) -> str:
+            """Report the encoding required by the stdin stream protocol."""
+            return "utf-8"
+
+        @property
+        def errors(self) -> str:
+            """Report the decoder error policy required by the stream protocol."""
+            return "strict"
+
+        def fileno(self) -> int:
+            """Select the direct-read fallback for this injected stream.
+
+            Raises
+            ------
+            ValueError
+                This synthetic stream has no file descriptor.
+            """
+            raise ValueError
+
+    stdin = _InjectedStdin("injected payload", is_tty=False)
+    source = shim._shim_stdin._StdinSource(
+        stream=stdin,
+        create_poller=lambda _descriptor: None,
+        read_descriptor=os.read,
+        stat_descriptor=os.fstat,
+    )
+    dependencies = shim._InvocationDependencies(
+        stdin_read=shim._shim_stdin._StdinReadDependencies(
+            source=source,
+            clock=lambda: 0.0,
+        ),
+        duration_clock=lambda: 1.0,
+    )
+
+    class _UnexpectedSystemStdin:
+        def isatty(self) -> typ.NoReturn:
+            """Fail if invocation construction bypasses the injected source."""
+            pytest.fail("system stdin was queried despite injected dependencies")
+
+    monkeypatch.setattr(sys, "argv", ["shim"])
+    monkeypatch.setattr(sys, "stdin", _UnexpectedSystemStdin())
+
+    invocation = _create_invocation("shim", timeout=1.0, dependencies=dependencies)
+
+    assert invocation.stdin == "injected payload", (
+        "invocation did not read from its injected stdin source"
+    )
+    assert stdin.read_calls == 1, "injected stdin source was not read exactly once"
+
+
 def test_create_invocation_observes_stdin_failure_without_error_text(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
