@@ -65,6 +65,21 @@ When it passes: your mocks were used exactly as expected.
 When it fails: you'll get a surgically precise diff of what was expected vs
 what your misbehaving code actually did.
 
+### Several calls to one command
+
+`mock(name)` retrieves one double per name; a second `with_args(...)` raises
+`ExpectationConfigurationError` rather than adding another expectation. For
+several calls, use a `runs(handler)` function that dispatches on
+`invocation.args` (`list[str]`) with `match`:
+
+```python
+cargo = cmd_mox.spy("cargo").runs(handle_cargo)
+```
+
+The `handle_cargo(invocation)` handler can match on `invocation.args`. See the
+[usage guide](docs/usage-guide.md#spies-and-passthrough-mode) for a full
+handler and assertions on the ordered `spy.invocations` sequence.
+
 No subshells. No flaky greps. Just clean, high-fidelity, Pythonic command
 mocking.
 

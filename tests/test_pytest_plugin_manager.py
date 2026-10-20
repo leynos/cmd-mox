@@ -119,6 +119,7 @@ class _StubMox:
         phase: Phase = Phase.REPLAY,
         behavior: StubMoxBehaviorConfig | None = None,
         environment: EnvironmentManager | None = None,
+        lifecycle_hint: str | None = None,
     ) -> None:
         self.phase = phase
         config = behavior or StubMoxBehaviorConfig()
@@ -130,6 +131,7 @@ class _StubMox:
         self.verify_calls = 0
         self.exit_calls: list[tuple[object | None, object | None, object | None]] = []
         self.environment: object | None = environment
+        self._lifecycle_hint = lifecycle_hint
 
     def __enter__(self) -> _StubMox:
         self.enter_calls += 1
@@ -186,6 +188,7 @@ def make_manager(
             *,
             verify_on_exit: bool = False,
             environment: EnvironmentManager | None = None,
+            lifecycle_hint: str | None = None,
         ) -> _StubMox:
             # Keep signature compatible with real CmdMox; forward kwargs to stub.
             behavior_config = StubMoxBehaviorConfig(
@@ -200,6 +203,7 @@ def make_manager(
                 phase=phase,
                 behavior=behavior_config,
                 environment=environment,
+                lifecycle_hint=lifecycle_hint,
             )
 
         monkeypatch.setattr(pytest_plugin, "CmdMox", _factory)
@@ -354,6 +358,7 @@ def test_enter_cmd_mox_auto_lifecycle_overrides(
     manager = make_manager(request)
 
     assert not manager.auto_lifecycle, "Assertion failed"
+    assert manager.mox._lifecycle_hint is None, "hint must be omitted in manual mode"
 
     manager.enter()
 
@@ -452,6 +457,31 @@ def test_enter_cmd_mox_param_override_precedes_marker(
 
     stub = typ.cast("_StubMox", manager.mox)
     _assert_lifecycle_calls(stub, enter=1, replay=0)
+
+
+def test_auto_lifecycle_hint_explains_override_precedence(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """The lifecycle hint makes higher-precedence opt-outs clear."""
+    request = _StubRequest(
+        config=_StubConfig(cli=False, ini=False),
+        node=_StubNode(marker=_StubMarker(auto_lifecycle=True)),
+        param={"auto_lifecycle": True},
+    )
+    manager = make_manager(request)
+
+    assert manager.auto_lifecycle, "Assertion failed"
+    hint = manager.mox._lifecycle_hint
+    expected_hint = (
+        "Disable the most specific active setting: pass False (or "
+        "{'auto_lifecycle': False}) as the cmd_mox fixture parameter, use "
+        "@pytest.mark.cmd_mox(auto_lifecycle=False), pass "
+        "--no-cmd-mox-auto-lifecycle, or set the "
+        "cmd_mox_auto_lifecycle ini option to false. Fixture parameters "
+        "override markers, markers override the CLI, and the CLI overrides "
+        "the ini option."
+    )
+    assert hint == expected_hint, "auto lifecycle hint must explain precedence"
 
 
 @pytest.mark.parametrize("mode", ["explicit-node", "request-node"])

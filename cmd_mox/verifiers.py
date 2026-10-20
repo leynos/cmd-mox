@@ -7,8 +7,8 @@ import typing as typ
 from collections import defaultdict
 from textwrap import indent
 
+from ._argument_redaction import SENSITIVE_ENV_KEY_TOKENS
 from .errors import UnexpectedCommandError, UnfulfilledExpectationError
-from .expectations import SENSITIVE_ENV_KEY_TOKENS
 from .test_doubles import DoubleKind
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing

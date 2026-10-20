@@ -16,8 +16,8 @@ if typ.TYPE_CHECKING:
 
 import pytest
 
+from cmd_mox._argument_redaction import SENSITIVE_ENV_KEY_TOKENS
 from cmd_mox.controller import CmdMox
-from cmd_mox.expectations import SENSITIVE_ENV_KEY_TOKENS
 from cmd_mox.ipc import Invocation
 from tests.helpers.controller import (
     CommandExecution,

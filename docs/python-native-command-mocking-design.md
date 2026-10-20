@@ -285,6 +285,12 @@ inspiration from PyMox's method-chaining style.
   method accepts a sequence of `CmdMox` comparator objects (see Section V).
   This allows for matching based on type, regular expressions, or custom logic.
 
+  Each `CommandDouble` accepts one argument expectation. A second call to
+  `with_args()` or `with_matching_args()`, including a call that mixes both
+  methods, raises `ExpectationConfigurationError` rather than replacing or
+  combining the existing expectation. Use `cmd_mox.spy(name).runs(handler)` for
+  multiple invocations of one command with different arguments.
+
 - `.with_stdin(data: Union[str, bytes, Comparator])`**:** Defines an expectation
   for the data that is piped to the command's standard input. This can be a
   literal string or bytes, or a comparator for flexible matching.
@@ -351,6 +357,11 @@ testing lifecycle. When using the pytest `cmd_mox` fixture, these are called
 automatically (replay before the test body executes, verification during
 teardown) so most tests only declare expectations and exercise the system under
 test.
+
+Phase checks can append optional, generic hint text supplied by an integration.
+The pytest fixture manager supplies auto-lifecycle opt-out guidance when it has
+already replayed the fixture. Pytest-specific policy remains in the plugin,
+while the controller treats the hint as opaque text.
 
 ```mermaid
 sequenceDiagram
@@ -2716,7 +2727,16 @@ rather than relying on `.replay()`.
 - Variables on the user-defined allowlist
 - Variables matching command-specific prefixes (e.g., `GIT_*` for git)
 
-#### 9.9.3 Review Workflow
+#### 9.9.3 Command argument diagnostics
+
+Expectation configuration errors pass displayed argument sets through a shared
+pure redactor. It masks values for credential-bearing options and headers,
+along with URL userinfo, sensitive query parameters, and credential
+assignments, while preserving argument positions. Redaction affects diagnostic
+output only; registered expectations and invocation arguments retain their
+original values.
+
+#### 9.9.4 Review workflow
 
 For sensitive fixtures, a review mode generates a companion file for manual
 verification:
