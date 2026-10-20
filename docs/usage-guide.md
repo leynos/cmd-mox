@@ -129,7 +129,7 @@ phase is an idempotent no-op. A manually managed controller with the default
 `verify_on_exit=True` verifies when its context exits and enters the verify
 phase; a later `replay()` raises `LifecycleError`. With `verify_on_exit=False`,
 the context exits while the controller is still in replay, so a later call
-raises `LifecycleError: Cannot call replay(): not in 'record' phase (current phase: replay)`.
+raises `LifecycleError` with the current phase reported as `replay`.
 
 For manual lifecycle control, disable automatic replay and verification with
 one of these settings:
