@@ -149,7 +149,6 @@ def _inner_server_cls_for_backend() -> tuple[_InnerServerClass, _CacheOutcome]:
         base_after = resolve_unix_server_base.cache_info()
 
     cache_outcome = _cache_outcome(before, after)
-    inner_server_cls = typ.cast("_InnerServerClass", inner_server_cls)
     selection_mode = inner_server_cls._cmd_mox_selection_mode
     if cache_outcome == "miss" and selection_mode in {"native", "compatibility"}:
         _emit_backend_event(
@@ -299,12 +298,12 @@ class _IPCHandler(socketserver.StreamRequestHandler):
 
 
 @cache
-def _inner_server_cls() -> cabc.Callable[[Path, IPCServer], socketserver.BaseServer]:
+def _inner_server_cls() -> _InnerServerClass:
     """Build the transport server class after resolving its platform base.
 
     Returns
     -------
-    cabc.Callable[[Path, IPCServer], socketserver.BaseServer]
+    _InnerServerClass
         The inner server class configured for this platform.
 
     Notes
@@ -328,7 +327,7 @@ def _inner_server_cls() -> cabc.Callable[[Path, IPCServer], socketserver.BaseSer
             self.daemon_threads = True
 
     return typ.cast(
-        "cabc.Callable[[Path, IPCServer], socketserver.BaseServer]",
+        "_InnerServerClass",
         _InnerServer,
     )
 

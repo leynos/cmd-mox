@@ -171,19 +171,11 @@ def test_inner_server_class_is_cached(
 
 
 def test_generated_server_class_keeps_daemon_threads_enabled(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     unix_server_base_cache: None,
-    stub_unix_stream_server: type[socketserver.BaseServer],
+    native_unix_server_platform: None,
 ) -> None:
     """Retain threaded lifecycle settings without opening a listening socket."""
-    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(
-        socketserver,
-        "ThreadingUnixStreamServer",
-        stub_unix_stream_server,
-        raising=False,
-    )
     outer_server = unix_server.IPCServer(tmp_path / "unused.sock")
 
     generated_server = typ.cast(
@@ -219,16 +211,9 @@ def test_concurrent_server_class_access_resolves_once(
 def test_concurrent_unix_base_access_resolves_once(
     monkeypatch: pytest.MonkeyPatch,
     unix_server_base_cache: None,
-    stub_unix_stream_server: type[socketserver.BaseServer],
+    native_unix_server_platform: None,
 ) -> None:
     """Serialize concurrent first access to the cached Unix base resolver."""
-    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(
-        socketserver,
-        "ThreadingUnixStreamServer",
-        stub_unix_stream_server,
-        raising=False,
-    )
     resolver_calls, server_bases = _run_concurrent_first_access(
         monkeypatch,
         (unix_server, "_UNIX_SERVER_BASE_CACHE_LOCK"),
@@ -237,9 +222,9 @@ def test_concurrent_unix_base_access_resolves_once(
     )
 
     assert resolver_calls == 1, "Concurrent first access must resolve the base once"
+    threading_server = socketserver.ThreadingUnixStreamServer
     assert all(
-        server_base == (stub_unix_stream_server, "native")
-        for server_base in server_bases
+        server_base == (threading_server, "native") for server_base in server_bases
     ), "Concurrent callers must share the same resolved base and mode"
 
 

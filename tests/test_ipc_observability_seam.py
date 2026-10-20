@@ -142,9 +142,10 @@ def test_counter_key_omits_unbounded_message_kinds_and_error_categories() -> Non
 
 def test_counter_key_preserves_fixed_backend_error_categories() -> None:
     """Keep bounded backend error labels available for diagnosis."""
+    categories = set(typ.get_args(_observability._BackendErrorCategory.__value__))
     _observability.reset_counters()
     try:
-        for error_category in ("os_error", "runtime_error"):
+        for error_category in categories:
             _observability.emit(
                 _observability.IPCEvent(
                     operation="ipc.backend_selection",
@@ -159,10 +160,9 @@ def test_counter_key_preserves_fixed_backend_error_categories() -> None:
 
         counters = _observability.counter_snapshot()
 
-        assert {key.error_category for key in counters} == {
-            "os_error",
-            "runtime_error",
-        }, "Fixed backend categories must remain separate counter dimensions"
+        assert {key.error_category for key in counters} == categories, (
+            "Fixed backend categories must remain separate counter dimensions"
+        )
     finally:
         _observability.reset_counters()
 
