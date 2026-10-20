@@ -374,6 +374,100 @@ def test_create_invocation_reports_stdin_timeout(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+@pytest.mark.parametrize("polling_adapter", ["poll", "select"])
+def test_create_invocation_reports_stdin_poll_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    stdin_pipe_descriptor: int,
+    polling_adapter: str,
+) -> None:
+    """Active poller failures use the bounded stdin diagnostic boundary."""
+
+    class _FailingPoll:
+        def register(self, _fd: int, _events: int) -> None:
+            """Accept the descriptor so failure occurs during the real wait."""
+
+        def poll(self, _timeout: int) -> list[tuple[int, int]]:
+            """Fail after setup to exercise the active read path.
+
+            Raises
+            ------
+            _InjectedOSError
+                Simulated poll failure.
+            """
+            raise _InjectedOSError("hidden")
+
+    buffer = _BufferedInput([b"must not be read"])
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        _DescriptorStdin(stdin_pipe_descriptor, buffer=buffer),
+    )
+    if polling_adapter == "poll":
+        monkeypatch.setattr(shim._shim_stdin.select, "poll", _FailingPoll)
+    else:
+        select_calls = 0
+
+        def fail_during_select_wait(
+            read_fds: list[int],
+            _write_fds: list[int],
+            _exception_fds: list[int],
+            _timeout: float,
+        ) -> tuple[list[int], list[int], list[int]]:
+            """Allow setup probing, then fail during the bounded wait.
+
+            Returns
+            -------
+            tuple[list[int], list[int], list[int]]
+                Empty readiness lists during the setup probe.
+
+            Raises
+            ------
+            _InjectedOSError
+                Simulated select failure.
+            """
+            nonlocal select_calls
+            select_calls += 1
+            if select_calls == 1:
+                return [], [], []
+            raise _InjectedOSError("hidden")
+
+        monkeypatch.setattr(shim._shim_stdin.select, "poll", None)
+        monkeypatch.setattr(
+            shim._shim_stdin.select,
+            "select",
+            fail_during_select_wait,
+        )
+    monkeypatch.setattr(sys, "argv", ["shim"])
+    counters_before = _observability.counter_snapshot()
+
+    with (
+        caplog.at_level("INFO", logger="cmd_mox.shim"),
+        _observability.capture_events() as events,
+        pytest.raises(SystemExit) as exc,
+    ):
+        _create_invocation("shim", timeout=1.0)
+
+    _assert_exit_code(exc, 1)
+    diagnostic = capsys.readouterr().err
+    assert "IPC error: stdin read failed" in diagnostic, (
+        "polling failure did not produce a controlled stdin diagnostic"
+    )
+    assert "hidden" not in diagnostic, "polling exception details must not reach stderr"
+    assert "hidden" not in caplog.text, "polling exception details must not reach logs"
+    assert buffer.read_calls == 0, "stdin bytes were read after poller failure"
+    [event] = events
+    assert event.operation == "ipc.shim.stdin_read", "Wrong stdin event operation"
+    assert event.outcome == "read_failed", "Polling failure was not reported once"
+    assert event.error_category == "OSError", "Wrong polling error category"
+    counts_after = _observability.counter_snapshot()
+    assert (
+        counts_after.get(event.key(), 0) == counters_before.get(event.key(), 0) + 1
+    ), "polling failure did not increment its bounded event counter once"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_create_invocation_caps_large_poll_timeout(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

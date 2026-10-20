@@ -111,7 +111,7 @@ def _stdin_decoder() -> io.IncrementalNewlineDecoder:
     )
 
 
-def _poll_stdin(poller: _Poller, deadline: float) -> list[tuple[int, int]] | None:
+def _poll_stdin(context: _ReadContext) -> list[tuple[int, int]] | None:
     """Wait once for stdin, returning None only after the deadline.
 
     Returns
@@ -120,13 +120,16 @@ def _poll_stdin(poller: _Poller, deadline: float) -> list[tuple[int, int]] | Non
         Readiness events, an empty list on an intermediate timeout, or None
         after the deadline.
     """
-    remaining = deadline - time.monotonic()
+    remaining = context.deadline - time.monotonic()
     if remaining <= 0:
         return None
 
     poll_timeout = min(remaining, MAX_POLL_TIMEOUT_MS / 1_000)
-    events = poller.poll(max(1, math.ceil(poll_timeout * 1_000)))
-    if time.monotonic() < deadline:
+    try:
+        events = context.poller.poll(max(1, math.ceil(poll_timeout * 1_000)))
+    except OSError as exc:
+        context.on_error(exc)
+    if time.monotonic() < context.deadline:
         return events
     return None
 
@@ -296,7 +299,7 @@ def _read_buffered_stdin(
     while True:
         if time.monotonic() >= context.deadline:
             context.on_error(TimeoutError("timed out reading stdin"))
-        events = _poll_stdin(context.poller, context.deadline)
+        events = _poll_stdin(context)
         if events is None or time.monotonic() >= context.deadline:
             context.on_error(TimeoutError("timed out reading stdin"))
         if not events:
@@ -338,7 +341,7 @@ def _read_buffered_chunk(
 
 def _wait_for_stdin(context: _ReadContext) -> None:
     """Wait for stdin readiness or report when its deadline expires."""
-    if _poll_stdin(context.poller, context.deadline) is None:
+    if _poll_stdin(context) is None:
         context.on_error(TimeoutError("timed out reading stdin"))
 
 
@@ -353,7 +356,7 @@ def _read_raw_polled_stdin(context: _ReadContext) -> str:
     decoder = _stdin_decoder()
     chunks: list[str] = []
     while True:
-        events = _poll_stdin(context.poller, context.deadline)
+        events = _poll_stdin(context)
         if events is None:
             context.on_error(TimeoutError("timed out reading stdin"))
         if not events:
