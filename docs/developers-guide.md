@@ -223,16 +223,9 @@ it composes that class with `ThreadingMixIn`. On Windows the resolver returns a
 placeholder whose construction raises `RuntimeError`, while a platform with
 neither Unix server class raises `RuntimeError` during resolution. Both caches
 retain a successful result for the process lifetime. A resolution failure is
-not cached: each backend creation repeats resolution, emits a new `unsupported`
-event, and records no cache outcome.
-
-The resolver emits the bounded `ipc.unix_server_base.resolve` event with one of
-the `native`, `compatibility`, `windows_unsupported`, or `unsupported`
-outcomes. Backend creation records `hit` or `miss` outcomes only for caches it
-consults; a factory cache hit does not consult the base resolver. These records
-carry only the `unix` transport, fixed operation/outcome labels, and the
-`RuntimeError` category where applicable; they never include socket paths or
-exception messages.
+not cached, so a later backend start retries resolution. Direct resolver calls
+have no observability side effects; request and dispatch events remain part of
+the normal IPC handling path.
 
 ## Skylos dead-code policy
 

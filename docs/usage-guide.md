@@ -979,6 +979,13 @@ with IPCServer(socket_path, handlers=handlers):
 Providing `passthrough_handler=` to `IPCHandlers` intercepts passthrough
 completions in the same fashion. When no callbacks are supplied the server
 keeps its default echo behaviour, so existing code continues to work unchanged.
+On Unix, the server selects its threaded socket base when the backend first
+starts and caches a successful selection for the process lifetime. It prefers
+`socketserver.ThreadingUnixStreamServer` and falls back to combining
+`socketserver.UnixStreamServer` with `socketserver.ThreadingMixIn`. If neither
+class is available, starting the Unix server raises `RuntimeError`; the failed
+selection is retried on a later start. Direct Unix-server use on Windows also
+raises `RuntimeError`, while `CmdMox` selects the Windows named-pipe transport.
 Request dispatch invokes the public `handle_invocation()` and
 `handle_passthrough_result()` hooks. Subclass `IPCServer` when server behaviour
 requires overriding those hooks:

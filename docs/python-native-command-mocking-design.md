@@ -686,18 +686,17 @@ process lifetime when resolution succeeds. The resolver prefers Python's
 `socketserver.ThreadingUnixStreamServer`; when that class is unavailable but
 `socketserver.UnixStreamServer` exists, it composes the latter with
 `socketserver.ThreadingMixIn`. If neither class exists, resolution raises
-`RuntimeError`, and that failure is not cached. Each backend creation retries
-resolution, emits a new `unsupported` event, and records no cache outcome.
-Directly constructing the Unix server on Windows also raises `RuntimeError`;
-the controller selects the named-pipe transport there. Incoming JSON messages
-are parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts (default: 5.0s). Callers can pass an `IPCHandlers`
-dataclass to provide invocation and passthrough callbacks when constructing the
-server for simple composition. Subclassing remains supported when custom
-behaviour requires overriding the public handler hooks. The `CallbackIPCServer`
-compatibility wrapper forwards a `TimeoutConfig` dataclass so callers can
-continue to customize startup and accept timeouts without exceeding the
-four-argument limit. On Windows hosts the controller constructs a
+`RuntimeError`, and that failure is not cached, so a later backend start
+retries resolution. Directly constructing the Unix server on Windows also raises
+`RuntimeError`; the controller selects the named-pipe transport there.
+Incoming JSON messages are parsed into `Invocation` objects and processed in
+background threads with reasonable timeouts (default: 5.0s). Callers can pass an
+`IPCHandlers` dataclass to provide invocation and passthrough callbacks when
+constructing the server for simple composition. Subclassing remains supported
+when custom behaviour requires overriding the public handler hooks. The
+`CallbackIPCServer` compatibility wrapper forwards a `TimeoutConfig` dataclass
+so callers can continue to customize startup and accept timeouts without
+exceeding the four-argument limit. On Windows hosts the controller constructs a
 `NamedPipeServer`, which shares the same handler plumbing but uses `win32pipe`/
 `win32file` (via `pywin32`) to host a duplex named pipe that mirrors the Unix
 socket behaviour. The named pipe name is derived from the logical socket path,
@@ -908,14 +907,6 @@ sequenceDiagram
         Server->>Client: Send response
     end
 ```
-
-The Unix resolver records a bounded `ipc.unix_server_base.resolve` event with
-the `native`, `compatibility`, `windows_unsupported`, or `unsupported` outcome;
-both failure outcomes carry the `RuntimeError` category. Backend creation
-records bounded cache `hit` and `miss` outcomes only for caches it consults. A
-factory cache hit bypasses the base resolver and emits only the factory cache
-event. The event dimensions are fixed labels and never include socket paths,
-request data, or exception messages.
 
 The relationships between the Windows transport helpers are summarized below.
 

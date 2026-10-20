@@ -166,12 +166,8 @@ EXPECTED_ENTRYPOINT_REASONS = {
         "abstract lifecycle hook."
     ),
     "cmd_mox.ipc.server._inner_server_cls": (
-        "IPCServer._create_backend obtains this cached class via "
-        "_inner_server_cls_for_backend; Skylos reports the factory as unreachable."
-    ),
-    "cmd_mox.ipc.server._inner_server_cls_for_backend": (
-        "IPCServer._create_backend calls this cache helper during "
-        "_ServerLifecycle.start."
+        "IPCServer._create_backend calls this cached factory during "
+        "_ServerLifecycle.start; Skylos reports the dynamic class use as unreachable."
     ),
     "cmd_mox.ipc.server._InnerServer": (
         "_create_backend instantiates the cached class; Skylos misses the dynamic edge."
@@ -194,7 +190,6 @@ EXPECTED_ENTRYPOINT_TYPES = {
     "cmd_mox.ipc.named_pipe._NamedPipeState._poke_pipe": "method",
     "cmd_mox.ipc._server_core._ServerLifecycle._stop_backend.server": "parameter",
     "cmd_mox.ipc.server._inner_server_cls": "function",
-    "cmd_mox.ipc.server._inner_server_cls_for_backend": "function",
     "cmd_mox.ipc.server._InnerServer": "class",
 }
 EXPECTED_ENTRYPOINT_FULL_NAMES = frozenset(EXPECTED_ENTRYPOINT_REASONS)

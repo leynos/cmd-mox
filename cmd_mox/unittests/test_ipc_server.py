@@ -2,6 +2,7 @@
 
 import os
 import socket
+import socketserver
 import threading
 import typing as typ
 from pathlib import Path
@@ -18,8 +19,10 @@ from cmd_mox.ipc import (
     Invocation,
     IPCServer,
     RetryConfig,
+    _unix_server_base,
     invoke_server,
 )
+from cmd_mox.ipc import server as unix_server
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -68,6 +71,46 @@ def test_ipc_server_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         invocation = Invocation(command="ls", args=["-l"], stdin="", env={})
         response = invoke_server(invocation, timeout=2.0)
         assert response.stdout == "ls"
+
+
+def test_ipc_server_resolves_unix_base_on_first_backend_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve the Unix base lazily and preserve the public IPC roundtrip."""
+    _unix_server_base.resolve_unix_server_base.cache_clear()
+    unix_server._inner_server_cls.cache_clear()
+    original_resolver = _unix_server_base._resolve_unix_server_base
+    resolver_calls = 0
+
+    def count_resolution() -> type[socketserver.BaseServer]:
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return original_resolver()
+
+    monkeypatch.setattr(
+        _unix_server_base,
+        "_resolve_unix_server_base",
+        count_resolution,
+    )
+    try:
+        socket_path = tmp_path / "ipc-lazy.sock"
+        server = IPCServer(socket_path)
+        assert resolver_calls == 0, "Creating IPCServer must not resolve its base."
+
+        with server:
+            assert resolver_calls == 1, "Backend start must resolve its base once."
+            monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+            response = invoke_server(
+                Invocation(command="ls", args=["-l"], stdin="", env={}),
+                timeout=2.0,
+            )
+            assert response.stdout == "ls"
+
+        assert resolver_calls == 1, "The successful base resolution must be cached."
+    finally:
+        unix_server._inner_server_cls.cache_clear()
+        _unix_server_base.resolve_unix_server_base.cache_clear()
 
 
 def test_ipc_server_start_fails_if_in_use(tmp_path: Path) -> None:
