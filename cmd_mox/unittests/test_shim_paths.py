@@ -339,6 +339,6 @@ def test_resolve_passthrough_target_merges_paths(
     assert captured_path == env["PATH"], (
         "resolved lookup path was not passed to PATH search"
     )
-    assert captured_path.split(os.pathsep) == ["/usr/bin", "/custom/bin"], (
+    assert env["PATH"].split(os.pathsep) == ["/usr/bin", "/custom/bin"], (
         "PATH search retained the shim directory or a duplicate entry"
     )

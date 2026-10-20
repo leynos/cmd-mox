@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import stat
 import sys
+import typing as typ
 
 import pytest
 
@@ -16,6 +18,127 @@ from cmd_mox.unittests._shim_test_support import (
     _DescriptorStdin,
     _InjectedOSError,
 )
+
+
+class _InjectedBufferedReader:
+    """Return scripted bytes through the injected buffered-read path."""
+
+    def __init__(self) -> None:
+        """Prepare UTF-8 input followed by EOF."""
+        self._chunks = iter([b"payload\r\n", b""])
+
+    def read1(self, _size: int) -> bytes:
+        """Return the next scripted chunk.
+
+        Returns
+        -------
+        bytes
+            One chunk of test input, or the empty EOF marker.
+        """
+        return next(self._chunks)
+
+
+class _InjectedStdin:
+    """Expose the minimal text-stream protocol for synthetic stdin."""
+
+    def __init__(self, descriptor: int) -> None:
+        """Bind the synthetic descriptor and buffered input."""
+        self._descriptor = descriptor
+        self.buffer = _InjectedBufferedReader()
+
+    @property
+    def encoding(self) -> str:
+        """Decoder encoding for the scripted input bytes."""
+        return "utf-8"
+
+    @property
+    def errors(self) -> str:
+        """Decoder error policy for the scripted input bytes."""
+        return "strict"
+
+    def fileno(self) -> int:
+        """Return the synthetic descriptor.
+
+        Returns
+        -------
+        int
+            The descriptor supplied at construction.
+        """
+        return self._descriptor
+
+    def read(self) -> str:
+        """Return a sentinel if the direct-read fallback is selected.
+
+        Returns
+        -------
+        str
+            A value that cannot match the expected buffered payload.
+        """
+        return "unexpected direct read"
+
+
+class _InjectedReadyPoller:
+    """Report readiness for the descriptor supplied at construction."""
+
+    def __init__(self, descriptor: int) -> None:
+        """Bind the descriptor to report as readable."""
+        self._descriptor = descriptor
+
+    def poll(self, _timeout: int) -> list[tuple[int, int]]:
+        """Report the bound descriptor as ready.
+
+        Returns
+        -------
+        list[tuple[int, int]]
+            A single readiness event for the synthetic descriptor.
+        """
+        return [(self._descriptor, 1)]
+
+
+class _CountingClock:
+    """Return a stable deadline clock and record each observation."""
+
+    def __init__(self) -> None:
+        """Start the clock-read counter at zero."""
+        self.reads = 0
+
+    def __call__(self) -> float:
+        """Return a time before the deadline.
+
+        Returns
+        -------
+        float
+            Zero, leaving the synthetic deadline in the future.
+        """
+        self.reads += 1
+        return 0.0
+
+
+def _create_ready_poller(descriptor: int) -> _InjectedReadyPoller:
+    """Create a poller for the descriptor returned by injected stdin.
+
+    Returns
+    -------
+    _InjectedReadyPoller
+        Poller that reports the supplied descriptor as ready.
+    """
+    return _InjectedReadyPoller(descriptor)
+
+
+def _fifo_stat(_descriptor: int) -> os.stat_result:
+    """Classify injected stdin as a pipe rather than a regular file.
+
+    Returns
+    -------
+    os.stat_result
+        A synthetic stat result whose mode denotes a FIFO.
+    """
+    return os.stat_result((stat.S_IFIFO, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+
+def _unexpected_descriptor_read(_descriptor: int, _size: int) -> typ.NoReturn:
+    """Fail if buffered stdin unexpectedly reaches raw descriptor reads."""
+    pytest.fail("buffered stdin unexpectedly used the descriptor reader")
 
 
 class _FailingPoll:
@@ -209,9 +332,7 @@ def test_create_invocation_caps_large_poll_timeout(
     monkeypatch.setattr(sys, "stdin", _DescriptorStdin(stdin_pipe_descriptor))
     monkeypatch.setattr(shim._shim_stdin.select, "poll", lambda: poller)
     monotonic_values = iter([0.0, 0.0, 1e308])
-    monkeypatch.setattr(
-        shim._shim_stdin.time, "monotonic", lambda: next(monotonic_values)
-    )
+    monkeypatch.setattr(shim.time, "monotonic", lambda: next(monotonic_values))
 
     with pytest.raises(SystemExit):
         _create_invocation("shim", timeout=1e308)
@@ -295,3 +416,28 @@ def test_create_invocation_preserves_piped_newlines(
     assert invocation.stdin == "first\r\nsecond\rthird", (
         "bounded stdin reads must preserve POSIX newline sequences"
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_stdin_reader_uses_injected_source_and_clock() -> None:
+    """The reader uses the supplied stream, polling, descriptor, and clock seam."""
+    descriptor = 123
+    clock = _CountingClock()
+    source = shim._shim_stdin._StdinSource(
+        stream=_InjectedStdin(descriptor),
+        create_poller=_create_ready_poller,
+        read_descriptor=_unexpected_descriptor_read,
+        stat_descriptor=_fifo_stat,
+    )
+    result = shim._shim_stdin._read_stdin_until_eof(
+        1.0,
+        deadline=1.0,
+        on_error=lambda exc: pytest.fail(f"injected stdin source failed: {exc}"),
+        dependencies=shim._shim_stdin._StdinReadDependencies(
+            source=source,
+            clock=clock,
+        ),
+    )
+
+    assert result == "payload\r\n", "Injected stdin source changed input text"
+    assert clock.reads > 0, "Reader ignored the injected monotonic clock"

@@ -296,26 +296,12 @@ def test_ci_caches_and_verifies_the_pinned_detector() -> None:
     ), "make install-nose must forbid cargo-binstall's compile strategies"
 def test_spelling_gate_fails_without_git_file_enumeration(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Do not let a failed Git file listing make the spelling gate pass."""
     make_executable = shutil.which("make")
     git_executable = shutil.which("git")
     if make_executable is None or git_executable is None:
         pytest.skip("make or git is unavailable")
-
-    isolated_environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
-    }
-    ambient_git_directory = tmp_path / "ambient-repository"
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed Git setup argv, shell disabled.
-        [git_executable, "init", "--quiet", str(ambient_git_directory)],
-        env=isolated_environment,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    monkeypatch.setenv("GIT_DIR", str(ambient_git_directory / ".git"))
 
     gate_environment = {
         key: value for key, value in os.environ.items() if not key.startswith("GIT_")

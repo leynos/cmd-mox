@@ -196,8 +196,15 @@ def _create_invocation(
             )
             _exit_ipc_error(exc, operation="stdin_read")
 
+        stdin_dependencies = _shim_stdin._StdinReadDependencies(
+            source=_shim_stdin._system_stdin_source(),
+            clock=time.monotonic,
+        )
         stdin_data = _shim_stdin._read_stdin_until_eof(
-            timeout, deadline=deadline, on_error=report_stdin_error
+            timeout,
+            deadline=deadline,
+            on_error=report_stdin_error,
+            dependencies=stdin_dependencies,
         )
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
