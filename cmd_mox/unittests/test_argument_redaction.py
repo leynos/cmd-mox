@@ -43,7 +43,7 @@ def test_redaction_masks_generated_detached_credentials(
     option: str,
     credential: str,
 ) -> None:
-    """Detached sensitive options hide generated values without shifting args."""
+    """Detached secrets stay hidden in redacted args and conflict diagnostics."""
     arguments = ["before", option, credential, "after"]
 
     redacted = redact_sensitive_argument_values(arguments)
@@ -51,6 +51,14 @@ def test_redaction_masks_generated_detached_credentials(
     assert len(redacted) == len(arguments)
     assert redacted == ["before", option, "<redacted>", "after"]
     assert credential not in repr(redacted)
+
+    expectation = Expectation("cargo").with_args(*arguments)
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args("replacement")
+
+    message = str(exc_info.value)
+    assert f"args={redacted!r}" in message
+    assert credential not in message
 
 
 @given(arguments=st.lists(st.text(max_size=32), max_size=24))
