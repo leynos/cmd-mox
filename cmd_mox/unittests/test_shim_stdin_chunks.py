@@ -436,13 +436,35 @@ def _read_stdin_chunks(chunks: list[bytes], *, buffered: bool) -> str:
 def test_decode_stdin_chunk_reports_invalid_text() -> None:
     """Decode failures flow through the shim's controlled error callback."""
 
+    class _StrictUtf8Stream:
+        """Pin decoder input to strict UTF-8 independent of the host stdin."""
+
+        @property
+        def encoding(self) -> str:
+            return "utf-8"
+
+        @property
+        def errors(self) -> str:
+            return "strict"
+
+        def isatty(self) -> bool:
+            return False
+
+        def fileno(self) -> int:
+            raise OSError
+
+        def read(self) -> str:
+            raise OSError
+
     def raise_error(exc: Exception) -> typ.NoReturn:
         """Propagate the decode error for the controlled-error assertion."""
         raise exc
 
     with pytest.raises(UnicodeDecodeError):
         shim._shim_stdin._decode_stdin_chunk(
-            shim._shim_stdin._stdin_decoder(sys.stdin), b"\xff", raise_error
+            shim._shim_stdin._stdin_decoder(_StrictUtf8Stream()),
+            b"\xff",
+            raise_error,
         )
 
 
