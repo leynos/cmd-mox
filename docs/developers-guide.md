@@ -266,14 +266,18 @@ The shim emits bounded IPC observability events when stdin reading or writing
 and flushing a response stream fails. These use the existing dependency-free
 observability seam and record fixed operation, outcome, and error-category
 values, elapsed duration, and a correlation identifier when one is available.
-They do not include exception messages or stream contents. If the original
-deadline expires while the real command runs, the shim emits an
-`ipc.shim.passthrough_report` event with outcome `deadline_expired` and does
-not dispatch a report. Its elapsed duration includes the real command's
-runtime. Failures after report dispatch are covered by `ipc.client.request`
-events, without a duplicate shim event. Unix server response writes use
-`ipc.server.connection` events. The seam writes structured logging records and
-keeps in-process counters; it does not export to an external collector.
+They do not include exception messages or stream contents. If the deadline
+expires after stdin capture but before initial dispatch, the shim emits one
+`ipc.shim.ipc_request` event with outcome `deadline_expired` and does not
+dispatch the invocation. Its elapsed duration measures the dispatch budget
+check. If the original deadline expires while the real command runs, the shim
+emits an `ipc.shim.passthrough_report` event with outcome `deadline_expired`
+and does not dispatch a report. Its elapsed duration includes the real
+command's runtime. Failures after either dispatch are covered by
+`ipc.client.request` events, without a duplicate shim event. Unix server
+response writes use `ipc.server.connection` events. The seam writes structured
+logging records and keeps in-process counters; it does not export to an
+external collector.
 
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs from
 `CommandDouble.name`. It performs that command-name check before expectation

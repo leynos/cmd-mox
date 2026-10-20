@@ -27,7 +27,9 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
         shim, "_validate_environment", lambda: calls.append("validate") or 1.0
     )
 
-    invocation = Invocation(command="shim", args=[], stdin="", env={})
+    invocation = Invocation(
+        command="shim", args=[], stdin="", env={}, invocation_id="bootstrap-id"
+    )
     monkeypatch.setattr(
         shim,
         "_create_invocation",
@@ -72,7 +74,7 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
             1.0,
             None if shim.path_utils.IS_WINDOWS else 101.0,
         ),
-        ("write", response, invocation.invocation_id),
+        ("write", response, "bootstrap-id"),
     ], "shim startup steps did not run in the expected order"
 
 

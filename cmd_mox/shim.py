@@ -90,6 +90,7 @@ CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
 _SHIM_STDIN_READ_OPERATION = "ipc.shim.stdin_read"
 _SHIM_RESPONSE_STREAM_OPERATION = "ipc.shim.response_stream"
 _SHIM_PASSTHROUGH_REPORT_OPERATION = "ipc.shim.passthrough_report"
+_SHIM_IPC_REQUEST_OPERATION = "ipc.shim.ipc_request"
 
 type _FailureOperation = typ.Literal[
     "ipc_request",
@@ -99,7 +100,10 @@ type _FailureOperation = typ.Literal[
     "response_flush",
 ]
 type _ShimEventOperation = typ.Literal[
-    "ipc.shim.stdin_read", "ipc.shim.response_stream", "ipc.shim.passthrough_report"
+    "ipc.shim.stdin_read",
+    "ipc.shim.response_stream",
+    "ipc.shim.passthrough_report",
+    "ipc.shim.ipc_request",
 ]
 type _ShimEventOutcome = typ.Literal[
     "read_failed", "write_failed", "flush_failed", "deadline_expired"
@@ -365,10 +369,16 @@ def _execute_invocation(
     Response
         Response returned by the server or passthrough command.
     """
+    failure = _ShimFailureContext(
+        _SHIM_IPC_REQUEST_OPERATION,
+        "deadline_expired",
+        time.perf_counter(),
+        invocation.invocation_id,
+    )
     try:
         response = invoke_server(
             invocation,
-            timeout=_timeout_remaining(timeout, deadline),
+            timeout=_dispatch_timeout(timeout, deadline, failure),
             deadline=deadline,
         )
     except (
@@ -488,12 +498,12 @@ def main() -> None:
     _write_response(response, correlation_id=invocation.invocation_id)
 
 
-def _passthrough_report_timeout(
+def _dispatch_timeout(
     timeout: float,
     deadline: float | None,
     failure: _ShimFailureContext,
 ) -> float:
-    """Check the reporting budget and record expiry before client dispatch.
+    """Check the shared budget and record expiry before client dispatch.
 
     Returns
     -------
@@ -558,7 +568,7 @@ def _handle_passthrough(
     try:
         return report_passthrough_result(
             passthrough_result,
-            timeout=_passthrough_report_timeout(timeout, deadline, failure),
+            timeout=_dispatch_timeout(timeout, deadline, failure),
             deadline=deadline,
         )
     except (OSError, RuntimeError, json.JSONDecodeError) as exc:
