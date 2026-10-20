@@ -89,6 +89,7 @@ from cmd_mox.ipc._server_core import bounded_correlation_id  # ruff: ignore[modu
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
 _SHIM_STDIN_READ_OPERATION = "ipc.shim.stdin_read"
 _SHIM_RESPONSE_STREAM_OPERATION = "ipc.shim.response_stream"
+_SHIM_PASSTHROUGH_REPORT_OPERATION = "ipc.shim.passthrough_report"
 
 type _FailureOperation = typ.Literal[
     "ipc_request",
@@ -98,9 +99,11 @@ type _FailureOperation = typ.Literal[
     "response_flush",
 ]
 type _ShimEventOperation = typ.Literal[
-    "ipc.shim.stdin_read", "ipc.shim.response_stream"
+    "ipc.shim.stdin_read", "ipc.shim.response_stream", "ipc.shim.passthrough_report"
 ]
-type _ShimEventOutcome = typ.Literal["read_failed", "write_failed", "flush_failed"]
+type _ShimEventOutcome = typ.Literal[
+    "read_failed", "write_failed", "flush_failed", "deadline_expired"
+]
 type _ResponseFailure = tuple[
     typ.Literal["response_write", "response_flush"], Exception
 ]
@@ -509,11 +512,18 @@ def _handle_passthrough(
     -------
     Response
         Response returned after the real command's result is reported.
+
+    Raises
+    ------
+    TimeoutError
+        Raised internally when the shared deadline expires before reporting;
+        recorded and converted into a controlled IPC exit.
     """
     directive = response.passthrough
     if directive is None:  # pragma: no cover - defensive guard
         return response
 
+    started = time.perf_counter()
     result_response = _run_real_command(invocation, directive)
     passthrough_result = PassthroughResult(
         invocation_id=directive.invocation_id,
@@ -522,9 +532,23 @@ def _handle_passthrough(
         exit_code=result_response.exit_code,
     )
     try:
+        try:
+            remaining = _timeout_remaining(timeout, deadline)
+        except TimeoutError as exc:
+            # The client cannot record failures that occur before dispatch.
+            _emit_shim_failure(
+                _ShimFailureContext(
+                    _SHIM_PASSTHROUGH_REPORT_OPERATION,
+                    "deadline_expired",
+                    started,
+                    invocation.invocation_id,
+                ),
+                exc,
+            )
+            raise
         return report_passthrough_result(
             passthrough_result,
-            timeout=_timeout_remaining(timeout, deadline),
+            timeout=remaining,
             deadline=deadline,
         )
     except (OSError, RuntimeError, json.JSONDecodeError) as exc:
