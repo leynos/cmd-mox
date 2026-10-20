@@ -199,6 +199,218 @@ def test_duplicate_argument_error_redacts_sensitive_values(
 
 
 @pytest.mark.parametrize(
+    (
+        "existing_args",
+        "attempted_args",
+        "existing_credential",
+        "attempted_credential",
+        "redacted_argument",
+    ),
+    [
+        pytest.param(
+            ("--accessToken=oldopaque123",),
+            ("--accessToken=newopaque456",),
+            "oldopaque123",
+            "newopaque456",
+            "--accessToken=<redacted>",
+            id="camel-case-access-token",
+        ),
+        pytest.param(
+            ("--clientSecret=oldopaque123",),
+            ("--clientSecret=newopaque456",),
+            "oldopaque123",
+            "newopaque456",
+            "--clientSecret=<redacted>",
+            id="camel-case-client-secret",
+        ),
+        pytest.param(
+            ("--authtoken=oldopaque123",),
+            ("--authtoken=newopaque456",),
+            "oldopaque123",
+            "newopaque456",
+            "--authtoken=<redacted>",
+            id="joined-auth-token",
+        ),
+        pytest.param(
+            ("-Dpassword=oldopaque123",),
+            ("-Dpassword=newopaque456",),
+            "oldopaque123",
+            "newopaque456",
+            "-Dpassword=<redacted>",
+            id="java-property-password",
+        ),
+        pytest.param(
+            ("PGPASSWORD=oldopaque123",),
+            ("PGPASSWORD=newopaque456",),
+            "oldopaque123",
+            "newopaque456",
+            "PGPASSWORD=<redacted>",
+            id="environment-style-password",
+        ),
+        pytest.param(
+            ("-u", "alice:oldopaque123"),
+            ("-u", "bob:newopaque456"),
+            "alice:oldopaque123",
+            "bob:newopaque456",
+            "'-u', '<redacted>'",
+            id="curl-short-user-option",
+        ),
+        pytest.param(
+            ("--user", "alice:oldopaque123"),
+            ("--user", "bob:newopaque456"),
+            "alice:oldopaque123",
+            "bob:newopaque456",
+            "'--user', '<redacted>'",
+            id="curl-long-user-option",
+        ),
+        pytest.param(
+            ("--proxy-user", "alice:oldopaque123"),
+            ("--proxy-user", "bob:newopaque456"),
+            "alice:oldopaque123",
+            "bob:newopaque456",
+            "'--proxy-user', '<redacted>'",
+            id="curl-proxy-user-option",
+        ),
+        pytest.param(
+            ("--oauth2-bearer", "oldopaque123"),
+            ("--oauth2-bearer", "newopaque456"),
+            "oldopaque123",
+            "newopaque456",
+            "'--oauth2-bearer', '<redacted>'",
+            id="curl-oauth2-bearer-option",
+        ),
+        pytest.param(
+            ("-b", "oldopaque123"),
+            ("-b", "newopaque456"),
+            "oldopaque123",
+            "newopaque456",
+            "'-b', '<redacted>'",
+            id="curl-short-cookie-option",
+        ),
+        pytest.param(
+            ("--cookie", "session=oldopaque123"),
+            ("--cookie", "session=newopaque456"),
+            "session=oldopaque123",
+            "session=newopaque456",
+            "'--cookie', '<redacted>'",
+            id="curl-long-cookie-option",
+        ),
+        pytest.param(
+            ("-ualice:oldopaque123",),
+            ("-ubob:newopaque456",),
+            "alice:oldopaque123",
+            "bob:newopaque456",
+            "-u<redacted>",
+            id="curl-joined-short-user-option",
+        ),
+        pytest.param(
+            ("-bsession=oldopaque123",),
+            ("-bsession=newopaque456",),
+            "oldopaque123",
+            "newopaque456",
+            "-b<redacted>",
+            id="curl-joined-short-cookie-option",
+        ),
+        pytest.param(
+            ("-u=alice:oldopaque123",),
+            ("-u=bob:newopaque456",),
+            "alice:oldopaque123",
+            "bob:newopaque456",
+            "-u=<redacted>",
+            id="curl-short-user-equals",
+        ),
+        pytest.param(
+            ("--user=alice:oldopaque123",),
+            ("--user=bob:newopaque456",),
+            "alice:oldopaque123",
+            "bob:newopaque456",
+            "--user=<redacted>",
+            id="curl-long-user-equals",
+        ),
+    ],
+)
+def test_duplicate_argument_error_redacts_credential_option_values(
+    existing_args: tuple[str, ...],
+    attempted_args: tuple[str, ...],
+    existing_credential: str,
+    attempted_credential: str,
+    redacted_argument: str,
+) -> None:
+    """Joined secret names and authentication options hide their values."""
+    expectation = Expectation("deploy").with_args(*existing_args)
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args(*attempted_args)
+
+    message = str(exc_info.value)
+    assert existing_credential not in message, "the existing credential must be hidden"
+    assert attempted_credential not in message, (
+        "the attempted credential must be hidden"
+    )
+    assert message.count(redacted_argument) == 2, (
+        "both credential options must be redacted"
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "existing_url",
+        "attempted_url",
+        "existing_credential",
+        "attempted_credential",
+        "redacted_url",
+    ),
+    [
+        pytest.param(
+            "https://alice:oldopaque123@github.com/org/repo.git",
+            "https://bob:newopaque456@github.com/org/repo.git",
+            "alice:oldopaque123",
+            "bob:newopaque456",
+            "https://<redacted>@github.com/org/repo.git",
+            id="positional-url",
+        ),
+        pytest.param(
+            "--url=https://alice:oldopaque123@github.com/org/repo.git",
+            "--url=https://bob:newopaque456@github.com/org/repo.git",
+            "alice:oldopaque123",
+            "bob:newopaque456",
+            "--url=https://<redacted>@github.com/org/repo.git",
+            id="url-option",
+        ),
+        pytest.param(
+            "https://alice:p@ss@github.com/org/repo.git",
+            "https://bob:n@ew@github.com/org/repo.git",
+            "alice:p@ss",
+            "bob:n@ew",
+            "https://<redacted>@github.com/org/repo.git",
+            id="password-containing-at",
+        ),
+    ],
+)
+def test_duplicate_argument_error_redacts_url_userinfo(
+    existing_url: str,
+    attempted_url: str,
+    existing_credential: str,
+    attempted_credential: str,
+    redacted_url: str,
+) -> None:
+    """Credential-bearing URLs keep their useful, non-secret components."""
+    expectation = Expectation("git").with_args(existing_url)
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args(attempted_url)
+
+    message = str(exc_info.value)
+    assert existing_credential not in message, "the existing credential must be hidden"
+    assert attempted_credential not in message, (
+        "the attempted credential must be hidden"
+    )
+    assert message.count(redacted_url) == 2, (
+        "both credentials should be hidden while the URL remains readable"
+    )
+
+
+@pytest.mark.parametrize(
     ("existing_header", "attempted_header", "existing_value", "attempted_value"),
     [
         pytest.param(
@@ -230,9 +442,195 @@ def test_duplicate_argument_error_redacts_authorization_values(
         expectation.with_args(f"--header={attempted_header}")
 
     message = str(exc_info.value)
-    assert existing_value not in message
-    assert attempted_value not in message
-    assert message.count("--header=<redacted>") == 2
+    assert existing_value not in message, "the existing credential must be hidden"
+    assert attempted_value not in message, "the attempted credential must be hidden"
+    assert message.count("--header=<redacted>") == 2, (
+        "both header values must be redacted"
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "existing_args",
+        "attempted_args",
+        "existing_credential",
+        "attempted_credential",
+        "redacted_argument",
+    ),
+    [
+        pytest.param(
+            ("-H", "Cookie: session=oldopaque123"),
+            ("-H", "Cookie: session=newopaque456"),
+            "oldopaque123",
+            "newopaque456",
+            "'<redacted>'",
+            id="separate-cookie-header",
+        ),
+        pytest.param(
+            ("--header=Cookie: session=oldopaque123",),
+            ("--header=Cookie: session=newopaque456",),
+            "oldopaque123",
+            "newopaque456",
+            "--header=<redacted>",
+            id="inline-cookie-header",
+        ),
+    ],
+)
+def test_duplicate_argument_error_redacts_cookie_header_values(
+    existing_args: tuple[str, ...],
+    attempted_args: tuple[str, ...],
+    existing_credential: str,
+    attempted_credential: str,
+    redacted_argument: str,
+) -> None:
+    """Cookie header values are hidden in separate and inline forms."""
+    expectation = Expectation("deploy").with_args(*existing_args)
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args(*attempted_args)
+
+    message = str(exc_info.value)
+    assert existing_credential not in message, "the existing credential must be hidden"
+    assert attempted_credential not in message, (
+        "the attempted credential must be hidden"
+    )
+    assert message.count(redacted_argument) == 2, "both cookie values must be redacted"
+
+
+@pytest.mark.parametrize(
+    (
+        "existing_header",
+        "attempted_header",
+        "existing_credential",
+        "attempted_credential",
+        "redacted_header",
+    ),
+    [
+        pytest.param(
+            "-HAuthorization: Bearer oldopaque123",
+            "-HAuthorization: Bearer newopaque456",
+            "oldopaque123",
+            "newopaque456",
+            "-H<redacted>",
+            id="joined-authorization-header",
+        ),
+        pytest.param(
+            "-HCookie: session=oldopaque123",
+            "-HCookie: session=newopaque456",
+            "oldopaque123",
+            "newopaque456",
+            "-H<redacted>",
+            id="joined-cookie-header",
+        ),
+        pytest.param(
+            "-HX-API-Key: oldopaque123",
+            "-HX-API-Key: newopaque456",
+            "oldopaque123",
+            "newopaque456",
+            "-HX-API-Key:<redacted>",
+            id="joined-api-key-header",
+        ),
+    ],
+)
+def test_duplicate_argument_error_redacts_joined_header_values(
+    existing_header: str,
+    attempted_header: str,
+    existing_credential: str,
+    attempted_credential: str,
+    redacted_header: str,
+) -> None:
+    """Joined curl header values remain redacted in conflict errors."""
+    expectation = Expectation("curl").with_args(existing_header)
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args(attempted_header)
+
+    message = str(exc_info.value)
+    assert existing_credential not in message, "the existing credential must be hidden"
+    assert attempted_credential not in message, (
+        "the attempted credential must be hidden"
+    )
+    assert message.count(redacted_header) == 2, "both header values must be redacted"
+
+
+@pytest.mark.parametrize(
+    (
+        "existing_header",
+        "attempted_header",
+        "existing_credential",
+        "attempted_credential",
+    ),
+    [
+        pytest.param(
+            "Authorization: Basic dXNlcjpwYXNz==",
+            "Authorization: Basic YXR0ZW1wdA==",
+            "dXNlcjpwYXNz",
+            "YXR0ZW1wdA",
+            id="authorization-basic-padding",
+        ),
+        pytest.param(
+            "X-API-Key: b2xkLXNlY3JldA==",
+            "X-API-Key: bmV3LXNlY3JldA==",
+            "b2xkLXNlY3JldA",
+            "bmV3LXNlY3JldA",
+            id="api-key-padding",
+        ),
+    ],
+)
+def test_duplicate_argument_error_redacts_padded_header_credentials(
+    existing_header: str,
+    attempted_header: str,
+    existing_credential: str,
+    attempted_credential: str,
+) -> None:
+    """Padded standalone header values remain hidden in conflict errors."""
+    expectation = Expectation("deploy").with_args("-H", existing_header)
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args("-H", attempted_header)
+
+    message = str(exc_info.value)
+    assert existing_credential not in message, "the existing credential must be hidden"
+    assert attempted_credential not in message, (
+        "the attempted credential must be hidden"
+    )
+    assert message.count("'<redacted>'") == 2, "both headers must be redacted"
+
+
+@pytest.mark.parametrize(
+    ("existing_argument", "attempted_argument", "redacted_argument"),
+    [
+        pytest.param(
+            "Authorization=Bearer oldopaque123",
+            "Authorization=Bearer newopaque456",
+            "Authorization=<redacted>",
+            id="authorization-equals",
+        ),
+        pytest.param(
+            "--authorization=Bearer oldopaque123",
+            "--authorization=Bearer newopaque456",
+            "--authorization=<redacted>",
+            id="option-authorization-equals",
+        ),
+    ],
+)
+def test_duplicate_argument_error_redacts_equals_form_authorization_values(
+    existing_argument: str,
+    attempted_argument: str,
+    redacted_argument: str,
+) -> None:
+    """Authorization credentials remain hidden in equals-form arguments."""
+    expectation = Expectation("deploy").with_args(existing_argument)
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args(attempted_argument)
+
+    message = str(exc_info.value)
+    assert "oldopaque123" not in message, "the existing credential must be hidden"
+    assert "newopaque456" not in message, "the attempted credential must be hidden"
+    assert message.count(redacted_argument) == 2, (
+        "both Authorization arguments must be redacted"
+    )
 
 
 def test_duplicate_argument_error_preserves_key_like_positionals() -> None:
@@ -243,8 +641,8 @@ def test_duplicate_argument_error_preserves_key_like_positionals() -> None:
         expectation.with_args("replacement-file")
 
     message = str(exc_info.value)
-    assert "'my-key-file'" in message
-    assert "'ssh-key'" in message
+    assert "'my-key-file'" in message, "safe key-like positionals must remain visible"
+    assert "'ssh-key'" in message, "safe key-like positionals must remain visible"
 
 
 def test_with_matching_args_rejects_a_second_argument_expectation() -> None:

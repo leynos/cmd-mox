@@ -19,6 +19,17 @@ if typ.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Kept in the plugin so the generic controller remains pytest-independent.
+_AUTO_LIFECYCLE_HINT: typ.Final[str] = (
+    "Disable the most specific active setting: pass False (or "
+    "{'auto_lifecycle': False}) as the cmd_mox fixture parameter, "
+    "use @pytest.mark.cmd_mox(auto_lifecycle=False), pass "
+    "--no-cmd-mox-auto-lifecycle, or set the "
+    "cmd_mox_auto_lifecycle ini option to false. Fixture parameters "
+    "override markers, markers override the CLI, and the CLI "
+    "overrides the ini option."
+)
+
 # Stash key to record per-item call-stage failure state.
 STASH_CALL_FAILED: pytest.StashKey[bool] = pytest.StashKey()
 
@@ -263,17 +274,8 @@ class _CmdMoxManager:
         self.mox = CmdMox(
             verify_on_exit=False,
             environment=EnvironmentManager(prefix=_build_worker_prefix(self.config)),
+            lifecycle_hint=(_AUTO_LIFECYCLE_HINT if self._auto_lifecycle else None),
         )
-        if self._auto_lifecycle:
-            self.mox._lifecycle_hint = (
-                "Disable the most specific active setting: pass False (or "
-                "{'auto_lifecycle': False}) as the cmd_mox fixture parameter, "
-                "use @pytest.mark.cmd_mox(auto_lifecycle=False), pass "
-                "--no-cmd-mox-auto-lifecycle, or set the "
-                "cmd_mox_auto_lifecycle ini option to false. Fixture parameters "
-                "override markers, markers override the CLI, and the CLI "
-                "overrides the ini option."
-            )
         # CmdMox wires its command runner to the provided environment during
         # initialisation, so injecting the worker-scoped manager here ensures the
         # replay lifecycle observes the correct PATH mutations once entered.

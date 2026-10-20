@@ -285,6 +285,12 @@ inspiration from PyMox's method-chaining style.
   method accepts a sequence of `CmdMox` comparator objects (see Section V).
   This allows for matching based on type, regular expressions, or custom logic.
 
+  Each `CommandDouble` accepts one argument expectation. A second call to
+  `with_args()` or `with_matching_args()`, including a call that mixes both
+  methods, raises `ExpectationConfigurationError` rather than replacing or
+  combining the existing expectation. Use `cmd_mox.spy(name).runs(handler)` for
+  multiple invocations of one command with different arguments.
+
 - `.with_stdin(data: Union[str, bytes, Comparator])`**:** Defines an expectation
   for the data that is piped to the command's standard input. This can be a
   literal string or bytes, or a comparator for flexible matching.

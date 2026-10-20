@@ -70,9 +70,10 @@ def test_require_phase_mismatch() -> None:
 
 def test_require_phase_appends_lifecycle_hint() -> None:
     """A configured lifecycle hint follows the phase error message."""
-    mox = CmdMox()
-    mox._lifecycle_hint = (
-        "Pass --no-cmd-mox-auto-lifecycle to drive the lifecycle manually."
+    mox = CmdMox(
+        lifecycle_hint=(
+            "Pass --no-cmd-mox-auto-lifecycle to drive the lifecycle manually."
+        )
     )
 
     with pytest.raises(
@@ -84,8 +85,9 @@ def test_require_phase_appends_lifecycle_hint() -> None:
 
 def test_replay_preconditions_append_lifecycle_hint() -> None:
     """A configured hint is also added to the not-entered error."""
-    mox = CmdMox()
-    mox._lifecycle_hint = "Pass --no-cmd-mox-auto-lifecycle to continue manually."
+    mox = CmdMox(
+        lifecycle_hint="Pass --no-cmd-mox-auto-lifecycle to continue manually."
+    )
 
     with pytest.raises(
         LifecycleError,

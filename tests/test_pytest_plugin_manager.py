@@ -119,6 +119,7 @@ class _StubMox:
         phase: Phase = Phase.REPLAY,
         behavior: StubMoxBehaviorConfig | None = None,
         environment: EnvironmentManager | None = None,
+        lifecycle_hint: str | None = None,
     ) -> None:
         self.phase = phase
         config = behavior or StubMoxBehaviorConfig()
@@ -130,6 +131,7 @@ class _StubMox:
         self.verify_calls = 0
         self.exit_calls: list[tuple[object | None, object | None, object | None]] = []
         self.environment: object | None = environment
+        self._lifecycle_hint = lifecycle_hint
 
     def __enter__(self) -> _StubMox:
         self.enter_calls += 1
@@ -186,6 +188,7 @@ def make_manager(
             *,
             verify_on_exit: bool = False,
             environment: EnvironmentManager | None = None,
+            lifecycle_hint: str | None = None,
         ) -> _StubMox:
             # Keep signature compatible with real CmdMox; forward kwargs to stub.
             behavior_config = StubMoxBehaviorConfig(
@@ -200,6 +203,7 @@ def make_manager(
                 phase=phase,
                 behavior=behavior_config,
                 environment=environment,
+                lifecycle_hint=lifecycle_hint,
             )
 
         monkeypatch.setattr(pytest_plugin, "CmdMox", _factory)
@@ -354,6 +358,7 @@ def test_enter_cmd_mox_auto_lifecycle_overrides(
     manager = make_manager(request)
 
     assert not manager.auto_lifecycle, "Assertion failed"
+    assert manager.mox._lifecycle_hint is None, "hint must be omitted in manual mode"
 
     manager.enter()
 

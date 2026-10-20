@@ -114,10 +114,9 @@ The three phases are defined in the design document:
    happened.
 
 With pytest's default `cmd_mox` fixture, replay begins before the test body and
-verification runs during teardown. Calling `replay()` while the controller is
-already in replay mode is a no-op; calling it after `verify()` raises
-`LifecycleError`. The default workflow should omit explicit lifecycle calls.
-Declare expectations and exercise the code under test:
+verification runs during teardown (see [Getting started](#getting-started)).
+Declare expectations and exercise the code without calling `replay()` or
+`verify()` manually:
 
 ```python
 def test_clone_repo(cmd_mox):
@@ -334,9 +333,12 @@ A spy expectation can also use `times_called(count)`—an alias of `times(count)
 
 For multiple distinct calls to one command, use a handler that selects a
 response from `invocation.args`. The `spy.invocations` list preserves the call
-sequence for assertions:
+sequence for assertions. Handler exceptions become command failures rather than
+pytest exceptions, so record unmatched arguments for an explicit assertion:
 
 ```python
+unexpected_calls: list[list[str]] = []
+
 def handle_cargo(invocation):
     match invocation.args:
         case ["nextest", "--version"]:
@@ -346,11 +348,13 @@ def handle_cargo(invocation):
         case ["nextest", "run", *_]:
             return "", "", 100
         case unexpected:
+            unexpected_calls.append(unexpected)
             raise AssertionError(f"Unexpected cargo arguments: {unexpected}")
 
 
 cargo = cmd_mox.spy("cargo").runs(handle_cargo)
 run_gate_script()
+assert not unexpected_calls, f"Unexpected cargo arguments: {unexpected_calls}"
 # These example invocations have no extra metadata or run arguments.
 assert [invocation.args for invocation in cargo.invocations] == [
     ["nextest", "--version"],
@@ -856,6 +860,8 @@ the context-manager API:
 - `max_journal_entries` bounds the number of stored invocations (oldest entries
   are evicted FIFO when the bound is reached). The journal is exposed via
   `cmd_mox.journal`, a `collections.deque[Invocation]` recorded during replay.
+- `lifecycle_hint` (default `None`) appends caller-provided guidance to
+  `LifecycleError` messages for invalid phase transitions.
 
 The journal is especially handy when debugging:
 

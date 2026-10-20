@@ -66,6 +66,7 @@ class CmdMox:
         verify_on_exit: bool = True,
         max_journal_entries: int | None = None,
         environment: EnvironmentManager | None = None,
+        lifecycle_hint: str | None = None,
     ) -> None:
         """Create a new controller.
 
@@ -82,6 +83,9 @@ class CmdMox:
         environment:
             Optional :class:`EnvironmentManager` instance used to prepare shim and
             PATH state. When omitted a fresh manager is created automatically.
+        lifecycle_hint:
+            Optional text appended to lifecycle errors when a phase transition
+            is invalid.
 
         Raises
         ------
@@ -95,7 +99,7 @@ class CmdMox:
         self._runner = CommandRunner(self.environment)
         self._entered = False
         self._phase = Phase.RECORD
-        self._lifecycle_hint: str | None = None
+        self._lifecycle_hint = lifecycle_hint
         self._passthrough_coordinator = PassthroughCoordinator()
 
         if max_journal_entries is not None and max_journal_entries <= 0:
@@ -596,9 +600,19 @@ class CmdMox:
                 f"Cannot call {action}(): not in '{expected.name.lower()}' phase "
                 f"(current phase: {self._phase.name.lower()})"
             )
-            if self._lifecycle_hint is not None:
-                msg = f"{msg}; {self._lifecycle_hint}"
-            raise LifecycleError(msg)
+            raise LifecycleError(self._append_lifecycle_hint(msg))
+
+    def _append_lifecycle_hint(self, message: str) -> str:
+        """Append the configured lifecycle hint to a phase error message.
+
+        Returns
+        -------
+        str
+            The original message with the configured hint appended, if set.
+        """
+        if self._lifecycle_hint is None:
+            return message
+        return f"{message}; {self._lifecycle_hint}"
 
     def _require_env_attrs(self, *attrs: str) -> None:
         """Ensure all referenced ``EnvironmentManager`` attributes exist.
@@ -638,9 +652,7 @@ class CmdMox:
                 "replay() called without entering context "
                 f"(current phase: {self._phase.name.lower()})"
             )
-            if self._lifecycle_hint is not None:
-                msg = f"{msg}; {self._lifecycle_hint}"
-            raise LifecycleError(msg)
+            raise LifecycleError(self._append_lifecycle_hint(msg))
         self._require_env_attrs("shim_dir", "socket_path")
 
     def _validate_replay_environment(self) -> tuple[Path, Path]:
