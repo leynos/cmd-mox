@@ -754,12 +754,12 @@ from the result: a failed interception cannot silently fall through to a real
 binary with the same name.
 
 Shims read non-terminal standard input until EOF to populate
-`Invocation.stdin`. If an intermediary process, such as Git invoking a merge
-driver, inherits stdin and leaves it open, the shim waits and may hang until
-the caller's timeout. The only server-side symptom may be an
-`IPC received malformed JSON` error, which does not identify stdin as the
-cause. Pass `stdin=subprocess.DEVNULL`, or otherwise close or redirect stdin,
-unless the caller intends to supply input.
+`Invocation.stdin`; terminal input is skipped. If an intermediary process,
+such as Git invoking a merge driver, inherits non-terminal stdin and leaves it
+open, the shim waits and may hang until the caller's timeout. The only
+server-side symptom may be an `IPC received malformed JSON` error, which does
+not identify stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise
+close or redirect stdin, unless the caller intends to supply input.
 
 ## Controller configuration and journals
 
@@ -805,8 +805,9 @@ few common ones are:
 - `with_args(*args)` – require exact arguments.
 - `with_matching_args(*matchers)` – match arguments using comparators.
 - `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
-  validate it with a predicate `Callable[[str], bool]`. Shims read stdin until
-  EOF, so close or redirect it when no input is intended. See the
+  validate it with a predicate `Callable[[str], bool]`. Shims read non-terminal
+  stdin until EOF; terminal input is skipped. Close or redirect stdin when no
+  input is intended. See the
   [shim path guidance](#wiring-a-tool-to-a-shim-by-absolute-path).
 - `with_env(mapping)` – inject additional environment variables into the
   invocation. The mapping is merged into the recorded `Invocation.env`, applied
