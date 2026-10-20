@@ -1,7 +1,11 @@
 # Documentation Contents
 
+- [User Guide](./users-guide.md): User-facing workflows and shim timeout
+  behaviour.
 - [Usage Guide](./usage-guide.md): Mocking, stubbing, and spying on commands.
 - [Developer Guide](./developers-guide.md): Local checks and linting policy.
+- [IPC Timeout Migration Note](./ipc-timeout-migration-note.md): Prepare for
+  bounded shim stdin and IPC waits in the next minor release.
 - [Shellmock Migration Guide](./shellmock-migration-guide.md): Migrate from
   `shellmock` to CmdMox.
 - [Design Doc](./python-native-command-mocking-design.md): Design rationale.
