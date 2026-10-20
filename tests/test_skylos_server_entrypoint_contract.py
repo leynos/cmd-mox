@@ -17,10 +17,18 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SERVER_MODULE = "cmd_mox.ipc.server"
 _SERVER_PATH = "cmd_mox/ipc/server.py"
 _ENTRYPOINT_TYPES = {
+    f"{_SERVER_MODULE}._inner_server_cls_for_backend": "function",
+    f"{_SERVER_MODULE}._backend_error_category": "function",
     f"{_SERVER_MODULE}._inner_server_cls": "function",
     f"{_SERVER_MODULE}._InnerServer": "class",
 }
 _SOURCE_DEFINITION_PATHS = {
+    f"{_SERVER_MODULE}._inner_server_cls_for_backend": (
+        f"{_SERVER_MODULE}._inner_server_cls_for_backend"
+    ),
+    f"{_SERVER_MODULE}._backend_error_category": (
+        f"{_SERVER_MODULE}._backend_error_category"
+    ),
     f"{_SERVER_MODULE}._inner_server_cls": f"{_SERVER_MODULE}._inner_server_cls",
     f"{_SERVER_MODULE}._InnerServer": (
         f"{_SERVER_MODULE}._inner_server_cls._InnerServer"

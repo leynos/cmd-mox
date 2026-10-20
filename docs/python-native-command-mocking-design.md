@@ -687,10 +687,10 @@ process lifetime when resolution succeeds. The resolver prefers Python's
 `socketserver.UnixStreamServer` exists, it composes the latter with
 `socketserver.ThreadingMixIn`. If neither class exists, resolution raises
 `RuntimeError`, and that failure is not cached, so a later backend start
-retries resolution. Directly constructing the Unix server on Windows also raises
-`RuntimeError`; the controller selects the named-pipe transport there.
-Incoming JSON messages are parsed into `Invocation` objects and processed in
-background threads with reasonable timeouts (default: 5.0s). Callers can pass an
+retries resolution. Starting the Unix server directly on Windows also raises
+`RuntimeError`; the controller selects the named-pipe transport there. Incoming
+JSON messages are parsed into `Invocation` objects and processed in background
+threads with reasonable timeouts (default: 5.0s). Callers can pass an
 `IPCHandlers` dataclass to provide invocation and passthrough callbacks when
 constructing the server for simple composition. Subclassing remains supported
 when custom behaviour requires overriding the public handler hooks. The
@@ -720,14 +720,15 @@ bounded request metadata and never payload data.
 
 `cmd_mox.ipc._observability` is a dependency-free seam shared by the client and
 both server transports. It defines a frozen `IPCEvent` carrying only bounded
-dimensions — `operation`, `transport`, `kind`, `outcome`, `error_category`,
-`attempt`, `duration_ms`, `message_size`, and `correlation_id` — renders them
-as structured logging fields, logs them at INFO, and counts them in an
-in-process registry keyed by `(operation, transport, outcome)`. Tests assert on
-emissions through `capture_events()` and `counter_snapshot()` rather than an
-external metrics collector. The module documents a never-log list: command
-names, arguments, standard streams, environments, socket paths, exception
-messages, and raw payloads must never become fields.
+dimensions — `operation`, `transport`, `kind`, `selection_mode`, `outcome`,
+`cache_name`, `cache_outcome`, `error_category`, `attempt`, `duration_ms`,
+`message_size`, and `correlation_id` — renders them as structured logging
+fields, logs them at INFO, and counts them in an in-process registry keyed by
+the bounded event dimensions. Tests assert on emissions through
+`capture_events()` and `counter_snapshot()` rather than an external metrics
+collector. The module documents a never-log list: command names, arguments,
+standard streams, environments, socket paths, exception messages, and raw
+payloads must never become fields.
 
 Requests carry an opaque `correlation_id` as a top-level envelope field beside
 `kind`. The client reuses the model's `invocation_id` when the request already
@@ -744,6 +745,17 @@ Client events use the operations `ipc.client.request` (outcomes `started`,
 with a 1-based `attempt`). Server dispatch keeps the existing
 `IPC dispatch outcome` record under the `ipc.dispatch` operation, now also
 carrying `transport` and `correlation_id`.
+
+Unix backend creation emits `ipc.backend_selection` events at the resolver and
+construction boundaries. The `selection_mode` dimension is one of `native`,
+`compatibility`, `windows_unsupported`, or `unsupported_platform`; cache
+observations name either `unix_server_base` or `inner_server_class` and report
+`hit` or `miss`. Outcomes distinguish selected bases, cache accesses, failed
+resolution, Windows rejection, and backend-construction failure. Error
+categories are fixed values such as `unsupported_platform`,
+`windows_unsupported`, and `os_error`; exception messages and socket paths
+never enter logs or counters. The cached resolver itself remains free of
+logging side effects.
 
 #### Named-pipe resource bounds (2026-08-28)
 

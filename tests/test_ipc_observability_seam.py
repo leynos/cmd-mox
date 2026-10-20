@@ -87,20 +87,28 @@ def test_event_as_extra_omits_inapplicable_fields() -> None:
 
 
 def test_emit_counts_events_by_bounded_key() -> None:
-    """The registry should count events by operation, transport, and outcome."""
+    """The registry should retain bounded selection and cache dimensions."""
     _observability.reset_counters()
     event = _observability.IPCEvent(
         operation="ipc.test",
         transport="unix",
+        selection_mode="native",
         outcome="success",
+        cache_name="unix_server_base",
+        cache_outcome="miss",
         correlation_id="corr-1",
     )
 
     _observability.emit(event)
     _observability.emit(dc.replace(event, correlation_id="corr-2"))
+    _observability.emit(dc.replace(event, cache_outcome="hit"))
 
-    key = _observability.EventKey("ipc.test", "unix", "success")
+    key = event.key()
+    hit_key = dc.replace(event, cache_outcome="hit").key()
     assert _observability.counter_snapshot()[key] == 2, "Counter must aggregate"
+    assert _observability.counter_snapshot()[hit_key] == 1, (
+        "Different cache outcomes must keep distinct counters"
+    )
     _observability.reset_counters()
     assert not _observability.counter_snapshot(), "Reset must clear counters"
 

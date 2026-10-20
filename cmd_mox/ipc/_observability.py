@@ -22,10 +22,10 @@ The seam has no third-party dependencies. It uses the standard library
 through :func:`capture_events` or :func:`counter_snapshot` without an external
 metrics collector.
 
-Counters are keyed by :class:`EventKey`, the ``(operation, transport,
-outcome)`` triple that identifies an event *class*. Those three dimensions are
-closed sets, so the counter registry stays bounded no matter how many requests
-are processed.
+Counters are keyed by :class:`EventKey`, which includes the event's bounded
+operation, transport, message kind, selection mode, outcome, cache, and error
+dimensions. Those values come from closed sets in the emitters, so the counter
+registry stays bounded no matter how many requests are processed.
 """
 
 from __future__ import annotations
@@ -54,7 +54,12 @@ class EventKey(typ.NamedTuple):
 
     operation: str
     transport: str | None
+    kind: str | None
+    selection_mode: str | None
     outcome: str | None
+    cache_name: str | None
+    cache_outcome: str | None
+    error_category: str | None
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -71,9 +76,14 @@ class IPCEvent:
         Wire message kind, e.g. ``"invocation"``.
     outcome:
         Terminal state of the operation, e.g. ``"success"``.
+    selection_mode:
+        Bounded backend selection, e.g. ``"native"`` or ``"compatibility"``.
+    cache_name:
+        Bounded cache being observed, when the event describes a cache access.
+    cache_outcome:
+        Whether the named cache access was a hit or miss.
     error_category:
-        Exception class name or other closed-set failure label. Never an
-        exception message.
+        Closed-set failure label or exception category. Never a message.
     attempt:
         1-based attempt counter for retried operations.
     duration_ms:
@@ -88,7 +98,10 @@ class IPCEvent:
     operation: str
     transport: Transport | None = None
     kind: str | None = None
+    selection_mode: str | None = None
     outcome: str | None = None
+    cache_name: str | None = None
+    cache_outcome: str | None = None
     error_category: str | None = None
     attempt: int | None = None
     duration_ms: float | None = None
@@ -110,7 +123,10 @@ class IPCEvent:
             "operation": self.operation,
             "transport": self.transport,
             "kind": self.kind,
+            "selection_mode": self.selection_mode,
             "outcome": self.outcome,
+            "cache_name": self.cache_name,
+            "cache_outcome": self.cache_outcome,
             "error_category": self.error_category,
             "attempt": self.attempt,
             "duration_ms": self.duration_ms,
@@ -125,9 +141,18 @@ class IPCEvent:
         Returns
         -------
         EventKey
-            The ``(operation, transport, outcome)`` triple for this event.
+            The bounded event dimensions used by the in-process counter.
         """
-        return EventKey(self.operation, self.transport, self.outcome)
+        return EventKey(
+            self.operation,
+            self.transport,
+            self.kind,
+            self.selection_mode,
+            self.outcome,
+            self.cache_name,
+            self.cache_outcome,
+            self.error_category,
+        )
 
 
 _LOCK: typ.Final[threading.Lock] = threading.Lock()

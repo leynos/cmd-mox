@@ -7,6 +7,9 @@ import typing as typ
 
 import pytest
 
+from cmd_mox.ipc import server as unix_server
+from cmd_mox.ipc._unix_server_base import resolve_unix_server_base
+
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
@@ -37,3 +40,13 @@ def run_fixture() -> cabc.Callable[..., subprocess.CompletedProcess[str]]:
         The subprocess helper used by tests.
     """
     return run_subprocess
+
+
+@pytest.fixture
+def unix_server_base_cache() -> cabc.Iterator[None]:
+    """Clear both lazy server caches around patched platform cases."""
+    resolve_unix_server_base.cache_clear()
+    unix_server._inner_server_cls.cache_clear()
+    yield
+    unix_server._inner_server_cls.cache_clear()
+    resolve_unix_server_base.cache_clear()

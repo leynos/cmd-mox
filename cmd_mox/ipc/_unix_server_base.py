@@ -13,9 +13,14 @@ True
 """
 
 import socketserver
+import typing as typ
 from functools import cache
 
 from cmd_mox import _path_utils as path_utils
+
+type _SelectionMode = typ.Literal[
+    "native", "compatibility", "windows_unsupported", "unsupported_platform"
+]
 
 
 def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
@@ -29,6 +34,8 @@ def _create_unsupported_unix_server() -> type[socketserver.BaseServer]:
 
     class _UnsupportedUnixServer(socketserver.BaseServer):
         """Placeholder that raises when Unix sockets are requested on Windows."""
+
+        _cmd_mox_selection_mode = "windows_unsupported"
 
         def __init__(self, *args: object, **kwargs: object) -> None:
             """Reject construction on Windows.
@@ -76,6 +83,21 @@ def _resolve_unix_server_base() -> type[socketserver.BaseServer]:
         return _ThreadingUnixCompat
     msg = "Unix domain socket servers are not supported on this platform"
     raise RuntimeError(msg)
+
+
+def _selection_mode(base_server: type[socketserver.BaseServer]) -> _SelectionMode:
+    """Describe the selected base without consulting another platform flag.
+
+    Returns
+    -------
+    _SelectionMode
+        The bounded mode that produced *base_server*.
+    """
+    mode = getattr(base_server, "_cmd_mox_selection_mode", None)
+    if mode is not None:
+        return typ.cast("_SelectionMode", mode)
+    threading_server = getattr(socketserver, "ThreadingUnixStreamServer", None)
+    return "native" if base_server is threading_server else "compatibility"
 
 
 @cache

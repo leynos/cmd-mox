@@ -224,8 +224,11 @@ placeholder whose construction raises `RuntimeError`, while a platform with
 neither Unix server class raises `RuntimeError` during resolution. Both caches
 retain a successful result for the process lifetime. A resolution failure is
 not cached, so a later backend start retries resolution. Direct resolver calls
-have no observability side effects; request and dispatch events remain part of
-the normal IPC handling path.
+have no observability side effects. The server's backend-creation boundary
+emits bounded `ipc.backend_selection` events for native or compatibility
+selection, cache hits and misses, unsupported platforms, Windows rejection, and
+backend-construction failures. Events use fixed selection and error categories;
+they never include socket paths or exception messages.
 
 ## Skylos dead-code policy
 
