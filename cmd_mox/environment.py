@@ -309,7 +309,8 @@ class EnvironmentManager:
 
     The manager is not re-entrant; nested usage is unsupported and will raise
     ``RuntimeError``. This keeps the restore logic simple and prevents
-    inadvertent environment leakage.
+    inadvertent environment leakage. The active-manager marker is thread-local,
+    so nesting detection checks the current thread.
 
     Attributes
     ----------

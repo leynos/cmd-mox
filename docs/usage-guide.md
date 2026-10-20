@@ -814,8 +814,8 @@ few common ones are:
 - `with_matching_args(*matchers)` – match arguments using comparators.
 - `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
   validate it with a predicate `Callable[[str], bool]`. Shims read non-terminal
-  stdin until EOF; terminal input is skipped. Close or redirect stdin when no
-  input is intended. See the
+  standard input until EOF; terminal input is skipped. Close or redirect
+  standard input when no input is intended. See the
   [shim path guidance](#wiring-a-tool-to-a-shim-by-absolute-path).
 - `with_env(mapping)` – inject additional environment variables into the
   invocation. The mapping is merged into the recorded `Invocation.env`, applied
@@ -834,10 +834,15 @@ few common ones are:
   working directory, but `Invocation` does not carry that directory. Opening a
   relative argument directly in the handler resolves it against the test
   process's working directory. Provide the invoking working directory
-  separately or use absolute paths. For example, write a Git merge result with
+  separately or use absolute paths. For a Git merge handler, capture the
+  invoking repository path as `repository` and compute the merged text as
+  `result`; then write the target with the fragment
   `(repository / inv.args[1]).write_text(result)`.
 
   Example:
+
+  With no `with_args(...)` constraint, this double accepts any argument list,
+  so both `tool run` and `tool run --fail` reach the handler.
 
   ```python
   def handler(inv: Invocation) -> tuple[str, str, int]:
