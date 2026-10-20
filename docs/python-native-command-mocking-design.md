@@ -564,19 +564,18 @@ workflow is as follows:
    listening server thread in the main test process and sends the serialized
    invocation over the socket.
 
-6. **Server-Side Processing:** The server thread in the main process receives
-   the JSON payload. It deserializes it into an `Invocation` object and records
-   it in the in-memory Invocation Journal after the handler runs. At that point
-   the invocation also captures the resulting `stdout`, `stderr`, and
-   `exit_code`. The server then searches its list of `Expectation` objects to
-   find a match for this invocation.
+6. **Server-Side Processing:** An IPC request-handler worker thread in the main
+   process receives the JSON payload and deserializes it into an `Invocation`
+   object. The controller resolves the invocation against its configured double
+   and expectations, then selects the response. A configured `.runs(handler)`
+   callback runs on an IPC request-handler worker thread in the main test
+   process.
 
-7. **Response Delivery:** Once a matching expectation is found, the server
-   determines the prescribed response. If it's a static `.returns()` value, it
-   serializes this data and sends it back to the shim. If it's a dynamic
-   `.runs(handler)`, the server thread executes the handler function (which is
-   in the same process and has access to all test state) and sends its result
-   back.
+7. **Response Delivery:** The controller applies the response to the invocation
+   and appends it to the in-memory Invocation Journal only when it is
+   non-passthrough. Passthrough invocations are appended after the shim reports
+   the command result. The server serializes the response and sends it back to
+   the shim.
 
 8. **Shim Action:** The shim receives the response payload from the server. It
    writes the `stdout` and `stderr` data to its own standard streams and then
@@ -938,12 +937,14 @@ each `CmdMox` controller instance. A `collections.deque` backs the journal,
 preserving call order and enabling efficient pruning when bounded. It stores a
 chronological record of command calls during replay.
 
-Each time the IPC server thread receives an invocation report from a shim, it
+Each time the IPC server receives an invocation report from a shim, it
 constructs an `Invocation` object containing the command name, arguments,
-`stdin`, and environment. After the handler runs, the controller attaches the
-resulting `stdout`, `stderr`, and `exit_code` to the `Invocation` and appends
-it to the journal. `verify()` uses this enriched journal as the definitive
-record, comparing it against predefined expectations to detect discrepancies.
+`stdin`, and environment. The controller selects and applies a response before
+appending non-passthrough invocations to the journal, so those entries also
+contain the resulting `stdout`, `stderr`, and `exit_code`. Passthrough
+invocations are appended after the shim reports their command results.
+`verify()` uses this enriched journal as the definitive record, comparing it
+against predefined expectations to detect discrepancies.
 
 ## IV. Feature Deep Dive: Stubbing
 
@@ -1000,11 +1001,11 @@ The implementation of this feature leverages the IPC architecture:
    server identifies that the corresponding stub is configured with a `.runs()`
    handler.
 
-3. The IPC server thread—which runs within the main test process and therefore
-   has direct access to `my_date_handler`—executes the handler. It passes the
-   structured `Invocation` object as an argument to the handler and, after the
-   handler returns, records the resulting output streams and exit code on that
-   invocation.
+3. An IPC request-handler worker thread—which runs within the main test process
+   and therefore has direct access to `my_date_handler`—executes the handler.
+   It passes the structured `Invocation` object as an argument to the handler;
+   after the handler returns, the controller applies the resulting output
+   streams and exit code to that invocation.
 
 4. The handler performs its logic (which can involve accessing or modifying
    state within the test function's scope) and returns a result tuple:

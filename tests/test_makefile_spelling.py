@@ -7,6 +7,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+_GIT_REPOSITORY_LOCATION_VARIABLES = frozenset({
+    "GIT_COMMON_DIR",
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE",
+})
+
 
 def _run_command(
     arguments: list[str], *, cwd: Path, environment: dict[str, str]
@@ -71,7 +80,9 @@ def _prepare_project(project: Path) -> tuple[Path, Path, Path, dict[str, str]]:
 
     environment = os.environ.copy()
     for name in tuple(environment):
-        if name.startswith("GIT_CONFIG_"):
+        if name.startswith("GIT_CONFIG_") or (
+            name in _GIT_REPOSITORY_LOCATION_VARIABLES
+        ):
             environment.pop(name)
     environment.update({
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -141,15 +152,28 @@ def _initialize_project(project: Path, environment: dict[str, str]) -> None:
 
 
 def test_spelling_target_scans_existing_tracked_and_unignored_markdown(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Pass existing tracked and unignored Markdown paths to the spelling tool."""
+    external_git_paths = {
+        "GIT_COMMON_DIR": tmp_path / "external-common",
+        "GIT_DIR": tmp_path / "external-git",
+        "GIT_INDEX_FILE": tmp_path / "external-index",
+        "GIT_WORK_TREE": tmp_path / "external-worktree",
+    }
+    for name, path in external_git_paths.items():
+        monkeypatch.setenv(name, str(path))
+
     project = tmp_path / "project"
     captured_arguments, uv_stub, typos_stub, environment = _prepare_project(project)
     _initialize_project(project, environment)
 
     spelling = _run_spelling_target(project, uv_stub, typos_stub, environment)
     assert spelling.returncode == 0, f"make spelling failed: {spelling.stderr}"
+    assert (project / ".git" / "index").is_file(), "Git must use the project index"
+    assert not any(path.exists() for path in external_git_paths.values()), (
+        "Git must not create repository state outside the isolated project"
+    )
     arguments = json.loads(captured_arguments.read_text(encoding="utf-8"))
     scanned_markdown = {argument for argument in arguments if argument.endswith(".md")}
 
