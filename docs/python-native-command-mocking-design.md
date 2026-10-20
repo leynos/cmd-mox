@@ -578,6 +578,33 @@ workflow is as follows:
    writes the `stdout` and `stderr` data to its own standard streams and then
    terminates with the specified `exit_code`.
 
+#### Absolute-path shim invocation
+
+For screen readers: The configured tool starts the shim by its absolute path.
+The shim reads standard input until end-of-file and sends the invocation to the
+IPC server through `CMOX_IPC_SOCKET`. The server calls `runs(handler)` and
+returns the handler's response to the shim, which applies standard output,
+standard error, and the exit code to the configured tool.
+
+```mermaid
+sequenceDiagram
+    participant Tool as Configured tool
+    participant Shim as Absolute shim path
+    participant Server as IPC server
+    participant Handler as runs(handler)
+
+    Tool->>Shim: Execute launcher by absolute path
+    Shim->>Shim: Read stdin until EOF
+    Shim->>Server: Send invocation via CMOX_IPC_SOCKET
+    Server->>Handler: runs(invocation)
+    Handler-->>Server: Return response
+    Server-->>Shim: Return response
+    Shim-->>Tool: Apply stdout, stderr, and exit_code
+```
+
+_Figure: Absolute-path invocation from the configured tool through the IPC
+server and handler._
+
 This socket-based IPC architecture is the key technical differentiator for
 `CmdMox`. It is transactional, inherently process-safe, and allows for the
 exchange of rich, complex data structures, providing a foundation for advanced
