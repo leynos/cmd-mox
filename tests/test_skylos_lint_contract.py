@@ -166,8 +166,9 @@ EXPECTED_ENTRYPOINT_REASONS = {
         "abstract lifecycle hook."
     ),
     "cmd_mox.ipc.server._inner_server_cls": (
-        "IPCServer._create_backend calls this cached factory during "
-        "_ServerLifecycle.start; Skylos reports the dynamic class use as unreachable."
+        "_inner_server_cls_for_backend calls this cached factory when "
+        "IPCServer._create_backend runs during _ServerLifecycle.start; Skylos "
+        "reports the dynamic class use as unreachable."
     ),
     "cmd_mox.ipc.server._inner_server_cls_for_backend": (
         "IPCServer._create_backend records the cached inner-class lookup and its "

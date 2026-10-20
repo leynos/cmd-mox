@@ -630,7 +630,7 @@ class _NamedPipeState:
 
         Returns
         -------
-        str
+        _observability._NamedPipeErrorCategory
             One of ``"BrokenPipe"``, ``"NoData"``, or ``"PipeError"``. The
             exception message is never used.
         """

@@ -457,7 +457,7 @@ reason = "IPCServer._create_backend maps backend failures to bounded categories 
 type = "function"
 full_name = ["cmd_mox.ipc.server._inner_server_cls"]
 path = "cmd_mox/ipc/server.py"
-reason = "IPCServer._create_backend calls this cached factory during _ServerLifecycle.start; Skylos reports the dynamic class use as unreachable."
+reason = "_inner_server_cls_for_backend calls this cached factory when IPCServer._create_backend runs during _ServerLifecycle.start; Skylos reports the dynamic class use as unreachable."
 
 [[tool.skylos.dead_code.entrypoints]]
 # Skylos flattens this local class name; the source contract verifies its scope.
