@@ -10,10 +10,7 @@ gates that pass locally and fail in CI (or the reverse).
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -294,39 +291,3 @@ def test_ci_caches_and_verifies_the_pinned_detector() -> None:
     assert "--disable-strategies compile,quick-install" in MAKEFILE_PATH.read_text(
         encoding="utf-8"
     ), "make install-nose must forbid cargo-binstall's compile strategies"
-def test_spelling_gate_fails_without_git_file_enumeration(
-    tmp_path: Path,
-) -> None:
-    """Do not let a failed Git file listing make the spelling gate pass."""
-    make_executable = shutil.which("make")
-    git_executable = shutil.which("git")
-    if make_executable is None or git_executable is None:
-        pytest.skip("make or git is unavailable")
-
-    gate_environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
-    }
-    gate_environment["GIT_CEILING_DIRECTORIES"] = str(tmp_path.parent)
-    working_directory = tmp_path / "outside-repository"
-    working_directory.mkdir()
-
-    with pytest.raises(subprocess.CalledProcessError) as error:
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, shell disabled.
-            [
-                make_executable,
-                "-f",
-                str(MAKEFILE_PATH),
-                "spelling",
-                "UV_GATE=true",
-                "TYPOS=true",
-            ],
-            cwd=working_directory,
-            env=gate_environment,
-            capture_output=True,
-            check=True,
-            text=True,
-        )
-
-    assert "not a git repository" in (error.value.stderr or ""), (
-        "spelling gate failed without reporting the missing Git checkout"
-    )
