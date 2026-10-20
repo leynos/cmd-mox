@@ -68,7 +68,7 @@ def test_require_phase_mismatch() -> None:
         mox._require_phase(Phase.REPLAY, "replay")
 
 
-def test_require_phase_appends_lifecycle_hint() -> None:
+def test_verify_in_record_phase_appends_lifecycle_hint() -> None:
     """A configured lifecycle hint follows the phase error message."""
     mox = CmdMox(
         lifecycle_hint=(
@@ -78,9 +78,10 @@ def test_require_phase_appends_lifecycle_hint() -> None:
 
     with pytest.raises(
         LifecycleError,
-        match=r"not in 'replay' phase.*--no-cmd-mox-auto-lifecycle",
+        match=r"Cannot call verify\(\): not in 'replay' phase.*"
+        r"--no-cmd-mox-auto-lifecycle",
     ):
-        mox._require_phase(Phase.REPLAY, "replay")
+        mox.verify()
 
 
 def test_replay_preconditions_append_lifecycle_hint() -> None:
@@ -93,7 +94,7 @@ def test_replay_preconditions_append_lifecycle_hint() -> None:
         LifecycleError,
         match=r"without entering context.*--no-cmd-mox-auto-lifecycle",
     ):
-        mox._check_replay_preconditions()
+        mox.replay()
 
 
 def test_context_manager_auto_verify(

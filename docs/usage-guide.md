@@ -195,9 +195,9 @@ The design document lists the available comparators:
 - `Predicate`
 
 Each comparator is a callable that returns `True` on match.
-`with_matching_args` expects one comparator per argv element (excluding the
-program name in `argv[1:]`), and `with_stdin` accepts either an exact string or
-a predicate `Callable[[str], bool]` for flexible input checks.
+`with_matching_args` expects one comparator per element of `argv[1:]`; the
+program name at `argv[0]` is excluded. `with_stdin` accepts either an exact
+string or a predicate `Callable[[str], bool]` for flexible input checks.
 
 ### Argument matchers (comparators)
 

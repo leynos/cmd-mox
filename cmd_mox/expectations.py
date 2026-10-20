@@ -54,10 +54,14 @@ class Expectation:
             If an argument expectation is already configured.
         """
         configured_args = list(args)
-        attempted = f"args={_redact_sensitive_argument_values(configured_args)!r}"
-        error_message = self._argument_expectation_conflict(attempted)
-        if error_message is not None:
-            raise ExpectationConfigurationError(error_message)
+        if self.args is not None or self.match_args is not None:
+            safe_configured_args = _redact_sensitive_argument_values(
+                configured_args, command=self.name
+            )
+            attempted = f"args={safe_configured_args!r}"
+            error_message = self._argument_expectation_conflict(attempted)
+            if error_message is not None:
+                raise ExpectationConfigurationError(error_message)
         self.args = configured_args
         return self
 
@@ -96,7 +100,7 @@ class Expectation:
             return None
 
         if self.args is not None:
-            safe_args = _redact_sensitive_argument_values(self.args)
+            safe_args = _redact_sensitive_argument_values(self.args, command=self.name)
             existing = f"args={safe_args!r}"
         else:
             matcher_types = [

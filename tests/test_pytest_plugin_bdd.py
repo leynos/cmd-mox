@@ -55,16 +55,19 @@ class ParallelSuite:
 
 TEST_CODE = textwrap.dedent(
     """
+    import os
     import subprocess
     import pytest
-    from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
     pytest_plugins = ("cmd_mox.pytest_plugin",)
 
     def test_example(cmd_mox):
         cmd_mox.stub("hello").returns(stdout="hi")
+        shim_dir = cmd_mox.environment.shim_dir
+        assert shim_dir is not None
+        shim_name = "hello.cmd" if os.name == "nt" else "hello"
         res = subprocess.run(
-            [str(_shim_cmd_path(cmd_mox, "hello"))],
+            [str(shim_dir / shim_name)],
             capture_output=True,
             text=True,
             check=True,
@@ -100,9 +103,9 @@ def create_manual_replay_test_file(pytester: Pytester) -> Path:
     """
     test_code = textwrap.dedent(
         """
+        import os
         import subprocess
         import pytest
-        from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
         pytest_plugins = ("cmd_mox.pytest_plugin",)
 
@@ -111,8 +114,11 @@ def create_manual_replay_test_file(pytester: Pytester) -> Path:
             # The plugin has already replayed; this call intentionally checks
             # that replaying again during the replay phase is a no-op.
             cmd_mox.replay()
+            shim_dir = cmd_mox.environment.shim_dir
+            assert shim_dir is not None
+            shim_name = "hello.cmd" if os.name == "nt" else "hello"
             subprocess.run(
-                [str(_shim_cmd_path(cmd_mox, "hello"))],
+                [str(shim_dir / shim_name)],
                 capture_output=True,
                 text=True,
                 check=True,
