@@ -35,6 +35,26 @@ if typ.TYPE_CHECKING:
 
 pytestmark = [pytest.mark.requires_unix_sockets]
 
+_EXPECTED_BACKEND_ERROR_CATEGORIES = frozenset({
+    "unsupported_platform",
+    "windows_unsupported",
+    "os_error",
+    "runtime_error",
+    "type_error",
+    "value_error",
+})
+_EXPECTED_NAMED_PIPE_ERROR_CATEGORIES = frozenset({
+    "ClientLimitReached",
+    "ThreadStartFailed",
+    "ServerStopping",
+    "PipeMessageTooLargeError",
+    "BrokenPipe",
+    "NoData",
+    "PipeError",
+    "ReadTimeout",
+    "ServerStopped",
+})
+
 
 class _AlwaysRefusedSocket:
     """Socket double whose every connection attempt is refused."""
@@ -87,7 +107,7 @@ def test_event_as_extra_omits_inapplicable_fields() -> None:
 
 
 def test_emit_counts_events_by_bounded_key() -> None:
-    """The registry should retain bounded selection and cache dimensions."""
+    """Counter keys retain selection/cache dimensions and ignore correlation."""
     _observability.reset_counters()
     event = _observability.IPCEvent(
         operation="ipc.test",
@@ -98,19 +118,61 @@ def test_emit_counts_events_by_bounded_key() -> None:
         cache_outcome="miss",
         correlation_id="corr-1",
     )
-
-    _observability.emit(event)
-    _observability.emit(dc.replace(event, correlation_id="corr-2"))
-    _observability.emit(dc.replace(event, cache_outcome="hit"))
-
-    key = event.key()
-    hit_key = dc.replace(event, cache_outcome="hit").key()
-    assert _observability.counter_snapshot()[key] == 2, "Counter must aggregate"
-    assert _observability.counter_snapshot()[hit_key] == 1, (
-        "Different cache outcomes must keep distinct counters"
+    events = (
+        event,
+        dc.replace(event, correlation_id="corr-2"),
+        dc.replace(event, cache_outcome="hit", correlation_id="corr-3"),
+        dc.replace(event, selection_mode="compatibility", correlation_id="corr-4"),
+        dc.replace(event, cache_name="inner_server_class", correlation_id="corr-5"),
     )
-    _observability.reset_counters()
-    assert not _observability.counter_snapshot(), "Reset must clear counters"
+    expected_counters = {
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "unix_server_base",
+            "miss",
+            None,
+        ): 2,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "unix_server_base",
+            "hit",
+            None,
+        ): 1,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "compatibility",
+            "success",
+            "unix_server_base",
+            "miss",
+            None,
+        ): 1,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "inner_server_class",
+            "miss",
+            None,
+        ): 1,
+    }
+    try:
+        for event in events:
+            _observability.emit(event)
+
+        assert _observability.counter_snapshot() == expected_counters, (
+            "Counters must distinguish bounded selection/cache dimensions and "
+            "aggregate equivalent events"
+        )
+    finally:
+        _observability.reset_counters()
 
 
 def test_counter_key_omits_unbounded_message_kinds_and_error_categories() -> None:
@@ -142,7 +204,7 @@ def test_counter_key_omits_unbounded_message_kinds_and_error_categories() -> Non
 
 def test_counter_key_preserves_fixed_backend_error_categories() -> None:
     """Keep bounded backend error labels available for diagnosis."""
-    categories = set(typ.get_args(_observability._BackendErrorCategory.__value__))
+    categories = _EXPECTED_BACKEND_ERROR_CATEGORIES
     _observability.reset_counters()
     try:
         for error_category in categories:
@@ -169,7 +231,7 @@ def test_counter_key_preserves_fixed_backend_error_categories() -> None:
 
 def test_counter_key_preserves_fixed_named_pipe_error_categories() -> None:
     """Keep closed named-pipe failure labels available for diagnosis."""
-    categories = set(typ.get_args(_observability._NamedPipeErrorCategory.__value__))
+    categories = _EXPECTED_NAMED_PIPE_ERROR_CATEGORIES
     _observability.reset_counters()
     try:
         for error_category in categories:
