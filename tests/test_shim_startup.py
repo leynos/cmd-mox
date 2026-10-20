@@ -53,6 +53,13 @@ def test_main_reports_invocation_details(
     def fake_invoke(
         invocation: Invocation, timeout: float, *, deadline: float | None = None
     ) -> Response:
+        """Capture shim parameters and return the configured response.
+
+        Returns
+        -------
+        Response
+            The output and exit status expected by the test.
+        """
         captured["invocation"] = invocation
         captured["timeout"] = timeout
         captured["deadline"] = deadline
@@ -108,6 +115,13 @@ def test_main_skips_interactive_stdin(
     def fake_invoke(
         invocation: Invocation, timeout: float, *, deadline: float | None = None
     ) -> Response:
+        """Capture the invocation and simulate a successful reply.
+
+        Returns
+        -------
+        Response
+            An empty successful response.
+        """
         captured["invocation"] = invocation
         return Response(stdout="", stderr="", exit_code=0)
 
@@ -144,6 +158,13 @@ def test_main_honours_custom_timeout(
     def fake_invoke(
         invocation: Invocation, timeout: float, *, deadline: float | None = None
     ) -> Response:
+        """Capture timeout arguments and return a response for the test.
+
+        Returns
+        -------
+        Response
+            A response carrying the configured standard output.
+        """
         captured["timeout"] = timeout
         deadlines.append(deadline)
         return Response(stdout="custom", stderr="", exit_code=0)

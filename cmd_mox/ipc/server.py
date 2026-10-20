@@ -345,6 +345,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             chunks.append(chunk)
 
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
+        """Handle one Unix connection and record bounded failure events."""
         started = time.perf_counter()
         try:
             raw = self._read_request_payload()

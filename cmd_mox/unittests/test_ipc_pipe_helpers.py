@@ -126,6 +126,13 @@ def test_named_pipe_handler_uses_shared_helpers(
         writes.append(payload)
 
     def fake_process(_outer: object, raw: bytes, transport: str) -> _RequestResult:
+        """Return a completed response for the named-pipe handler test.
+
+        Returns
+        -------
+        _RequestResult
+            A response without a correlation identifier.
+        """
         assert raw == b"raw-request"
         assert transport == "named_pipe"
         return _RequestResult(response_bytes=b"processed", correlation_id=None)
