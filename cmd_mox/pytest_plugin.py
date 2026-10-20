@@ -266,10 +266,13 @@ class _CmdMoxManager:
         )
         if self._auto_lifecycle:
             self.mox._lifecycle_hint = (
-                "Pass --no-cmd-mox-auto-lifecycle, set the "
-                "cmd_mox_auto_lifecycle ini option to false, or use "
-                "@pytest.mark.cmd_mox(auto_lifecycle=False) to drive the "
-                "lifecycle manually."
+                "Disable the most specific active setting: pass False (or "
+                "{'auto_lifecycle': False}) as the cmd_mox fixture parameter, "
+                "use @pytest.mark.cmd_mox(auto_lifecycle=False), pass "
+                "--no-cmd-mox-auto-lifecycle, or set the "
+                "cmd_mox_auto_lifecycle ini option to false. Fixture parameters "
+                "override markers, markers override the CLI, and the CLI "
+                "overrides the ini option."
             )
         # CmdMox wires its command runner to the provided environment during
         # initialisation, so injecting the worker-scoped manager here ensures the

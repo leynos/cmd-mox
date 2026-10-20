@@ -91,7 +91,7 @@ def create_test_file(pytester: Pytester) -> Path:
     target_fixture="test_file",
 )
 def create_manual_replay_test_file(pytester: Pytester) -> Path:
-    """Write a test that replays after explicitly verifying.
+    """Generate coverage for default replay idempotence and post-verify failure.
 
     Returns
     -------
@@ -106,8 +106,11 @@ def create_manual_replay_test_file(pytester: Pytester) -> Path:
 
         pytest_plugins = ("cmd_mox.pytest_plugin",)
 
-        def test_manual_replay_after_verify(cmd_mox):
+        def test_replay_after_verify_is_rejected(cmd_mox):
             cmd_mox.mock("hello").with_args().returns(stdout="hi")
+            # The plugin has already replayed; this call intentionally checks
+            # that replaying again during the replay phase is a no-op.
+            cmd_mox.replay()
             subprocess.run(
                 [str(_shim_cmd_path(cmd_mox, "hello"))],
                 capture_output=True,
@@ -145,11 +148,17 @@ def assert_auto_lifecycle_error_hint(result: RunResult) -> None:
     result.assert_outcomes(failed=1)
     expected_hint_parts = (
         "Cannot call replay(): not in 'record' phase (current phase: verify)",
+        "Disable the most specific active setting",
+        "cmd_mox fixture parameter",
+        "@pytest.mark.cmd_mox(auto_lifecycle=False)",
         "--no-cmd-mox-auto-lifecycle",
         "cmd_mox_auto_lifecycle",
-        "@pytest.mark.cmd_mox(auto_lifecycle=False)",
+        "Fixture parameters override markers",
     )
-    result.stdout.fnmatch_lines([f"*{'*'.join(expected_hint_parts)}*"])
+    result.stdout.fnmatch_lines(["*--no-cmd-mox-auto-lifecycle*"])
+    normalized_output = " ".join(result.stdout.str().split())
+    for part in expected_hint_parts:
+        assert part in normalized_output, f"missing lifecycle hint text: {part}"
 
 
 @given(

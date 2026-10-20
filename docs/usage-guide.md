@@ -23,14 +23,19 @@ pytest_plugins = ("cmd_mox.pytest_plugin",)
 Each test receives a `cmd_mox` fixture that provides access to the controller
 object. By default, the plugin enters replay mode before the test body executes
 and performs verification during teardown, so most tests only need to declare
-expectations and exercise the code under test. Tests using this default must
-not call `replay()` themselves. If both the test body and verification fail,
-the verification error is suppressed so the original test failure surfaces.
-Automatic replay/verify can be disabled globally via the
-``cmd_mox_auto_lifecycle`` pytest.ini option or per test with
-``@pytest.mark.cmd_mox(auto_lifecycle=False)``. Command-line flags
-``--cmd-mox-auto-lifecycle`` and ``--no-cmd-mox-auto-lifecycle`` override both
-settings for a single pytest run.
+expectations and exercise the code under test. A repeated `replay()` call while
+the controller remains in replay mode is a no-op; calling `replay()` after
+`verify()` raises `LifecycleError`. Tests using the automatic lifecycle should
+omit explicit lifecycle calls. If both the test body and verification fail, the
+verification error is suppressed so the original test failure surfaces.
+Automatic replay/verify can be disabled with the `cmd_mox_auto_lifecycle`
+pytest.ini option set to `false`, `@pytest.mark.cmd_mox(auto_lifecycle=False)`,
+an indirect `cmd_mox` fixture parameter of `False` or
+`{"auto_lifecycle": False}`, or the command-line flag
+`--no-cmd-mox-auto-lifecycle`. The `--cmd-mox-auto-lifecycle` flag explicitly
+enables automatic replay and verification. Fixture parameters take precedence
+over markers, which take precedence over command-line flags and then the ini
+option.
 
 The repository includes runnable examples under `examples/` covering stubs,
 mocks, spies, pipelines, and passthrough mode. These examples can be run
@@ -109,9 +114,10 @@ The three phases are defined in the design document:
    happened.
 
 With pytest's default `cmd_mox` fixture, replay begins before the test body and
-verification runs during teardown. Tests using the default lifecycle must not
-call `replay()` themselves. Declare expectations and exercise the code under
-test:
+verification runs during teardown. Calling `replay()` while the controller is
+already in replay mode is a no-op; calling it after `verify()` raises
+`LifecycleError`. The default workflow should omit explicit lifecycle calls.
+Declare expectations and exercise the code under test:
 
 ```python
 def test_clone_repo(cmd_mox):
@@ -125,6 +131,8 @@ one of these settings:
 - Run pytest with `--no-cmd-mox-auto-lifecycle`.
 - Set `cmd_mox_auto_lifecycle = false` in the pytest configuration.
 - Mark a test with `@pytest.mark.cmd_mox(auto_lifecycle=False)`.
+- Pass `False` or `{"auto_lifecycle": False}` as an indirect `cmd_mox` fixture
+  parameter.
 
 With automatic lifecycle disabled, the phases can be called explicitly:
 
@@ -324,7 +332,7 @@ def test_spy(cmd_mox):
 A spy expectation can also use `times_called(count)`—an alias of `times(count)`
 —to require a specific call count during verification.
 
-For several distinct calls to one command, use a handler that selects a
+For multiple distinct calls to one command, use a handler that selects a
 response from `invocation.args`. The `spy.invocations` list preserves the call
 sequence for assertions:
 
@@ -343,6 +351,7 @@ def handle_cargo(invocation):
 
 cargo = cmd_mox.spy("cargo").runs(handle_cargo)
 run_gate_script()
+# These example invocations have no extra metadata or run arguments.
 assert [invocation.args for invocation in cargo.invocations] == [
     ["nextest", "--version"],
     ["metadata"],
@@ -519,9 +528,12 @@ def test_git_clone(cmd_mox):
 
 Each passthrough invocation is captured by the `PassthroughCoordinator` and
 persisted to the fixture file when `verify()` is called. When
-`verify_on_exit=True` (the default), the context manager calls `verify()`
-automatically on exit. If `verify_on_exit=False`, fixtures are **not** written
-unless `verify()` is called explicitly.
+`verify_on_exit=True` (the default for manually managed controllers), the
+context manager calls `verify()` automatically on exit. A manually managed
+controller with `verify_on_exit=False` requires an explicit `verify()` call to
+write fixtures. The pytest plugin calls `verify()` during teardown when its
+automatic lifecycle is enabled, so fixture-backed recordings need no explicit
+verification call.
 
 ### Record parameters
 

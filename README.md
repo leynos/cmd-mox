@@ -82,8 +82,8 @@ def handle_cargo(invocation):
             return '{"packages": []}', "", 0
         case ["nextest", "run", *_]:
             return "", "", 100
-        case _:
-            return "", "", 0
+        case unexpected:
+            raise AssertionError(f"Unexpected cargo arguments: {unexpected}")
 
 
 cargo = cmd_mox.spy("cargo").runs(handle_cargo)

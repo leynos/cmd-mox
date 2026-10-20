@@ -30,20 +30,91 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from pathlib import Path
 
 
-def test_with_args_rejects_a_second_argument_expectation() -> None:
-    """A second exact argument set must fail at registration."""
-    expectation = Expectation("cargo").with_args("metadata")
+def _with_metadata(expectation: Expectation) -> Expectation:
+    """Register an exact metadata argument expectation.
+
+    Returns
+    -------
+    Expectation
+        The configured expectation.
+    """
+    return expectation.with_args("metadata")
+
+
+def _with_nextest_run(expectation: Expectation) -> Expectation:
+    """Register an exact nextest run argument expectation.
+
+    Returns
+    -------
+    Expectation
+        The configured expectation.
+    """
+    return expectation.with_args("nextest", "run")
+
+
+def _with_alphabetic_args(expectation: Expectation) -> Expectation:
+    """Register an alphabetic argument matcher expectation.
+
+    Returns
+    -------
+    Expectation
+        The configured expectation.
+    """
+    return expectation.with_matching_args(str.isalpha)
+
+
+@pytest.mark.parametrize(
+    ("register_existing", "register_attempted", "existing", "attempted"),
+    [
+        pytest.param(
+            _with_metadata,
+            _with_nextest_run,
+            "args=['metadata']",
+            "args=['nextest', 'run']",
+            id="exact-then-exact",
+        ),
+        pytest.param(
+            _with_metadata,
+            _with_alphabetic_args,
+            "args=['metadata']",
+            "match_args=",
+            id="exact-then-matcher",
+        ),
+        pytest.param(
+            _with_alphabetic_args,
+            _with_metadata,
+            "match_args=",
+            "args=['metadata']",
+            id="matcher-then-exact",
+        ),
+    ],
+)
+def test_argument_expectation_rejects_reconfiguration(
+    register_existing: cabc.Callable[[Expectation], Expectation],
+    register_attempted: cabc.Callable[[Expectation], Expectation],
+    existing: str,
+    attempted: str,
+) -> None:
+    """Repeated and mixed argument expectations fail without mutation."""
+    expectation = Expectation("cargo")
+    register_existing(expectation)
+    existing_args = expectation.args.copy() if expectation.args is not None else None
+    existing_matchers = (
+        expectation.match_args.copy() if expectation.match_args is not None else None
+    )
 
     with pytest.raises(ExpectationConfigurationError) as exc_info:
-        expectation.with_args("nextest", "run")
+        register_attempted(expectation)
 
     message = str(exc_info.value)
     assert "Command 'cargo'" in message, "the error should name the command"
-    assert "args=['metadata']" in message, "the error should show the existing set"
-    assert "args=['nextest', 'run']" in message, "the error should show the new set"
+    assert existing in message, "the error should show the existing set"
+    assert attempted in message, "the error should show the attempted set"
     assert "runs(handler)" in message, "the error should direct users to handlers"
-    assert expectation.args == ["metadata"], "the existing exact set should remain"
-    assert expectation.match_args is None, "the failed call should not add matchers"
+    assert expectation.args == existing_args, "the failed call must preserve exact args"
+    assert expectation.match_args == existing_matchers, (
+        "the failed call must preserve matchers"
+    )
 
 
 @pytest.mark.parametrize(
@@ -72,6 +143,30 @@ def test_with_args_rejects_a_second_argument_expectation() -> None:
             "--passphrase=<redacted>",
             "'--passphrase', '<redacted>'",
         ),
+        (
+            ("--header=Authorization: Bearer old-secret",),
+            ("--env=API_KEY=new-secret",),
+            "'--header=<redacted>'",
+            "'--env=<redacted>'",
+        ),
+        (
+            ("--header=X-API-Key: old-secret",),
+            ("--header=X-Auth-Token: new-secret",),
+            "'--header=<redacted>'",
+            "'--header=<redacted>'",
+        ),
+        (
+            ("--token:old-secret",),
+            ("--token:new-secret",),
+            "--token:<redacted>",
+            "--token:<redacted>",
+        ),
+        (
+            ("--token", "--api-key", "old-secret"),
+            ("--password", "--api-key", "new-secret"),
+            "'--token', '<redacted>', '<redacted>'",
+            "'--password', '<redacted>', '<redacted>'",
+        ),
     ],
 )
 def test_duplicate_argument_error_redacts_sensitive_values(
@@ -95,6 +190,55 @@ def test_duplicate_argument_error_redacts_sensitive_values(
     assert attempted_redacted in message, "the attempted sensitive option must remain"
     assert "'--output', 'json'" in message, "the existing safe arguments must remain"
     assert "'--output', 'yaml'" in message, "the attempted safe arguments must remain"
+
+
+@pytest.mark.parametrize(
+    ("existing_header", "attempted_header", "existing_value", "attempted_value"),
+    [
+        pytest.param(
+            "Authorization: Token abc123",
+            "Authorization: Digest def456",
+            "abc123",
+            "def456",
+            id="non-standard-schemes",
+        ),
+        pytest.param(
+            "Authorization: AWS4-HMAC-SHA256 abc123",
+            "Authorization: barevalue789",
+            "abc123",
+            "barevalue789",
+            id="aws-and-bare-credentials",
+        ),
+    ],
+)
+def test_duplicate_argument_error_redacts_authorization_values(
+    existing_header: str,
+    attempted_header: str,
+    existing_value: str,
+    attempted_value: str,
+) -> None:
+    """Authorization values remain hidden for every scheme and bare values."""
+    expectation = Expectation("deploy").with_args(f"--header={existing_header}")
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args(f"--header={attempted_header}")
+
+    message = str(exc_info.value)
+    assert existing_value not in message
+    assert attempted_value not in message
+    assert message.count("--header=<redacted>") == 2
+
+
+def test_duplicate_argument_error_preserves_key_like_positionals() -> None:
+    """Non-assignment arguments with key-like segments remain diagnosable."""
+    expectation = Expectation("deploy").with_args("my-key-file", "ssh-key")
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_args("replacement-file")
+
+    message = str(exc_info.value)
+    assert "'my-key-file'" in message
+    assert "'ssh-key'" in message
 
 
 def test_with_matching_args_rejects_a_second_argument_expectation() -> None:
@@ -134,36 +278,6 @@ def test_with_matching_args_rejects_a_second_argument_expectation() -> None:
     )
     assert "runs(handler)" in message, "the error should direct users to handlers"
     assert expectation.match_args == [existing_matcher], "the prior matcher must remain"
-    assert expectation.args is None, "the failed call should not add exact arguments"
-
-
-def test_with_matching_args_rejects_an_existing_exact_argument_set() -> None:
-    """Exact and matcher argument expectations cannot be combined."""
-    expectation = Expectation("cargo").with_args("metadata")
-
-    with pytest.raises(ExpectationConfigurationError) as exc_info:
-        expectation.with_matching_args(str.isalpha)
-
-    message = str(exc_info.value)
-    assert "args=['metadata']" in message, "the error should show the exact set"
-    assert "match_args=" in message, "the error should show the attempted matcher"
-    assert "runs(handler)" in message, "the error should direct users to handlers"
-    assert expectation.args == ["metadata"], "the existing exact set should remain"
-    assert expectation.match_args is None, "the failed call should not add matchers"
-
-
-def test_with_args_rejects_an_existing_matcher_argument_set() -> None:
-    """Matcher and exact argument expectations cannot be combined."""
-    expectation = Expectation("cargo").with_matching_args(str.isalpha)
-
-    with pytest.raises(ExpectationConfigurationError) as exc_info:
-        expectation.with_args("metadata")
-
-    message = str(exc_info.value)
-    assert "match_args=" in message, "the error should show the existing matcher"
-    assert "args=['metadata']" in message, "the error should show the attempted set"
-    assert "runs(handler)" in message, "the error should direct users to handlers"
-    assert expectation.match_args == [str.isalpha], "the prior matcher must remain"
     assert expectation.args is None, "the failed call should not add exact arguments"
 
 

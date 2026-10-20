@@ -23,7 +23,10 @@ _SENSITIVE_TOKENS: typ.Final[tuple[str, ...]] = tuple(
 # compact ``APIKEY`` spelling used by some command-line options.
 _SECRET_ENV_KEY_RE: typ.Final[re.Pattern[str]] = re.compile(
     r"(?i)(^|[_-])(?:API)?(KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?"
-    r"|PASS(?:WORD)?|PWD)(?=[_-]|\d|$)"
+    r"|PASS(?:WORD)?|PWD)(?=[_-]|=|:|\d|$)"
+)
+_AUTHORIZATION_CREDENTIAL_RE: typ.Final[re.Pattern[str]] = re.compile(
+    r"(?i)\bauthorization\s*[:=]\s*[^,;]+"
 )
 
 
@@ -54,6 +57,84 @@ def is_sensitive_recording_env_key(key: str) -> bool:
     return _is_sensitive_env_key(key) or bool(_SECRET_ENV_KEY_RE.search(key))
 
 
+def _classify_sensitive_argument_option(arg: str) -> tuple[str, str, bool]:
+    """Classify an argument option and report whether its name is sensitive.
+
+    Returns
+    -------
+    tuple[str, str, bool]
+        Option name, equals separator if present, and sensitivity flag.
+    """
+    option, separator, _value = arg.partition("=")
+    if not separator and arg.startswith("-"):
+        option, separator, _value = arg.partition(":")
+    is_option = arg.startswith("-") or bool(separator)
+    is_sensitive_option = is_option and bool(_SECRET_ENV_KEY_RE.search(option))
+    return option, separator, is_sensitive_option
+
+
+def _contains_sensitive_argument_value(arg: str) -> bool:
+    """Return whether an argument embeds a credential value.
+
+    Returns
+    -------
+    bool
+        Whether the argument contains a recognised credential marker.
+    """
+    _option, separator, value = arg.partition("=")
+    if separator:
+        return bool(
+            _SECRET_ENV_KEY_RE.search(value)
+            or _AUTHORIZATION_CREDENTIAL_RE.search(value)
+        )
+    return bool(_AUTHORIZATION_CREDENTIAL_RE.search(arg))
+
+
+def _format_redacted_argument_value(option: str, separator: str) -> str:
+    """Format a redacted argument value while preserving an inline option.
+
+    Returns
+    -------
+    str
+        The redacted argument representation.
+    """
+    if separator:
+        return f"{option}{separator}<redacted>"
+    return "<redacted>"
+
+
+def _redact_embedded_value_or_keep(arg: str, option: str, separator: str) -> str:
+    """Mask credential markers embedded in an otherwise ordinary argument.
+
+    Returns
+    -------
+    str
+        A redacted argument or the original safe argument.
+    """
+    if not _contains_sensitive_argument_value(arg):
+        return arg
+    return _format_redacted_argument_value(option, separator)
+
+
+def _redact_current_argument(
+    arg: str,
+    option: str,
+    separator: str,
+    *,
+    is_sensitive_option: bool,
+) -> str:
+    """Redact inline sensitive options and embedded credential values.
+
+    Returns
+    -------
+    str
+        The diagnostic-safe argument representation.
+    """
+    if is_sensitive_option and separator:
+        return _format_redacted_argument_value(option, separator)
+    return _redact_embedded_value_or_keep(arg, option, separator)
+
+
 def _iter_redacted_argument_values(args: list[str]) -> cabc.Iterator[str]:
     """Yield arguments with values for secret-like options hidden.
 
@@ -69,18 +150,20 @@ def _iter_redacted_argument_values(args: list[str]) -> cabc.Iterator[str]:
     """
     redact_next_value = False
     for arg in args:
-        option, separator, _value = arg.partition("=")
-        is_option = arg.startswith("-") or bool(separator)
-        is_sensitive_option = is_option and bool(_SECRET_ENV_KEY_RE.search(option))
+        option, separator, is_sensitive_option = _classify_sensitive_argument_option(
+            arg
+        )
         if redact_next_value:
             yield "<redacted>"
-            # If the value is itself another sensitive option, redact its value too.
-            redact_next_value = is_sensitive_option and not separator
-        elif is_sensitive_option and separator:
-            yield f"{option}=<redacted>"
         else:
-            yield arg
-            redact_next_value = is_sensitive_option
+            yield _redact_current_argument(
+                arg,
+                option,
+                separator,
+                is_sensitive_option=is_sensitive_option,
+            )
+        # Preserve chained sensitive options after consuming their current value.
+        redact_next_value = is_sensitive_option and not separator
 
 
 def _redact_sensitive_argument_values(args: list[str]) -> list[str]:

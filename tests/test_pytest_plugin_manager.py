@@ -454,6 +454,31 @@ def test_enter_cmd_mox_param_override_precedes_marker(
     _assert_lifecycle_calls(stub, enter=1, replay=0)
 
 
+def test_auto_lifecycle_hint_explains_override_precedence(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """The lifecycle hint makes higher-precedence opt-outs clear."""
+    request = _StubRequest(
+        config=_StubConfig(cli=False, ini=False),
+        node=_StubNode(marker=_StubMarker(auto_lifecycle=True)),
+        param={"auto_lifecycle": True},
+    )
+    manager = make_manager(request)
+
+    assert manager.auto_lifecycle, "Assertion failed"
+    hint = manager.mox._lifecycle_hint
+    expected_hint = (
+        "Disable the most specific active setting: pass False (or "
+        "{'auto_lifecycle': False}) as the cmd_mox fixture parameter, use "
+        "@pytest.mark.cmd_mox(auto_lifecycle=False), pass "
+        "--no-cmd-mox-auto-lifecycle, or set the "
+        "cmd_mox_auto_lifecycle ini option to false. Fixture parameters "
+        "override markers, markers override the CLI, and the CLI overrides "
+        "the ini option."
+    )
+    assert hint == expected_hint, "auto lifecycle hint must explain precedence"
+
+
 @pytest.mark.parametrize("mode", ["explicit-node", "request-node"])
 def test_exit_cmd_mox_cleanup_error_handling(
     make_manager: cabc.Callable[..., _CmdMoxManager],
