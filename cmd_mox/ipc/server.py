@@ -99,42 +99,17 @@ def _cache_outcome(before: _CacheInfo, after: _CacheInfo) -> _CacheOutcome:
 def _resolve_unix_server_base_for_inner_server() -> tuple[
     type[socketserver.BaseServer], _SelectionMode
 ]:
-    """Resolve once for the factory and record bounded decision telemetry.
+    """Resolve the cached Unix server base and its bounded selection mode.
 
     Returns
     -------
     tuple[type[socketserver.BaseServer], _SelectionMode]
         The selected base and its bounded platform mode.
 
-    Raises
-    ------
-    RuntimeError
-        If the platform does not provide a Unix server base.
     """
-    try:
-        with _UNIX_SERVER_BASE_CACHE_LOCK:
-            before = resolve_unix_server_base.cache_info()
-            base_server = resolve_unix_server_base()
-            after = resolve_unix_server_base.cache_info()
-    except RuntimeError:
-        _emit_backend_event(
-            "unsupported_platform",
-            "resolution_failed",
-            _CacheObservation("unix_server_base", "miss"),
-            "unsupported_platform",
-        )
-        raise
-
+    with _UNIX_SERVER_BASE_CACHE_LOCK:
+        base_server = resolve_unix_server_base()
     selection_mode = _selection_mode(base_server)
-    if selection_mode in {"native", "compatibility"}:
-        _emit_backend_event(
-            selection_mode,
-            "selected",
-            _CacheObservation(
-                "unix_server_base",
-                _cache_outcome(before, after),
-            ),
-        )
     return base_server, selection_mode
 
 
@@ -145,17 +120,46 @@ def _inner_server_cls_for_backend() -> tuple[_InnerServerClass, _CacheOutcome]:
     -------
     tuple[_InnerServerClass, _CacheOutcome]
         The cached class and whether this access hit or missed.
+
+    Raises
+    ------
+    RuntimeError
+        If the platform does not provide a Unix server base.
     """
-    # Base-resolution failures are emitted once by
-    # _resolve_unix_server_base_for_inner_server.
     with _INNER_SERVER_CLASS_CACHE_LOCK:
         before = _inner_server_cls.cache_info()
-        inner_server_cls = _inner_server_cls()
+        base_before = resolve_unix_server_base.cache_info()
+        try:
+            inner_server_cls = _inner_server_cls()
+        except RuntimeError:
+            _emit_backend_event(
+                "unsupported_platform",
+                "resolution_failed",
+                _CacheObservation(
+                    "unix_server_base",
+                    _cache_outcome(
+                        base_before,
+                        resolve_unix_server_base.cache_info(),
+                    ),
+                ),
+                "unsupported_platform",
+            )
+            raise
         after = _inner_server_cls.cache_info()
+        base_after = resolve_unix_server_base.cache_info()
 
     cache_outcome = _cache_outcome(before, after)
     inner_server_cls = typ.cast("_InnerServerClass", inner_server_cls)
     selection_mode = inner_server_cls._cmd_mox_selection_mode
+    if cache_outcome == "miss" and selection_mode in {"native", "compatibility"}:
+        _emit_backend_event(
+            selection_mode,
+            "selected",
+            _CacheObservation(
+                "unix_server_base",
+                _cache_outcome(base_before, base_after),
+            ),
+        )
     _emit_backend_event(
         selection_mode,
         "cache_access",
@@ -302,6 +306,10 @@ def _inner_server_cls() -> cabc.Callable[[Path, IPCServer], socketserver.BaseSer
     -------
     cabc.Callable[[Path, IPCServer], socketserver.BaseServer]
         The inner server class configured for this platform.
+
+    Notes
+    -----
+    A ``RuntimeError`` from platform base resolution propagates to the caller.
     """
     base_server, selection_mode = _resolve_unix_server_base_for_inner_server()
     # Any is needed because the class base is selected at runtime; the resolver

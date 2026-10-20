@@ -49,11 +49,9 @@ def unsupported_unix_server_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_direct_base_resolution_emits_no_observability(
-    monkeypatch: pytest.MonkeyPatch,
-    unix_server_base_cache: None,
-) -> None:
-    """Keep telemetry at backend creation rather than in the pure resolver."""
+@pytest.fixture
+def native_unix_server_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Select a stand-in native Unix server without opening sockets."""
     monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
     monkeypatch.setattr(
         socketserver,
@@ -62,6 +60,31 @@ def test_direct_base_resolution_emits_no_observability(
         raising=False,
     )
 
+
+def _single_selection(
+    events: cabc.Iterable[_observability.IPCEvent],
+) -> _observability.IPCEvent:
+    """Return the sole base-selection event in *events*.
+
+    Returns
+    -------
+    _observability.IPCEvent
+        The selected base event.
+    """
+    [selection] = [
+        event
+        for event in events
+        if event.operation == unix_server.BACKEND_SELECTION_OPERATION
+        and event.outcome == "selected"
+    ]
+    return selection
+
+
+def test_direct_base_resolution_emits_no_observability(
+    unix_server_base_cache: None,
+    native_unix_server_platform: None,
+) -> None:
+    """Keep telemetry at backend creation rather than in the pure resolver."""
     with _observability.capture_events() as events:
         base_server = resolve_unix_server_base()
 
@@ -69,8 +92,38 @@ def test_direct_base_resolution_emits_no_observability(
     assert events == [], "Direct resolution must remain free of telemetry side effects"
 
 
+def test_direct_inner_server_factory_emits_no_observability(
+    unix_server_base_cache: None,
+    native_unix_server_platform: None,
+) -> None:
+    """Keep the cached class factory free of backend telemetry side effects."""
+    with _observability.capture_events() as events:
+        inner_server_cls = unix_server._inner_server_cls()
+
+    assert issubclass(
+        typ.cast("type[socketserver.BaseServer]", inner_server_cls),
+        _StubUnixStreamServer,
+    ), "The factory must subclass the resolved platform base"
+    assert events == [], "Direct factory access must not emit backend telemetry"
+
+
+def test_direct_inner_server_factory_failure_emits_no_observability(
+    unix_server_base_cache: None,
+    unsupported_unix_server_platform: None,
+) -> None:
+    """Propagate resolution errors without emitting from the cached factory."""
+    with (
+        _observability.capture_events() as events,
+        pytest.raises(RuntimeError, match="not supported on this platform"),
+    ):
+        unix_server._inner_server_cls()
+
+    assert events == [], "Direct factory failure must not emit backend telemetry"
+
+
 def test_resolution_builds_threaded_compatibility_server(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     unix_server_base_cache: None,
 ) -> None:
     """Add threading when only the basic Unix server class is available."""
@@ -88,8 +141,9 @@ def test_resolution_builds_threaded_compatibility_server(
         raising=False,
     )
 
+    server = unix_server.IPCServer(tmp_path / "unused.sock")
     with _observability.capture_events() as events:
-        _inner_server_cls, cache_outcome = unix_server._inner_server_cls_for_backend()
+        server._create_backend()
 
     compat_server = resolve_unix_server_base()
     assert issubclass(compat_server, socketserver.ThreadingMixIn), (
@@ -98,33 +152,27 @@ def test_resolution_builds_threaded_compatibility_server(
     assert issubclass(compat_server, _StubUnixStreamServer), (
         "Compatibility server must extend the available Unix server"
     )
-    [selection] = [
-        event
-        for event in events
-        if event.operation == unix_server.BACKEND_SELECTION_OPERATION
-        and event.outcome == "selected"
-    ]
+    selection = _single_selection(events)
     assert selection.selection_mode == "compatibility", (
         "The fallback choice must be observable"
     )
     assert selection.cache_name == "unix_server_base", "Wrong cache was reported"
     assert selection.cache_outcome == "miss", "First resolution must miss"
-    assert cache_outcome == "miss", "First server-class creation must miss"
+    class_cache_events = [
+        event
+        for event in events
+        if event.cache_name == "inner_server_class" and event.outcome == "cache_access"
+    ]
+    assert [event.cache_outcome for event in class_cache_events] == ["miss"], (
+        "First server-class creation must miss"
+    )
 
 
 def test_server_class_cache_hit_is_observable(
-    monkeypatch: pytest.MonkeyPatch,
     unix_server_base_cache: None,
+    native_unix_server_platform: None,
 ) -> None:
     """Record reuse of the cached server class without opening a socket."""
-    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(
-        socketserver,
-        "ThreadingUnixStreamServer",
-        _StubUnixStreamServer,
-        raising=False,
-    )
-
     with _observability.capture_events() as events:
         first_class, first_outcome = unix_server._inner_server_cls_for_backend()
         second_class, second_outcome = unix_server._inner_server_cls_for_backend()
@@ -142,40 +190,23 @@ def test_server_class_cache_hit_is_observable(
     assert [event.cache_outcome for event in class_cache_events] == ["miss", "hit"], (
         "Each inner-class lookup must report its cache outcome"
     )
-    [selection] = [
-        event
-        for event in events
-        if event.operation == unix_server.BACKEND_SELECTION_OPERATION
-        and event.outcome == "selected"
-    ]
+    selection = _single_selection(events)
     assert selection.selection_mode == "native", "The native choice must be observed"
     assert selection.cache_outcome == "miss", "The first base lookup must miss"
 
 
 def test_unix_base_cache_hit_is_observable_after_factory_reset(
-    monkeypatch: pytest.MonkeyPatch,
     unix_server_base_cache: None,
+    native_unix_server_platform: None,
 ) -> None:
     """Report reuse of the base class when the inner class is rebuilt."""
-    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(
-        socketserver,
-        "ThreadingUnixStreamServer",
-        _StubUnixStreamServer,
-        raising=False,
-    )
     unix_server._inner_server_cls_for_backend()
     unix_server._inner_server_cls.cache_clear()
 
     with _observability.capture_events() as events:
         unix_server._inner_server_cls_for_backend()
 
-    [selection] = [
-        event
-        for event in events
-        if event.operation == unix_server.BACKEND_SELECTION_OPERATION
-        and event.outcome == "selected"
-    ]
+    selection = _single_selection(events)
     assert selection.selection_mode == "native", "The native choice must be observed"
     assert selection.cache_name == "unix_server_base", "Wrong cache was reported"
     assert selection.cache_outcome == "hit", "The base class should be reused"
