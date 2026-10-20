@@ -9,6 +9,7 @@ whitespace or nearby source text.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shlex
@@ -720,6 +721,42 @@ class TestSkylosLintContract:
         }
         assert entrypoint_types == EXPECTED_ENTRYPOINT_TYPES, (
             "Skylos entry-point contract must retain each verified caller type."
+        )
+
+    def test_function_and_class_entrypoints_match_server_definitions(self) -> None:
+        """Keep dynamic function and class exceptions scoped to live definitions."""
+        entrypoints = [
+            entrypoint
+            for entrypoint in _skylos_entrypoints()
+            if entrypoint.get("type") in {"function", "class"}
+        ]
+        assert entrypoints, "Skylos must retain reviewed dynamic server entrypoints."
+        assert all(
+            entrypoint.get("path") == "cmd_mox/ipc/server.py"
+            for entrypoint in entrypoints
+        ), "Dynamic server entrypoints must stay scoped to server.py."
+
+        tree = ast.parse(
+            (REPOSITORY_ROOT / "cmd_mox/ipc/server.py").read_text(encoding="utf-8")
+        )
+        definitions = {
+            (node.name, "function")
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        } | {
+            (node.name, "class")
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef)
+        }
+        configured_definitions = {
+            (full_name.rsplit(".", maxsplit=1)[-1], typ.cast("str", entrypoint["type"]))
+            for entrypoint in entrypoints
+            for full_name in _text_sequence(
+                entrypoint.get("full_name"), subject="entrypoint full name"
+            )
+        }
+        assert configured_definitions <= definitions, (
+            "Dynamic Skylos entrypoints must resolve to current source definitions."
         )
 
     def test_skylos_gate_is_strict(self) -> None:
