@@ -552,7 +552,9 @@ def test_regular_stdin_read_error_uses_controlled_exit(
             )
 
     _assert_exit_code(exc, 1)
-    assert "IPC error:" in capsys.readouterr().err
+    assert "IPC error:" in capsys.readouterr().err, (
+        "regular-file read failure did not produce a controlled diagnostic"
+    )
 
 
 def test_regular_stdin_thread_start_error_uses_controlled_exit(
@@ -585,7 +587,9 @@ def test_regular_stdin_thread_start_error_uses_controlled_exit(
         )
 
     _assert_exit_code(exc, 1)
-    assert "IPC error:" in capsys.readouterr().err
+    assert "IPC error:" in capsys.readouterr().err, (
+        "worker start failure did not produce a controlled diagnostic"
+    )
 
 
 def test_await_regular_stdin_read_rejects_result_after_deadline(
@@ -632,7 +636,9 @@ def test_read_buffered_chunk_treats_empty_read_as_eof(
         lambda *_args: pytest.fail("EOF must not trigger another descriptor read"),
     )
 
-    assert shim._shim_stdin._read_buffered_chunk(context, lambda _size: b"") == b""
+    assert shim._shim_stdin._read_buffered_chunk(context, lambda _size: b"") == b"", (
+        "an empty buffered read was not reported as EOF"
+    )
 
 
 def test_read_raw_polled_stdin_reports_descriptor_error(

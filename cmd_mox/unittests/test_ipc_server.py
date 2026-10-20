@@ -129,11 +129,25 @@ def test_ipc_server_readiness_probe_is_a_closed_connection(
 
     with _observability.capture_events() as events, IPCServer(tmp_path / "ipc.sock"):
         deadline = time.monotonic() + 1.0
-        while "connection closed" not in caplog.text and time.monotonic() < deadline:
+        while (
+            not any(
+                event.operation == "ipc.server.connection"
+                and event.outcome == "receive_closed"
+                and event.error_category == "ConnectionClosed"
+                for event in events
+            )
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.01)
 
     assert "connection closed" in caplog.text, "Readiness probe closure was not named"
     assert "malformed JSON" not in caplog.text, "Readiness probe was called malformed"
+    assert any(
+        event.operation == "ipc.server.connection"
+        and event.outcome == "receive_closed"
+        and event.error_category == "ConnectionClosed"
+        for event in events
+    ), "Readiness probe did not emit its connection event"
     [event] = [
         event
         for event in events
@@ -224,22 +238,38 @@ def test_ipc_handler_uses_remaining_time_for_each_receive(
     assert request.timeouts == pytest.approx([1.0, 0.75, 0.5])
 
 
-def test_handler_logs_connection_reset_during_reply_at_debug(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize(
+    ("stage", "failure_type", "error_number", "expected_category"),
+    [
+        ("write", BrokenPipeError, errno.EPIPE, "ConnectionError"),
+        ("flush", ConnectionResetError, errno.ECONNRESET, "ConnectionError"),
+        ("flush", OSError, errno.EBADF, "OSError"),
+    ],
+)
+def test_ipc_handler_logs_response_connection_drop(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stage: str,
+    failure_type: type[OSError],
+    error_number: int,
+    expected_category: str,
 ) -> None:
-    """A reset connection is classified as a quiet client disconnect."""
-    caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
-    writer = _FailingReplyWriter(
-        "flush", ConnectionResetError(errno.ECONNRESET, "Connection reset")
-    )
+    """Response failures emit bounded events and retain useful log severity."""
 
-    def response_pipeline(
-        _server: object, _raw: bytes, _transport: str
-    ) -> SimpleNamespace:
-        return SimpleNamespace(response_bytes=b"response", correlation_id="reset-123")
+    class BrokenWriter:
+        flush_called = False
 
-    monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
+        def write(self, payload: bytes) -> int:
+            if stage == "write":
+                raise failure_type(error_number, "secret-exception-detail")
+            return len(payload)
+
+        def flush(self) -> None:
+            self.flush_called = True
+            if stage == "flush":
+                raise failure_type(error_number, "secret-exception-detail")
+
+    writer = BrokenWriter()
     handler = SimpleNamespace(
         request=SimpleNamespace(settimeout=lambda _timeout: None),
         _read_request_payload=lambda: b"request",
@@ -248,20 +278,39 @@ def test_handler_logs_connection_reset_during_reply_at_debug(
         wfile=writer,
     )
 
+    def response_pipeline(
+        _server: object, _raw: bytes, _transport: str
+    ) -> SimpleNamespace:
+        return SimpleNamespace(response_bytes=b"reply", correlation_id="request-123")
+
+    monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
+    caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
     with _observability.capture_events() as events:
         _ipc_server._IPCHandler.handle(
             typ.cast("_ipc_server._IPCHandler", handler)
         )
 
-    assert writer.flush_called, "The reply was not flushed"
-    _assert_disconnect_is_quiet(caplog)
-    assert any(
-        event.operation == "ipc.server.connection"
-        and event.outcome == "response_dropped"
-        and event.error_category == "ConnectionError"
-        and event.correlation_id == "reset-123"
+    [event] = [
+        event
         for event in events
-    ), "Dropped response did not emit a bounded connection event"
+        if event.operation == "ipc.server.connection"
+        and event.outcome == "response_dropped"
+    ]
+    assert event.error_category == expected_category
+    assert event.correlation_id == "request-123"
+    assert writer.flush_called is (stage == "flush")
+    if expected_category == "ConnectionError":
+        _assert_disconnect_is_quiet(caplog)
+    else:
+        [error_record] = [
+            record
+            for record in caplog.records
+            if record.name == "cmd_mox.ipc.server"
+            and record.levelno == logging.ERROR
+        ]
+        assert error_record.getMessage() == "IPC reply write failed"
+        assert error_record.exc_info is None
+        assert "secret-exception-detail" not in caplog.text
 
 
 def test_ipc_handler_records_receive_connection_drop() -> None:

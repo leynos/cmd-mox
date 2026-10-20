@@ -1,4 +1,4 @@
-"""Tests for top-level shim stdin capture and fallback behavior."""
+"""Tests for top-level shim stdin capture and fallback behaviour."""
 
 from __future__ import annotations
 
@@ -27,11 +27,11 @@ def test_create_invocation_skips_tty_stdin(monkeypatch: pytest.MonkeyPatch) -> N
 
     invocation = _create_invocation("shim", timeout=1.0)
 
-    assert invocation.command == "shim"
-    assert invocation.args == ["--flag"]
-    assert invocation.stdin == ""
-    assert dummy_stdin.read_calls == 0
-    assert invocation.env["EXTRA"] == "value"
+    assert invocation.command == "shim", "invocation command was not recorded"
+    assert invocation.args == ["--flag"], "invocation arguments were not recorded"
+    assert invocation.stdin == "", "TTY stdin must not be captured"
+    assert dummy_stdin.read_calls == 0, "TTY stdin was read"
+    assert invocation.env["EXTRA"] == "value", "environment was not copied"
 
 
 def test_create_invocation_reads_stdin_when_not_tty(
@@ -44,8 +44,8 @@ def test_create_invocation_reads_stdin_when_not_tty(
 
     invocation = _create_invocation("shim", timeout=1.0)
 
-    assert invocation.stdin == "payload"
-    assert dummy_stdin.read_calls == 1
+    assert invocation.stdin == "payload", "non-TTY stdin was not captured"
+    assert dummy_stdin.read_calls == 1, "non-TTY stdin was not read exactly once"
 
 
 def test_create_invocation_observes_stdin_failure_without_error_text(
@@ -209,8 +209,8 @@ def test_create_invocation_falls_back_to_direct_read_when_unpollable(
 
     invocation = _create_invocation("shim", timeout=1.0)
 
-    assert invocation.stdin == "payload"
-    assert stdin.read_calls == 1
+    assert invocation.stdin == "payload", "direct-read fallback lost stdin payload"
+    assert stdin.read_calls == 1, "direct-read fallback must read stdin exactly once"
 
 
 def test_create_invocation_keeps_windows_stdin_read_unchanged(
@@ -228,5 +228,5 @@ def test_create_invocation_keeps_windows_stdin_read_unchanged(
             on_error=shim._exit_ipc_error,
         )
         == "payload"
-    )
-    assert stdin.read_calls == 1
+    ), "Windows stdin direct read did not preserve its payload"
+    assert stdin.read_calls == 1, "Windows stdin must be read exactly once"

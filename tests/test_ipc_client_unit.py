@@ -5,9 +5,13 @@ from __future__ import annotations
 import os
 import pathlib
 import socket
+import tempfile
 import threading
 import time
 import typing as typ
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 import pytest
 
@@ -233,10 +237,10 @@ def test_invoke_server_does_not_restart_expired_encoding_deadline(
 
 @pytest.mark.skipif(os.name == "nt", reason="Unix socket deadline behaviour")
 def test_invoke_server_bounds_fragmented_response_to_one_deadline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    monkeypatch: pytest.MonkeyPatch, short_unix_socket_path: pathlib.Path
 ) -> None:
     """Slow response chunks cannot renew the Unix client's I/O budget."""
-    socket_path = tmp_path / "delayed-response.sock"
+    socket_path = short_unix_socket_path
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(str(socket_path))
     listener.listen(1)
@@ -287,6 +291,19 @@ def test_invoke_server_bounds_fragmented_response_to_one_deadline(
         server_thread.join(timeout=1.0)
 
     assert not server_thread.is_alive(), "Unix response peer did not stop"
+
+
+@pytest.fixture
+def short_unix_socket_path() -> cabc.Iterator[pathlib.Path]:
+    """Yield a short Unix socket path and clean up its temporary directory.
+
+    Yields
+    ------
+    pathlib.Path
+        Short socket path kept alive for one test.
+    """
+    with tempfile.TemporaryDirectory(prefix="cmox-") as short_dir:
+        yield pathlib.Path(short_dir) / "ipc.sock"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Unix socket retry behaviour")
