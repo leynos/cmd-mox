@@ -4,14 +4,17 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import importlib.util
 import io
 import json
+import logging
 import math
 import os
 import sys
 import time
 import typing as typ
+import uuid
 from pathlib import Path
 
 if typ.TYPE_CHECKING:
@@ -76,12 +79,65 @@ from cmd_mox.ipc import (  # ruff: ignore[module-import-not-at-top-of-file] - sh
     PassthroughRequest,
     PassthroughResult,
     Response,
+    _observability,
     invoke_server,
     report_passthrough_result,
 )
 from cmd_mox.ipc._deadline import _remaining_time  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
+from cmd_mox.ipc._server_core import bounded_correlation_id  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
 
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
+_SHIM_STDIN_READ_OPERATION = "ipc.shim.stdin_read"
+_SHIM_RESPONSE_STREAM_OPERATION = "ipc.shim.response_stream"
+
+type _FailureOperation = typ.Literal[
+    "ipc_request",
+    "stdin_read",
+    "passthrough_report",
+    "response_write",
+    "response_flush",
+]
+type _ShimEventOperation = typ.Literal[
+    "ipc.shim.stdin_read", "ipc.shim.response_stream"
+]
+type _ShimEventOutcome = typ.Literal["read_failed", "write_failed", "flush_failed"]
+type _ResponseFailure = tuple[
+    typ.Literal["response_write", "response_flush"], Exception
+]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ShimFailureContext:
+    """Capture bounded metadata shared by one shim failure event."""
+
+    operation: _ShimEventOperation
+    outcome: _ShimEventOutcome
+    started: float
+    correlation_id: str | None
+
+
+_ERROR_DETAILS: dict[tuple[bool, _FailureOperation], str] = {
+    (False, "ipc_request"): "IPC operation failed",
+    (True, "ipc_request"): "IPC operation timed out",
+    (False, "stdin_read"): "stdin read failed",
+    (True, "stdin_read"): "timed out reading stdin",
+    (False, "passthrough_report"): "passthrough reporting failed",
+    (True, "passthrough_report"): "timed out reporting passthrough",
+    (False, "response_write"): "response stream write failed",
+    (True, "response_write"): "timed out writing response stream",
+    (False, "response_flush"): "response stream flush failed",
+    (True, "response_flush"): "timed out flushing response stream",
+}
+_ERROR_CATEGORIES: tuple[tuple[type[Exception], str], ...] = (
+    (BrokenPipeError, "BrokenPipeError"),
+    (TimeoutError, "TimeoutError"),
+    (ConnectionError, "ConnectionError"),
+    (UnicodeError, "UnicodeError"),
+    (OSError, "OSError"),
+    (json.JSONDecodeError, "JSONDecodeError"),
+    (ValueError, "ValueError"),
+    (RuntimeError, "RuntimeError"),
+)
 
 
 def _normalize_windows_arg(arg: str) -> str:
@@ -145,18 +201,71 @@ def _validate_environment() -> float:
     timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     timeout = _parse_positive_finite(timeout_raw)
     if timeout is None:
-        print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
+        print("IPC error: invalid CMOX_IPC_TIMEOUT", file=sys.stderr)
         sys.exit(1)
 
     return timeout
 
 
-def _exit_ipc_error(exc: Exception, exit_code: int = 1) -> typ.NoReturn:
-    """Print an IPC diagnostic and terminate with a controlled status."""
+def _exit_ipc_error(
+    exc: Exception,
+    exit_code: int = 1,
+    *,
+    operation: _FailureOperation = "ipc_request",
+) -> typ.NoReturn:
+    """Print a bounded IPC diagnostic and terminate with a controlled status."""
     # A closed stderr cannot prevent the shim from returning a known status.
     with contextlib.suppress(OSError, ValueError):
-        print(f"IPC error: {exc}", file=sys.stderr)
+        detail = _safe_error_detail(exc, operation)
+        print(f"IPC error: {detail}", file=sys.stderr)
     sys.exit(exit_code)
+
+
+def _safe_error_detail(exc: Exception, operation: _FailureOperation) -> str:
+    """Return a fixed diagnostic that does not expose exception text.
+
+    Returns
+    -------
+    str
+        Safe message selected from the operation and timeout state.
+    """
+    return _ERROR_DETAILS[isinstance(exc, TimeoutError), operation]
+
+
+def _bounded_error_category(exc: Exception) -> str:
+    """Map caught failures to a closed set of log-safe categories.
+
+    Returns
+    -------
+    str
+        A known exception class name, or ``Exception`` for other failures.
+    """
+    return next(
+        (
+            category
+            for exception_type, category in _ERROR_CATEGORIES
+            if isinstance(exc, exception_type)
+        ),
+        "Exception",
+    )
+
+
+def _emit_shim_failure(failure: _ShimFailureContext, exc: Exception) -> None:
+    """Emit bounded shim failure metadata without exception details."""
+    transport: _observability.Transport = (
+        "named_pipe" if path_utils.IS_WINDOWS else "unix"
+    )
+    _observability.emit(
+        _observability.IPCEvent(
+            operation=failure.operation,
+            transport=transport,
+            outcome=failure.outcome,
+            error_category=_bounded_error_category(exc),
+            duration_ms=_observability.elapsed_ms(failure.started),
+            correlation_id=bounded_correlation_id(failure.correlation_id),
+        ),
+        logger=logging.getLogger(__name__),
+    )
 
 
 def _create_invocation(
@@ -178,15 +287,27 @@ def _create_invocation(
     Invocation
         Invocation containing arguments, stdin, and a copied environment.
     """
-    import uuid
+    invocation_id = uuid.uuid4().hex
+    stdin_data = ""
+    if not sys.stdin.isatty():
+        stdin_started = time.perf_counter()
 
-    stdin_data = (
-        ""
-        if sys.stdin.isatty()
-        else _shim_stdin._read_stdin_until_eof(
-            timeout, deadline=deadline, on_error=_exit_ipc_error
+        def report_stdin_error(exc: Exception) -> typ.NoReturn:
+            """Record a bounded stdin failure before exiting the shim."""
+            _emit_shim_failure(
+                _ShimFailureContext(
+                    _SHIM_STDIN_READ_OPERATION,
+                    "read_failed",
+                    stdin_started,
+                    invocation_id,
+                ),
+                exc,
+            )
+            _exit_ipc_error(exc, operation="stdin_read")
+
+        stdin_data = _shim_stdin._read_stdin_until_eof(
+            timeout, deadline=deadline, on_error=report_stdin_error
         )
-    )
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
     if path_utils.IS_WINDOWS:
@@ -196,7 +317,7 @@ def _create_invocation(
         args=argv,
         stdin=stdin_data,
         env=env,
-        invocation_id=uuid.uuid4().hex,
+        invocation_id=invocation_id,
     )
 
 
@@ -259,7 +380,7 @@ def _execute_invocation(
     return response
 
 
-def _write_response(response: Response) -> None:
+def _write_response(response: Response, *, correlation_id: str | None = None) -> None:
     """Write response to stdout/stderr and update environment if needed."""
     if response.env:
         os.environ |= response.env
@@ -270,24 +391,61 @@ def _write_response(response: Response) -> None:
             ("stdout", response.stdout),
             ("stderr", response.stderr),
         )
-        if (failure := _write_response_stream(stream_name, text)) is not None
+        if (
+            failure := _write_response_stream(
+                stream_name, text, correlation_id=correlation_id
+            )
+        )
+        is not None
     ]
     if write_failures:
-        _exit_ipc_error(write_failures[0], exit_code=response.exit_code or 1)
+        operation, exc = write_failures[0]
+        _exit_ipc_error(
+            exc,
+            exit_code=response.exit_code or 1,
+            operation=operation,
+        )
     sys.exit(response.exit_code)
 
 
 def _write_response_stream(
-    stream_name: typ.Literal["stdout", "stderr"], text: str
-) -> Exception | None:
+    stream_name: typ.Literal["stdout", "stderr"],
+    text: str,
+    *,
+    correlation_id: str | None = None,
+) -> _ResponseFailure | None:
     """Write one response stream and return its failure, if any."""  # ruff: ignore[docstring-missing-returns] - the annotation makes the optional failure explicit
     stream = getattr(sys, stream_name)
+    started = time.perf_counter()
     try:
         stream.write(text)
+    except (OSError, ValueError) as exc:
+        _emit_shim_failure(
+            _ShimFailureContext(
+                _SHIM_RESPONSE_STREAM_OPERATION,
+                "write_failed",
+                started,
+                correlation_id,
+            ),
+            exc,
+        )
+        _replace_failed_stream_with_sink(stream_name, stream)
+        return "response_write", exc
+    started = time.perf_counter()
+    try:
         stream.flush()
     except (OSError, ValueError) as exc:
+        _emit_shim_failure(
+            _ShimFailureContext(
+                _SHIM_RESPONSE_STREAM_OPERATION,
+                "flush_failed",
+                started,
+                correlation_id,
+            ),
+            exc,
+        )
         _replace_failed_stream_with_sink(stream_name, stream)
-        return exc
+        return "response_flush", exc
     return None
 
 
@@ -324,7 +482,7 @@ def main() -> None:
     deadline = None if path_utils.IS_WINDOWS else time.monotonic() + timeout
     invocation = _create_invocation(cmd_name, timeout, deadline=deadline)
     response = _execute_invocation(invocation, timeout, deadline=deadline)
-    _write_response(response)
+    _write_response(response, correlation_id=invocation.invocation_id)
 
 
 def _handle_passthrough(
@@ -374,8 +532,14 @@ def _handle_passthrough(
             ("stdout", result_response.stdout),
             ("stderr", result_response.stderr),
         ):
-            _write_response_stream(stream_name, text)
-        _exit_ipc_error(exc, exit_code=result_response.exit_code or 1)
+            _write_response_stream(
+                stream_name, text, correlation_id=invocation.invocation_id
+            )
+        _exit_ipc_error(
+            exc,
+            exit_code=result_response.exit_code or 1,
+            operation="passthrough_report",
+        )
 
 
 def _shim_directory_from_env() -> Path | None:

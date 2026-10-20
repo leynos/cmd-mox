@@ -125,10 +125,11 @@ def test_clone_repo(cmd_mox):
 ```
 
 Calling `replay()` while the controller context is active and in the replay
-phase is an idempotent no-op. A manually managed controller created with
-`verify_on_exit=False` remains in replay after its context exits; calling
-`replay()` again then raises
-`LifecycleError: Cannot call replay(): not in 'record' phase (current phase: replay)`.
+phase is an idempotent no-op. A manually managed controller with the default
+`verify_on_exit=True` verifies when its context exits and enters the verify
+phase; a later `replay()` raises `LifecycleError`. With `verify_on_exit=False`,
+the context exits while the controller is still in replay, so a later call
+raises `LifecycleError: Cannot call replay(): not in 'record' phase (current phase: replay)`.
 
 For manual lifecycle control, disable automatic replay and verification with
 one of these settings:
@@ -1072,15 +1073,22 @@ server.
   if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
-  exported automatically (default `5.0`). On POSIX, this is one deadline shared
-  by reading piped or regular-file stdin, connecting to the Unix socket,
+  exported automatically (default `5.0`). On POSIX, one deadline covers
+  pollable piped stdin, regular-file stdin, connecting to the Unix socket,
   sending the request, receiving the response, and reporting passthrough
-  results. If stdin cannot be polled, the shim retains its direct-read
-  behaviour. On Windows, the named-pipe client keeps its existing cooperative
-  timeout behaviour. The IPC client raises `TimeoutError` when its available
-  time expires; the shim reports `IPC error: ...` to stderr and exits non-zero.
-  If a passthrough report fails, the shim preserves the real command's non-zero
-  exit status.
+  results. Regular-file reads use a worker so the shim can stop waiting at the
+  deadline. Streams that cannot be polled retain direct-read behaviour, so the
+  stdin read itself may wait beyond this timeout. On Windows, stdin retains
+  direct-read behaviour and named-pipe communication uses its existing
+  cooperative timeout; the POSIX shared-deadline guarantee does not apply.
+
+  A non-empty request that cannot be parsed or fails validation receives a
+  bounded error response on stderr and exit status 1. An empty read, including
+  a readiness probe that closes without sending a request, is treated as a
+  closed connection and receives no response frame. Connection failures and
+  timeout expiry produce a controlled `IPC error: ...` diagnostic on stderr and
+  a non-zero exit. If passthrough reporting fails, the shim preserves the real
+  command's non-zero exit status.
 
 Most tests should rely on the fixture to manage these variables.
 

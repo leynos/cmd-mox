@@ -199,7 +199,9 @@ def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None
         monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "nan")
         result = _run_unserved_shim(env, "baz")
         assert not result.stdout, "Assertion failed"
-        assert "invalid timeout: 'nan'" in result.stderr, "Assertion failed"
+        assert result.stderr == "IPC error: invalid CMOX_IPC_TIMEOUT\n", (
+            "Shim did not emit the bounded invalid-timeout diagnostic"
+        )
         assert result.returncode == 1, "Assertion failed"
 
 

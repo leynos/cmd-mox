@@ -271,6 +271,6 @@ def test_main_rejects_invalid_timeout(
         "shim.main should exit with code 1 for an invalid timeout"
     )
     out = capsys.readouterr()
-    assert f"invalid timeout: '{raw_timeout}'" in out.err, (
-        "shim.main should report the rejected timeout value on stderr"
+    assert out.err == "IPC error: invalid CMOX_IPC_TIMEOUT\n", (
+        "shim.main should emit a bounded invalid-timeout diagnostic"
     )

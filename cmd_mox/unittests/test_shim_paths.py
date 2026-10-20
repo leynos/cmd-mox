@@ -54,7 +54,7 @@ def test_normalize_windows_arg_respects_platform(
     is_windows: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized platform, not a flag
     expected: str,
 ) -> None:
-    """Caret normalisation should only collapse carets on Windows."""
+    """Carets should only be collapsed on Windows."""
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", is_windows)
 
     assert shim._normalize_windows_arg(r"^^^literal^^^^") == expected, (

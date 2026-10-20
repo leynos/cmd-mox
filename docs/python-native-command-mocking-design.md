@@ -791,6 +791,14 @@ backend-construction failure. Error categories are fixed values such as
 `unsupported_platform`, `windows_unsupported`, and `os_error`; exception
 messages and socket paths never enter logs or counters. The cached resolver
 itself remains free of logging side effects.
+Shim failures while reading stdin or writing and flushing response streams use
+the same seam with fixed operation, outcome, and error-category values, a
+duration, and a correlation identifier when available. Passthrough reporting
+already emits `ipc.client.request` events, while Unix server response-write
+failures emit `ipc.server.connection` events. These additions retain the
+never-log rules: event fields contain no exception messages or stream content.
+Events are sent to structured logging and counted in process; the seam has no
+external metrics or tracing collector.
 
 #### Named-pipe resource bounds (2026-08-28)
 
