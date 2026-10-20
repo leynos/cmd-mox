@@ -22,6 +22,7 @@ if typ.TYPE_CHECKING:
     import collections.abc as cabc
     from pathlib import Path
 
+    from ._observability import _BackendErrorCategory as _ErrorCategory
     from ._unix_server_base import _SelectionMode
     from .models import Invocation, PassthroughResult, Response
 
@@ -42,14 +43,6 @@ type _BackendOutcome = typ.Literal[
     "cache_access",
     "backend_construction_failed",
     "windows_rejected",
-]
-type _ErrorCategory = typ.Literal[
-    "unsupported_platform",
-    "windows_unsupported",
-    "os_error",
-    "runtime_error",
-    "type_error",
-    "value_error",
 ]
 
 
@@ -152,24 +145,13 @@ def _inner_server_cls_for_backend() -> tuple[_InnerServerClass, _CacheOutcome]:
     -------
     tuple[_InnerServerClass, _CacheOutcome]
         The cached class and whether this access hit or missed.
-
-    Raises
-    ------
-    RuntimeError
-        If the platform does not provide a Unix server base.
     """
-    try:
-        with _INNER_SERVER_CLASS_CACHE_LOCK:
-            before = _inner_server_cls.cache_info()
-            inner_server_cls = _inner_server_cls()
-            after = _inner_server_cls.cache_info()
-    except RuntimeError:
-        _emit_backend_event(
-            "unsupported_platform",
-            "cache_access",
-            _CacheObservation("inner_server_class", "miss"),
-        )
-        raise
+    # Base-resolution failures are emitted once by
+    # _resolve_unix_server_base_for_inner_server.
+    with _INNER_SERVER_CLASS_CACHE_LOCK:
+        before = _inner_server_cls.cache_info()
+        inner_server_cls = _inner_server_cls()
+        after = _inner_server_cls.cache_info()
 
     cache_outcome = _cache_outcome(before, after)
     inner_server_cls = typ.cast("_InnerServerClass", inner_server_cls)

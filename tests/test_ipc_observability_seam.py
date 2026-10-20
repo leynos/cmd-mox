@@ -113,6 +113,60 @@ def test_emit_counts_events_by_bounded_key() -> None:
     assert not _observability.counter_snapshot(), "Reset must clear counters"
 
 
+def test_counter_key_omits_unbounded_message_kinds_and_error_categories() -> None:
+    """Dynamic exception classes and message kinds must not expand counters."""
+    _observability.reset_counters()
+    try:
+        for index in range(4):
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.dispatch",
+                    transport="unix",
+                    kind=f"plugin_kind_{index}",
+                    outcome="handler_error",
+                    error_category=f"PluginException{index}",
+                )
+            )
+
+        counters = _observability.counter_snapshot()
+
+        assert len(counters) == 1, "Unbounded values must collapse to one counter key"
+        [key] = counters
+        assert key.error_category is None, (
+            "Dynamic exception names must not label counters"
+        )
+        assert counters[key] == 4, "All equivalent dispatch errors must aggregate"
+    finally:
+        _observability.reset_counters()
+
+
+def test_counter_key_preserves_fixed_backend_error_categories() -> None:
+    """Keep bounded backend error labels available for diagnosis."""
+    _observability.reset_counters()
+    try:
+        for error_category in ("os_error", "runtime_error"):
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.backend_selection",
+                    transport="unix",
+                    selection_mode="native",
+                    outcome="backend_construction_failed",
+                    cache_name="inner_server_class",
+                    cache_outcome="miss",
+                    error_category=error_category,
+                )
+            )
+
+        counters = _observability.counter_snapshot()
+
+        assert {key.error_category for key in counters} == {
+            "os_error",
+            "runtime_error",
+        }, "Fixed backend categories must remain separate counter dimensions"
+    finally:
+        _observability.reset_counters()
+
+
 def test_capture_events_collects_emissions() -> None:
     """The capture context manager should collect events without a collector."""
     with _observability.capture_events() as events:

@@ -11,21 +11,22 @@ emitter:
 * exception messages, tracebacks, and object ``repr`` output;
 * raw request or response payloads.
 
-Any field added to :class:`IPCEvent` in future must be a **bounded dimension**:
-a value drawn from a small closed set fixed by the source code (an operation
-name, a transport name, an outcome, an exception class name), a numeric
-measurement, or an opaque correlation identifier that is never derived from
-request content. Free-form strings taken from a request must never be added.
+Any field added to :class:`IPCEvent` in future must be safe for structured
+logging and must never contain request content. Dimensions used in counter keys
+must come from small closed sets fixed by the source code. Logs may include
+sanitized exception class names, but those caller-defined values are not
+counter labels.
 
 The seam has no third-party dependencies. It uses the standard library
 :mod:`logging` plus in-process counters, so tests can assert on emitted events
 through :func:`capture_events` or :func:`counter_snapshot` without an external
 metrics collector.
 
-Counters are keyed by :class:`EventKey`, which includes the event's bounded
-operation, transport, message kind, selection mode, outcome, cache, and error
-dimensions. Those values come from closed sets in the emitters, so the counter
-registry stays bounded no matter how many requests are processed.
+Counters are keyed by :class:`EventKey`. Message kinds and exception class
+names remain available in structured logs but are excluded from counter keys,
+because callers may add new values. Backend error categories come from a
+closed set and retain separate counters. This keeps the registry bounded while
+preserving the backend-selection dimensions needed to diagnose startup.
 """
 
 from __future__ import annotations
@@ -47,6 +48,18 @@ EVENT_MESSAGE: typ.Final[str] = "IPC observability event"
 
 type Transport = typ.Literal["unix", "named_pipe"]
 type EventField = str | int | float
+type _BackendErrorCategory = typ.Literal[
+    "unsupported_platform",
+    "windows_unsupported",
+    "os_error",
+    "runtime_error",
+    "type_error",
+    "value_error",
+]
+
+_BACKEND_ERROR_CATEGORIES: typ.Final[frozenset[str]] = frozenset(
+    typ.get_args(_BackendErrorCategory.__value__)
+)
 
 
 class EventKey(typ.NamedTuple):
@@ -54,7 +67,6 @@ class EventKey(typ.NamedTuple):
 
     operation: str
     transport: str | None
-    kind: str | None
     selection_mode: str | None
     outcome: str | None
     cache_name: str | None
@@ -83,7 +95,9 @@ class IPCEvent:
     cache_outcome:
         Whether the named cache access was a hit or miss.
     error_category:
-        Closed-set failure label or exception category. Never a message.
+        Failure label used in structured logs. Counter keys retain only the
+        closed set of backend-selection categories; arbitrary exception class
+        names stay in logs and are omitted from counters.
     attempt:
         1-based attempt counter for retried operations.
     duration_ms:
@@ -143,15 +157,19 @@ class IPCEvent:
         EventKey
             The bounded event dimensions used by the in-process counter.
         """
+        counter_error_category = (
+            self.error_category
+            if self.error_category in _BACKEND_ERROR_CATEGORIES
+            else None
+        )
         return EventKey(
             self.operation,
             self.transport,
-            self.kind,
             self.selection_mode,
             self.outcome,
             self.cache_name,
             self.cache_outcome,
-            self.error_category,
+            counter_error_category,
         )
 
 

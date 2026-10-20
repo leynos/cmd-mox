@@ -1,0 +1,85 @@
+# serializer version: 1
+# name: test_backend_event_payloads_match_snapshot
+  dict({
+    'backend_construction_failed': dict({
+      'extra': dict({
+        'cache_name': 'inner_server_class',
+        'cache_outcome': 'miss',
+        'error_category': 'os_error',
+        'operation': 'ipc.backend_selection',
+        'outcome': 'backend_construction_failed',
+        'selection_mode': 'native',
+        'transport': 'unix',
+      }),
+      'message': 'IPC observability event',
+    }),
+    'compatibility_base_hit': dict({
+      'extra': dict({
+        'cache_name': 'unix_server_base',
+        'cache_outcome': 'hit',
+        'operation': 'ipc.backend_selection',
+        'outcome': 'selected',
+        'selection_mode': 'compatibility',
+        'transport': 'unix',
+      }),
+      'message': 'IPC observability event',
+    }),
+    'inner_class_cache_hit': dict({
+      'extra': dict({
+        'cache_name': 'inner_server_class',
+        'cache_outcome': 'hit',
+        'operation': 'ipc.backend_selection',
+        'outcome': 'cache_access',
+        'selection_mode': 'native',
+        'transport': 'unix',
+      }),
+      'message': 'IPC observability event',
+    }),
+    'inner_class_cache_miss': dict({
+      'extra': dict({
+        'cache_name': 'inner_server_class',
+        'cache_outcome': 'miss',
+        'operation': 'ipc.backend_selection',
+        'outcome': 'cache_access',
+        'selection_mode': 'native',
+        'transport': 'unix',
+      }),
+      'message': 'IPC observability event',
+    }),
+    'native_base_miss': dict({
+      'extra': dict({
+        'cache_name': 'unix_server_base',
+        'cache_outcome': 'miss',
+        'operation': 'ipc.backend_selection',
+        'outcome': 'selected',
+        'selection_mode': 'native',
+        'transport': 'unix',
+      }),
+      'message': 'IPC observability event',
+    }),
+    'unsupported_platform': dict({
+      'extra': dict({
+        'cache_name': 'unix_server_base',
+        'cache_outcome': 'miss',
+        'error_category': 'unsupported_platform',
+        'operation': 'ipc.backend_selection',
+        'outcome': 'resolution_failed',
+        'selection_mode': 'unsupported_platform',
+        'transport': 'unix',
+      }),
+      'message': 'IPC observability event',
+    }),
+    'windows_rejected': dict({
+      'extra': dict({
+        'cache_name': 'inner_server_class',
+        'cache_outcome': 'miss',
+        'error_category': 'windows_unsupported',
+        'operation': 'ipc.backend_selection',
+        'outcome': 'windows_rejected',
+        'selection_mode': 'windows_unsupported',
+        'transport': 'unix',
+      }),
+      'message': 'IPC observability event',
+    }),
+  })
+# ---

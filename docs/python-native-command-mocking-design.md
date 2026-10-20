@@ -722,13 +722,14 @@ bounded request metadata and never payload data.
 both server transports. It defines a frozen `IPCEvent` carrying only bounded
 dimensions — `operation`, `transport`, `kind`, `selection_mode`, `outcome`,
 `cache_name`, `cache_outcome`, `error_category`, `attempt`, `duration_ms`,
-`message_size`, and `correlation_id` — renders them as structured logging
-fields, logs them at INFO, and counts them in an in-process registry keyed by
-the bounded event dimensions. Tests assert on emissions through
-`capture_events()` and `counter_snapshot()` rather than an external metrics
-collector. The module documents a never-log list: command names, arguments,
-standard streams, environments, socket paths, exception messages, and raw
-payloads must never become fields.
+`message_size`, and `correlation_id` — renders applicable values as structured
+logging fields and logs them at INFO. The in-process registry uses a narrower
+counter key: message kinds and caller-defined exception class names remain
+available in logs but do not label counters; fixed backend error categories do.
+Tests assert on emissions through `capture_events()` and `counter_snapshot()`
+rather than an external metrics collector. The module documents a never-log
+list: command names, arguments, standard streams, environments, socket paths,
+exception messages, and raw payloads must never become fields.
 
 Requests carry an opaque `correlation_id` as a top-level envelope field beside
 `kind`. The client reuses the model's `invocation_id` when the request already

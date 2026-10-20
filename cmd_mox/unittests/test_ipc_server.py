@@ -145,10 +145,11 @@ def test_invoke_server_retries_connection_parametrized(
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     try:
+        # Leave room for the delayed server thread to be scheduled under xdist.
         if jitter is None:
-            retry_config = RetryConfig(retries=5, backoff=0.01)
+            retry_config = RetryConfig(retries=20, backoff=0.01)
         else:
-            retry_config = RetryConfig(retries=5, backoff=0.01, jitter=jitter)
+            retry_config = RetryConfig(retries=20, backoff=0.01, jitter=jitter)
         response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
         assert response.stdout == "ls"
     finally:
