@@ -63,7 +63,7 @@ jobs:
             makeutil
 
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@5ac271baf94615e9a876ce1b77a4b266dd81f201
+        uses: leynos/shared-actions/.github/actions/generate-coverage@126d02e32a07c2b049e8b68fff09298526e5971a
         with:
           output-path: coverage.xml
           format: cobertura
@@ -88,7 +88,7 @@ jobs:
         if: >-
           steps.codescene-token.outputs.available == 'true'
           && github.ref == 'refs/heads/main'
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@5ac271baf94615e9a876ce1b77a4b266dd81f201
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@126d02e32a07c2b049e8b68fff09298526e5971a
         with:
           format: cobertura
           path: coverage.xml
