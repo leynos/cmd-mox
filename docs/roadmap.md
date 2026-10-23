@@ -257,6 +257,8 @@ supports deterministic replay without external dependencies. See
 - [x] 12.2.5. Extend `CmdMox.verify()` to report unconsumed recordings.
 - [ ] 12.2.6. Add unit tests for fixture loading, matcher behaviour, and
   consumption tracking.
+- [ ] 12.2.7. Journal strict replay misses so `CmdMox.verify()` reports them
+  alongside unconsumed recordings.
 
 ### 12.3. Scrubbing and security
 

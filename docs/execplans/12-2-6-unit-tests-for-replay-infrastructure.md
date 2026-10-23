@@ -51,8 +51,8 @@ After this change a library user observes four things:
 4. The usage guide documents one sharp edge the probe found: when a strict
    replay session has no matching recording, the shim exits with status 1 and
    prints `No fixture recording matches: <command>` on stderr, but
-   `CmdMox.verify()` does not report it. Changing that is proposed as a
-   follow-up roadmap item, not done here.
+   `CmdMox.verify()` does not report it. Changing that is roadmap item 12.2.7,
+   not done here.
 
 Success is observable when `make check-fmt`, `make typecheck`, `make lint`, and
 `make test` all pass at every milestone, the new tests listed in
@@ -157,7 +157,10 @@ observed failing before its fix.
 - [x] (2026-10-23) Expert design review (structure, contracts, verification,
   cost, failure modes, viability) completed; the shim-path probe (Stage A) was
   run during review; revisions applied.
-- [ ] Plan approved by the user.
+- [x] (2026-10-23) User decided that the defect fixes stay in this pull
+  request as separate commits, and that 12.2.7 is added to the roadmap (added
+  in the planning pull request).
+- [ ] Plan approved by the user for implementation.
 - [ ] Stage A: baseline gates recorded.
 - [ ] EP-M1: shared replay test builders and strategies.
 - [ ] EP-M2: fixture-loading tests and schema and encoding defect fixes.
@@ -249,9 +252,9 @@ observed failing before its fix.
   would specify a bug. `AGENTS.md` requires bug fixes to start with a failing
   test, which this plan does. The review raised splitting EP-M2 into its own
   pull request; keeping it in the 12.2.6 pull request with separate commits was
-  preferred because the tests and fixes are inseparable. The user may ask for a
-  split at approval. Date/Author: 2026-10-23, planning agent after design
-  review.
+  preferred because the tests and fixes are inseparable. Date/Author:
+  2026-10-23, planning agent after design review; confirmed by the user on
+  2026-10-23.
 - Decision: validate recording and metadata field types explicitly instead
   of coercing with `str()` and `int()`. Accepted types, which are exactly what
   the writer emits:
@@ -298,10 +301,11 @@ observed failing before its fix.
   replay miss through the shim exits 1 while `verify()` passes. Propose a
   follow-up roadmap entry under 12.2, worded as "12.2.7. Journal strict replay
   misses so `CmdMox.verify()` reports them alongside unconsumed recordings.",
-  to be added to `docs/roadmap.md` in EP-M5 only if the user approves it with
-  this plan. Rationale: the fix changes controller and verifier behaviour,
-  which is outside a testing item and needs its own design decision.
-  Date/Author: 2026-10-23, planning agent after design review.
+  added to `docs/roadmap.md`. Rationale: the fix changes controller and
+  verifier behaviour, which is outside a testing item and needs its own design
+  decision. Date/Author: 2026-10-23, planning agent after design review; the
+  user approved adding 12.2.7 on 2026-10-23, and it was added to the roadmap in
+  the planning pull request.
 - Decision: seeded-mutant controls use deterministic, hand-built witnesses
   passed to a shared check function, not generated Hypothesis runs against
   mutants; class coverage is enforced by witness tests, not by reading
@@ -487,8 +491,8 @@ RM-12.2.6 (consumption) -> TDD-9.5.2, TDD-9.10.15 -> EP-M4
 
 Known deviation from an upstream expectation: TDD-9.10.15 assumes a strict miss
 fails the test; over the shim it only fails the command. This plan does not
-change behaviour; it records the deviation in the design document and proposes
-12.2.7.
+change behaviour; it records the deviation in the design document and leaves
+the fix to roadmap item 12.2.7.
 
 ## Verification plan
 
@@ -736,9 +740,9 @@ Stage F (EP-M5): documentation and roadmap updates; see
   the state-machine mutant is rejected. Conformance: no production change; the
   strict-miss deviation is pinned, not altered. Recovery: revert. Remaining
   gaps: documentation. Compatibility decision: none.
-- EP-M5: documentation updated, roadmap item 12.2.6 marked done, and, if
-  approved, 12.2.7 added. Acceptance: `make fmt`, `make markdownlint`, and
-  `make nixie` pass, plus all four code gates. Compatibility decision: none.
+- EP-M5: documentation updated and roadmap item 12.2.6 marked done. Acceptance:
+  `make fmt`, `make markdownlint`, and `make nixie` pass, plus all four code
+  gates. Compatibility decision: none.
 
 Each milestone ends with `make check-fmt`, `make typecheck`, `make lint`, and
 `make test` passing (run sequentially, preferably by the `scrutineer` agent),
@@ -992,7 +996,7 @@ Documentation changes in EP-M5:
   tolerance, `ensure_ascii` unchanged); in 9.5.5 state that a missing live
   environment key never satisfies an `env_subset` pair and that equal
   `sequence` values fall back to list order; amend 9.10.15 with the
-  strict-miss-over-shim observation and the 12.2.7 proposal; in 9.8 note that
+  strict-miss-over-shim observation and a reference to 12.2.7; in 9.8 note that
   verify stops at the first double with unconsumed recordings.
 - `docs/usage-guide.md`: in "Creating and loading a replay session", state
   that fixtures are UTF-8, that a byte order mark is tolerated, and that a
@@ -1006,8 +1010,8 @@ Documentation changes in EP-M5:
   seeded-mutant convention, and why mutant runs are never generated; extend
   "Snapshot testing" with the new `.ambr` files and the no-paths rule; add
   "Replay test helpers" describing `cmd_mox/unittests/_replay_helpers.py`.
-- `docs/roadmap.md`: mark 12.2.6 done (`- [x]`); add 12.2.7 only if
-  approved.
+- `docs/roadmap.md`: mark 12.2.6 done (`- [x]`). Item 12.2.7 is already
+  present.
 
 ## Revision note
 
@@ -1025,3 +1029,7 @@ Documentation changes in EP-M5:
   documented, and proposed as 12.2.7. Effect on remaining work: EP-M2 is
   smaller and touches one file; EP-M4 gains a definite end-to-end scenario;
   EP-M5 gains the strict-miss documentation.
+- 2026-10-23: recorded the user's decisions. The defect fixes stay in the
+  12.2.6 pull request as separate commits, and roadmap item 12.2.7 was added in
+  the planning pull request. Effect on remaining work: EP-M5 no longer adds
+  12.2.7; the design and usage documentation refer to it by number.
