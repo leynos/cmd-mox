@@ -5,7 +5,7 @@ This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Outcomes & retrospective`, `Conformance basis`, and `Verification plan` must
 be kept up to date as work proceeds.
 
-Status: DRAFT (awaiting approval, including open decision `DEC-OPEN-1`)
+Status: DRAFT (`DEC-OPEN-1` resolved as Option C; awaiting plan approval)
 
 ## Purpose / big picture
 
@@ -27,9 +27,9 @@ module `cmd_mox/_atomic_write.py`:
   bytes, for the text and executable helpers planned in roadmap item `14.5.1`.
 
 Later JSON writers (the state store in `14.3.1`, the side-effect helpers in
-`14.5.1`) share this boundary. Under the recommended resolution of `DEC-OPEN-1`
-(Option C), `FixtureFile.save()` is routed through the helper in the same
-change, which also delivers roadmap item `14.1.2`.
+`14.5.1`) share this boundary. As accepted in `DEC-OPEN-1` (Option C),
+`FixtureFile.save()` is routed through the helper in the same change, which
+also delivers roadmap item `14.1.2`.
 
 A maintainer can observe success in these ways:
 
@@ -44,7 +44,7 @@ A maintainer can observe success in these ways:
 4. On POSIX, a successful write leaves the target with mode `0o600` (or the
    caller's requested mode) regardless of the process umask and the previous
    file's mode.
-5. Under Option C, a recorded fixture is owner-only on POSIX, and a fixture
+5. A recorded fixture is owner-only on POSIX, and a fixture
    save that fails before the rename keeps the previous fixture intact.
 6. `make check-fmt`, `make typecheck`, `make lint`, and `make test` pass, and
    the new tests fail before the implementation and pass afterwards.
@@ -63,9 +63,9 @@ Keep these references open while executing the plan:
   persistence (with Persistence exceptions and Failure semantics), Filesystem
   side-effect helpers, Security and portability, and Verification strategy.
 - `docs/python-native-command-mocking-design.md` §9.5.3 (`FixtureFile`) and
-  §9.10 (design decisions), updated under Option C.
+  §9.10 (design decisions), updated in Stage D.
 - `docs/usage-guide.md` §§Recording sessions and Fixture file format, updated
-  under Option C. There is no `docs/users-guide.md`; this is the consumer guide.
+  in Stage D. There is no `docs/users-guide.md`; this is the consumer guide.
 - `docs/developers-guide.md` §§Snapshot testing, Property-based testing, and
   Skylos dead-code policy.
 - `docs/documentation-style-guide.md` for en-GB-oxendict spelling, 80-column
@@ -85,9 +85,9 @@ Keep these references open while executing the plan:
 - Do not change any public signature. `atomic_write_json`,
   `atomic_write_bytes`, `AtomicWriteError`, `AtomicWriteStage`, `JsonValue`, and
   `JsonInput` must not be added to `cmd_mox/__init__.py` or to any `__all__`.
-- Do not change `FixtureFile.load()` or the fixture schema. Under Option A,
-  do not modify `cmd_mox/record/fixture.py` at all. Under Option C, the only
-  change there is the body of `FixtureFile.save()`.
+- Do not change `FixtureFile.load()` or the fixture schema. The only change
+  to `cmd_mox/record/fixture.py` is the body (and docstring) of
+  `FixtureFile.save()`.
 - Do not add runtime or development dependencies. Hypothesis, syrupy,
   pytest-bdd, pytest-timeout, and pytest-xdist are already in the `dev` group.
 - Support Python 3.12 and later (`requires-python = ">=3.12"`). `os.fchmod`
@@ -124,10 +124,10 @@ Keep these references open while executing the plan:
 
 - Risk: the blocking Skylos scan reports the helper as dead code if nothing in
   `cmd_mox/` calls it, because tests are excluded from the scan by design.
-  Severity: high. Likelihood: certain under Option A. Mitigation: settle
-  `DEC-OPEN-1` before Stage A. Option C removes the risk by giving the helper a
-  real caller in the same commit.
-- Risk: under Option C, fixture files written on WSL drvfs, Docker Desktop
+  Severity: high. Likelihood: certain if the helper lands alone. Mitigation:
+  `DEC-OPEN-1` (Option C) gives the helper a real caller in the same commit, so
+  Stage B adds the helper and the `FixtureFile.save()` change together.
+- Risk: fixture files written on WSL drvfs, Docker Desktop
   bind mounts, virtiofs, or some FUSE mounts could fail because those
   filesystems reject `fsync` on a directory. Severity: high. Likelihood:
   medium. Mitigation: `DEC-8` treats "directory sync unsupported" errors as an
@@ -172,7 +172,8 @@ Keep these references open while executing the plan:
 - [x] (2026-10-23) First draft of this plan (commit `a3bac1f`).
 - [x] (2026-10-23) Expert-panel design review (verdict: proceed with
   conditions) and revision of this plan to meet those conditions.
-- [ ] User approval of the plan and of `DEC-OPEN-1`.
+- [x] (2026-10-23) User accepted Option C for `DEC-OPEN-1`.
+- [ ] User approval of the plan.
 - [ ] Stage A: red tests (EP-M1).
 - [ ] Stage B: green implementation and adoption (EP-M2).
 - [ ] Stage C: Windows coverage, refactor, and mutation audit (EP-M3).
@@ -361,10 +362,9 @@ Keep these references open while executing the plan:
 - Decision `DEC-11`: no ADR. Rationale: the decisions refine an existing
   design rather than choosing between architectures, and the documentation
   style guide reserves ADRs for substantive, hard-to-reverse choices. The
-  refinements are recorded in `docs/cmd-mox-fake-capabilities-design.md`, and
-  under Option C a short entry is added to
-  `docs/python-native-command-mocking-design.md` §9.10. Date/Author:
-  2026-10-23, planning agent.
+  refinements are recorded in `docs/cmd-mox-fake-capabilities-design.md`, and a
+  short entry is added to `docs/python-native-command-mocking-design.md` §9.10.
+  Date/Author: 2026-10-23, planning agent.
 
 - Decision `DEC-12`: on Windows only, retry a `PermissionError` from the
   replace step with a bounded policy,
@@ -372,9 +372,9 @@ Keep these references open while executing the plan:
   before raising `AtomicWriteError` at stage `replace`. Rationale: Windows
   refuses to replace a file that another process holds open without delete
   sharing, which is common with antivirus scanners, indexers, and parallel test
-  workers. Under Option C this would otherwise be a regression for fixture
-  saves. POSIX has no such failure, so it does not retry. Date/Author:
-  2026-10-23, planning agent, after expert review.
+  workers. Because `FixtureFile.save()` now uses the helper, this would
+  otherwise be a regression for fixture saves. POSIX has no such failure, so it
+  does not retry. Date/Author: 2026-10-23, planning agent, after expert review.
 
 - Decision `DEC-13`: implement each protocol step as a private module-level
   seam function wrapping exactly one operating-system call, with a one-to-one
@@ -420,24 +420,22 @@ Keep these references open while executing the plan:
 
 - Decision `DEC-16`: replace two drafted tests. The concurrent-writer stress
   test becomes a deterministic interleaving test, and the standalone
-  `features/atomic_json_persistence.feature` is dropped under Option C in
-  favour of two scenarios in `features/recording_session.feature`. Rationale:
-  the stress test's evidence depended on scheduling and mostly exercised the
-  kernel's atomic rename, an axiom. The only repository-owned property it
-  touched, unique temporary names, is checked deterministically by pausing
-  writer A at a seam while writer B completes. Every existing feature file
-  describes a user-facing flow, and the fixture-recording flow is the
-  user-facing face of this helper. Under Option A, the standalone feature is
-  kept, because there is then no user-facing flow. Date/Author: 2026-10-23,
-  planning agent, after expert review.
+  `features/atomic_json_persistence.feature` is dropped in favour of two
+  scenarios in `features/recording_session.feature`. Rationale: the stress
+  test's evidence depended on scheduling and mostly exercised the kernel's
+  atomic rename, an axiom. The only repository-owned property it touched,
+  unique temporary names, is checked deterministically by pausing writer A at a
+  seam while writer B completes. Every existing feature file describes a
+  user-facing flow, and the fixture-recording flow is the user-facing face of
+  this helper. Date/Author: 2026-10-23, planning agent, after expert review.
 
-- Open decision `DEC-OPEN-1` (requires user approval before Stage A): how to
-  satisfy the blocking Skylos dead-code scan. Skylos scans only `cmd_mox/`,
-  excludes tests on purpose (`--no-grep-verify`), and the policy in
+- Decision `DEC-OPEN-1` (resolved 2026-10-23: the user accepted Option C):
+  how to satisfy the blocking Skylos dead-code scan. Skylos scans only
+  `cmd_mox/`, excludes tests on purpose (`--no-grep-verify`), and the policy in
   `docs/developers-guide.md` and `AGENTS.md` treats a report as genuine dead
   code until a runtime caller is verified. Every exception must name its
   verified runtime caller and must never be used to avoid a removal.
-  - Option A: keep `14.1.1` alone. Add a typed entry-point rule for
+  - Option A (rejected): keep `14.1.1` alone. Add a typed entry-point rule for
     `cmd_mox._atomic_write.atomic_write_json`, mirrored in
     `EXPECTED_ENTRYPOINT_REASONS` and `EXPECTED_ENTRYPOINT_TYPES` in
     `tests/test_skylos_lint_contract.py`, with a reason naming `14.1.2` as
@@ -446,7 +444,7 @@ Keep these references open while executing the plan:
     breaks the written policy, because no verified runtime caller exists yet.
   - Option B: leave `make lint` failing until `14.1.2`. Rejected, because
     every milestone must pass all gates.
-  - Option C (recommended): deliver `14.1.1` and `14.1.2` together. The
+  - Option C (accepted): deliver `14.1.1` and `14.1.2` together. The
     commit that adds the helper also changes `FixtureFile.save()` to
     `atomic_write_json(path, self.to_dict())`, so the helper is live through a
     real caller and no exception is needed. `14.1.2`'s success criteria
@@ -455,9 +453,9 @@ Keep these references open while executing the plan:
     plan, and both roadmap items are marked done. The user-visible change is
     that fixtures become mode `0o600` on POSIX and are written atomically.
     Git tracks only the execute bit, so committed fixtures are unaffected.
-  Recommendation: Option C, supported by all three expert reviewers. The rest
-  of this plan is written for Option C, with the Option A differences noted
-  where they apply.
+  Outcome: Option C, recommended by all three expert reviewers, was accepted by
+  the user on 2026-10-23. This plan is written for Option C only. Date/Author:
+  2026-10-23, user decision recorded by the planning agent.
 
 ## Design review outcome
 
@@ -595,7 +593,7 @@ Upstream artefacts, at the branch point `d22bb65`:
   `RM-14.1.1-S1` ("interrupted or failing writes preserve the previous complete
   JSON file") and `RM-14.1.1-S2` ("successful writes leave owner-restricted
   files on POSIX").
-- Under Option C, `docs/roadmap.md` item `14.1.2` (`RM-14.1.2`), with
+- `docs/roadmap.md` item `14.1.2` (`RM-14.1.2`), with
   `RM-14.1.2-S1` ("existing record-mode fixture round-trips still pass") and
   `RM-14.1.2-S2` ("new failure-injection tests prove old fixture contents
   survive failed writes"), and its constraint that `FixtureFile.load()` and the
@@ -910,7 +908,7 @@ Obligations:
   destination unchanged (POSIX only).
   - Artefact: `test_symlink_target_is_replaced_not_followed`.
 
-- Obligation `INV-FIXTURE-ADOPTION` (Option C): `FixtureFile.save()` writes
+- Obligation `INV-FIXTURE-ADOPTION`: `FixtureFile.save()` writes
   through the helper. Existing round-trip tests in
   `cmd_mox/unittests/test_fixture_file.py` and the recording-session
   behavioural suite pass unchanged. A save that fails at stage `replace` raises
@@ -935,9 +933,9 @@ test. Equivalent mutants are recorded in `Surprises & discoveries`.
 
 ## Plan of work
 
-Stage 0 (no code): obtain approval of this plan and the user's choice for
-`DEC-OPEN-1`, then record both in `Decision log`. Stage A must not start before
-that.
+Stage 0 (no code): obtain approval of this plan and record it in `Progress`.
+`DEC-OPEN-1` is already resolved as Option C. Stage A must not start before the
+plan is approved.
 
 Stage A (EP-M1, red): write every test named in `Verification plan`. Committed
 tests must not leave the repository red, and a stub module would itself be dead
@@ -947,8 +945,8 @@ the helper through a fixture,
 `ModuleNotFoundError` until Stage B, and each such test carries
 `@pytest.mark.xfail(strict=True, raises=ModuleNotFoundError,
 reason="14.1.1: cmd_mox._atomic_write not implemented yet")`.
-The fixture-level mode and failure tests (Option C) fail against the current
-`write_text` code for the right reason (`AssertionError` on mode `0o644`, and
+The fixture-level mode and failure tests fail against the current `write_text`
+code for the right reason (`AssertionError` on mode `0o644`, and
 `ModuleNotFoundError` for the seam), so they carry strict `xfail` markers
 naming those exceptions. Add the two new scenarios to
 `features/recording_session.feature` with matching steps and bindings, marked
@@ -957,11 +955,11 @@ reason; all four gates pass; commit.
 
 Stage B (EP-M2, green, one commit): create `cmd_mox/_atomic_write.py` with the
 interface in `Interfaces and dependencies`; change `FixtureFile.save()` to call
-`atomic_write_json(path, self.to_dict())` (Option C); replace the import
-fixture with a normal module import; remove every `xfail` marker; and generate
-the snapshot with `--snapshot-update`, then inspect the `.ambr` file by hand.
-Validate: the focused tests and the existing fixture and recording suites pass;
-all four gates pass; commit.
+`atomic_write_json(path, self.to_dict())`; replace the import fixture with a
+normal module import; remove every `xfail` marker; and generate the snapshot
+with `--snapshot-update`, then inspect the `.ambr` file by hand. Validate: the
+focused tests and the existing fixture and recording suites pass; all four
+gates pass; commit.
 
 Stage C (EP-M3, Windows and hardening): add
 `cmd_mox/unittests/test_atomic_write.py` to `WINDOWS_SMOKE_ARGS` in the
@@ -1076,12 +1074,7 @@ all four code gates pass; commit.
     `AtomicWriteStage` that patch module-local seams, `TemporaryDirectory`
     inside Hypothesis tests, and launching child processes with `-I`.
   - `docs/roadmap.md`: change `- [ ] 14.1.1.` and `- [ ] 14.1.2.` to
-    `- [x]`. Under Option A, mark only `14.1.1`, and amend `14.1.2` to name
-    removal of the temporary Skylos rule as a success criterion.
-  - Under Option A only: do not edit `docs/usage-guide.md` or
-    `docs/python-native-command-mocking-design.md`, and describe the
-    temporary entry-point rule and its removal obligation in the developers
-    guide's Skylos section.
+    `- [x]`.
 - Acceptance evidence: `make markdownlint` and `make nixie` pass; the four
   code gates pass.
 - Conformance check: every deviation is reconciled with the design document;
@@ -1195,7 +1188,7 @@ Behaviour to observe after Stage B:
 - Recording a session with `RecordingSession` and finalizing it leaves the
   fixture with mode `0o600` on POSIX and the same bytes as before the change.
 
-Behavioural specification. Under Option C, append these scenarios to
+Behavioural specification. Append these scenarios to
 `features/recording_session.feature`, implement their steps in
 `tests/steps/recording_session.py`, and bind each with its own `@scenario`
 function in `tests/test_recording_session_bdd.py`:
@@ -1223,11 +1216,6 @@ phrasing, provided the scenario meaning is unchanged, and this section must
 then be updated to quote the final text. The owner-only step asserts on POSIX
 and is skipped on Windows with an explanatory reason. The rename-failure step
 patches `cmd_mox._atomic_write._replace` through `monkeypatch`.
-
-Under Option A, the same behaviours are specified instead in a standalone
-`features/atomic_json_persistence.feature`, with steps in
-`tests/steps/atomic_json_persistence.py` and bindings in
-`tests/test_atomic_json_persistence_bdd.py`, calling the helper directly.
 
 Red-Green-Refactor evidence to record in `Artefacts and notes`:
 
@@ -1353,7 +1341,7 @@ Keep NumPy-style docstrings with `Parameters`, `Raises`, and `Examples`
 sections on `atomic_write_json`, `atomic_write_bytes`, `AtomicWriteError`, and
 `AtomicWriteStage`, and one-line docstrings on the private seams.
 
-Under Option C, `FixtureFile.save()` in `cmd_mox/record/fixture.py` becomes:
+`FixtureFile.save()` in `cmd_mox/record/fixture.py` becomes:
 
 ```python
 def save(self, path: Path) -> None:
@@ -1375,3 +1363,8 @@ def save(self, path: Path) -> None:
   fixture byte-compatibility property. Raised the scope tolerance to 18 files
   and 1,300 lines to cover `14.1.2`. Remaining work is unchanged in kind:
   approval, then Stages A to D.
+- 2026-10-23: recorded the user's acceptance of Option C for
+  `DEC-OPEN-1`. Removed the Option A alternatives (the temporary Skylos rule,
+  the standalone feature file, and the reduced documentation set), so the plan
+  now describes a single delivery of `14.1.1` and `14.1.2`. The remaining work
+  is plan approval, then Stages A to D.
