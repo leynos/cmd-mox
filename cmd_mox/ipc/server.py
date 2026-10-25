@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import errno
+import logging
 import socketserver
 import threading
 import typing as typ
@@ -18,6 +20,14 @@ from ._server_core import (
 )
 from ._unix_server_base import _selection_mode, resolve_unix_server_base
 from .socket_utils import cleanup_stale_socket, wait_for_socket
+
+logger = logging.getLogger(__name__)
+_CLIENT_DISCONNECT_ERRNOS = frozenset({
+    errno.EPIPE,
+    errno.ECONNRESET,
+    errno.ECONNABORTED,
+    errno.ENOTCONN,
+})
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -263,8 +273,16 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         response_bytes = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
         if response_bytes is None:
             return
-        self.wfile.write(response_bytes)
-        self.wfile.flush()
+        try:
+            self.wfile.write(response_bytes)
+            self.wfile.flush()
+        except OSError as error:
+            if error.errno in _CLIENT_DISCONNECT_ERRNOS:
+                logger.debug("IPC client disconnected before reply was written")
+            else:
+                # Keep the failure visible without exposing exception details.
+                logger.log(logging.ERROR, "IPC reply write failed")
+            return
 
 
 @cache

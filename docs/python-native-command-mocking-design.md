@@ -717,6 +717,38 @@ remains virtual, so subclasses can override the server hooks. The payload
 parser and validator run before any hook invocation. Observability records only
 bounded request metadata and never payload data.
 
+##### Empty reads and disconnected clients
+
+An empty read is logged at debug level and returns no reply. Malformed or
+unsupported content retains its error log, and requests that fail validation
+also return no reply. Only valid requests produce a response.
+
+For screen readers: The client sends a request to IPCHandler. The handler
+passes the raw bytes to request_pipeline, which returns response bytes. The
+handler writes and flushes the reply. If the client disconnects before the
+reply is written, the handler logs a debug message and returns without a
+traceback.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Handler as IPCHandler
+    participant Pipeline as request_pipeline
+    participant Logger
+
+    Client->>Handler: send request
+    Handler->>Pipeline: _request_pipeline(raw, unix)
+    Pipeline-->>Handler: response_bytes
+    Handler->>Client: wfile.write(response_bytes)
+    Handler->>Client: wfile.flush()
+    alt client disconnected before reply
+        Client--xHandler: OSError
+        Handler->>Logger: debug("IPC client disconnected before reply was written")
+    end
+```
+
+_Figure: IPC reply writes and client-disconnect handling._
+
 #### Observability seam and correlation identifiers (2026-08-28)
 
 `cmd_mox.ipc._observability` is a dependency-free seam shared by the client and

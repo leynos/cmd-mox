@@ -1008,6 +1008,11 @@ The same dispatch contract applies to both the Unix-domain-socket transport and
 the Windows named-pipe transport. Use callbacks for simple composition and
 subclassing for behaviour that requires overridden hooks.
 
+Zero-byte reads, including Unix readiness-probe connections, are logged at
+DEBUG and receive no reply; non-empty malformed JSON retains its error log. On
+Unix, if a client disconnects while the server writes or flushes its reply, the
+server logs the disconnect at DEBUG and returns without a traceback.
+
 On Windows the transport can be forced explicitly by swapping `IPCServer` for
 :class:`NamedPipeServer`; `CmdMox` selects it automatically based on
 ``os.name``.
