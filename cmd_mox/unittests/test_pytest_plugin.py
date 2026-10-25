@@ -204,6 +204,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
 
     result = pytester.runpytest(str(test_file), *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(passed=1, errors=1)
+    # pytester inherits an outer xdist worker's temporary-root prefix.
     expected = (
         "*cmd_mox teardown failure for "
         "*test_teardown_error_reports_failure.py::test_cleanup_error: "
