@@ -1,6 +1,7 @@
 """Unit tests for the IPC server component."""
 
 import contextlib
+import io
 import logging
 import os
 import socket
@@ -8,6 +9,7 @@ import socketserver
 import threading
 import typing as typ
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,6 +29,7 @@ from cmd_mox.ipc import (
     _unix_server_base,
     invoke_server,
 )
+from cmd_mox.ipc import server as _ipc_server
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -281,8 +284,61 @@ def _assert_disconnect_is_quiet(caplog: pytest.LogCaptureFixture) -> None:
     )
 
 
+class _FailingReplyWriter:
+    """Raise an I/O error at the selected reply-write stage."""
+
+    def __init__(self, failure_point: typ.Literal["write", "flush"]) -> None:
+        self.failure_point = failure_point
+        self.write_called = False
+        self.flush_called = False
+
+    def write(self, response_bytes: bytes) -> int:
+        self.write_called = True
+        if self.failure_point == "write":
+            raise OSError
+        return len(response_bytes)
+
+    def flush(self) -> None:
+        self.flush_called = True
+        if self.failure_point == "flush":
+            raise OSError
+
+
+@pytest.mark.parametrize("failure_point", ["write", "flush"])
+def test_handler_logs_reply_write_oserror_at_debug(
+    failure_point: typ.Literal["write", "flush"],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Write and flush errors return quietly from the request handler."""
+    caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
+    caplog.clear()
+    writer = _FailingReplyWriter(failure_point)
+
+    def response_pipeline(_server: object, _raw: bytes, _transport: str) -> bytes:
+        return b"response"
+
+    monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
+    handler = SimpleNamespace(
+        rfile=io.BytesIO(b"request"),
+        wfile=writer,
+        server=SimpleNamespace(outer=object()),
+    )
+
+    _ipc_server._IPCHandler.handle(typ.cast("_ipc_server._IPCHandler", handler))
+
+    assert writer.write_called, "The reply was not written"
+    assert writer.flush_called is (failure_point == "flush"), (
+        "Flush was called only when the write succeeded"
+    )
+    _assert_disconnect_is_quiet(caplog)
+
+
 def test_server_logs_client_disconnect_during_reply_write(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A client closing before the reply should not produce an error log."""
     disconnect_logged = threading.Event()
@@ -303,7 +359,19 @@ def test_server_logs_client_disconnect_during_reply_write(
         root_logger.addHandler(observer)
         stack.callback(root_logger.removeHandler, observer)
         caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
-        with IPCServer(socket_path, handlers=IPCHandlers(handler=slow_handler)):
+        with IPCServer(
+            socket_path, handlers=IPCHandlers(handler=slow_handler)
+        ) as server:
+            backend = server._server
+            assert backend is not None, "The IPC server did not start"
+            request_finished = threading.Event()
+            shutdown_request = backend.shutdown_request
+
+            def observe_request_shutdown(request: socket.socket) -> None:
+                shutdown_request(request)
+                request_finished.set()
+
+            monkeypatch.setattr(backend, "shutdown_request", observe_request_shutdown)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.connect(str(socket_path))
                 client.sendall(b'{"command":"ls","args":[],"stdin":"","env":{}}')
@@ -317,5 +385,13 @@ def test_server_logs_client_disconnect_during_reply_write(
             assert disconnect_logged.wait(timeout=3.0), (
                 "The reply write did not report the disconnected client"
             )
+            assert request_finished.wait(timeout=3.0), (
+                "The request thread did not finish its socket cleanup"
+            )
 
     _assert_disconnect_is_quiet(caplog)
+    captured = capfd.readouterr()
+    assert "Traceback" not in captured.err, "The server printed a traceback to stderr"
+    assert "BrokenPipeError" not in captured.err, (
+        "The server printed a BrokenPipeError to stderr"
+    )
