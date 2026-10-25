@@ -81,6 +81,7 @@ def _connection_error_category(
         case _:
             return "OSError"
 
+
 if typ.TYPE_CHECKING:
     from pathlib import Path
 

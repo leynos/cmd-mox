@@ -389,7 +389,13 @@ def _assert_response_drop_is_correlated(
     assert event.duration_ms is not None, "Connection event omitted its duration"
     assert event.duration_ms >= 0, "Connection event duration must be nonnegative"
     counter_key = _observability.EventKey(
-        "ipc.server.connection", "unix", "response_dropped"
+        operation="ipc.server.connection",
+        transport="unix",
+        selection_mode=None,
+        outcome="response_dropped",
+        cache_name=None,
+        cache_outcome=None,
+        error_category=None,
     )
     assert _observability.counter_snapshot()[counter_key] == count_before + 1, (
         "Response drop must increment its bounded counter once"
@@ -458,7 +464,13 @@ def test_ipc_handler_correlates_response_drop_with_validated_envelope(
     )
     caplog.set_level(logging.INFO, logger="cmd_mox.ipc.server")
     counter_key = _observability.EventKey(
-        "ipc.server.connection", "unix", "response_dropped"
+        operation="ipc.server.connection",
+        transport="unix",
+        selection_mode=None,
+        outcome="response_dropped",
+        cache_name=None,
+        cache_outcome=None,
+        error_category=None,
     )
     count_before = _observability.counter_snapshot().get(counter_key, 0)
 

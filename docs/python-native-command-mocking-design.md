@@ -791,6 +791,7 @@ backend-construction failure. Error categories are fixed values such as
 `unsupported_platform`, `windows_unsupported`, and `os_error`; exception
 messages and socket paths never enter logs or counters. The cached resolver
 itself remains free of logging side effects.
+
 Shim failures while reading stdin or writing and flushing response streams use
 the same seam with fixed operation, outcome, and error-category values, a
 duration, and a correlation identifier when available. Passthrough reporting
