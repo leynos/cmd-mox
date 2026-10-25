@@ -548,7 +548,9 @@ pipe (`\\.\pipe\cmdmox-<hash>`) via ``derive_pipe_name``. Shims therefore keep
 working with socket semantics (PATH filtering, env setup, etc.) while the IPC
 layer transparently maps that logical path to a Windows named pipe using
 ``win32pipe``/``win32file`` (provided by the ``pywin32`` dependency). The
-workflow is as follows:
+server transport reaches those modules through an injected backend port
+(``NamedPipeBackend``) rather than through direct module globals. The workflow
+is as follows:
 
 1. **Server Initialization:** When the `CmdMox` controller enters the replay
    phase, it starts a lightweight server thread. This thread creates a
@@ -708,6 +710,18 @@ the journal. On Unix systems the server cleans up the socket on shutdown to
 prevent stale sockets from interfering with subsequent tests, while the Windows
 transport simply closes the pipe handles. The timeout is configurable via :data:
 `cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
+
+The named-pipe server transport is split along a port and adapter boundary.
+`NamedPipeServer._create_backend` builds a `Win32NamedPipeBackend` and injects
+it into `_NamedPipeState`. The state performs every Win32 operation through the
+`NamedPipeBackend` protocol declared in `cmd_mox/ipc/windows.py`; it never
+imports a `pywin32` module itself. `cmd_mox/ipc/_win32_named_pipe_backend.py`
+imports those modules and forwards each port operation, so it is the only place
+in the server transport that touches `pywin32`. Tests inject
+`FakeNamedPipeBackend` from `cmd_mox/unittests/_named_pipe_fakes.py` in its
+place, which lets the transport logic run on any platform without replacing
+`pywin32` module globals and keeps the `pywin32` surface confined to a single
+file.
 
 #### Dispatch and observability decision (2026-08-21)
 
@@ -929,6 +943,8 @@ The relationships between the Windows transport helpers are summarized below.
 erDiagram
     Path ||--o| NamedPipeServer : derives
     NamedPipeServer ||--|{ _NamedPipeState : manages
+    NamedPipeServer ||--|| Win32NamedPipeBackend : "injects into state"
+    _NamedPipeState }o--|| NamedPipeBackend : uses
     Path ||--|{ derive_pipe_name : input
     derive_pipe_name }|--|| WINDOWS_PIPE_PREFIX : uses
     NamedPipeServer ||--|| derive_pipe_name : uses
