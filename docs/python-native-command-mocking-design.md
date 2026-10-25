@@ -716,12 +716,13 @@ The named-pipe server transport is split along a port and adapter boundary.
 it into `_NamedPipeState`. The state performs every Win32 operation through the
 `NamedPipeBackend` protocol declared in `cmd_mox/ipc/windows.py`; it never
 imports a `pywin32` module itself. `cmd_mox/ipc/_win32_named_pipe_backend.py`
-imports those modules and forwards each port operation, so it is the only place
-in the server transport that touches `pywin32`. Tests inject
-`FakeNamedPipeBackend` from `cmd_mox/unittests/_named_pipe_fakes.py` in its
-place, which lets the transport logic run on any platform without replacing
-`pywin32` module globals and keeps the `pywin32` surface confined to a single
-file.
+forwards each port operation to the guarded bindings it imports from
+`cmd_mox/ipc/windows.py`, so it is the only place in the server transport that
+calls `pywin32`. The import guard itself lives in `windows.py` and exists
+once for the package. Tests inject `FakeNamedPipeBackend` from
+`cmd_mox/unittests/_named_pipe_fakes.py` in its place, which lets the transport
+logic run on any platform without replacing `pywin32` module globals and keeps
+the `pywin32` call surface confined to a single file.
 
 #### Dispatch and observability decision (2026-08-21)
 
