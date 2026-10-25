@@ -163,7 +163,7 @@ class PipeFileOpenSpec:
 
     The transport uses ``CreateFile`` for a single purpose: opening the pipe
     once so its accept loop wakes up. Naming the fields keeps that call site
-    readable and stops the eight-positional-argument shape of ``CreateFile``
+    readable and stops the seven-positional-argument shape of ``CreateFile``
     from spreading through the port.
 
     Attributes
