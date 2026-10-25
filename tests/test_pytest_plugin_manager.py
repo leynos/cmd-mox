@@ -372,9 +372,10 @@ def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """An injected generator interruption is recorded before propagation."""
-    request = _StubRequest(config=_StubConfig())
+    node = _StubNode()
+    request = _StubRequest(config=_StubConfig(), node=node)
     # Install the _StubMox factory used when the fixture creates the spy manager.
-    make_manager(request)
+    make_manager(request, raise_on_verify=True)
 
     with (
         mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
@@ -392,6 +393,10 @@ def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
     assert manager is not None, "Assertion failed"
     assert manager.body_failed_values == [True], "Assertion failed"
     assert raised.value is interruption, "Assertion failed"
+    _assert_teardown_sections(
+        node,
+        ("teardown", "cmd_mox verification", "RuntimeError: verify boom"),
+    )
 
 
 def test_enter_cmd_mox_replays_when_enabled(

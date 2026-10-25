@@ -446,7 +446,7 @@ sequenceDiagram
         Fixture->>Fixture: body_failed = True
         Fixture-->>Test: re-raise original exception
         Teardown->>Fixture: verify or close handling
-        Teardown-->>Test: preserve propagating interrupt
+        Teardown-->>Test: preserve propagating interrupt when cleanup succeeds
     else Normal execution
         Fixture-->>Test: yield manager.mox
     end
