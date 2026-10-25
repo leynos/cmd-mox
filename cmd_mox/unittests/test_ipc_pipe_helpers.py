@@ -254,13 +254,7 @@ class _FakeWinError(Exception):
 def _scripted_read_chunk(
     steps: list[tuple[bytes, int]], *, broken_pipe_at: int | None = None
 ) -> cabc.Callable[[int], tuple[int, bytes]]:
-    """Build a reader that consumes scripted outcomes in order.
-
-    Returns
-    -------
-    cabc.Callable[[int], tuple[int, bytes]]
-        A reader that returns each scripted outcome in turn.
-    """
+    """Build a reader that consumes scripted outcomes in order."""  # ruff: ignore[docstring-missing-returns] - private test reader has an obvious callable return
     pending_steps = list(steps)
     read_count = 0
 
@@ -279,13 +273,7 @@ def _scripted_read_chunk(
 
 
 def _scripted_message_payload(steps: list[tuple[bytes, int]]) -> bytes:
-    """Return scripted bytes through the first status that ends the read.
-
-    Returns
-    -------
-    bytes
-        The concatenated chunks through the first terminal status.
-    """
+    """Return scripted bytes through the first status that ends the read."""  # ruff: ignore[docstring-missing-returns] - private test oracle has an obvious bytes return
     terminal_index = next(
         index
         for index, (_data, status) in enumerate(steps)
@@ -301,13 +289,7 @@ def _read_scripted_message(
     max_bytes: int,
     broken_pipe_at: int | None = None,
 ) -> bytes:
-    """Read a scripted message through the injected reader.
-
-    Returns
-    -------
-    bytes
-        The result returned by :func:`read_pipe_message`.
-    """
+    """Read a scripted message through the injected reader."""  # ruff: ignore[docstring-missing-returns] - private wrapper has an obvious bytes return
     return read_pipe_message(
         object(),
         # The injected reader means this value is never dereferenced.
