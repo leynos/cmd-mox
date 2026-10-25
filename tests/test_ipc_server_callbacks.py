@@ -286,6 +286,50 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
     assert "malformed JSON" in caplog.text, "Assertion failed"
 
 
+def test_readiness_probe_logs_empty_read_at_debug(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The startup probe should not be reported as malformed JSON."""
+    logger_name = "cmd_mox.ipc._server_core"
+    caplog.set_level("DEBUG", logger=logger_name)
+    empty_read_logged = threading.Event()
+
+    class _EmptyReadObserver(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if (
+                record.name == logger_name
+                and record.getMessage() == "IPC received empty read"
+            ):
+                empty_read_logged.set()
+
+    observer = _EmptyReadObserver()
+    root_logger = logging.getLogger()
+    root_logger.addHandler(observer)
+    try:
+        with IPCServer(tmp_path / "ipc.sock", timeout=2):
+            assert empty_read_logged.wait(timeout=2), (
+                "The readiness probe did not reach the empty-read handler"
+            )
+    finally:
+        root_logger.removeHandler(observer)
+
+    server_records = [record for record in caplog.records if record.name == logger_name]
+    assert any(
+        record.getMessage() == "IPC received empty read"
+        and record.levelno == logging.DEBUG
+        for record in server_records
+    ), "The readiness probe was not logged as an empty read at DEBUG"
+    assert not any(
+        "malformed JSON" in record.getMessage() for record in server_records
+    ), "The readiness probe was logged as malformed JSON"
+    assert not any(record.levelno >= logging.ERROR for record in server_records), (
+        "The readiness probe emitted an ERROR record"
+    )
+    assert not any(record.exc_info is not None for record in server_records), (
+        "The readiness probe emitted an exception record"
+    )
+
+
 def test_decode_payload_logs_empty_read_at_debug(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
