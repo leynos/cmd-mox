@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import sys
 import tomllib
+import typing as typ
 from collections import abc as cabc
 from pathlib import Path
 
@@ -117,12 +118,18 @@ def _report(
     )
 
 
+def _fail_configuration(error: Exception) -> typ.NoReturn:
+    """Report one configuration failure and exit with the gate's status 2."""  # ruff: ignore[docstring-missing-exception] - exiting with the gate's configuration status is the helper's whole purpose
+    print(f"configuration error: {error}", file=sys.stderr)
+    raise SystemExit(2) from error
+
+
 def _read_allowlist(allowlist_reader: AllowlistReader) -> tuple[AllowEntry, ...]:
     """Read the reasoned allowlist, naming unreadable configuration."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private reader forwards the allow entries or re-raises
+    # GateConfigError is a ValueError, so it can never reach the handler below;
+    # letting it propagate untouched is the whole of the pass-through rule.
     try:
         return allowlist_reader(PYPROJECT)
-    except GateConfigError:
-        raise
     except (OSError, tomllib.TOMLDecodeError) as error:
         msg = f"cannot load duplication allowlist: {error}"
         raise GateExecutionError(msg) from error
@@ -170,8 +177,7 @@ def check() -> None:
             detector=detect_findings,
         )
     except GateConfigError as error:
-        print(f"configuration error: {error}", file=sys.stderr)
-        raise SystemExit(2) from error
+        _fail_configuration(error)
     blocking, allowed, stale = partition_findings(findings, allowlist)
     _report(blocking, allowed, stale)
     if blocking:
@@ -211,8 +217,7 @@ def allow(
             validate_key(key, context=f"'{key}'")
         append_allow_entry(PYPROJECT, keys=keys, reason=reason)
     except (GateConfigError, OSError) as error:
-        print(f"configuration error: {error}", file=sys.stderr)
-        raise SystemExit(2) from error
+        _fail_configuration(error)
     print(f"recorded duplication exception for {' ~ '.join(keys)}")
 
 
