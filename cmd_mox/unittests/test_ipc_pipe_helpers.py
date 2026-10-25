@@ -333,17 +333,23 @@ _BOUNDED_READ_CASES = _READ_SCRIPT_CASES.flatmap(
     )
 )
 
-#: Oversized reads vary their limit, payload, status, and requested chunk size.
+#: Oversized reads combine individually bounded chunks past the total limit.
 _OVERSIZED_READ_CASES = st.integers(min_value=1, max_value=8).flatmap(
-    lambda max_bytes: st.binary(
-        min_size=max_bytes + 1,
-        max_size=max_bytes + 4,
-    ).flatmap(
-        lambda data: st.tuples(
-            st.just(max_bytes),
-            st.just(data),
-            _READ_STATUSES,
-            st.integers(min_value=len(data), max_value=12),
+    lambda max_bytes: st.integers(min_value=1, max_value=max_bytes).flatmap(
+        lambda first_size: st.integers(
+            min_value=max_bytes - first_size + 1,
+            max_value=max_bytes,
+        ).flatmap(
+            lambda second_size: st.tuples(
+                st.just(max_bytes),
+                st.binary(min_size=first_size, max_size=first_size),
+                st.binary(min_size=second_size, max_size=second_size),
+                _TERMINAL_READ_STATUSES,
+                st.integers(
+                    min_value=max(first_size, second_size),
+                    max_value=8,
+                ),
+            )
         )
     )
 )
@@ -429,20 +435,25 @@ def test_read_pipe_message_never_returns_more_than_its_limit(
 
 @given(case=_OVERSIZED_READ_CASES)
 def test_read_pipe_message_rejects_oversized_generated_input(
-    case: tuple[int, bytes, int, int],
+    case: tuple[int, bytes, bytes, int, int],
 ) -> None:
     """Invariant: oversized reads raise without retaining or exposing data."""
-    max_bytes, data, status, chunk_size = case
+    max_bytes, first_chunk, second_chunk, status, chunk_size = case
+    steps = [(first_chunk, ERROR_MORE_DATA), (second_chunk, status)]
+
+    assert len(first_chunk) <= max_bytes, "first chunk exceeded the byte limit"
+    assert len(second_chunk) <= max_bytes, "second chunk exceeded the byte limit"
 
     with pytest.raises(PipeMessageTooLargeError) as excinfo:
-        _read_scripted_message(
-            [(data, status)], chunk_size=chunk_size, max_bytes=max_bytes
-        )
+        _read_scripted_message(steps, chunk_size=chunk_size, max_bytes=max_bytes)
 
     error = excinfo.value
-    assert vars(error) == {"received": len(data), "limit": max_bytes}
-    assert type(error.received) is int
-    assert type(error.limit) is int
+    received = len(first_chunk) + len(second_chunk)
+    assert vars(error) == {"received": received, "limit": max_bytes}, (
+        "oversized-read error fields did not match received bytes and limit"
+    )
+    assert type(error.received) is int, "error received count was not an integer"
+    assert type(error.limit) is int, "error byte limit was not an integer"
     expected_message = f"named pipe message exceeded the {max_bytes}-byte limit"
     assert error.args == (expected_message,), "exception arguments exposed message data"
     assert str(error) == expected_message, "exception text exposed message data"
@@ -457,7 +468,9 @@ def test_read_pipe_message_concatenates_through_the_first_terminal_status(
 
     payload = _read_scripted_message(steps, chunk_size=chunk_size, max_bytes=max_bytes)
 
-    assert payload == _scripted_message_payload(steps)
+    assert payload == _scripted_message_payload(steps), (
+        "returned payload did not stop at the first terminal status"
+    )
 
 
 @given(case=_BROKEN_PIPE_CASES)
@@ -475,7 +488,9 @@ def test_read_pipe_message_returns_prefix_on_generated_broken_pipe(
         broken_pipe_at=broken_pipe_at,
     )
 
-    assert payload == b"".join(chunks[:broken_pipe_at])
+    assert payload == b"".join(chunks[:broken_pipe_at]), (
+        "broken pipe did not return exactly the received prefix"
+    )
 
 
 @pytest.mark.parametrize(
