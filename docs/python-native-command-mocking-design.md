@@ -429,6 +429,32 @@ sequenceDiagram
   end
 ```
 
+For screen readers: This sequence shows the fixture yielding the mock during
+normal execution. If setup or test execution raises a `BaseException`, the
+fixture marks the body as failed, re-raises the exception, and teardown
+preserves the interrupt while handling verification or close errors.
+
+```mermaid
+sequenceDiagram
+    participant Test as Test execution
+    participant Fixture as cmd_mox fixture
+    participant Manager as CmdMox manager
+    participant Teardown as Fixture teardown
+
+    Fixture->>Manager: enter()
+    alt BaseException during setup or yield
+        Manager-->>Fixture: KeyboardInterrupt or SystemExit
+        Fixture->>Fixture: body_failed = True
+        Fixture-->>Test: re-raise original exception
+        Teardown->>Fixture: verify or close handling
+        Teardown-->>Test: preserve propagating interrupt
+    else Normal execution
+        Fixture-->>Test: yield manager.mox
+    end
+```
+
+_Figure 1: Fixture setup, exception propagation, and teardown behaviour._
+
 - `mox.replay()`: This method must be called after all expectations have been
   recorded. It signals the end of the record phase and the beginning of the
   replay phase. Internally, this call triggers the creation of the temporary
