@@ -25,11 +25,10 @@ from cmd_mox.ipc import (
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+    import socketserver
     from pathlib import Path
 
     from syrupy.assertion import SnapshotAssertion
-
-    from cmd_mox.ipc.server import _InnerServer
 
 type _RequestPayload = dict[
     str, str | int | float | bool | list[str] | dict[str, str] | None
@@ -582,7 +581,7 @@ def test_stop_without_a_started_backend_skips_transport_hooks(
 def test_stop_joins_the_live_backend_thread(tmp_path: Path) -> None:
     """A started server still joins its backend thread on the way out."""
     server = IPCServer(tmp_path / "ipc.sock")
-    backend = typ.cast("_InnerServer", object())
+    backend = typ.cast("socketserver.BaseServer", object())
     thread = threading.Thread(target=lambda: None)
     thread.start()
     server._server = backend
