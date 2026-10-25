@@ -144,8 +144,7 @@ def test_named_pipe_server_passthrough_handler(
         )
         response = report_passthrough_result(result, timeout=1.0)
 
-    assert passthrough_results, "Assertion failed"
-    assert passthrough_results[0].invocation_id == "123", "Assertion failed"
+    assert passthrough_results == [result], "handler must receive the result intact"
     assert response.stdout == "passthrough", "Assertion failed"
     assert response.exit_code == 5, "Assertion failed"
 
