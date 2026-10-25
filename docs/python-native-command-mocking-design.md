@@ -719,50 +719,35 @@ bounded request metadata and never payload data.
 
 ##### Empty reads and disconnected clients
 
-For screen readers: The handler passes the request bytes to the shared
-pipeline. An empty read is logged at debug level and returns no reply.
-Malformed or unsupported content retains its error log, and requests that fail
-validation also return no reply. Only valid requests produce a response. If the
-client disconnects during the reply write or flush, the handler logs at debug
-level and returns without a traceback; otherwise, it writes and flushes the
-reply.
+An empty read is logged at debug level and returns no reply. Malformed or
+unsupported content retains its error log, and requests that fail validation
+also return no reply. Only valid requests produce a response.
+
+For screen readers: The client sends a request to IPCHandler. The handler
+passes the raw bytes to request_pipeline, which returns response bytes. The
+handler writes and flushes the reply. If the client disconnects before the
+reply is written, the handler logs a debug message and returns without a
+traceback.
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant IPCHandler
-    participant RequestPipeline
+    participant Handler as IPCHandler
+    participant Pipeline as request_pipeline
     participant Logger
 
-    Client->>IPCHandler: read request
-    IPCHandler->>RequestPipeline: _request_pipeline(raw, unix)
-    alt empty read
-        RequestPipeline->>Logger: debug IPC received empty read
-        RequestPipeline-->>IPCHandler: no response
-        IPCHandler-->>Client: no reply
-    else non-empty request
-        alt malformed or unsupported payload
-            RequestPipeline->>Logger: ERROR malformed or unsupported payload
-            RequestPipeline-->>IPCHandler: no response
-            IPCHandler-->>Client: no reply
-        else validation fails
-            RequestPipeline-->>IPCHandler: no response
-            IPCHandler-->>Client: no reply
-        else valid request
-            RequestPipeline-->>IPCHandler: response_bytes
-            alt client disconnects during write or flush
-                IPCHandler->>Logger: debug IPC client disconnected before reply was written
-                IPCHandler-->>Client: return without traceback
-            else reply succeeds
-                IPCHandler-->>Client: write response_bytes
-                IPCHandler-->>Client: flush
-            end
-        end
+    Client->>Handler: send request
+    Handler->>Pipeline: _request_pipeline(raw, unix)
+    Pipeline-->>Handler: response_bytes
+    Handler->>Client: wfile.write(response_bytes)
+    Handler->>Client: wfile.flush()
+    alt client disconnected before reply
+        Client--xHandler: OSError
+        Handler->>Logger: debug("IPC client disconnected before reply was written")
     end
 ```
 
-_Figure: IPC handling for empty reads, invalid requests, disconnected clients,
-and successful replies._
+_Figure: IPC reply writes and client-disconnect handling._
 
 #### Observability seam and correlation identifiers (2026-08-28)
 
