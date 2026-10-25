@@ -214,8 +214,10 @@ them degrades to an empty findings list or a skipped successful check.
   reference. CmdMox records no independent precision, recall or timing claim.
 - **`cargo install`, a floating `latest` installer, or a curl-to-shell
   bootstrap.** Each either compiles from source on an ordinary lint run or
-  trusts an unverified artefact. The installer is pinned by version and its
-  artefact verified by a platform-specific checksum.
+  trusts an unverified artefact. In CI the `cargo-binstall` release archive is
+  pinned to version 1.25.2 and the Linux x86_64 archive is verified against a
+  hard-coded SHA-256 checksum. `make install-nose` then verifies the detector
+  itself by requiring it to report the pinned `nose` version.
 - **nose's native baseline and ignore files.** Rejected for the reasons in
   Table 1: an entry has to carry its justification.
 - **Importing Episodic's application changes.** Episodic's exception list, path

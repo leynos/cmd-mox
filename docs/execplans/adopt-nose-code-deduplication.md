@@ -393,7 +393,7 @@ dependency was introduced.
 | `_check_replay_preconditions` ~ `_check_verify_preconditions` (`controller.py`)                            | `_require_replay_environment()` — the shared environment precondition, called from both phase checks                                                           | Controller phase boundary |
 | `_connect_unix_with_retries` ~ `_connect_pipe_with_retries` (`ipc/client.py`)                              | `context.validate()` hoisted into `_dispatch_request`, so no transport can reach a retry loop unvalidated                                                      | Client dispatch boundary  |
 | `validate_positive_finite_timeout` ~ `validate_retry_backoff` ~ `validate_retry_jitter` (`_validators.py`) | `_validate_numeric` — the shared bool rejection and bounds application, with the caller supplying its own bound and wording                                    | Validator module          |
-| `validate_invocation_payload` ~ `validate_passthrough_payload` (`ipc/json_utils.py`)                       | `_build_payload[PayloadT]` — one build-and-log-malformed helper, parameterized by model and description                                                        | IPC payload construction  |
+| `validate_invocation_payload` ~ `validate_passthrough_payload` (`ipc/json_utils.py`)                       | `_build_payload[PayloadT]` — one build helper that reports a malformed payload by returning `None`, parameterized by model alone                               | IPC payload construction  |
 | `Expectation.times` ~ `Expectation.times_called`                                                           | `times` delegates to `times_called`                                                                                                                            | Fluent DSL                |
 | `pywin32` import guards (repeated per transport module)                                                    | One guarded import block in `cmd_mox/ipc/windows.py`, re-exported from its `__all__` so the fake-based tests keep patching module attributes                   | Windows transport seam    |
 | `_ServerLifecycle.stop`'s `None`-tolerating hooks (three sites)                                            | `stop` skips a backend that was never created; `_stop_backend` now takes a non-optional `BackendT` and `_join_backend_thread` was inlined                      | Lifecycle base class      |
@@ -410,7 +410,7 @@ guarded statements no longer exist.
 ### Reasoned exceptions (intentional parallels)
 
 Ten families are covered by the eight `[tool.duplication_gate]` entries below;
-three of those entries cover two families each. Every entry names the specific
+two of those entries cover two families each. Every entry names the specific
 independent contract or boundary an extraction would couple. No exception was
 written to obtain a green run: every one of them is a family whose shared text
 is a signature, a docstring section, an import list or a one-statement idiom.
