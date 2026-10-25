@@ -9,7 +9,7 @@ import typing as typ
 
 import pytest
 
-from cmd_mox.ipc import IPCServer, _server_core
+from cmd_mox.ipc import IPCServer, _observability, _server_core
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -64,12 +64,23 @@ def test_readiness_probe_logs_connection_close_at_info(
     with contextlib.ExitStack() as cleanup:
         root_logger.addHandler(observer)
         cleanup.callback(root_logger.removeHandler, observer)
-        with IPCServer(tmp_path / "ipc.sock", timeout=2):
+        with (
+            _observability.capture_events() as events,
+            IPCServer(tmp_path / "ipc.sock", timeout=2),
+        ):
             assert observer.connection_closed_logged.wait(timeout=2), (
                 "The readiness probe did not reach the empty-read handler"
             )
 
     _assert_connection_close_is_logged_quietly(caplog.records)
+    [event] = [
+        item
+        for item in events
+        if item.operation == "ipc.server.connection"
+        and item.outcome == "receive_closed"
+        and item.error_category == "ConnectionClosed"
+    ]
+    assert event.correlation_id is None, "Readiness probe must not carry correlation"
 
 
 def test_decode_payload_logs_connection_close_at_info(
