@@ -173,6 +173,9 @@ def _is_integer(value: object) -> typ.TypeIs[int]:
 def require_positive_int(value: object, *, context: str) -> int:
     """Validate one required positive configuration integer.
 
+    ``True`` and ``False`` are rejected even though ``bool`` subclasses
+    ``int``, so a TOML ``true`` cannot arrive as the size ``1``.
+
     Parameters
     ----------
     value : object
