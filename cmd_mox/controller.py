@@ -116,6 +116,16 @@ class CmdMox:
     # ------------------------------------------------------------------
     # Double accessors
     # ------------------------------------------------------------------
+    def _doubles_of_kind(self, kind: DoubleKind) -> dict[str, CommandDouble]:
+        """Return the registered doubles whose kind is *kind*.
+
+        Returns
+        -------
+        dict[str, CommandDouble]
+            A new mapping holding only doubles of the requested kind.
+        """
+        return {name: dbl for name, dbl in self._doubles.items() if dbl.kind is kind}
+
     @property
     def stubs(self) -> dict[str, CommandDouble]:
         """All registered stub doubles.
@@ -125,11 +135,7 @@ class CmdMox:
         dict[str, CommandDouble]
             Registered command doubles whose kind is ``STUB``.
         """
-        return {
-            name: dbl
-            for name, dbl in self._doubles.items()
-            if dbl.kind is DoubleKind.STUB
-        }
+        return self._doubles_of_kind(DoubleKind.STUB)
 
     @property
     def mocks(self) -> dict[str, CommandDouble]:
@@ -140,11 +146,7 @@ class CmdMox:
         dict[str, CommandDouble]
             Registered command doubles whose kind is ``MOCK``.
         """
-        return {
-            name: dbl
-            for name, dbl in self._doubles.items()
-            if dbl.kind is DoubleKind.MOCK
-        }
+        return self._doubles_of_kind(DoubleKind.MOCK)
 
     @property
     def spies(self) -> dict[str, CommandDouble]:
@@ -155,11 +157,7 @@ class CmdMox:
         dict[str, CommandDouble]
             Registered command doubles whose kind is ``SPY``.
         """
-        return {
-            name: dbl
-            for name, dbl in self._doubles.items()
-            if dbl.kind is DoubleKind.SPY
-        }
+        return self._doubles_of_kind(DoubleKind.SPY)
 
     # ------------------------------------------------------------------
     # Lifecycle state
@@ -635,6 +633,16 @@ class CmdMox:
         if missing:
             raise MissingEnvironmentError("; ".join(missing))
 
+    def _require_replay_environment(self) -> None:
+        """Ensure the replay environment attributes the run depends on exist.
+
+        Raises
+        ------
+        MissingEnvironmentError
+            If the shim directory or socket path is unavailable.
+        """  # ruff: ignore[docstring-extraneous-exception] - _require_env_attrs propagates this caller-visible failure.
+        self._require_env_attrs("shim_dir", "socket_path")
+
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay.
 
@@ -645,7 +653,7 @@ class CmdMox:
             been entered.
         MissingEnvironmentError
             If the shim directory or socket path is unavailable.
-        """  # ruff: ignore[docstring-extraneous-exception] - _require_env_attrs propagates this caller-visible failure.
+        """  # ruff: ignore[docstring-extraneous-exception] - _require_replay_environment propagates this caller-visible failure.
         self._require_phase(Phase.RECORD, "replay")
         if not self._entered:
             msg = (
@@ -653,7 +661,7 @@ class CmdMox:
                 f"(current phase: {self._phase.name.lower()})"
             )
             raise LifecycleError(self._append_lifecycle_hint(msg))
-        self._require_env_attrs("shim_dir", "socket_path")
+        self._require_replay_environment()
 
     def _validate_replay_environment(self) -> tuple[Path, Path]:
         """Ensure the replay environment is fully prepared.
@@ -728,7 +736,7 @@ class CmdMox:
     def _check_verify_preconditions(self) -> None:
         """Ensure verify() is called in the correct phase."""
         self._require_phase(Phase.REPLAY, "verify")
-        self._require_env_attrs("shim_dir", "socket_path")
+        self._require_replay_environment()
 
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""

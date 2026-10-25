@@ -55,19 +55,21 @@ made to the generators and the uploader together is still a reviewed change.
 
 ## Linting
 
-CmdMox uses a four-tier linting pipeline. Run it with:
+CmdMox uses a five-tier linting pipeline. Run it with:
 
 ```bash
 make lint
 ```
 
 The `lint` target first builds the development environment through
-`make build`. It then runs the four lint tiers in order:
+`make build`, and provisions the pinned duplication detector through
+`make install-nose`. It then runs the five lint tiers in order:
 
 1. `ruff check`
 2. Pylint on uv-managed PyPy 3.12
 3. CPython 3.14 Pylint with `df12_python_lints`, followed by `ambrleaks`
 4. a blocking Skylos dead-code scan of the production package
+5. the blocking nose code-duplication gate
 
 Ruff is the fast first tier. It enforces import order, pycodestyle and Pyflakes
 rules, pathlib usage, docstring rules, pytest rules, selected Ruff preview
@@ -85,11 +87,16 @@ CPython 3.14. Its separate `pylintrc-df12.toml` enables every DF12 checker
 against CmdMox's supported Python 3.12 source baseline. `ambrleaks` then scans
 the test snapshot area for unredacted values.
 
-Skylos is the final production-liveness check. It is separately provisioned at
-an exact release, scans `cmd_mox` without treating test references as live
-callers, and fails the local gate and Linux CI when it reports unexplained dead
-code. The scan uses only local static analysis: uploads, provenance collection,
-and grep verification are disabled.
+Skylos is the fourth tier. It is separately provisioned at an exact release,
+scans `cmd_mox` without treating test references as live callers, and fails the
+local gate and Linux CI when it reports unexplained dead code. The scan uses
+only local static analysis: uploads, provenance collection, and grep
+verification are disabled.
+
+The nose duplication gate is the final tier. It runs the pinned `nose-cli`
+detector over the production package and fails when it finds a clone family no
+reasoned exception covers. See [Code-duplication gate](#code-duplication-gate)
+below.
 
 ## Makefile lint variables
 
@@ -97,36 +104,51 @@ The `Makefile` exposes the lint runner through variables so developers and
 Continuous Integration (CI) jobs can override the runtime without editing
 project files.
 
-| Variable                    | Default                                                                                                                                              | Purpose                                                                           |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `RUFF_VERSION`              | `0.16.4`                                                                                                                                             | Pins the Ruff release used by lint and format targets.                            |
-| `RUFF`                      | `$(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)`                                                                                                      | Runs the pinned Ruff command via `uv tool run`.                                   |
-| `TY_VERSION`                | `0.0.74`                                                                                                                                             | Pins the `ty` release used by the typecheck target.                               |
-| `TY`                        | `$(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty`                                                                                                    | Overlays the pinned `ty` onto the project virtualenv so it sees dependencies.     |
-| `TYPOS_VERSION`             | `1.48.0`                                                                                                                                             | Pins the `typos` release used by the spelling target.                             |
-| `PYLINT_PYTHON`             | `pypy@3.12`                                                                                                                                          | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
-| `PYLINT_TARGETS`            | `cmd_mox conftest.py examples tests`                                                                                                                 | Lists the directories and files linted by Pylint.                                 |
-| `PYLINT_VERSION`            | `4.0.9`                                                                                                                                              | Pins the Pylint release run by the second tier.                                   |
-| `PYLINT_BASELINE_DISABLE`   | Existing cmd-mox baseline                                                                                                                            | Temporarily disables legacy Pylint findings while keeping the second tier active. |
-| `PYLINT`                    | `$(UV_ENV) $(UV) tool run --managed-python --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' pylint --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy Pylint command.                                              |
-| `DF12_PYTHON`               | `3.14`                                                                                                                                               | Selects CPython for the isolated DF12 tooling tier.                               |
-| `DF12_PYTHON_LINTS_REF`     | `4cf41736cce2f7ba2778882a5c629c044568a0e5`                                                                                                           | Pins the immutable DF12 lint and `ambrleaks` revision (the `v0.3.0` tag commit).  |
-| `DF12_PYTHON_LINTS`         | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                                       | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
-| `DF12_PYLINT`               | uv-isolated Pylint under CPython 3.14                                                                                                                | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
-| `AMBRLEAKS`                 | uv-isolated `ambrleaks` under CPython 3.14                                                                                                           | Scans tracked test snapshot files for unredacted values.                          |
-| `SKYLOS_VERSION`            | `4.33.2`                                                                                                                                             | Pins the separately provisioned dead-code analyser.                               |
-| `SKYLOS_CLI`                | `$(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' skylos`                                                                   | Command-only CLI; Python 3.14 supplies Skylos's source AST runtime.               |
-| `SKYLOS`                    | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                                         | Adds scan-only global options for the blocking lint target.                       |
-| `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                                            | Limits dead-code liveness analysis to production sources.                         |
-| `SKYLOS_EXCLUDE_FOLDERS`    | `tests cmd_mox/unittests`                                                                                                                            | Excludes both test paths from the production liveness graph.                      |
-| `SKYLOS_EXCLUDE_ARGS`       | `$(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))`                                                                                    | Expands each excluded folder to its own repeatable `--exclude` flag.              |
-| `SKYLOS_WHITELIST_LOCK`     | `.skylos-whitelist.lock`                                                                                                                             | Repository-local lock serializing documented whitelist updates.                   |
+| Variable                      | Default                                                                                                                                        | Purpose                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `RUFF_VERSION`                | `0.16.4`                                                                                                                                       | Pins the Ruff release used by lint and format targets.                            |
+| `RUFF`                        | `$(UV_GATE) tool --from ruff@$(RUFF_VERSION) -- ruff`                                                                                          | Runs the pinned Ruff command via the vendored helper's tool channel.              |
+| `TY_VERSION`                  | `0.0.74`                                                                                                                                       | Pins the `ty` release used by the typecheck target.                               |
+| `TY`                          | `$(UV_GATE) tool --from ty@$(TY_VERSION) -- ty`                                                                                                | Runs the pinned `ty`; `--python .venv` points it at the project environment.      |
+| `TYPOS_VERSION`               | `1.48.0`                                                                                                                                       | Pins the `typos` release used by the spelling target.                             |
+| `PYLINT_PYTHON`               | `pypy@3.12`                                                                                                                                    | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
+| `PYLINT_TARGETS`              | `cmd_mox conftest.py examples tests`                                                                                                           | Lists the directories and files linted by Pylint.                                 |
+| `PYLINT_VERSION`              | `4.0.9`                                                                                                                                        | Pins the Pylint release run by the second tier.                                   |
+| `PYLINT_BASELINE_DISABLE`     | Existing cmd-mox baseline                                                                                                                      | Temporarily disables legacy Pylint findings while keeping the second tier active. |
+| `PYLINT`                      | `$(UV_GATE) tool --managed-python --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' -- pylint --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy Pylint command.                                              |
+| `DF12_PYTHON`                 | `3.14`                                                                                                                                         | Selects CPython for the isolated DF12 tooling tier.                               |
+| `DF12_PYTHON_LINTS_REF`       | `4cf41736cce2f7ba2778882a5c629c044568a0e5`                                                                                                     | Pins the immutable DF12 lint and `ambrleaks` revision (the `v0.3.0` tag commit).  |
+| `DF12_PYTHON_LINTS`           | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                                 | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
+| `DF12_PYLINT`                 | uv-isolated Pylint under CPython 3.14                                                                                                          | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
+| `AMBRLEAKS`                   | uv-isolated `ambrleaks` under CPython 3.14                                                                                                     | Scans tracked test snapshot files for unredacted values.                          |
+| `SKYLOS_VERSION`              | `4.33.2`                                                                                                                                       | Pins the separately provisioned dead-code analyser.                               |
+| `SKYLOS_CLI`                  | `$(UV_GATE) tool --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' -- skylos`                                                                   | Command-only CLI; Python 3.14 supplies Skylos's source AST runtime.               |
+| `SKYLOS`                      | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                                   | Adds scan-only global options for the blocking lint target.                       |
+| `SKYLOS_PRODUCTION_TARGETS`   | `cmd_mox`                                                                                                                                      | Limits dead-code liveness analysis to production sources.                         |
+| `SKYLOS_EXCLUDE_FOLDERS`      | `tests cmd_mox/unittests`                                                                                                                      | Excludes both test paths from the production liveness graph.                      |
+| `SKYLOS_EXCLUDE_ARGS`         | `$(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))`                                                                              | Expands each excluded folder to its own repeatable `--exclude` flag.              |
+| `SKYLOS_WHITELIST_LOCK`       | `.skylos-whitelist.lock`                                                                                                                       | Repository-local lock serializing documented whitelist updates.                   |
+| `NOSE_VERSION`                | `0.20.0`                                                                                                                                       | Pins the duplication detector installed and run by the duplication targets.       |
+| `NOSE_TOOLS_DIR`              | `.tools/nose`                                                                                                                                  | Repository-local install directory for the detector binary.                       |
+| `NOSE_BIN`                    | `$(NOSE_TOOLS_DIR)/nose`                                                                                                                       | Detector binary path; a relative value resolves against the repository root.      |
+| `CARGO_BINSTALL`              | `cargo-binstall`                                                                                                                               | Installer used to fetch the pinned prebuilt detector release.                     |
+| `DUPLICATION_PYTHON`          | `3.14`                                                                                                                                         | Selects the gate tool environment interpreter; matches the script's Python floor. |
+| `CYCLOPTS_VERSION`            | `4.25.2`                                                                                                                                       | Pins cyclopts for the gate environment; matches the script's PEP 723 block.       |
+| `TOMLKIT_VERSION`             | `0.15.1`                                                                                                                                       | Pins tomlkit for the gate environment; matches the script's PEP 723 block.        |
+| `DUPLICATION_GATE`            | `NOSE_BIN=$(NOSE_BIN) $(UV_GATE) tool --from 'python@$(DUPLICATION_PYTHON)' --with ... -- python scripts/duplication_gate.py`                  | Builds the gate command through the vendored helper's pinned-tool channel.        |
+| `DUPLICATION_TEST_PYTHON`     | `$(DUPLICATION_PYTHON)`                                                                                                                        | Selects the interpreter for the focused duplication-gate helper tests.            |
+| `DUPLICATION_TEST_PYTEST`     | `9.0.2`                                                                                                                                        | Pins pytest for the isolated helper-test environment.                             |
+| `DUPLICATION_TEST_HYPOTHESIS` | `6.165.6`                                                                                                                                      | Pins hypothesis for the isolated helper-test environment.                         |
 
 _Table 1: Makefile variables for the lint pipeline._
 
 `tests/test_toolchain_contract.py` enforces that the Makefile's pinned
 `RUFF_VERSION` and `TY_VERSION` match the versions used in Continuous
-Integration (CI), so the two never drift apart silently.
+Integration (CI), so the two never drift apart silently. It also enforces that
+`NOSE_VERSION`, the CI job's `NOSE_VERSION` environment variable and
+`[tool.nose].version` in `pyproject.toml` all agree, since a drift there
+produces a cache key that can never hit or a detector the gate rejects at run
+time.
 
 Override variables on the command line when a local investigation needs a
 different target set or interpreter:
@@ -136,8 +158,9 @@ make lint PYLINT_TARGETS=cmd_mox/ipc PYLINT_PYTHON=pypy@3.12
 ```
 
 Do not bypass `make lint` for normal validation. Running the target keeps the
-Ruff, PyPy Pylint, DF12 Pylint, snapshot-leak, Skylos, and spelling gates
-ordered consistently with CI and preserves the shared `uv` cache configuration.
+Ruff, PyPy Pylint, DF12 Pylint, snapshot-leak, Skylos, duplication and spelling
+gates ordered consistently with CI and preserves the shared `uv` cache
+configuration.
 
 ## Snapshot testing
 
@@ -230,6 +253,42 @@ selection, cache hits and misses, unsupported platforms, Windows rejection, and
 backend-construction failures. Events use fixed selection and error categories;
 they never include socket paths or exception messages.
 
+### Callback server construction
+
+`_CallbackServerBase` in `cmd_mox/ipc/_server_core.py` owns the constructor
+signature shared by the two callback-driven transports: positional
+`socket_path`, `handler` and `passthrough_handler`, plus a keyword-only
+`timeouts`. `CallbackIPCServer` (`cmd_mox/ipc/server.py`) and
+`CallbackNamedPipeServer` (`cmd_mox/ipc/named_pipe.py`) each inherit from it
+and add nothing of their own; neither class defines `__init__`, so both resolve
+to `_CallbackServerBase.__init__`.
+
+`_callback_wiring`, in the same module, pairs the two callbacks into an
+`IPCHandlers` and flattens a `TimeoutConfig` into the `timeout` and
+`accept_timeout` arguments, defaulting to `TimeoutConfig()` when no
+configuration is supplied.
+
+The inherited constructor calls `super().__init__(...)`, so the next class in
+each transport's method resolution order receives the base-server arguments. For
+`CallbackIPCServer` that is `_BaseIPCServer.__init__`, because `IPCServer`
+defines no `__init__` of its own. For `CallbackNamedPipeServer` it is
+`NamedPipeServer.__init__`, which enforces its Windows-only guard and derives
+the pipe name before delegating. This is observable: constructing
+`CallbackNamedPipeServer` on Linux raises
+`NamedPipeServer is only available on Windows` from the `super()` call inside
+`_CallbackServerBase.__init__`.
+
+The `_stop_backend` hook takes a non-optional backend.
+`_ServerLifecycle.stop()` calls the hook only when a backend instance exists,
+so a server that never started never passes `None`. Implementations may
+therefore dereference the argument unconditionally: `CallbackIPCServer` calls
+`server.shutdown()` and `server.server_close()`, while
+`CallbackNamedPipeServer` calls `server.stop()` and
+`server.join_clients(self.timeout)`.
+
+A further callback-driven transport should subclass `_CallbackServerBase` with
+its backend type rather than restating the constructor signature.
+
 ## Skylos dead-code policy
 
 Treat a Skylos report as genuine dead code until a runtime caller has been
@@ -291,6 +350,133 @@ RUSTFLAGS="-Zpolonius=next" cargo +nightly-2026-05-28 install \
   --locked --force makeutil
 make test
 ```
+
+## Code-duplication gate
+
+The final lint tier runs [nose](https://github.com/corca-ai/nose), the Rust
+`nose-cli` clone detector, behind `scripts/duplication_gate.py`. Nose is not
+the Python test framework of the same name on PyPI. The gate, its exception
+format and the decision to adopt it are recorded in
+[ADR 002](./adr-002-code-duplication-gate.md).
+
+Run it on its own with:
+
+```bash
+make duplication
+```
+
+The scan, its channels and its size floor are configured in `[tool.nose]` in
+`pyproject.toml`. `roots` names the production Python surface, `exclude` skips
+the packaged unit tests, and all three detection channels are pinned explicitly
+so a change to nose's defaults cannot widen or narrow the gate unnoticed. The
+`min-size` floor counts nose intermediate-language (IL) tokens, not Python
+lines or abstract syntax tree nodes.
+
+Exclusions are matched relative to each configured root, not to the repository
+root. `unittests/*` therefore names `cmd_mox/unittests/`; the repository-root
+form `cmd_mox/unittests/*` would match nothing and silently scan the test tree
+instead.
+
+`scripts/tests/test_nose_config_contract.py` pins that surface. It reads the
+production table through `nose_detector.load_settings` and checks four things:
+the settings match the intended scan, every root exists inside the repository,
+the roots still select production modules, and every exclusion still hides
+files. Changing the scan therefore fails a test rather than quietly shrinking
+what the gate enforces. The module imports only the standard library, so it
+also runs in the application suite, not just under `make duplication-test`.
+
+The gate adjudicates a ranked budget of families rather than the whole report.
+`top` bounds how many of the highest-ranked families are checked; duplication
+below that ranking is reported nowhere and enforced nowhere. Do not raise
+thresholds or lower the budget to reach a green build, and do not describe
+lower-ranked duplication as enforced. Re-check saturation rather than assuming
+it, since the control scan recorded in ADR 002 only shows the budget was not
+saturated when it was taken.
+
+### Recording an exception
+
+When duplication is intentional, record it with a written reason:
+
+```bash
+make duplication-allow FIRST='cmd_mox/a.py::run' SECOND='cmd_mox/b.py::run' \
+  REASON="Two independent transport implementations must not share a base."
+```
+
+An entry is a TOML `[[tool.duplication_gate.allow]]` block with either one
+`unit` key or several `members` keys, never both, plus a non-blank `reason`. A
+key is a repository-relative POSIX path matched as a full glob, optionally
+suffixed `::name` to require the exact unit name nose reported. A `::name` key
+never matches an unnamed fragment. `FIRST`, `SECOND` and `REASON` are read only
+from the make command line, so an ambient environment variable of the same name
+cannot create an exception. The underlying CLI accepts repeated `--second` for
+families with more than two members.
+
+An entry silences a family only when every location in that family matches one
+of its keys. Partial coverage from several entries does not combine, and a new
+copy in an unlisted file blocks the build. Keys name locations, not line
+numbers or detector identifiers, so moving code does not invalidate an
+exception and regenerating the report does not renumber one.
+
+Prefer explicit paths and names. A path-only key is a glob that also covers
+future locations in its scope; justify that scope in the reason and do not
+describe the entry as protection against every new clone. Never use a
+repository-wide wildcard, mass-generated reasons, or an automatic allowlisting
+of the initial scan. No exceptions were copied from the reference repository;
+each one here was adjudicated against this tree.
+
+The gate prints allow entries that matched no finding. Absence from a capped
+ranked report means "unmatched in this scan"; it is not proof the duplication
+disappeared, and an entry whose family fell below the ranking budget is still
+stale by that definition. Confirm with source inspection, or with an adequately
+widened scan, before removing an entry.
+
+### Provisioning
+
+`make install-nose` installs the pinned release binary into `$(NOSE_TOOLS_DIR)`
+through `cargo-binstall`'s Git mode, and is a no-op when the correct version is
+already there. The install explicitly forbids cargo-binstall's `compile` and
+`quick-install` strategies, so a platform with no prebuilt binary fails
+provisioning rather than silently starting a costly source build or fetching
+from an unapproved source. The installed binary must report the pinned version,
+both when discovered and after installation.
+
+The gate itself runs as isolated CPython 3.14 tooling. It neither installs nor
+imports the application and needs no application service, and the application
+keeps its own Python floor.
+
+The Makefile builds that environment through the vendored `uv_gate` helper's
+tool channel, naming the interpreter and both dependencies explicitly:
+
+```make
+DUPLICATION_GATE = NOSE_BIN=$(NOSE_BIN) $(UV_GATE) tool \
+	--from 'python@$(DUPLICATION_PYTHON)' \
+	--with cyclopts==$(CYCLOPTS_VERSION) --with tomlkit==$(TOMLKIT_VERSION) \
+	-- python scripts/duplication_gate.py
+```
+
+The gate script keeps its own PEP 723 block, so
+`uv run scripts/duplication_gate.py` still works when invoked directly, and
+`test_duplication_gate_pins_match_the_script_metadata` fails if the Makefile
+pins and that block disagree. The tool channel is used rather than
+`uv_gate run` for two reasons: `run` always adds `--frozen`, which a PEP 723
+script cannot satisfy without a committed script lockfile, and `run` never goes
+online, so a cold cache could never provision the environment at all. The tool
+channel warms once on a proven cache miss and refuses an unpinned spec, which
+is why the interpreter is requested as `python@<version>` rather than through a
+bare `--python`.
+
+Because the helper uses POSIX file locking and directory operations, the
+supported developer workflow is POSIX, including WSL, and native Windows
+operation is not claimed; the Windows CI job does not run the gate.
+
+Run the focused helper tests with:
+
+```bash
+make duplication-test
+```
+
+They run on the tooling interpreter with injected command runners and stub
+executables, so they never download the detector.
 
 ## Spelling policy
 
@@ -380,6 +566,16 @@ a method count would fragment it. `tests/test_pylint_tier_contract.py` holds
 the tier's interpreter pin, its Pylint release pin, and the rule that
 `syntax-error` stays enabled.
 
+Inline pragmas may name df12 messages that the classic PyPy pass never
+registers. For example, the `trivial-attribute-wrapper` pragma in
+`cmd_mox/expectations.py` is unknown to that pass, and Pylint reports
+`unknown-option-value` (W0012) for the name even under `disable = ["all"]`.
+`pyproject.toml` therefore disables W0012 by name for the classic pass, while
+`pylintrc-df12.toml` enables it, because that pass registers both the core and
+the df12 messages. Every pragma name is still validated exactly once, by the
+one pass whose vocabulary is complete, and `tests/test_pylint_tier_contract.py`
+pins that split.
+
 The `Makefile` currently supplies `PYLINT_BASELINE_DISABLE` in addition to the
 `pyproject.toml` tables. That split is intentional: `pyproject.toml` documents
 the desired selected Pylint policy, while the `Makefile` carries the temporary
@@ -398,6 +594,15 @@ temporary PyPy Pylint baseline.
 - `[tool.skylos.whitelist.documented]` stores only reasoned false positives;
   each entry must identify the verified runtime caller.
 
+### Nose and duplication-gate tables
+
+- `[tool.nose]` pins the detector version, the scanned roots, the detection
+  channels, the size floor, the reported surface and the ranked budget. Its
+  `version` must agree with the Makefile and CI pins.
+- `[tool.duplication_gate]` is otherwise empty; each
+  `[[tool.duplication_gate.allow]]` entry below it records one reviewed
+  exception with its `unit` or `members` keys and a non-blank `reason`.
+
 ## Updating lint policy
 
 When changing lint policy:
@@ -407,6 +612,8 @@ When changing lint policy:
 3. Run `make lint`.
 4. If Markdown or ADR files changed, run `make markdownlint` and `make nixie`.
 5. Remove baseline suppressions when the underlying code has been cleaned up.
+6. When bumping `NOSE_VERSION`, update all three pins together and let
+   `tests/test_toolchain_contract.py` confirm they agree.
 
 Changes that add broad new rule families should explain whether failures are
 fixed immediately or recorded as a visible baseline.

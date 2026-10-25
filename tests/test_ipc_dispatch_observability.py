@@ -208,6 +208,81 @@ def test_request_pipeline_logs_invalid_request(
     _assert_bounded_duration(event)
 
 
+@pytest.mark.parametrize(
+    ("kind", "sentinel"),
+    [
+        pytest.param(
+            _server_core.KIND_INVOCATION, "s3cr3t-invocation", id="invocation"
+        ),
+        pytest.param(
+            _server_core.KIND_PASSTHROUGH_RESULT,
+            "s3cr3t-passthrough",
+            id="passthrough",
+        ),
+    ],
+)
+def test_request_pipeline_never_logs_malformed_payload_contents(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    kind: str,
+    sentinel: str,
+) -> None:
+    """A rejected payload's contents must not reach any captured log record.
+
+    ``_build_payload`` used to log the offending payload and the ``TypeError``
+    message, which quoted the rejected keyword arguments. Both carried
+    caller-supplied values into the logs. The rejection is now silent there and
+    reported once by the bounded ``invalid_request`` dispatch record, so this
+    drives the whole pipeline and scans every record to keep that true.
+    """
+    # The level must be lowered on the root logger, not just on the pipeline's
+    # logger: a sibling module's DEBUG record is discarded at source by its own
+    # effective level before any handler sees it, so scoping the change to one
+    # logger would leave the very leak this test exists to catch invisible.
+    caplog.set_level("DEBUG")
+    caplog.set_level("DEBUG", logger="cmd_mox.ipc.json_utils")
+
+    # The sentinel rides on an unknown keyword: the model constructors reject
+    # it with a TypeError that quotes it, exactly the path that used to log.
+    rejected_field = {"unexpected_field": sentinel}
+    if kind == _server_core.KIND_INVOCATION:
+        payload = {
+            "kind": kind,
+            "command": sentinel,
+            "args": [],
+            "stdin": "",
+            "env": {},
+            **rejected_field,
+        }
+    else:
+        payload = {
+            "kind": kind,
+            "invocation_id": sentinel,
+            "stdout": sentinel,
+            "stderr": sentinel,
+            "exit_code": 0,
+            **rejected_field,
+        }
+
+    response = _server_core._request_pipeline(
+        IPCServer(tmp_path / "ipc.sock"),
+        json.dumps(payload).encode(),
+    )
+
+    assert response is None, "A malformed payload must not produce a response"
+    [event] = _dispatch_events(caplog)
+    assert event["outcome"] == "invalid_request", "Wrong outcome"
+    assert event["kind"] == kind, "Wrong request kind"
+    assert "request" not in event, "The rejected payload must not be attached"
+    _assert_bounded_fields(event, [sentinel])
+    leaked = [
+        record.getMessage()
+        for record in caplog.records
+        if sentinel in record.getMessage()
+    ]
+    assert not leaked, f"payload content reached the log: {leaked}"
+
+
 def test_request_pipeline_logs_handler_failure(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

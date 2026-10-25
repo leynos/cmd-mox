@@ -92,19 +92,25 @@ class _ServerLifecycle[BackendT](abc.ABC):
             self._server = server
             self._thread = thread
 
-        self._start_backend_thread(thread)
+        thread.start()
         self._wait_until_ready()
 
     def stop(self) -> None:
-        """Stop the backend transport."""
+        """Stop the backend transport.
+
+        A server that never started has no backend to stop, so the transport
+        hooks only run once there is something to hand them.
+        """
         with self._lock:
             server = self._server
             thread = self._thread
             self._server = None
             self._thread = None
 
-        self._stop_backend(server)
-        self._join_backend_thread(thread)
+        if server is not None:
+            self._stop_backend(server)
+        if thread is not None:
+            thread.join(self.timeout)
         self._post_stop_cleanup()
 
     @abc.abstractmethod
@@ -116,22 +122,13 @@ class _ServerLifecycle[BackendT](abc.ABC):
     def _export_environment(self) -> None:  # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
         """Export environment variables for client processes."""
 
-    @staticmethod
-    def _start_backend_thread(thread: threading.Thread) -> None:
-        thread.start()
-
     def _wait_until_ready(self) -> None:  # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
         """Wait for the backend server to be ready to accept connections."""
 
     # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
     @staticmethod
-    def _stop_backend(server: BackendT | None) -> None:
+    def _stop_backend(server: BackendT) -> None:
         """Stop the backend server instance."""
-
-    def _join_backend_thread(self, thread: threading.Thread | None) -> None:
-        if thread is None:
-            return
-        thread.join(self.timeout)
 
     def _post_stop_cleanup(self) -> None:  # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
         """Perform cleanup after the backend server has stopped."""
@@ -156,6 +153,31 @@ class TimeoutConfig:
         """Validate timeout values to catch misconfiguration early."""
         validate_positive_finite_timeout(self.timeout)
         validate_optional_timeout(self.accept_timeout, name="accept_timeout")
+
+
+def _callback_wiring(
+    handler: cabc.Callable[[Invocation], Response],
+    passthrough_handler: cabc.Callable[[PassthroughResult], Response],
+    timeouts: TimeoutConfig | None,
+) -> tuple[float, float | None, IPCHandlers]:
+    """Derive the base-server arguments from a callback server's inputs.
+
+    The Unix and named-pipe callback helpers are both thin adapters that pair
+    two handlers into :class:`IPCHandlers` and flatten :class:`TimeoutConfig`
+    into the base constructor's keyword arguments, so the flattening lives
+    here rather than being restated by each transport.
+
+    Returns
+    -------
+    tuple[float, float | None, IPCHandlers]
+        Connection timeout, accept timeout, and the paired handlers.
+    """
+    bindings = timeouts or TimeoutConfig()
+    return (
+        bindings.timeout,
+        bindings.accept_timeout,
+        IPCHandlers(handler=handler, passthrough_handler=passthrough_handler),
+    )
 
 
 class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
@@ -283,6 +305,36 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
             result,
             default=self._raise_unhandled_passthrough,
             error_builder=self._build_passthrough_error,
+        )
+
+
+class _CallbackServerBase[BackendT](_BaseIPCServer[BackendT]):
+    """Constructor shared by the two callback-driven transport adapters.
+
+    :class:`~cmd_mox.ipc.server.CallbackIPCServer` and
+    :class:`~cmd_mox.ipc.named_pipe.CallbackNamedPipeServer` add the callback
+    signature to the transport they inherit from and differ in nothing else, so
+    that signature and its flattening into the base constructor live here
+    instead of being restated by each transport.
+    """
+
+    def __init__(
+        self,
+        socket_path: Path,
+        handler: cabc.Callable[[Invocation], Response],
+        passthrough_handler: cabc.Callable[[PassthroughResult], Response],
+        *,
+        timeouts: TimeoutConfig | None = None,
+    ) -> None:
+        """Initialise a callback-driven IPC server."""
+        timeout, accept_timeout, handlers = _callback_wiring(
+            handler, passthrough_handler, timeouts
+        )
+        super().__init__(
+            socket_path,
+            timeout=timeout,
+            accept_timeout=accept_timeout,
+            handlers=handlers,
         )
 
 

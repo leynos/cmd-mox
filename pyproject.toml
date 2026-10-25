@@ -211,8 +211,16 @@ max-positional-arguments = 4
 
 [tool.pylint."messages control"]
 # Keep this Pylint pass focused on the explicitly selected messages.
+#
+# unknown-option-value (W0012) is disabled because inline pragmas such as
+# `# pylint: disable-next=trivial-attribute-wrapper` name df12 messages, which
+# this pass never registers. Pylint reports W0012 despite `disable = ["all"]`,
+# so it is named explicitly. No validation is lost: the df12 pass in
+# `pylintrc-df12.toml` registers both the core and df12 messages and enables
+# W0012, so every pragma name is still checked against the complete vocabulary.
 disable = [
     "all",
+    "unknown-option-value",
 ]
 enable = [
     # Logging format safety.
@@ -363,6 +371,66 @@ also_copy = ["conftest.py", "features/", "docs/"]
 [tool.uv]
 package = true
 
+# Blocking duplication scan over the shipped package. Keep the detector pin in
+# sync with NOSE_VERSION in the Makefile and the CI install step;
+# tests/test_toolchain_contract.py enforces the match.
+#
+# `roots` names the maintained production Python only: `cmd_mox/` is the
+# installed package, while `scripts/`, `tests/`, `examples/` and `features/`
+# are tooling and examples, and `src/` is Rust. `exclude` is matched relative
+# to each root, not to the repository root, so `unittests/*` is the shipped
+# in-package test tree (`cmd_mox/unittests/`) rather than a repo-root path.
+#
+# `min-size` counts nose IL tokens, not Python lines. `surface = "all"` widens
+# the reported surface but `top = 30` is not exhaustive: the gate adjudicates
+# the thirty highest-ranked families, so lower-ranked duplication is reported
+# nowhere and enforced nowhere.
+[tool.nose]
+version = "0.20.0"
+roots = ["cmd_mox"]
+mode = "syntax,semantic,near"
+min-size = 24
+surface = "all"
+top = 30
+exclude = ["unittests/*"]
+
+# Reasoned exceptions for the duplication gate. Entries key on locations, not
+# line spans: `path` (glob) matches any location in matching files, and
+# `path::name` additionally requires nose's unit name. A `unit` entry names one
+# key; a `members` entry names several. Either silences a family only when
+# every location in it matches one of the entry's keys, so a new copy in an
+# unlisted file still blocks. Record entries with
+# `make duplication-allow FIRST=... [SECOND=...] REASON=...` and remove them
+# when the gate reports them as stale, after confirming the duplication is
+# really gone: a family can drop out of the ranked report without being fixed.
+[tool.duplication_gate]
+
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/ipc/client.py::invoke_server", "cmd_mox/ipc/client.py::report_passthrough_result"]
+reason = "nose matches the three-parameter signature and NumPy return-section boilerplate; each body is one delegating call to _send_request with a different request kind, and each docstring describes the Unix/Windows timeout split that applies to both. A shared wrapper would erase two distinct public entry points without sharing any logic."
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/ipc/_server_core.py::_default_invocation_response", "cmd_mox/response_strategy.py::default_response"]
+reason = "Deliberate layer boundary, not a shared implementation: response_strategy imports Response from cmd_mox.ipc, so the ipc package cannot import response_strategy back without a cycle. _default_invocation_response is the transport base fallback when a server has no handler; default_response is the recording-mode strategy users select. nose is matching the two one-line bodies and their shared NumPy Returns boilerplate."
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/shimgen.py::is_broken_symlink", "cmd_mox/shimgen.py::has_non_symlink_collision"]
+reason = "Two inverse one-line predicates over the same path: a broken symlink exists as a link but not as a target, a non-symlink collision exists as a target but not as a link. nose is matching their shared Parameters/Returns sections. Collapsing them would mean a boolean mode flag selecting is_symlink() or exists(), which is exactly the kind of shape-only helper the gate must not manufacture."
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/expectations.py::in_order", "cmd_mox/expectations.py::any_order"]
+reason = "Two fluent DSL verbs whose bodies differ only in the boolean they store. nose matches the six-line shared Returns block and the identical return self. A combined setter would need an ordered=True/False argument, forcing callers to pass a boolean that the two named verbs exist to avoid; the API is the two names."
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/environment.py", "cmd_mox/fs_retry.py", "cmd_mox/ipc/named_pipe.py"]
+reason = "One early-return idiom repeated in three Windows-only code paths: ensure PATHEXT carries .CMD, repair read-only permissions before rmtree, and guard the named-pipe accept loop. The first two are invoked unconditionally by cross-platform callers and must no-op on POSIX; the third keeps a state object whose production constructor already rejects non-Windows use inert. Each guards a different operation with different consequences, so the shared two lines are the platform check, not omitted behaviour. These fragments are reported unnamed, so the keys must be path-only; they therefore also cover any future family contained entirely within these three files and are not a claim that every new clone in them is safe."
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/pytest_plugin.py", "cmd_mox/verifiers.py"]
+reason = "The idiom if not <collection>: return \"<literal>\" appears in four diagnostic formatters that each render a different empty case: a teardown failure banner, an empty environment mapping, an empty invocation list, and an empty numbered list. The literal and the surrounding formatter differ every time, so the shared two lines are the shape of a guard, not a behaviour. A shared helper would need the caller to pass the replacement text, adding indirection for one if-statement."
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/verifiers.py", "cmd_mox/test_doubles.py"]
+reason = "Two unrelated one-statement idioms in the same pair of files. verifiers.py has inverse length comparisons in OrderVerifier._check_missing_expectations and _check_extra_invocations (bail out when invocations already satisfy or already exceed the ordered sequence) plus the same if-not-then-return shape used by the empty-collection formatters above; test_doubles.py repeats self._validate_spy_usage(\"<method>\") at three assertion entry points that differ only in the method name they report. Both meanings come from the call site, so an extraction would be a shape-only helper. nose reports these fragments unnamed, so the keys are path-only; they also cover any future family contained entirely within these two files."
+
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/controller.py", "cmd_mox/passthrough.py"]
+reason = "One call repeated in each file. cmd_mox/controller.py invokes self._require_replay_environment() from both the replay and verify preconditions because the two entry points need the same environment attributes; cmd_mox/passthrough.py invokes self._prune_expired_locked() under its own lock from both record and finalize_result because both must observe a pruned ledger. Neither pair shares a behaviour beyond the single guarded call, and the shared helper already exists in each case, so the duplication is the call itself. Both fragments are reported unnamed, so the keys are path-only and also cover any future family contained entirely within these two files."
+
 [tool.skylos.gate]
 strict = true
 
@@ -439,7 +507,7 @@ reason = "_get_short_path assigns this ctypes return type to GetShortPathNameW t
 [[tool.skylos.dead_code.entrypoints]]
 type = "parameter"
 full_name = ["cmd_mox.ipc._server_core._ServerLifecycle._stop_backend.server"]
-reason = "_ServerLifecycle.stop passes the stored backend instance through this abstract lifecycle hook."
+reason = "_ServerLifecycle.stop invokes this lifecycle hook with the stored backend instance, which the Unix and named-pipe transports override to stop their backend."
 
 [[tool.skylos.dead_code.entrypoints]]
 type = "function"
