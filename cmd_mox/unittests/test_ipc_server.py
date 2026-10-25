@@ -346,7 +346,7 @@ def test_handler_reports_non_disconnect_reply_write_oserror(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unexpected reply-write errors retain traceback diagnostics."""
+    """Unexpected reply-write errors stay visible without exception details."""
     caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
     caplog.clear()
     writer = _FailingReplyWriter("write", OSError(errno.EBADF, "Bad file descriptor"))
@@ -366,17 +366,18 @@ def test_handler_reports_non_disconnect_reply_write_oserror(
     server_records = [
         record for record in caplog.records if record.name == "cmd_mox.ipc.server"
     ]
-    assert any(
-        record.levelno == logging.DEBUG
-        and record.getMessage() == "IPC reply could not be written"
-        for record in server_records
-    ), "The unexpected write failure was not logged at DEBUG"
-    assert any(
-        record.levelno == logging.ERROR
-        and record.getMessage() == "IPC reply write failed"
-        and record.exc_info is not None
-        for record in server_records
-    ), "The unexpected write failure was not reported with its traceback"
+    error_records = [
+        record for record in server_records if record.levelno == logging.ERROR
+    ]
+    assert len(error_records) == 1, "The unexpected write failure was not reported"
+    assert error_records[0].getMessage() == "IPC reply write failed", (
+        "The unexpected write error did not use its bounded category"
+    )
+    assert error_records[0].exc_info is None, "The error exposed exception details"
+    assert "Bad file descriptor" not in caplog.text, (
+        "The exception message was included in the log"
+    )
+    assert "Traceback" not in caplog.text, "The unexpected error emitted a traceback"
 
 
 def test_server_logs_client_disconnect_during_reply_write(

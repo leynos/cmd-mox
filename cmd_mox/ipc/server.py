@@ -280,8 +280,8 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             if error.errno in _CLIENT_DISCONNECT_ERRNOS:
                 logger.debug("IPC client disconnected before reply was written")
             else:
-                logger.debug("IPC reply could not be written")
-                logger.exception("IPC reply write failed")
+                # Keep the failure visible without exposing exception details.
+                logger.log(logging.ERROR, "IPC reply write failed")
             return
 
 

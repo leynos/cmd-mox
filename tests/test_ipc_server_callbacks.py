@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses as dc
 import json
 import logging
@@ -330,14 +331,13 @@ def test_readiness_probe_logs_empty_read_at_debug(
     caplog.set_level("DEBUG", logger=logger_name)
     observer = _EmptyReadObserver()
     root_logger = logging.getLogger()
-    root_logger.addHandler(observer)
-    try:
+    with contextlib.ExitStack() as cleanup:
+        root_logger.addHandler(observer)
+        cleanup.callback(root_logger.removeHandler, observer)
         with IPCServer(tmp_path / "ipc.sock", timeout=2):
             assert observer.empty_read_logged.wait(timeout=2), (
                 "The readiness probe did not reach the empty-read handler"
             )
-    finally:
-        root_logger.removeHandler(observer)
 
     _assert_empty_read_is_logged_quietly(caplog.records)
 
