@@ -117,7 +117,7 @@ prepare: $(UV) ## Install the locked development environment, offline first
 build: prepare ## Build virtual-env and install deps
 
 build-release: ## Build artefacts (sdist & wheel)
-	uv build --out-dir dist
+	$(UV) build --out-dir dist
 
 clean: ## Remove build artifacts
 	rm -rf build dist *.egg-info \
