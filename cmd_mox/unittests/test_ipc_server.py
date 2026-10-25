@@ -1,5 +1,7 @@
 """Unit tests for the IPC server component."""
 
+import contextlib
+import logging
 import os
 import socket
 import socketserver
@@ -17,8 +19,11 @@ from cmd_mox.environment import (
 from cmd_mox.ipc import (
     DEFAULT_CONNECT_JITTER,
     Invocation,
+    IPCHandlers,
     IPCServer,
+    Response,
     RetryConfig,
+    _client_events,
     _unix_server_base,
     invoke_server,
 )
@@ -134,14 +139,21 @@ def test_invoke_server_retries_connection_parametrized(
 
     server = IPCServer(socket_path)
 
-    def delayed_start() -> None:
-        import time
+    emit_connect_retry = _client_events.emit_connect_retry
 
-        time.sleep(0.05)
-        server.start()
+    def start_server_after_first_retry(
+        transport: typ.Literal["unix", "named_pipe"],
+        attempt: int,
+        exc: Exception,
+        correlation_id: str | None,
+    ) -> None:
+        emit_connect_retry(transport, attempt, exc, correlation_id)
+        if attempt == 0:
+            server.start()
 
-    thread = threading.Thread(target=delayed_start)
-    thread.start()
+    monkeypatch.setattr(
+        _client_events, "emit_connect_retry", start_server_after_first_retry
+    )
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
     try:
@@ -153,7 +165,6 @@ def test_invoke_server_retries_connection_parametrized(
         response = invoke_server(invocation, timeout=1.0, retry_config=retry_config)
         assert response.stdout == "ls"
     finally:
-        thread.join()
         server.stop()
 
 
@@ -234,3 +245,77 @@ def test_invoke_server_invalid_json(
     with pytest.raises(RuntimeError, match="Invalid JSON"):
         invoke_server(invocation, timeout=1.0)
     thread.join()
+
+
+_DISCONNECT_MESSAGE = "IPC client disconnected before reply was written"
+
+
+class _DisconnectObserver(logging.Handler):
+    """Signal when the reply-write failure is logged."""
+
+    def __init__(self, disconnect_logged: threading.Event) -> None:
+        super().__init__()
+        self._disconnect_logged = disconnect_logged
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.name != "cmd_mox.ipc.server" or record.levelno != logging.DEBUG:
+            return
+        if record.getMessage() == _DISCONNECT_MESSAGE:
+            self._disconnect_logged.set()
+
+
+def _assert_disconnect_is_quiet(caplog: pytest.LogCaptureFixture) -> None:
+    """Assert a reply-write disconnect is logged only at DEBUG."""
+    assert any(
+        record.getMessage() == _DISCONNECT_MESSAGE and record.levelno == logging.DEBUG
+        for record in caplog.records
+    ), "The disconnect was not logged at DEBUG"
+    server_records = [
+        record for record in caplog.records if record.name == "cmd_mox.ipc.server"
+    ]
+    assert not any(record.levelno >= logging.ERROR for record in server_records), (
+        "The client disconnect emitted an ERROR record"
+    )
+    assert not any(record.exc_info is not None for record in server_records), (
+        "The client disconnect emitted an exception record"
+    )
+
+
+def test_server_logs_client_disconnect_during_reply_write(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A client closing before the reply should not produce an error log."""
+    disconnect_logged = threading.Event()
+    handler_started = threading.Event()
+    reply_allowed = threading.Event()
+
+    def slow_handler(_invocation: Invocation) -> Response:
+        handler_started.set()
+        reply_allowed.wait(timeout=3.0)
+        return Response(stdout="complete")
+
+    observer = _DisconnectObserver(disconnect_logged)
+    # Follow pytest's root capture handler so the event cannot race capture.
+    root_logger = logging.getLogger()
+    socket_path = tmp_path / "ipc.sock"
+
+    with contextlib.ExitStack() as stack:
+        root_logger.addHandler(observer)
+        stack.callback(root_logger.removeHandler, observer)
+        caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
+        with IPCServer(socket_path, handlers=IPCHandlers(handler=slow_handler)):
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.connect(str(socket_path))
+                client.sendall(b'{"command":"ls","args":[],"stdin":"","env":{}}')
+                client.shutdown(socket.SHUT_WR)
+                assert handler_started.wait(timeout=3.0), (
+                    "The server did not start handling the request"
+                )
+
+            reply_allowed.set()
+
+            assert disconnect_logged.wait(timeout=3.0), (
+                "The reply write did not report the disconnected client"
+            )
+
+    _assert_disconnect_is_quiet(caplog)
