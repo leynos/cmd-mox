@@ -1,6 +1,7 @@
 """Unit tests for the IPC server component."""
 
 import contextlib
+import errno
 import io
 import logging
 import os
@@ -287,21 +288,26 @@ def _assert_disconnect_is_quiet(caplog: pytest.LogCaptureFixture) -> None:
 class _FailingReplyWriter:
     """Raise an I/O error at the selected reply-write stage."""
 
-    def __init__(self, failure_point: typ.Literal["write", "flush"]) -> None:
+    def __init__(
+        self,
+        failure_point: typ.Literal["write", "flush"],
+        error: OSError,
+    ) -> None:
         self.failure_point = failure_point
+        self.error = error
         self.write_called = False
         self.flush_called = False
 
     def write(self, response_bytes: bytes) -> int:
         self.write_called = True
         if self.failure_point == "write":
-            raise OSError
+            raise self.error
         return len(response_bytes)
 
     def flush(self) -> None:
         self.flush_called = True
         if self.failure_point == "flush":
-            raise OSError
+            raise self.error
 
 
 @pytest.mark.parametrize("failure_point", ["write", "flush"])
@@ -313,7 +319,9 @@ def test_handler_logs_reply_write_oserror_at_debug(
     """Write and flush errors return quietly from the request handler."""
     caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
     caplog.clear()
-    writer = _FailingReplyWriter(failure_point)
+    writer = _FailingReplyWriter(
+        failure_point, BrokenPipeError(errno.EPIPE, "Broken pipe")
+    )
 
     def response_pipeline(_server: object, _raw: bytes, _transport: str) -> bytes:
         return b"response"
@@ -332,6 +340,43 @@ def test_handler_logs_reply_write_oserror_at_debug(
         "Flush was called only when the write succeeded"
     )
     _assert_disconnect_is_quiet(caplog)
+
+
+def test_handler_reports_non_disconnect_reply_write_oserror(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected reply-write errors retain traceback diagnostics."""
+    caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
+    caplog.clear()
+    writer = _FailingReplyWriter("write", OSError(errno.EBADF, "Bad file descriptor"))
+
+    def response_pipeline(_server: object, _raw: bytes, _transport: str) -> bytes:
+        return b"response"
+
+    monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
+    handler = SimpleNamespace(
+        rfile=io.BytesIO(b"request"),
+        wfile=writer,
+        server=SimpleNamespace(outer=object()),
+    )
+
+    _ipc_server._IPCHandler.handle(typ.cast("_ipc_server._IPCHandler", handler))
+
+    server_records = [
+        record for record in caplog.records if record.name == "cmd_mox.ipc.server"
+    ]
+    assert any(
+        record.levelno == logging.DEBUG
+        and record.getMessage() == "IPC reply could not be written"
+        for record in server_records
+    ), "The unexpected write failure was not logged at DEBUG"
+    assert any(
+        record.levelno == logging.ERROR
+        and record.getMessage() == "IPC reply write failed"
+        and record.exc_info is not None
+        for record in server_records
+    ), "The unexpected write failure was not reported with its traceback"
 
 
 def test_server_logs_client_disconnect_during_reply_write(
