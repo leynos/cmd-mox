@@ -143,35 +143,45 @@ def _write_response_stream(
     """Write one response stream and return its failure, if any."""  # ruff: ignore[docstring-missing-returns] - the annotation makes the optional failure explicit
     stream = getattr(sys, stream_name)
     started = time.perf_counter()
-    try:
-        stream.write(text)
-    except (OSError, ValueError) as exc:
+
+    def record_failure(
+        outcome: typ.Literal["write_failed", "flush_failed"],
+        failure_started: float,
+        exc: Exception,
+    ) -> _ResponseFailure:
+        """Emit bounded failure metadata and replace the failed stream.
+
+        Returns
+        -------
+        _ResponseFailure
+            The failure operation and original exception.
+        """
+        failure_operation: typ.Literal["response_write", "response_flush"]
+        if outcome == "write_failed":
+            failure_operation = "response_write"
+        else:
+            failure_operation = "response_flush"
         _emit_shim_failure(
             _ShimFailureContext(
                 _SHIM_RESPONSE_STREAM_OPERATION,
-                "write_failed",
-                started,
+                outcome,
+                failure_started,
                 correlation_id,
             ),
             exc,
         )
         _replace_failed_stream_with_sink(stream_name, stream)
-        return "response_write", exc
+        return failure_operation, exc
+
+    try:
+        stream.write(text)
+    except (OSError, ValueError) as exc:
+        return record_failure("write_failed", started, exc)
     started = time.perf_counter()
     try:
         stream.flush()
     except (OSError, ValueError) as exc:
-        _emit_shim_failure(
-            _ShimFailureContext(
-                _SHIM_RESPONSE_STREAM_OPERATION,
-                "flush_failed",
-                started,
-                correlation_id,
-            ),
-            exc,
-        )
-        _replace_failed_stream_with_sink(stream_name, stream)
-        return "response_flush", exc
+        return record_failure("flush_failed", started, exc)
     return None
 
 

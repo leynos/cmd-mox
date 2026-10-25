@@ -351,12 +351,23 @@ def test_request_pipeline_never_logs_malformed_payload_contents(
             **rejected_field,
         }
 
-    response = _server_core._request_pipeline(
+    result = _server_core._request_pipeline(
         IPCServer(tmp_path / "ipc.sock"),
         json.dumps(payload).encode(),
     )
 
-    assert response is None, "A malformed payload must not produce a response"
+    assert result.response_bytes is not None, (
+        "A malformed payload must return a rejection frame"
+    )
+    response = json.loads(result.response_bytes.decode("utf-8"))
+    assert response["exit_code"] == 1, "A malformed payload must fail"
+    assert response["stderr"] == "IPC request payload failed validation\n", (
+        "A malformed payload must return a bounded diagnostic"
+    )
+    assert sentinel not in result.response_bytes.decode("utf-8"), (
+        "The rejection frame must not echo malformed payload contents"
+    )
+    assert result.correlation_id is None, "Malformed payload cannot carry correlation"
     [event] = _dispatch_events(caplog)
     assert event["outcome"] == "invalid_request", "Wrong outcome"
     assert event["kind"] == kind, "Wrong request kind"
