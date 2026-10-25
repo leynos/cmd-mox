@@ -304,7 +304,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
     # pytester inherits an outer xdist worker's temporary-root prefix.
     expected = (
         "*cmd_mox teardown failure for *"
-        "test_teardown_error_reports_failure.py::test_cleanup_error: "
+        "*test_teardown_error_reports_failure.py::test_cleanup_error: "
         "verification OSError: kaboom; cleanup for "
         "*test_teardown_error_reports_failure.py::test_cleanup_error OSError: kaboom*"
     )
