@@ -24,7 +24,6 @@ from cmd_mox.ipc.models import Invocation, PassthroughResult, Response
 from cmd_mox.ipc.named_pipe import (
     CallbackNamedPipeServer,
     NamedPipeServer,
-    _NamedPipeState,
 )
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
@@ -304,12 +303,14 @@ def test_try_connect_pipe_maps_a_failed_overlapped_connect(
     assert closed_pipe_handles(file_fake) == [handle], "handle was not closed"
 
 
-def test_close_handle_delegates_to_win32file(patch_win32: PatchWin32) -> None:
-    """Closing a handle calls straight through to ``win32file``."""
+def test_dispose_handle_closes_through_the_injected_backend(
+    patch_win32: PatchWin32,
+) -> None:
+    """Disposing of a client handle calls straight through to its backend."""
     file_fake, _pipe_fake = patch_win32()
     handle = object()
 
-    _NamedPipeState._close_handle(handle)
+    build_state()._dispose_handle(handle)
 
     assert file_fake.closed == [handle], "handle was not closed"
 

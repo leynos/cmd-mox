@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import types
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,13 @@ from cmd_mox.ipc.windows import (
     Win32FileProtocol,
     _read_pipe_chunk,
     read_pipe_message,
+)
+from cmd_mox.unittests._named_pipe_fakes import (
+    FakeNamedPipeBackend,
+    FakePyWinTypes,
+    FakeWin32File,
+    FakeWin32Pipe,
+    FakeWinError,
 )
 
 
@@ -141,20 +149,23 @@ def test_named_pipe_handler_uses_shared_helpers(
     class _FakePyWinTypes:
         error = type("Err", (Exception,), {})
 
+    backend = FakeNamedPipeBackend(
+        win32file=typ.cast("FakeWin32File", _FakeWin32File()),
+        win32pipe=typ.cast("FakeWin32Pipe", _FakeWin32Pipe()),
+        pywintypes=typ.cast("FakePyWinTypes", _FakePyWinTypes()),
+    )
     dummy_outer = object()
     state = _NamedPipeState(
         pipe_name="pipe",
         outer=dummy_outer,  # type: ignore[arg-type, ty:invalid-argument-type]
         accept_timeout=0.1,
+        backend=backend,
     )
     state._client_threads.add(threading.current_thread())
 
     monkeypatch.setattr("cmd_mox.ipc.named_pipe.read_pipe_message", fake_read)
     monkeypatch.setattr("cmd_mox.ipc.named_pipe.write_pipe_payload", fake_write)
     monkeypatch.setattr("cmd_mox.ipc.named_pipe._request_pipeline", fake_process)
-    monkeypatch.setattr("cmd_mox.ipc.named_pipe.win32file", _FakeWin32File())
-    monkeypatch.setattr("cmd_mox.ipc.named_pipe.win32pipe", _FakeWin32Pipe())
-    monkeypatch.setattr("cmd_mox.ipc.named_pipe.pywintypes", _FakePyWinTypes())
 
     state._handle_client(handle)
 
@@ -168,24 +179,18 @@ def test_named_pipe_server_signals_ready_when_accept_creation_fails(
 ) -> None:
     """Pipe creation failures should signal readiness and stop accepting clients."""
 
-    class _FakePipeError(Exception):
-        pass
-
     def fail_pipe_creation() -> object:
-        msg = "pipe creation failed"
-        raise _FakePipeError(msg)
+        raise FakeWinError(ERROR_BROKEN_PIPE)
 
+    backend = FakeNamedPipeBackend()
     state = _NamedPipeState(
         pipe_name="pipe",
         outer=object(),  # type: ignore[arg-type, ty:invalid-argument-type]
         accept_timeout=0.1,
+        backend=backend,
     )
     caplog.set_level("ERROR", logger="cmd_mox.ipc.named_pipe")
     monkeypatch.setattr("cmd_mox.ipc.named_pipe.path_utils.IS_WINDOWS", True)
-    monkeypatch.setattr(
-        "cmd_mox.ipc.named_pipe.pywintypes",
-        types.SimpleNamespace(error=_FakePipeError),
-    )
     monkeypatch.setattr(state, "_create_pipe_instance", fail_pipe_creation)
 
     state.serve_forever()
