@@ -695,8 +695,10 @@ The change is accepted only if all of the following hold:
 - Rejected request payloads stay out of the logs:
   `tests/test_ipc_dispatch_observability.py` drives both malformed request
   kinds through `_request_pipeline` carrying unique sensitive values and
-  asserts that no captured log record contains them, so the payload-logging
-  removal has a regression test rather than only a reviewed diff.
+  asserts that no captured log record contains them. Root capture at `DEBUG`
+  keeps the property observable for a reintroduction at any level, so the
+  payload-logging removal has a regression test rather than only a reviewed
+  diff.
 - `make lint`, `make check-fmt`, `make typecheck`, `make test`,
   `make markdownlint` and `make nixie` all pass, or their pre-existing failures
   are reported as such with evidence.
@@ -798,5 +800,11 @@ gates. As part of the same reconciliation, the payload-logging removal in
 `cmd_mox/ipc/json_utils.py` gained a pipeline-level regression test:
 `tests/test_ipc_dispatch_observability.py` now drives both malformed request
 kinds through `_request_pipeline` with unique sensitive values and asserts that
-no captured log record — at any level, from any module — carries payload
-content, so the behaviour removed in `42cde49` cannot return unnoticed.
+no captured log record carries payload content, so the behaviour removed in
+`42cde49` cannot return unnoticed. Root capture is lowered to `DEBUG` and the
+validation module's logger is named explicitly, because a sibling module's
+`DEBUG` record is discarded at source by its own effective level before any
+handler sees it; scoping the level change to the pipeline logger alone left a
+`DEBUG`-level reintroduction invisible. Both a `DEBUG` and a `WARNING` log call
+restored in `_build_payload` were confirmed to fail the test, and the module
+passes unmutated.

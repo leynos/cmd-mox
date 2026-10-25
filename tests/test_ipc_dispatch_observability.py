@@ -235,7 +235,12 @@ def test_request_pipeline_never_logs_malformed_payload_contents(
     reported once by the bounded ``invalid_request`` dispatch record, so this
     drives the whole pipeline and scans every record to keep that true.
     """
-    caplog.set_level("DEBUG", logger="cmd_mox.ipc._server_core")
+    # The level must be lowered on the root logger, not just on the pipeline's
+    # logger: a sibling module's DEBUG record is discarded at source by its own
+    # effective level before any handler sees it, so scoping the change to one
+    # logger would leave the very leak this test exists to catch invisible.
+    caplog.set_level("DEBUG")
+    caplog.set_level("DEBUG", logger="cmd_mox.ipc.json_utils")
 
     # The sentinel rides on an unknown keyword: the model constructors reject
     # it with a TypeError that quotes it, exactly the path that used to log.
