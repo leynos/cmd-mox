@@ -717,12 +717,13 @@ it into `_NamedPipeState`. The state performs every Win32 operation through the
 `NamedPipeBackend` protocol declared in `cmd_mox/ipc/windows.py`; it never
 imports a `pywin32` module itself. `cmd_mox/ipc/_win32_named_pipe_backend.py`
 forwards each port operation to the guarded bindings it imports from
-`cmd_mox/ipc/windows.py`, so it is the only place in the server transport that
-calls `pywin32`. The import guard itself lives in `windows.py` and exists once
-for the package. Tests inject `FakeNamedPipeBackend` from
+`cmd_mox/ipc/windows.py`. The port also exposes `win32file` and `pywintypes`
+views, which the shared `read_pipe_message` and `write_pipe_payload` helpers in
+`windows.py` use for synchronous I/O and for matching `pywintypes.error`. The
+import guard itself lives in `windows.py` and exists once for the package.
+Tests inject `FakeNamedPipeBackend` from
 `cmd_mox/unittests/_named_pipe_fakes.py` in its place, which lets the transport
-logic run on any platform without replacing `pywin32` module globals and keeps
-the `pywin32` call surface confined to a single file.
+logic run on any platform without replacing `pywin32` module globals.
 
 #### Dispatch and observability decision (2026-08-21)
 

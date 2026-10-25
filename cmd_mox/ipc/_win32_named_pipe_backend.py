@@ -1,11 +1,14 @@
 """Win32 adapter for the named-pipe transport's :class:`NamedPipeBackend` port.
 
-Every transport call goes through :class:`Win32NamedPipeBackend` rather than
-reaching for the ``pywin32`` modules directly, so the rest of the transport
-runs unchanged against a fake adapter on any platform. The guarded module
-bindings themselves live in :mod:`cmd_mox.ipc.windows`, which owns the single
-import guard for the whole package; this adapter only re-exports the ones it
-binds onto an instance.
+The server transport reaches ``pywin32`` through
+:class:`Win32NamedPipeBackend` rather than through module globals of its own, so
+it runs unchanged against a fake adapter on any platform. The port also exposes
+``win32file`` and ``pywintypes`` views, because the shared ``read_pipe_message``
+and ``write_pipe_payload`` helpers in :mod:`cmd_mox.ipc.windows` perform
+synchronous I/O and match ``pywintypes.error`` themselves. The guarded module
+bindings live in :mod:`cmd_mox.ipc.windows`, which owns the single import guard
+for the whole package; this adapter only binds the ones it needs onto an
+instance.
 """
 
 from __future__ import annotations
@@ -37,8 +40,8 @@ class Win32NamedPipeBackend(NamedPipeBackend):
     there, but this module still has to import so the rest of the package loads.
 
     Each method forwards one port operation to pywin32 and nothing else. That
-    one-to-one correspondence is the point: it keeps every Win32 call site
-    visible in a single file and lets a fake adapter stand in for this one.
+    one-to-one correspondence is the point: it keeps this adapter's Win32 calls
+    together in one file and lets a fake adapter stand in for this one.
     """
 
     def __init__(self) -> None:
