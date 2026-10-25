@@ -366,6 +366,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         self.OPEN_EXISTING = FakeWin32File.OPEN_EXISTING
 
     @property
+    @typ.override
     def win32file(self) -> Win32FileProtocol:
         """The ``win32file`` view the transport hands to its shared helpers.
 
@@ -377,10 +378,12 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         return typ.cast("Win32FileProtocol", self._file_fake)
 
     @property
+    @typ.override
     def pywintypes(self) -> PyWinTypesProtocol:
         """The ``pywintypes`` view the transport hands to its shared helpers."""
         return typ.cast("PyWinTypesProtocol", self._pywintypes_fake)
 
+    @typ.override
     def create_event(self) -> object:
         """Create a fake manual-reset event handle.
 
@@ -392,6 +395,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         # CreateEvent(security, manual_reset, initial_state, name).
         return self.event.CreateEvent(None, True, False, None)  # ruff: ignore[boolean-positional-value-in-call] - mirrors pywin32's positional flags
 
+    @typ.override
     def set_event(self, handle: object) -> None:
         """Record *handle* as signalled.
 
@@ -402,6 +406,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         """
         self.event.SetEvent(handle)
 
+    @typ.override
     def wait(self, handles: cabc.Sequence[object], timeout_ms: int) -> int:
         """Return the next scripted wait result.
 
@@ -420,6 +425,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         # WaitForMultipleObjects(handles, wait_all, timeout_ms).
         return self.event.WaitForMultipleObjects(list(handles), False, timeout_ms)  # ruff: ignore[boolean-positional-value-in-call] - mirrors pywin32's positional flag
 
+    @typ.override
     def create_overlapped(self) -> tuple[object, object]:
         """Build a fake overlapped structure with a dedicated event.
 
@@ -433,6 +439,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         overlapped.hEvent = event
         return overlapped, event
 
+    @typ.override
     def get_overlapped_result(self, handle: object, overlapped: object) -> int:
         """Complete the scripted overlapped operation.
 
@@ -450,6 +457,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         """
         return self._file_fake.GetOverlappedResult(handle, overlapped, True)  # ruff: ignore[boolean-positional-value-in-call] - mirrors pywin32's positional flag
 
+    @typ.override
     def cancel_io(self, handle: object, overlapped: object) -> None:
         """Record the cancellation of *overlapped* on *handle*.
 
@@ -462,6 +470,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         """
         self._file_fake.CancelIoEx(handle, overlapped)
 
+    @typ.override
     def create_named_pipe(self, spec: NamedPipeCreateSpec) -> object:
         """Create the next scripted pipe instance.
 
@@ -487,6 +496,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
             spec.security_attributes,
         )
 
+    @typ.override
     def connect_named_pipe(self, handle: object, overlapped: object) -> int:
         """Report the next scripted connection status.
 
@@ -504,6 +514,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         """
         return typ.cast("int", self.pipe.ConnectNamedPipe(handle, overlapped))
 
+    @typ.override
     def disconnect_named_pipe(self, handle: object) -> None:
         """Record the disconnection of *handle*.
 
@@ -514,6 +525,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         """
         self.pipe.DisconnectNamedPipe(handle)
 
+    @typ.override
     def read_file(
         self, handle: object, buffer: cabc.Buffer, overlapped: object
     ) -> tuple[int, cabc.Buffer]:
@@ -537,6 +549,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
             handle, typ.cast("bytearray", buffer), overlapped
         )
 
+    @typ.override
     def allocate_read_buffer(self, size: int) -> cabc.Buffer:
         """Return a writable buffer of *size* bytes.
 
@@ -552,6 +565,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         """
         return self._file_fake.AllocateReadBuffer(size)
 
+    @typ.override
     def create_file(self, spec: PipeFileOpenSpec) -> object:
         """Record the wakeup open and return its scripted result.
 
@@ -575,6 +589,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
             spec.template_file,
         )
 
+    @typ.override
     def close_handle(self, handle: object) -> None:
         """Record *handle* as closed.
 
