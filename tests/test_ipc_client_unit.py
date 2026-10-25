@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import os
 import pathlib
 import socket
@@ -474,6 +475,40 @@ class _DeadlineClock:
         self.now += delay
 
 
+@dc.dataclass(frozen=True, slots=True)
+class _DeadlineScenario:
+    """Generated timings and retry outcomes for one IPC request."""
+
+    failed_connects: int
+    backoff: float
+    connect_elapsed: tuple[float, float, float]
+    send_elapsed: float
+    shutdown_elapsed: float
+    response_chunks: int
+    recv_elapsed: tuple[float, float, float, float]
+
+
+def _deadline_scenario_strategy() -> st.SearchStrategy[_DeadlineScenario]:
+    """Generate bounded socket-phase timings and retry counts.
+
+    Returns
+    -------
+    hypothesis.strategies.SearchStrategy[_DeadlineScenario]
+        Scenarios that vary retries, blocking phases, and expiry order.
+    """
+    elapsed = st.floats(min_value=0.0, max_value=1.25, allow_nan=False)
+    return st.builds(
+        _DeadlineScenario,
+        failed_connects=st.integers(min_value=0, max_value=2),
+        backoff=elapsed,
+        connect_elapsed=st.tuples(elapsed, elapsed, elapsed),
+        send_elapsed=elapsed,
+        shutdown_elapsed=elapsed,
+        response_chunks=st.integers(min_value=0, max_value=3),
+        recv_elapsed=st.tuples(elapsed, elapsed, elapsed, elapsed),
+    )
+
+
 class _ScriptedUnixSocket:
     """Socket double driven by a generated sequence of operation durations."""
 
@@ -481,21 +516,11 @@ class _ScriptedUnixSocket:
         self,
         clock: _DeadlineClock,
         attempt: int,
-        failed_connects: int,
-        connect_elapsed: list[float],
-        send_elapsed: float,
-        shutdown_elapsed: float,
-        response_chunks: int,
-        recv_elapsed: list[float],
+        scenario: _DeadlineScenario,
     ) -> None:
         self.clock = clock
         self.attempt = attempt
-        self.failed_connects = failed_connects
-        self.connect_elapsed = connect_elapsed
-        self.send_elapsed = send_elapsed
-        self.shutdown_elapsed = shutdown_elapsed
-        self.response_chunks = response_chunks
-        self.recv_elapsed = recv_elapsed
+        self.scenario = scenario
         self.timeout: float | None = None
         self.received = 0
 
@@ -503,19 +528,23 @@ class _ScriptedUnixSocket:
         self.timeout = timeout
 
     def connect(self, _address: str) -> None:
-        self.clock.consume("connect", self.connect_elapsed[self.attempt], self.timeout)
-        if self.attempt < self.failed_connects:
+        self.clock.consume(
+            "connect", self.scenario.connect_elapsed[self.attempt], self.timeout
+        )
+        if self.attempt < self.scenario.failed_connects:
             raise ConnectionRefusedError
 
     def sendall(self, _payload: bytes) -> None:
-        self.clock.consume("send", self.send_elapsed, self.timeout)
+        self.clock.consume("send", self.scenario.send_elapsed, self.timeout)
 
     def shutdown(self, _how: int) -> None:
-        self.clock.consume("shutdown", self.shutdown_elapsed, self.timeout)
+        self.clock.consume("shutdown", self.scenario.shutdown_elapsed, self.timeout)
 
     def recv(self, _size: int) -> bytes:
-        self.clock.consume("recv", self.recv_elapsed[self.received], self.timeout)
-        if self.received >= self.response_chunks:
+        self.clock.consume(
+            "recv", self.scenario.recv_elapsed[self.received], self.timeout
+        )
+        if self.received >= self.scenario.response_chunks:
             return b""
         chunk = f"response-{self.received}".encode()
         self.received += 1
@@ -537,20 +566,10 @@ class _ScriptedUnixSocketFactory:
     def __init__(
         self,
         clock: _DeadlineClock,
-        failed_connects: int,
-        connect_elapsed: list[float],
-        send_elapsed: float,
-        shutdown_elapsed: float,
-        response_chunks: int,
-        recv_elapsed: list[float],
+        scenario: _DeadlineScenario,
     ) -> None:
         self.clock = clock
-        self.failed_connects = failed_connects
-        self.connect_elapsed = connect_elapsed
-        self.send_elapsed = send_elapsed
-        self.shutdown_elapsed = shutdown_elapsed
-        self.response_chunks = response_chunks
-        self.recv_elapsed = recv_elapsed
+        self.scenario = scenario
         self.attempts = 0
 
     def __call__(self, *_args: object, **_kwargs: object) -> _ScriptedUnixSocket:
@@ -564,12 +583,7 @@ class _ScriptedUnixSocketFactory:
         sock = _ScriptedUnixSocket(
             self.clock,
             self.attempts,
-            self.failed_connects,
-            self.connect_elapsed,
-            self.send_elapsed,
-            self.shutdown_elapsed,
-            self.response_chunks,
-            self.recv_elapsed,
+            self.scenario,
         )
         self.attempts += 1
         return sock
@@ -577,103 +591,85 @@ class _ScriptedUnixSocketFactory:
 
 @pytest.mark.skipif(os.name == "nt", reason="Unix socket deadline behaviour")
 @settings(max_examples=60, deadline=None)
-@given(
-    failed_connects=st.integers(min_value=0, max_value=2),
-    backoff=st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
-    connect_elapsed=st.lists(
-        st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
-        min_size=3,
-        max_size=3,
-    ),
-    send_elapsed=st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
-    shutdown_elapsed=st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
-    response_chunks=st.integers(min_value=0, max_value=3),
-    recv_elapsed=st.lists(
-        st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
-        min_size=4,
-        max_size=4,
+@example(
+    scenario=_DeadlineScenario(
+        failed_connects=0,
+        backoff=0.0,
+        connect_elapsed=(1.25, 0.0, 0.0),
+        send_elapsed=0.0,
+        shutdown_elapsed=0.0,
+        response_chunks=0,
+        recv_elapsed=(0.0, 0.0, 0.0, 0.0),
     ),
 )
 @example(
-    failed_connects=0,
-    backoff=0.0,
-    connect_elapsed=[1.25, 0.0, 0.0],
-    send_elapsed=0.0,
-    shutdown_elapsed=0.0,
-    response_chunks=0,
-    recv_elapsed=[0.0, 0.0, 0.0, 0.0],
+    scenario=_DeadlineScenario(
+        failed_connects=1,
+        backoff=1.25,
+        connect_elapsed=(0.0, 0.0, 0.0),
+        send_elapsed=0.0,
+        shutdown_elapsed=0.0,
+        response_chunks=0,
+        recv_elapsed=(0.0, 0.0, 0.0, 0.0),
+    ),
 )
 @example(
-    failed_connects=1,
-    backoff=1.25,
-    connect_elapsed=[0.0, 0.0, 0.0],
-    send_elapsed=0.0,
-    shutdown_elapsed=0.0,
-    response_chunks=0,
-    recv_elapsed=[0.0, 0.0, 0.0, 0.0],
+    scenario=_DeadlineScenario(
+        failed_connects=0,
+        backoff=0.0,
+        connect_elapsed=(0.0, 0.0, 0.0),
+        send_elapsed=1.25,
+        shutdown_elapsed=0.0,
+        response_chunks=0,
+        recv_elapsed=(0.0, 0.0, 0.0, 0.0),
+    ),
 )
 @example(
-    failed_connects=0,
-    backoff=0.0,
-    connect_elapsed=[0.0, 0.0, 0.0],
-    send_elapsed=1.25,
-    shutdown_elapsed=0.0,
-    response_chunks=0,
-    recv_elapsed=[0.0, 0.0, 0.0, 0.0],
+    scenario=_DeadlineScenario(
+        failed_connects=0,
+        backoff=0.0,
+        connect_elapsed=(0.0, 0.0, 0.0),
+        send_elapsed=0.0,
+        shutdown_elapsed=1.25,
+        response_chunks=0,
+        recv_elapsed=(0.0, 0.0, 0.0, 0.0),
+    ),
 )
 @example(
-    failed_connects=0,
-    backoff=0.0,
-    connect_elapsed=[0.0, 0.0, 0.0],
-    send_elapsed=0.0,
-    shutdown_elapsed=1.25,
-    response_chunks=0,
-    recv_elapsed=[0.0, 0.0, 0.0, 0.0],
+    scenario=_DeadlineScenario(
+        failed_connects=0,
+        backoff=0.0,
+        connect_elapsed=(0.0, 0.0, 0.0),
+        send_elapsed=0.0,
+        shutdown_elapsed=0.0,
+        response_chunks=2,
+        recv_elapsed=(1.25, 0.0, 0.0, 0.0),
+    ),
 )
 @example(
-    failed_connects=0,
-    backoff=0.0,
-    connect_elapsed=[0.0, 0.0, 0.0],
-    send_elapsed=0.0,
-    shutdown_elapsed=0.0,
-    response_chunks=2,
-    recv_elapsed=[1.25, 0.0, 0.0, 0.0],
+    scenario=_DeadlineScenario(
+        failed_connects=1,
+        backoff=0.1,
+        connect_elapsed=(0.05, 0.05, 0.0),
+        send_elapsed=0.05,
+        shutdown_elapsed=0.05,
+        response_chunks=2,
+        recv_elapsed=(0.05, 0.05, 0.05, 0.0),
+    ),
 )
-@example(
-    failed_connects=1,
-    backoff=0.1,
-    connect_elapsed=[0.05, 0.05, 0.0],
-    send_elapsed=0.05,
-    shutdown_elapsed=0.05,
-    response_chunks=2,
-    recv_elapsed=[0.05, 0.05, 0.05, 0.0],
-)
+@given(scenario=_deadline_scenario_strategy())
 def test_unix_request_shares_deadline_across_generated_io_phases(
-    failed_connects: int,
-    backoff: float,
-    connect_elapsed: list[float],
-    send_elapsed: float,
-    shutdown_elapsed: float,
-    response_chunks: int,
-    recv_elapsed: list[float],
+    scenario: _DeadlineScenario,
 ) -> None:
     """One absolute deadline bounds generated connect, send, and read phases."""
     deadline = 1.0
     clock = _DeadlineClock(deadline)
-    socket_factory = _ScriptedUnixSocketFactory(
-        clock,
-        failed_connects,
-        connect_elapsed,
-        send_elapsed,
-        shutdown_elapsed,
-        response_chunks,
-        recv_elapsed,
-    )
+    socket_factory = _ScriptedUnixSocketFactory(clock, scenario)
     context = _ConnectionContext(
         timeout=deadline,
         retry_config=RetryConfig(
-            retries=failed_connects + 1,
-            backoff=backoff,
+            retries=scenario.failed_connects + 1,
+            backoff=scenario.backoff,
             jitter=0.0,
         ),
         deadline=deadline,
@@ -702,6 +698,6 @@ def test_unix_request_shares_deadline_across_generated_io_phases(
     if response is not None:
         assert clock.now < deadline, "The request completed at its deadline"
         expected = b"".join(
-            f"response-{index}".encode() for index in range(response_chunks)
+            f"response-{index}".encode() for index in range(scenario.response_chunks)
         )
         assert response == expected, "The successful request lost response fragments"
