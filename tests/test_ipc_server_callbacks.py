@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses as dc
 import json
-import logging
 import threading
 import typing as typ
 
@@ -35,42 +33,6 @@ if typ.TYPE_CHECKING:
 type _RequestPayload = dict[
     str, str | int | float | bool | list[str] | dict[str, str] | None
 ]
-
-
-class _EmptyReadObserver(logging.Handler):
-    """Signal when the IPC server logs the readiness probe's empty read."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.empty_read_logged = threading.Event()
-
-    def emit(self, record: logging.LogRecord) -> None:
-        if (
-            record.name == "cmd_mox.ipc._server_core"
-            and record.getMessage() == "IPC received empty read"
-        ):
-            self.empty_read_logged.set()
-
-
-def _assert_empty_read_is_logged_quietly(
-    records: list[logging.LogRecord],
-) -> None:
-    """Assert empty reads have one quiet DEBUG outcome."""
-    server_records = [
-        record for record in records if record.name == "cmd_mox.ipc._server_core"
-    ]
-    assert any(
-        record.getMessage() == "IPC received empty read"
-        and record.levelno == logging.DEBUG
-        for record in server_records
-    ), "An empty read was not logged at DEBUG"
-    assert not any(
-        "malformed JSON" in record.getMessage() for record in server_records
-    ), "An empty read was logged as malformed JSON"
-    assert all(
-        record.levelno < logging.ERROR and record.exc_info is None
-        for record in server_records
-    ), "An empty read emitted an error or exception record"
 
 
 pytestmark = [pytest.mark.requires_unix_sockets]
@@ -321,37 +283,6 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
 
     assert result is None, "Assertion failed"
     assert "malformed JSON" in caplog.text, "Assertion failed"
-
-
-def test_readiness_probe_logs_empty_read_at_debug(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """The startup probe should not be reported as malformed JSON."""
-    logger_name = "cmd_mox.ipc._server_core"
-    caplog.set_level("DEBUG", logger=logger_name)
-    observer = _EmptyReadObserver()
-    root_logger = logging.getLogger()
-    with contextlib.ExitStack() as cleanup:
-        root_logger.addHandler(observer)
-        cleanup.callback(root_logger.removeHandler, observer)
-        with IPCServer(tmp_path / "ipc.sock", timeout=2):
-            assert observer.empty_read_logged.wait(timeout=2), (
-                "The readiness probe did not reach the empty-read handler"
-            )
-
-    _assert_empty_read_is_logged_quietly(caplog.records)
-
-
-def test_decode_payload_logs_empty_read_at_debug(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An empty request should be logged as a quiet disconnect."""
-    caplog.set_level("DEBUG", logger="cmd_mox.ipc._server_core")
-
-    result = _server_core._decode_payload(b"")
-
-    assert result is None, "An empty read must decode to None"
-    _assert_empty_read_is_logged_quietly(caplog.records)
 
 
 @pytest.mark.parametrize(

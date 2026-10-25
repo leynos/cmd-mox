@@ -2,7 +2,6 @@
 
 import contextlib
 import errno
-import io
 import json
 import logging
 import os
@@ -310,9 +309,7 @@ def test_ipc_handler_logs_response_connection_drop(
     monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
     caplog.set_level("DEBUG", logger="cmd_mox.ipc.server")
     with _observability.capture_events() as events:
-        _ipc_server._IPCHandler.handle(
-            typ.cast("_ipc_server._IPCHandler", handler)
-        )
+        _ipc_server._IPCHandler.handle(typ.cast("_ipc_server._IPCHandler", handler))
 
     [event] = [
         event
@@ -329,8 +326,7 @@ def test_ipc_handler_logs_response_connection_drop(
         [error_record] = [
             record
             for record in caplog.records
-            if record.name == "cmd_mox.ipc.server"
-            and record.levelno == logging.ERROR
+            if record.name == "cmd_mox.ipc.server" and record.levelno == logging.ERROR
         ]
         assert error_record.getMessage() == "IPC reply write failed"
         assert error_record.exc_info is None
