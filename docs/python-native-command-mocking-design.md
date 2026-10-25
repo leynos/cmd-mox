@@ -430,8 +430,8 @@ sequenceDiagram
 ```
 
 For screen readers: This sequence shows the fixture setting `body_failed` and
-re-raising `KeyboardInterrupt` or `SystemExit`, so teardown knows to preserve
-the propagating interrupt during verification or close handling.
+re-raising `KeyboardInterrupt` or `SystemExit`. Teardown can preserve the
+interrupt when verification fails and cleanup succeeds.
 
 ```mermaid
 sequenceDiagram
