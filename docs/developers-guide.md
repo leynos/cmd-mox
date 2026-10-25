@@ -245,6 +245,11 @@ dispatch:
   `outcome` dimensions, so correlation identifiers and payload data never
   increase the number of counter keys.
 
+The private deadline helpers accept an optional monotonic clock callable and use
+`time.monotonic` when runtime callers omit it. The Unix request handler binds
+its clock once and reuses it for each receive-budget check. Tests can pass a
+fake clock directly without replacing the process-wide time function.
+
 ## IPC deadlines and stdin reads
 
 On POSIX, the shim carries one monotonic deadline through Unix socket

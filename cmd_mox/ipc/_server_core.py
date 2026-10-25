@@ -554,12 +554,34 @@ class _RequestResult:
     correlation_id: str | None
 
 
-def _rejection_result(
+def _rejection_record(
     parsed: ParsedRequest | None,
     started: float,
     transport: _observability.Transport | None,
-) -> _RequestResult:
-    """Emit bounded rejection metadata and return its safe response frame.
+) -> _DispatchRecord:
+    """Build bounded metadata for a rejected request without emitting it.
+
+    Returns
+    -------
+    _DispatchRecord
+        Bounded metadata describing the rejection.
+    """
+    is_parse_error = parsed is None
+    kind = parsed.kind if parsed is not None else "unknown"
+    correlation_id = parsed.correlation_id if parsed is not None else None
+    return _DispatchRecord(
+        kind=kind,
+        request=None,
+        outcome="rejection_frame" if is_parse_error else "invalid_request",
+        duration_ms=_observability.elapsed_ms(started),
+        error_category=("RequestParseError" if is_parse_error else "ValidationError"),
+        correlation_id=correlation_id,
+        transport=transport,
+    )
+
+
+def _rejection_result(parsed: ParsedRequest | None) -> _RequestResult:
+    """Build the safe response frame for a rejected request.
 
     Returns
     -------
@@ -567,19 +589,7 @@ def _rejection_result(
         The encoded rejection response and its bounded correlation identifier.
     """
     is_parse_error = parsed is None
-    kind = parsed.kind if parsed is not None else "unknown"
     correlation_id = parsed.correlation_id if parsed is not None else None
-    _emit_dispatch_outcome(
-        _DispatchRecord(
-            kind=kind,
-            request=None,
-            outcome="rejection_frame" if is_parse_error else "invalid_request",
-            duration_ms=_observability.elapsed_ms(started),
-            error_category="RequestParseError" if is_parse_error else "ValidationError",
-            correlation_id=correlation_id,
-            transport=transport,
-        )
-    )
     message = (
         "IPC request could not be parsed"
         if is_parse_error
@@ -612,11 +622,13 @@ def _request_pipeline(
     if parsed is None:
         if raw == b"":
             return _RequestResult(response_bytes=None, correlation_id=None)
-        return _rejection_result(parsed, started, transport)
+        _emit_dispatch_outcome(_rejection_record(parsed, started, transport))
+        return _rejection_result(parsed)
 
     obj = parsed.validate()
     if obj is None:
-        return _rejection_result(parsed, started, transport)
+        _emit_dispatch_outcome(_rejection_record(parsed, started, transport))
+        return _rejection_result(parsed)
 
     response, error_category = _execute_request(server, parsed.processor, obj)
     correlation_id = _resolve_correlation_id(parsed, obj)

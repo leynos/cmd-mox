@@ -323,8 +323,10 @@ class _IPCHandler(socketserver.StreamRequestHandler):
 
     def setup(self) -> None:
         """Start the connection's receive deadline before reading begins."""
+        self._clock = time.monotonic
         self._read_deadline = _compute_deadline(
-            self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
+            self.server.outer.timeout,  # type: ignore[attr-defined, ty:unresolved-attribute]
+            clock=self._clock,
         )
         super().setup()
 
@@ -338,7 +340,9 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         """
         chunks: list[bytes] = []
         while True:
-            self.request.settimeout(_remaining_time(self._read_deadline))
+            self.request.settimeout(
+                _remaining_time(self._read_deadline, clock=self._clock)
+            )
             chunk = self.request.recv(64 * 1024)
             if not chunk:
                 return b"".join(chunks)

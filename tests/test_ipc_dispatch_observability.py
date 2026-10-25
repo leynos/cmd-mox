@@ -14,6 +14,7 @@ from cmd_mox.ipc import (
     IPCServer,
     PassthroughResult,
     Response,
+    _observability,
     _server_core,
 )
 
@@ -85,6 +86,19 @@ def _dispatch_events(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]
         for record in caplog.records
         if record.__dict__.get("operation") == "ipc.dispatch"
     ]
+
+
+def _assert_single_counter_increment(
+    emitted: list[_observability.IPCEvent],
+    counters_before: dict[_observability.EventKey, int],
+) -> None:
+    """Assert the captured event increments its bounded counter once."""
+    [event] = emitted
+    event_key = event.key()
+    counters_after = _observability.counter_snapshot()
+    assert counters_after.get(event_key, 0) == counters_before.get(event_key, 0) + 1, (
+        "Dispatch event must increment its counter exactly once"
+    )
 
 
 def _assert_bounded_duration(event: dict[str, object]) -> None:
@@ -201,10 +215,12 @@ def test_request_pipeline_logs_invalid_request(
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    result = _server_core._request_pipeline(
-        ipc_server,
-        json.dumps({"kind": _server_core.KIND_INVOCATION}).encode(),
-    )
+    counters_before = _observability.counter_snapshot()
+    with _observability.capture_events() as emitted:
+        result = _server_core._request_pipeline(
+            ipc_server,
+            json.dumps({"kind": _server_core.KIND_INVOCATION}).encode(),
+        )
 
     assert result.response_bytes is not None, (
         "Invalid request did not return an error frame"
@@ -224,6 +240,7 @@ def test_request_pipeline_logs_invalid_request(
     assert event["error_category"] == "ValidationError", "Wrong error"
     assert "invocation_id" not in event, "Invocation ID must be omitted"
     _assert_bounded_duration(event)
+    _assert_single_counter_increment(emitted, counters_before)
 
 
 def test_request_pipeline_logs_rejection_frame(
@@ -233,7 +250,9 @@ def test_request_pipeline_logs_rejection_frame(
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
     ipc_server = IPCServer(tmp_path / "ipc.sock")
 
-    result = _server_core._request_pipeline(ipc_server, b"not-json")
+    counters_before = _observability.counter_snapshot()
+    with _observability.capture_events() as emitted:
+        result = _server_core._request_pipeline(ipc_server, b"not-json")
 
     assert result.response_bytes is not None, (
         "Parse failure did not return an error frame"
@@ -251,6 +270,29 @@ def test_request_pipeline_logs_rejection_frame(
     assert event["outcome"] == "rejection_frame", "Wrong dispatch outcome"
     assert event["error_category"] == "RequestParseError", "Wrong error"
     _assert_bounded_duration(event)
+    _assert_single_counter_increment(emitted, counters_before)
+
+
+def test_rejection_result_builds_frame_without_emitting_observability(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Building a rejection frame has no logging or counter side effects."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    counters_before = _observability.counter_snapshot()
+
+    with _observability.capture_events() as emitted:
+        result = _server_core._rejection_result(None)
+
+    assert result.response_bytes is not None, "Parse rejection needs a response frame"
+    payload = json.loads(result.response_bytes.decode("utf-8"))
+    assert payload["stderr"] == "IPC request could not be parsed\n", (
+        "Parse rejection diagnostic changed"
+    )
+    assert not emitted, "Response construction must not emit an event"
+    assert not _dispatch_events(caplog), "Response construction must not log"
+    assert _observability.counter_snapshot() == counters_before, (
+        "Response construction must not update counters"
+    )
 
 
 @pytest.mark.parametrize(

@@ -29,7 +29,6 @@ from cmd_mox.ipc import (
     IPCServer,
     Response,
     RetryConfig,
-    _deadline,
     _observability,
     _unix_server_base,
     invoke_server,
@@ -221,12 +220,12 @@ def test_ipc_server_bounds_incomplete_request_read(
     assert event.correlation_id is None, "Incomplete request must not carry correlation"
 
 
-def test_ipc_handler_uses_remaining_time_for_each_receive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_ipc_handler_uses_remaining_time_for_each_receive() -> None:
     """Slow request chunks cannot renew the connection's read budget."""
     now = {"value": 5.0}
-    monkeypatch.setattr(_deadline.time, "monotonic", lambda: now["value"])
+
+    def clock() -> float:
+        return now["value"]
 
     class SlowRequest:
         def __init__(self) -> None:
@@ -252,7 +251,7 @@ def test_ipc_handler_uses_remaining_time_for_each_receive(
     request = SlowRequest()
     fake_handler = typ.cast(
         "_ipc_server._IPCHandler",
-        types.SimpleNamespace(request=request, _read_deadline=6.0),
+        types.SimpleNamespace(request=request, _read_deadline=6.0, _clock=clock),
     )
 
     payload = _ipc_server._IPCHandler._read_request_payload(fake_handler)
