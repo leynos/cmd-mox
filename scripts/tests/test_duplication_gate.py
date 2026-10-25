@@ -8,13 +8,13 @@ allowlist, matching, and partitioning logic without invoking it. The
 from __future__ import annotations
 
 import re
-import textwrap
 import typing as typ
 
 import pytest
 from duplication_gate_test_support import allowlist, detector, gate
 
 if typ.TYPE_CHECKING:
+    from collections import abc as cabc
     from pathlib import Path
 
 
@@ -150,16 +150,12 @@ class TestValidateKey:
 class TestLoadAllowlist:
     """Allowlist parsing and validation."""
 
-    def _write(self, tmp_path: Path, body: str) -> Path:
-        """Write ``body`` to ``pyproject.toml`` under ``tmp_path``."""  # ruff: ignore[docstring-missing-returns] - private test writer has an obvious path return
-        pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text(textwrap.dedent(body), encoding="utf-8")
-        return pyproject
-
-    def test_loads_unit_and_members_entries(self, tmp_path: Path) -> None:
+    def test_loads_unit_and_members_entries(
+        self,
+        write_pyproject: cabc.Callable[[str], Path],
+    ) -> None:
         """Unit and members entries load with their reasons."""
-        pyproject = self._write(
-            tmp_path,
+        pyproject = write_pyproject(
             """\
             [[tool.duplication_gate.allow]]
             unit = "cmd_mox/a.py"
@@ -181,9 +177,12 @@ class TestLoadAllowlist:
             "Allow entry must retain its reason."
         )
 
-    def test_missing_gate_table_yields_empty_allowlist(self, tmp_path: Path) -> None:
+    def test_missing_gate_table_yields_empty_allowlist(
+        self,
+        write_pyproject: cabc.Callable[[str], Path],
+    ) -> None:
         """A pyproject without the gate table produces no entries."""
-        pyproject = self._write(tmp_path, "[project]\nname = 'x'\nversion = '0'\n")
+        pyproject = write_pyproject("[project]\nname = 'x'\nversion = '0'\n")
         assert allowlist.load_allowlist(pyproject) == (), (
             "Missing gate table must mean no allow entries."
         )
@@ -243,12 +242,12 @@ class TestLoadAllowlist:
     )
     def test_rejects_malformed_entries(
         self,
-        tmp_path: Path,
+        write_pyproject: cabc.Callable[[str], Path],
         body: str,
         diagnostic: str,
     ) -> None:
         """Malformed entries raise a configuration error."""
-        pyproject = self._write(tmp_path, body)
+        pyproject = write_pyproject(body)
         with pytest.raises(gate.GateConfigError, match=re.escape(diagnostic)):
             allowlist.load_allowlist(pyproject)
 

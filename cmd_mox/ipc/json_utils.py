@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import json
-import logging
 import typing as typ
 
 from .models import Invocation, PassthroughResult
-
-logger = logging.getLogger(__name__)
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
@@ -34,10 +31,12 @@ def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
 def _build_payload[PayloadT](
     payload: dict[str, typ.Any],
     model: cabc.Callable[..., PayloadT],
-    *,
-    description: str,
 ) -> PayloadT | None:
-    """Build *model* from *payload*, reporting malformed payloads once.
+    """Build *model* from *payload*, reporting malformed payloads by ``None``.
+
+    A payload that does not fit its model is not logged here. The dispatch
+    boundary already emits one bounded ``invalid_request`` record carrying the
+    error category, and payload contents must never reach the logs.
 
     Parameters
     ----------
@@ -45,8 +44,6 @@ def _build_payload[PayloadT](
         Decoded JSON object received from the IPC peer.
     model : collections.abc.Callable[..., PayloadT]
         IPC model whose keyword arguments the payload must supply.
-    description : str
-        Human-readable payload kind used when logging the failure.
 
     Returns
     -------
@@ -56,9 +53,6 @@ def _build_payload[PayloadT](
     try:
         return model(**payload)
     except TypeError:
-        logger.exception(
-            "IPC %s payload missing required fields: %r", description, payload
-        )
         return None
 
 
@@ -70,7 +64,7 @@ def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | Non
     Invocation or None
         The validated invocation, or ``None`` for malformed payloads.
     """
-    return _build_payload(payload, Invocation, description="invocation")
+    return _build_payload(payload, Invocation)
 
 
 def validate_passthrough_payload(
@@ -83,7 +77,7 @@ def validate_passthrough_payload(
     PassthroughResult or None
         The validated result, or ``None`` for malformed payloads.
     """
-    return _build_payload(payload, PassthroughResult, description="passthrough")
+    return _build_payload(payload, PassthroughResult)
 
 
 __all__ = [

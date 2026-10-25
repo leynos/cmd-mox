@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import dataclasses as dc
 import re
-import textwrap
 import typing as typ
 
 import pytest
@@ -42,16 +41,12 @@ def _settings_body(
 class TestLoadSettings:
     """`[tool.nose]` settings parsing."""
 
-    def _write(self, tmp_path: Path, body: str) -> Path:
-        """Write ``body`` to ``pyproject.toml`` under ``tmp_path``."""  # ruff: ignore[docstring-missing-returns] - private test writer has an obvious path return
-        pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text(textwrap.dedent(body), encoding="utf-8")
-        return pyproject
-
-    def test_loads_the_repository_settings(self, tmp_path: Path) -> None:
+    def test_loads_the_repository_settings(
+        self,
+        write_pyproject: cabc.Callable[[str], Path],
+    ) -> None:
         """A complete table produces validated settings."""
-        pyproject = self._write(
-            tmp_path,
+        pyproject = write_pyproject(
             """\
             [tool.nose]
             version = "0.20.0"
@@ -70,10 +65,12 @@ class TestLoadSettings:
         )
         assert settings.top == 30, "The ranking bound must round-trip."
 
-    def test_top_and_exclude_are_optional(self, tmp_path: Path) -> None:
+    def test_top_and_exclude_are_optional(
+        self,
+        write_pyproject: cabc.Callable[[str], Path],
+    ) -> None:
         """Omitted optional keys fall back to nose's own view size."""
-        pyproject = self._write(
-            tmp_path,
+        pyproject = write_pyproject(
             """\
             [tool.nose]
             version = "0.20.0"
@@ -109,10 +106,13 @@ class TestLoadSettings:
         ids=["missing-version", "string-roots", "zero-min-size", "bad-surface"],
     )
     def test_rejects_malformed_settings(
-        self, tmp_path: Path, body: str, diagnostic: str
+        self,
+        write_pyproject: cabc.Callable[[str], Path],
+        body: str,
+        diagnostic: str,
     ) -> None:
         """Malformed settings raise a configuration error."""
-        pyproject = self._write(tmp_path, body)
+        pyproject = write_pyproject(body)
         with pytest.raises(detector.GateConfigError, match=re.escape(diagnostic)):
             detector.load_settings(pyproject)
 

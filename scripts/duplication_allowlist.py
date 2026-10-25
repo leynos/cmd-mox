@@ -127,11 +127,11 @@ def validate_key(key: str, *, context: str) -> str:
     str
         The validated key.
 
-    Propagated errors
-    -----------------
+    Raises
+    ------
     GateConfigError
         If the key is not a well-formed ``path[::name]`` string.
-    """
+    """  # ruff: ignore[docstring-extraneous-exception] - the shape guards below raise GateConfigError
     path_glob, separator, name = key.partition("::")
     _validate_key_shape(path_glob, separator, name, context=context)
     _validate_repository_relative_path(path_glob, context=context)

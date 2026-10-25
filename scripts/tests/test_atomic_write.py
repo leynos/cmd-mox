@@ -154,6 +154,55 @@ class _FailingDirectorySync:
         os.close(descriptor)
 
 
+@dc.dataclass
+class _FailingFileSync:
+    """Fail the very first ``fsync``, which is the temporary file's.
+
+    ``atomic_write`` syncs the temporary file before it replaces the
+    destination, so raising here fails while the sibling still exists and the
+    destination is untouched. That ordering is the whole point: the cleanup has
+    to run for a failure raised before the ``Path.replace``.
+    """
+
+    #: The spy stands in for the whole ``os`` module, so the directory-sync
+    #: helper's ``os.O_RDONLY`` has to resolve here too.
+    O_RDONLY: typ.ClassVar[int] = os.O_RDONLY
+
+    def fsync(self, descriptor: int) -> None:
+        """Fail the file sync."""  # ruff: ignore[docstring-missing-exception] - the injected OSError is the point of the test
+        message = "file sync failed"
+        raise OSError(message)
+
+    def open(self, path: Path, flags: int) -> int:
+        """Delegate descriptor opening."""  # ruff: ignore[docstring-missing-returns] - the fake restates the protocol method it replaces
+        return os.open(path, flags)
+
+    def close(self, descriptor: int) -> None:
+        """Delegate descriptor closing."""
+        os.close(descriptor)
+
+
+def test_removes_the_temporary_file_when_the_file_sync_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure before the replace must not leave the temporary sibling behind."""
+    destination = tmp_path / "config.toml"
+    monkeypatch.setattr(atomic_write, "os", _FailingFileSync())
+
+    with pytest.raises(OSError, match="file sync failed"):
+        atomic_write.atomic_write(
+            destination,
+            b"payload\n",
+            options=atomic_write.AtomicWriteOptions(sync_file=True),
+        )
+
+    assert list(tmp_path.glob(f".{destination.name}.*")) == [], (
+        "A failed file sync must not leave the temporary sibling behind."
+    )
+    assert not destination.exists(), "A failed write must not create the destination."
+
+
 def test_closes_the_directory_descriptor_when_the_sync_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -93,15 +93,20 @@ def atomic_write(
     if options.create_parents:
         path.parent.mkdir(parents=True, exist_ok=True)
     mode = path.stat().st_mode if options.preserve_mode and path.exists() else None
-    with tempfile.NamedTemporaryFile(
-        delete=False, dir=path.parent, prefix=f".{path.name}."
-    ) as stream:
-        stream.write(content)
-        stream.flush()
-        if options.sync_file:
-            os.fsync(stream.fileno())
-        temporary = pathlib.Path(stream.name)
+    # `delete=False` leaves the file in place when the block exits, so the
+    # unlink below is the only cleanup. The path is bound before any fallible
+    # I/O and the whole operation sits inside the `try`, or a raise from write,
+    # flush or the file fsync would skip the unlink and strand the sibling.
+    temporary: pathlib.Path | None = None
     try:
+        with tempfile.NamedTemporaryFile(
+            delete=False, dir=path.parent, prefix=f".{path.name}."
+        ) as stream:
+            temporary = pathlib.Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            if options.sync_file:
+                os.fsync(stream.fileno())
         if mode is not None:
             temporary.chmod(mode)
         temporary.replace(path)
@@ -109,4 +114,5 @@ def atomic_write(
             with _open_directory(path.parent) as descriptor:
                 os.fsync(descriptor)
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

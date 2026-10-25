@@ -1,7 +1,11 @@
 """Configure imports and collection for the duplication-gate script tests."""
 
+import collections.abc as cabc
 import sys
+import textwrap
 from pathlib import Path
+
+import pytest
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parents[1]
 # The directory must be appended, not prepended. Neither `tests/` nor this
@@ -30,3 +34,32 @@ collect_ignore = [
     "test_duplication_gate_properties.py",
     "test_nose_detector.py",
 ]
+
+
+@pytest.fixture
+def write_pyproject(tmp_path: Path) -> cabc.Callable[[str], Path]:
+    """Return a writer that puts a ``pyproject.toml`` under ``tmp_path``.
+
+    Both the allowlist and the settings tests build a throwaway repository
+    configuration. The writer dedents so a triple-quoted body can be indented
+    with its surroundings in the test, and returns the path it wrote so the
+    caller can hand it straight to the loader under test.
+
+    Parameters
+    ----------
+    tmp_path : pathlib.Path
+        Per-test directory supplied by pytest.
+
+    Returns
+    -------
+    collections.abc.Callable[[str], pathlib.Path]
+        Writer taking the TOML body and returning the written path.
+    """
+
+    def _write(body: str) -> Path:
+        """Write ``body`` to ``pyproject.toml`` and return the path."""  # ruff: ignore[docstring-missing-returns] - private test writer has an obvious path return
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(textwrap.dedent(body), encoding="utf-8")
+        return pyproject
+
+    return _write
