@@ -4,7 +4,7 @@ This execution plan (ExecPlan) is a living document. The sections `Constraints`,
 `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
 and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
-Status: IN PROGRESS
+Status: COMPLETE
 
 PLANS.md does not exist in this repository.
 
@@ -712,3 +712,13 @@ count (124, not 123). A stale table row described a `ipc/named_pipe.py` ~
 "Stale-entry removal"; it was deleted, and the path-only entry list was
 corrected to match. Every count now reproduces from `pyproject.toml` and a
 detector scan.
+
+Revised 2026-10-25: the candidate was rebased onto the then-current `main` and
+the branch was force-pushed over SSH with a lease bound to the previously
+recorded remote head. PR #315 was opened as a draft and has since been marked
+ready for review. The full commit-gate set passed on the final head:
+formatting, typecheck, the duplication gate, the focused duplication-gate
+tests, lint, and the full test suite. `Status: COMPLETE` records that the
+implementation and its gates are finished; merging PR #315 remains the final
+delivery action, and the dated entry above that reads "Not merged" is the
+2026-10-14 publication record rather than a current state.

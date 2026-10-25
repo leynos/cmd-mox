@@ -253,6 +253,42 @@ selection, cache hits and misses, unsupported platforms, Windows rejection, and
 backend-construction failures. Events use fixed selection and error categories;
 they never include socket paths or exception messages.
 
+### Callback server construction
+
+`_CallbackServerBase` in `cmd_mox/ipc/_server_core.py` owns the constructor
+signature shared by the two callback-driven transports: positional
+`socket_path`, `handler` and `passthrough_handler`, plus a keyword-only
+`timeouts`. `CallbackIPCServer` (`cmd_mox/ipc/server.py`) and
+`CallbackNamedPipeServer` (`cmd_mox/ipc/named_pipe.py`) each inherit from it
+and add nothing of their own; neither class defines `__init__`, so both resolve
+to `_CallbackServerBase.__init__`.
+
+`_callback_wiring`, in the same module, pairs the two callbacks into an
+`IPCHandlers` and flattens a `TimeoutConfig` into the `timeout` and
+`accept_timeout` arguments, defaulting to `TimeoutConfig()` when no
+configuration is supplied.
+
+The inherited constructor calls `super().__init__(...)`, so the next class in
+each transport's method resolution order receives the base-server arguments. For
+`CallbackIPCServer` that is `_BaseIPCServer.__init__`, because `IPCServer`
+defines no `__init__` of its own. For `CallbackNamedPipeServer` it is
+`NamedPipeServer.__init__`, which enforces its Windows-only guard and derives
+the pipe name before delegating. This is observable: constructing
+`CallbackNamedPipeServer` on Linux raises
+`NamedPipeServer is only available on Windows` from the `super()` call inside
+`_CallbackServerBase.__init__`.
+
+The `_stop_backend` hook takes a non-optional backend.
+`_ServerLifecycle.stop()` calls the hook only when a backend instance exists,
+so a server that never started never passes `None`. Implementations may
+therefore dereference the argument unconditionally: `CallbackIPCServer` calls
+`server.shutdown()` and `server.server_close()`, while
+`CallbackNamedPipeServer` calls `server.stop()` and
+`server.join_clients(self.timeout)`.
+
+A further callback-driven transport should subclass `_CallbackServerBase` with
+its backend type rather than restating the constructor signature.
+
 ## Skylos dead-code policy
 
 Treat a Skylos report as genuine dead code until a runtime caller has been
