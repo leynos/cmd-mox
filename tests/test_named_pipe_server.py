@@ -36,12 +36,12 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="Named pipes require Win
 
 @pytest.fixture
 def passthrough_results() -> list[PassthroughResult]:
-    """Accumulate the results the recording passthrough handler receives.
+    """Return the list that the recording passthrough handler appends to.
 
     Returns
     -------
     list[PassthroughResult]
-        The shared list that :func:`passthrough_handler` appends to.
+        A fresh, empty list shared with :func:`passthrough_handler`.
     """
     return []
 
@@ -51,6 +51,11 @@ def passthrough_handler(
     passthrough_results: list[PassthroughResult],
 ) -> cabc.Callable[[PassthroughResult], Response]:
     """Return a handler that records passthrough results.
+
+    Parameters
+    ----------
+    passthrough_results : list[PassthroughResult]
+        The list the returned handler appends each received result to.
 
     Returns
     -------
@@ -97,7 +102,7 @@ def test_named_pipe_server_exports_environment() -> None:
 def test_named_pipe_server_passthrough_default_error(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Passthrough results should fail when the server has no handler."""
+    """Unhandled passthrough results should answer with an error response."""
     socket_path = tmp_path / "ipc.sock"
 
     with NamedPipeServer(socket_path, timeout=1.0):
