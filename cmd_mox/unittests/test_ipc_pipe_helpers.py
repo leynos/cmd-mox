@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import threading
 import types
+import typing as typ
 from pathlib import Path
 
+import hypothesis.strategies as st
 import pytest
+from hypothesis import given
 
 from cmd_mox.ipc import client
 from cmd_mox.ipc._server_core import _RequestResult
@@ -28,6 +31,9 @@ from cmd_mox.unittests._named_pipe_fakes import (
     FakeWin32File,
     FakeWinError,
 )
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 
 class _UnusedError(Exception):
@@ -245,6 +251,141 @@ class _FakeWinError(Exception):
         self.winerror = winerror
 
 
+def _scripted_read_chunk(
+    steps: list[tuple[bytes, int]], *, broken_pipe_at: int | None = None
+) -> cabc.Callable[[int], tuple[int, bytes]]:
+    """Build a reader that consumes scripted outcomes in order.
+
+    Returns
+    -------
+    cabc.Callable[[int], tuple[int, bytes]]
+        A reader that returns each scripted outcome in turn.
+    """
+    pending_steps = list(steps)
+    read_count = 0
+
+    def read_chunk(_requested_size: int) -> tuple[int, bytes]:
+        nonlocal read_count
+        if broken_pipe_at == read_count:
+            raise _FakeWinError(ERROR_BROKEN_PIPE)
+        if not pending_steps:
+            msg = "scripted reader ran out of steps before a terminal status"
+            raise AssertionError(msg)
+        data, status = pending_steps.pop(0)
+        read_count += 1
+        return status, data
+
+    return read_chunk
+
+
+def _scripted_message_payload(steps: list[tuple[bytes, int]]) -> bytes:
+    """Return scripted bytes through the first status that ends the read.
+
+    Returns
+    -------
+    bytes
+        The concatenated chunks through the first terminal status.
+    """
+    terminal_index = next(
+        index
+        for index, (_data, status) in enumerate(steps)
+        if status != ERROR_MORE_DATA
+    )
+    return b"".join(data for data, _status in steps[: terminal_index + 1])
+
+
+def _read_scripted_message(
+    steps: list[tuple[bytes, int]],
+    *,
+    chunk_size: int,
+    max_bytes: int,
+    broken_pipe_at: int | None = None,
+) -> bytes:
+    """Read a scripted message through the injected reader.
+
+    Returns
+    -------
+    bytes
+        The result returned by :func:`read_pipe_message`.
+    """
+    return read_pipe_message(
+        object(),
+        # The injected reader means this value is never dereferenced.
+        win32file=typ.cast("Win32FileProtocol", None),
+        pywintypes=types.SimpleNamespace(error=_FakeWinError),
+        options=PipeReadOptions(
+            chunk_size=chunk_size,
+            max_bytes=max_bytes,
+            read_chunk=_scripted_read_chunk(steps, broken_pipe_at=broken_pipe_at),
+        ),
+    )
+
+
+#: Statuses returned by a scripted read; only ERROR_MORE_DATA continues.
+_UNEXPECTED_READ_STATUS = 1234
+_READ_STATUSES = st.sampled_from((0, ERROR_MORE_DATA, _UNEXPECTED_READ_STATUS))
+_TERMINAL_READ_STATUSES = st.sampled_from((0, _UNEXPECTED_READ_STATUS))
+
+#: Bounded read scripts always end, while earlier statuses can terminate early.
+_READ_SCRIPT_CASES = st.integers(min_value=1, max_value=8).flatmap(
+    lambda chunk_size: st.tuples(
+        st.lists(st.tuples(st.binary(max_size=chunk_size), _READ_STATUSES), max_size=4),
+        st.tuples(st.binary(max_size=chunk_size), _TERMINAL_READ_STATUSES),
+    ).map(
+        lambda outcomes: (
+            chunk_size,
+            [*outcomes[0], outcomes[1]],
+        )
+    )
+)
+
+#: Successful cases choose a limit large enough for the first delivered prefix.
+_BOUNDED_READ_CASES = _READ_SCRIPT_CASES.flatmap(
+    lambda case: st.tuples(
+        st.just(case[0]),
+        st.just(case[1]),
+        st.integers(
+            min_value=max(1, len(_scripted_message_payload(case[1]))),
+            max_value=40,
+        ),
+    )
+)
+
+#: Oversized reads vary their limit, payload, status, and requested chunk size.
+_OVERSIZED_READ_CASES = st.integers(min_value=1, max_value=8).flatmap(
+    lambda max_bytes: st.binary(
+        min_size=max_bytes + 1,
+        max_size=max_bytes + 4,
+    ).flatmap(
+        lambda data: st.tuples(
+            st.just(max_bytes),
+            st.just(data),
+            _READ_STATUSES,
+            st.integers(min_value=len(data), max_value=12),
+        )
+    )
+)
+
+#: Broken-pipe cases stop after a received chunk and before a later one.
+_BROKEN_PIPE_CASES = st.integers(min_value=1, max_value=8).flatmap(
+    lambda chunk_size: st.lists(
+        st.binary(min_size=1, max_size=chunk_size), min_size=2, max_size=6
+    ).flatmap(
+        lambda chunks: st.integers(min_value=1, max_value=len(chunks) - 1).flatmap(
+            lambda broken_pipe_at: st.tuples(
+                st.just(chunk_size),
+                st.just(chunks),
+                st.just(broken_pipe_at),
+                st.integers(
+                    min_value=sum(map(len, chunks[:broken_pipe_at])),
+                    max_value=40,
+                ),
+            )
+        )
+    )
+)
+
+
 def test_read_pipe_chunk_reports_peer_disconnection() -> None:
     """A broken pipe ends the read rather than propagating."""
 
@@ -290,6 +431,69 @@ def test_read_pipe_message_uses_the_injected_reader() -> None:
 
     assert payload == b"payload", "injected reader was not used"
     assert seen == [17], "chunk size was not forwarded to the reader"
+
+
+@given(case=_BOUNDED_READ_CASES)
+def test_read_pipe_message_never_returns_more_than_its_limit(
+    case: tuple[int, list[tuple[bytes, int]], int],
+) -> None:
+    """Invariant: every successful read fits its configured byte limit."""
+    chunk_size, steps, max_bytes = case
+
+    payload = _read_scripted_message(steps, chunk_size=chunk_size, max_bytes=max_bytes)
+
+    assert len(payload) <= max_bytes, "successful read exceeded its byte limit"
+
+
+@given(case=_OVERSIZED_READ_CASES)
+def test_read_pipe_message_rejects_oversized_generated_input(
+    case: tuple[int, bytes, int, int],
+) -> None:
+    """Invariant: oversized reads raise without retaining or exposing data."""
+    max_bytes, data, status, chunk_size = case
+
+    with pytest.raises(PipeMessageTooLargeError) as excinfo:
+        _read_scripted_message(
+            [(data, status)], chunk_size=chunk_size, max_bytes=max_bytes
+        )
+
+    error = excinfo.value
+    assert vars(error) == {"received": len(data), "limit": max_bytes}
+    assert type(error.received) is int
+    assert type(error.limit) is int
+    expected_message = f"named pipe message exceeded the {max_bytes}-byte limit"
+    assert error.args == (expected_message,), "exception arguments exposed message data"
+    assert str(error) == expected_message, "exception text exposed message data"
+
+
+@given(case=_BOUNDED_READ_CASES)
+def test_read_pipe_message_concatenates_through_the_first_terminal_status(
+    case: tuple[int, list[tuple[bytes, int]], int],
+) -> None:
+    """Invariant: returned bytes stop at the first non-continuation status."""
+    chunk_size, steps, max_bytes = case
+
+    payload = _read_scripted_message(steps, chunk_size=chunk_size, max_bytes=max_bytes)
+
+    assert payload == _scripted_message_payload(steps)
+
+
+@given(case=_BROKEN_PIPE_CASES)
+def test_read_pipe_message_returns_prefix_on_generated_broken_pipe(
+    case: tuple[int, list[bytes], int, int],
+) -> None:
+    """Invariant: a mid-sequence broken pipe returns exactly its read prefix."""
+    chunk_size, chunks, broken_pipe_at, max_bytes = case
+    steps = [(chunk, ERROR_MORE_DATA) for chunk in chunks]
+
+    payload = _read_scripted_message(
+        steps,
+        chunk_size=chunk_size,
+        max_bytes=max_bytes,
+        broken_pipe_at=broken_pipe_at,
+    )
+
+    assert payload == b"".join(chunks[:broken_pipe_at])
 
 
 @pytest.mark.parametrize(
