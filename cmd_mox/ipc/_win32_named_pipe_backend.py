@@ -15,6 +15,8 @@ from cmd_mox import _path_utils as path_utils
 
 from .windows import (
     NamedPipeBackend,
+    NamedPipeCreateSpec,
+    PipeFileOpenSpec,
     PyWinErrorProtocol,
     PyWinTypesProtocol,
     Win32FileProtocol,
@@ -163,18 +165,8 @@ class Win32NamedPipeBackend(NamedPipeBackend):
         self._win32file.CancelIoEx(handle, overlapped)
 
     @typ.override
-    def create_named_pipe(
-        self,
-        name: str,
-        open_mode: int,
-        pipe_mode: int,
-        max_instances: int,
-        out_buffer_size: int,
-        in_buffer_size: int,
-        default_timeout: int,
-        security_attributes: object,
-    ) -> object:
-        """Create one named-pipe instance with the supplied modes and buffers.
+    def create_named_pipe(self, spec: NamedPipeCreateSpec) -> object:
+        """Create one named-pipe instance described by *spec*.
 
         Returns
         -------
@@ -182,14 +174,14 @@ class Win32NamedPipeBackend(NamedPipeBackend):
             The new pipe instance handle.
         """
         return self._win32pipe.CreateNamedPipe(
-            name,
-            open_mode,
-            pipe_mode,
-            max_instances,
-            out_buffer_size,
-            in_buffer_size,
-            default_timeout,
-            security_attributes,
+            spec.name,
+            spec.open_mode,
+            spec.pipe_mode,
+            spec.max_instances,
+            spec.out_buffer_size,
+            spec.in_buffer_size,
+            spec.default_timeout,
+            spec.security_attributes,
         )
 
     @typ.override
@@ -234,17 +226,8 @@ class Win32NamedPipeBackend(NamedPipeBackend):
         return self._win32file.AllocateReadBuffer(size)
 
     @typ.override
-    def create_file(
-        self,
-        file_name: str,
-        desired_access: int,
-        share_mode: int,
-        security_attributes: object,
-        creation_disposition: int,
-        flags_and_attributes: int,
-        template_file: object,
-    ) -> object:
-        """Open *file_name*, used by the transport only to wake its accept loop.
+    def create_file(self, spec: PipeFileOpenSpec) -> object:
+        """Open the pipe described by *spec*, used only to wake the accept loop.
 
         Returns
         -------
@@ -252,13 +235,13 @@ class Win32NamedPipeBackend(NamedPipeBackend):
             The opened handle.
         """
         return self._win32file.CreateFile(
-            file_name,
-            desired_access,
-            share_mode,
-            security_attributes,
-            creation_disposition,
-            flags_and_attributes,
-            template_file,
+            spec.file_name,
+            spec.desired_access,
+            spec.share_mode,
+            spec.security_attributes,
+            spec.creation_disposition,
+            spec.flags_and_attributes,
+            spec.template_file,
         )
 
     @typ.override

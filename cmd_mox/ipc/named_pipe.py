@@ -22,6 +22,8 @@ from cmd_mox.ipc.windows import (
     MAX_MESSAGE_SIZE,
     PIPE_CHUNK_SIZE,
     NamedPipeBackend,
+    NamedPipeCreateSpec,
+    PipeFileOpenSpec,
     PipeMessageTooLargeError,
     PipeReadOptions,
     derive_pipe_name,
@@ -471,20 +473,22 @@ class _NamedPipeState:
         backend = self._backend
         timeout_ms = max(1, int(self.accept_timeout * 1000))
         return backend.create_named_pipe(
-            self.pipe_name,
-            # Overlapped I/O is mandatory for cancellation: an overlapped read
-            # issued on a synchronous handle completes synchronously, so
-            # CancelIoEx would have nothing to cancel and the deadline could
-            # not be enforced.
-            backend.PIPE_ACCESS_DUPLEX | backend.FILE_FLAG_OVERLAPPED,
-            backend.PIPE_TYPE_MESSAGE
-            | backend.PIPE_READMODE_MESSAGE
-            | backend.PIPE_WAIT,
-            backend.PIPE_UNLIMITED_INSTANCES,
-            PIPE_CHUNK_SIZE,
-            PIPE_CHUNK_SIZE,
-            timeout_ms,
-            None,
+            NamedPipeCreateSpec(
+                name=self.pipe_name,
+                # Overlapped I/O is mandatory for cancellation: an overlapped
+                # read issued on a synchronous handle completes synchronously,
+                # so CancelIoEx would have nothing to cancel and the deadline
+                # could not be enforced.
+                open_mode=backend.PIPE_ACCESS_DUPLEX | backend.FILE_FLAG_OVERLAPPED,
+                pipe_mode=backend.PIPE_TYPE_MESSAGE
+                | backend.PIPE_READMODE_MESSAGE
+                | backend.PIPE_WAIT,
+                max_instances=backend.PIPE_UNLIMITED_INSTANCES,
+                out_buffer_size=PIPE_CHUNK_SIZE,
+                in_buffer_size=PIPE_CHUNK_SIZE,
+                default_timeout=timeout_ms,
+                security_attributes=None,
+            )
         )
 
     def _handle_client(self, handle: object, slot: ClientSlot | None = None) -> None:
@@ -699,13 +703,15 @@ class _NamedPipeState:
         backend = self._backend
         try:
             handle = backend.create_file(
-                self.pipe_name,
-                backend.GENERIC_READ | backend.GENERIC_WRITE,
-                0,
-                None,
-                backend.OPEN_EXISTING,
-                0,
-                None,
+                PipeFileOpenSpec(
+                    file_name=self.pipe_name,
+                    desired_access=backend.GENERIC_READ | backend.GENERIC_WRITE,
+                    share_mode=0,
+                    security_attributes=None,
+                    creation_disposition=backend.OPEN_EXISTING,
+                    flags_and_attributes=0,
+                    template_file=None,
+                )
             )
         except backend.error as exc:
             if exc.winerror not in {ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND}:

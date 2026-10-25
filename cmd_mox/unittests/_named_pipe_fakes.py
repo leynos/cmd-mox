@@ -20,7 +20,12 @@ import pytest
 
 from cmd_mox import _path_utils as path_utils
 from cmd_mox.ipc import named_pipe
-from cmd_mox.ipc.windows import NamedPipeBackend, Win32FileProtocol
+from cmd_mox.ipc.windows import (
+    NamedPipeBackend,
+    NamedPipeCreateSpec,
+    PipeFileOpenSpec,
+    Win32FileProtocol,
+)
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -429,17 +434,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         """Record the cancellation of *overlapped* on *handle*."""
         self._file_fake.CancelIoEx(handle, overlapped)
 
-    def create_named_pipe(  # ruff: ignore[too-many-positional-arguments,too-many-arguments] - mirrors the port's pywin32-shaped signature
-        self,
-        name: str,
-        open_mode: int,
-        pipe_mode: int,
-        max_instances: int,
-        out_buffer_size: int,
-        in_buffer_size: int,
-        default_timeout: int,
-        security_attributes: object,
-    ) -> object:
+    def create_named_pipe(self, spec: NamedPipeCreateSpec) -> object:
         """Create the next scripted pipe instance.
 
         Returns
@@ -448,14 +443,14 @@ class FakeNamedPipeBackend(NamedPipeBackend):
             The scripted pipe handle.
         """
         return self.pipe.CreateNamedPipe(
-            name,
-            open_mode,
-            pipe_mode,
-            max_instances,
-            out_buffer_size,
-            in_buffer_size,
-            default_timeout,
-            security_attributes,
+            spec.name,
+            spec.open_mode,
+            spec.pipe_mode,
+            spec.max_instances,
+            spec.out_buffer_size,
+            spec.in_buffer_size,
+            spec.default_timeout,
+            spec.security_attributes,
         )
 
     def connect_named_pipe(self, handle: object, overlapped: object) -> int:
@@ -496,16 +491,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         """
         return self._file_fake.AllocateReadBuffer(size)
 
-    def create_file(  # ruff: ignore[too-many-positional-arguments,too-many-arguments] - mirrors the port's pywin32-shaped signature
-        self,
-        file_name: str,
-        desired_access: int,
-        share_mode: int,
-        security_attributes: object,
-        creation_disposition: int,
-        flags_and_attributes: int,
-        template_file: object,
-    ) -> object:
+    def create_file(self, spec: PipeFileOpenSpec) -> object:
         """Record the wakeup open and return its scripted result.
 
         Returns
@@ -514,13 +500,13 @@ class FakeNamedPipeBackend(NamedPipeBackend):
             The scripted handle, or the scripted error is raised.
         """
         return self._file_fake.CreateFile(
-            file_name,
-            desired_access,
-            share_mode,
-            security_attributes,
-            creation_disposition,
-            flags_and_attributes,
-            template_file,
+            spec.file_name,
+            spec.desired_access,
+            spec.share_mode,
+            spec.security_attributes,
+            spec.creation_disposition,
+            spec.flags_and_attributes,
+            spec.template_file,
         )
 
     def close_handle(self, handle: object) -> None:

@@ -117,6 +117,82 @@ PyWinTypesProtocol = _PyWinTypes
 PyWinErrorProtocol = _PyWinError
 
 
+@dc.dataclass(frozen=True, slots=True)
+class NamedPipeCreateSpec:
+    """The arguments one ``CreateNamedPipe`` instance needs.
+
+    ``win32pipe.CreateNamedPipe`` takes eight positional arguments, which is
+    more than a call site can pass without the reader having to hold the
+    Win32 signature in their head. Grouping them into a value object keeps the
+    port signature small and lets a test name the field it cares about instead
+    of counting positions.
+
+    Attributes
+    ----------
+    name:
+        Fully qualified pipe name, usually from :func:`derive_pipe_name`.
+    open_mode:
+        Duplex access plus the overlapped-I/O flag.
+    pipe_mode:
+        Message-mode flags.
+    max_instances:
+        Upper bound on simultaneous instances.
+    out_buffer_size:
+        Size of the server-to-client buffer.
+    in_buffer_size:
+        Size of the client-to-server buffer.
+    default_timeout:
+        Default timeout in milliseconds for blocking pipe operations.
+    security_attributes:
+        Optional ``SECURITY_ATTRIBUTES``, or ``None`` for the default.
+    """
+
+    name: str
+    open_mode: int
+    pipe_mode: int
+    max_instances: int
+    out_buffer_size: int
+    in_buffer_size: int
+    default_timeout: int
+    security_attributes: object
+
+
+@dc.dataclass(frozen=True, slots=True)
+class PipeFileOpenSpec:
+    """The arguments one ``CreateFile`` call needs.
+
+    The transport uses ``CreateFile`` for a single purpose: opening the pipe
+    once so its accept loop wakes up. Naming the fields keeps that call site
+    readable and stops the eight-positional-argument shape of ``CreateFile``
+    from spreading through the port.
+
+    Attributes
+    ----------
+    file_name:
+        Path to the object being opened.
+    desired_access:
+        Requested access rights.
+    share_mode:
+        Sharing flags, usually ``0`` for an exclusive open.
+    security_attributes:
+        Optional ``SECURITY_ATTRIBUTES``, or ``None`` for the default.
+    creation_disposition:
+        Whether to create or open an existing object.
+    flags_and_attributes:
+        Additional file flags.
+    template_file:
+        Optional template handle, or ``None``.
+    """
+
+    file_name: str
+    desired_access: int
+    share_mode: int
+    security_attributes: object
+    creation_disposition: int
+    flags_and_attributes: int
+    template_file: object
+
+
 class NamedPipeBackend(typ.Protocol):
     """Narrow port over the Win32 named-pipe operations the transport needs.
 
@@ -203,18 +279,8 @@ class NamedPipeBackend(typ.Protocol):
         """Request cancellation of the operation *overlapped* describes."""
         ...
 
-    def create_named_pipe(  # ruff: ignore[too-many-positional-arguments,too-many-arguments] - mirrors the pywin32 CreateNamedPipe signature
-        self,
-        name: str,
-        open_mode: int,
-        pipe_mode: int,
-        max_instances: int,
-        out_buffer_size: int,
-        in_buffer_size: int,
-        default_timeout: int,
-        security_attributes: object,
-    ) -> object:
-        """Create one named-pipe instance with the supplied modes and buffers."""
+    def create_named_pipe(self, spec: NamedPipeCreateSpec) -> object:
+        """Create one named-pipe instance described by *spec*."""
         ...
 
     def connect_named_pipe(self, handle: object, overlapped: object) -> int:
@@ -235,17 +301,8 @@ class NamedPipeBackend(typ.Protocol):
         """Allocate a writable buffer of *size* bytes for an overlapped read."""
         ...
 
-    def create_file(  # ruff: ignore[too-many-positional-arguments,too-many-arguments] - mirrors the pywin32 CreateFile signature
-        self,
-        file_name: str,
-        desired_access: int,
-        share_mode: int,
-        security_attributes: object,
-        creation_disposition: int,
-        flags_and_attributes: int,
-        template_file: object,
-    ) -> object:
-        """Open *file_name*, used by the transport only to wake its accept loop."""
+    def create_file(self, spec: PipeFileOpenSpec) -> object:
+        """Open the pipe described by *spec*, used only to wake the accept loop."""
         ...
 
     def close_handle(self, handle: object) -> None:
@@ -424,8 +481,10 @@ __all__ = sorted([
     "ERROR_PIPE_CONNECTED",
     "MAX_MESSAGE_SIZE",
     "NamedPipeBackend",
+    "NamedPipeCreateSpec",
     "PIPE_CHUNK_SIZE",
     "PipeChunkReader",
+    "PipeFileOpenSpec",
     "PipeMessageTooLargeError",
     "PipeReadOptions",
     "PyWinErrorProtocol",
