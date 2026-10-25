@@ -13,8 +13,8 @@ import time
 import typing as typ
 
 from cmd_mox import _path_utils
+from cmd_mox._correlation import bounded_correlation_id
 from cmd_mox.ipc import _observability
-from cmd_mox.ipc._server_core import bounded_correlation_id
 
 _SHIM_RESPONSE_STREAM_OPERATION = "ipc.shim.response_stream"
 

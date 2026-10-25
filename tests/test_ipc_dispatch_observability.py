@@ -7,6 +7,7 @@ import typing as typ
 
 import pytest
 
+from cmd_mox._correlation import MAX_CORRELATION_ID_LENGTH
 from cmd_mox.ipc import (
     Invocation,
     IPCHandlers,
@@ -481,9 +482,7 @@ def test_parse_payload_rejects_unbounded_correlation_ids(
 @pytest.mark.parametrize(
     "invocation_id",
     [
-        pytest.param(
-            "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1), id="over-long"
-        ),
+        pytest.param("x" * (MAX_CORRELATION_ID_LENGTH + 1), id="over-long"),
         pytest.param("id\nWARNING forged", id="newline"),
         pytest.param("id\x1b[31mred", id="ansi-escape"),
         pytest.param("id\x00null", id="control-char"),
