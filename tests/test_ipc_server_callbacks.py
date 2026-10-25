@@ -36,6 +36,42 @@ type _RequestPayload = dict[
 ]
 
 
+class _EmptyReadObserver(logging.Handler):
+    """Signal when the IPC server logs the readiness probe's empty read."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.empty_read_logged = threading.Event()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if (
+            record.name == "cmd_mox.ipc._server_core"
+            and record.getMessage() == "IPC received empty read"
+        ):
+            self.empty_read_logged.set()
+
+
+def _assert_empty_read_is_logged_quietly(
+    records: list[logging.LogRecord],
+) -> None:
+    """Assert empty reads have one quiet DEBUG outcome."""
+    server_records = [
+        record for record in records if record.name == "cmd_mox.ipc._server_core"
+    ]
+    assert any(
+        record.getMessage() == "IPC received empty read"
+        and record.levelno == logging.DEBUG
+        for record in server_records
+    ), "An empty read was not logged at DEBUG"
+    assert not any(
+        "malformed JSON" in record.getMessage() for record in server_records
+    ), "An empty read was logged as malformed JSON"
+    assert all(
+        record.levelno < logging.ERROR and record.exc_info is None
+        for record in server_records
+    ), "An empty read emitted an error or exception record"
+
+
 pytestmark = [pytest.mark.requires_unix_sockets]
 
 
@@ -292,42 +328,18 @@ def test_readiness_probe_logs_empty_read_at_debug(
     """The startup probe should not be reported as malformed JSON."""
     logger_name = "cmd_mox.ipc._server_core"
     caplog.set_level("DEBUG", logger=logger_name)
-    empty_read_logged = threading.Event()
-
-    class _EmptyReadObserver(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            if (
-                record.name == logger_name
-                and record.getMessage() == "IPC received empty read"
-            ):
-                empty_read_logged.set()
-
     observer = _EmptyReadObserver()
     root_logger = logging.getLogger()
     root_logger.addHandler(observer)
     try:
         with IPCServer(tmp_path / "ipc.sock", timeout=2):
-            assert empty_read_logged.wait(timeout=2), (
+            assert observer.empty_read_logged.wait(timeout=2), (
                 "The readiness probe did not reach the empty-read handler"
             )
     finally:
         root_logger.removeHandler(observer)
 
-    server_records = [record for record in caplog.records if record.name == logger_name]
-    assert any(
-        record.getMessage() == "IPC received empty read"
-        and record.levelno == logging.DEBUG
-        for record in server_records
-    ), "The readiness probe was not logged as an empty read at DEBUG"
-    assert not any(
-        "malformed JSON" in record.getMessage() for record in server_records
-    ), "The readiness probe was logged as malformed JSON"
-    assert not any(record.levelno >= logging.ERROR for record in server_records), (
-        "The readiness probe emitted an ERROR record"
-    )
-    assert not any(record.exc_info is not None for record in server_records), (
-        "The readiness probe emitted an exception record"
-    )
+    _assert_empty_read_is_logged_quietly(caplog.records)
 
 
 def test_decode_payload_logs_empty_read_at_debug(
@@ -339,20 +351,7 @@ def test_decode_payload_logs_empty_read_at_debug(
     result = _server_core._decode_payload(b"")
 
     assert result is None, "An empty read must decode to None"
-    assert any(
-        record.getMessage() == "IPC received empty read"
-        and record.levelno == logging.DEBUG
-        for record in caplog.records
-    ), "Empty reads were not logged at DEBUG"
-    assert not any(
-        "malformed JSON" in record.getMessage() for record in caplog.records
-    ), "An empty read was logged as malformed JSON"
-    assert not any(record.levelno >= logging.ERROR for record in caplog.records), (
-        "An empty read emitted an ERROR record"
-    )
-    assert not any(record.exc_info is not None for record in caplog.records), (
-        "An empty read emitted an exception record"
-    )
+    _assert_empty_read_is_logged_quietly(caplog.records)
 
 
 @pytest.mark.parametrize(
