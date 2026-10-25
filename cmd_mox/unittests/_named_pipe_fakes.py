@@ -393,11 +393,24 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         return self.event.CreateEvent(None, True, False, None)  # ruff: ignore[boolean-positional-value-in-call] - mirrors pywin32's positional flags
 
     def set_event(self, handle: object) -> None:
-        """Record *handle* as signalled."""
+        """Record *handle* as signalled.
+
+        Parameters
+        ----------
+        handle:
+            The event handle to record.
+        """
         self.event.SetEvent(handle)
 
     def wait(self, handles: cabc.Sequence[object], timeout_ms: int) -> int:
         """Return the next scripted wait result.
+
+        Parameters
+        ----------
+        handles:
+            The event handles the transport asked to wait on.
+        timeout_ms:
+            Milliseconds the transport asked to wait.
 
         Returns
         -------
@@ -423,6 +436,13 @@ class FakeNamedPipeBackend(NamedPipeBackend):
     def get_overlapped_result(self, handle: object, overlapped: object) -> int:
         """Complete the scripted overlapped operation.
 
+        Parameters
+        ----------
+        handle:
+            The handle the overlapped operation was issued on.
+        overlapped:
+            The overlapped structure tracking that operation.
+
         Returns
         -------
         int
@@ -431,11 +451,25 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         return self._file_fake.GetOverlappedResult(handle, overlapped, True)  # ruff: ignore[boolean-positional-value-in-call] - mirrors pywin32's positional flag
 
     def cancel_io(self, handle: object, overlapped: object) -> None:
-        """Record the cancellation of *overlapped* on *handle*."""
+        """Record the cancellation of *overlapped* on *handle*.
+
+        Parameters
+        ----------
+        handle:
+            The handle the overlapped operation was issued on.
+        overlapped:
+            The overlapped structure identifying the cancelled operation.
+        """
         self._file_fake.CancelIoEx(handle, overlapped)
 
     def create_named_pipe(self, spec: NamedPipeCreateSpec) -> object:
         """Create the next scripted pipe instance.
+
+        Parameters
+        ----------
+        spec:
+            The creation arguments the transport would pass to
+            ``CreateNamedPipe``.
 
         Returns
         -------
@@ -456,21 +490,43 @@ class FakeNamedPipeBackend(NamedPipeBackend):
     def connect_named_pipe(self, handle: object, overlapped: object) -> int:
         """Report the next scripted connection status.
 
+        Parameters
+        ----------
+        handle:
+            The pipe instance awaiting a client.
+        overlapped:
+            The overlapped structure tracking the connection attempt.
+
         Returns
         -------
-        object
+        int
             The scripted ``ConnectNamedPipe`` status.
         """
         return typ.cast("int", self.pipe.ConnectNamedPipe(handle, overlapped))
 
     def disconnect_named_pipe(self, handle: object) -> None:
-        """Record the disconnection of *handle*."""
+        """Record the disconnection of *handle*.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to detach.
+        """
         self.pipe.DisconnectNamedPipe(handle)
 
     def read_file(
         self, handle: object, buffer: cabc.Buffer, overlapped: object
     ) -> tuple[int, cabc.Buffer]:
         """Start the next scripted overlapped read.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to read from.
+        buffer:
+            The buffer the scripted read copies its data into.
+        overlapped:
+            The overlapped structure tracking the read.
 
         Returns
         -------
@@ -484,6 +540,11 @@ class FakeNamedPipeBackend(NamedPipeBackend):
     def allocate_read_buffer(self, size: int) -> cabc.Buffer:
         """Return a writable buffer of *size* bytes.
 
+        Parameters
+        ----------
+        size:
+            Buffer capacity in bytes, normally one pipe chunk.
+
         Returns
         -------
         bytearray
@@ -493,6 +554,11 @@ class FakeNamedPipeBackend(NamedPipeBackend):
 
     def create_file(self, spec: PipeFileOpenSpec) -> object:
         """Record the wakeup open and return its scripted result.
+
+        Parameters
+        ----------
+        spec:
+            The open arguments the transport would pass to ``CreateFile``.
 
         Returns
         -------
@@ -510,7 +576,13 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         )
 
     def close_handle(self, handle: object) -> None:
-        """Record *handle* as closed."""
+        """Record *handle* as closed.
+
+        Parameters
+        ----------
+        handle:
+            The handle to record in the fake's closed-handle list.
+        """
         self._file_fake.CloseHandle(handle)
 
 

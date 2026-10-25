@@ -108,12 +108,25 @@ class Win32NamedPipeBackend(NamedPipeBackend):
 
     @typ.override
     def set_event(self, handle: object) -> None:
-        """Signal *handle* so every waiter wakes."""
+        """Signal *handle* so every waiter wakes.
+
+        Parameters
+        ----------
+        handle:
+            The event handle to signal.
+        """
         self._win32event.SetEvent(handle)
 
     @typ.override
     def wait(self, handles: cabc.Sequence[object], timeout_ms: int) -> int:
         """Wait until any of *handles* is signalled, or *timeout_ms* expires.
+
+        Parameters
+        ----------
+        handles:
+            The event handles to wait on.
+        timeout_ms:
+            Milliseconds to wait, or ``INFINITE`` to block until signalled.
 
         Returns
         -------
@@ -147,6 +160,13 @@ class Win32NamedPipeBackend(NamedPipeBackend):
     def get_overlapped_result(self, handle: object, overlapped: object) -> int:
         """Wait for *overlapped* to complete and return the bytes transferred.
 
+        Parameters
+        ----------
+        handle:
+            The handle the overlapped operation was issued on.
+        overlapped:
+            The overlapped structure tracking that operation.
+
         Returns
         -------
         int
@@ -161,12 +181,26 @@ class Win32NamedPipeBackend(NamedPipeBackend):
 
     @typ.override
     def cancel_io(self, handle: object, overlapped: object) -> None:
-        """Request cancellation of the operation *overlapped* describes."""
+        """Request cancellation of the operation *overlapped* describes.
+
+        Parameters
+        ----------
+        handle:
+            The handle the overlapped operation was issued on.
+        overlapped:
+            The overlapped structure identifying the operation to cancel.
+        """
         self._win32file.CancelIoEx(handle, overlapped)
 
     @typ.override
     def create_named_pipe(self, spec: NamedPipeCreateSpec) -> object:
         """Create one named-pipe instance described by *spec*.
+
+        Parameters
+        ----------
+        spec:
+            The creation arguments, already grouped as a value object so the
+            eight positional ``CreateNamedPipe`` arguments stay named.
 
         Returns
         -------
@@ -188,6 +222,13 @@ class Win32NamedPipeBackend(NamedPipeBackend):
     def connect_named_pipe(self, handle: object, overlapped: object) -> int:
         """Start connecting *handle* to a client and report the initial status.
 
+        Parameters
+        ----------
+        handle:
+            The pipe instance awaiting a client.
+        overlapped:
+            The overlapped structure tracking the connection attempt.
+
         Returns
         -------
         int
@@ -198,7 +239,13 @@ class Win32NamedPipeBackend(NamedPipeBackend):
 
     @typ.override
     def disconnect_named_pipe(self, handle: object) -> None:
-        """Disconnect *handle* from its client."""
+        """Disconnect *handle* from its client.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to detach.
+        """
         self._win32pipe.DisconnectNamedPipe(handle)
 
     @typ.override
@@ -206,6 +253,15 @@ class Win32NamedPipeBackend(NamedPipeBackend):
         self, handle: object, buffer: cabc.Buffer, overlapped: object
     ) -> tuple[int, cabc.Buffer]:
         """Start an overlapped read and report the immediate status.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to read from.
+        buffer:
+            The writable buffer the kernel fills with the received bytes.
+        overlapped:
+            The overlapped structure tracking the read.
 
         Returns
         -------
@@ -218,6 +274,11 @@ class Win32NamedPipeBackend(NamedPipeBackend):
     def allocate_read_buffer(self, size: int) -> cabc.Buffer:
         """Allocate a writable buffer of *size* bytes for an overlapped read.
 
+        Parameters
+        ----------
+        size:
+            Buffer capacity in bytes, normally one pipe chunk.
+
         Returns
         -------
         collections.abc.Buffer
@@ -228,6 +289,12 @@ class Win32NamedPipeBackend(NamedPipeBackend):
     @typ.override
     def create_file(self, spec: PipeFileOpenSpec) -> object:
         """Open the pipe described by *spec*, used only to wake the accept loop.
+
+        Parameters
+        ----------
+        spec:
+            The open arguments, already grouped as a value object so the seven
+            positional ``CreateFile`` arguments stay named.
 
         Returns
         -------
@@ -246,7 +313,14 @@ class Win32NamedPipeBackend(NamedPipeBackend):
 
     @typ.override
     def close_handle(self, handle: object) -> None:
-        """Release *handle*."""
+        """Release *handle*.
+
+        Parameters
+        ----------
+        handle:
+            The handle to release, as returned by this adapter's creation
+            methods.
+        """
         self._win32file.CloseHandle(handle)
 
 
