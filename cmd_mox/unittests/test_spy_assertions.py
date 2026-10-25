@@ -299,6 +299,18 @@ class TestSpyAssertions:
             ),
         },
         {
+            "name": "validate_optional_attr_raises_on_mismatch",
+            "setup": lambda self, run: self._create_spy_with_invocation(
+                "hi", [], "", {}
+            ),
+            "method": "_validate_optional_attr",
+            "args": lambda spy: ("label", "actual", "expected"),
+            "kwargs": lambda spy: {},
+            "expected_message": (
+                "'hi' called with label 'actual', expected 'expected'"
+            ),
+        },
+        {
             "name": "assert_equal_raises_on_mismatch",
             "setup": lambda self, run: self._create_spy_with_invocation(
                 "hi", [], "", {}
@@ -350,6 +362,9 @@ class TestSpyAssertions:
             ),
             "_validate_environment": lambda s: s._validate_environment(
                 s.invocations[0], s.invocations[0].env
+            ),
+            "_validate_optional_attr": lambda s: s._validate_optional_attr(
+                "label", "expected", "expected"
             ),
             "_assert_equal": lambda s: s._assert_equal("label", "expected", "expected"),
         }

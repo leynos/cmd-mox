@@ -7,6 +7,8 @@ second lint tier.
 
 Amended 2026-08-27 to add a third lint tier; see
 [Amendment (2026-08-27): third lint tier](#amendment-2026-08-27-third-lint-tier).
+Amended 2026-10-09 to add a fifth lint tier; see
+[Amendment (2026-10-09): fifth lint tier](#amendment-2026-10-09-fifth-lint-tier).
 
 Amended 2026-09-25 to retire `pylint-pypy-shim` and to stop disabling
 `syntax-error`; see
@@ -172,3 +174,16 @@ no messages at all and the tier passed. Those modules were never linted.
 Removing the disable makes a parse failure a lint failure, and the findings
 that PyPy 3.12 then reported in previously skipped modules are fixed in the
 same change.
+
+## Amendment (2026-10-09): fifth lint tier
+
+CmdMox adds a fifth lint tier: the nose code-duplication gate. It runs the
+pinned Rust `nose-cli` detector over the production package and fails when a
+clone family is left uncovered by a reasoned exception. This amendment records
+only that the tier exists and where it sits;
+[ADR 002](./adr-002-code-duplication-gate.md) records the scan scope, channel
+pins, ranked budget, exception contract and provisioning.
+
+Consequence: `make lint` now depends on `make install-nose`, and a developer
+workflow that runs the full lint pipeline needs a prebuilt detector release for
+the host platform.

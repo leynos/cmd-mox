@@ -5,12 +5,37 @@ from __future__ import annotations
 import dataclasses as dc
 import functools
 import hashlib
+import importlib
 import logging
 import os
 import typing as typ
 
+from cmd_mox import _path_utils as path_utils
+
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+#: pywin32 is imported lazily: it is a Windows-only dependency, so the guard
+#: keeps ``cmd_mox.ipc`` importable on other platforms while still failing
+#: with an actionable message when a Windows transport is actually used. Each
+#: transport module binds these names and packages that call the Win32 API
+#: from other modules import them back from here, so the guard exists once.
+if path_utils.IS_WINDOWS:  # pragma: win32-only
+    try:
+        pywintypes = importlib.import_module("pywintypes")
+        win32api = importlib.import_module("win32api")
+        win32event = importlib.import_module("win32event")
+        win32file = importlib.import_module("win32file")
+        win32pipe = importlib.import_module("win32pipe")
+    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
+        msg = "pywin32 is required for Windows named pipe support"
+        raise RuntimeError(msg) from exc
+else:  # pragma: no cover - non-Windows fallbacks for type-checkers
+    pywintypes = typ.cast("typ.Any", None)
+    win32api = typ.cast("typ.Any", None)
+    win32event = typ.cast("typ.Any", None)
+    win32file = typ.cast("typ.Any", None)
+    win32pipe = typ.cast("typ.Any", None)
 
 #: Reads one chunk of *chunk_size* bytes, returning ``(status, data)`` exactly
 #: as :func:`win32file.ReadFile` would.
@@ -609,6 +634,11 @@ __all__ = sorted([
     "WINDOWS_PIPE_PREFIX",
     "Win32FileProtocol",
     "derive_pipe_name",
+    "pywintypes",
     "read_pipe_message",
+    "win32api",
+    "win32event",
+    "win32file",
+    "win32pipe",
     "write_pipe_payload",
 ])

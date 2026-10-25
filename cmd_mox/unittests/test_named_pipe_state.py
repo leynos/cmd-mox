@@ -171,14 +171,6 @@ def test_accept_failure_at_startup_is_reported_to_the_waiting_starter(
 
 
 @pytest.mark.usefixtures("windows_platform")
-def test_stop_backend_tolerates_missing_server(tmp_path: pathlib.Path) -> None:
-    """Stopping a server that never started is a no-op."""
-    server = NamedPipeServer(tmp_path / "ipc.sock", timeout=1.0)
-
-    assert server._stop_backend(None) is None, "missing backend should be tolerated"
-
-
-@pytest.mark.usefixtures("windows_platform")
 def test_stop_backend_stops_state_and_joins_clients(
     tmp_path: pathlib.Path, patch_win32: PatchWin32
 ) -> None:

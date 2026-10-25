@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses as dc
-import importlib
 import json
 import os
 import random
@@ -12,6 +11,7 @@ import socket
 import threading
 import time
 import typing as typ
+from functools import partial
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
@@ -28,7 +28,11 @@ from cmd_mox.ipc.windows import (
     PIPE_CHUNK_SIZE,
     PipeReadOptions,
     derive_pipe_name,
+    pywintypes,
     read_pipe_message,
+    win32api,
+    win32file,
+    win32pipe,
     write_pipe_payload,
 )
 
@@ -39,21 +43,6 @@ from .models import Invocation, PassthroughResult, Response
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
-
-if path_utils.IS_WINDOWS:  # pragma: win32-only
-    try:
-        pywintypes = importlib.import_module("pywintypes")
-        win32api = importlib.import_module("win32api")
-        win32file = importlib.import_module("win32file")
-        win32pipe = importlib.import_module("win32pipe")
-    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
-        msg = "pywin32 is required for Windows named pipe support"
-        raise RuntimeError(msg) from exc
-else:  # pragma: no cover - satisfies type-checkers on non-Windows hosts
-    pywintypes = typ.cast("typ.Any", None)
-    win32api = typ.cast("typ.Any", None)
-    win32file = typ.cast("typ.Any", None)
-    win32pipe = typ.cast("typ.Any", None)
 
 DEFAULT_CONNECT_RETRIES: typ.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: typ.Final[float] = 0.05
@@ -427,6 +416,20 @@ def _run_blocking_io[T](
     return typ.cast("T", _extract_outcome(outcome))
 
 
+def _log_connect_retry(
+    transport: _observability.Transport,
+    attempt: int,
+    exc: Exception,
+    context: _ConnectionContext,
+) -> None:
+    """Emit the bounded connect-retry event for *transport*.
+
+    The bounded event is the only report: the endpoint and the exception
+    message are both on the observability never-log list.
+    """
+    _client_events.emit_connect_retry(transport, attempt, exc, context.correlation_id)
+
+
 def _connect_unix_with_retries(
     sock_path: Path,
     context: _ConnectionContext,
@@ -438,7 +441,6 @@ def _connect_unix_with_retries(
     socket.socket
         The connected Unix domain socket.
     """
-    context.validate()
     address = str(sock_path)
 
     def attempt_connect(_attempt: int) -> socket.socket:
@@ -451,15 +453,12 @@ def _connect_unix_with_retries(
             raise
         return sock
 
-    def log_failure(attempt: int, exc: Exception) -> None:
-        # The bounded event is the only report: the socket path and the
-        # exception message are both on the observability never-log list.
-        _client_events.emit_connect_retry("unix", attempt, exc, context.correlation_id)
-
     return retry_with_backoff(
         attempt_connect,
         retry_config=context.retry_config,
-        strategy=RetryStrategy(on_failure=log_failure),
+        strategy=RetryStrategy(
+            on_failure=partial(_log_connect_retry, "unix", context=context)
+        ),
     )
 
 
@@ -578,16 +577,8 @@ def _connect_pipe_with_retries(
     *,
     deadline: float | None = None,
 ) -> object:
-    context.validate()
     pipe_name_str = os.fspath(pipe_name)
     connect_deadline = deadline or _compute_deadline(context.timeout)
-
-    def log_failure(attempt: int, exc: Exception) -> None:
-        # The bounded event is the only report: the pipe name and the
-        # exception message are both on the observability never-log list.
-        _client_events.emit_connect_retry(
-            "named_pipe", attempt, exc, context.correlation_id
-        )
 
     def sleep(delay: float) -> None:
         _wait_for_pipe_availability(
@@ -600,7 +591,7 @@ def _connect_pipe_with_retries(
         lambda _attempt: _create_pipe_handle(pipe_name_str),
         retry_config=context.retry_config,
         strategy=RetryStrategy(
-            on_failure=log_failure,
+            on_failure=partial(_log_connect_retry, "named_pipe", context=context),
             should_retry=_should_retry_pipe_error,
             sleep=sleep,
         ),
@@ -672,6 +663,9 @@ def _dispatch_request(payload: bytes, context: _ConnectionContext) -> bytes:
     bytes
         The raw response bytes returned by the server.
     """
+    # Validate once at the transport boundary rather than in each transport
+    # helper, so a request cannot reach either retry loop unvalidated.
+    context.validate()
     sock_path = _get_validated_socket_path()
     if path_utils.IS_WINDOWS:
         return _send_pipe_request(sock_path, payload, context)

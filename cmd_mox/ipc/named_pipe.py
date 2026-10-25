@@ -29,6 +29,10 @@ from cmd_mox.ipc.windows import (
     derive_pipe_name,
     read_pipe_message,
     write_pipe_payload,
+    pywintypes,
+    win32event,
+    win32file,
+    win32pipe,
 )
 
 from . import _observability
@@ -45,9 +49,9 @@ from ._named_pipe_limits import (
 )
 from ._server_core import (
     IPCHandlers,
-    TimeoutConfig,
     _BaseIPCServer,
     _request_pipeline,
+    _CallbackServerBase,
 )
 from ._win32_named_pipe_backend import Win32NamedPipeBackend
 
@@ -57,6 +61,34 @@ if typ.TYPE_CHECKING:
 
     from .models import Invocation, PassthroughResult, Response
 
+logger = logging.getLogger(__name__)
+
+
+
+"""Windows named-pipe transport for the shared IPC request pipeline."""
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+    from pathlib import Path
+<<<<<<< ours
+    from .models import Invocation, PassthroughResult, Response
+||||||| original
+    from .models import Invocation, PassthroughResult, Response
+if path_utils.IS_WINDOWS:  # pragma: win32-only
+    try:
+        pywintypes = importlib.import_module("pywintypes")
+        win32event = importlib.import_module("win32event")
+        win32file = importlib.import_module("win32file")
+        win32pipe = importlib.import_module("win32pipe")
+    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
+        msg = "pywin32 is required for Windows named pipe support"
+        raise RuntimeError(msg) from exc
+else:  # pragma: no cover - non-Windows fallback for type-checkers
+    pywintypes = typ.cast("typ.Any", None)
+    win32event = typ.cast("typ.Any", None)
+    win32file = typ.cast("typ.Any", None)
+    win32pipe = typ.cast("typ.Any", None)
+=======
+>>>>>>> theirs
 logger = logging.getLogger(__name__)
 
 
@@ -113,34 +145,13 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         msg = f"Named pipe {self._pipe_name} {reason}"
         raise RuntimeError(msg)
 
-    def _stop_backend(self, server: _NamedPipeState | None) -> None:
-        if server is None:
-            return
+    def _stop_backend(self, server: _NamedPipeState) -> None:
         server.stop()
         server.join_clients(self.timeout)
 
 
-class CallbackNamedPipeServer(NamedPipeServer):
+class CallbackNamedPipeServer(_CallbackServerBase["_NamedPipeState"], NamedPipeServer):
     """Callback-based helper mirroring :class:`CallbackIPCServer`."""
-
-    def __init__(
-        self,
-        socket_path: Path,
-        handler: cabc.Callable[[Invocation], Response],
-        passthrough_handler: cabc.Callable[[PassthroughResult], Response],
-        *,
-        timeouts: TimeoutConfig | None = None,
-    ) -> None:
-        timeouts = timeouts or TimeoutConfig()
-        super().__init__(
-            socket_path,
-            timeout=timeouts.timeout,
-            accept_timeout=timeouts.accept_timeout,
-            handlers=IPCHandlers(
-                handler=handler,
-                passthrough_handler=passthrough_handler,
-            ),
-        )
 
 
 class _NamedPipeState:
@@ -651,7 +662,7 @@ class _NamedPipeState:
         int
             ``ERROR_IO_PENDING`` when the read is still in flight, otherwise
             the completion status reported synchronously.
-        """
+        """  # ruff: ignore[docstring-missing-exception] - any non-pending pywintypes.error propagates to the caller
         try:
             status, _ = self._backend.read_file(handle, buffer, overlapped)
         except self._backend.error as exc:
@@ -687,7 +698,7 @@ class _NamedPipeState:
         -------
         tuple[int, bytes]
             The ``ReadFile`` status and the transferred bytes.
-        """
+        """  # ruff: ignore[docstring-missing-exception] - any pywintypes.error other than ERROR_MORE_DATA propagates to the caller
         try:
             transferred = self._backend.get_overlapped_result(handle, overlapped)
         except self._backend.error as exc:

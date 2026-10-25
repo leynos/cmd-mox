@@ -64,36 +64,20 @@ def _format_env(mapping: cabc.Mapping[str, str | None]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
-def _format_args(args: cabc.Sequence[str] | None) -> str:
-    """Format command arguments as a comma-separated representation.
+def _format_items[ItemT](items: cabc.Sequence[ItemT] | None) -> str:
+    """Format *items* as a comma-separated representation.
 
     Parameters
     ----------
-    args : collections.abc.Sequence[str] or None
-        Arguments to format.
+    items : collections.abc.Sequence or None
+        Values to format, such as command arguments or matcher predicates.
 
     Returns
     -------
     str
-        Repr-formatted arguments, or an empty string when absent.
+        Repr-formatted items, or an empty string when absent.
     """
-    return "" if not args else ", ".join(repr(arg) for arg in args)
-
-
-def _format_matchers(matchers: cabc.Sequence[cabc.Callable[[str], bool]] | None) -> str:
-    """Format argument matcher callables for diagnostic output.
-
-    Parameters
-    ----------
-    matchers : collections.abc.Sequence or None
-        Matcher predicates to format.
-
-    Returns
-    -------
-    str
-        Repr-formatted matchers, or an empty string when absent.
-    """
-    return "" if not matchers else ", ".join(repr(matcher) for matcher in matchers)
+    return "" if not items else ", ".join(repr(item) for item in items)
 
 
 def _format_call(name: str, args_repr: str) -> str:
@@ -116,9 +100,9 @@ def _expectation_args_repr(exp: Expectation) -> str:
         Representation of exact arguments, matchers, or no arguments.
     """
     if exp.args is not None:
-        return _format_args(exp.args)
+        return _format_items(exp.args)
     if exp.match_args is not None:
-        return _format_matchers(exp.match_args)
+        return _format_items(exp.match_args)
     return ""
 
 
@@ -183,7 +167,7 @@ def _describe_invocation(
     str
         Multi-line diagnostic description.
     """
-    lines = [_format_call(inv.command, _format_args(inv.args))]
+    lines = [_format_call(inv.command, _format_items(inv.args))]
     if include_stdin:
         lines.append(f"stdin={inv.stdin!r}")
     if focus_env:

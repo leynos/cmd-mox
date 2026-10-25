@@ -36,6 +36,7 @@ extend-ignore-re = [
     "GitHub\\s+Flavored\\s+Markdown\\b(?:\\s\\(GFM\\))?",
     "HashiCorp",
     "How to organise your Rust tests",
+    "\\b(?:FORCE|NO)_COLOR\\b",
     "\\b(?:background|theme)_color\\b",
     "\\b(?:carousel|dropdown|footer|indicator|items|navbar|toast)-center\\b",
     "\\bAppFactory<Ser\\b",
