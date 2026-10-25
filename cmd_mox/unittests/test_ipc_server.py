@@ -221,6 +221,46 @@ def test_ipc_server_bounds_incomplete_request_read(
     assert event.correlation_id is None, "Incomplete request must not carry correlation"
 
 
+def test_ipc_server_reports_timeout_when_deadline_expires_before_handle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An expired setup deadline is reported by the handler's read path."""
+    socket_path = tmp_path / "ipc.sock"
+
+    with _observability.capture_events() as events, IPCServer(socket_path):
+        monkeypatch.setattr(
+            ipc_server_module,
+            "_compute_deadline",
+            lambda _timeout: time.monotonic() - 1.0,
+        )
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as incomplete:
+            incomplete.settimeout(1.0)
+            incomplete.connect(str(socket_path))
+            deadline = time.monotonic() + 1.0
+            while (
+                not any(
+                    event.operation == "ipc.server.connection"
+                    and event.outcome == "receive_timeout"
+                    for event in events
+                )
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+
+    receive_timeouts = [
+        event
+        for event in events
+        if event.operation == "ipc.server.connection"
+        and event.outcome == "receive_timeout"
+    ]
+    assert receive_timeouts, "Expired deadline did not emit a receive timeout event"
+    event = receive_timeouts[0]
+    assert event.error_category == "TimeoutError", (
+        "Expired receive deadline did not emit a timeout event"
+    )
+
+
 def test_ipc_handler_uses_remaining_time_for_each_receive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

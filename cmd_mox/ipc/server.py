@@ -326,7 +326,6 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         self._read_deadline = _compute_deadline(
             self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
         )
-        self.request.settimeout(_remaining_time(self._read_deadline))
         super().setup()
 
     def _read_request_payload(self) -> bytes:
