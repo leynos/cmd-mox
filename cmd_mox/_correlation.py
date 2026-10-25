@@ -14,7 +14,7 @@ def bounded_correlation_id(value: object) -> str | None:
 
     Identifiers are opaque and supplied by the caller, so an absent, empty,
     non-string, over-long, or non-conforming value is treated as no identifier
-    at all. Rejected values are dropped rather than truncated or sanitised in
+    at all. Rejected values are dropped rather than truncated or sanitized in
     place: a repaired identifier is a forged one, and two distinct identifiers
     sharing a prefix would collapse onto one, silently correlating unrelated
     records.

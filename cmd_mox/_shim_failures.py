@@ -191,20 +191,20 @@ def _replace_failed_stream_with_sink(
     """Prevent interpreter shutdown from retrying a failed stream flush."""
     original_name = f"__{stream_name}__"
     original_stream = getattr(sys, original_name, None)
+    sink = io.StringIO()
     if failed_stream is original_stream:
         descriptor = 1 if stream_name == "stdout" else 2
-        try:
-            sink_descriptor = os.open(os.devnull, os.O_WRONLY)
-            if sink_descriptor != descriptor:
-                try:
-                    os.dup2(sink_descriptor, descriptor)
-                finally:
-                    os.close(sink_descriptor)
-        except OSError:
-            pass
-
-        sink = io.StringIO()
+        _redirect_descriptor_to_null(descriptor)
         setattr(sys, original_name, sink)
-    else:
-        sink = io.StringIO()
     setattr(sys, stream_name, sink)
+
+
+def _redirect_descriptor_to_null(descriptor: int) -> None:
+    """Best-effort redirect of one descriptor to the null device."""
+    with contextlib.suppress(OSError):
+        sink_descriptor = os.open(os.devnull, os.O_WRONLY)
+        if sink_descriptor != descriptor:
+            try:
+                os.dup2(sink_descriptor, descriptor)
+            finally:
+                os.close(sink_descriptor)

@@ -256,8 +256,10 @@ def test_ipc_handler_uses_remaining_time_for_each_receive() -> None:
 
     payload = _ipc_server._IPCHandler._read_request_payload(fake_handler)
 
-    assert payload == b"firstsecond"
-    assert request.timeouts == pytest.approx([1.0, 0.75, 0.5])
+    assert payload == b"firstsecond", "Request payload fragments were not assembled"
+    assert request.timeouts == pytest.approx([1.0, 0.75, 0.5]), (
+        "Each receive should use the remaining request deadline"
+    )
 
 
 @pytest.mark.parametrize(
