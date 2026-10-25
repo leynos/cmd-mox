@@ -1,17 +1,16 @@
 """Win32 adapter for the named-pipe transport's :class:`NamedPipeBackend` port.
 
-This module is the transport's single point of contact with ``pywin32``. The
-guarded module bindings live here, and every transport call goes through
-:class:`Win32NamedPipeBackend` rather than reaching for a module global, so the
-rest of the transport runs unchanged against a fake adapter on any platform.
+Every transport call goes through :class:`Win32NamedPipeBackend` rather than
+reaching for the ``pywin32`` modules directly, so the rest of the transport
+runs unchanged against a fake adapter on any platform. The guarded module
+bindings themselves live in :mod:`cmd_mox.ipc.windows`, which owns the single
+import guard for the whole package; this adapter only re-exports the ones it
+binds onto an instance.
 """
 
 from __future__ import annotations
 
-import importlib
 import typing as typ
-
-from cmd_mox import _path_utils as path_utils
 
 from .windows import (
     NamedPipeBackend,
@@ -20,33 +19,14 @@ from .windows import (
     PyWinErrorProtocol,
     PyWinTypesProtocol,
     Win32FileProtocol,
+    pywintypes,
+    win32event,
+    win32file,
+    win32pipe,
 )
 
 if typ.TYPE_CHECKING:  # pragma: no cover - type-checkers only
     import collections.abc as cabc
-
-    # Annotated rather than inferred: the Windows branch rebinds these to real
-    # modules and the fallback branch to ``None``, which type-checkers cannot
-    # reconcile without help.
-    pywintypes: typ.Any
-    win32event: typ.Any
-    win32file: typ.Any
-    win32pipe: typ.Any
-
-if path_utils.IS_WINDOWS:  # pragma: win32-only
-    try:
-        pywintypes = importlib.import_module("pywintypes")
-        win32event = importlib.import_module("win32event")
-        win32file = importlib.import_module("win32file")
-        win32pipe = importlib.import_module("win32pipe")
-    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
-        msg = "pywin32 is required for Windows named pipe support"
-        raise RuntimeError(msg) from exc
-else:  # pragma: no cover - non-Windows fallback for type-checkers
-    pywintypes = typ.cast("typ.Any", None)
-    win32event = typ.cast("typ.Any", None)
-    win32file = typ.cast("typ.Any", None)
-    win32pipe = typ.cast("typ.Any", None)
 
 
 class Win32NamedPipeBackend(NamedPipeBackend):
