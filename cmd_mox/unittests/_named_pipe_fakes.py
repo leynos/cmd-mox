@@ -528,15 +528,29 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         self._file_fake.CloseHandle(handle)
 
 
-#: Backend every :func:`build_state` call injects.
-#:
-#: The object identity is stable so a test may build its state before calling
-#: :func:`patch_win32_fixture`; the fixture swaps the inner fakes in place
-#: under ``monkeypatch``, which restores them after each test.
-_FALLBACK_BACKEND: typ.Final[FakeNamedPipeBackend] = FakeNamedPipeBackend()
-
-
 type PatchWin32 = cabc.Callable[..., tuple[FakeWin32File, FakeWin32Pipe]]
+
+
+#: Backend :func:`build_state` injects for the test currently running.
+#:
+#: ``fake_backend`` replaces this per test and ``monkeypatch`` restores it
+#: afterwards. A shared singleton would leak recorded handles, writes, and
+#: events from one test into the next.
+_current_backend: FakeNamedPipeBackend | None = None
+
+
+@pytest.fixture(name="fake_backend")
+def fake_backend_fixture(monkeypatch: pytest.MonkeyPatch) -> FakeNamedPipeBackend:
+    """Give each test a fresh fake backend and publish it to ``build_state``.
+
+    Returns
+    -------
+    FakeNamedPipeBackend
+        The fake adapter :func:`build_state` will inject.
+    """
+    backend = FakeNamedPipeBackend()
+    monkeypatch.setattr(f"{__name__}._current_backend", backend)
+    return backend
 
 
 def closed_pipe_handles(file_fake: FakeWin32File) -> list[object]:
@@ -553,13 +567,15 @@ def closed_pipe_handles(file_fake: FakeWin32File) -> list[object]:
 
 
 @pytest.fixture(name="patch_win32")
-def patch_win32_fixture(monkeypatch: pytest.MonkeyPatch) -> PatchWin32:
-    """Build the fake backend that :func:`build_state` injects.
+def patch_win32_fixture(
+    fake_backend: FakeNamedPipeBackend,
+) -> PatchWin32:
+    """Install the fake ``win32`` modules on this test's fake backend.
 
-    The fakes reach the transport through :class:`FakeNamedPipeBackend` rather
-    than module attributes, so this fixture stores the built backend in a
-    monkeypatched attribute that :func:`build_state` reads. Tests keep the
-    familiar ``patch_win32(win32file=..., win32pipe=..., win32event=...)``
+    The transport receives a :class:`FakeNamedPipeBackend` rather than module
+    globals, so patching means swapping the fakes inside the backend the
+    ``fake_backend`` fixture built and :func:`build_state` injects. Tests keep
+    the familiar ``patch_win32(win32file=..., win32pipe=..., win32event=...)``
     spelling and the ``(file_fake, pipe_fake)`` return tuple.
 
     Returns
@@ -575,43 +591,53 @@ def patch_win32_fixture(monkeypatch: pytest.MonkeyPatch) -> PatchWin32:
     ) -> tuple[FakeWin32File, FakeWin32Pipe]:
         file_fake = win32file or FakeWin32File()
         pipe_fake = win32pipe or FakeWin32Pipe()
-        # Swap the fakes in place so a state built earlier in the test still
-        # observes them; monkeypatch restores the defaults afterwards.
-        monkeypatch.setattr(_FALLBACK_BACKEND, "_file_fake", file_fake)
-        monkeypatch.setattr(_FALLBACK_BACKEND, "pipe", pipe_fake)
-        monkeypatch.setattr(_FALLBACK_BACKEND, "event", win32event or FakeWin32Event())
-        monkeypatch.setattr(_FALLBACK_BACKEND, "_pywintypes_fake", FakePyWinTypes())
+        # Mutate in place: the state under test already holds this backend.
+        fake_backend._file_fake = file_fake
+        fake_backend.pipe = pipe_fake
+        fake_backend.event = win32event or FakeWin32Event()
+        fake_backend._pywintypes_fake = FakePyWinTypes()
         return file_fake, pipe_fake
 
     return _patch
 
 
 @pytest.fixture(name="windows_platform")
-def windows_platform_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+def windows_platform_fixture(
+    monkeypatch: pytest.MonkeyPatch, fake_backend: FakeNamedPipeBackend
+) -> None:
     """Pretend the current platform is Windows for platform-gated code.
 
     Faking the platform flag on POSIX also has to supply a Win32 backend:
     :class:`~cmd_mox.ipc.named_pipe.NamedPipeServer` constructs the real
     adapter at its transport edge, and that adapter needs ``pywin32``, which
-    is absent here. Redirecting the construction site to the fake adapter
-    keeps the faked flag and the available backend consistent.
+    is absent here. Redirecting the construction site to this test's fake
+    adapter keeps the faked flag and the available backend consistent.
     """
     monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(named_pipe, "Win32NamedPipeBackend", lambda: _FALLBACK_BACKEND)
+    monkeypatch.setattr(named_pipe, "Win32NamedPipeBackend", lambda: fake_backend)
 
 
 def build_state(accept_timeout: float = 0.1) -> named_pipe._NamedPipeState:
     """Create a state object detached from any real IPC server.
 
+    A test using ``patch_win32`` or ``windows_platform`` gets the backend the
+    ``fake_backend`` fixture published, so it may build its state before or
+    after calling ``patch_win32``. A test that needs no scripted Win32 I/O
+    gets a throwaway backend, which keeps the signature unchanged for the
+    state-only tests.
+
     Returns
     -------
     cmd_mox.ipc.named_pipe._NamedPipeState
         A state instance whose outer server is an inert stand-in and whose
-        backend is the fake adapter installed by ``patch_win32``.
+        backend is this test's fake adapter.
     """
+    backend = (
+        _current_backend if _current_backend is not None else FakeNamedPipeBackend()
+    )
     return named_pipe._NamedPipeState(
         pipe_name="pipe",
         outer=typ.cast("typ.Any", object()),
         accept_timeout=accept_timeout,
-        backend=_FALLBACK_BACKEND,
+        backend=backend,
     )

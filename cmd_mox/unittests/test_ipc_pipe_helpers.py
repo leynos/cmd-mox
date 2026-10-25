@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 import types
-import typing as typ
 from pathlib import Path
 
 import pytest
@@ -25,9 +24,7 @@ from cmd_mox.ipc.windows import (
 )
 from cmd_mox.unittests._named_pipe_fakes import (
     FakeNamedPipeBackend,
-    FakePyWinTypes,
     FakeWin32File,
-    FakeWin32Pipe,
     FakeWinError,
 )
 
@@ -121,7 +118,6 @@ def test_named_pipe_handler_uses_shared_helpers(
 ) -> None:
     """Server handler delegates to read/write helpers for pipe I/O."""
     writes: list[bytes] = []
-    closes: list[object] = []
     read_calls: list[object] = []
     handle = object()
 
@@ -137,29 +133,12 @@ def test_named_pipe_handler_uses_shared_helpers(
         assert transport == "named_pipe"
         return b"processed"
 
-    class _FakeWin32File:
-        def CloseHandle(self, h: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
-            closes.append(h)
-
-    class _FakeWin32Pipe:
-        @staticmethod
-        def DisconnectNamedPipe(_handle: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
-            return None
-
-    class _FakePyWinTypes:
-        error = type("Err", (Exception,), {})
-
-    backend = FakeNamedPipeBackend(
-        win32file=typ.cast("FakeWin32File", _FakeWin32File()),
-        win32pipe=typ.cast("FakeWin32Pipe", _FakeWin32Pipe()),
-        pywintypes=typ.cast("FakePyWinTypes", _FakePyWinTypes()),
-    )
-    dummy_outer = object()
+    file_fake = FakeWin32File()
     state = _NamedPipeState(
         pipe_name="pipe",
-        outer=dummy_outer,  # type: ignore[arg-type, ty:invalid-argument-type]
+        outer=object(),  # type: ignore[arg-type, ty:invalid-argument-type]
         accept_timeout=0.1,
-        backend=backend,
+        backend=FakeNamedPipeBackend(win32file=file_fake),
     )
     state._client_threads.add(threading.current_thread())
 
@@ -171,7 +150,7 @@ def test_named_pipe_handler_uses_shared_helpers(
 
     assert read_calls == [handle]
     assert writes == [b"processed"]
-    assert closes == [handle]
+    assert file_fake.closed == [handle], "the client handle was not closed"
 
 
 def test_named_pipe_server_signals_ready_when_accept_creation_fails(

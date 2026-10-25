@@ -135,13 +135,9 @@ class Win32NamedPipeBackend(NamedPipeBackend):
             The overlapped structure and its event handle.
         """
         overlapped = self._pywintypes.OVERLAPPED()
-        # CreateEvent(security, manual_reset, initial_state, name).
-        event = self._win32event.CreateEvent(
-            None,
-            True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-            False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-            None,
-        )
+        # The overlapped event has the same manual-reset semantics the
+        # transport wants for its shutdown event, so build it the same way.
+        event = self.create_event()
         overlapped.hEvent = event
         return overlapped, event
 

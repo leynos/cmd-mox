@@ -26,6 +26,7 @@ from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import]
     ScriptedRead,
     build_state,
     closed_pipe_handles,
+    fake_backend_fixture,
     patch_win32_fixture,
 )
 from cmd_mox.unittests._named_pipe_test_helpers import (
