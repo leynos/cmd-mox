@@ -118,6 +118,15 @@ is not saturated at the time of adoption. Saturation must be re-checked rather
 than assumed, and a larger budget is a deliberate change, not a way to reach a
 green build.
 
+The scan surface is pinned by `scripts/tests/test_nose_config_contract.py`
+rather than left to review. It reads this production table through the gate's
+own `load_settings`, compares it with the intended scan, and asserts that each
+root exists inside the repository and still selects production modules outside
+the excluded subtree, and that each exclusion still hides files. Without that
+check the failure this ADR is most exposed to — a root or exclusion that
+silently stops matching, so the gate passes over an empty surface — would leave
+no trace beyond a green build.
+
 ### Exceptions
 
 An exception is a TOML entry under `[tool.duplication_gate]` with a non-blank

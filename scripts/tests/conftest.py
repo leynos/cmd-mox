@@ -35,6 +35,13 @@ collect_ignore = [
     "test_nose_detector.py",
 ]
 
+# `test_nose_config_contract.py` deliberately sits outside that list. It reads
+# the production `[tool.nose]` table through `nose_detector.load_settings`, and
+# that module imports only the standard library, so the contract is asserted
+# for the real configuration in whichever suite collects it — including the
+# application suite, which is what keeps a green `make duplication` from being
+# the only evidence that the scan still has a surface.
+
 
 @pytest.fixture
 def write_pyproject(tmp_path: Path) -> cabc.Callable[[str], Path]:

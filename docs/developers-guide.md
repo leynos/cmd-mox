@@ -377,6 +377,14 @@ root. `unittests/*` therefore names `cmd_mox/unittests/`; the repository-root
 form `cmd_mox/unittests/*` would match nothing and silently scan the test tree
 instead.
 
+`scripts/tests/test_nose_config_contract.py` pins that surface. It reads the
+production table through `nose_detector.load_settings` and checks four things:
+the settings match the intended scan, every root exists inside the repository,
+the roots still select production modules, and every exclusion still hides
+files. Changing the scan therefore fails a test rather than quietly shrinking
+what the gate enforces. The module imports only the standard library, so it
+also runs in the application suite, not just under `make duplication-test`.
+
 The gate adjudicates a ranked budget of families rather than the whole report.
 `top` bounds how many of the highest-ranked families are checked; duplication
 below that ranking is reported nowhere and enforced nowhere. Do not raise

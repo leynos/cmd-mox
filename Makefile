@@ -207,6 +207,7 @@ duplication-test: ## Run the duplication-gate helper tests
 		scripts/tests/test_duplication_gate_persistence.py \
 		scripts/tests/test_duplication_gate_properties.py \
 		scripts/tests/test_make_install_nose.py \
+		scripts/tests/test_nose_config_contract.py \
 		scripts/tests/test_nose_detector.py
 
 # Accept FIRST/SECOND/REASON (and skylos SYMBOL) only from the make command

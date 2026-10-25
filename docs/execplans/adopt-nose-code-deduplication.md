@@ -62,7 +62,33 @@ Success is observable when:
 - Scope: if the adoption needs files beyond `scripts/`, `scripts/tests/`,
   `Makefile`, `pyproject.toml`, `.gitignore`, `.github/workflows/ci.yml`,
   `tests/test_toolchain_contract.py`, `AGENTS.md` and `docs/`, stop and
-  escalate.
+  escalate. Amended 2026-10-25: adjudication exceeded that list, and the
+  expansion was accepted as part of the assignment rather than waived. The
+  listed set assumed the gate would only need new files and never touch the
+  code being scanned. Dissolving a clone family means editing both sides of it,
+  so every extraction necessarily reaches into `cmd_mox/`, and the three
+  in-package tests that pin the extracted behaviour
+  (`cmd_mox/unittests/test_named_pipe_state.py`, `test_spy_assertions.py`,
+  `test_verifier_helpers.py`) move with it. Three further sets of files follow
+  from the work rather than from the gate:
+
+  - The `cmd_mox/` production modules that held the dissolved families, plus
+    `cmd_mox/ipc/json_utils.py` and `cmd_mox/ipc/_server_core.py` for the
+    review-driven repairs.
+  - `tests/test_ipc_json_utils.py`, `tests/test_ipc_server_callbacks.py`,
+    `tests/test_pylint_tier_contract.py` and
+    `tests/test_skylos_lint_contract.py`, which pin contracts the adoption
+    changed — the bounded dispatch record, the pragma-vocabulary split, and the
+    `_stop_backend` entry-point rule.
+  - `pylintrc-df12.toml`, `typos.toml`, `typos.local.toml` and
+    `scripts/ty.toml`, because the new modules and the new `R9104` pragma need
+    the gate vocabulary, spelling allowances and interpreter floor the
+    existing surfaces did not carry. `docs/adr-001-linting-architecture.md`
+    gains the amendment that points at ADR 002.
+
+  The `scripts/uv_gate.py` exclusion in the brief held: the vendored helper is
+  used unchanged. No change here authorizes a wider scope for a future
+  adoption; it records what this one needed.
 - Detector: if nose 0.20.0 cannot express the configured scan, or emits a
   schema that the ported validation rejects, stop and escalate rather than
   loosening validation.
@@ -78,8 +104,13 @@ Success is observable when:
 
 - Risk: the gate's scan surface silently narrows (mistyped root, new ignore
   pattern) and reports a clean run over nothing. Severity: high. Likelihood:
-  medium. Mitigation: roots are asserted to exist and select files in tests;
-  the survey recorded 27 ranked production families before adjudication, so a
+  medium. Mitigation: `scripts/tests/test_nose_config_contract.py` reads the
+  checked-in `pyproject.toml` through `nose_detector.load_settings`, asserts
+  the roots and exclusions against the intended scan, and asserts that each
+  root exists and still selects production Python files outside the excluded
+  subtrees. It needs neither the detector binary nor nose's report schema, so
+  it runs under `make duplication-test` and under the application suite. The
+  survey recorded 27 ranked production families before adjudication, so a
   subsequent empty or near-empty report is a signal, not a pass.
 - Risk: a ported exception helper partially covers a family because matching
   degrades to any-member. Severity: high. Likelihood: low. Mitigation: port the
@@ -129,7 +160,7 @@ Success is observable when:
   run with `make duplication-test`).
 - [x] (2026-10-09) Adjudicated every ranked family at source across four
   passes, extracting nine genuine duplicates at their correct layer, and
-  recorded eight reasoned entries covering ten families of intentional
+  recorded eight reasoned entries covering nine families of intentional
   parallel. The ranked count fell 27 → 18 → 17 → 14 → 13 → 11 → 5 → 0 blocking
   as the extractions and entries landed; the family-level detail is in
   "Adjudication record" below.
@@ -211,7 +242,7 @@ Success is observable when:
   adoption must not silently start a costly source build or reach an unapproved
   binary source. Date/Author: 2026-10-09 / Claude Code.
 - Decision: extract nine families and record eight reasoned entries covering
-  ten families, rather than driving the blocking count to zero by refactoring.
+  nine families, rather than driving the blocking count to zero by refactoring.
   Rationale: the surviving families are signatures, docstring sections, import
   lists and one-statement idioms. Removing them would require boolean-mode
   helpers, a third re-export module, a call-site-passed literal or a reversed
@@ -321,11 +352,23 @@ Success is observable when:
 
 The adoption landed as a first-party port rather than a cherry-pick. Nine
 families were dissolved by extracting the shared behaviour at its owning layer;
-the eight remaining reasoned entries cover ten families, each naming the
+the eight remaining reasoned entries cover nine families, each naming the
 independent contract or architectural boundary an extraction would couple. The
 detector is provisioned by `make install-nose`, the blocking check is inside
 `make lint`, CI caches and re-verifies the binary, and
 `tests/test_toolchain_contract.py` keeps the three version pins in agreement.
+
+The ninth family is the reason the count moved. `environment.py` ~
+`fs_retry.py` ~ `ipc/named_pipe.py` and `pytest_plugin.py` ~ `verifiers.py`
+each cover one family, but `verifiers.py` ~ `test_doubles.py` covers two: the
+inverse length comparisons in `OrderVerifier`, and the repeated
+`self._validate_spy_usage("<method>")` calls in `test_doubles.py`. Both are
+reported unnamed, so one path-only entry covers both. A 2026-10-25 re-measure
+at the delivered head reports `entries=8`, `findings=9`, `allowed=9`,
+`blocking=0`, `stale=0` at both `top=30` and `top=300`, and the mapping from
+each finding to the entries that cover it. The earlier ten-family figures in
+this plan are the 2026-10-09 scan's own record; they are left in place as
+history, and the current count is the measured one.
 
 Three lessons are worth carrying forward.
 
@@ -409,8 +452,8 @@ guarded statements no longer exist.
 
 ### Reasoned exceptions (intentional parallels)
 
-Ten families are covered by the eight `[tool.duplication_gate]` entries below;
-two of those entries cover two families each. Every entry names the specific
+Nine families are covered by the eight `[tool.duplication_gate]` entries below;
+one of those entries covers two families. Every entry names the specific
 independent contract or boundary an extraction would couple. No exception was
 written to obtain a green run: every one of them is a family whose shared text
 is a signature, a docstring section, an import list or a one-statement idiom.
@@ -510,8 +553,8 @@ was not deleted on the gate's word. Source inspection showed the two import
 blocks now diverge — different stdlib imports, different shared helper modules
 — and a widened `top=400` scan (which returns the entire ten-family report)
 contained no family spanning both files. The entry was therefore removed, and
-`make duplication` now passes with ten families allowed by eight entries and no
-stale entries.
+`make duplication` now passes with nine families allowed by eight entries and
+no stale entries.
 
 ### Lint findings raised by the deduplication work
 
@@ -644,6 +687,11 @@ The change is accepted only if all of the following hold:
 - A narrow reasoned exception makes the planted clone pass; one extra member
   outside the exception's keys makes it fail again.
 - `make duplication-test` passes without downloading the detector.
+- The checked-in scan configuration is asserted, not assumed:
+  `scripts/tests/test_nose_config_contract.py` reads the production
+  `[tool.nose]` table, compares it with the intended scan, and asserts that
+  each root exists inside the repository, still selects production modules
+  outside the excluded subtree, and that each exclusion still hides files.
 - `make lint`, `make check-fmt`, `make typecheck`, `make test`,
   `make markdownlint` and `make nixie` all pass, or their pre-existing failures
   are reported as such with evidence.
@@ -722,3 +770,14 @@ tests, lint, and the full test suite. `Status: COMPLETE` records that the
 implementation and its gates are finished; merging PR #315 remains the final
 delivery action, and the dated entry above that reads "Not merged" is the
 2026-10-14 publication record rather than a current state.
+
+Revised again 2026-10-25, after review: three claims were reconciled with the
+delivered head. The allowed-family count is nine, not ten — one `members` entry
+covers two unnamed families, not two entries covering two each — and the
+2026-10-09 figures stay above as that scan's own record. The scope tolerance
+now states which files the adjudication actually needed and why, instead of
+listing only the files the gate's tooling was expected to add. The scan-surface
+mitigation no longer claims a contract test that did not exist; it names
+`scripts/tests/test_nose_config_contract.py`, which reads the checked-in
+configuration, asserts the intended roots and exclusions, and asserts that the
+roots still select production Python outside the excluded subtree.
