@@ -429,11 +429,9 @@ sequenceDiagram
   end
 ```
 
-For screen readers: This sequence shows the fixture yielding the mock during
-normal execution. If setup or test execution raises a `BaseException`, the
-fixture marks the body as failed and re-raises the exception. Teardown
-preserves the interrupt when cleanup succeeds; a cleanup failure is reported
-and can replace the interrupt.
+For screen readers: This sequence shows the fixture setting `body_failed` and
+re-raising `KeyboardInterrupt` or `SystemExit`, so teardown knows to preserve
+the propagating interrupt during verification or close handling.
 
 ```mermaid
 sequenceDiagram
@@ -448,11 +446,7 @@ sequenceDiagram
         Fixture->>Fixture: body_failed = True
         Fixture-->>Test: re-raise original exception
         Teardown->>Fixture: verify or close handling
-        alt Cleanup succeeds
-            Teardown-->>Test: preserve propagating interrupt
-        else Cleanup fails
-            Teardown-->>Test: report cleanup failure, which can mask interrupt
-        end
+        Teardown-->>Test: preserve propagating interrupt
     else Normal execution
         Fixture-->>Test: yield manager.mox
     end
