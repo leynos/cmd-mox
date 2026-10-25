@@ -10,6 +10,8 @@ import time
 import typing as typ
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc import client as ipc_client
@@ -413,3 +415,293 @@ def test_report_passthrough_result_forwards_absolute_deadline(
     report_passthrough_result(result, timeout=1.0, deadline=deadline)
 
     assert captured["deadline"] == deadline, "Passthrough deadline was not forwarded"
+
+
+class _DeadlineClock:
+    """Fake monotonic clock for generated IPC operation schedules."""
+
+    def __init__(self, deadline: float) -> None:
+        self.deadline = deadline
+        self.now = 0.0
+        self.operation_starts: list[tuple[str, float, float]] = []
+        self.sleep_intervals: list[tuple[float, float]] = []
+
+    def remaining(self, request_deadline: float) -> float:
+        """Return time left on the one request deadline.
+
+        Returns
+        -------
+        float
+            Positive seconds remaining in the request budget.
+
+        Raises
+        ------
+        TimeoutError
+            The request deadline has expired.
+        """
+        assert request_deadline == self.deadline, "The request changed its deadline"
+        remaining = request_deadline - self.now
+        if remaining <= 0:
+            raise TimeoutError
+        return remaining
+
+    def consume(self, operation: str, elapsed: float, timeout: float | None) -> None:
+        """Advance fake time for one blocking socket operation.
+
+        Raises
+        ------
+        TimeoutError
+            The operation cannot finish within its assigned socket timeout.
+        """
+        assert timeout is not None, "Blocking I/O had no socket timeout"
+        start = self.now
+        remaining = self.remaining(self.deadline)
+        assert timeout == pytest.approx(remaining), (
+            "Socket timeout did not use the shared deadline"
+        )
+        self.operation_starts.append((operation, start, timeout))
+        if elapsed >= remaining:
+            self.now = self.deadline
+            raise TimeoutError
+        self.now += elapsed
+
+    def sleep(self, delay: float) -> None:
+        """Advance fake time for retry backoff within the remaining budget."""
+        start = self.now
+        remaining = self.remaining(self.deadline)
+        assert delay <= remaining, "Retry backoff exceeded the shared deadline"
+        self.sleep_intervals.append((start, delay))
+        self.now += delay
+
+
+class _ScriptedUnixSocket:
+    """Socket double driven by a generated sequence of operation durations."""
+
+    def __init__(
+        self,
+        clock: _DeadlineClock,
+        attempt: int,
+        failed_connects: int,
+        connect_elapsed: list[float],
+        send_elapsed: float,
+        shutdown_elapsed: float,
+        response_chunks: int,
+        recv_elapsed: list[float],
+    ) -> None:
+        self.clock = clock
+        self.attempt = attempt
+        self.failed_connects = failed_connects
+        self.connect_elapsed = connect_elapsed
+        self.send_elapsed = send_elapsed
+        self.shutdown_elapsed = shutdown_elapsed
+        self.response_chunks = response_chunks
+        self.recv_elapsed = recv_elapsed
+        self.timeout: float | None = None
+        self.received = 0
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeout = timeout
+
+    def connect(self, _address: str) -> None:
+        self.clock.consume("connect", self.connect_elapsed[self.attempt], self.timeout)
+        if self.attempt < self.failed_connects:
+            raise ConnectionRefusedError
+
+    def sendall(self, _payload: bytes) -> None:
+        self.clock.consume("send", self.send_elapsed, self.timeout)
+
+    def shutdown(self, _how: int) -> None:
+        self.clock.consume("shutdown", self.shutdown_elapsed, self.timeout)
+
+    def recv(self, _size: int) -> bytes:
+        self.clock.consume("recv", self.recv_elapsed[self.received], self.timeout)
+        if self.received >= self.response_chunks:
+            return b""
+        chunk = f"response-{self.received}".encode()
+        self.received += 1
+        return chunk
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self) -> _ScriptedUnixSocket:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
+class _ScriptedUnixSocketFactory:
+    """Create sockets from the generated request-phase scenario."""
+
+    def __init__(
+        self,
+        clock: _DeadlineClock,
+        failed_connects: int,
+        connect_elapsed: list[float],
+        send_elapsed: float,
+        shutdown_elapsed: float,
+        response_chunks: int,
+        recv_elapsed: list[float],
+    ) -> None:
+        self.clock = clock
+        self.failed_connects = failed_connects
+        self.connect_elapsed = connect_elapsed
+        self.send_elapsed = send_elapsed
+        self.shutdown_elapsed = shutdown_elapsed
+        self.response_chunks = response_chunks
+        self.recv_elapsed = recv_elapsed
+        self.attempts = 0
+
+    def __call__(self, *_args: object, **_kwargs: object) -> _ScriptedUnixSocket:
+        """Return the next scripted socket.
+
+        Returns
+        -------
+        _ScriptedUnixSocket
+            A socket configured for this connection attempt.
+        """
+        sock = _ScriptedUnixSocket(
+            self.clock,
+            self.attempts,
+            self.failed_connects,
+            self.connect_elapsed,
+            self.send_elapsed,
+            self.shutdown_elapsed,
+            self.response_chunks,
+            self.recv_elapsed,
+        )
+        self.attempts += 1
+        return sock
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix socket deadline behaviour")
+@settings(max_examples=60, deadline=None)
+@given(
+    failed_connects=st.integers(min_value=0, max_value=2),
+    backoff=st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
+    connect_elapsed=st.lists(
+        st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
+        min_size=3,
+        max_size=3,
+    ),
+    send_elapsed=st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
+    shutdown_elapsed=st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
+    response_chunks=st.integers(min_value=0, max_value=3),
+    recv_elapsed=st.lists(
+        st.floats(min_value=0.0, max_value=1.25, allow_nan=False),
+        min_size=4,
+        max_size=4,
+    ),
+)
+@example(
+    failed_connects=0,
+    backoff=0.0,
+    connect_elapsed=[1.25, 0.0, 0.0],
+    send_elapsed=0.0,
+    shutdown_elapsed=0.0,
+    response_chunks=0,
+    recv_elapsed=[0.0, 0.0, 0.0, 0.0],
+)
+@example(
+    failed_connects=1,
+    backoff=1.25,
+    connect_elapsed=[0.0, 0.0, 0.0],
+    send_elapsed=0.0,
+    shutdown_elapsed=0.0,
+    response_chunks=0,
+    recv_elapsed=[0.0, 0.0, 0.0, 0.0],
+)
+@example(
+    failed_connects=0,
+    backoff=0.0,
+    connect_elapsed=[0.0, 0.0, 0.0],
+    send_elapsed=1.25,
+    shutdown_elapsed=0.0,
+    response_chunks=0,
+    recv_elapsed=[0.0, 0.0, 0.0, 0.0],
+)
+@example(
+    failed_connects=0,
+    backoff=0.0,
+    connect_elapsed=[0.0, 0.0, 0.0],
+    send_elapsed=0.0,
+    shutdown_elapsed=1.25,
+    response_chunks=0,
+    recv_elapsed=[0.0, 0.0, 0.0, 0.0],
+)
+@example(
+    failed_connects=0,
+    backoff=0.0,
+    connect_elapsed=[0.0, 0.0, 0.0],
+    send_elapsed=0.0,
+    shutdown_elapsed=0.0,
+    response_chunks=2,
+    recv_elapsed=[1.25, 0.0, 0.0, 0.0],
+)
+@example(
+    failed_connects=1,
+    backoff=0.1,
+    connect_elapsed=[0.05, 0.05, 0.0],
+    send_elapsed=0.05,
+    shutdown_elapsed=0.05,
+    response_chunks=2,
+    recv_elapsed=[0.05, 0.05, 0.05, 0.0],
+)
+def test_unix_request_shares_deadline_across_generated_io_phases(
+    failed_connects: int,
+    backoff: float,
+    connect_elapsed: list[float],
+    send_elapsed: float,
+    shutdown_elapsed: float,
+    response_chunks: int,
+    recv_elapsed: list[float],
+) -> None:
+    """One absolute deadline bounds generated connect, send, and read phases."""
+    deadline = 1.0
+    clock = _DeadlineClock(deadline)
+    socket_factory = _ScriptedUnixSocketFactory(
+        clock,
+        failed_connects,
+        connect_elapsed,
+        send_elapsed,
+        shutdown_elapsed,
+        response_chunks,
+        recv_elapsed,
+    )
+    context = _ConnectionContext(
+        timeout=deadline,
+        retry_config=RetryConfig(
+            retries=failed_connects + 1,
+            backoff=backoff,
+            jitter=0.0,
+        ),
+        deadline=deadline,
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(ipc_client, "_remaining_time", clock.remaining)
+        monkeypatch.setattr(ipc_client.socket, "socket", socket_factory)
+        monkeypatch.setattr(ipc_client.time, "sleep", clock.sleep)
+        try:
+            response = ipc_client._send_unix_request(
+                pathlib.Path("ipc.sock"), b"request", context
+            )
+        except TimeoutError:
+            response = None
+
+    assert clock.now <= deadline, "The request exceeded its shared deadline"
+    assert all(
+        start < deadline for _operation, start, _timeout in clock.operation_starts
+    ), "A blocking operation began after the request deadline"
+    assert all(delay <= deadline - start for start, delay in clock.sleep_intervals), (
+        "Retry sleep exceeded the remaining request budget"
+    )
+    if clock.now == deadline:
+        assert response is None, "The request succeeded after exhausting its deadline"
+    if response is not None:
+        assert clock.now < deadline, "The request completed at its deadline"
+        expected = b"".join(
+            f"response-{index}".encode() for index in range(response_chunks)
+        )
+        assert response == expected, "The successful request lost response fragments"
