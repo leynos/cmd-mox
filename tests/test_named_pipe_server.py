@@ -1,9 +1,15 @@
-"""Windows-specific NamedPipeServer integration tests."""
+"""Windows-specific behavioural tests for the named-pipe public API.
+
+These drive :class:`~cmd_mox.ipc.NamedPipeServer` through the same client
+helpers a generated shim uses, so the named-pipe transport is exercised end to
+end rather than through the shared request pipeline alone.
+"""
 
 from __future__ import annotations
 
 import os
 import pathlib
+import typing as typ
 
 import pytest
 
@@ -12,9 +18,51 @@ from cmd_mox.environment import (
     CMOX_IPC_TIMEOUT_ENV,
     EnvironmentManager,
 )
-from cmd_mox.ipc import Invocation, NamedPipeServer, invoke_server
+from cmd_mox.ipc import (
+    Invocation,
+    IPCHandlers,
+    NamedPipeServer,
+    PassthroughResult,
+    Response,
+    invoke_server,
+    report_passthrough_result,
+)
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Named pipes require Windows")
+
+
+@pytest.fixture
+def passthrough_results() -> list[PassthroughResult]:
+    """Accumulate the results the recording passthrough handler receives.
+
+    Returns
+    -------
+    list[PassthroughResult]
+        The shared list that :func:`passthrough_handler` appends to.
+    """
+    return []
+
+
+@pytest.fixture
+def passthrough_handler(
+    passthrough_results: list[PassthroughResult],
+) -> cabc.Callable[[PassthroughResult], Response]:
+    """Return a handler that records passthrough results.
+
+    Returns
+    -------
+    collections.abc.Callable[[PassthroughResult], Response]
+        A handler storing each result and returning a fixed response.
+    """
+
+    def handler(result: PassthroughResult) -> Response:
+        passthrough_results.append(result)
+        return Response(stdout="passthrough", exit_code=5)
+
+    return handler
 
 
 def test_named_pipe_server_roundtrip(
@@ -44,3 +92,79 @@ def test_named_pipe_server_exports_environment() -> None:
 
     assert os.environ.get(CMOX_IPC_SOCKET_ENV) == original_socket, "Assertion failed"
     assert os.environ.get(CMOX_IPC_TIMEOUT_ENV) == original_timeout, "Assertion failed"
+
+
+def test_named_pipe_server_passthrough_default_error(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Passthrough results should fail when the server has no handler."""
+    socket_path = tmp_path / "ipc.sock"
+
+    with NamedPipeServer(socket_path, timeout=1.0):
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        result = PassthroughResult(
+            invocation_id="123",
+            stdout="out",
+            stderr="err",
+            exit_code=0,
+        )
+        response = report_passthrough_result(result, timeout=1.0)
+
+    assert response.exit_code == 1, "Assertion failed"
+    assert "Unhandled passthrough result for 123" in response.stderr, "Assertion failed"
+    assert isinstance(response.stdout, str), "stdout must be a string"
+    assert not response.stdout, "Assertion failed"
+
+
+def test_named_pipe_server_passthrough_handler(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    passthrough_handler: cabc.Callable[[PassthroughResult], Response],
+    passthrough_results: list[PassthroughResult],
+) -> None:
+    """Passthrough results should reach the configured handler over the pipe."""
+    socket_path = tmp_path / "ipc.sock"
+
+    with NamedPipeServer(
+        socket_path,
+        timeout=1.0,
+        handlers=IPCHandlers(passthrough_handler=passthrough_handler),
+    ):
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        result = PassthroughResult(
+            invocation_id="123",
+            stdout="out",
+            stderr="err",
+            exit_code=0,
+        )
+        response = report_passthrough_result(result, timeout=1.0)
+
+    assert passthrough_results, "Assertion failed"
+    assert passthrough_results[0].invocation_id == "123", "Assertion failed"
+    assert response.stdout == "passthrough", "Assertion failed"
+    assert response.exit_code == 5, "Assertion failed"
+
+
+def test_named_pipe_server_handler_error(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Handler exceptions should surface as error responses over the pipe."""
+    socket_path = tmp_path / "ipc.sock"
+
+    def handler(_invocation: Invocation) -> Response:
+        msg = "handler failed"
+        raise RuntimeError(msg)
+
+    with NamedPipeServer(
+        socket_path,
+        timeout=1.0,
+        handlers=IPCHandlers(handler=handler),
+    ):
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
+        invocation = Invocation(command="cmd", args=[], stdin="", env={})
+        response = invoke_server(invocation, timeout=1.0)
+
+    assert response.exit_code == 1, "Assertion failed"
+    assert "handler failed" in response.stderr, "Assertion failed"
+    assert isinstance(response.stdout, str), "stdout must be a string"
+    assert not response.stdout, "Assertion failed"
