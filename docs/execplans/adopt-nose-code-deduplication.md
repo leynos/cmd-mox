@@ -692,6 +692,11 @@ The change is accepted only if all of the following hold:
   `[tool.nose]` table, compares it with the intended scan, and asserts that
   each root exists inside the repository, still selects production modules
   outside the excluded subtree, and that each exclusion still hides files.
+- Rejected request payloads stay out of the logs:
+  `tests/test_ipc_dispatch_observability.py` drives both malformed request
+  kinds through `_request_pipeline` carrying unique sensitive values and
+  asserts that no captured log record contains them, so the payload-logging
+  removal has a regression test rather than only a reviewed diff.
 - `make lint`, `make check-fmt`, `make typecheck`, `make test`,
   `make markdownlint` and `make nixie` all pass, or their pre-existing failures
   are reported as such with evidence.
@@ -781,3 +786,17 @@ mitigation no longer claims a contract test that did not exist; it names
 `scripts/tests/test_nose_config_contract.py`, which reads the checked-in
 configuration, asserts the intended roots and exclusions, and asserts that the
 roots still select production Python outside the excluded subtree.
+
+Revised once more 2026-10-25, at merge readiness: the delivery item is closed.
+PR [#315](https://github.com/leynos/cmd-mox/pull/315) was opened as a draft on
+2026-10-14 and marked ready on 2026-10-25, so the checkbox at "Committed as
+`878bc54`, pushed over SSH, and opened draft PR" is complete and the "Not
+merged" clause is the publication record rather than an open action. What
+remains is the merge itself, which is a repository action outside this plan's
+own scope; `Status: COMPLETE` continues to describe the implementation and its
+gates. As part of the same reconciliation, the payload-logging removal in
+`cmd_mox/ipc/json_utils.py` gained a pipeline-level regression test:
+`tests/test_ipc_dispatch_observability.py` now drives both malformed request
+kinds through `_request_pipeline` with unique sensitive values and asserts that
+no captured log record — at any level, from any module — carries payload
+content, so the behaviour removed in `42cde49` cannot return unnoticed.
