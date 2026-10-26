@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses as dc
 import importlib.util
 import json
@@ -16,6 +17,8 @@ from pathlib import Path
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+    from cmd_mox._shim_failures import _ShimEventOutcome as _StdinOutcome
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PACKAGE_ROOT) not in sys.path:
@@ -60,7 +63,7 @@ if __name__ == "__main__":
 else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
 
-from cmd_mox import _path_utils as path_utils, _shim_stdin  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
+from cmd_mox import _path_utils as path_utils, _stdin_capture  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
 from cmd_mox._shim_failures import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
     _ShimFailureContext,
     _emit_shim_failure,
@@ -77,6 +80,7 @@ from cmd_mox.environment import (  # ruff: ignore[module-import-not-at-top-of-fi
     CMOX_IPC_TIMEOUT_ENV,
     CMOX_REAL_COMMAND_ENV_PREFIX,
 )
+from cmd_mox.errors import StdinTimeoutError  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
 from cmd_mox.ipc import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
     Invocation,
     PassthroughRequest,
@@ -97,8 +101,19 @@ _SHIM_IPC_REQUEST_OPERATION = "ipc.shim.ipc_request"
 class _InvocationDependencies:
     """Bind stdin operations and clocks for one invocation."""
 
-    stdin_read: _shim_stdin._StdinReadDependencies
+    stdin_stream: _StdinTextStream
+    monotonic_clock: cabc.Callable[[], float]
     duration_clock: cabc.Callable[[], float]
+
+
+class _StdinTextStream(typ.Protocol):
+    """Text stream the shim captures before contacting the IPC server."""
+
+    def isatty(self) -> bool:
+        """Return whether the stream is attached to a terminal."""
+
+    def read(self) -> str:
+        """Read text directly when the stream cannot be bounded."""
 
 
 def _system_invocation_dependencies() -> _InvocationDependencies:
@@ -110,10 +125,8 @@ def _system_invocation_dependencies() -> _InvocationDependencies:
         Dependencies backed by process stdin and the system clocks.
     """
     return _InvocationDependencies(
-        stdin_read=_shim_stdin._StdinReadDependencies(
-            source=_shim_stdin._system_stdin_source(),
-            clock=time.monotonic,
-        ),
+        stdin_stream=sys.stdin,
+        monotonic_clock=time.monotonic,
         duration_clock=time.perf_counter,
     )
 
@@ -185,11 +198,52 @@ def _validate_environment() -> float:
     return timeout
 
 
+def _capture_stdin(
+    timeout: float, invocation_id: str, dependencies: _InvocationDependencies
+) -> str:
+    """Capture non-terminal stdin, reporting failures through the shim.
+
+    Returns
+    -------
+    str
+        The captured text, or ``""`` for terminal input.
+    """
+    stream = dependencies.stdin_stream
+    if stream.isatty():
+        return ""
+    stdin_started = dependencies.duration_clock()
+
+    def report_stdin_failure(exc: Exception, outcome: _StdinOutcome) -> typ.NoReturn:
+        """Record a bounded stdin failure and terminate the shim."""
+        _emit_shim_failure(
+            _ShimFailureContext(
+                _SHIM_STDIN_READ_OPERATION,
+                outcome,
+                stdin_started,
+                invocation_id,
+            ),
+            exc,
+        )
+        _exit_ipc_error(exc, operation="stdin_read")
+
+    try:
+        return _stdin_capture.read_stdin(
+            typ.cast("_stdin_capture._StdinStream", stream),
+            timeout,
+            clock=dependencies.monotonic_clock,
+        )
+    except StdinTimeoutError as exc:
+        # A timed-out capture never contacts IPC: the command would otherwise
+        # run with a truncated body the caller never finished sending.
+        report_stdin_failure(exc, "deadline_expired")
+    except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+        report_stdin_failure(exc, "read_failed")
+
+
 def _create_invocation(
     cmd_name: str,
     timeout: float,
     *,
-    deadline: float | None = None,
     dependencies: _InvocationDependencies | None = None,
 ) -> Invocation:
     """Create an invocation from command-line arguments and stdin.
@@ -199,9 +253,7 @@ def _create_invocation(
     cmd_name : str
         Command name associated with the shim process.
     timeout : float
-        Maximum time available to read non-interactive standard input.
-    deadline : float or None, optional
-        Shared monotonic deadline for stdin and subsequent IPC on POSIX.
+        Deadline in seconds for capturing non-interactive standard input.
     dependencies : _InvocationDependencies or None, optional
         Stdin operations and clocks, or process-backed dependencies when omitted.
 
@@ -211,32 +263,9 @@ def _create_invocation(
         Invocation containing arguments, stdin, and a copied environment.
     """
     invocation_id = uuid.uuid4().hex
-    stdin_data = ""
     if dependencies is None:
         dependencies = _system_invocation_dependencies()
-    stdin_source = dependencies.stdin_read.source
-    if not stdin_source.stream.isatty():
-        stdin_started = dependencies.duration_clock()
-
-        def report_stdin_error(exc: Exception) -> typ.NoReturn:
-            """Record a bounded stdin failure before exiting the shim."""
-            _emit_shim_failure(
-                _ShimFailureContext(
-                    _SHIM_STDIN_READ_OPERATION,
-                    "read_failed",
-                    stdin_started,
-                    invocation_id,
-                ),
-                exc,
-            )
-            _exit_ipc_error(exc, operation="stdin_read")
-
-        stdin_data = _shim_stdin._read_stdin_until_eof(
-            timeout,
-            deadline=deadline,
-            on_error=report_stdin_error,
-            dependencies=dependencies.stdin_read,
-        )
+    stdin_data = _capture_stdin(timeout, invocation_id, dependencies)
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
     if path_utils.IS_WINDOWS:
@@ -344,14 +373,56 @@ def _write_response(response: Response, *, correlation_id: str | None = None) ->
 
 
 def main() -> None:
-    """Connect to the IPC server and execute the command behaviour."""
+    """Connect to the IPC server and execute the command behaviour.
+
+    Notes
+    -----
+    In-process callers receive ``SystemExit`` and keep ownership of ``sys.stdin``;
+    a stdin worker abandoned at the deadline only finishes once that stream
+    closes or reaches EOF. :func:`_run_as_script` adds the process-exit
+    boundary for the standalone shim.
+    """
     bootstrap_shim_path()
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
     deadline = None if path_utils.IS_WINDOWS else time.monotonic() + timeout
-    invocation = _create_invocation(cmd_name, timeout, deadline=deadline)
+    invocation = _create_invocation(cmd_name, timeout)
     response = _execute_invocation(invocation, timeout, deadline=deadline)
     _write_response(response, correlation_id=invocation.invocation_id)
+
+
+def _run_as_script() -> None:
+    """Run :func:`main` as the standalone shim entry point.
+
+    A reader worker that outlived its deadline cannot be joined: it is blocked
+    in a read that only the stream's owner can end. Letting the interpreter
+    shut down would wait for that daemon thread, so an unmanaged worker makes
+    ``os._exit`` the only way out that still reports the intended status.
+
+    Raises
+    ------
+    SystemExit
+        Re-raised unchanged when no worker was abandoned, so normal shim exits
+        keep their usual interpreter shutdown.
+    """
+    try:
+        main()
+    except SystemExit as exc:
+        if not _stdin_capture.outstanding_workers():
+            raise
+        # Non-integer statuses (an exit carried a message string) signal an
+        # abnormal termination, so they must never be reported as success.
+        status = exc.code if isinstance(exc.code, int) else 1
+        _exit_without_joining_workers(status)
+
+
+def _exit_without_joining_workers(status: int) -> typ.NoReturn:
+    """Flush the response streams, then leave without waiting for workers."""
+    for stream in (sys.stdout, sys.stderr):
+        # A closed or broken stream must not change the status being reported.
+        with contextlib.suppress(OSError, ValueError):
+            stream.flush()
+    os._exit(status)
 
 
 def _dispatch_timeout(
@@ -579,4 +650,4 @@ def _run_real_command(
 
 
 if __name__ == "__main__":  # pragma: no cover - manual entry
-    main()
+    _run_as_script()

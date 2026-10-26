@@ -26,6 +26,31 @@ if typ.TYPE_CHECKING:
 _THREAD_TERMINATE: typ.Final[int] = 0x0001
 
 
+def stash_outcome[T](
+    outcome: dict[str, object], func: cabc.Callable[[], T]
+) -> cabc.Callable[[], None]:
+    """Build a thread target that stores *func*'s value or exception.
+
+    A worker that raises must not take the process down with it: the failure
+    belongs to the caller's thread, which is still deciding whether the result
+    is still wanted. Storing both outcomes in *outcome* is what lets the caller
+    re-raise verbatim once it has claimed the worker's result.
+
+    Returns
+    -------
+    collections.abc.Callable[[], None]
+        A zero-argument target suitable for :class:`threading.Thread`.
+    """
+
+    def run() -> None:
+        try:
+            outcome["value"] = func()
+        except BaseException as exc:  # ruff: ignore[blind-except] - worker-thread boundary: any failure must be stashed and re-raised on the caller's thread
+            outcome["error"] = exc
+
+    return run
+
+
 class _Win32File(typ.Protocol):
     """Subset of the pywin32 file API used by the cancellation helper."""
 

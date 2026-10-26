@@ -341,14 +341,8 @@ def _run_blocking_io[T](
     """
     outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
-    def _target() -> None:
-        try:
-            outcome["value"] = func()
-        except BaseException as exc:  # ruff: ignore[blind-except] - worker-thread boundary: any failure must be stashed and re-raised on the caller's thread
-            outcome["error"] = exc
-
     thread = threading.Thread(
-        target=_target,
+        target=_bounded_thread.stash_outcome(outcome, func),
         name="cmd-mox-ipc-io",
         daemon=True,
     )
