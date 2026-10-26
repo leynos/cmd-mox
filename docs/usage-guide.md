@@ -27,13 +27,15 @@ expectations and exercise the code under test. A repeated `replay()` call while
 the controller remains in replay mode is a no-op; calling `replay()` after
 `verify()` raises `LifecycleError`. Tests using the automatic lifecycle should
 omit explicit lifecycle calls. If both the test body and verification fail, the
-verification error is suppressed so the original test failure surfaces. If
-setup is interrupted by `KeyboardInterrupt` or `SystemExit`, the fixture
-records the failure before re-raising. Interrupts raised by the test body are
-recorded by the pytest call hook before fixture finalization. If verification
-also fails but cleanup succeeds, teardown suppresses that exception and
-preserves the original interrupt. Automatic replay/verify can be disabled with
-the `cmd_mox_auto_lifecycle` pytest.ini option set to `false`,
+verification error is suppressed so the original test failure surfaces. A
+`BaseException` during fixture setup or while the test uses the fixture,
+including `KeyboardInterrupt` or an xdist worker's `SystemExit`, is recorded as
+a body failure before the original exception is re-raised. Interrupts raised by
+the test body are recorded by the pytest call hook before fixture finalization.
+If verification also fails but cleanup succeeds, teardown suppresses that
+exception and preserves the original interrupt; cleanup failures remain
+reportable. Automatic replay/verify can be disabled with the
+`cmd_mox_auto_lifecycle` pytest.ini option set to `false`,
 `@pytest.mark.cmd_mox(auto_lifecycle=False)`, an indirect `cmd_mox` fixture
 parameter of `False` or `{"auto_lifecycle": False}`, or the command-line flag
 `--no-cmd-mox-auto-lifecycle`. The `--cmd-mox-auto-lifecycle` flag explicitly
