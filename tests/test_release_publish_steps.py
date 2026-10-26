@@ -13,6 +13,7 @@ import os
 import shlex
 import shutil
 import sys
+import typing as typ
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,17 @@ pytestmark = [
         reason="release shell-step tests require Bash on a Unix-like system",
     ),
 ]
+
+
+def _tool_arguments(call: dict[str, object]) -> list[str]:
+    """Return the argument vector from one recorded fake-tool call.
+
+    Returns
+    -------
+    list[str]
+        The recorded command arguments.
+    """
+    return typ.cast("list[str]", call["argv"])
 
 
 @pytest.mark.parametrize(
@@ -279,7 +291,7 @@ def test_pypi_index_retries_only_network_rate_and_server_errors(
 def test_publish_release_waits_for_every_distribution_to_reach_pypi(
     tmp_path: Path,
 ) -> None:
-    """A stale successful index read is retried until all uploads appear."""
+    """The propagation poll outlasts the initial retry window when needed."""
     names = ["cmd_mox-0.3.0.tar.gz", "cmd_mox-0.3.0-py3-none-any.whl"]
     publish = tmp_path / "dist" / "publish"
     publish.mkdir(parents=True)
@@ -305,10 +317,10 @@ def test_publish_release_waits_for_every_distribution_to_reach_pypi(
         env={
             **declared_env,
             "CURL_BODIES": json.dumps([
-                '{"files": []}',
+                *(['{"files": []}'] * 6),
                 complete_index_path.read_text(encoding="utf-8"),
             ]),
-            "CURL_STATUSES": "200,200",
+            "CURL_STATUSES": ",".join(["200"] * 7),
             "FAKE_TOOL_LOG": str(log),
             "PATH": f"{tools}:/usr/bin:/bin",
             "PYPI_INDEX_PATH": "index.json",
@@ -317,18 +329,31 @@ def test_publish_release_waits_for_every_distribution_to_reach_pypi(
     )
 
     assert result.returncode == 0, result.stderr
-    assert len(read_tool_calls(log, tool="curl")) == 2, (
-        "the index fetch must retry a 200 response that omits uploaded names"
+    assert len(read_tool_calls(log, tool="curl")) == 7, (
+        "the propagation poll must outlast the six-attempt initial fetch"
     )
-    assert len(read_tool_calls(log, tool="sleep")) == 1, (
-        "the stale index response must trigger the configured retry delay"
+    assert all(
+        arguments[arguments.index("--max-time") + 1] == "20"
+        for arguments in map(_tool_arguments, read_tool_calls(log, tool="curl"))
+    ), "every propagation request must have a bounded twenty-second timeout"
+    sleep_arguments = list(map(_tool_arguments, read_tool_calls(log, tool="sleep")))
+    assert [arguments[0] for arguments in sleep_arguments] == [
+        "2",
+        "4",
+        "8",
+        "16",
+        "30",
+        "30",
+    ], "the propagation poll must use bounded exponential backoff"
+    assert len(sleep_arguments) == 6, (
+        "the stale index responses must delay between polling attempts"
     )
     assert (tmp_path / "index.json").read_text(encoding="utf-8") == (
         complete_index_path.read_text(encoding="utf-8")
     ), "the final index must contain every published distribution"
 
 
-def test_publish_release_fails_after_six_indexes_omit_a_distribution(
+def test_publish_release_fails_after_ten_indexes_omit_a_distribution(
     tmp_path: Path,
 ) -> None:
     """A persistently stale PyPI index fails after the bounded retry window."""
@@ -358,15 +383,15 @@ def test_publish_release_fails_after_six_indexes_omit_a_distribution(
     )
 
     assert result.returncode == 1, "an index that never lists the upload must fail"
-    assert (
-        "PyPI index did not list release files after six attempts" in result.stderr
-    ), "the failure must identify the expired index wait"
-    assert expected_name in result.stderr, "the failure must name the missing sdist"
-    assert len(read_tool_calls(log, tool="curl")) == 6, (
-        "the index wait must stop after its six bounded attempts"
+    assert "PyPI index did not list release files after 10 attempts" in result.stderr, (
+        "the failure must identify the expired index wait"
     )
-    assert len(read_tool_calls(log, tool="sleep")) == 5, (
-        "the index wait must delay only between attempts"
+    assert expected_name in result.stderr, "the failure must name the missing sdist"
+    assert len(read_tool_calls(log, tool="curl")) == 10, (
+        "the propagation wait must stop after its ten bounded attempts"
+    )
+    assert len(read_tool_calls(log, tool="sleep")) == 9, (
+        "the propagation wait must delay only between attempts"
     )
 
 

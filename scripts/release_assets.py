@@ -248,9 +248,11 @@ def _digest_hex(digest: object) -> str | None:
     str or None
         Lower-case digest hex, or ``None`` when the value is unsupported.
     """
-    if isinstance(digest, str) and digest.startswith(_DIGEST_PREFIX):
-        return digest.removeprefix(_DIGEST_PREFIX).lower()
-    return None
+    match digest:
+        case str() as value if value.startswith(_DIGEST_PREFIX):
+            return value.removeprefix(_DIGEST_PREFIX).lower()
+        case _:
+            return None
 
 
 def sha256_of(path: Path) -> str:
@@ -481,11 +483,13 @@ def _canonical_digest(name: str, source: Source, state: State) -> str | None:
     str or None
         The PyPI or GitHub SHA-256 digest, or ``None`` when unavailable.
     """
-    if source is Source.PYPI:
-        return state.pypi[name].sha256
-    if source is Source.GITHUB:
-        return state.github[name]
-    return None
+    match source:
+        case Source.PYPI:
+            return state.pypi[name].sha256
+        case Source.GITHUB:
+            return state.github[name]
+        case Source.LOCAL:
+            return None
 
 
 def _has_retained_bundle(bundles: Path, github: cabc.Mapping[str, str | None]) -> bool:
@@ -568,17 +572,26 @@ def verify(state: State, bundles: Path) -> list[str]:
     """
     pypi = {name: file.sha256 for name, file in state.pypi.items()}
     problems = mismatches(local_names(state.publish), pypi, state.github)
+    return [
+        *problems,
+        *_missing_provenance(state, bundles),
+    ]
+
+
+def _missing_provenance(state: State, bundles: Path) -> list[str]:
+    """Return any bundle requirement unmet by the existing GitHub Release.
+
+    Returns
+    -------
+    list[str]
+        Diagnostics for missing current-run or retained release provenance.
+    """
     if _canonical_sources_match_build(state):
-        missing = [
-            name
+        return [
+            f"{name} is missing from the GitHub Release"
             for name in local_names(bundles)
             if not _has_bundle_for_release(name, state.github)
         ]
-    elif not _has_retained_bundle(bundles, state.github):
-        missing = ["carried-over release assets have no retained provenance bundle"]
-    else:
-        missing = []
-    return [
-        *problems,
-        *(f"{name} is missing from the GitHub Release" for name in missing),
-    ]
+    if not _has_retained_bundle(bundles, state.github):
+        return ["carried-over release assets have no retained provenance bundle"]
+    return []
