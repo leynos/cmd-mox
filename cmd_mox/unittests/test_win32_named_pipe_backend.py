@@ -5,6 +5,15 @@ The adapter only runs on Windows, but every method is a single forward to a
 can be checked anywhere: that each port operation maps to the one Win32 call it
 names, with the arguments arriving in the order ``pywin32`` expects.
 
+The two spec-taking calls are checked by positional *identity*, not by value:
+the ``CreateNamedPipe`` and ``CreateFile`` specs below give every field a
+distinct value or object, so a transposed pair fails the assertion rather than
+matching by coincidence. Reusing ``0`` for two integer fields and ``None`` for
+both optional handles would hide exactly the mistake these tests exist to
+catch. ``test_create_file_detects_a_transposed_field`` pins that property
+down, because the guard is otherwise easy to dismantle the next time the spec
+changes.
+
 Only the adapter's own forwarding is in scope here. The transport's use of the
 port is covered by the named-pipe suites, which drive it through the fake
 adapter in :mod:`cmd_mox.unittests._named_pipe_fakes`.
@@ -26,6 +35,13 @@ if typ.TYPE_CHECKING:
 
 #: Returned by every stub call so a test can recognise it as the forwarded value.
 _SENTINEL: typ.Final[object] = object()
+
+#: Stand-ins for the specs' optional handle fields. They are deliberately two
+#: separate objects: sharing one would make ``PipeFileOpenSpec.security_attributes``
+#: and ``.template_file`` compare equal, and the ordering assertions would stop
+#: noticing if the adapter swapped them.
+_SECURITY_ATTRIBUTES: typ.Final[object] = object()
+_TEMPLATE_FILE: typ.Final[object] = object()
 
 #: Constants the adapter copies onto itself at construction.
 _CONSTANTS: typ.Final[dict[str, dict[str, int]]] = {
@@ -116,6 +132,45 @@ class _StubModules:
         for name in ("win32event", "win32pipe", "win32file", "pywintypes"):
             monkeypatch.setattr(backend_module, name, getattr(self, name))
         return Win32NamedPipeBackend()
+
+
+def _create_spec() -> NamedPipeCreateSpec:
+    """Build a creation spec whose eight fields are all distinguishable.
+
+    Returns
+    -------
+    NamedPipeCreateSpec
+        A spec no two of whose fields compare equal.
+    """
+    return NamedPipeCreateSpec(
+        name=r"\\.\pipe\cmdmox-1",
+        open_mode=3,
+        pipe_mode=4,
+        max_instances=255,
+        out_buffer_size=4096,
+        in_buffer_size=8192,
+        default_timeout=1000,
+        security_attributes=_SECURITY_ATTRIBUTES,
+    )
+
+
+def _open_spec() -> PipeFileOpenSpec:
+    """Build an open spec whose seven fields are all distinguishable.
+
+    Returns
+    -------
+    PipeFileOpenSpec
+        A spec no two of whose fields compare equal.
+    """
+    return PipeFileOpenSpec(
+        file_name=r"\\.\pipe\cmdmox-1",
+        desired_access=0xC0000000,
+        share_mode=0,
+        security_attributes=_SECURITY_ATTRIBUTES,
+        creation_disposition=3,
+        flags_and_attributes=0x40000000,
+        template_file=_TEMPLATE_FILE,
+    )
 
 
 def test_construction_binds_the_modules_and_constants(
@@ -223,23 +278,14 @@ def test_create_named_pipe_unpacks_the_spec_in_call_order(
     """All eight ``CreateNamedPipe`` arguments arrive positionally, in order."""
     modules = _StubModules()
     backend = modules.install(monkeypatch)
-    spec = NamedPipeCreateSpec(
-        name=r"\\.\pipe\cmdmox-1",
-        open_mode=3,
-        pipe_mode=4,
-        max_instances=255,
-        out_buffer_size=4096,
-        in_buffer_size=8192,
-        default_timeout=1000,
-        security_attributes=None,
-    )
+    spec = _create_spec()
 
     assert backend.create_named_pipe(spec) is _SENTINEL, "the handle was not returned"
     assert modules.calls == [
         (
             "win32pipe",
             "CreateNamedPipe",
-            (spec.name, 3, 4, 255, 4096, 8192, 1000, None),
+            (spec.name, 3, 4, 255, 4096, 8192, 1000, _SECURITY_ATTRIBUTES),
         )
     ]
 
@@ -305,22 +351,22 @@ def test_create_file_unpacks_the_spec_in_call_order(
     """All seven ``CreateFile`` arguments arrive positionally, in order."""
     modules = _StubModules()
     backend = modules.install(monkeypatch)
-    spec = PipeFileOpenSpec(
-        file_name=r"\\.\pipe\cmdmox-1",
-        desired_access=0xC0000000,
-        share_mode=0,
-        security_attributes=None,
-        creation_disposition=3,
-        flags_and_attributes=0,
-        template_file=None,
-    )
+    spec = _open_spec()
 
     assert backend.create_file(spec) is _SENTINEL, "the handle was not returned"
     assert modules.calls == [
         (
             "win32file",
             "CreateFile",
-            (spec.file_name, 0xC0000000, 0, None, 3, 0, None),
+            (
+                spec.file_name,
+                0xC0000000,
+                0,
+                _SECURITY_ATTRIBUTES,
+                3,
+                0x40000000,
+                _TEMPLATE_FILE,
+            ),
         )
     ]
 
@@ -336,3 +382,47 @@ def test_close_handle_forwards_the_handle(
     backend.close_handle(handle)
 
     assert modules.calls == [("win32file", "CloseHandle", (handle,))]
+
+
+def test_create_file_detects_a_transposed_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A swap of two same-typed spec fields is visible in the recorded call.
+
+    ``share_mode`` and ``flags_and_attributes`` are both plain integers, and
+    ``security_attributes`` and ``template_file`` are both bare objects. If the
+    fixtures reused one value for each pair, ``create_file`` could transpose
+    them and still satisfy its ordering assertion. This pins the guard: the
+    open spec is rebuilt with the two integers exchanged, and the call the
+    adapter actually makes must differ from the recorded expectation.
+    """
+    modules = _StubModules()
+    backend = modules.install(monkeypatch)
+    spec = _open_spec()
+    transposed = PipeFileOpenSpec(
+        file_name=spec.file_name,
+        desired_access=spec.desired_access,
+        share_mode=spec.flags_and_attributes,
+        security_attributes=spec.security_attributes,
+        creation_disposition=spec.creation_disposition,
+        flags_and_attributes=spec.share_mode,
+        template_file=spec.template_file,
+    )
+
+    backend.create_file(transposed)
+
+    assert modules.calls != [
+        (
+            "win32file",
+            "CreateFile",
+            (
+                spec.file_name,
+                0xC0000000,
+                0,
+                _SECURITY_ATTRIBUTES,
+                3,
+                0x40000000,
+                _TEMPLATE_FILE,
+            ),
+        )
+    ], "a transposed share_mode would have matched the expected call"
