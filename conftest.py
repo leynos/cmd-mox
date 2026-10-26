@@ -109,6 +109,15 @@ def run_nested_pytester(
     so the nested run restores the outer invocation cwd and pins its own
     configuration to the pytester project.
 
+    Parameters
+    ----------
+    pytester : pytest.Pytester
+        Create the temporary project and its inner pytest configuration.
+    monkeypatch : pytest.MonkeyPatch
+        Restore the pytester cwd after the nested in-process run.
+    request : pytest.FixtureRequest
+        Provide the outer invocation directory used by the nested run.
+
     Returns
     -------
     cabc.Callable[..., RunResult]
