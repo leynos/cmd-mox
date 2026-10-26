@@ -180,7 +180,7 @@ class _ExitSpyCmdMoxManager(_CmdMoxManager):
 
     @typ.override
     def __init__(self, request: pytest.FixtureRequest) -> None:
-        """Initialise the manager spy for one fixture instance."""
+        """Initialize the manager spy for one fixture instance."""
         super().__init__(request)
         self.body_failed_values: list[bool] = []
         type(self).last_instance = self

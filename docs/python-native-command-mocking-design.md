@@ -412,12 +412,18 @@ sequenceDiagram
   end
 
   PyTest->>PyTest: run test body
-  alt call raises KeyboardInterrupt or SystemExit
-    PyTest->>Plugin: pytest_runtest_call wrapper sees interrupt
+  alt call raises KeyboardInterrupt
+    PyTest->>Plugin: pytest_runtest_call wrapper sees KeyboardInterrupt
     Plugin->>Plugin: store STASH_CALL_FAILED = True
     Plugin-->>PyTest: return without changing the call outcome
     Note over PyTest: propagate the original interrupt after wrappers finish
-  else pytest produces a call report
+  else call returns or raises SystemExit
+    opt call raises SystemExit
+      PyTest->>Plugin: pytest_runtest_call wrapper sees SystemExit
+      Plugin->>Plugin: store STASH_CALL_FAILED = True
+      Plugin-->>PyTest: return without changing the call outcome
+      Note over PyTest: capture SystemExit in CallInfo and create a failed call report
+    end
     PyTest->>Plugin: pytest_runtest_makereport
     Plugin->>Plugin: store report failure state
   end
@@ -459,9 +465,10 @@ sequenceDiagram
 
 For screen readers: The diagram follows fixture setup into two exception paths.
 If setup fails or an exception is delivered into the fixture generator, the
-fixture sets `body_failed` before re-raising it. For an interrupt raised by the
-test body, pytest records call failure before fixture finalization. Teardown
-handles verification errors without replacing the original interrupt when
+fixture sets `body_failed` before re-raising it. During a test call,
+`KeyboardInterrupt` is re-raised after the hook wrappers finish; `SystemExit`
+is captured in `CallInfo` and produces a failed call report. Teardown combines
+the call and fixture failure state and preserves a propagating interrupt when
 cleanup succeeds.
 
 _Figure 1: Fixture setup, exception propagation, and teardown behaviour._
