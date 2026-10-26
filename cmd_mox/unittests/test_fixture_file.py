@@ -56,7 +56,7 @@ def _sample_fixture(
     recordings: list[RecordedInvocation] | None = None,
 ) -> FixtureFile:
     return FixtureFile(
-        version="1.0",
+        version="1.0.0",
         metadata=_sample_metadata(),
         recordings=recordings or [_sample_invocation()],
         scrubbing_rules=[],
@@ -153,14 +153,14 @@ class TestFixtureMetadata:
 
 
 def _assert_normalized_to_v1(result: FixtureFile) -> None:
-    """Assert *result* carries the v1.0 schema with its recording intact.
+    """Assert *result* carries schema 1.0.0 with its recording intact.
 
     Parameters
     ----------
     result : FixtureFile
         The fixture returned by ``FixtureFile.from_dict``.
     """
-    assert result.version == "1.0", result.version
+    assert result.version == "1.0.0", result.version
     assert len(result.recordings) == 1, result.recordings
     assert result.recordings[0].command == "git", result.recordings[0]
 
@@ -169,11 +169,11 @@ class TestFixtureFile:
     """Tests for FixtureFile serialization and persistence."""
 
     def test_to_dict_schema_structure(self) -> None:
-        """to_dict() produces the v1.0 schema structure."""
+        """to_dict() produces the 1.0.0 schema structure."""
         fixture = _sample_fixture()
         d = fixture.to_dict()
 
-        assert d["version"] == "1.0"
+        assert d["version"] == "1.0.0"
         assert "metadata" in d
         assert "recordings" in d
         assert "scrubbing_rules" in d
@@ -209,7 +209,7 @@ class TestFixtureFile:
 
         # Verify it is valid JSON
         raw = json.loads(fixture_path.read_text())
-        assert raw["version"] == "1.0"
+        assert raw["version"] == "1.0.0"
 
     def test_save_creates_parent_directories(self, tmp_path: Path) -> None:
         """save() creates intermediate directories when needed."""
@@ -220,18 +220,18 @@ class TestFixtureFile:
 
         assert nested_path.exists()
         loaded = FixtureFile.load(nested_path)
-        assert loaded.version == "1.0"
+        assert loaded.version == "1.0.0"
 
     def test_from_dict_migrates_old_version(self) -> None:
-        """from_dict() migrates a v0.9 fixture to v1.0."""
+        """from_dict() migrates a 0.9.0 fixture to 1.0.0."""
         data = _sample_fixture().to_dict()
-        data["version"] = "0.9"
+        data["version"] = "0.9.0"
         result = FixtureFile.from_dict(data)
 
         _assert_normalized_to_v1(result)
 
     def test_from_dict_migrates_when_version_missing(self) -> None:
-        """from_dict() treats missing version as legacy and migrates to v1.0."""
+        """from_dict() migrates a fixture without a version to 1.0.0."""
         data = _sample_fixture().to_dict()
         data.pop("version", None)
         result = FixtureFile.from_dict(data)
@@ -241,7 +241,7 @@ class TestFixtureFile:
     def test_from_dict_does_not_mutate_input(self) -> None:
         """from_dict() does not modify the caller's dict."""
         data = _sample_fixture().to_dict()
-        data["version"] = "0.9"
+        data["version"] = "0.9.0"
         original_version = data["version"]
         FixtureFile.from_dict(data)
 
@@ -252,17 +252,20 @@ class TestFixtureFile:
         from cmd_mox.record.fixture import _apply_migrations
 
         data = _sample_fixture().to_dict()
-        data["version"] = "0.9"
+        data["version"] = "0.9.0"
         original_metadata = data["metadata"]
         result = _apply_migrations(data)
 
         # The nested metadata dict must be a distinct object, not shared.
         assert result["metadata"] is not original_metadata
 
-    def test_from_dict_tolerates_higher_minor_version(self) -> None:
-        """from_dict() accepts a v1.1 fixture when current schema is v1.0."""
+    @pytest.mark.parametrize("fixture_version", ["1.1.0", "1.0.7"])
+    def test_from_dict_tolerates_same_major_version_differences(
+        self, fixture_version: str
+    ) -> None:
+        """from_dict() accepts same-major minor and patch differences."""
         data = _sample_fixture().to_dict()
-        data["version"] = "1.1"
+        data["version"] = fixture_version
         data["new_future_field"] = "should be ignored"
         result = FixtureFile.from_dict(data)
 
@@ -271,9 +274,22 @@ class TestFixtureFile:
     def test_from_dict_rejects_incompatible_major_version(self) -> None:
         """from_dict() raises ValueError for a higher major with no migration."""
         data = _sample_fixture().to_dict()
-        data["version"] = "99.0"
-        with pytest.raises(ValueError, match=r"99\.0"):
+        data["version"] = "99.0.0"
+        with pytest.raises(ValueError, match=r"99\.0\.0"):
             FixtureFile.from_dict(data)
+
+    def test_from_dict_normalizes_legacy_two_component_version(self) -> None:
+        """Legacy two-component versions load and normalize to three parts."""
+        from cmd_mox.record.fixture import _apply_migrations
+
+        data = _sample_fixture().to_dict()
+        data["version"] = "1.0"
+
+        normalized = _apply_migrations(data)
+        result = FixtureFile.from_dict(data)
+
+        assert normalized["version"] == "1.0.0"
+        assert result.version == "1.0.0"
 
     def test_from_dict_rejects_explicit_null_version(self) -> None:
         """from_dict() raises ValueError when version is explicitly None."""
@@ -298,7 +314,7 @@ class TestFixtureFile:
             description="GitHub PAT",
         )
         fixture = FixtureFile(
-            version="1.0",
+            version="1.0.0",
             metadata=_sample_metadata(),
             recordings=[],
             scrubbing_rules=[rule],
@@ -318,20 +334,24 @@ class TestVersionParsing:
     @pytest.mark.parametrize(
         ("version_str", "expected"),
         [
-            ("1.0", (1, 0)),
-            (" 1.0 ", (1, 0)),
-            ("1.1", (1, 1)),
-            ("0.9", (0, 9)),
+            ("1.0.0", (1, 0, 0)),
+            (" 1.0.0 ", (1, 0, 0)),
+            ("1.1.0", (1, 1, 0)),
+            ("0.9.0", (0, 9, 0)),
+            ("1.2.3", (1, 2, 3)),
+            ("1.0", (1, 0, 0)),
         ],
         ids=[
             "simple",
             "surrounding-whitespace-stripped",
             "non-zero-minor",
             "zero-major",
+            "non-zero-patch",
+            "legacy-two-component",
         ],
     )
     def test_parse_valid_versions(
-        self, version_str: str, expected: tuple[int, int]
+        self, version_str: str, expected: tuple[int, int, int]
     ) -> None:
         """Well-formed version strings parse into comparable integer tuples."""
         from cmd_mox.record.fixture import _parse_version
@@ -345,7 +365,7 @@ class TestVersionParsing:
         with pytest.raises(ValueError, match="Invalid"):
             _parse_version("1.-1")
 
-    @pytest.mark.parametrize("bad_version", ["1", "1.2.3", "1.a", "abc"])
+    @pytest.mark.parametrize("bad_version", ["1", "1.a", "abc", "1.2.3.4"])
     def test_parse_rejects_invalid_formats(self, bad_version: str) -> None:
         """Various malformed version strings are rejected."""
         from cmd_mox.record.fixture import _parse_version

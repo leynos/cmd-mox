@@ -158,9 +158,9 @@ def metadata_has_python_version(fixture: FixtureFile) -> None:
 # -- Steps for fixture migration scenario ------------------------------------
 
 
-@given("a v0.9 fixture file on disk", target_fixture="fixture_path")
+@given("a 0.9.0 fixture file on disk", target_fixture="fixture_path")
 def v09_fixture_on_disk(tmp_path: Path) -> Path:
-    """Write a v0.9 fixture file to disk for migration testing.
+    """Write a 0.9.0 fixture file to disk for migration testing.
 
     Returns
     -------
@@ -168,7 +168,7 @@ def v09_fixture_on_disk(tmp_path: Path) -> Path:
         The path to the written legacy fixture file.
     """
     data = {
-        "version": "0.9",
+        "version": "0.9.0",
         "metadata": {
             "created_at": "2025-01-15T10:30:00Z",
             "cmdmox_version": "0.1.0",

@@ -124,7 +124,7 @@ class TestRecordingSessionFinalize:
         fixture = session.finalize()
 
         assert isinstance(fixture, FixtureFile)
-        assert fixture.version == "1.0"
+        assert fixture.version == "1.0.0"
         assert len(fixture.recordings) == 1
         assert fixture.recordings[0].command == "git"
 
