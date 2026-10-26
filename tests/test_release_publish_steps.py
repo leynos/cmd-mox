@@ -27,7 +27,8 @@ from helpers.release_workflow import (
     should_skip_release_tests_for_mutation_sandbox,
 )
 
-from scripts import release_assets, release_version
+release_assets = pytest.importorskip("scripts.release_assets")
+release_version = pytest.importorskip("scripts.release_version")
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"

@@ -13,9 +13,8 @@ workflow that publishes to PyPI and reconciles the GitHub Release with PyPI.
 
 CmdMox 0.2.0 was published to PyPI by hand with a wheel and a source
 distribution. The GitHub Release for the same version contains only the wheel.
-The two PyPI files were built separately from the GitHub asset, so the
-repositories did not have one recorded, repeatable publication path or an
-assurance that both destinations carried identical bytes.
+The PyPI files and GitHub asset came from separate builds. There was no
+repeatable release path or check that both destinations carried identical bytes.
 
 The release workflow also needs to tolerate a run that stops after publishing
 only some files. Repeating a tag must not try to overwrite immutable PyPI or

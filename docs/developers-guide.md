@@ -856,10 +856,13 @@ To publish a release:
 3. Watch the workflow graph. `check-version` and `build-dist` run first;
    attestation, the draft GitHub Release and PyPI publication follow before the
    GitHub Release is published.
-4. If a run needs retrying, re-run it for the same tag. PyPI filenames already
+4. If a run needs retrying, re-run only its failed jobs so they reuse the
+   attested `release-dist` from the original run. PyPI filenames already
    present in the project index are skipped, and existing GitHub assets are not
-   overwritten. The final job waits for PyPI to list every distribution before
-   it publishes the GitHub Release.
+   overwritten. A full rerun builds new distributions; if their bytes differ
+   from PyPI's files and the GitHub Release has no retained bundle for those
+   canonical bytes, the workflow fails safely. The final job waits for PyPI to
+   list every distribution before publishing the GitHub Release.
 5. Verify the provenance attestations for the sdist and each wheel against the
    `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
    the build run that attested those bytes.
