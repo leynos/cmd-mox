@@ -319,6 +319,13 @@ launcher's exit-status forwarding can only be exercised there; the Unix
 capability marker is deliberately not applied, so the cross-platform cases run
 on both hosts.
 
+The launcher needs no explicit `exit /b %ERRORLEVEL%`. `setlocal` ends
+implicitly when the batch file ends, and `endlocal` does not touch
+`ERRORLEVEL`, so the status the Python shim exits with is the status `cmd.exe`
+reports. The assertion on a forwarded exit code of `3` in
+`tests/test_shim_stdin_timeout.py` is what holds that behaviour in place: if a
+future launcher change ever scrubs the status, that test fails on Windows.
+
 The shim emits bounded IPC observability events when stdin reading or writing
 and flushing a response stream fails. These use the existing dependency-free
 observability seam and record fixed operation, outcome, and error-category
