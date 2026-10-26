@@ -68,13 +68,29 @@ class _RecordingModule:
     def __init__(
         self, name: str, calls: list[tuple[str, str, tuple[object, ...]]]
     ) -> None:
+        """Bind the module name, the shared call log, and this module's constants."""
         self._name = name
         self._calls = calls
         for constant, value in _CONSTANTS.get(name, {}).items():
             setattr(self, constant, value)
 
     def __getattr__(self, attribute: str) -> cabc.Callable[..., object]:
+        """Return a callable that records the call and yields the sentinel.
+
+        Returns
+        -------
+        collections.abc.Callable[..., object]
+            A stand-in for the named module attribute.
+        """
+
         def record(*args: object) -> object:
+            """Log the call and hand back the sentinel every stub returns.
+
+            Returns
+            -------
+            object
+                The shared sentinel, so a test can spot the forwarded value.
+            """
             self._calls.append((self._name, attribute, args))
             return _SENTINEL
 
@@ -89,36 +105,80 @@ class _RecordingPyWinTypes(_RecordingModule):
 
 
 class _RecordingWin32File(_RecordingModule):
-    """``win32file`` stand-in returning the buffer a read or allocation yields."""
+    """``win32file`` stand-in for the two calls that produce a buffer.
+
+    ``ReadFile`` and ``AllocateReadBuffer`` are not interchangeable: the read
+    wraps the caller's own buffer in a ``(status, buffer)`` pair, while the
+    allocation mints a fresh buffer of the requested size. One shared handler
+    returning a fixed pair would let the adapter get either shape wrong and
+    still satisfy the recorded-call assertions, which only look at arguments.
+    """
 
     def __init__(
         self,
         calls: list[tuple[str, str, tuple[object, ...]]],
-        buffer: cabc.Buffer | None = None,
+        read_buffer: cabc.Buffer | None = None,
     ) -> None:
+        """Bind the shared call log and the buffer a read hands back."""
         super().__init__("win32file", calls)
-        self.buffer: cabc.Buffer = buffer if buffer is not None else bytearray(4)
+        self.read_buffer: cabc.Buffer = (
+            read_buffer if read_buffer is not None else bytearray(4)
+        )
+        #: Set by the last ``AllocateReadBuffer`` call, so a test can check the
+        #: adapter returned the buffer the allocation produced.
+        self.allocated: bytearray | None = None
 
     def __getattr__(self, attribute: str) -> cabc.Callable[..., object]:
-        if attribute in {"ReadFile", "AllocateReadBuffer"}:
+        """Return the handler for *attribute*, specialised for buffer producers.
+
+        Returns
+        -------
+        collections.abc.Callable[..., object]
+            The read pair, the minted buffer, or the base recording stub.
+        """
+        if attribute == "ReadFile":
             forwarded = super().__getattr__(attribute)
 
-            def record(*args: object) -> tuple[int, cabc.Buffer]:
-                forwarded(*args)
-                return 0, self.buffer
+            def record_read(*args: object) -> tuple[int, cabc.Buffer]:
+                """Log the read and wrap the read buffer in its status pair.
 
-            return record
+                Returns
+                -------
+                tuple[int, collections.abc.Buffer]
+                    The immediate status and the buffer handed to the read.
+                """
+                forwarded(*args)
+                return 0, self.read_buffer
+
+            return record_read
+        if attribute == "AllocateReadBuffer":
+            forwarded = super().__getattr__(attribute)
+
+            def record_allocation(size: int) -> cabc.Buffer:
+                """Log the allocation and mint a zeroed buffer of *size* bytes.
+
+                Returns
+                -------
+                collections.abc.Buffer
+                    The freshly allocated buffer, also kept on ``allocated``.
+                """
+                forwarded(size)
+                self.allocated = bytearray(size)
+                return self.allocated
+
+            return record_allocation
         return super().__getattr__(attribute)
 
 
 class _StubModules:
     """The four ``pywin32`` modules plus the calls recorded across all of them."""
 
-    def __init__(self, buffer: cabc.Buffer | None = None) -> None:
+    def __init__(self, read_buffer: cabc.Buffer | None = None) -> None:
+        """Build the four stand-ins sharing one call log."""
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
         self.win32event = _RecordingModule("win32event", self.calls)
         self.win32pipe = _RecordingModule("win32pipe", self.calls)
-        self.win32file = _RecordingWin32File(self.calls, buffer)
+        self.win32file = _RecordingWin32File(self.calls, read_buffer)
         self.pywintypes = _RecordingPyWinTypes("pywintypes", self.calls)
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> Win32NamedPipeBackend:
@@ -176,15 +236,32 @@ def _open_spec() -> PipeFileOpenSpec:
 def test_construction_binds_the_modules_and_constants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Construction copies the constants and module views onto the instance."""
+    """Construction copies every constant and module view onto the instance.
+
+    The expected values come from ``_CONSTANTS``, and the instance's own
+    upper-case integer attributes are compared against that table as whole
+    dictionaries. That catches both directions at once: a constant the table
+    expects but the adapter stopped binding, and one the adapter binds but the
+    table never learned about. The second matters — every bound constant is
+    read by :mod:`cmd_mox.ipc.named_pipe` when it builds its Win32 arguments,
+    so a new one would otherwise go untested and surface as an
+    ``AttributeError`` on Windows only.
+    """
     modules = _StubModules()
 
     backend = modules.install(monkeypatch)
 
-    assert backend.INFINITE == -1, "the event timeout sentinel was not bound"
-    assert backend.WAIT_TIMEOUT == 258, "the wait timeout code was not bound"
-    assert backend.PIPE_UNLIMITED_INSTANCES == 255, "the pipe constants were lost"
-    assert backend.OPEN_EXISTING == 3, "the file constants were lost"
+    expected = {
+        name: value
+        for constants in _CONSTANTS.values()
+        for name, value in constants.items()
+    }
+    bound = {
+        name: value
+        for name, value in vars(backend).items()
+        if isinstance(value, int) and name.isupper()
+    }
+    assert bound == expected, "the adapter's bound constants differ from the table"
     assert backend.win32file is modules.win32file, "the file view was not exposed"
     assert backend.pywintypes is modules.pywintypes, "the types view was not exposed"
     assert backend.error is FakeWinError, "the error type was not exposed"
@@ -336,13 +413,21 @@ def test_read_file_passes_the_buffer_and_overlapped(
 def test_allocate_read_buffer_requests_the_chunk_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Buffer allocation asks for exactly the requested capacity."""
+    """Buffer allocation asks for exactly the requested capacity.
+
+    The returned buffer is the one the allocation produced, not a read's pair:
+    the port promises a bare buffer here, and only the read returns a tuple.
+    """
     modules = _StubModules()
     backend = modules.install(monkeypatch)
 
-    backend.allocate_read_buffer(4096)
+    buffer = backend.allocate_read_buffer(4096)
 
     assert modules.calls == [("win32file", "AllocateReadBuffer", (4096,))]
+    assert buffer is modules.win32file.allocated, (
+        "the adapter did not return the buffer the allocation produced"
+    )
+    assert len(buffer) == 4096, "the buffer was not sized to the request"
 
 
 def test_create_file_unpacks_the_spec_in_call_order(
@@ -387,14 +472,18 @@ def test_close_handle_forwards_the_handle(
 def test_create_file_detects_a_transposed_field(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A swap of two same-typed spec fields is visible in the recorded call.
+    """A swap of two same-typed spec fields reaches the call site visibly.
 
     ``share_mode`` and ``flags_and_attributes`` are both plain integers, and
     ``security_attributes`` and ``template_file`` are both bare objects. If the
     fixtures reused one value for each pair, ``create_file`` could transpose
     them and still satisfy its ordering assertion. This pins the guard: the
     open spec is rebuilt with the two integers exchanged, and the call the
-    adapter actually makes must differ from the recorded expectation.
+    adapter makes must carry the exchanged values in their original positions.
+
+    The assertion is exact rather than an inequality, so an adapter that drops
+    the call entirely — or makes no call at all — fails here too. Only one
+    ``CreateFile`` call is expected; any other call is a failure as well.
     """
     modules = _StubModules()
     backend = modules.install(monkeypatch)
@@ -411,18 +500,18 @@ def test_create_file_detects_a_transposed_field(
 
     backend.create_file(transposed)
 
-    assert modules.calls != [
+    assert modules.calls == [
         (
             "win32file",
             "CreateFile",
             (
                 spec.file_name,
                 0xC0000000,
-                0,
+                0x40000000,
                 _SECURITY_ATTRIBUTES,
                 3,
-                0x40000000,
+                0,
                 _TEMPLATE_FILE,
             ),
         )
-    ], "a transposed share_mode would have matched the expected call"
+    ], "the transposed share_mode did not reach CreateFile in position"
