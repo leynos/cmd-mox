@@ -181,6 +181,47 @@ def test_main_reports_stdin_read_failure_without_contacting_ipc(
     assert "secret detail" not in diagnostic, "stdin error text leaked to stderr"
 
 
+def test_main_reports_a_failing_isatty_without_contacting_ipc(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A stream that cannot report its type still gets the bounded diagnostic.
+
+    ``isatty()`` is the shim's first stdin call, and a closed text stream raises
+    ``ValueError`` from it. Probing before the bounded handler would therefore
+    surface that failure as an unhandled traceback instead of the diagnostic
+    every other stdin failure receives.
+    """
+
+    class _UnprobeableStdin:
+        def isatty(self) -> bool:
+            """Fail the way a closed text stream does.
+
+            Raises
+            ------
+            ValueError
+                Always, because the stream is closed.
+            """
+            msg = "I/O operation on closed file"
+            raise ValueError(msg)
+
+    monkeypatch.setattr(shim, "bootstrap_shim_path", lambda: None)
+    monkeypatch.setattr(shim, "_resolve_command_name", lambda: "shim")
+    monkeypatch.setattr(shim, "_validate_environment", lambda: 1.0)
+    monkeypatch.setattr(sys, "stdin", _UnprobeableStdin())
+    monkeypatch.setattr(
+        shim, "_execute_invocation", lambda *_a, **_k: pytest.fail("dispatched")
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        shim.main()
+
+    _assert_exit_code(exc, 1)
+    assert capsys.readouterr().err == "IPC error: stdin read failed\n", (
+        "an unprobeable stdin must use the bounded diagnostic"
+    )
+
+
 def test_run_as_script_exits_without_joining_an_abandoned_worker(
     stalled_stdin: _StalledStdin,
     monkeypatch: pytest.MonkeyPatch,

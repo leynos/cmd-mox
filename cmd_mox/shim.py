@@ -209,8 +209,6 @@ def _capture_stdin(
         The captured text, or ``""`` for terminal input.
     """
     stream = dependencies.stdin_stream
-    if stream.isatty():
-        return ""
     stdin_started = dependencies.duration_clock()
 
     def report_stdin_failure(exc: Exception, outcome: _StdinOutcome) -> typ.NoReturn:
@@ -227,6 +225,10 @@ def _capture_stdin(
         _exit_ipc_error(exc, operation="stdin_read")
 
     try:
+        # The probe belongs inside the handler: a closed text stream raises
+        # ValueError from ``isatty()`` itself, before any read is attempted.
+        if stream.isatty():
+            return ""
         return _stdin_capture.read_stdin(
             typ.cast("_stdin_capture._StdinStream", stream),
             timeout,

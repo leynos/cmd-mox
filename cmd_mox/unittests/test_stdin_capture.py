@@ -431,8 +431,20 @@ def test_regular_file_timeout_reports_expiry(
 ) -> None:
     """A stalled regular-file read expires at the shared deadline."""
     stall = threading.Event()
+
+    def stalled_read(_descriptor: int, _size: int) -> bytes:
+        """Block until released, then report EOF as ``os.read`` would.
+
+        Returns
+        -------
+        bytes
+            Empty bytes, the signal a reader sees at end-of-file.
+        """
+        stall.wait(5.0)
+        return b""
+
     monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(capture.os, "read", lambda _descriptor, _size: stall.wait(5.0))
+    monkeypatch.setattr(capture.os, "read", stalled_read)
     path = tmp_path / "input.txt"
     path.write_text("never read", encoding="utf-8")
     try:
