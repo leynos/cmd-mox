@@ -55,7 +55,7 @@ def _unix_sockets_supported() -> bool:
 
 
 def _anchor_mutmut_source_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Temporarily anchor mutmut paths during an in-process nested run."""
+    """Make cwd-relative mutmut paths absolute for the current scope."""
     mutmut_configuration = sys.modules.get("mutmut.configuration")
     if mutmut_configuration is None:
         return
@@ -74,6 +74,20 @@ def _anchor_mutmut_source_paths(monkeypatch: pytest.MonkeyPatch) -> None:
             for path in mutmut_config.source_paths
         ],
     )
+
+
+@pytest.fixture(autouse=True)
+def anchor_mutmut_source_paths_for_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep mutmut paths valid while tests can change cwd.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Restore the relative source paths after this test finishes.
+    """
+    _anchor_mutmut_source_paths(monkeypatch)
 
 
 def pytest_configure(config: pytest.Config) -> None:
