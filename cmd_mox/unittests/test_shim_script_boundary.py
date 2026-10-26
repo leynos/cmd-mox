@@ -60,6 +60,12 @@ class _StalledStdin:
 def stalled_stdin(monkeypatch: pytest.MonkeyPatch) -> cabc.Iterator[_StalledStdin]:
     """Install a blocking stdin double and always release its worker.
 
+    The double's ``finished`` event fires inside ``read`` itself, so it only
+    proves the stream stopped waiting, not that the reader thread exited. The
+    process-global worker registry is joined as well, because a leftover live
+    worker would make a later ``_run_as_script`` test take the ``os._exit``
+    path and fail on its patched exit.
+
     Yields
     ------
     _StalledStdin
@@ -73,6 +79,8 @@ def stalled_stdin(monkeypatch: pytest.MonkeyPatch) -> cabc.Iterator[_StalledStdi
     finally:
         stdin.release.set()
         stdin.finished.wait(5.0)
+        for worker in capture.outstanding_workers():
+            worker.join(5.0)
 
 
 def test_main_reports_stdin_timeout_without_contacting_ipc(
@@ -219,6 +227,10 @@ def test_run_as_script_reraises_when_no_worker_was_abandoned(
         raise SystemExit(0)
 
     monkeypatch.setattr(shim, "main", fake_main)
+    # The registry is process-global, and other modules deliberately abandon
+    # workers of their own. Pin it empty so this test asserts the normal exit
+    # path rather than whatever an earlier test happened to leave behind.
+    monkeypatch.setattr(capture, "outstanding_workers", lambda: ())
     monkeypatch.setattr(
         shim.os, "_exit", lambda _status: pytest.fail("normal exits must not _exit")
     )

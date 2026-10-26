@@ -606,13 +606,23 @@ def _read_win32_chunk(
     -------
     bytes
         The bytes read, or ``b""`` once the pipe reports EOF.
+
+    Raises
+    ------
+    OSError
+        A ``ReadFile`` failure other than a closed pipe. ``pywintypes.error``
+        derives from ``Exception`` rather than ``OSError``, so it is converted
+        here: the shim's bounded stdin handler catches ``OSError`` and would
+        otherwise let a Windows read failure escape as a traceback. Only the
+        numeric code is carried over; the pywin32 message is not surfaced.
     """
     try:
         _status, data = win32file.ReadFile(handle, _READ_CHUNK)
     except pywintypes.error as exc:
         if getattr(exc, "winerror", None) == _ERROR_BROKEN_PIPE:
             return b""
-        raise
+        msg = "stdin handle read failed"
+        raise OSError(getattr(exc, "winerror", None), msg) from exc
     return data or b""
 
 
