@@ -2,12 +2,12 @@
 
 import contextlib
 import errno
-import io
 import logging
 import os
 import socket
 import socketserver
 import threading
+import time
 import typing as typ
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,10 +26,11 @@ from cmd_mox.ipc import (
     IPCServer,
     Response,
     RetryConfig,
-    _client_events,
+    _observability,
     _unix_server_base,
     invoke_server,
 )
+from cmd_mox.ipc import client as ipc_client_module
 from cmd_mox.ipc import server as _ipc_server
 
 pytestmark = pytest.mark.requires_unix_sockets
@@ -142,21 +143,25 @@ def test_invoke_server_retries_connection_parametrized(
     socket_path = tmp_path / "ipc.sock"
 
     server = IPCServer(socket_path)
+    emit_connect_retry = ipc_client_module._client_events.emit_connect_retry
+    server_started = False
 
-    emit_connect_retry = _client_events.emit_connect_retry
-
-    def start_server_after_first_retry(
-        transport: typ.Literal["unix", "named_pipe"],
+    def start_server_after_first_failure(
+        transport: _observability.Transport,
         attempt: int,
-        exc: Exception,
+        exception: Exception,
         correlation_id: str | None,
     ) -> None:
-        emit_connect_retry(transport, attempt, exc, correlation_id)
-        if attempt == 0:
+        nonlocal server_started
+        emit_connect_retry(transport, attempt, exception, correlation_id)
+        if not server_started:
+            server_started = True
             server.start()
 
     monkeypatch.setattr(
-        _client_events, "emit_connect_retry", start_server_after_first_retry
+        ipc_client_module._client_events,
+        "emit_connect_retry",
+        start_server_after_first_failure,
     )
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(socket_path))
     invocation = Invocation(command="ls", args=[], stdin="", env={})
@@ -323,14 +328,18 @@ def test_handler_logs_reply_write_oserror_at_debug(
         failure_point, BrokenPipeError(errno.EPIPE, "Broken pipe")
     )
 
-    def response_pipeline(_server: object, _raw: bytes, _transport: str) -> bytes:
-        return b"response"
+    def response_pipeline(
+        _server: object, _raw: bytes, _transport: str
+    ) -> SimpleNamespace:
+        return SimpleNamespace(response_bytes=b"response", correlation_id=None)
 
     monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
     handler = SimpleNamespace(
-        rfile=io.BytesIO(b"request"),
+        request=SimpleNamespace(settimeout=lambda _timeout: None),
+        _read_request_payload=lambda: b"request",
+        _read_deadline=time.monotonic() + 1.0,
         wfile=writer,
-        server=SimpleNamespace(outer=object()),
+        server=SimpleNamespace(outer=SimpleNamespace(timeout=1.0)),
     )
 
     _ipc_server._IPCHandler.handle(typ.cast("_ipc_server._IPCHandler", handler))
@@ -351,14 +360,18 @@ def test_handler_reports_non_disconnect_reply_write_oserror(
     caplog.clear()
     writer = _FailingReplyWriter("write", OSError(errno.EBADF, "Bad file descriptor"))
 
-    def response_pipeline(_server: object, _raw: bytes, _transport: str) -> bytes:
-        return b"response"
+    def response_pipeline(
+        _server: object, _raw: bytes, _transport: str
+    ) -> SimpleNamespace:
+        return SimpleNamespace(response_bytes=b"response", correlation_id=None)
 
     monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
     handler = SimpleNamespace(
-        rfile=io.BytesIO(b"request"),
+        request=SimpleNamespace(settimeout=lambda _timeout: None),
+        _read_request_payload=lambda: b"request",
+        _read_deadline=time.monotonic() + 1.0,
         wfile=writer,
-        server=SimpleNamespace(outer=object()),
+        server=SimpleNamespace(outer=SimpleNamespace(timeout=1.0)),
     )
 
     _ipc_server._IPCHandler.handle(typ.cast("_ipc_server._IPCHandler", handler))

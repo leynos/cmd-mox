@@ -37,6 +37,7 @@ from cmd_mox.ipc.windows import (
 )
 
 from . import _client_events, _observability
+from ._deadline import _compute_deadline, _remaining_time
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 from .models import Invocation, PassthroughResult, Response
@@ -89,16 +90,12 @@ class RetryStrategy:
 
 @dc.dataclass(frozen=True, slots=True)
 class _ConnectionContext:
-    """Per-request connection parameters shared by both client transports.
-
-    Bundling the timeout, retry configuration, and correlation identifier keeps
-    the transport helpers within the project's argument-count limit and lets the
-    identifier reach the retry seam without widening any public signature.
-    """
+    """Transport settings and metadata shared throughout one client request."""
 
     timeout: float
     retry_config: RetryConfig
     correlation_id: str | None = None
+    deadline: float | None = None
 
     def validate(self) -> None:
         """Re-validate the retry configuration against the timeout."""
@@ -209,37 +206,6 @@ def retry_with_backoff[T](
         "without returning a value."
     )
     raise RuntimeError(msg)  # pragma: no cover
-
-
-def _compute_deadline(timeout: float) -> float:
-    """Return the absolute deadline for *timeout* seconds from now.
-
-    Returns
-    -------
-    float
-        The monotonic clock value at which *timeout* expires.
-    """
-    return time.monotonic() + timeout
-
-
-def _remaining_time(deadline: float) -> float:
-    """Return the seconds remaining before *deadline* expires.
-
-    Returns
-    -------
-    float
-        The strictly positive seconds left before *deadline*.
-
-    Raises
-    ------
-    TimeoutError
-        If *deadline* has already passed.
-    """
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        msg = "IPC client operation timed out"
-        raise TimeoutError(msg)
-    return remaining
 
 
 class _HandleCloser:
@@ -433,6 +399,8 @@ def _log_connect_retry(
 def _connect_unix_with_retries(
     sock_path: Path,
     context: _ConnectionContext,
+    *,
+    deadline: float | None = None,
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`.
 
@@ -442,22 +410,32 @@ def _connect_unix_with_retries(
         The connected Unix domain socket.
     """
     address = str(sock_path)
+    request_deadline = deadline if deadline is not None else context.deadline
+    if request_deadline is None:
+        request_deadline = _compute_deadline(context.timeout)
+    _remaining_time(request_deadline)
 
     def attempt_connect(_attempt: int) -> socket.socket:
+        _remaining_time(request_deadline)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(context.timeout)
         try:
+            sock.settimeout(_remaining_time(request_deadline))
             sock.connect(address)
         except OSError:
             sock.close()
             raise
         return sock
 
+    def bounded_sleep(delay: float) -> None:
+        """Limit retry backoff to the remaining request deadline."""
+        time.sleep(min(delay, _remaining_time(request_deadline)))
+
     return retry_with_backoff(
         attempt_connect,
         retry_config=context.retry_config,
         strategy=RetryStrategy(
-            on_failure=partial(_log_connect_retry, "unix", context=context)
+            on_failure=partial(_log_connect_retry, "unix", context=context),
+            sleep=bounded_sleep,
         ),
     )
 
@@ -482,7 +460,7 @@ def _get_validated_socket_path() -> Path:
     return Path(sock)
 
 
-def _read_all(sock: socket.socket) -> bytes:
+def _read_all(sock: socket.socket, deadline: float) -> bytes:
     """Read all data from *sock* until EOF.
 
     Returns
@@ -491,7 +469,11 @@ def _read_all(sock: socket.socket) -> bytes:
         Every byte received before the peer closed the connection.
     """
     chunks = []
-    while chunk := sock.recv(1024):
+    while True:
+        sock.settimeout(_remaining_time(deadline))
+        chunk = sock.recv(1024)
+        if not chunk:
+            break
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -501,10 +483,17 @@ def _send_unix_request(
     payload: bytes,
     context: _ConnectionContext,
 ) -> bytes:
-    with _connect_unix_with_retries(sock_path, context) as client:
+    context.validate()
+    deadline = context.deadline
+    if deadline is None:
+        deadline = _compute_deadline(context.timeout)
+    _remaining_time(deadline)
+    with _connect_unix_with_retries(sock_path, context, deadline=deadline) as client:
+        client.settimeout(_remaining_time(deadline))
         client.sendall(payload)
+        client.settimeout(_remaining_time(deadline))
         client.shutdown(socket.SHUT_WR)
-        return _read_all(client)
+        return _read_all(client, deadline)
 
 
 def _decode_response(raw: bytes) -> Response:
@@ -712,22 +701,16 @@ def _perform_request(
 def _send_request(
     kind: str,
     data: dict[str, typ.Any],
-    timeout: float,
-    retry_config: RetryConfig | None,
+    context: _ConnectionContext,
 ) -> Response:
     """Send a JSON request of *kind* to the IPC server.
 
     Returns
     -------
     Response
-        The decoded server response.
     """
     payload_bytes, correlation_id = _build_request_envelope(kind, data)
-    context = _ConnectionContext(
-        timeout=timeout,
-        retry_config=retry_config or RetryConfig(),
-        correlation_id=correlation_id,
-    )
+    context = dc.replace(context, correlation_id=correlation_id)
     return _perform_request(payload_bytes, kind, context)
 
 
@@ -735,32 +718,57 @@ def invoke_server(
     invocation: Invocation,
     timeout: float,
     retry_config: RetryConfig | None = None,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
-    The *timeout* applies to each blocking connect/send/receive operation.
-    Unix clients rely on ``socket.settimeout`` so the kernel enforces the
-    limit, while Windows clients cooperatively track the deadline and close
-    the named pipe if any step exceeds *timeout*, raising ``TimeoutError``.
+    Unix shares one deadline across I/O; Windows uses per-step pipe timeouts.
+
+    Parameters
+    ----------
+    invocation : Invocation
+        Request to send.
+    timeout : float
+        Request limit in seconds.
+    retry_config : RetryConfig or None, optional
+        Connection retry policy.
+    deadline : float or None, optional
+        Absolute Unix deadline shared with preceding shim work.
 
     Returns
     -------
     Response
         The IPC server's response to the invocation.
     """
-    return _send_request(KIND_INVOCATION, invocation.to_dict(), timeout, retry_config)
+    return _send_request(
+        KIND_INVOCATION,
+        invocation.to_dict(),
+        _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
+    )
 
 
 def report_passthrough_result(
     result: PassthroughResult,
     timeout: float,
     retry_config: RetryConfig | None = None,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Send passthrough execution results back to the IPC server.
 
-    Timeout handling mirrors :func:`invoke_server`: Unix sockets enforce the
-    limit per system call, and Windows callers rely on cooperative deadlines
-    that cancel the named pipe when *timeout* expires.
+    Unix shares the shim deadline; Windows retains per-step pipe timeouts.
+
+    Parameters
+    ----------
+    result : PassthroughResult
+        Command result to report.
+    timeout : float
+        Request limit in seconds.
+    retry_config : RetryConfig or None, optional
+        Connection retry policy.
+    deadline : float or None, optional
+        Absolute Unix deadline shared with preceding shim work.
 
     Returns
     -------
@@ -770,8 +778,7 @@ def report_passthrough_result(
     return _send_request(
         KIND_PASSTHROUGH_RESULT,
         result.to_dict(),
-        timeout,
-        retry_config,
+        _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
     )
 
 

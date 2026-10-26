@@ -229,6 +229,60 @@ dispatch:
   results, and an `error_category` only on failure. Payloads, arguments,
   standard streams, environments, socket paths, and exception messages must
   never be logged.
+- Outcomes are `success`, `invalid_request` for validation failures,
+  `rejection_frame` for parse failures, and `handler_error`. Parse failures
+  return a bounded error response and use `RequestParseError` as their error
+  category; validation failures keep the `invalid_request` outcome and use
+  `ValidationError`. An empty read is treated as a closed connection, so
+  readiness probes emit neither a dispatch record nor a response frame.
+- Unix connection failures emit a bounded `ipc.server.connection` event with
+  one of three outcomes: `receive_timeout`, `receive_closed`, or
+  `response_dropped`. Its `error_category` is one of `ConnectionClosed`,
+  `ConnectionError`, `OSError`, or `TimeoutError`; exception messages are not
+  included. The event carries a nonnegative `duration_ms` and includes
+  `correlation_id` only when a validated request identifier is available.
+  Connection counters use only the fixed `operation`, `transport`, and
+  `outcome` dimensions, so correlation identifiers and payload data never
+  increase the number of counter keys.
+
+The private deadline helpers accept an optional monotonic clock callable and use
+`time.monotonic` when runtime callers omit it. The Unix request handler binds
+its clock once and reuses it for each receive-budget check. Tests can pass a
+fake clock directly without replacing the process-wide time function.
+
+## IPC deadlines and stdin reads
+
+On POSIX, the shim carries one monotonic deadline through Unix socket
+connection retries, request sending, response reads, and passthrough reporting.
+Stdin capture uses that deadline when the stream can be waited on. The client
+stores the deadline in `_ConnectionContext` and applies only the remaining time
+before each blocking socket operation. The Unix server also keeps one read
+deadline per accepted connection and updates the socket timeout before each
+receive, so a client that slowly streams a request cannot renew its full wait
+budget with every byte.
+
+The shim polls pipe-like stdin descriptors when possible. It reads regular-file
+stdin on a daemon worker because regular files cannot provide a bounded poll
+wait. Windows streams and descriptors that cannot be polled retain direct
+reads; the Windows named-pipe IPC client keeps its existing cooperative timeout
+behaviour.
+
+The shim emits bounded IPC observability events when stdin reading or writing
+and flushing a response stream fails. These use the existing dependency-free
+observability seam and record fixed operation, outcome, and error-category
+values, elapsed duration, and a correlation identifier when one is available.
+They do not include exception messages or stream contents. If the deadline
+expires after stdin capture but before initial dispatch, the shim emits one
+`ipc.shim.ipc_request` event with outcome `deadline_expired` and does not
+dispatch the invocation. Its elapsed duration measures the dispatch budget
+check. If the original deadline expires while the real command runs, the shim
+emits an `ipc.shim.passthrough_report` event with outcome `deadline_expired`
+and does not dispatch a report. Its elapsed duration includes the real
+command's runtime. Failures after either dispatch are covered by
+`ipc.client.request` events, without a duplicate shim event. Unix server
+response writes use `ipc.server.connection` events. The seam writes structured
+logging records and keeps in-process counters; it does not export to an
+external collector.
 
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs from
 `CommandDouble.name`. It performs that command-name check before expectation
@@ -489,10 +543,9 @@ can still enforce the last known-good policy.
 
 `make spelling` checks existing `*.md` files that are tracked by Git or
 untracked and not ignored. Standard Git ignore rules exclude generated caches
-and other ignored files, while new Markdown is checked before it is staged.
-
-Add repository-only proper names or quoted upstream terms to
-`typos.local.toml`; never edit generated entries in `typos.toml` by hand.
+and other ignored files, while new Markdown is checked before it is staged. Add
+repository-only proper names or quoted upstream terms to `typos.local.toml`;
+never edit generated entries in `typos.toml` by hand.
 
 ## Episodic lint policy
 

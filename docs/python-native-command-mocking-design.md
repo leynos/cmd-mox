@@ -646,10 +646,10 @@ features that are infeasible with file-based logging.
   value into a named pipe (``\\.\pipe\cmdmox-<hash>``). This keeps the PATH
   filtering logic working unchanged while the transport communicates through
   `win32pipe`/`win32file` provided by `pywin32`.
-- Standard input is eagerly read when the shim detects it is connected to a
-  pipe. Guarding the read with ``sys.stdin.isatty()`` avoids blocking when a
-  user invokes an interactive command during a test run, and the implementation
-  explicitly skips calling ``read()`` on terminal-bound streams.
+- The shim captures non-terminal standard input before IPC. On POSIX, waitable
+  descriptors are read against the invocation deadline; terminal-bound streams
+  are skipped. Windows and descriptors that cannot be polled retain the direct
+  text read.
 - The shim sends a shallow copy of ``os.environ`` to the IPC server. This
   captures environment variables at call time without mutating the caller's
   process state.
@@ -719,9 +719,12 @@ bounded request metadata and never payload data.
 
 ##### Empty reads and disconnected clients
 
-An empty read is logged at debug level and returns no reply. Malformed or
-unsupported content retains its error log, and requests that fail validation
-also return no reply. Only valid requests produce a response.
+An empty read means the peer closed the connection without sending a request,
+which includes readiness probes. The server logs it at INFO level, emits an
+`ipc.server.connection` event with outcome `receive_closed`, and sends no
+reply. Malformed or unsupported content retains its error log and receives a
+bounded error response with exit status 1. Requests that fail validation
+receive the same form of response. Only valid requests reach a handler.
 
 For screen readers: The client sends a request to IPCHandler. The handler
 passes the raw bytes to request_pipeline, which returns response bytes. The
@@ -792,6 +795,15 @@ backend-construction failure. Error categories are fixed values such as
 messages and socket paths never enter logs or counters. The cached resolver
 itself remains free of logging side effects.
 
+Shim failures while reading stdin or writing and flushing response streams use
+the same seam with fixed operation, outcome, and error-category values, a
+duration, and a correlation identifier when available. Passthrough reporting
+already emits `ipc.client.request` events, while Unix server response-write
+failures emit `ipc.server.connection` events. These additions retain the
+never-log rules: event fields contain no exception messages or stream content.
+Events are sent to structured logging and counted in process; the seam has no
+external metrics or tracing collector.
+
 #### Named-pipe resource bounds (2026-08-28)
 
 The Windows named-pipe transport bounds concurrency, message size, and client
@@ -835,6 +847,29 @@ When `IPCServer.start()` executes inside an active :class:
 and timeout environment variables automatically. This keeps tests and shim
 workflows from having to patch :mod:`os.environ` manually when they rely on the
 higher-level context manager.
+
+#### Shared POSIX deadline and request rejection (2026-10-09)
+
+On POSIX, the shim creates one monotonic deadline from CMOX_IPC_TIMEOUT. It
+applies that deadline to waitable stdin capture, Unix socket connection
+attempts and retry backoff, request sending, response reads, and passthrough
+reporting. Each socket wait receives only the remaining budget, so partial
+response chunks and retries cannot restart the timeout. Regular-file stdin uses
+a worker because readiness polling does not bound a text read from a regular
+file. Windows keeps its named-pipe timeout behaviour. Windows,
+missing-file-descriptor, and unpollable stdin retain the existing direct text
+read; read failures still use the shim's controlled IPC diagnostic.
+
+The Unix server applies a read deadline to each accepted connection. A
+non-empty malformed or invalid request receives a bounded error response that
+the shim can decode and report. An empty read means the peer closed without a
+request, which includes the server's readiness probes; it is logged as a closed
+connection and receives no response frame. If the peer closes while a response
+is being written, the server logs the same connection-drop class. Shim-side IPC
+failures, including response writes and passthrough reporting, produce a
+controlled diagnostic and exit status rather than an unhandled traceback. If
+passthrough reporting fails, the shim still writes the captured command output
+before exiting.
 
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background

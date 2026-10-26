@@ -31,10 +31,12 @@ class Invocation:
         Command-line arguments passed after the executable name.
     stdin : str
         Standard input captured by the shim. When stdin is not a terminal, the
-        shim reads it through EOF to populate this field. If the caller
-        inherits stdin and does not close it, the shim blocks. Close or
-        redirect stdin (for example, to ``subprocess.DEVNULL``) when the caller
-        supplies no input.
+        shim reads it through EOF to populate this field. On POSIX, pollable
+        pipes and regular files use the ``CMOX_IPC_TIMEOUT`` deadline. Streams
+        that cannot be polled retain direct reads and may wait beyond that
+        deadline; Windows also retains direct reads. Close or redirect stdin
+        (for example, to ``subprocess.DEVNULL``) when the caller supplies no
+        input.
     env : dict[str, str]
         Environment variables copied from the shim process.
     stdout : str

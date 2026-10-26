@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import importlib.util
 import json
 import math
 import os
 import sys
+import time
 import typing as typ
+import uuid
 from pathlib import Path
 
 if typ.TYPE_CHECKING:
@@ -57,7 +60,13 @@ if __name__ == "__main__":
 else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
 
-from cmd_mox import _path_utils as path_utils  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
+from cmd_mox import _path_utils as path_utils, _shim_stdin  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
+from cmd_mox._shim_failures import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
+    _ShimFailureContext,
+    _emit_shim_failure,
+    _exit_ipc_error,
+    _write_response_stream,
+)
 from cmd_mox.command_runner import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
     execute_command,
     prepare_environment,
@@ -76,8 +85,37 @@ from cmd_mox.ipc import (  # ruff: ignore[module-import-not-at-top-of-file] - sh
     invoke_server,
     report_passthrough_result,
 )
+from cmd_mox.ipc._deadline import _remaining_time  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
 
 CMOX_SHIM_COMMAND_ENV = "CMOX_SHIM_COMMAND"
+_SHIM_STDIN_READ_OPERATION = "ipc.shim.stdin_read"
+_SHIM_PASSTHROUGH_REPORT_OPERATION = "ipc.shim.passthrough_report"
+_SHIM_IPC_REQUEST_OPERATION = "ipc.shim.ipc_request"
+
+
+@dc.dataclass(frozen=True, slots=True)
+class _InvocationDependencies:
+    """Bind stdin operations and clocks for one invocation."""
+
+    stdin_read: _shim_stdin._StdinReadDependencies
+    duration_clock: cabc.Callable[[], float]
+
+
+def _system_invocation_dependencies() -> _InvocationDependencies:
+    """Bind process stdin operations and clocks at the system boundary.
+
+    Returns
+    -------
+    _InvocationDependencies
+        Dependencies backed by process stdin and the system clocks.
+    """
+    return _InvocationDependencies(
+        stdin_read=_shim_stdin._StdinReadDependencies(
+            source=_shim_stdin._system_stdin_source(),
+            clock=time.monotonic,
+        ),
+        duration_clock=time.perf_counter,
+    )
 
 
 def _normalize_windows_arg(arg: str) -> str:
@@ -141,28 +179,64 @@ def _validate_environment() -> float:
     timeout_raw = os.environ.get(CMOX_IPC_TIMEOUT_ENV, "5.0")
     timeout = _parse_positive_finite(timeout_raw)
     if timeout is None:
-        print(f"IPC error: invalid timeout: {timeout_raw!r}", file=sys.stderr)
+        print("IPC error: invalid CMOX_IPC_TIMEOUT", file=sys.stderr)
         sys.exit(1)
 
     return timeout
 
 
-def _create_invocation(cmd_name: str) -> Invocation:
+def _create_invocation(
+    cmd_name: str,
+    timeout: float,
+    *,
+    deadline: float | None = None,
+    dependencies: _InvocationDependencies | None = None,
+) -> Invocation:
     """Create an invocation from command-line arguments and stdin.
 
     Parameters
     ----------
     cmd_name : str
         Command name associated with the shim process.
+    timeout : float
+        Maximum time available to read non-interactive standard input.
+    deadline : float or None, optional
+        Shared monotonic deadline for stdin and subsequent IPC on POSIX.
+    dependencies : _InvocationDependencies or None, optional
+        Stdin operations and clocks, or process-backed dependencies when omitted.
 
     Returns
     -------
     Invocation
         Invocation containing arguments, stdin, and a copied environment.
     """
-    import uuid
+    invocation_id = uuid.uuid4().hex
+    stdin_data = ""
+    if dependencies is None:
+        dependencies = _system_invocation_dependencies()
+    stdin_source = dependencies.stdin_read.source
+    if not stdin_source.stream.isatty():
+        stdin_started = dependencies.duration_clock()
 
-    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+        def report_stdin_error(exc: Exception) -> typ.NoReturn:
+            """Record a bounded stdin failure before exiting the shim."""
+            _emit_shim_failure(
+                _ShimFailureContext(
+                    _SHIM_STDIN_READ_OPERATION,
+                    "read_failed",
+                    stdin_started,
+                    invocation_id,
+                ),
+                exc,
+            )
+            _exit_ipc_error(exc, operation="stdin_read")
+
+        stdin_data = _shim_stdin._read_stdin_until_eof(
+            timeout,
+            deadline=deadline,
+            on_error=report_stdin_error,
+            dependencies=dependencies.stdin_read,
+        )
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
     if path_utils.IS_WINDOWS:
@@ -172,11 +246,35 @@ def _create_invocation(cmd_name: str) -> Invocation:
         args=argv,
         stdin=stdin_data,
         env=env,
-        invocation_id=uuid.uuid4().hex,
+        invocation_id=invocation_id,
     )
 
 
-def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
+def _timeout_remaining(timeout: float, deadline: float | None) -> float:
+    """Return the remaining shared budget, or the original timeout.
+
+    Returns
+    -------
+    float
+        Remaining time before *deadline*, or *timeout* when no deadline exists.
+
+    Raises
+    ------
+    TimeoutError
+        If the shared deadline has expired.
+    """
+    if deadline is None:
+        return timeout
+    try:
+        return _remaining_time(deadline)
+    except TimeoutError:
+        msg = "IPC operation timed out"
+        raise TimeoutError(msg) from None
+
+
+def _execute_invocation(
+    invocation: Invocation, timeout: float, *, deadline: float | None = None
+) -> Response:
     """Execute an invocation via IPC, handling passthrough if needed.
 
     Parameters
@@ -185,34 +283,63 @@ def _execute_invocation(invocation: Invocation, timeout: float) -> Response:
         Invocation to send to the IPC server.
     timeout : float
         IPC timeout in seconds.
+    deadline : float or None, optional
+        Shared monotonic deadline for the request and any passthrough report.
 
     Returns
     -------
     Response
         Response returned by the server or passthrough command.
     """
+    failure = _ShimFailureContext(
+        _SHIM_IPC_REQUEST_OPERATION,
+        "deadline_expired",
+        time.perf_counter(),
+        invocation.invocation_id,
+    )
     try:
-        response = invoke_server(invocation, timeout=timeout)
+        response = invoke_server(
+            invocation,
+            timeout=_dispatch_timeout(timeout, deadline, failure),
+            deadline=deadline,
+        )
     except (
         OSError,
         RuntimeError,
         json.JSONDecodeError,
     ) as exc:  # pragma: no cover - network issues
-        print(f"IPC error: {exc}", file=sys.stderr)
-        sys.exit(1)
+        _exit_ipc_error(exc)
 
     if response.passthrough is not None:
-        response = _handle_passthrough(invocation, response, timeout)
+        response = _handle_passthrough(invocation, response, timeout, deadline=deadline)
     return response
 
 
-def _write_response(response: Response) -> None:
+def _write_response(response: Response, *, correlation_id: str | None = None) -> None:
     """Write response to stdout/stderr and update environment if needed."""
     if response.env:
         os.environ |= response.env
 
-    sys.stdout.write(response.stdout)
-    sys.stderr.write(response.stderr)
+    write_failures = [
+        failure
+        for stream_name, text in (
+            ("stdout", response.stdout),
+            ("stderr", response.stderr),
+        )
+        if (
+            failure := _write_response_stream(
+                stream_name, text, correlation_id=correlation_id
+            )
+        )
+        is not None
+    ]
+    if write_failures:
+        operation, exc = write_failures[0]
+        _exit_ipc_error(
+            exc,
+            exit_code=response.exit_code or 1,
+            operation=operation,
+        )
     sys.exit(response.exit_code)
 
 
@@ -221,13 +348,43 @@ def main() -> None:
     bootstrap_shim_path()
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
-    invocation = _create_invocation(cmd_name)
-    response = _execute_invocation(invocation, timeout)
-    _write_response(response)
+    deadline = None if path_utils.IS_WINDOWS else time.monotonic() + timeout
+    invocation = _create_invocation(cmd_name, timeout, deadline=deadline)
+    response = _execute_invocation(invocation, timeout, deadline=deadline)
+    _write_response(response, correlation_id=invocation.invocation_id)
+
+
+def _dispatch_timeout(
+    timeout: float,
+    deadline: float | None,
+    failure: _ShimFailureContext,
+) -> float:
+    """Check the shared budget and record expiry before client dispatch.
+
+    Returns
+    -------
+    float
+        The remaining budget under the original shared deadline.
+
+    Raises
+    ------
+    TimeoutError
+        When the shared deadline expires before a client request can start.
+    """
+    try:
+        return _timeout_remaining(timeout, deadline)
+    except TimeoutError as exc:
+        # The client cannot record failures that occur before dispatch.
+        _emit_shim_failure(failure, exc)
+        raise
 
 
 def _handle_passthrough(
-    invocation: Invocation, response: Response, timeout: float
+    invocation: Invocation,
+    response: Response,
+    timeout: float,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Execute the real command and report its outcome to the server.
 
@@ -239,6 +396,8 @@ def _handle_passthrough(
         Server response containing the passthrough directive.
     timeout : float
         IPC timeout in seconds.
+    deadline : float or None, optional
+        Shared monotonic deadline for the passthrough report.
 
     Returns
     -------
@@ -249,6 +408,12 @@ def _handle_passthrough(
     if directive is None:  # pragma: no cover - defensive guard
         return response
 
+    failure = _ShimFailureContext(
+        _SHIM_PASSTHROUGH_REPORT_OPERATION,
+        "deadline_expired",
+        time.perf_counter(),
+        invocation.invocation_id,
+    )
     result_response = _run_real_command(invocation, directive)
     passthrough_result = PassthroughResult(
         invocation_id=directive.invocation_id,
@@ -256,7 +421,25 @@ def _handle_passthrough(
         stderr=result_response.stderr,
         exit_code=result_response.exit_code,
     )
-    return report_passthrough_result(passthrough_result, timeout=timeout)
+    try:
+        return report_passthrough_result(
+            passthrough_result,
+            timeout=_dispatch_timeout(timeout, deadline, failure),
+            deadline=deadline,
+        )
+    except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+        for stream_name, text in (
+            ("stdout", result_response.stdout),
+            ("stderr", result_response.stderr),
+        ):
+            _write_response_stream(
+                stream_name, text, correlation_id=invocation.invocation_id
+            )
+        _exit_ipc_error(
+            exc,
+            exit_code=result_response.exit_code or 1,
+            operation="passthrough_report",
+        )
 
 
 def _shim_directory_from_env() -> Path | None:
