@@ -540,7 +540,9 @@ assert len(fixture.recordings) == 1
 Fixture files use the numeric semantic-version core `MAJOR.MINOR.PATCH` in the
 `version` field. CmdMox parses it into a `(major, minor, patch)` tuple. Legacy
 two-component values such as `1.0` remain accepted with an implicit patch of
-zero and are normalized to `1.0.0`.
+zero and are normalized to `1.0.0`. This compatibility is one-way: older CmdMox
+releases that require exactly two components cannot read fixtures written with
+a three-component version.
 
 CmdMox automatically migrates older fixture files to the current schema when
 loading via `FixtureFile.load()` or `FixtureFile.from_dict()`. Minor and patch

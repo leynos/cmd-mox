@@ -3243,6 +3243,10 @@ components when loaded.
 
 **Compatibility:** Tolerate minor and patch differences within the same major
 version. Reject a higher major version when no migration path is registered.
+Compatibility with older readers is one-way: this version loads legacy
+two-component fixture versions and writes three-component versions, while older
+releases that require exactly two components cannot read fixtures written by
+this version.
 
 **Rationale:** Three components match the semantic-version core used by the
 fixture schema while preserving compatibility with existing two-component
@@ -3255,7 +3259,9 @@ fixtures.
 Fixture schema versions use the numeric `MAJOR.MINOR.PATCH` semantic-version
 core, such as `1.0.0`. CmdMox parses the field into a three-integer tuple.
 Legacy two-component versions such as `1.0` are accepted with an implicit patch
-of zero and normalized to `1.0.0` when loaded.
+of zero and normalized to `1.0.0` when loaded. This compatibility is one-way:
+older CmdMox releases that require exactly two components cannot read fixtures
+written with a three-component version.
 
 - Breaking changes increment the major version
 - New optional fields increment the minor version
