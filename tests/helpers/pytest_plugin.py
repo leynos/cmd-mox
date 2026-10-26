@@ -28,6 +28,8 @@ class ParallelRecord:
     shim_dir: Path
     socket: Path
     worker: str
+    cwd: Path
+    package_origin: Path
 
 
 def read_parallel_records(artifact_dir: Path) -> list[ParallelRecord]:
@@ -47,6 +49,8 @@ def read_parallel_records(artifact_dir: Path) -> list[ParallelRecord]:
                 shim_dir=Path(payload["shim_dir"]),
                 socket=Path(payload["socket"]),
                 worker=payload["worker"],
+                cwd=Path(payload["cwd"]),
+                package_origin=Path(payload["package_origin"]),
             )
         )
     return records
