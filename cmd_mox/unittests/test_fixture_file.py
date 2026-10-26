@@ -222,10 +222,11 @@ class TestFixtureFile:
         loaded = FixtureFile.load(nested_path)
         assert loaded.version == "1.0.0"
 
-    def test_from_dict_migrates_old_version(self) -> None:
-        """from_dict() migrates a 0.9.0 fixture to 1.0.0."""
+    @pytest.mark.parametrize("fixture_version", ["0.9", "0.9.0"])
+    def test_from_dict_migrates_old_version(self, fixture_version: str) -> None:
+        """from_dict() migrates legacy fixtures to 1.0.0."""
         data = _sample_fixture().to_dict()
-        data["version"] = "0.9.0"
+        data["version"] = fixture_version
         result = FixtureFile.from_dict(data)
 
         _assert_normalized_to_v1(result)
