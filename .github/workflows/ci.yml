@@ -184,6 +184,8 @@ jobs:
         with:
           output-path: coverage.xml
           format: cobertura
+          # Track the installed package, not test harness or release tooling.
+          python-source: cmd_mox
           # The suite currently runs serially (the previous slipcover step
           # used pytest-forked without xdist); keep it serial to stay
           # behaviour-preserving. Follow-up 4 removes this pin to adopt
