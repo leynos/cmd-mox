@@ -51,6 +51,12 @@ runs:
           echo "::error::Expected exactly one sdist and at least one wheel in ${BUILD_DIR}; found ${#sdists[@]} sdist(s) and ${#wheels[@]} wheel(s)." >&2
           exit 1
         fi
+        for wheel in "${wheels[@]}"; do
+          if [[ "${wheel##*/}" != *-py3-none-any.whl ]]; then
+            echo "::error::Pure-Python wheels must use the py3-none-any tag: ${wheel##*/}." >&2
+            exit 1
+          fi
+        done
         printf 'build-dir=%s\n' "${BUILD_DIR}" >> "${GITHUB_OUTPUT}"
     - name: Upload sdist and wheel artefact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

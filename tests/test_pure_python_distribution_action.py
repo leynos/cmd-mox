@@ -1,4 +1,9 @@
-"""Behavioural checks for the pure-Python sdist and wheel action."""
+"""Behavioural checks for the pure-Python sdist and wheel action.
+
+Run these checks with ``make test`` or
+``python -m pytest -q tests/test_pure_python_distribution_action.py``. They
+execute the checked-in Bash step with a temporary fake ``uv`` command.
+"""
 
 from __future__ import annotations
 
@@ -31,20 +36,18 @@ mkdir -p "$3"
 if [ "$FAKE_SDIST" = 1 ]; then
   : > "$3/cmd_mox-0.2.0.tar.gz"
 fi
-: > "$3/cmd_mox-0.2.0-py3-none-any.whl"
+: > "$3/$FAKE_WHEEL"
 """
+_PURE_WHEEL_NAME = "cmd_mox-0.2.0-py3-none-any.whl"
 
 
 def _run_build_step(
-    tmp_path: Path, *, has_sdist: bool
+    tmp_path: Path,
+    *,
+    has_sdist: bool,
+    wheel_name: str = _PURE_WHEEL_NAME,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
-    """Run the build script with a recording uv stub.
-
-    Returns
-    -------
-    tuple[subprocess.CompletedProcess[str], Path, Path, Path]
-        The process result, output directory, GitHub output file and stale sdist.
-    """
+    """Run the build script with a recording uv stub."""  # ruff: ignore[docstring-missing-returns] - the private helper's tuple is explicit in its annotation.
     script, _ = load_action_build_step()
     output_dir = tmp_path / "dist"
     output_dir.mkdir()
@@ -60,6 +63,7 @@ def _run_build_step(
         cwd=tmp_path,
         env={
             "FAKE_SDIST": "1" if has_sdist else "0",
+            "FAKE_WHEEL": wheel_name,
             "GITHUB_OUTPUT": str(github_output),
             "OUT_DIR": "dist",
             "PATH": f"{fake_bin}:/usr/bin:/bin",
@@ -99,3 +103,18 @@ def test_build_action_fails_when_current_build_has_no_sdist(tmp_path: Path) -> N
         "the failure must identify the invalid sdist inventory"
     )
     assert not github_output.exists(), "a failed build must not report upload files"
+
+
+def test_build_action_rejects_platform_specific_wheels(tmp_path: Path) -> None:
+    """The pure-Python action rejects a platform wheel before upload."""
+    result, _, github_output, _ = _run_build_step(
+        tmp_path,
+        has_sdist=True,
+        wheel_name="cmd_mox-0.2.0-cp312-cp312-manylinux_x86_64.whl",
+    )
+
+    assert result.returncode == 1, "platform-specific wheels must fail the build"
+    assert "must use the py3-none-any tag" in result.stderr, (
+        "the failure must explain the accepted wheel tag"
+    )
+    assert not github_output.exists(), "a rejected wheel must not be reported"

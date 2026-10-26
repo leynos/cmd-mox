@@ -1,4 +1,10 @@
-"""Helpers for exercising the checked-in release shell steps."""
+"""Shared helpers for checked-in release workflow tests.
+
+Call ``load_action_build_step`` to read the script and environment from the
+composite action, then pass them to ``run_bash_step`` with a scratch directory
+and controlled environment. Use ``write_executable`` to install fake tools on
+that environment's ``PATH``.
+"""
 
 from __future__ import annotations
 
@@ -38,6 +44,15 @@ def run_bash_step(
 ) -> subprocess.CompletedProcess[str]:
     """Run a shell step in a scratch directory with a controlled environment.
 
+    Parameters
+    ----------
+    script : str
+        Bash script extracted from a checked-in workflow or action.
+    cwd : pathlib.Path
+        Scratch working directory for the command.
+    env : dict[str, str]
+        The complete environment passed to Bash and its child processes.
+
     Returns
     -------
     subprocess.CompletedProcess[str]
@@ -56,6 +71,14 @@ def run_bash_step(
 
 
 def write_executable(path: Path, contents: str) -> None:
-    """Write a shell stub and mark it executable."""
+    """Write a shell stub and mark it executable.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Location of the executable stub.
+    contents : str
+        Script text, including its interpreter shebang.
+    """
     path.write_text(contents, encoding="utf-8")
     path.chmod(0o755)
