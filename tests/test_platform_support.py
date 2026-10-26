@@ -8,8 +8,12 @@ import pytest
 
 from cmd_mox import platform
 
+pytest_plugins = ("pytester",)
+
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for type hints
-    from _pytest.pytester import Pytester
+    import collections.abc as cabc
+
+    from _pytest.pytester import Pytester, RunResult
 
 
 def test_is_supported_true_for_windows() -> None:
@@ -101,7 +105,9 @@ def test_skip_if_unsupported_ignores_reason_on_supported_platform() -> None:
 
 
 def test_cmd_mox_fixture_auto_skips_on_unsupported_platform(
-    pytester: Pytester, monkeypatch: pytest.MonkeyPatch
+    pytester: Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    run_nested_pytester: cabc.Callable[..., RunResult],
 ) -> None:
     """The pytest fixture should skip automatically when support is absent."""
     monkeypatch.setattr(platform, "_UNSUPPORTED_PLATFORMS", (("win", "blocked"),))
@@ -115,6 +121,64 @@ def test_cmd_mox_fixture_auto_skips_on_unsupported_platform(
         """
     )
 
-    result = pytester.runpytest(str(test_file), "-rs")
-    result.assert_outcomes(skipped=1)
+    result = run_nested_pytester("-rs", test_path=test_file)
+    result.assert_outcomes(passed=0, skipped=1, errors=0, failed=0)
     result.stdout.fnmatch_lines(["*blocked*"])
+    for output in (result.stdout, result.stderr):
+        output.no_fnmatch_line("*FileNotFoundError*")
+        output.no_fnmatch_line("*ERROR at setup*")
+
+
+@pytest.mark.requires_unix_sockets
+def test_cmd_mox_fixture_runs_on_supported_platform(
+    pytester: Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+) -> None:
+    """The fixture performs native IPC when its platform is supported."""
+    monkeypatch.setattr(platform, "_UNSUPPORTED_PLATFORMS", (("win", "blocked"),))
+    monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, "linux")
+    test_file = pytester.makepyfile(
+        """
+        import os
+        import subprocess
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def test_supported(cmd_mox):
+            cmd_mox.stub("hello").returns(stdout="works")
+            shim_dir = cmd_mox.environment.shim_dir
+            assert shim_dir is not None
+            shim_name = "hello.cmd" if os.name == "nt" else "hello"
+            result = subprocess.run(
+                [str(shim_dir / shim_name)],
+                capture_output=True,
+                check=True,
+                text=True,
+            )
+            assert result.stdout.strip() == "works"
+        """
+    )
+
+    result = run_nested_pytester(test_path=test_file)
+    result.assert_outcomes(passed=1, skipped=0, errors=0, failed=0)
+
+
+def test_nested_pytester_anchors_cwd_and_configuration(
+    pytester: Pytester,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+) -> None:
+    """Nested runs use the invocation package root and pytester's ini file."""
+    expected_ini = pytester.path / "tox.ini"
+    test_file = pytester.makepyfile(
+        f"""
+        from pathlib import Path
+
+        def test_nested_roots(request):
+            assert Path("cmd_mox").is_dir()
+            assert request.config.inipath == Path({str(expected_ini)!r})
+        """
+    )
+
+    result = run_nested_pytester(test_path=test_file)
+    result.assert_outcomes(passed=1, errors=0)

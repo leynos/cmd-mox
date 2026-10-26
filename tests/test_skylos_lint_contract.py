@@ -526,10 +526,13 @@ class TestSkylosLintContract:
             "whitelist update."
         )
 
+    # mutmut 3.6 reuses test modules across two pytest.main() calls; keeping
+    # these Hypothesis cases unbound avoids retaining one TestCase executor.
+    @staticmethod
     @hyp.settings(max_examples=25, deadline=None)
     @hyp.given(value=st.text(alphabet=" \t", max_size=8))
     def test_skylos_allow_rejects_missing_or_whitespace_values(
-        self, value: str
+        value: str,
     ) -> None:
         """The whitelist target must reject absent and whitespace-only inputs."""
         for arguments, missing_name in (
@@ -548,11 +551,12 @@ class TestSkylosLintContract:
                 in completed.stderr
             ), f"Skylos whitelist boundary must name the missing {missing_name}."
 
+    @staticmethod
     @hyp.settings(max_examples=25, deadline=None)
     @hyp.example(symbol="$(handler);*", reason='Loaded "$plugin" | registry')
     @hyp.given(symbol=_SHELL_ARGUMENT_TEXT, reason=_SHELL_ARGUMENT_TEXT)
     def test_skylos_allow_forwards_generated_argument_boundaries(
-        self, symbol: str, reason: str
+        symbol: str, reason: str
     ) -> None:
         """Every non-empty generated value must reach Skylos as one argument."""
         with TemporaryDirectory() as temporary_directory:

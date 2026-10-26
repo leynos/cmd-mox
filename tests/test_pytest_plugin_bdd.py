@@ -10,9 +10,12 @@ from pathlib import Path
 import pytest
 from pytest_bdd import given, scenario, then, when
 
+import cmd_mox as cmd_mox_package
 from tests.helpers.pytest_plugin import load_parallel_suite, read_parallel_records
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used for type checking only
+    import collections.abc as cabc
+
     from _pytest.pytester import Pytester, RunResult
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
@@ -131,7 +134,10 @@ def create_manual_replay_test_file(pytester: Pytester) -> Path:
 
 
 @when("I run pytest on the file", target_fixture="result")
-def run_pytest(pytester: Pytester, test_file: Path) -> RunResult:
+def run_pytest(
+    test_file: Path,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+) -> RunResult:
     """Run the inner pytest instance.
 
     Returns
@@ -139,7 +145,7 @@ def run_pytest(pytester: Pytester, test_file: Path) -> RunResult:
     RunResult
         The result of the inner pytest run.
     """
-    return pytester.runpytest(str(test_file))
+    return run_nested_pytester(test_path=test_file)
 
 
 @then("the run should pass")
@@ -187,7 +193,10 @@ def create_parallel_suite(
 
 
 @when("I run pytest with 2 workers", target_fixture="parallel_result")
-def run_pytest_parallel(pytester: Pytester, parallel_suite: ParallelSuite) -> RunResult:
+def run_pytest_parallel(
+    parallel_suite: ParallelSuite,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+) -> RunResult:
     """Execute the generated suite with pytest-xdist.
 
     Returns
@@ -195,12 +204,18 @@ def run_pytest_parallel(pytester: Pytester, parallel_suite: ParallelSuite) -> Ru
     RunResult
         The result of the parallel pytest run.
     """
-    return pytester.runpytest("-n2", "-s", str(parallel_suite.test_file))
+    return run_nested_pytester(
+        "-n2",
+        "-s",
+        test_path=parallel_suite.test_file,
+    )
 
 
 @then("each worker should use isolated shim directories and sockets")
 def assert_parallel_isolation(
-    parallel_suite: ParallelSuite, parallel_result: RunResult
+    parallel_suite: ParallelSuite,
+    parallel_result: RunResult,
+    request: pytest.FixtureRequest,
 ) -> None:
     """Assert that shim directories and sockets are unique per worker."""
     parallel_result.assert_outcomes(passed=2)
@@ -216,7 +231,11 @@ def assert_parallel_isolation(
     assert len(sockets) == len(records), "Assertion failed"
     assert len(workers) == len(records), "Assertion failed"
 
+    expected_cwd = Path(request.config.invocation_params.dir).resolve()
+    expected_package_origin = Path(cmd_mox_package.__file__).resolve()
     for record in records:
+        assert record.cwd == expected_cwd, "Assertion failed"
+        assert record.package_origin == expected_package_origin, "Assertion failed"
         assert record.socket.parent == record.shim_dir, "Assertion failed"
         assert not record.shim_dir.exists(), "Assertion failed"
         assert not record.socket.exists(), "Assertion failed"
