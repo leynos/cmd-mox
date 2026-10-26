@@ -24,6 +24,7 @@ from helpers.release_workflow import (
     load_workflow_step,
     read_tool_calls,
     run_bash_step,
+    should_skip_release_tests_for_mutation_sandbox,
 )
 
 from scripts import release_assets, release_version
@@ -33,8 +34,10 @@ _RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
 _FETCH_INDEX_SCRIPT = _REPOSITORY_ROOT / "scripts" / "fetch_pypi_index.sh"
 pytestmark = [
     pytest.mark.skipif(
-        not (RELEASE_WORKFLOW_PATH.is_file() and _RELEASE_ASSETS_CLI.is_file()),
-        reason="release workflow or release-assets CLI is absent",
+        should_skip_release_tests_for_mutation_sandbox(
+            Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
+        ),
+        reason="mutmut sandbox omits the release workflow and CLI",
     ),
     pytest.mark.skipif(
         os.name == "nt" or shutil.which("bash") is None,

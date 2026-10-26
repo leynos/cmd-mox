@@ -18,6 +18,7 @@ from helpers.release_workflow import (
     Workflow,
     WorkflowJob,
     WorkflowStep,
+    should_skip_release_tests_for_mutation_sandbox,
     workflow_triggers,
 )
 
@@ -27,10 +28,11 @@ _CI_WORKFLOW = _REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
 _BUILD_ACTION = (
     _REPOSITORY_ROOT / ".github" / "actions" / "pure-python-wheel" / "action.yml"
 )
-_RELEASE_TESTS_AVAILABLE = RELEASE_WORKFLOW_PATH.is_file() and _ASSETS_CLI.is_file()
 pytestmark = pytest.mark.skipif(
-    not _RELEASE_TESTS_AVAILABLE,
-    reason="release workflow or release-assets CLI is absent in this working copy",
+    should_skip_release_tests_for_mutation_sandbox(
+        Path.cwd(), RELEASE_WORKFLOW_PATH, _ASSETS_CLI
+    ),
+    reason="mutmut sandbox omits the release workflow and CLI",
 )
 
 _EXPECTED_PERMISSIONS = {
@@ -139,6 +141,31 @@ def test_release_trigger_concurrency_and_top_level_permissions() -> None:
         "group": "release-${{ github.ref }}",
         "cancel-in-progress": False,
     }, "a repeated tag must queue behind the active upload"
+
+
+def test_release_tests_skip_missing_files_only_in_mutation_sandbox(
+    tmp_path: Path,
+) -> None:
+    """Only mutmut's intentionally sparse checkout may omit release files."""
+    workflow = tmp_path / ".github" / "workflows" / "release.yml"
+    cli = tmp_path / "scripts" / "release_assets_cli.py"
+    mutation_root = tmp_path / "mutants"
+    checkout_root = tmp_path / "checkout"
+
+    assert should_skip_release_tests_for_mutation_sandbox(
+        mutation_root, workflow, cli
+    ), "release tests must skip when mutmut omits workflow and CLI files"
+    assert not should_skip_release_tests_for_mutation_sandbox(
+        checkout_root, workflow, cli
+    ), "a normal checkout must fail rather than skip when release files are missing"
+
+    workflow.parent.mkdir(parents=True)
+    cli.parent.mkdir(parents=True)
+    workflow.touch()
+    cli.touch()
+    assert not should_skip_release_tests_for_mutation_sandbox(
+        mutation_root, workflow, cli
+    ), "present release files must keep mutation-sandbox checks active"
 
 
 def test_release_jobs_have_exact_permissions_and_dependencies() -> None:

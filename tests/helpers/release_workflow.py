@@ -81,6 +81,30 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 RELEASE_WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
 
 
+def should_skip_release_tests_for_mutation_sandbox(
+    working_root: Path, workflow_path: Path, cli_path: Path
+) -> bool:
+    """Skip release-step tests only in mutmut's sparse working copy.
+
+    Parameters
+    ----------
+    working_root : pathlib.Path
+        The current pytest working root.
+    workflow_path : pathlib.Path
+        The checked-in release workflow path for this copy.
+    cli_path : pathlib.Path
+        The release-assets CLI path for this copy.
+
+    Returns
+    -------
+    bool
+        Whether the mutmut sandbox omits either required release file.
+    """
+    return working_root.name == "mutants" and not (
+        workflow_path.is_file() and cli_path.is_file()
+    )
+
+
 def load_workflow() -> Workflow:
     """Parse the release workflow with PyYAML's YAML 1.1 key compatibility.
 
