@@ -753,6 +753,16 @@ disables the general Pylint catalogue, and enables the complete DF12 checker
 list explicitly. This keeps the DF12 policy auditable and independent of the
 temporary PyPy Pylint baseline.
 
+The enforced module ceiling is the DF12 tier's 800 lines, not the 400 that
+`[tool.pylint.main]` sets: `Makefile` disables `too-many-lines` for the classic
+pass. Note also that `cmd_mox/unittests/` and `tests/` carry no `__init__.py`,
+so Pylint's recursive walk from a directory target never descends into them;
+`too-many-lines` and the other design rules apply to test modules only when a
+gate names the file directly. `make lint` therefore does not catch an oversized
+test module, which is why review remains the check for this limit. Keep test
+modules split by strategy so the ceiling is satisfied when a named-file run
+does happen.
+
 ### Skylos tables
 
 - `[tool.skylos.gate]` enables strict failure for unexplained dead-code
