@@ -18,6 +18,11 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for type hints
 
     from _pytest.pytester import Pytester, RunResult
 
+    class MutmutConfig(typ.Protocol):
+        """Expose the source paths used by mutmut's cached config."""
+
+        source_paths: list[Path]
+
 
 def test_is_supported_true_for_windows() -> None:
     """Windows is now considered a supported platform."""
@@ -233,4 +238,63 @@ def test_nested_pytester_temporarily_anchors_mutmut_source_paths(
     result.assert_outcomes(passed=1, errors=0)
     assert mutmut_config.source_paths == original_source_paths, (
         "mutmut source paths should be restored after the nested run"
+    )
+
+
+@pytest.fixture(scope="module")
+def relative_mutmut_source_paths() -> cabc.Iterator[MutmutConfig]:
+    """Expose relative mutmut paths before a test's autouse fixtures run.
+
+    Yields
+    ------
+    MutmutConfig
+        The cached configuration with a relative package source path.
+    """
+    module_name = "mutmut.configuration"
+    original_module = sys.modules.get(module_name)
+    config_factory = (
+        None if original_module is None else vars(original_module).get("Config")
+    )
+    is_fake_module = config_factory is None
+
+    if is_fake_module:
+        mutmut_config = types.SimpleNamespace(source_paths=[Path("cmd_mox")])
+        configuration_module = types.ModuleType(module_name)
+        configuration_module.__dict__["Config"] = types.SimpleNamespace(
+            get=lambda: mutmut_config
+        )
+        sys.modules[module_name] = configuration_module
+        original_source_paths = None
+    else:
+        mutmut_config = config_factory.get()
+        original_source_paths = mutmut_config.source_paths
+        mutmut_config.source_paths = [Path("cmd_mox")]
+
+    try:
+        yield mutmut_config
+    finally:
+        if original_source_paths is not None:
+            mutmut_config.source_paths = original_source_paths
+        if is_fake_module:
+            if original_module is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = original_module
+
+
+def test_mutmut_source_paths_stay_anchored_when_test_changes_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    relative_mutmut_source_paths: MutmutConfig,
+) -> None:
+    """Keep mutmut source paths valid through test-local cwd changes."""
+    expected_source_paths = [Path(__file__).resolve().parent.parent / "cmd_mox"]
+    assert relative_mutmut_source_paths.source_paths == expected_source_paths, (
+        "mutmut source paths should be absolute during each test"
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    assert relative_mutmut_source_paths.source_paths == expected_source_paths, (
+        "changing cwd must not make mutmut source paths point into tmp_path"
     )
