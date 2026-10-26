@@ -10,10 +10,11 @@ an active `EnvironmentManager`. Capture of non-terminal stdin is bounded on
 every platform and for every kind of stream: once the deadline passes, the shim
 discards partial input, does not contact the IPC server, prints
 `IPC error: stdin read timed out after <timeout> seconds`, and exits with status
-`1`. On POSIX, the same deadline then covers the Unix IPC exchange through
-passthrough reporting. On Windows, stdin has a separate capture deadline while
-named-pipe communication uses its existing cooperative timeout, so the POSIX
-shared-deadline guarantee does not apply there.
+`1`. On POSIX, the Unix IPC exchange through passthrough reporting then runs
+against a separate deadline anchored where the shim starts, so a slow capture
+leaves it correspondingly less time. On Windows, stdin has a separate capture
+deadline while named-pipe communication uses its existing cooperative timeout,
+so the POSIX IPC deadline does not apply there.
 
 If a shim may inherit stdin that stays open, send EOF, close the pipe, or
 redirect stdin from a source that is already complete. The shim now stops

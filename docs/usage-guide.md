@@ -1083,14 +1083,16 @@ server.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
   exported automatically (default `5.0`). The value bounds stdin capture on
-  every platform: capture starts a fresh deadline, and reaching it ends the
+  every platform: capture starts its own deadline, and reaching it ends the
   shim with the `IPC error: stdin read timed out ...` diagnostic and status `1`
-  whatever the stream's kind. On POSIX, the same deadline then covers
-  connecting to the Unix socket, sending the request, receiving the response,
-  and reporting passthrough results, so stdin and IPC share one budget. On
-  Windows, stdin is bounded by its own capture deadline and named-pipe
-  communication keeps its existing cooperative timeout; the shared POSIX
-  deadline does not apply there.
+  whatever the stream's kind. On POSIX, the IPC exchange then runs against a
+  separate deadline anchored where the shim starts, covering connection to the
+  Unix socket, sending the request, receiving the response, and reporting
+  passthrough results. Because capture can consume the full timeout, stdin and
+  IPC are two bounds rather than one shared budget; a slow capture leaves the
+  IPC exchange correspondingly less time. On Windows, stdin is bounded by its
+  own capture deadline and named-pipe communication keeps its existing
+  cooperative timeout, so the POSIX IPC deadline does not apply there.
 
   A non-empty request that cannot be parsed or fails validation receives a
   bounded error response on stderr and exit status 1. An empty read, including

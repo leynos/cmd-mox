@@ -271,10 +271,11 @@ fake clock directly without replacing the process-wide time function.
 
 ## IPC deadlines and stdin reads
 
-On POSIX, the shim carries one monotonic deadline through Unix socket
-connection retries, request sending, response reads, and passthrough reporting.
-Stdin capture is bounded by the same configured timeout, from its own capture
-start; see the strategies below. The client stores the deadline in
+On POSIX, the shim anchors one monotonic deadline in `main()` and carries it
+through Unix socket connection retries, request sending, response reads, and
+passthrough reporting. Stdin capture is bounded by the same configured timeout
+but from its own capture start, so the two are separate bounds that can
+overlap; see the strategies below. The client stores the deadline in
 `_ConnectionContext` and applies only the remaining time before each blocking
 socket operation. The Unix server also keeps one read deadline per accepted
 connection and updates the socket timeout before each receive, so a client that

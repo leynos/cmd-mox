@@ -709,6 +709,8 @@ features that are infeasible with file-based logging.
   | Windows, resolvable handle               | `ReadFile` on a daemon worker                         | `CancelSynchronousIo` aborts the blocked call; the worker is joined within a grace period. |
   | Any host, no usable descriptor or handle | Tracked daemon worker running the stream's `read()`   | Abandoned at the deadline and registered as outstanding.                                   |
 
+  _Table: Bounded stdin capture strategies by host and stream kind._
+
   A strategy that cannot be interrupted leaves a worker blocked in the stream's
   own read. Only the stream's owner can end it, by closing the stream or
   reaching EOF, so the shim's script entry point is the final cancellation
