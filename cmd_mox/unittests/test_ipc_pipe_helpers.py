@@ -23,6 +23,11 @@ from cmd_mox.ipc.windows import (
     _read_pipe_chunk,
     read_pipe_message,
 )
+from cmd_mox.unittests._named_pipe_fakes import (
+    FakeNamedPipeBackend,
+    FakeWin32File,
+    FakeWinError,
+)
 
 
 class _UnusedError(Exception):
@@ -114,7 +119,6 @@ def test_named_pipe_handler_uses_shared_helpers(
 ) -> None:
     """Server handler delegates to read/write helpers for pipe I/O."""
     writes: list[bytes] = []
-    closes: list[object] = []
     read_calls: list[object] = []
     handle = object()
 
@@ -137,38 +141,24 @@ def test_named_pipe_handler_uses_shared_helpers(
         assert transport == "named_pipe"
         return _RequestResult(response_bytes=b"processed", correlation_id=None)
 
-    class _FakeWin32File:
-        def CloseHandle(self, h: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
-            closes.append(h)
-
-    class _FakeWin32Pipe:
-        @staticmethod
-        def DisconnectNamedPipe(_handle: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
-            return None
-
-    class _FakePyWinTypes:
-        error = type("Err", (Exception,), {})
-
-    dummy_outer = object()
+    file_fake = FakeWin32File()
     state = _NamedPipeState(
         pipe_name="pipe",
-        outer=dummy_outer,  # type: ignore[arg-type, ty:invalid-argument-type]
+        outer=object(),  # type: ignore[arg-type, ty:invalid-argument-type]
         accept_timeout=0.1,
+        backend=FakeNamedPipeBackend(win32file=file_fake),
     )
     state._client_threads.add(threading.current_thread())
 
     monkeypatch.setattr("cmd_mox.ipc.named_pipe.read_pipe_message", fake_read)
     monkeypatch.setattr("cmd_mox.ipc.named_pipe.write_pipe_payload", fake_write)
     monkeypatch.setattr("cmd_mox.ipc.named_pipe._request_pipeline", fake_process)
-    monkeypatch.setattr("cmd_mox.ipc.named_pipe.win32file", _FakeWin32File())
-    monkeypatch.setattr("cmd_mox.ipc.named_pipe.win32pipe", _FakeWin32Pipe())
-    monkeypatch.setattr("cmd_mox.ipc.named_pipe.pywintypes", _FakePyWinTypes())
 
     state._handle_client(handle)
 
     assert read_calls == [handle]
     assert writes == [b"processed"]
-    assert closes == [handle]
+    assert file_fake.closed == [handle], "the client handle was not closed"
 
 
 def test_named_pipe_server_signals_ready_when_accept_creation_fails(
@@ -176,24 +166,18 @@ def test_named_pipe_server_signals_ready_when_accept_creation_fails(
 ) -> None:
     """Pipe creation failures should signal readiness and stop accepting clients."""
 
-    class _FakePipeError(Exception):
-        pass
-
     def fail_pipe_creation() -> object:
-        msg = "pipe creation failed"
-        raise _FakePipeError(msg)
+        raise FakeWinError(ERROR_BROKEN_PIPE)
 
+    backend = FakeNamedPipeBackend()
     state = _NamedPipeState(
         pipe_name="pipe",
         outer=object(),  # type: ignore[arg-type, ty:invalid-argument-type]
         accept_timeout=0.1,
+        backend=backend,
     )
     caplog.set_level("ERROR", logger="cmd_mox.ipc.named_pipe")
     monkeypatch.setattr("cmd_mox.ipc.named_pipe.path_utils.IS_WINDOWS", True)
-    monkeypatch.setattr(
-        "cmd_mox.ipc.named_pipe.pywintypes",
-        types.SimpleNamespace(error=_FakePipeError),
-    )
     monkeypatch.setattr(state, "_create_pipe_instance", fail_pipe_creation)
 
     state.serve_forever()

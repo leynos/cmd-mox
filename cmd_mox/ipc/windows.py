@@ -142,6 +142,316 @@ PyWinTypesProtocol = _PyWinTypes
 PyWinErrorProtocol = _PyWinError
 
 
+@dc.dataclass(frozen=True, slots=True)
+class NamedPipeCreateSpec:
+    """The arguments one ``CreateNamedPipe`` instance needs.
+
+    ``win32pipe.CreateNamedPipe`` takes eight positional arguments, which is
+    more than a call site can pass without the reader having to hold the
+    Win32 signature in their head. Grouping them into a value object keeps the
+    port signature small and lets a test name the field it cares about instead
+    of counting positions.
+
+    Attributes
+    ----------
+    name:
+        Fully qualified pipe name, usually from :func:`derive_pipe_name`.
+    open_mode:
+        Duplex access plus the overlapped-I/O flag.
+    pipe_mode:
+        Message-mode flags.
+    max_instances:
+        Upper bound on simultaneous instances.
+    out_buffer_size:
+        Size of the server-to-client buffer.
+    in_buffer_size:
+        Size of the client-to-server buffer.
+    default_timeout:
+        Default timeout in milliseconds for blocking pipe operations.
+    security_attributes:
+        Optional ``SECURITY_ATTRIBUTES``, or ``None`` for the default.
+    """
+
+    name: str
+    open_mode: int
+    pipe_mode: int
+    max_instances: int
+    out_buffer_size: int
+    in_buffer_size: int
+    default_timeout: int
+    security_attributes: object
+
+
+@dc.dataclass(frozen=True, slots=True)
+class PipeFileOpenSpec:
+    """The arguments one ``CreateFile`` call needs.
+
+    The transport uses ``CreateFile`` for a single purpose: opening the pipe
+    once so its accept loop wakes up. Naming the fields keeps that call site
+    readable and stops the seven-positional-argument shape of ``CreateFile``
+    from spreading through the port.
+
+    Attributes
+    ----------
+    file_name:
+        Path to the object being opened.
+    desired_access:
+        Requested access rights.
+    share_mode:
+        Sharing flags, usually ``0`` for an exclusive open.
+    security_attributes:
+        Optional ``SECURITY_ATTRIBUTES``, or ``None`` for the default.
+    creation_disposition:
+        Whether to create or open an existing object.
+    flags_and_attributes:
+        Additional file flags.
+    template_file:
+        Optional template handle, or ``None``.
+    """
+
+    file_name: str
+    desired_access: int
+    share_mode: int
+    security_attributes: object
+    creation_disposition: int
+    flags_and_attributes: int
+    template_file: object
+
+
+class NamedPipeBackend(typ.Protocol):
+    """Narrow port over the Win32 named-pipe operations the transport needs.
+
+    :class:`~cmd_mox.ipc.named_pipe._NamedPipeState` owns pipe lifecycle,
+    cancellation, and bounded reads, but it must not reach for ``pywin32``
+    module globals. This port is that seam: the Windows adapter implements it
+    over the real modules, and the transport tests implement it over
+    scriptable fakes.
+
+    Handles, buffers, and overlapped structures stay opaque ``object`` values.
+    They are created by this port and only ever passed back to it, so naming
+    the concrete Win32 types here would add coupling without adding safety.
+    """
+
+    #: ``win32file`` view used by the shared read/write helpers.
+    win32file: Win32FileProtocol
+    #: ``pywintypes`` view used by the shared read/write helpers.
+    pywintypes: PyWinTypesProtocol
+    #: Exception type raised by every failing Win32 call.
+    error: type[PyWinErrorProtocol]
+
+    #: ``win32event`` timeout sentinel meaning "wait forever".
+    INFINITE: int
+    #: ``win32event`` result reporting that the first handle was signalled.
+    WAIT_OBJECT_0: int
+    #: ``win32event`` result reporting that the wait timed out.
+    WAIT_TIMEOUT: int
+
+    #: ``win32pipe`` access mode granting both directions.
+    PIPE_ACCESS_DUPLEX: int
+    #: ``win32pipe`` mode delivering whole messages.
+    PIPE_TYPE_MESSAGE: int
+    #: ``win32pipe`` mode reading whole messages.
+    PIPE_READMODE_MESSAGE: int
+    #: ``win32pipe`` mode making blocking calls wait rather than fail.
+    PIPE_WAIT: int
+    #: ``win32pipe`` sentinel allowing an unbounded instance count.
+    PIPE_UNLIMITED_INSTANCES: int
+
+    #: ``win32file`` flag opening the pipe for overlapped I/O.
+    FILE_FLAG_OVERLAPPED: int
+    #: ``win32file`` access right granting reads.
+    GENERIC_READ: int
+    #: ``win32file`` access right granting writes.
+    GENERIC_WRITE: int
+    #: ``win32file`` creation disposition opening an existing object.
+    OPEN_EXISTING: int
+
+    def create_event(self) -> object:
+        """Create the unnamed, manual-reset event the transport waits on.
+
+        Returns
+        -------
+        object
+            The new event handle.
+        """
+        ...
+
+    def set_event(self, handle: object) -> None:
+        """Signal *handle* so every waiter wakes.
+
+        Parameters
+        ----------
+        handle:
+            The event handle to signal.
+        """
+        ...
+
+    def wait(self, handles: cabc.Sequence[object], timeout_ms: int) -> int:
+        """Wait until any of *handles* is signalled, or *timeout_ms* expires.
+
+        Parameters
+        ----------
+        handles:
+            The event handles to wait on.
+        timeout_ms:
+            Milliseconds to wait, or ``INFINITE`` to block until signalled.
+
+        Returns
+        -------
+        int
+            The Win32 wait result: ``WAIT_OBJECT_0`` plus the index of the
+            signalled handle, ``WAIT_TIMEOUT``, or another status.
+        """
+        ...
+
+    def create_overlapped(self) -> tuple[object, object]:
+        """Build an ``OVERLAPPED`` with a dedicated manual-reset event.
+
+        Returns
+        -------
+        tuple[object, object]
+            The overlapped structure and its event handle. The caller owns the
+            event and must close it.
+        """
+        ...
+
+    def get_overlapped_result(self, handle: object, overlapped: object) -> int:
+        """Wait for *overlapped* to complete and return the bytes transferred.
+
+        Parameters
+        ----------
+        handle:
+            The handle the overlapped operation was issued on.
+        overlapped:
+            The overlapped structure tracking that operation.
+
+        Returns
+        -------
+        int
+            The number of bytes the completed operation transferred.
+        """
+        ...
+
+    def cancel_io(self, handle: object, overlapped: object) -> None:
+        """Request cancellation of the operation *overlapped* describes.
+
+        Parameters
+        ----------
+        handle:
+            The handle the overlapped operation was issued on.
+        overlapped:
+            The overlapped structure identifying the operation to cancel.
+        """
+        ...
+
+    def create_named_pipe(self, spec: NamedPipeCreateSpec) -> object:
+        """Create one named-pipe instance described by *spec*.
+
+        Parameters
+        ----------
+        spec:
+            The creation arguments, already grouped as a value object so the
+            eight positional ``CreateNamedPipe`` arguments stay named.
+
+        Returns
+        -------
+        object
+            The new pipe instance handle.
+        """
+        ...
+
+    def connect_named_pipe(self, handle: object, overlapped: object) -> int:
+        """Start connecting *handle* to a client and report the initial status.
+
+        Parameters
+        ----------
+        handle:
+            The pipe instance awaiting a client.
+        overlapped:
+            The overlapped structure tracking the connection attempt.
+
+        Returns
+        -------
+        int
+            ``ERROR_IO_PENDING`` when the connect is asynchronous, otherwise
+            the status reported synchronously.
+        """
+        ...
+
+    def disconnect_named_pipe(self, handle: object) -> None:
+        """Disconnect *handle* from its client.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to detach.
+        """
+        ...
+
+    def read_file(
+        self, handle: object, buffer: cabc.Buffer, overlapped: object
+    ) -> tuple[int, cabc.Buffer]:
+        """Start an overlapped read and report the immediate status.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to read from.
+        buffer:
+            The writable buffer the kernel fills with the received bytes.
+        overlapped:
+            The overlapped structure tracking the read.
+
+        Returns
+        -------
+        tuple[int, cabc.Buffer]
+            The immediate status and the buffer filled by the read.
+        """
+        ...
+
+    def allocate_read_buffer(self, size: int) -> cabc.Buffer:
+        """Allocate a writable buffer of *size* bytes for an overlapped read.
+
+        Parameters
+        ----------
+        size:
+            Buffer capacity in bytes, normally one pipe chunk.
+
+        Returns
+        -------
+        collections.abc.Buffer
+            A zeroed buffer the kernel can write into.
+        """
+        ...
+
+    def create_file(self, spec: PipeFileOpenSpec) -> object:
+        """Open the pipe described by *spec*, used only to wake the accept loop.
+
+        Parameters
+        ----------
+        spec:
+            The open arguments, already grouped as a value object so the seven
+            positional ``CreateFile`` arguments stay named.
+
+        Returns
+        -------
+        object
+            The opened handle.
+        """
+        ...
+
+    def close_handle(self, handle: object) -> None:
+        """Release *handle*.
+
+        Parameters
+        ----------
+        handle:
+            The handle to release. Handles only ever come back to this port
+            from its own creation methods.
+        """
+        ...
+
+
 def derive_pipe_name(identifier: os.PathLike[str] | str) -> str:
     """Return a deterministic named pipe name for *identifier*.
 
@@ -312,8 +622,11 @@ __all__ = sorted([
     "ERROR_PIPE_BUSY",
     "ERROR_PIPE_CONNECTED",
     "MAX_MESSAGE_SIZE",
+    "NamedPipeBackend",
+    "NamedPipeCreateSpec",
     "PIPE_CHUNK_SIZE",
     "PipeChunkReader",
+    "PipeFileOpenSpec",
     "PipeMessageTooLargeError",
     "PipeReadOptions",
     "PyWinErrorProtocol",

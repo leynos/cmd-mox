@@ -362,6 +362,50 @@ therefore dereference the argument unconditionally: `CallbackIPCServer` calls
 A further callback-driven transport should subclass `_CallbackServerBase` with
 its backend type rather than restating the constructor signature.
 
+### Named-pipe backend selection
+
+The Windows transport reaches `pywin32` through an injected backend rather than
+through module globals of its own. `NamedPipeBackend`, in
+`cmd_mox/ipc/windows.py`, is the port: a `typing.Protocol` covering the pipe
+lifecycle, the event handles, the overlapped read path, synchronous file I/O,
+and handle closure. Handles, buffers, and overlapped structures stay opaque
+`object` values because they are created by the port and only ever passed back
+to it.
+
+The port also carries the Win32 constants the transport builds its calls from,
+and two module views: `win32file` and `pywintypes`. Those views exist because
+the shared `read_pipe_message` and `write_pipe_payload` helpers in `windows.py`
+perform synchronous I/O and match `pywintypes.error` themselves. The helpers
+take the views as `win32file=` and `pywintypes=` arguments and receive them from
+`.win32file` and `.pywintypes` on the active backend.
+
+Two frozen dataclasses keep long Win32 argument lists legible:
+`NamedPipeCreateSpec` for `CreateNamedPipe` and `PipeFileOpenSpec` for
+`CreateFile`. A port method takes the spec and unpacks it at the call, so
+adding a parameter does not lengthen a signature the transport has to thread
+through.
+
+`NamedPipeServer._create_backend` constructs `Win32NamedPipeBackend` and passes
+it as the keyword-only `backend` argument of `_NamedPipeState`. That is the
+injection point: the state never imports a `pywin32` module. The adapter, in
+`cmd_mox/ipc/_win32_named_pipe_backend.py`, binds the guarded module bindings
+onto the instance in `__init__` and forwards each port method to exactly one
+pywin32 call. Construction reads the bindings rather than the class body
+because they are `None` off Windows, where the module must still import.
+
+The import guard lives once for the package, in `cmd_mox/ipc/windows.py`. The
+adapter does not add a second one; it imports what that guard already produced.
+
+Tests inject `FakeNamedPipeBackend` from
+`cmd_mox/unittests/_named_pipe_fakes.py`, which lets the transport run on any
+platform without replacing `pywin32` module globals. The `fake_backend` fixture
+creates one and publishes it for `build_state`; `patch_win32` mutates that
+instance and still returns its `(file_fake, pipe_fake)` pair; and
+`windows_platform` redirects the construction site to the fake so
+platform-gated code can run off Windows. Add a new Win32 operation to the port,
+both adapters, and the fake together — a transport call that bypasses the
+backend reintroduces the module-global dependency the seam exists to remove.
+
 ## Skylos dead-code policy
 
 Treat a Skylos report as genuine dead code until a runtime caller has been

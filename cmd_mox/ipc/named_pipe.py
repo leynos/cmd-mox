@@ -21,14 +21,13 @@ from cmd_mox.ipc.windows import (
     ERROR_PIPE_CONNECTED,
     MAX_MESSAGE_SIZE,
     PIPE_CHUNK_SIZE,
+    NamedPipeBackend,
+    NamedPipeCreateSpec,
+    PipeFileOpenSpec,
     PipeMessageTooLargeError,
     PipeReadOptions,
     derive_pipe_name,
-    pywintypes,
     read_pipe_message,
-    win32event,
-    win32file,
-    win32pipe,
     write_pipe_payload,
 )
 
@@ -50,10 +49,12 @@ from ._server_core import (
     _CallbackServerBase,
     _request_pipeline,
 )
+from ._win32_named_pipe_backend import Win32NamedPipeBackend
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
     from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
             pipe_name=self._pipe_name,
             outer=self,
             accept_timeout=self.accept_timeout,
+            backend=Win32NamedPipeBackend(),
         )
         thread = threading.Thread(target=state.serve_forever, daemon=True)
         return state, thread
@@ -153,9 +155,11 @@ class _NamedPipeState:
         pipe_name: str,
         outer: _BaseIPCServer[_NamedPipeState],
         accept_timeout: float,
+        backend: NamedPipeBackend,
     ) -> None:
         self.pipe_name, self.outer = pipe_name, outer
         self.accept_timeout = accept_timeout
+        self._backend = backend
         self.stop_event = threading.Event()
         self.ready_event = threading.Event()
         # Set when the accept loop never created its first pipe instance.
@@ -184,54 +188,21 @@ class _NamedPipeState:
         """
         with self._stop_handle_lock:
             if self._stop_handle is None:
-                # CreateEvent(security, manual_reset, initial_state, name).
-                self._stop_handle = win32event.CreateEvent(
-                    None,
-                    True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-                    False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-                    None,
-                )
+                self._stop_handle = self._backend.create_event()
                 if self.stop_event.is_set():
-                    win32event.SetEvent(self._stop_handle)
+                    self._backend.set_event(self._stop_handle)
             return self._stop_handle
 
-    @staticmethod
-    def _create_overlapped() -> tuple[typ.Any, object]:
-        """Build an ``OVERLAPPED`` with a dedicated manual-reset event.
-
-        Returns
-        -------
-        tuple[typing.Any, object]
-            The overlapped structure and its event handle. The caller owns the
-            event and must close it.
-        """
-        overlapped = pywintypes.OVERLAPPED()
-        # CreateEvent(security, manual_reset, initial_state, name).
-        event = win32event.CreateEvent(
-            None,
-            True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-            False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-            None,
-        )
-        overlapped.hEvent = event
-        return overlapped, event
-
-    @staticmethod
-    def _cancel_overlapped(handle: object, overlapped: object) -> None:
+    def _cancel_overlapped(self, handle: object, overlapped: object) -> None:
         """Cancel a pending overlapped operation and wait for it to settle.
 
         Draining with ``GetOverlappedResult`` before the caller releases the
         buffer guarantees the kernel is no longer writing into it.
         """
-        with contextlib.suppress(pywintypes.error):
-            win32file.CancelIoEx(handle, overlapped)
-        with contextlib.suppress(pywintypes.error):
-            # GetOverlappedResult(handle, overlapped, wait).
-            win32file.GetOverlappedResult(
-                handle,
-                overlapped,
-                True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-            )
+        with contextlib.suppress(self._backend.error):
+            self._backend.cancel_io(handle, overlapped)
+        with contextlib.suppress(self._backend.error):
+            self._backend.get_overlapped_result(handle, overlapped)
 
     def _wait_for_overlapped(self, event: object, timeout_ms: int) -> int:
         """Wait for *event* or shutdown, whichever comes first.
@@ -241,12 +212,7 @@ class _NamedPipeState:
         int
             The ``WaitForMultipleObjects`` result code.
         """
-        # WaitForMultipleObjects(handles, wait_all, timeout_ms).
-        return win32event.WaitForMultipleObjects(
-            [event, self._win32_stop_handle()],
-            False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-            timeout_ms,
-        )
+        return self._backend.wait([event, self._win32_stop_handle()], timeout_ms)
 
     # ------------------------------------------------------------------
     # Accept loop
@@ -261,17 +227,17 @@ class _NamedPipeState:
             ``(keep_serving, connected)``: whether the accept loop should
             continue, and whether a client is now attached to *handle*.
         """
-        overlapped, event = self._create_overlapped()
+        overlapped, event = self._backend.create_overlapped()
         try:
             try:
-                status = win32pipe.ConnectNamedPipe(handle, overlapped)
-            except pywintypes.error as exc:
+                status = self._backend.connect_named_pipe(handle, overlapped)
+            except self._backend.error as exc:
                 return self._handle_connection_error(exc, handle)
             if status == ERROR_IO_PENDING:
                 return self._await_connection(handle, overlapped, event)
             return True, True
         finally:
-            win32file.CloseHandle(event)
+            self._backend.close_handle(event)
 
     def _await_connection(
         self, handle: object, overlapped: object, event: object
@@ -283,20 +249,15 @@ class _NamedPipeState:
         tuple[bool, bool]
             ``(keep_serving, connected)`` for the accept loop.
         """
-        if self._wait_for_overlapped(event, win32event.INFINITE) != (
-            win32event.WAIT_OBJECT_0
+        if self._wait_for_overlapped(event, self._backend.INFINITE) != (
+            self._backend.WAIT_OBJECT_0
         ):
             self._cancel_overlapped(handle, overlapped)
-            self._close_handle(handle)
+            self._backend.close_handle(handle)
             return False, False
         try:
-            # GetOverlappedResult(handle, overlapped, wait).
-            win32file.GetOverlappedResult(
-                handle,
-                overlapped,
-                True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-            )
-        except pywintypes.error as exc:
+            self._backend.get_overlapped_result(handle, overlapped)
+        except self._backend.error as exc:
             return self._handle_connection_error(exc, handle)
         return True, True
 
@@ -314,32 +275,27 @@ class _NamedPipeState:
         winerror = getattr(exc, "winerror", None)
         if winerror is None:
             logger.error("Named pipe connect failed", exc_info=exc)
-            self._close_handle(handle)
+            self._backend.close_handle(handle)
             return True, False
         if winerror == ERROR_PIPE_CONNECTED:
             return True, True
         if winerror in {ERROR_OPERATION_ABORTED, ERROR_NO_DATA}:
-            self._close_handle(handle)
+            self._backend.close_handle(handle)
             return False, False
         logger.error("Named pipe connect failed", exc_info=exc)
-        self._close_handle(handle)
+        self._backend.close_handle(handle)
         return True, False
 
-    @staticmethod
-    def _close_handle(handle: object) -> None:
-        win32file.CloseHandle(handle)
-
-    @staticmethod
-    def _dispose_handle(handle: object) -> None:
+    def _dispose_handle(self, handle: object) -> None:
         """Disconnect and close a client *handle*, tolerating pipe errors.
 
         Closing is tolerant because the cancel-and-drain path may already have
         closed the handle; a second close must not escape a worker thread.
         """
-        with contextlib.suppress(pywintypes.error):
-            win32pipe.DisconnectNamedPipe(handle)
-        with contextlib.suppress(pywintypes.error):
-            win32file.CloseHandle(handle)
+        with contextlib.suppress(self._backend.error):
+            self._backend.disconnect_named_pipe(handle)
+        with contextlib.suppress(self._backend.error):
+            self._backend.close_handle(handle)
 
     def _admit_client(self, handle: object) -> None:
         """Hand *handle* to a worker thread, or refuse it.
@@ -438,7 +394,7 @@ class _NamedPipeState:
         while not self.stop_event.is_set():
             try:
                 handle = self._create_pipe_instance()
-            except pywintypes.error:
+            except self._backend.error:
                 logger.exception("Named pipe accept failed")
                 self.startup_failed = not self.ready_event.is_set()
                 self.ready_event.set()
@@ -452,7 +408,7 @@ class _NamedPipeState:
                 continue
 
             if self.stop_event.is_set():
-                win32file.CloseHandle(handle)
+                self._backend.close_handle(handle)
                 break
 
             self._admit_client(handle)
@@ -480,7 +436,7 @@ class _NamedPipeState:
         with self._stop_handle_lock:
             handle = self._stop_handle
         if handle is not None:
-            win32event.SetEvent(handle)
+            self._backend.set_event(handle)
 
     def join_clients(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
@@ -492,22 +448,25 @@ class _NamedPipeState:
                 return
 
     def _create_pipe_instance(self) -> object:
+        backend = self._backend
         timeout_ms = max(1, int(self.accept_timeout * 1000))
-        return win32pipe.CreateNamedPipe(
-            self.pipe_name,
-            # Overlapped I/O is mandatory for cancellation: an overlapped read
-            # issued on a synchronous handle completes synchronously, so
-            # CancelIoEx would have nothing to cancel and the deadline could
-            # not be enforced.
-            win32pipe.PIPE_ACCESS_DUPLEX | win32file.FILE_FLAG_OVERLAPPED,
-            win32pipe.PIPE_TYPE_MESSAGE
-            | win32pipe.PIPE_READMODE_MESSAGE
-            | win32pipe.PIPE_WAIT,
-            win32pipe.PIPE_UNLIMITED_INSTANCES,
-            PIPE_CHUNK_SIZE,
-            PIPE_CHUNK_SIZE,
-            timeout_ms,
-            None,
+        return backend.create_named_pipe(
+            NamedPipeCreateSpec(
+                name=self.pipe_name,
+                # Overlapped I/O is mandatory for cancellation: an overlapped
+                # read issued on a synchronous handle completes synchronously,
+                # so CancelIoEx would have nothing to cancel and the deadline
+                # could not be enforced.
+                open_mode=backend.PIPE_ACCESS_DUPLEX | backend.FILE_FLAG_OVERLAPPED,
+                pipe_mode=backend.PIPE_TYPE_MESSAGE
+                | backend.PIPE_READMODE_MESSAGE
+                | backend.PIPE_WAIT,
+                max_instances=backend.PIPE_UNLIMITED_INSTANCES,
+                out_buffer_size=PIPE_CHUNK_SIZE,
+                in_buffer_size=PIPE_CHUNK_SIZE,
+                default_timeout=timeout_ms,
+                security_attributes=None,
+            )
         )
 
     def _handle_client(self, handle: object, slot: ClientSlot | None = None) -> None:
@@ -542,7 +501,9 @@ class _NamedPipeState:
                 result = _request_pipeline(self.outer, raw, "named_pipe")
                 if result.response_bytes is not None:
                     write_pipe_payload(
-                        handle, result.response_bytes, win32file=win32file
+                        handle,
+                        result.response_bytes,
+                        win32file=self._backend.win32file,
                     )
         except PipeMessageTooLargeError as exc:
             # The limit trips before any envelope is parsed, so no correlation
@@ -556,7 +517,7 @@ class _NamedPipeState:
             )
         except PipeReadCancelled as exc:
             emit_worker_event(self._cancellation_event(exc, started))
-        except pywintypes.error as exc:
+        except self._backend.error as exc:
             if exc.winerror not in {ERROR_BROKEN_PIPE, ERROR_NO_DATA}:
                 logger.exception("Named pipe handler failed")
             emit_worker_event(
@@ -624,8 +585,8 @@ class _NamedPipeState:
         deadline = time.monotonic() + CLIENT_READ_TIMEOUT_SECONDS
         return read_pipe_message(
             handle,
-            win32file=win32file,
-            pywintypes=pywintypes,
+            win32file=self._backend.win32file,
+            pywintypes=self._backend.pywintypes,
             options=PipeReadOptions(
                 chunk_size=PIPE_CHUNK_SIZE,
                 max_bytes=MAX_MESSAGE_SIZE,
@@ -647,20 +608,19 @@ class _NamedPipeState:
         tuple[int, bytes]
             The ``ReadFile`` status and the bytes transferred.
         """
-        overlapped, event = self._create_overlapped()
+        overlapped, event = self._backend.create_overlapped()
         try:
-            buffer = win32file.AllocateReadBuffer(chunk_size)
+            buffer = self._backend.allocate_read_buffer(chunk_size)
             if self._start_overlapped_read(handle, buffer, overlapped) == (
                 ERROR_IO_PENDING
             ):
                 self._await_read(handle, overlapped, event, deadline)
             return self._finish_overlapped_read(handle, overlapped, buffer, chunk_size)
         finally:
-            win32file.CloseHandle(event)
+            self._backend.close_handle(event)
 
-    @staticmethod
     def _start_overlapped_read(
-        handle: object, buffer: object, overlapped: object
+        self, handle: object, buffer: cabc.Buffer, overlapped: object
     ) -> int:
         """Issue the overlapped ``ReadFile`` and report its initial status.
 
@@ -669,10 +629,10 @@ class _NamedPipeState:
         int
             ``ERROR_IO_PENDING`` when the read is still in flight, otherwise
             the completion status reported synchronously.
-        """  # ruff: ignore[docstring-missing-exception] - any non-pending pywintypes.error propagates to the caller
+        """
         try:
-            status, _ = win32file.ReadFile(handle, buffer, overlapped)
-        except pywintypes.error as exc:
+            status, _ = self._backend.read_file(handle, buffer, overlapped)
+        except self._backend.error as exc:
             if exc.winerror != ERROR_IO_PENDING:
                 raise
             return ERROR_IO_PENDING
@@ -691,14 +651,13 @@ class _NamedPipeState:
             longer writing into the buffer once this returns.
         """
         result = self._wait_for_overlapped(event, remaining_ms(deadline))
-        if result == win32event.WAIT_OBJECT_0:
+        if result == self._backend.WAIT_OBJECT_0:
             return
         self._cancel_overlapped(handle, overlapped)
-        raise PipeReadCancelled(timed_out=result == win32event.WAIT_TIMEOUT)
+        raise PipeReadCancelled(timed_out=result == self._backend.WAIT_TIMEOUT)
 
-    @staticmethod
     def _finish_overlapped_read(
-        handle: object, overlapped: object, buffer: cabc.Buffer, chunk_size: int
+        self, handle: object, overlapped: object, buffer: cabc.Buffer, chunk_size: int
     ) -> tuple[int, bytes]:
         """Collect the completed overlapped read.
 
@@ -706,15 +665,10 @@ class _NamedPipeState:
         -------
         tuple[int, bytes]
             The ``ReadFile`` status and the transferred bytes.
-        """  # ruff: ignore[docstring-missing-exception] - any pywintypes.error other than ERROR_MORE_DATA propagates to the caller
+        """
         try:
-            # GetOverlappedResult(handle, overlapped, wait).
-            transferred = win32file.GetOverlappedResult(
-                handle,
-                overlapped,
-                True,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes this flag positionally
-            )
-        except pywintypes.error as exc:
+            transferred = self._backend.get_overlapped_result(handle, overlapped)
+        except self._backend.error as exc:
             if exc.winerror != ERROR_MORE_DATA:
                 raise
             # ERROR_MORE_DATA means the buffer was filled and the message
@@ -724,18 +678,21 @@ class _NamedPipeState:
         return 0, bytes(memoryview(buffer)[:transferred])
 
     def _poke_pipe(self) -> None:
+        backend = self._backend
         try:
-            handle = win32file.CreateFile(
-                self.pipe_name,
-                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
-                0,
-                None,
-                win32file.OPEN_EXISTING,
-                0,
-                None,
+            handle = backend.create_file(
+                PipeFileOpenSpec(
+                    file_name=self.pipe_name,
+                    desired_access=backend.GENERIC_READ | backend.GENERIC_WRITE,
+                    share_mode=0,
+                    security_attributes=None,
+                    creation_disposition=backend.OPEN_EXISTING,
+                    flags_and_attributes=0,
+                    template_file=None,
+                )
             )
-        except pywintypes.error as exc:
+        except backend.error as exc:
             if exc.winerror not in {ERROR_PIPE_BUSY, ERROR_FILE_NOT_FOUND}:
                 logger.debug("Named pipe wakeup failed: %s", exc)
             return
-        win32file.CloseHandle(handle)
+        backend.close_handle(handle)

@@ -25,6 +25,7 @@ from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import]
     PatchWin32,
     build_state,
     closed_pipe_handles,
+    fake_backend_fixture,
     patch_win32_fixture,
     windows_platform_fixture,
 )
