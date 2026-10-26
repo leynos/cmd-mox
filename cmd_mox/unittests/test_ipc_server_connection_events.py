@@ -33,20 +33,36 @@ class _FailingResponseWriter:
     """Fail at a selected reply-write stage while tracking flush calls."""
 
     def __init__(self, scenario: _ResponseDropScenario) -> None:
+        """Store the selected failure and initialize flush tracking."""
         self._scenario = scenario
         self.flush_called = False
 
     def write(self, payload: bytes) -> int:
+        """Fail at the configured write stage or accept the payload.
+
+        Returns
+        -------
+        int
+            Number of payload bytes accepted when the write succeeds.
+        """
         if self._scenario.stage == "write":
             raise self._failure()
         return len(payload)
 
     def flush(self) -> None:
+        """Record the flush and fail when the scenario selects this stage."""
         self.flush_called = True
         if self._scenario.stage == "flush":
             raise self._failure()
 
     def _failure(self) -> OSError:
+        """Create the configured error with a deliberately sensitive detail.
+
+        Returns
+        -------
+        OSError
+            The configured failure with its test-only sensitive detail.
+        """
         return self._scenario.failure_type(
             self._scenario.error_number, "secret-exception-detail"
         )
@@ -107,9 +123,13 @@ def _assert_unexpected_write_error_logged(
         for record in caplog.records
         if record.name == "cmd_mox.ipc.server" and record.levelno == logging.ERROR
     ]
-    assert error_record.getMessage() == "IPC reply write failed"
-    assert error_record.exc_info is None
-    assert "secret-exception-detail" not in caplog.text
+    assert error_record.getMessage() == "IPC reply write failed", (
+        "Unexpected write error did not use its bounded message"
+    )
+    assert error_record.exc_info is None, "Write error exposed exception details"
+    assert "secret-exception-detail" not in caplog.text, (
+        "Exception detail leaked into logs"
+    )
 
 
 def _assert_response_drop_result(
@@ -125,9 +145,13 @@ def _assert_response_drop_result(
         if item.operation == "ipc.server.connection"
         and item.outcome == "response_dropped"
     ]
-    assert event.error_category == scenario.expected_category
-    assert event.correlation_id == "request-123"
-    assert writer.flush_called is (scenario.stage == "flush")
+    assert event.error_category == scenario.expected_category, (
+        "Response drop reported the wrong bounded error category"
+    )
+    assert event.correlation_id == "request-123", "Response drop lost correlation"
+    assert writer.flush_called is (scenario.stage == "flush"), (
+        "Flush was called inconsistently with the failing stage"
+    )
     if scenario.expected_category == "ConnectionError":
         _assert_disconnect_logged_quietly(caplog)
     else:

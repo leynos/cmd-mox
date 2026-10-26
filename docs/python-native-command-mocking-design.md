@@ -719,9 +719,12 @@ bounded request metadata and never payload data.
 
 ##### Empty reads and disconnected clients
 
-An empty read is logged at debug level and returns no reply. Malformed or
-unsupported content retains its error log, and requests that fail validation
-also return no reply. Only valid requests produce a response.
+An empty read means the peer closed the connection without sending a request,
+which includes readiness probes. The server logs it at INFO level, emits an
+`ipc.server.connection` event with outcome `receive_closed`, and sends no
+reply. Malformed or unsupported content retains its error log and receives a
+bounded error response with exit status 1. Requests that fail validation
+receive the same form of response. Only valid requests reach a handler.
 
 For screen readers: The client sends a request to IPCHandler. The handler
 passes the raw bytes to request_pipeline, which returns response bytes. The
