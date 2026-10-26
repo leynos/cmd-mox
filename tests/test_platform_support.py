@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+import types
 import typing as typ
 from pathlib import Path
 
@@ -195,3 +197,40 @@ def test_nested_pytester_anchors_cwd_and_configuration(
 
     result = run_nested_pytester(test_path=test_file)
     result.assert_outcomes(passed=1, errors=0)
+
+
+def test_nested_pytester_temporarily_anchors_mutmut_source_paths(
+    pytester: Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+) -> None:
+    """Anchor mutmut's cached source paths only during nested pytest."""
+    package_root = Path(__file__).resolve().parent.parent
+    mutmut_configuration = sys.modules.get("mutmut.configuration")
+    if mutmut_configuration is None:
+        mutmut_config = types.SimpleNamespace(source_paths=[Path("cmd_mox")])
+        configuration_module = types.ModuleType("mutmut.configuration")
+        configuration_module.__dict__["Config"] = types.SimpleNamespace(
+            get=lambda: mutmut_config
+        )
+        monkeypatch.setitem(sys.modules, "mutmut.configuration", configuration_module)
+    else:
+        config_factory = vars(mutmut_configuration)["Config"]
+        mutmut_config = config_factory.get()
+        monkeypatch.setattr(mutmut_config, "source_paths", [Path("cmd_mox")])
+
+    original_source_paths = list(mutmut_config.source_paths)
+
+    def assert_anchored_source_paths(session: pytest.Session) -> None:
+        del session
+        assert mutmut_config.source_paths == [package_root / "cmd_mox"], (
+            "mutmut source paths should be absolute during the nested run"
+        )
+
+    probe = types.SimpleNamespace(pytest_sessionstart=assert_anchored_source_paths)
+    test_file = pytester.makepyfile("def test_nested():\n    assert True\n")
+    result = run_nested_pytester(test_path=test_file, plugins=(probe,))
+    result.assert_outcomes(passed=1, errors=0)
+    assert mutmut_config.source_paths == original_source_paths, (
+        "mutmut source paths should be restored after the nested run"
+    )
