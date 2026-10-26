@@ -57,8 +57,8 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shim,
         "_create_invocation",
-        lambda name, timeout, *, deadline: (
-            calls.append(("create", name, timeout, deadline)) or invocation
+        lambda name, timeout, *, dependencies=None: (
+            calls.append(("create", name, timeout)) or invocation
         ),
     )
 
@@ -90,7 +90,6 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
             "create",
             "shim",
             1.0,
-            None if shim.path_utils.IS_WINDOWS else 101.0,
         ),
         (
             "execute",
