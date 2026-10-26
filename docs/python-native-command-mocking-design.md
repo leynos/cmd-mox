@@ -455,9 +455,9 @@ sequenceDiagram
     alt BaseException during setup or yield
         Manager-->>Fixture: KeyboardInterrupt or SystemExit
         Fixture->>Fixture: body_failed = True
-        Fixture-->>Test: re-raise original exception
         Teardown->>Fixture: verify or close handling
         Teardown-->>Test: preserve propagating interrupt
+        Fixture-->>Test: re-raise original exception
     else Normal execution
         Fixture-->>Test: yield manager.mox
     end
