@@ -37,6 +37,15 @@ class AutoLifecycleTestCase:
     expect_auto_fail: bool = False
 
 
+@dc.dataclass(slots=True, frozen=True)
+class BodyExceptionTestCase:
+    """Test case data for call-stage exception scenarios."""
+
+    exception_type: type[BaseException]
+    message: str
+    expected_exit: pytest.ExitCode
+
+
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
 
 # Flags that disable CI-injected plugins (e.g. slipcover) which can fail
@@ -181,6 +190,94 @@ def test_verification_error_suppressed_on_test_failure(
     result.stdout.fnmatch_lines(["*assert False*"])
 
 
+def test_call_hook_does_not_warn_on_ordinary_test_failure(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ordinary assertion failures must not escape hook-wrapper teardown."""
+    monkeypatch.delenv("PYTEST_PLUGINS", raising=False)
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    pytester.makeconftest('pytest_plugins = ("cmd_mox.pytest_plugin",)')
+    pytester.makepyfile(
+        test_failure=textwrap.dedent(
+            """
+            def test_assertion_failure():
+                assert False, "ordinary test failure"
+            """
+        )
+    )
+
+    result = pytester.runpytest_subprocess("-q", "-s", *_DISABLE_CI_PLUGINS, timeout=30)
+    output = result.stdout.str() + result.stderr.str()
+
+    assert result.ret == pytest.ExitCode.TESTS_FAILED, "Assertion failed"
+    assert "AssertionError: ordinary test failure" in output, "Assertion failed"
+    assert "PluggyTeardownRaisedWarning" not in output, "Assertion failed"
+
+
+@pytest.mark.parametrize(
+    "test_case",
+    [
+        pytest.param(
+            BodyExceptionTestCase(
+                KeyboardInterrupt, "body interrupt", pytest.ExitCode.INTERRUPTED
+            ),
+            id="keyboard-interrupt",
+        ),
+        pytest.param(
+            BodyExceptionTestCase(
+                SystemExit, "worker exit", pytest.ExitCode.TESTS_FAILED
+            ),
+            id="system-exit",
+        ),
+    ],
+)
+def test_call_hook_preserves_body_exception_during_verification_failure(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    test_case: BodyExceptionTestCase,
+) -> None:
+    """Test-body interrupts and worker exits remain primary at teardown."""
+    monkeypatch.delenv("PYTEST_PLUGINS", raising=False)
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    exception_name = test_case.exception_type.__name__
+    pytester.makeconftest(
+        textwrap.dedent(
+            """
+            import pytest
+
+            from cmd_mox.controller import CmdMox
+
+            pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+            @pytest.fixture(autouse=True)
+            def fail_verification(monkeypatch):
+                def _fail(self):
+                    raise RuntimeError("verify boom")
+
+                monkeypatch.setattr(CmdMox, "verify", _fail)
+            """
+        )
+    )
+    pytester.makepyfile(
+        test_interrupted=textwrap.dedent(
+            f"""
+            def test_body_exit_with_verify_failure(cmd_mox):
+                raise {exception_name}("{test_case.message}")
+            """
+        )
+    )
+
+    result = pytester.runpytest_subprocess("-q", "-s", timeout=30)
+    output = result.stdout.str() + result.stderr.str()
+
+    assert result.ret == test_case.expected_exit, "Assertion failed"
+    assert f"{exception_name}: {test_case.message}" in output, "Assertion failed"
+    assert "Failed: cmd_mox verification" not in output, "Assertion failed"
+    assert "cmd_mox teardown failure" not in output, "Assertion failed"
+    assert "PluggyTeardownRaisedWarning" not in output, "Assertion failed"
+
+
 def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
     """Cleanup errors should fail the test with a helpful message."""
     test_file = pytester.makepyfile(
@@ -204,6 +301,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
 
     result = pytester.runpytest(str(test_file), *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(passed=1, errors=1)
+    # pytester inherits an outer xdist worker's temporary-root prefix.
     expected = (
         "*cmd_mox teardown failure for *"
         "test_teardown_error_reports_failure.py::test_cleanup_error: "

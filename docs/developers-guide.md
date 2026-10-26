@@ -4,6 +4,25 @@ This guide documents the local development checks for CmdMox. It is the source
 of truth for running lint, understanding the current lint baseline, and knowing
 where lint policy is configured.
 
+## Pytest fixture lifecycle
+
+The pytest plugin records failures at both the test-call and fixture
+boundaries. Its `pytest_runtest_call` hook wrapper stores call-stage
+`KeyboardInterrupt` and `SystemExit` on the test item before pytest finalizes
+yield fixtures. This hook is needed because pytest can resume a fixture
+generator normally while propagating those interruptions from the test body.
+
+The `cmd_mox` fixture also marks `body_failed` when a `BaseException` escapes
+`manager.enter()` or is thrown back through the fixture's `yield`, then
+immediately re-raises the same exception. This records setup and fixture
+failures without consuming interrupts or worker exits.
+
+During teardown, `_CmdMoxManager.exit()` combines `body_failed` with the
+call-stage state recorded by the hook. It suppresses a verification error only
+when a body or call-stage failure already exists and controller cleanup
+succeeds, preserving the original failure. Cleanup errors remain visible as
+teardown failures.
+
 ## Coverage ownership
 
 Pull-request CI generates coverage with the ratchet (`with-ratchet: 'true'`)

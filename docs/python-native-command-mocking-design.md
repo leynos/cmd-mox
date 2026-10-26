@@ -412,10 +412,25 @@ sequenceDiagram
   end
 
   PyTest->>PyTest: run test body
-  note over PyTest: pytest_runtest_makereport records call failure flag
+  alt call raises KeyboardInterrupt
+    PyTest->>Plugin: pytest_runtest_call wrapper sees KeyboardInterrupt
+    Plugin->>Plugin: store STASH_CALL_FAILED = True
+    Plugin-->>PyTest: return without changing the call outcome
+    Note over PyTest: propagate the original interrupt after wrappers finish
+  else call returns or raises SystemExit
+    opt call raises SystemExit
+      PyTest->>Plugin: pytest_runtest_call wrapper sees SystemExit
+      Plugin->>Plugin: store STASH_CALL_FAILED = True
+      Plugin-->>PyTest: return without changing the call outcome
+      Note over PyTest: capture SystemExit in CallInfo and create a failed call report
+    end
+    PyTest->>Plugin: pytest_runtest_makereport
+    Plugin->>Plugin: store report failure state
+  end
 
   rect rgb(245,255,245)
     PyTest->>Plugin: fixture teardown (exit, body_failed?)
+    Note over Plugin: effective failure combines body_failed and call-stage state
     alt auto_lifecycle and in REPLAY
       Plugin->>Mox: verify()
       note over Plugin: record verification section if error
@@ -428,6 +443,35 @@ sequenceDiagram
     end
   end
 ```
+
+```mermaid
+sequenceDiagram
+    participant Test as Test execution
+    participant Fixture as cmd_mox fixture
+    participant Manager as CmdMox manager
+    participant Teardown as Fixture teardown
+
+    Fixture->>Manager: enter()
+    alt BaseException during setup or yield
+        Manager-->>Fixture: KeyboardInterrupt or SystemExit
+        Fixture->>Fixture: body_failed = True
+        Teardown->>Fixture: verify or close handling
+        Teardown-->>Test: preserve propagating interrupt
+        Fixture-->>Test: re-raise original exception
+    else Normal execution
+        Fixture-->>Test: yield manager.mox
+    end
+```
+
+For screen readers: The diagram follows fixture setup into two exception paths.
+If setup fails or an exception is delivered into the fixture generator, the
+fixture sets `body_failed` before re-raising it. During a test call,
+`KeyboardInterrupt` is re-raised after the hook wrappers finish; `SystemExit`
+is captured in `CallInfo` and produces a failed call report. Teardown combines
+the call and fixture failure state and preserves a propagating interrupt when
+cleanup succeeds.
+
+_Figure 1: Fixture setup, exception propagation, and teardown behaviour._
 
 - `mox.replay()`: This method must be called after all expectations have been
   recorded. It signals the end of the record phase and the beginning of the
