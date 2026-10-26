@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typing as typ
+from pathlib import Path
 
 import pytest
 
@@ -166,16 +167,25 @@ def test_cmd_mox_fixture_runs_on_supported_platform(
 
 def test_nested_pytester_anchors_cwd_and_configuration(
     pytester: Pytester,
+    request: pytest.FixtureRequest,
     run_nested_pytester: cabc.Callable[..., RunResult],
 ) -> None:
-    """Nested runs use the invocation package root and pytester's ini file."""
+    """Nested runs retain the invocation cwd and use pytester's ini file."""
     expected_ini = pytester.path / "tox.ini"
+    expected_invocation_dir = Path(request.config.invocation_params.dir).resolve()
+    package_root = Path(__file__).resolve().parent.parent
     test_file = pytester.makepyfile(
         f"""
         from pathlib import Path
 
+        expected_invocation_dir = Path({str(expected_invocation_dir)!r})
+        package_root = Path({str(package_root)!r})
+
         def test_nested_roots(request):
-            assert Path("cmd_mox").is_dir()
+            assert Path.cwd() == expected_invocation_dir
+            assert (package_root / "cmd_mox").is_dir()
+            if expected_invocation_dir == package_root:
+                assert Path("cmd_mox").is_dir()
             assert request.config.inipath == Path({str(expected_ini)!r})
         """
     )
