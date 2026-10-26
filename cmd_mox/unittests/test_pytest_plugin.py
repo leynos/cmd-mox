@@ -37,6 +37,15 @@ class AutoLifecycleTestCase:
     expect_auto_fail: bool = False
 
 
+@dc.dataclass(slots=True, frozen=True)
+class BodyExceptionTestCase:
+    """Test case data for call-stage exception scenarios."""
+
+    exception_type: type[BaseException]
+    message: str
+    expected_exit: pytest.ExitCode
+
+
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
 
 # Flags that disable CI-injected plugins (e.g. slipcover) which can fail
@@ -207,18 +216,18 @@ def test_call_hook_does_not_warn_on_ordinary_test_failure(
 
 
 @pytest.mark.parametrize(
-    ("exception_name", "message", "expected_exit"),
+    "test_case",
     [
         pytest.param(
-            "KeyboardInterrupt",
-            "body interrupt",
-            pytest.ExitCode.INTERRUPTED,
+            BodyExceptionTestCase(
+                KeyboardInterrupt, "body interrupt", pytest.ExitCode.INTERRUPTED
+            ),
             id="keyboard-interrupt",
         ),
         pytest.param(
-            "SystemExit",
-            "worker exit",
-            pytest.ExitCode.TESTS_FAILED,
+            BodyExceptionTestCase(
+                SystemExit, "worker exit", pytest.ExitCode.TESTS_FAILED
+            ),
             id="system-exit",
         ),
     ],
@@ -226,13 +235,12 @@ def test_call_hook_does_not_warn_on_ordinary_test_failure(
 def test_call_hook_preserves_body_exception_during_verification_failure(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
-    exception_name: str,
-    message: str,
-    expected_exit: pytest.ExitCode,
+    test_case: BodyExceptionTestCase,
 ) -> None:
     """Test-body interrupts and worker exits remain primary at teardown."""
     monkeypatch.delenv("PYTEST_PLUGINS", raising=False)
     monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    exception_name = test_case.exception_type.__name__
     pytester.makeconftest(
         textwrap.dedent(
             """
@@ -255,7 +263,7 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
         test_interrupted=textwrap.dedent(
             f"""
             def test_body_exit_with_verify_failure(cmd_mox):
-                raise {exception_name}("{message}")
+                raise {exception_name}("{test_case.message}")
             """
         )
     )
@@ -263,8 +271,8 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
     result = pytester.runpytest_subprocess("-q", "-s", timeout=30)
     output = result.stdout.str() + result.stderr.str()
 
-    assert result.ret == expected_exit, "Assertion failed"
-    assert f"{exception_name}: {message}" in output, "Assertion failed"
+    assert result.ret == test_case.expected_exit, "Assertion failed"
+    assert f"{exception_name}: {test_case.message}" in output, "Assertion failed"
     assert "Failed: cmd_mox verification" not in output, "Assertion failed"
     assert "cmd_mox teardown failure" not in output, "Assertion failed"
     assert "PluggyTeardownRaisedWarning" not in output, "Assertion failed"
