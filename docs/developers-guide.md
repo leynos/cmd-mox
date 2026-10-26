@@ -280,11 +280,44 @@ deadline per accepted connection and updates the socket timeout before each
 receive, so a client that slowly streams a request cannot renew its full wait
 budget with every byte.
 
-The shim polls pipe-like stdin descriptors when possible. It reads regular-file
-stdin on a daemon worker because regular files cannot provide a bounded poll
-wait. Windows streams and descriptors that cannot be polled retain direct
-reads; the Windows named-pipe IPC client keeps its existing cooperative timeout
-behaviour.
+Stdin capture is bounded by `CMOX_IPC_TIMEOUT` on every platform and for every
+stream kind, and all of that logic lives in `cmd_mox._stdin_capture`. Limiting
+the component to one deadline and one error type keeps strategy selection,
+decoding, and reader-resource ownership out of `cmd_mox.shim`, which only turns
+a failure into a diagnostic. The strategies are:
+
+- a zero-timeout readiness probe on a POSIX descriptor, using `select.poll`
+  first and `select.select` second, so an unpollable descriptor is detected
+  before any bytes are read;
+- chunked `os.read` against the remaining budget for pollable descriptors, and
+  the same reads on a daemon worker for regular files, which cannot be waited
+  on;
+- bounded `ReadFile` chunks on a daemon worker for a resolved Windows handle,
+  with `CancelSynchronousIo` followed by a bounded join when the deadline
+  expires;
+- the stream's own `read()` on a tracked daemon worker when there is no usable
+  descriptor or handle.
+
+A stream that never reaches EOF leaves its reader blocked inside the stream.
+That thread cannot be joined, because only the stream's owner can end the read,
+so a finished worker is pruned from the registry and a live one stays in it.
+`os._exit()` must therefore stay out of `main()`: an in-process caller that can
+reach `main()` shares the process with other tests and code, and terminating it
+would be a hostile side effect. Instead `main()` raises `SystemExit`, and the
+script entry point `_run_as_script()` inspects `outstanding_workers()` and calls
+`os._exit()` with the same status only when it finds one. Normal exits re-raise
+`SystemExit` and keep the ordinary interpreter shutdown, which flushes streams
+and runs `atexit` handlers. The wrapper maps a non-integer status, such as the
+message string `sys.exit("fatal")` carries, to `1` rather than reporting it as
+success.
+
+`tests/test_shim_stdin_timeout.py` starts the generated launcher as a child
+process with an open stdin writer, so it is the only test that observes the
+process-lifetime half of this contract. It is listed in `WINDOWS_SMOKE_ARGS`
+because the Windows `.cmd` launcher path, the native handle strategy, and the
+launcher's exit-status forwarding can only be exercised there; the Unix
+capability marker is deliberately not applied so the cross-platform cases run
+on both hosts.
 
 The shim emits bounded IPC observability events when stdin reading or writing
 and flushing a response stream fails. These use the existing dependency-free
