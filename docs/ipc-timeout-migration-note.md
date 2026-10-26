@@ -7,21 +7,26 @@ behaviour and configuration details, see the
 
 ## Check how commands receive stdin
 
-On POSIX, `CMOX_IPC_TIMEOUT` applies one deadline to pollable piped stdin,
-regular-file stdin, and the Unix IPC exchange through passthrough reporting.
-Regular-file reads run in a worker so the shim can stop waiting at the
-deadline. A stream that cannot be polled retains direct-read behaviour and may
-wait beyond the timeout. On Windows, stdin remains a direct read, while
-named-pipe communication uses its existing cooperative timeout; the POSIX
-shared-deadline guarantee does not apply.
+`CMOX_IPC_TIMEOUT` bounds the capture of non-terminal stdin on every platform
+and for every kind of stream. On POSIX one deadline then applies to pollable
+piped stdin, regular-file stdin, and the Unix IPC exchange through passthrough
+reporting. Regular-file reads run in a worker so the shim can stop waiting at
+the deadline. On Windows, stdin keeps its own capture deadline while named-pipe
+communication uses its existing cooperative timeout, so the POSIX
+shared-deadline guarantee does not apply there.
 
-Tests or callers that leave stdin open should send EOF or close the pipe before
-waiting for the invocation to complete. If stdin is not needed, redirect it
-from a source that is already complete. An unpollable stream or a Windows
-direct read may still wait for input independently of the IPC timeout.
+Reaching the deadline ends the capture: the shim discards partial input, does
+not contact the IPC server, and exits with status `1`. A caller that never
+finishes sending input therefore loses what it had sent, so tests and callers
+should still send EOF or close the pipe before waiting for an invocation to
+complete. If stdin is not needed, redirect it from a source that is already
+complete, such as `subprocess.DEVNULL`.
 
 ## Understand failure diagnostics
 
+- A stdin capture that reaches the deadline prints
+  `IPC error: stdin read timed out after <timeout> seconds` on stderr and exits
+  with status `1`.
 - A non-empty request that cannot be parsed or fails validation receives a
   bounded error response on stderr and exit status 1.
 - An empty read, including a readiness probe that closes without sending a
