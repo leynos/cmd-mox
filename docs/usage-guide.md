@@ -1085,12 +1085,12 @@ server.
   exported automatically (default `5.0`). The value bounds stdin capture on
   every platform: capture starts a fresh deadline, and reaching it ends the
   shim with the `IPC error: stdin read timed out ...` diagnostic and status `1`
-  whatever the stream's kind. On POSIX the same deadline then covers connecting
-  to the Unix socket, sending the request, receiving the response, and
-  reporting passthrough results, so stdin and IPC share one budget. On Windows,
-  stdin is bounded by its own capture deadline and named-pipe communication
-  keeps its existing cooperative timeout; the shared POSIX deadline does not
-  apply there.
+  whatever the stream's kind. On POSIX, the same deadline then covers
+  connecting to the Unix socket, sending the request, receiving the response,
+  and reporting passthrough results, so stdin and IPC share one budget. On
+  Windows, stdin is bounded by its own capture deadline and named-pipe
+  communication keeps its existing cooperative timeout; the shared POSIX
+  deadline does not apply there.
 
   A non-empty request that cannot be parsed or fails validation receives a
   bounded error response on stderr and exit status 1. An empty read, including

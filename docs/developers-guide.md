@@ -273,12 +273,12 @@ fake clock directly without replacing the process-wide time function.
 
 On POSIX, the shim carries one monotonic deadline through Unix socket
 connection retries, request sending, response reads, and passthrough reporting.
-Stdin capture uses that deadline when the stream can be waited on. The client
-stores the deadline in `_ConnectionContext` and applies only the remaining time
-before each blocking socket operation. The Unix server also keeps one read
-deadline per accepted connection and updates the socket timeout before each
-receive, so a client that slowly streams a request cannot renew its full wait
-budget with every byte.
+Stdin capture is bounded by the same configured timeout, from its own capture
+start; see the strategies below. The client stores the deadline in
+`_ConnectionContext` and applies only the remaining time before each blocking
+socket operation. The Unix server also keeps one read deadline per accepted
+connection and updates the socket timeout before each receive, so a client that
+slowly streams a request cannot renew its full wait budget with every byte.
 
 Stdin capture is bounded by `CMOX_IPC_TIMEOUT` on every platform and for every
 stream kind, and all of that logic lives in `cmd_mox._stdin_capture`. Limiting
@@ -299,11 +299,11 @@ a failure into a diagnostic. The strategies are:
   descriptor or handle.
 
 A stream that never reaches EOF leaves its reader blocked inside the stream.
-That thread cannot be joined, because only the stream's owner can end the read,
+That thread cannot be joined because only the stream's owner can end the read,
 so a finished worker is pruned from the registry and a live one stays in it.
 `os._exit()` must therefore stay out of `main()`: an in-process caller that can
 reach `main()` shares the process with other tests and code, and terminating it
-would be a hostile side effect. Instead `main()` raises `SystemExit`, and the
+would be a hostile side effect. Instead, `main()` raises `SystemExit`, and the
 script entry point `_run_as_script()` inspects `outstanding_workers()` and calls
 `os._exit()` with the same status only when it finds one. Normal exits re-raise
 `SystemExit` and keep the ordinary interpreter shutdown, which flushes streams
@@ -313,10 +313,10 @@ success.
 
 `tests/test_shim_stdin_timeout.py` starts the generated launcher as a child
 process with an open stdin writer, so it is the only test that observes the
-process-lifetime half of this contract. It is listed in `WINDOWS_SMOKE_ARGS`
+process-lifetime half of this contract. It is listed in `WINDOWS_SMOKE_ARGS`,
 because the Windows `.cmd` launcher path, the native handle strategy, and the
 launcher's exit-status forwarding can only be exercised there; the Unix
-capability marker is deliberately not applied so the cross-platform cases run
+capability marker is deliberately not applied, so the cross-platform cases run
 on both hosts.
 
 The shim emits bounded IPC observability events when stdin reading or writing
