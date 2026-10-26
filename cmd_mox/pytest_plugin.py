@@ -262,6 +262,27 @@ def pytest_runtest_makereport(
         item.stash[STASH_CALL_FAILED] = rep.failed
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> cabc.Generator[None, None, None]:
+    """Record call-stage interrupts before pytest finalises yield fixtures.
+
+    Parameters
+    ----------
+    item : pytest.Item
+        Test item whose call-stage interruption is being recorded.
+
+    Yields
+    ------
+    None
+        Control until pytest supplies the test call outcome.
+    """
+    outcome = yield
+    excinfo = typ.cast("typ.Any", outcome).excinfo
+    if excinfo is not None and isinstance(excinfo[1], (KeyboardInterrupt, SystemExit)):
+        # Inspect the result so ordinary test failures remain under Pluggy's control.
+        item.stash[STASH_CALL_FAILED] = True
+
+
 class _CmdMoxManager:
     """Encapsulate cmd_mox lifecycle decisions for the pytest fixture."""
 

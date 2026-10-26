@@ -412,10 +412,19 @@ sequenceDiagram
   end
 
   PyTest->>PyTest: run test body
-  note over PyTest: pytest_runtest_makereport records call failure flag
+  alt call raises KeyboardInterrupt or SystemExit
+    PyTest->>Plugin: pytest_runtest_call wrapper sees interrupt
+    Plugin->>Plugin: store STASH_CALL_FAILED = True
+    Plugin-->>PyTest: return without changing the call outcome
+    Note over PyTest: propagate the original interrupt after wrappers finish
+  else pytest produces a call report
+    PyTest->>Plugin: pytest_runtest_makereport
+    Plugin->>Plugin: store report failure state
+  end
 
   rect rgb(245,255,245)
     PyTest->>Plugin: fixture teardown (exit, body_failed?)
+    Note over Plugin: effective failure combines body_failed and call-stage state
     alt auto_lifecycle and in REPLAY
       Plugin->>Mox: verify()
       note over Plugin: record verification section if error
@@ -428,10 +437,6 @@ sequenceDiagram
     end
   end
 ```
-
-For screen readers: This sequence shows the fixture setting `body_failed` and
-re-raising `KeyboardInterrupt` or `SystemExit`. Teardown can preserve the
-interrupt when verification fails and cleanup succeeds.
 
 ```mermaid
 sequenceDiagram
@@ -451,6 +456,13 @@ sequenceDiagram
         Fixture-->>Test: yield manager.mox
     end
 ```
+
+For screen readers: The diagram follows fixture setup into two exception paths.
+If setup fails or an exception is delivered into the fixture generator, the
+fixture sets `body_failed` before re-raising it. For an interrupt raised by the
+test body, pytest records call failure before fixture finalization. Teardown
+handles verification errors without replacing the original interrupt when
+cleanup succeeds.
 
 _Figure 1: Fixture setup, exception propagation, and teardown behaviour._
 

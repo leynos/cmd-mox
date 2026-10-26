@@ -15,6 +15,8 @@ from cmd_mox.controller import Phase
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.pytest_plugin import STASH_CALL_FAILED, _CmdMoxManager
 
+pytest_plugins = ("pytester",)
+
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
     from pathlib import Path
@@ -178,12 +180,14 @@ class _ExitSpyCmdMoxManager(_CmdMoxManager):
 
     @typ.override
     def __init__(self, request: pytest.FixtureRequest) -> None:
+        """Initialise the manager spy for one fixture instance."""
         super().__init__(request)
         self.body_failed_values: list[bool] = []
         type(self).last_instance = self
 
     @typ.override
     def exit(self, *, body_failed: bool) -> None:
+        """Record the fixture decision before delegating to manager teardown."""
         self.body_failed_values.append(body_failed)
         super().exit(body_failed=body_failed)
 
@@ -397,6 +401,40 @@ def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
         node,
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom"),
     )
+
+
+@pytest.mark.usefixtures("reset_exit_spy_manager_state")
+@pytest.mark.parametrize(
+    "interruption_type",
+    [
+        pytest.param(KeyboardInterrupt, id="keyboard-interrupt"),
+        pytest.param(SystemExit, id="system-exit"),
+    ],
+)
+def test_cmd_mox_fixture_marks_setup_baseexception_as_body_failure(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+    interruption_type: type[BaseException],
+) -> None:
+    """Setup interrupts are recorded before the fixture re-raises them."""
+    request = _StubRequest(config=_StubConfig())
+    make_manager(request)
+    interruption = interruption_type()
+
+    with (
+        mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
+        mock.patch.object(pytest_plugin, "_CmdMoxManager", _ExitSpyCmdMoxManager),
+        mock.patch.object(_ExitSpyCmdMoxManager, "enter", side_effect=interruption),
+    ):
+        fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
+        generator = fixture(typ.cast("pytest.FixtureRequest", request))
+
+        with pytest.raises(interruption_type) as raised:
+            next(generator)
+
+    manager = _ExitSpyCmdMoxManager.last_instance
+    assert manager is not None, "Assertion failed"
+    assert manager.body_failed_values == [True], "Assertion failed"
+    assert raised.value is interruption, "Assertion failed"
 
 
 def test_enter_cmd_mox_replays_when_enabled(
