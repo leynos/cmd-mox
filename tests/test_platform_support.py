@@ -178,12 +178,15 @@ def test_nested_pytester_anchors_cwd_and_configuration(
         f"""
         from pathlib import Path
 
+        import cmd_mox
+
         expected_invocation_dir = Path({str(expected_invocation_dir)!r})
         package_root = Path({str(package_root)!r})
 
         def test_nested_roots(request):
             assert Path.cwd() == expected_invocation_dir
             assert (package_root / "cmd_mox").is_dir()
+            assert Path(cmd_mox.__file__).resolve().parent == package_root / "cmd_mox"
             if expected_invocation_dir == package_root:
                 assert Path("cmd_mox").is_dir()
             assert request.config.inipath == Path({str(expected_ini)!r})
