@@ -3277,6 +3277,8 @@ def _parse_version(version_str: str) -> tuple[int, int, int]:
     if len(parts) not in (2, 3):
         raise ValueError("expected 'major.minor.patch'")
     components = [int(part) for part in parts]
+    if any(component < 0 for component in components):
+        raise ValueError("version components must be non-negative")
     if len(components) == 2:
         components.append(0)
     return (components[0], components[1], components[2])
