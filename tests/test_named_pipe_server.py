@@ -64,6 +64,19 @@ def passthrough_handler(
     """
 
     def handler(result: PassthroughResult) -> Response:
+        """Record the received result and return a fixed response.
+
+        Parameters
+        ----------
+        result : PassthroughResult
+            The passthrough result the server delivered over the pipe.
+
+        Returns
+        -------
+        Response
+            A fixed response whose values differ from the defaults, so the
+            caller can tell the handler's answer from a fallback.
+        """
         passthrough_results.append(result)
         return Response(stdout="passthrough", exit_code=5)
 
@@ -156,6 +169,19 @@ def test_named_pipe_server_handler_error(
     socket_path = tmp_path / "ipc.sock"
 
     def handler(_invocation: Invocation) -> Response:
+        """Fail so the server must convert the exception into a response.
+
+        Parameters
+        ----------
+        _invocation : Invocation
+            The invocation the server forwarded. Unused: the test only needs
+            the handler to raise.
+
+        Raises
+        ------
+        RuntimeError
+            Always, with a message the test asserts on.
+        """
         msg = "handler failed"
         raise RuntimeError(msg)
 
