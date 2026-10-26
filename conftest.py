@@ -54,8 +54,8 @@ def _unix_sockets_supported() -> bool:
     return _UNIX_SOCKETS_SUPPORTED
 
 
-def _anchor_mutmut_source_paths() -> None:
-    """Keep mutmut attribution valid when tests temporarily change cwd."""
+def _anchor_mutmut_source_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Temporarily anchor mutmut paths during an in-process nested run."""
     mutmut_configuration = sys.modules.get("mutmut.configuration")
     if mutmut_configuration is None:
         return
@@ -66,15 +66,18 @@ def _anchor_mutmut_source_paths() -> None:
 
     mutmut_config = config_factory.get()
     package_root = Path(__file__).resolve().parent
-    mutmut_config.source_paths = [
-        path if path.is_absolute() else package_root / path
-        for path in mutmut_config.source_paths
-    ]
+    monkeypatch.setattr(
+        mutmut_config,
+        "source_paths",
+        [
+            path if path.is_absolute() else package_root / path
+            for path in mutmut_config.source_paths
+        ],
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and cache platform capability checks."""
-    _anchor_mutmut_source_paths()
     config.addinivalue_line(
         "markers",
         "requires_unix_sockets: mark test as requiring Unix domain socket support",
@@ -136,6 +139,7 @@ def run_nested_pytester(
         generated_path = pytester.path if test_path is None else test_path
         with monkeypatch.context() as scoped_monkeypatch:
             scoped_monkeypatch.chdir(request.config.invocation_params.dir)
+            _anchor_mutmut_source_paths(scoped_monkeypatch)
             return pytester.runpytest_inprocess(
                 *args,
                 "-c",
