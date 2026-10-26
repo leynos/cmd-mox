@@ -65,8 +65,8 @@ def _parse_version(version_str: str) -> tuple[int, int, int]:
             "expected numeric 'major.minor.patch'"
         )
         raise ValueError(msg) from None
-    if len(components) == _MIN_VERSION_COMPONENT_COUNT:
-        components.append(0)
+    # Legacy versions omit PATCH; complete the tuple before comparison.
+    components.extend([0] * (_MAX_VERSION_COMPONENT_COUNT - len(components)))
     major, minor, patch = components
     if min(major, minor, patch) < 0:
         msg = f"Invalid schema version {version_str!r}; components must be non-negative"
