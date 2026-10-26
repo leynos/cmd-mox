@@ -83,9 +83,19 @@ def _needs(job: WorkflowJob) -> list[str]:
     -------
     list[str]
         Dependency job IDs, or an empty list.
+
+    Raises
+    ------
+    TypeError
+        If the workflow declares ``needs`` with an unsupported value.
     """
-    needs = job.get("needs", [])
-    return [needs] if isinstance(needs, str) else list(needs)
+    match job.get("needs", []):
+        case str() as dependency:
+            return [dependency]
+        case list() as dependencies:
+            return list(dependencies)
+        case _:
+            raise TypeError
 
 
 def _steps(job: WorkflowJob) -> list[WorkflowStep]:
@@ -108,12 +118,15 @@ def _run_scripts(workflow_path: Path, job_ids: set[str]) -> list[str]:
         Shell scripts declared by those jobs.
     """
     jobs = _jobs(_workflow(workflow_path))
-    return [
-        run
-        for job_id in job_ids
-        for step in _steps(jobs[job_id])
-        if isinstance((run := step.get("run")), str)
-    ]
+    scripts = []
+    for job_id in job_ids:
+        for step in _steps(jobs[job_id]):
+            match step.get("run"):
+                case str() as run:
+                    scripts.append(run)
+                case _:
+                    continue
+    return scripts
 
 
 def _action_run_scripts(action_path: Path) -> list[str]:

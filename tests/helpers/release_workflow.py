@@ -138,9 +138,11 @@ def workflow_triggers(workflow: Workflow) -> WorkflowTriggers:
     """
     workflow_map = typ.cast("dict[object, object]", workflow)
     triggers = workflow_map.get("on", workflow_map.get(True))
-    if not isinstance(triggers, dict):
-        raise TypeError
-    return typ.cast("WorkflowTriggers", triggers)
+    match triggers:
+        case dict():
+            return typ.cast("WorkflowTriggers", triggers)
+        case _:
+            raise TypeError
 
 
 def load_workflow_step(job_id: str, step_id_or_name: str) -> tuple[str, dict[str, str]]:
