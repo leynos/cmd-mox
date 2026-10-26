@@ -246,6 +246,7 @@ def _write_publication_inputs(
     bundle_name: str,
     sdist: bytes = b"canonical sdist",
     wheel: bytes = b"canonical wheel",
+    pypi_assets: dict[str, bytes] | None = None,
 ) -> tuple[Path, Path]:
     """Create local distributions, index and provenance bundle for a release.
 
@@ -261,6 +262,8 @@ def _write_publication_inputs(
     (publish / _SDIST).write_bytes(sdist)
     (publish / _WHEEL).write_bytes(wheel)
     (bundles / bundle_name).write_bytes(b"current run provenance")
+    built_assets = {_SDIST: sdist, _WHEEL: wheel}
+    index_assets = built_assets if pypi_assets is None else pypi_assets
     index = {
         "files": [
             {
@@ -268,7 +271,7 @@ def _write_publication_inputs(
                 "hashes": {"sha256": _digest(content)},
                 "url": f"https://files.example.invalid/{name}",
             }
-            for name, content in ((_SDIST, sdist), (_WHEEL, wheel))
+            for name, content in index_assets.items()
         ]
     }
     _write_json(root / "pypi-index.json", index)
@@ -276,23 +279,67 @@ def _write_publication_inputs(
     return publish, bundles
 
 
-def test_stage_github_uploads_only_missing_assets_and_missing_bundle(
+def test_stage_github_stages_local_assets_and_attestation_bundle(
     tmp_path: Path,
 ) -> None:
-    """GitHub gets PyPI's missing wheel bytes and the first tag bundle only."""
+    """GitHub gets this run's assets and bundle when no destination has them."""
     current_bundle = f"cmd-mox-{_TAG}-run41-1.sigstore.json"
-    curl_downloads = tmp_path / "curl-downloads"
-    curl_downloads.mkdir()
-    (curl_downloads / _WHEEL).write_bytes(b"canonical wheel")
     _write_publication_inputs(
         tmp_path,
-        github_assets={
-            "assets": [
-                {"name": _SDIST, "digest": f"sha256:{_digest(b'canonical sdist')}"}
-            ]
-        },
+        github_assets={"assets": []},
         bundle_name=current_bundle,
+        pypi_assets={},
     )
+    result = _run_github_step(
+        tmp_path,
+        "stage",
+        {
+            "PYPI_INDEX_PATH": "pypi-index.json",
+            "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
+        },
+    )
+
+    output = tmp_path / "github-upload"
+    assert result.returncode == 0, result.stderr
+    assert {path.name for path in output.iterdir()} == {
+        _SDIST,
+        _WHEEL,
+        current_bundle,
+    }, "local canonical distributions must be staged with their bundle"
+    assert (tmp_path / "github-output").read_text(encoding="utf-8") == (
+        "pending=true\n"
+    ), "missing release assets must enable the upload step"
+    upload_result = _run_github_step(tmp_path, "upload", {})
+    assert upload_result.returncode == 0, upload_result.stderr
+    assert read_tool_calls(tmp_path / "tool-calls.jsonl", tool="gh")[-1] == _gh_call([
+        "release",
+        "upload",
+        _TAG,
+        *sorted([
+            f"github-upload/{_SDIST}",
+            f"github-upload/{_WHEEL}",
+            f"github-upload/{current_bundle}",
+        ]),
+    ]), "the release upload must include only staged files and no clobber flag"
+
+
+def test_pypi_sourced_rerun_keeps_existing_bundle_and_bytes(tmp_path: Path) -> None:
+    """A rerun uses PyPI's bytes without attaching a bundle for rebuilt files."""
+    prior_bundle = f"cmd-mox-{_TAG}-run40-1.sigstore.json"
+    current_bundle = f"cmd-mox-{_TAG}-run41-1.sigstore.json"
+    pypi_sdist = b"previously published sdist"
+    pypi_wheel = b"previously published wheel"
+    curl_downloads = tmp_path / "curl-downloads"
+    curl_downloads.mkdir()
+    (curl_downloads / _SDIST).write_bytes(pypi_sdist)
+    (curl_downloads / _WHEEL).write_bytes(pypi_wheel)
+    _write_publication_inputs(
+        tmp_path,
+        github_assets={"assets": [{"name": prior_bundle}]},
+        bundle_name=current_bundle,
+        pypi_assets={_SDIST: pypi_sdist, _WHEEL: pypi_wheel},
+    )
+
     result = _run_github_step(
         tmp_path,
         "stage",
@@ -305,23 +352,113 @@ def test_stage_github_uploads_only_missing_assets_and_missing_bundle(
 
     output = tmp_path / "github-upload"
     assert result.returncode == 0, result.stderr
-    assert {path.name for path in output.iterdir()} == {_WHEEL, current_bundle}, (
-        "only the missing wheel and missing run bundle should be staged"
+    assert {path.name for path in output.iterdir()} == {_SDIST, _WHEEL}, (
+        "PyPI carry-overs must be staged without this run's unrelated bundle"
     )
-    assert (output / _WHEEL).read_bytes() == b"canonical wheel", (
-        "GitHub must receive PyPI's canonical bytes"
+    assert (output / _SDIST).read_bytes() == pypi_sdist, (
+        "GitHub must receive PyPI's canonical sdist bytes"
+    )
+    assert (output / _WHEEL).read_bytes() == pypi_wheel, (
+        "GitHub must receive PyPI's canonical wheel bytes"
     )
     assert (tmp_path / "github-output").read_text(encoding="utf-8") == (
         "pending=true\n"
-    ), "missing release assets must enable the upload step"
-    upload_result = _run_github_step(tmp_path, "upload", {})
-    assert upload_result.returncode == 0, upload_result.stderr
-    assert read_tool_calls(tmp_path / "tool-calls.jsonl", tool="gh")[-1] == _gh_call([
-        "release",
-        "upload",
-        _TAG,
-        *sorted([f"github-upload/{_WHEEL}", f"github-upload/{current_bundle}"]),
-    ]), "the release upload must include only staged files and no clobber flag"
+    ), "staging missing GitHub assets must enable the upload step"
+
+    assets = _assets(sdist=pypi_sdist, wheel=pypi_wheel, bundle=prior_bundle)
+    verify_result = _run_github_step(
+        tmp_path,
+        "verify",
+        {
+            "GH_ASSETS_JSON": json.dumps(assets),
+            "PYPI_INDEX_PATH": "pypi-index.json",
+        },
+    )
+    assert verify_result.returncode == 0, verify_result.stderr
+    assert "hold the same bytes" in verify_result.stdout, (
+        "verification must confirm that both destinations agree"
+    )
+
+
+def test_first_pypi_publication_can_attach_this_runs_matching_bundle(
+    tmp_path: Path,
+) -> None:
+    """The first run may attach its bundle after PyPI accepts its exact bytes."""
+    bundle = f"cmd-mox-{_TAG}-run41-1.sigstore.json"
+    curl_downloads = tmp_path / "curl-downloads"
+    curl_downloads.mkdir()
+    (curl_downloads / _SDIST).write_bytes(b"canonical sdist")
+    (curl_downloads / _WHEEL).write_bytes(b"canonical wheel")
+    _write_publication_inputs(
+        tmp_path,
+        github_assets={"assets": []},
+        bundle_name=bundle,
+        pypi_assets={
+            _SDIST: b"canonical sdist",
+            _WHEEL: b"canonical wheel",
+        },
+    )
+
+    result = _run_github_step(
+        tmp_path,
+        "stage",
+        {
+            "CURL_DOWNLOADS": str(curl_downloads),
+            "PYPI_INDEX_PATH": "pypi-index.json",
+            "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
+        },
+    )
+
+    output = tmp_path / "github-upload"
+    assert result.returncode == 0, result.stderr
+    assert {path.name for path in output.iterdir()} == {
+        _SDIST,
+        _WHEEL,
+        bundle,
+    }, "matching PyPI and attested bytes must carry the current run's bundle"
+    assert (output / _SDIST).read_bytes() == b"canonical sdist", (
+        "the staged sdist must match the attested build"
+    )
+    assert (output / _WHEEL).read_bytes() == b"canonical wheel", (
+        "the staged wheel must match the attested build"
+    )
+
+
+def test_stage_rejects_carried_assets_without_retained_provenance(
+    tmp_path: Path,
+) -> None:
+    """The workflow stops before uploading carried bytes without their bundle."""
+    current_bundle = f"cmd-mox-{_TAG}-run41-1.sigstore.json"
+    published_sdist = b"previously published sdist"
+    published_wheel = b"previously published wheel"
+    curl_downloads = tmp_path / "curl-downloads"
+    curl_downloads.mkdir()
+    (curl_downloads / _SDIST).write_bytes(published_sdist)
+    (curl_downloads / _WHEEL).write_bytes(published_wheel)
+    _write_publication_inputs(
+        tmp_path,
+        github_assets={"assets": []},
+        bundle_name=current_bundle,
+        pypi_assets={_SDIST: published_sdist, _WHEEL: published_wheel},
+    )
+
+    result = _run_github_step(
+        tmp_path,
+        "stage",
+        {
+            "CURL_DOWNLOADS": str(curl_downloads),
+            "PYPI_INDEX_PATH": "pypi-index.json",
+            "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
+        },
+    )
+
+    assert result.returncode == 1, "carried bytes without retained provenance must fail"
+    assert "carried-over release assets have no retained provenance bundle" in (
+        result.stderr
+    ), "the error must identify missing retained provenance"
+    assert not (tmp_path / "github-upload").exists(), (
+        "no release assets should be staged when no matching bundle is available"
+    )
 
 
 def test_stage_github_is_empty_when_assets_and_tag_bundle_are_complete(
@@ -406,7 +543,11 @@ def test_verify_rejects_digest_mismatches_and_missing_tag_bundle(
     )
 
     assert result.returncode == 1, "a digest or provenance mismatch must fail"
-    expected = "differs" if failure == "digest" else "missing from the GitHub Release"
+    expected = (
+        "differs"
+        if failure == "digest"
+        else f"{bundle} is missing from the GitHub Release"
+    )
     assert expected in result.stderr, "verification must explain its failing invariant"
     assert len(read_tool_calls(log, tool="gh")) == 1, (
         "a failed verification must not execute the release edit"

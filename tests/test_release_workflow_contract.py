@@ -243,8 +243,11 @@ def test_run_scripts_are_quoted_shell_steps_without_workflow_interpolation() -> 
     )
     ci_scripts = _run_scripts(_CI_WORKFLOW, {"build-dist"})
     action_scripts = _action_run_scripts(_BUILD_ACTION)
+    fetch_script = (_REPOSITORY_ROOT / "scripts" / "fetch_pypi_index.sh").read_text(
+        encoding="utf-8"
+    )
 
-    for script in [*scripts, *ci_scripts, *action_scripts]:
+    for script in [*scripts, *ci_scripts, *action_scripts, fetch_script]:
         first_line = script.splitlines()[0].strip()
         assert first_line == "set -euo pipefail", (
             "every checked-in release shell step must start in strict mode"

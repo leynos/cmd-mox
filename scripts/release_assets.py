@@ -62,6 +62,16 @@ class InsecurePypiDownloadError(ReleaseAssetError):
         super().__init__("every PyPI download must use HTTPS")
 
 
+class MissingRetainedProvenanceError(ReleaseAssetError):
+    """Carried-over release assets have no existing attestation bundle."""
+
+    def __init__(self) -> None:
+        """Explain why publishing carried-over bytes must stop."""
+        super().__init__(
+            "carried-over release assets have no retained provenance bundle"
+        )
+
+
 class Source(enum.StrEnum):
     """Where one artefact name's canonical bytes come from."""
 
@@ -77,6 +87,26 @@ class Plan:
     canonical: cabc.Mapping[str, Source]
     pypi_uploads: frozenset[str]
     github_uploads: frozenset[str]
+
+
+def _canonical_source(
+    name: str,
+    on_pypi: cabc.Collection[str],
+    on_github: cabc.Collection[str],
+) -> Source:
+    """Select one filename's canonical bytes in destination priority order.
+
+    Returns
+    -------
+    Source
+        PyPI when it already holds the filename, otherwise GitHub when it
+        does, and local build bytes as the final source.
+    """
+    if name in on_pypi:
+        return Source.PYPI
+    if name in on_github:
+        return Source.GITHUB
+    return Source.LOCAL
 
 
 def plan(
@@ -106,14 +136,7 @@ def plan(
     <Source.GITHUB: 'github'>
     """
     names = frozenset(local)
-    canonical = {
-        name: Source.PYPI
-        if name in on_pypi
-        else Source.GITHUB
-        if name in on_github
-        else Source.LOCAL
-        for name in names
-    }
+    canonical = {name: _canonical_source(name, on_pypi, on_github) for name in names}
     return Plan(
         canonical=canonical,
         pypi_uploads=frozenset(name for name in names if name not in on_pypi),
@@ -413,6 +436,53 @@ def _has_bundle_for_release(name: str, github: cabc.Mapping[str, str | None]) ->
     )
 
 
+def _canonical_sources_match_build(state: State) -> bool:
+    """Report whether every canonical distribution matches this run's bytes.
+
+    Returns
+    -------
+    bool
+        True when each remote canonical digest, when present, matches this
+        run's staged distribution. This also recognises the first PyPI upload,
+        whose index now names the attested bytes from this same workflow run.
+    """
+    canonical = state.plan().canonical
+    return bool(canonical) and all(
+        source is Source.LOCAL
+        or (
+            (expected := _canonical_digest(name, source, state)) is not None
+            and expected == sha256_of(state.publish / name)
+        )
+        for name, source in canonical.items()
+    )
+
+
+def _canonical_digest(name: str, source: Source, state: State) -> str | None:
+    """Return the selected remote source's digest, if it is available.
+
+    Returns
+    -------
+    str or None
+        The PyPI or GitHub SHA-256 digest, or ``None`` when unavailable.
+    """
+    if source is Source.PYPI:
+        return state.pypi[name].sha256
+    if source is Source.GITHUB:
+        return state.github[name]
+    return None
+
+
+def _has_retained_bundle(bundles: Path, github: cabc.Mapping[str, str | None]) -> bool:
+    """Report whether GitHub retains a bundle for this tag's current bundle family.
+
+    Returns
+    -------
+    bool
+        Whether the release already has a current or earlier run's bundle.
+    """
+    return any(_has_bundle_for_release(name, github) for name in local_names(bundles))
+
+
 def _copy_unattached_bundles(
     bundles: Path, github: cabc.Mapping[str, str | None], output: Path
 ) -> None:
@@ -430,7 +500,9 @@ def stage_github(state: State, bundles: Path, output: Path) -> list[tuple[str, s
     state : State
         The staged artefacts and both destinations' asset listings.
     bundles : pathlib.Path
-        This run's Sigstore provenance bundle directory.
+        This run's Sigstore provenance bundle directory. Its bundle is staged
+        only when every canonical distribution matches this run's attested
+        bytes.
     output : pathlib.Path
         Directory receiving assets to upload and PyPI download targets.
 
@@ -438,12 +510,22 @@ def stage_github(state: State, bundles: Path, output: Path) -> list[tuple[str, s
     -------
     list[tuple[str, str]]
         PyPI filenames and HTTPS URLs whose bytes GitHub must receive.
+
+    Raises
+    ------
+    MissingRetainedProvenanceError
+        If canonical bytes are carried over but the release has no retained
+        bundle for this tag.
     """
     lacking = sorted(state.plan().github_uploads)
     fetch = _pypi_fetch_list(lacking, state.pypi)
+    sources_match_build = _canonical_sources_match_build(state)
+    if not sources_match_build and not _has_retained_bundle(bundles, state.github):
+        raise MissingRetainedProvenanceError
     output.mkdir(parents=True, exist_ok=True)
     _copy_pypi_gap(lacking, state.pypi, state.publish, output)
-    _copy_unattached_bundles(bundles, state.github, output)
+    if sources_match_build:
+        _copy_unattached_bundles(bundles, state.github, output)
     return fetch
 
 
@@ -470,11 +552,16 @@ def verify(state: State, bundles: Path) -> list[str]:
     """
     pypi = {name: file.sha256 for name, file in state.pypi.items()}
     problems = mismatches(local_names(state.publish), pypi, state.github)
-    missing = [
-        name
-        for name in local_names(bundles)
-        if not _has_bundle_for_release(name, state.github)
-    ]
+    if _canonical_sources_match_build(state):
+        missing = [
+            name
+            for name in local_names(bundles)
+            if not _has_bundle_for_release(name, state.github)
+        ]
+    elif not _has_retained_bundle(bundles, state.github):
+        missing = ["carried-over release assets have no retained provenance bundle"]
+    else:
+        missing = []
     return [
         *problems,
         *(f"{name} is missing from the GitHub Release" for name in missing),

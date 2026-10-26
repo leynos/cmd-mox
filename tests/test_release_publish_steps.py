@@ -29,6 +29,7 @@ from scripts import release_assets, release_version
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
+_FETCH_INDEX_SCRIPT = _REPOSITORY_ROOT / "scripts" / "fetch_pypi_index.sh"
 pytestmark = [
     pytest.mark.skipif(
         not (RELEASE_WORKFLOW_PATH.is_file() and _RELEASE_ASSETS_CLI.is_file()),
@@ -59,6 +60,21 @@ def test_version_labels_classify_only_public_prerelease_markers(
     assert release_version.is_prerelease(version) is (is_prerelease == "true"), (
         f"unexpected pre-release classification for {version}"
     )
+
+
+def test_plan_uses_pypi_then_github_then_local_as_the_source_order() -> None:
+    """Canonical source selection follows the release's destination priority."""
+    decision = release_assets.plan(
+        local={"pypi.whl", "github.whl", "local.whl"},
+        on_pypi={"pypi.whl"},
+        on_github={"pypi.whl", "github.whl"},
+    )
+
+    assert decision.canonical == {
+        "pypi.whl": release_assets.Source.PYPI,
+        "github.whl": release_assets.Source.GITHUB,
+        "local.whl": release_assets.Source.LOCAL,
+    }, "PyPI, then GitHub, then the local build must determine source priority"
 
 
 def test_version_check_accepts_the_exact_v_prefixed_beta_tag(tmp_path: Path) -> None:
@@ -218,6 +234,13 @@ def test_pypi_index_retries_only_network_rate_and_server_errors(
     tools = install_fake_tools(tmp_path / "bin")
     log = tmp_path / "tool-calls.jsonl"
     script, _ = load_workflow_step("publish-pypi", "index")
+    release_script, _ = load_workflow_step("publish-release", "index")
+    assert script == release_script, "both release jobs must call the shared fetch step"
+    (tmp_path / "scripts").mkdir()
+    shutil.copyfile(_FETCH_INDEX_SCRIPT, tmp_path / "scripts" / "fetch_pypi_index.sh")
+    assert _FETCH_INDEX_SCRIPT.read_text(encoding="utf-8").splitlines()[0] == (
+        "set -euo pipefail"
+    ), "the checked-in shared fetch script must enable strict Bash"
 
     result = run_bash_step(
         script,
