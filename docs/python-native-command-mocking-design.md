@@ -696,8 +696,8 @@ features that are infeasible with file-based logging.
   capture by `CMOX_IPC_TIMEOUT` on every platform; terminal-bound streams are
   skipped. One private component, `cmd_mox._stdin_capture`, owns the deadline
   and the strategy choice, so `cmd_mox.shim` never reads stdin itself. On
-  expiry it discards partial input and raises `StdinTimeoutError`, and the shim
-  reports a bounded diagnostic and exits `1` without contacting IPC. The
+  expiry, it discards partial input and raises `StdinTimeoutError`, and the
+  shim reports a bounded diagnostic and exits `1` without contacting IPC. The
   strategy table is:
 
   | Host and stream                          | Strategy                                              | Deadline enforcement                                                                       |
