@@ -8,11 +8,11 @@ behaviour and configuration details, see the
 ## Check how commands receive stdin
 
 `CMOX_IPC_TIMEOUT` bounds the capture of non-terminal stdin on every platform
-and for every kind of stream. On POSIX one deadline then applies to pollable
+and for every kind of stream. On POSIX, one deadline then applies to pollable
 piped stdin, regular-file stdin, and the Unix IPC exchange through passthrough
-reporting. Regular-file reads run in a worker so the shim can stop waiting at
-the deadline. On Windows, stdin keeps its own capture deadline while named-pipe
-communication uses its existing cooperative timeout, so the POSIX
+reporting. Regular-file reads run in a worker, so the shim can stop waiting at
+the deadline. On Windows, stdin has a separate capture deadline while
+named-pipe communication uses its existing cooperative timeout, so the POSIX
 shared-deadline guarantee does not apply there.
 
 Reaching the deadline ends the capture: the shim discards partial input, does
