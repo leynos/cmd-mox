@@ -126,6 +126,7 @@ def test_draft_step_reuses_existing_draft_or_published_release(
     """An existing release is reused regardless of whether it is draft."""
     tools = install_fake_tools(tmp_path / "bin")
     log = tmp_path / "tool-calls.jsonl"
+    state_log = tmp_path / "release-state.txt"
     script, _ = load_workflow_step("draft-release", "create")
 
     result = run_bash_step(
@@ -134,6 +135,8 @@ def test_draft_step_reuses_existing_draft_or_published_release(
         env={
             "FAKE_TOOL_LOG": str(log),
             "GH_RELEASE_EXISTS": "1",
+            "GH_RELEASE_STATE": release_state,
+            "GH_RELEASE_STATE_LOG": str(state_log),
             "IS_PRERELEASE": "false",
             "PATH": f"{tools}:/usr/bin:/bin",
             "TAG_NAME": _TAG,
@@ -142,6 +145,9 @@ def test_draft_step_reuses_existing_draft_or_published_release(
 
     calls = read_tool_calls(log, tool="gh")
     assert result.returncode == 0, result.stderr
+    assert state_log.read_text(encoding="utf-8") == release_state, (
+        "the fake GitHub CLI must expose the parametrized existing release state"
+    )
     assert calls == [{"tool": "gh", "argv": ["release", "view", _TAG]}], (
         f"the {release_state} release must be reused without create"
     )

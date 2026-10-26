@@ -280,6 +280,13 @@ if argv[:2] != ["release", "view"]:
 if os.environ.get("GH_RELEASE_EXISTS", "1") != "1":
     sys.stderr.write("release not found\n")
     raise SystemExit(1)
+release_state = os.environ.get("GH_RELEASE_STATE")
+if release_state is not None:
+    if release_state not in {"draft", "published"}:
+        raise SystemExit(2)
+    state_log = os.environ.get("GH_RELEASE_STATE_LOG")
+    if state_log is not None:
+        Path(state_log).write_text(release_state, encoding="utf-8")
 if "--json" in argv:
     sys.stdout.write(os.environ.get("GH_ASSETS_JSON", '{"assets": []}'))
     sys.stdout.write("\n")
