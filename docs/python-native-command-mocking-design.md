@@ -2207,7 +2207,7 @@ Fixtures use JSON format for several reasons: human-readability, native Python
 support without dependencies, Git-friendliness (mergeable, diffable), and
 compatibility with the existing `Invocation.to_dict()` serialization.
 
-#### 9.3.1 Schema Definition (Version 1.0.0)
+#### 9.3.1 Schema definition (Version 1.0.0)
 
 <!-- markdownlint-disable MD013 -->
 
@@ -3234,7 +3234,7 @@ misses fall back to the spy's configured behaviour.
   replay much less useful for tests that only fixture a subset of command
   variants
 
-#### 9.10.16 Three-Component Fixture Schema Versions (2026-10-26)
+#### 9.10.16 Three-component fixture schema versions (2026-10-26)
 
 **Decision:** Represent fixture schema versions with numeric
 `MAJOR.MINOR.PATCH` components. Continue accepting legacy two-component
