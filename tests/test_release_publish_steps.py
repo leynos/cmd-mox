@@ -98,7 +98,7 @@ def test_version_check_accepts_the_exact_v_prefixed_beta_tag(tmp_path: Path) -> 
 def test_version_check_annotates_an_exact_spelling_mismatch(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Different version spellings fail instead of being normalised."""
+    """Different version spellings fail instead of being normalized."""
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "cmd-mox"\nversion = "0.2.0-beta.1"\n',
         encoding="utf-8",
@@ -136,7 +136,7 @@ def test_pep691_index_resolves_relative_urls_and_missing_files_are_empty(
 
     files = release_assets.read_pypi_index(index)
     assert files["cmd_mox-0.3.0.tar.gz"].sha256 == "abcd", (
-        "PyPI hashes must be normalised to lower-case hex"
+        "PyPI hashes must be normalized to lower-case hex"
     )
     assert files["cmd_mox-0.3.0.tar.gz"].url == (
         "https://pypi.org/simple/cmd-mox/files/cmd_mox-0.3.0.tar.gz"
@@ -274,6 +274,100 @@ def test_pypi_index_retries_only_network_rate_and_server_errors(
             "a non-retryable HTTP error must fail immediately"
         )
     assert calls, "the fake tool log must contain each recorded invocation"
+
+
+def test_publish_release_waits_for_every_distribution_to_reach_pypi(
+    tmp_path: Path,
+) -> None:
+    """A stale successful index read is retried until all uploads appear."""
+    names = ["cmd_mox-0.3.0.tar.gz", "cmd_mox-0.3.0-py3-none-any.whl"]
+    publish = tmp_path / "dist" / "publish"
+    publish.mkdir(parents=True)
+    for name in names:
+        (publish / name).write_bytes(name.encode())
+    (tmp_path / "release-assets.json").write_text('{"assets": []}', encoding="utf-8")
+    complete_index_path = tmp_path / "complete-index.json"
+    _write_index(complete_index_path, names)
+
+    tools = install_fake_tools(tmp_path / "bin")
+    log = tmp_path / "tool-calls.jsonl"
+    script, declared_env = load_workflow_step("publish-release", "index")
+    assert declared_env == {
+        "EXPECTED_PUBLISH_DIR": "dist/publish",
+        "RELEASE_ASSETS_PATH": "release-assets.json",
+    }, "publish-release must poll for every file in its release-dist inventory"
+    (tmp_path / "scripts").mkdir()
+    shutil.copyfile(_FETCH_INDEX_SCRIPT, tmp_path / "scripts" / "fetch_pypi_index.sh")
+
+    result = run_bash_step(
+        script,
+        cwd=tmp_path,
+        env={
+            **declared_env,
+            "CURL_BODIES": json.dumps([
+                '{"files": []}',
+                complete_index_path.read_text(encoding="utf-8"),
+            ]),
+            "CURL_STATUSES": "200,200",
+            "FAKE_TOOL_LOG": str(log),
+            "PATH": f"{tools}:/usr/bin:/bin",
+            "PYPI_INDEX_PATH": "index.json",
+            "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert len(read_tool_calls(log, tool="curl")) == 2, (
+        "the index fetch must retry a 200 response that omits uploaded names"
+    )
+    assert len(read_tool_calls(log, tool="sleep")) == 1, (
+        "the stale index response must trigger the configured retry delay"
+    )
+    assert (tmp_path / "index.json").read_text(encoding="utf-8") == (
+        complete_index_path.read_text(encoding="utf-8")
+    ), "the final index must contain every published distribution"
+
+
+def test_publish_release_fails_after_six_indexes_omit_a_distribution(
+    tmp_path: Path,
+) -> None:
+    """A persistently stale PyPI index fails after the bounded retry window."""
+    publish = tmp_path / "dist" / "publish"
+    publish.mkdir(parents=True)
+    expected_name = "cmd_mox-0.3.0.tar.gz"
+    (publish / expected_name).write_bytes(b"sdist")
+    (tmp_path / "release-assets.json").write_text('{"assets": []}', encoding="utf-8")
+
+    tools = install_fake_tools(tmp_path / "bin")
+    log = tmp_path / "tool-calls.jsonl"
+    script, declared_env = load_workflow_step("publish-release", "index")
+    (tmp_path / "scripts").mkdir()
+    shutil.copyfile(_FETCH_INDEX_SCRIPT, tmp_path / "scripts" / "fetch_pypi_index.sh")
+
+    result = run_bash_step(
+        script,
+        cwd=tmp_path,
+        env={
+            **declared_env,
+            "CURL_BODIES": json.dumps(['{"files": []}']),
+            "FAKE_TOOL_LOG": str(log),
+            "PATH": f"{tools}:/usr/bin:/bin",
+            "PYPI_INDEX_PATH": "index.json",
+            "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
+        },
+    )
+
+    assert result.returncode == 1, "an index that never lists the upload must fail"
+    assert (
+        "PyPI index did not list release files after six attempts" in result.stderr
+    ), "the failure must identify the expired index wait"
+    assert expected_name in result.stderr, "the failure must name the missing sdist"
+    assert len(read_tool_calls(log, tool="curl")) == 6, (
+        "the index wait must stop after its six bounded attempts"
+    )
+    assert len(read_tool_calls(log, tool="sleep")) == 5, (
+        "the index wait must delay only between attempts"
+    )
 
 
 def _write_index(path: Path, filenames: list[str]) -> None:

@@ -346,6 +346,22 @@ def carryover(state: State) -> list[str]:
     return sorted(set(local_names(state.publish)) & set(state.github))
 
 
+def missing_from_pypi(state: State) -> list[str]:
+    """Return staged distribution names absent from the current PyPI index.
+
+    Parameters
+    ----------
+    state : State
+        The staged distributions and the most recent PyPI inventory.
+
+    Returns
+    -------
+    list[str]
+        Sorted filenames that PyPI has not listed yet.
+    """
+    return sorted(set(local_names(state.publish)) - set(state.pypi))
+
+
 def stage_pypi(state: State, github_files: Path) -> bool:
     """Leave exactly the canonical files PyPI still needs in ``publish``.
 
@@ -443,7 +459,7 @@ def _canonical_sources_match_build(state: State) -> bool:
     -------
     bool
         True when each remote canonical digest, when present, matches this
-        run's staged distribution. This also recognises the first PyPI upload,
+        run's staged distribution. This also recognizes the first PyPI upload,
         whose index now names the attested bytes from this same workflow run.
     """
     canonical = state.plan().canonical

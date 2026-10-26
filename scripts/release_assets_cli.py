@@ -18,6 +18,7 @@ from scripts.release_assets import (
     State,
     carryover,
     check_fetched,
+    missing_from_pypi,
     stage_github,
     stage_pypi,
     verify,
@@ -100,6 +101,13 @@ def _check_fetched(state: State, args: argparse.Namespace) -> None:
     check_fetched(state, _path(args, "output"))
 
 
+def _missing_pypi(state: State, args: argparse.Namespace) -> None:
+    """Print each staged distribution absent from the current PyPI index."""
+    del args
+    for name in missing_from_pypi(state):
+        sys.stdout.write(f"{name}\n")
+
+
 def _verify(state: State, args: argparse.Namespace) -> None:
     """Fail if PyPI and the GitHub Release disagree about shipped files.
 
@@ -121,9 +129,16 @@ _COMMANDS: dict[str, cabc.Callable[[State, argparse.Namespace], None]] = {
     "stage-pypi": _stage_pypi,
     "stage-github": _stage_github,
     "check-fetched": _check_fetched,
+    "missing-pypi": _missing_pypi,
     "verify": _verify,
 }
-_INDEX_COMMANDS = frozenset({"stage-pypi", "stage-github", "check-fetched", "verify"})
+_INDEX_COMMANDS = frozenset({
+    "stage-pypi",
+    "stage-github",
+    "check-fetched",
+    "missing-pypi",
+    "verify",
+})
 
 
 def main(argv: cabc.Sequence[str] | None = None) -> int:

@@ -10,8 +10,10 @@ first on ``PATH``.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 import typing as typ
 from pathlib import Path
 
@@ -166,7 +168,7 @@ def run_bash_step(
     env: dict[str, str],
     output_path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a shell step in a scratch directory with a controlled environment.
+    """Run a shell step with controlled tools and the test Python interpreter.
 
     Parameters
     ----------
@@ -184,8 +186,14 @@ def run_bash_step(
     subprocess.CompletedProcess[str]
         The completed process, including captured output and status.
     """
+    python_shim = cwd / ".python-shim"
+    python_shim.mkdir(exist_ok=True)
+    python3 = python_shim / "python3"
+    if not python3.exists():
+        python3.symlink_to(sys.executable)
     process_env = {
         **env,
+        "PATH": os.pathsep.join((str(python_shim), env.get("PATH", ""))),
         "GITHUB_OUTPUT": str(
             output_path or env.get("GITHUB_OUTPUT") or cwd / "github-output"
         ),
@@ -273,10 +281,16 @@ with log_path.open("a", encoding="utf-8") as log:
 
 statuses = os.environ.get("CURL_STATUSES", "200").split(",")
 status = statuses[min(curl_count, len(statuses) - 1)]
+bodies = json.loads(os.environ["CURL_BODIES"]) if "CURL_BODIES" in os.environ else None
 if "--output" in argv:
     output = Path(argv[argv.index("--output") + 1])
     output.parent.mkdir(parents=True, exist_ok=True)
-    body = os.environ.get("CURL_BODY", '{"files": []}').encode()
+    body_text = (
+        bodies[min(curl_count, len(bodies) - 1)]
+        if bodies is not None
+        else os.environ.get("CURL_BODY", '{"files": []}')
+    )
+    body = body_text.encode()
     if "--write-out" not in argv and "CURL_DOWNLOADS" in os.environ:
         name = Path(urllib.parse.urlparse(argv[-1]).path).name
         download = Path(os.environ["CURL_DOWNLOADS"]) / name

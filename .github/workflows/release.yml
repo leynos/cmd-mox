@@ -246,16 +246,19 @@ jobs:
         with:
           name: release-dist
           path: dist
-      - name: Fetch the PyPI simple index
-        id: index
-        run: |
-          set -euo pipefail
-          bash scripts/fetch_pypi_index.sh
       - name: List the release assets
         id: assets
         run: |
           set -euo pipefail
           gh release view "${TAG_NAME}" --json assets > release-assets.json
+      - name: Fetch the PyPI simple index
+        id: index
+        env:
+          EXPECTED_PUBLISH_DIR: dist/publish
+          RELEASE_ASSETS_PATH: release-assets.json
+        run: |
+          set -euo pipefail
+          bash scripts/fetch_pypi_index.sh
       - name: Stage missing release assets
         id: stage
         run: |
