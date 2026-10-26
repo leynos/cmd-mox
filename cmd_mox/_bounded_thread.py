@@ -16,6 +16,7 @@ pywin32 builds and from every non-Windows host, where the module stand-ins are
 from __future__ import annotations
 
 import contextlib
+import time
 import typing as typ
 
 if typ.TYPE_CHECKING:
@@ -24,6 +25,11 @@ if typ.TYPE_CHECKING:
 
 # ``CancelSynchronousIo`` requires THREAD_TERMINATE access to its target.
 _THREAD_TERMINATE: typ.Final[int] = 0x0001
+
+# Upper bound on one wait between cancellation attempts. Short enough that a
+# request landing between two blocking calls is retried promptly, long enough
+# that a cancel which does take effect is not immediately duplicated.
+_CANCEL_JOIN_SLICE: typ.Final[float] = 0.05
 
 
 def stash_outcome[T](
@@ -203,8 +209,23 @@ def cancel_and_await_worker(
     -------
     bool
         Whether the worker exited before the grace period elapsed.
+
+    Notes
+    -----
+    *request_cancel* is re-issued across the wait rather than spent once.
+    ``CancelSynchronousIo`` reports ``ERROR_NOT_FOUND`` when its target is
+    between blocking calls, and a chunked reader decodes between reads, so a
+    single attempt can land in that gap and be swallowed. Retrying costs one
+    cheap native call per slice and keeps the graceful path reachable.
     """
+    deadline = time.monotonic() + grace
     request_cancel(thread)
     cancel()
-    thread.join(grace)
+    while thread.is_alive():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        thread.join(min(remaining, _CANCEL_JOIN_SLICE))
+        if thread.is_alive():
+            request_cancel(thread)
     return not thread.is_alive()

@@ -559,10 +559,17 @@ def test_windows_handle_reports_unexpected_errors_as_oserror(
     )
 
 
-def test_windows_handle_timeout_cancels_once(
+def test_windows_handle_timeout_cancels_and_closes_one_handle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An expired handle read cancels the worker and closes one handle."""
+    """An expired handle read cancels the worker and leaks no thread handle.
+
+    The number of cancellation attempts is not pinned: the shared helper
+    re-issues ``CancelSynchronousIo`` while the worker survives, because a
+    request landing between two ``ReadFile`` calls is swallowed. Each attempt
+    opens and closes its own thread handle, so the invariant is that every
+    handle opened was closed again.
+    """
     release = threading.Event()
     started = threading.Event()
 
@@ -582,10 +589,13 @@ def test_windows_handle_timeout_cancels_once(
         release.set()
 
     assert started.is_set(), "the handle read never began"
-    assert len(harness.cancelled) == 1, "the read was not cancelled exactly once"
-    assert len(harness.closed) == 1, "the thread handle was not closed exactly once"
-    assert len(harness.opened) == 1, "the thread handle was not opened exactly once"
-    assert harness.opened[0][2] is not None, "no native thread was targeted"
+    assert harness.cancelled, "the read was never cancelled"
+    assert len(harness.closed) == len(harness.opened), (
+        "a thread handle was opened and never closed"
+    )
+    assert all(args[2] is not None for args in harness.opened), (
+        "no native thread was targeted"
+    )
     assert excinfo.value.worker_alive is True, "the blocked worker should live"
 
 
