@@ -109,6 +109,19 @@ def _steps(job: WorkflowJob) -> list[WorkflowStep]:
     return job["steps"]
 
 
+def _release_steps(workflow: Workflow) -> list[WorkflowStep]:
+    """Return workflow and composite-action steps in execution order.
+
+    Returns
+    -------
+    list[WorkflowStep]
+        Workflow job steps followed by the composite action's steps.
+    """
+    workflow_steps = [step for job in _jobs(workflow).values() for step in _steps(job)]
+    action = yaml.safe_load(_BUILD_ACTION.read_text(encoding="utf-8"))
+    return [*workflow_steps, *action["runs"]["steps"]]
+
+
 def _run_scripts(workflow_path: Path, job_ids: set[str]) -> list[str]:
     """Collect ``run`` blocks from only the named workflow jobs.
 
@@ -216,31 +229,31 @@ def test_release_jobs_have_exact_permissions_and_dependencies() -> None:
     )
 
 
-def test_every_action_is_local_or_pinned_and_checkout_credentials_are_disabled() -> (
-    None
-):
+def test_every_action_is_local_or_pinned() -> None:
     """Release actions use local paths or immutable SHA pins."""
     workflow = _workflow(RELEASE_WORKFLOW_PATH)
-    action = yaml.safe_load(_BUILD_ACTION.read_text(encoding="utf-8"))
-    uses_values = [
-        step["uses"]
-        for job in _jobs(workflow).values()
-        for step in _steps(job)
-        if "uses" in step
-    ] + [step["uses"] for step in action["runs"]["steps"] if "uses" in step]
-
-    for uses in uses_values:
+    for step in _release_steps(workflow):
+        if "uses" not in step:
+            continue
+        uses = step["uses"]
         assert uses.startswith("./") or _SHA_PIN.fullmatch(uses.rpartition("@")[2]), (
             f"action must be local or pinned to a lowercase full SHA: {uses}"
         )
-    checkouts = [uses for uses in uses_values if uses.startswith("actions/checkout@")]
+
+
+def test_every_release_checkout_disables_persisted_credentials() -> None:
+    """Release checkouts must not persist their GitHub token."""
+    workflow = _workflow(RELEASE_WORKFLOW_PATH)
+    checkouts = [
+        step
+        for step in _release_steps(workflow)
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
     assert checkouts, "release workflow must check out scripts"
-    for job in _jobs(workflow).values():
-        for step in _steps(job):
-            if step.get("uses", "").startswith("actions/checkout@"):
-                assert step.get("with", {}).get("persist-credentials") is False, (
-                    "every release checkout must disable persisted credentials"
-                )
+    for step in checkouts:
+        assert step.get("with", {}).get("persist-credentials") is False, (
+            "every release checkout must disable persisted credentials"
+        )
 
 
 def test_release_workflow_attests_and_uploads_without_clobbering() -> None:

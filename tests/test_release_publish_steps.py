@@ -33,6 +33,17 @@ release_version = pytest.importorskip("scripts.release_version")
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
 _FETCH_INDEX_SCRIPT = _REPOSITORY_ROOT / "scripts" / "fetch_pypi_index.sh"
+
+
+class _IndexFetchCase(typ.NamedTuple):
+    """Expected tool behaviour for one PyPI index response sequence."""
+
+    statuses: str
+    expected_status: int
+    expected_calls: int
+    expected_sleeps: int
+
+
 pytestmark = [
     pytest.mark.skipif(
         should_skip_release_tests_for_mutation_sandbox(
@@ -228,23 +239,23 @@ def test_attestation_collection_fails_without_exactly_one_sdist(
 
 
 @pytest.mark.parametrize(
-    ("statuses", "expected_status", "expected_calls", "expected_sleeps"),
+    "case",
     [
-        ("200", 0, 1, 0),
-        ("404", 0, 1, 0),
-        ("503,200", 0, 2, 1),
-        ("429,200", 0, 2, 1),
-        ("000,200", 0, 2, 1),
-        ("503,503,503,503,503,503", 1, 6, 5),
-        ("403,200", 1, 1, 0),
+        pytest.param(_IndexFetchCase("200", 0, 1, 0), id="success"),
+        pytest.param(_IndexFetchCase("404", 0, 1, 0), id="missing-project"),
+        pytest.param(_IndexFetchCase("503,200", 0, 2, 1), id="server-recovery"),
+        pytest.param(_IndexFetchCase("429,200", 0, 2, 1), id="rate-limit-recovery"),
+        pytest.param(_IndexFetchCase("000,200", 0, 2, 1), id="network-recovery"),
+        pytest.param(
+            _IndexFetchCase("503,503,503,503,503,503", 1, 6, 5),
+            id="persistent-server-error",
+        ),
+        pytest.param(_IndexFetchCase("403,200", 1, 1, 0), id="forbidden"),
     ],
 )
 def test_pypi_index_retries_only_network_rate_and_server_errors(
     tmp_path: Path,
-    statuses: str,
-    expected_status: int,
-    expected_calls: int,
-    expected_sleeps: int,
+    case: _IndexFetchCase,
 ) -> None:
     """Index fetch accepts 200/404 and retries only 000, 429 and 5xx."""
     tools = install_fake_tools(tmp_path / "bin")
@@ -263,7 +274,7 @@ def test_pypi_index_retries_only_network_rate_and_server_errors(
         cwd=tmp_path,
         env={
             "CURL_BODY": '{"files": []}',
-            "CURL_STATUSES": statuses,
+            "CURL_STATUSES": case.statuses,
             "FAKE_TOOL_LOG": str(log),
             "PATH": f"{tools}:/usr/bin:/bin",
             "PYPI_INDEX_PATH": "index.json",
@@ -272,20 +283,20 @@ def test_pypi_index_retries_only_network_rate_and_server_errors(
     )
 
     calls = read_tool_calls(log)
-    assert result.returncode == expected_status, (
+    assert result.returncode == case.expected_status, (
         f"unexpected index-fetch status {result.returncode}: {result.stderr}"
     )
-    assert len(read_tool_calls(log, tool="curl")) == expected_calls, (
+    assert len(read_tool_calls(log, tool="curl")) == case.expected_calls, (
         "the index fetch used an unexpected number of curl attempts"
     )
-    assert len(read_tool_calls(log, tool="sleep")) == expected_sleeps, (
+    assert len(read_tool_calls(log, tool="sleep")) == case.expected_sleeps, (
         "only retryable statuses should cause a two-second delay"
     )
-    if statuses == "404":
+    if case.statuses == "404":
         assert (tmp_path / "index.json").read_text(encoding="utf-8") == (
             '{"files": []}\n'
         ), "an unpublished project must be represented as an empty index"
-    if statuses == "403,200":
+    if case.statuses == "403,200":
         assert any("HTTP 403" in line for line in result.stderr.splitlines()), (
             "a non-retryable HTTP error must fail immediately"
         )

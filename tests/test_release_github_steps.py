@@ -48,6 +48,16 @@ _SDIST = "cmd_mox-0.3.0.tar.gz"
 _WHEEL = "cmd_mox-0.3.0-py3-none-any.whl"
 
 
+class _PublicationInputs(typ.NamedTuple):
+    """Describe the release files and destination state for one test."""
+
+    github_assets: dict[str, object]
+    bundle_name: str
+    sdist: bytes = b"canonical sdist"
+    wheel: bytes = b"canonical wheel"
+    pypi_assets: dict[str, bytes] | None = None
+
+
 def _write_json(path: Path, document: object) -> None:
     """Write a JSON document with stable UTF-8 encoding."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,12 +260,7 @@ def test_snapshot_downloads_only_assets_carried_over_from_github(
 
 def _write_publication_inputs(
     root: Path,
-    *,
-    github_assets: dict[str, object],
-    bundle_name: str,
-    sdist: bytes = b"canonical sdist",
-    wheel: bytes = b"canonical wheel",
-    pypi_assets: dict[str, bytes] | None = None,
+    inputs: _PublicationInputs,
 ) -> tuple[Path, Path]:
     """Create local distributions, index and provenance bundle for a release.
 
@@ -268,11 +273,11 @@ def _write_publication_inputs(
     bundles = root / "dist" / "attestations"
     publish.mkdir(parents=True)
     bundles.mkdir()
-    (publish / _SDIST).write_bytes(sdist)
-    (publish / _WHEEL).write_bytes(wheel)
-    (bundles / bundle_name).write_bytes(b"current run provenance")
-    built_assets = {_SDIST: sdist, _WHEEL: wheel}
-    index_assets = built_assets if pypi_assets is None else pypi_assets
+    (publish / _SDIST).write_bytes(inputs.sdist)
+    (publish / _WHEEL).write_bytes(inputs.wheel)
+    (bundles / inputs.bundle_name).write_bytes(b"current run provenance")
+    built_assets = {_SDIST: inputs.sdist, _WHEEL: inputs.wheel}
+    index_assets = built_assets if inputs.pypi_assets is None else inputs.pypi_assets
     index = {
         "files": [
             {
@@ -284,7 +289,7 @@ def _write_publication_inputs(
         ]
     }
     _write_json(root / "pypi-index.json", index)
-    _write_json(root / "release-assets.json", github_assets)
+    _write_json(root / "release-assets.json", inputs.github_assets)
     return publish, bundles
 
 
@@ -295,9 +300,11 @@ def test_stage_github_stages_local_assets_and_attestation_bundle(
     current_bundle = f"cmd-mox-{_TAG}-run41-1.sigstore.json"
     _write_publication_inputs(
         tmp_path,
-        github_assets={"assets": []},
-        bundle_name=current_bundle,
-        pypi_assets={},
+        _PublicationInputs(
+            github_assets={"assets": []},
+            bundle_name=current_bundle,
+            pypi_assets={},
+        ),
     )
     result = _run_github_step(
         tmp_path,
@@ -344,9 +351,11 @@ def test_pypi_sourced_rerun_keeps_existing_bundle_and_bytes(tmp_path: Path) -> N
     (curl_downloads / _WHEEL).write_bytes(pypi_wheel)
     _write_publication_inputs(
         tmp_path,
-        github_assets={"assets": [{"name": prior_bundle}]},
-        bundle_name=current_bundle,
-        pypi_assets={_SDIST: pypi_sdist, _WHEEL: pypi_wheel},
+        _PublicationInputs(
+            github_assets={"assets": [{"name": prior_bundle}]},
+            bundle_name=current_bundle,
+            pypi_assets={_SDIST: pypi_sdist, _WHEEL: pypi_wheel},
+        ),
     )
 
     result = _run_github_step(
@@ -400,12 +409,14 @@ def test_first_pypi_publication_can_attach_this_runs_matching_bundle(
     (curl_downloads / _WHEEL).write_bytes(b"canonical wheel")
     _write_publication_inputs(
         tmp_path,
-        github_assets={"assets": []},
-        bundle_name=bundle,
-        pypi_assets={
-            _SDIST: b"canonical sdist",
-            _WHEEL: b"canonical wheel",
-        },
+        _PublicationInputs(
+            github_assets={"assets": []},
+            bundle_name=bundle,
+            pypi_assets={
+                _SDIST: b"canonical sdist",
+                _WHEEL: b"canonical wheel",
+            },
+        ),
     )
 
     result = _run_github_step(
@@ -446,9 +457,11 @@ def test_stage_rejects_carried_assets_without_retained_provenance(
     (curl_downloads / _WHEEL).write_bytes(published_wheel)
     _write_publication_inputs(
         tmp_path,
-        github_assets={"assets": []},
-        bundle_name=current_bundle,
-        pypi_assets={_SDIST: published_sdist, _WHEEL: published_wheel},
+        _PublicationInputs(
+            github_assets={"assets": []},
+            bundle_name=current_bundle,
+            pypi_assets={_SDIST: published_sdist, _WHEEL: published_wheel},
+        ),
     )
 
     result = _run_github_step(
@@ -482,8 +495,7 @@ def test_stage_github_is_empty_when_assets_and_tag_bundle_are_complete(
     # A unique run name must not force another bundle onto a complete release.
     (publish, _) = _write_publication_inputs(
         tmp_path,
-        github_assets=assets,
-        bundle_name=bundle,
+        _PublicationInputs(github_assets=assets, bundle_name=bundle),
     )
     assert publish.exists(), "the test distribution directory must be present"
     script, _ = load_workflow_step("publish-release", "stage")
@@ -532,8 +544,7 @@ def test_verify_rejects_digest_mismatches_and_missing_tag_bundle(
     )
     _write_publication_inputs(
         tmp_path,
-        github_assets=assets,
-        bundle_name=bundle,
+        _PublicationInputs(github_assets=assets, bundle_name=bundle),
     )
     tools = install_fake_tools(tmp_path / "bin")
     log = tmp_path / "tool-calls.jsonl"
@@ -574,8 +585,10 @@ def test_successful_verification_runs_release_edit_last_with_prerelease_flag(
     )
     _write_publication_inputs(
         tmp_path,
-        github_assets=assets,
-        bundle_name=f"cmd-mox-{_TAG}-run61-1.sigstore.json",
+        _PublicationInputs(
+            github_assets=assets,
+            bundle_name=f"cmd-mox-{_TAG}-run61-1.sigstore.json",
+        ),
     )
     verify_result = _run_github_step(
         tmp_path,
