@@ -16,3 +16,5 @@
   including the dated addendum for the fourth Skylos tier.
 - [ADR 002](./adr-002-code-duplication-gate.md): The nose code-duplication
   gate, its scan scope, its exception contract and its provisioning.
+- [ADR 003](./adr-003-release-pipeline.md): The sdist-first release pipeline,
+  Trusted Publishing and reconciliation between PyPI and GitHub Releases.

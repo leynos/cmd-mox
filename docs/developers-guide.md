@@ -839,3 +839,53 @@ The test validates:
   and
 - the triggers keep the daily schedule and a plain `workflow_dispatch` with
   no inputs.
+
+## Publishing a release
+
+The release workflow publishes pure-Python source distributions and wheels to
+PyPI, then reconciles the GitHub Release with PyPI. The decision and its
+trade-offs are recorded in [ADR 003](./adr-003-release-pipeline.md).
+
+To publish a release:
+
+1. Set `project.version` in `pyproject.toml` to the release version and commit
+   that change.
+2. Create and push the matching version tag, for example `vX.Y.Z`. The version
+   check compares the tag and project version as exact strings after removing
+   the leading `v`.
+3. Watch the workflow graph. `check-version` and `build-dist` run first;
+   attestation, the draft GitHub Release and PyPI publication follow before the
+   GitHub Release is published.
+4. If a run needs retrying, re-run it for the same tag. PyPI filenames already
+   present in the project index are skipped, and existing GitHub assets are not
+   overwritten. The final job waits for PyPI to list every distribution before
+   it publishes the GitHub Release.
+5. Verify the provenance attestations for the sdist and each wheel against the
+   `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
+   the build run that attested those bytes.
+
+The first automated release must use a version later than `0.2.0`. PyPI already
+contains the manually uploaded `0.2.0` wheel and source distribution, so
+another publication of those filenames is a no-op there. The existing GitHub
+Release does not contain the sdist or provenance bundle from this workflow.
+
+### Release publishing settings
+
+The GitHub repository needs an environment named `pypi`. Its deployment branch
+policy must be a tag policy restricted to `v*.*.*`.
+
+The PyPI project `cmd-mox` needs a Trusted Publisher configured with these
+values:
+
+| Setting           | Value         |
+| ----------------- | ------------- |
+| Owner             | `leynos`      |
+| Repository        | `cmd-mox`     |
+| Workflow filename | `release.yml` |
+| Environment name  | `pypi`        |
+
+_Table 1: GitHub Trusted Publishing settings for the `cmd-mox` project._
+
+For a local release build, run `make build-release`. The target uses `uv build`
+to create the source distribution first and then build the wheel from it in
+`dist/`.

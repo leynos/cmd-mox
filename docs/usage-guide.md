@@ -11,6 +11,12 @@ Install the package and enable the pytest plugin:
 pip install cmd-mox
 ```
 
+This installs CmdMox from PyPI. PyPI provides both a wheel and a source
+distribution. Releases produced by the current workflow attach the same
+distribution bytes and their provenance bundle to the GitHub Release; the
+manually uploaded `0.2.0` GitHub Release predates that process. See
+[ADR 003](./adr-003-release-pipeline.md) for the release details.
+
 On Windows the wheel also pulls in `pywin32`, which provides the `win32pipe` and
 `win32file` modules that power CmdMox's named-pipe IPC transport.
 
