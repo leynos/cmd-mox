@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 
+from cmd_mox._correlation import MAX_CORRELATION_ID_LENGTH, bounded_correlation_id
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc import (
     Invocation,
@@ -337,6 +338,45 @@ def test_client_failure_event_records_error_category(
     assert failed.correlation_id is not None, "Failures must stay correlated"
 
 
+def test_passthrough_report_failure_emits_correlated_client_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed passthrough report remains visible through the client seam."""
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(tmp_path / "missing.sock"))
+    result = PassthroughResult(
+        invocation_id="passthrough-123",
+        stdout="secret-stdout",
+        stderr="secret-stderr",
+        exit_code=2,
+    )
+    retry_config = RetryConfig(retries=1, backoff=0.0, jitter=0.0)
+    counters_before = _observability.counter_snapshot()
+
+    with (
+        _observability.capture_events() as events,
+        pytest.raises(FileNotFoundError),
+    ):
+        report_passthrough_result(result, timeout=0.5, retry_config=retry_config)
+
+    started, failed = _events_for(events, _client_events.REQUEST_OPERATION)
+    assert started.kind == "passthrough-result", "Wrong passthrough event kind"
+    assert started.outcome == "started", "Missing passthrough start event"
+    assert failed.kind == "passthrough-result", "Wrong failed event kind"
+    assert failed.outcome == "error", "Failed report event has wrong outcome"
+    assert failed.error_category == "FileNotFoundError", "Wrong report error category"
+    assert failed.correlation_id == result.invocation_id, (
+        "Passthrough report lost its validated correlation id"
+    )
+    assert failed.duration_ms is not None, (
+        "Passthrough report failure lost its duration"
+    )
+    assert failed.duration_ms >= 0, "Passthrough report failure duration is negative"
+    counts_after = _observability.counter_snapshot()
+    assert (
+        counts_after.get(failed.key(), 0) == counters_before.get(failed.key(), 0) + 1
+    ), "Passthrough report failure did not increment its bounded event counter"
+
+
 def test_passthrough_result_preserves_its_invocation_identifier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -388,9 +428,9 @@ def _assert_minted_identifier(value: str, rejected: object) -> None:
     """Assert *value* is a fresh, bounded, log-safe minted identifier."""
     assert value, "Minted identifier is empty"
     assert value != rejected, "Rejected identifier was reused"
-    assert len(value) <= _server_core.MAX_CORRELATION_ID_LENGTH, "Not bounded"
+    assert len(value) <= MAX_CORRELATION_ID_LENGTH, "Not bounded"
     assert uuid.UUID(value), "Minted identifier is not a UUID"
-    assert _server_core.bounded_correlation_id(value) == value, "Not log-safe"
+    assert bounded_correlation_id(value) == value, "Not log-safe"
 
 
 @pytest.mark.parametrize(
@@ -399,8 +439,8 @@ def _assert_minted_identifier(value: str, rejected: object) -> None:
         pytest.param({}, None, id="absent"),
         pytest.param({"invocation_id": ""}, "", id="empty"),
         pytest.param(
-            {"invocation_id": "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1)},
-            "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1),
+            {"invocation_id": "x" * (MAX_CORRELATION_ID_LENGTH + 1)},
+            "x" * (MAX_CORRELATION_ID_LENGTH + 1),
             id="over-long",
         ),
         pytest.param(

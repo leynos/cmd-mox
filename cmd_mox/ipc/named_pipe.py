@@ -498,11 +498,11 @@ class _NamedPipeState:
         try:
             raw = self._read_request(handle)
             if raw is not None:
-                response_bytes = _request_pipeline(self.outer, raw, "named_pipe")
-                if response_bytes is not None:
+                result = _request_pipeline(self.outer, raw, "named_pipe")
+                if result.response_bytes is not None:
                     write_pipe_payload(
                         handle,
-                        response_bytes,
+                        result.response_bytes,
                         win32file=self._backend.win32file,
                     )
         except PipeMessageTooLargeError as exc:

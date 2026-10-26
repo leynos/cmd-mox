@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socketserver
 import subprocess
 import typing as typ
@@ -101,3 +102,37 @@ def unix_server_base_cache() -> cabc.Iterator[None]:
     yield
     unix_server._inner_server_cls.cache_clear()
     resolve_unix_server_base.cache_clear()
+
+
+@pytest.fixture
+def stdin_pipe_descriptor() -> cabc.Iterator[int]:
+    """Yield an owned pipe descriptor for stdin polling tests.
+
+    Yields
+    ------
+    int
+        The read end of the pipe.
+    """
+    read_descriptor, write_descriptor = os.pipe()
+    try:
+        yield read_descriptor
+    finally:
+        os.close(read_descriptor)
+        os.close(write_descriptor)
+
+
+@pytest.fixture
+def stdin_pipe_descriptor_at_eof() -> cabc.Iterator[int]:
+    """Yield a pipe read descriptor after closing its writer.
+
+    Yields
+    ------
+    int
+        The read end of the pipe, which returns EOF immediately.
+    """
+    read_descriptor, write_descriptor = os.pipe()
+    os.close(write_descriptor)
+    try:
+        yield read_descriptor
+    finally:
+        os.close(read_descriptor)

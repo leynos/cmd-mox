@@ -14,12 +14,12 @@ import collections.abc as cabc
 import dataclasses as dc
 import json
 import logging
-import re
 import threading
 import time
 import typing as typ
 from pathlib import Path
 
+from cmd_mox._correlation import bounded_correlation_id
 from cmd_mox._validators import (
     validate_optional_timeout,
     validate_positive_finite_timeout,
@@ -339,7 +339,9 @@ class _CallbackServerBase[BackendT](_BaseIPCServer[BackendT]):
 
 
 type _RequestProcessor = typ.Literal["handle_invocation", "handle_passthrough_result"]
-type _DispatchOutcome = typ.Literal["success", "invalid_request", "handler_error"]
+type _DispatchOutcome = typ.Literal[
+    "success", "invalid_request", "rejection_frame", "handler_error"
+]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
     KIND_INVOCATION: (validate_invocation_payload, "handle_invocation"),
@@ -357,52 +359,6 @@ _DISPATCH_MESSAGE: typ.Final[str] = "IPC dispatch outcome"
 # validation; passing them to ``Invocation``/``PassthroughResult`` would raise
 # ``TypeError`` and reject every request.
 _ENVELOPE_FIELDS: typ.Final[frozenset[str]] = frozenset({"kind", "correlation_id"})
-# Correlation identifiers are opaque and client-supplied, so cap their length to
-# keep the observability dimension bounded. The limit lives here rather than in
-# :mod:`cmd_mox.ipc._observability` so that a single definition serves both the
-# server and :mod:`cmd_mox.ipc._client_events`; neither module imports the
-# other's transport, so the shared import introduces no cycle.
-MAX_CORRELATION_ID_LENGTH: typ.Final[int] = 64
-# Accepted identifier alphabet. Correlation identifiers reach ``logging``'s
-# ``extra=`` mapping, and cmd-mox is a library: the consuming application picks
-# the log formatter, so we cannot assume it escapes structured fields. Newlines,
-# ANSI escapes, and other control characters are therefore refused outright.
-# The alphabet admits ``uuid.uuid4().hex`` and conventional hyphenated or
-# underscored identifiers, which is everything a well-behaved caller sends.
-_CORRELATION_ID_PATTERN: typ.Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_-]+")
-
-
-def bounded_correlation_id(value: object) -> str | None:
-    """Return *value* when it is a usable, bounded correlation identifier.
-
-    Identifiers are opaque and supplied by the caller, so an absent, empty,
-    non-string, over-long, or non-conforming value is treated as no identifier
-    at all. Rejected values are dropped rather than truncated or sanitised in
-    place: a repaired identifier is a forged one, and two distinct identifiers
-    sharing a prefix would collapse onto one, silently correlating unrelated
-    records.
-
-    The character bound is defence in depth rather than a demonstrated
-    injection. The identifier never enters the bounded counter key, and the log
-    message is a fixed string, so the only exposure is the structured
-    ``extra=`` field a downstream formatter may render verbatim.
-
-    Parameters
-    ----------
-    value:
-        Candidate identifier taken from a wire envelope or a validated model.
-
-    Returns
-    -------
-    str or None
-        The identifier, or ``None`` when it is unusable.
-    """
-    if not isinstance(value, str) or len(value) > MAX_CORRELATION_ID_LENGTH:
-        return None
-    # The length is checked first so the pattern only ever scans a short string.
-    if _CORRELATION_ID_PATTERN.fullmatch(value) is None:
-        return None
-    return value
 
 
 @dc.dataclass(slots=True)
@@ -438,6 +394,10 @@ def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
     dict[str, typ.Any] or None
         The decoded payload, or ``None`` when *raw* is not a JSON mapping.
     """
+    if raw == b"":
+        logger.info("IPC connection closed before request was received")
+        return None
+
     payload = parse_json_safely(raw)
     if payload is not None:
         return payload
@@ -586,42 +546,92 @@ def _resolve_correlation_id(
     return bounded_correlation_id(getattr(obj, "invocation_id", None))
 
 
+@dc.dataclass(frozen=True, slots=True)
+class _RequestResult:
+    """Encoded response and bounded request metadata for a transport."""
+
+    response_bytes: bytes | None
+    correlation_id: str | None
+
+
+def _rejection_record(
+    parsed: ParsedRequest | None,
+    started: float,
+    transport: _observability.Transport | None,
+) -> _DispatchRecord:
+    """Build bounded metadata for a rejected request without emitting it.
+
+    Returns
+    -------
+    _DispatchRecord
+        Bounded metadata describing the rejection.
+    """
+    is_parse_error = parsed is None
+    kind = parsed.kind if parsed is not None else "unknown"
+    correlation_id = parsed.correlation_id if parsed is not None else None
+    return _DispatchRecord(
+        kind=kind,
+        request=None,
+        outcome="rejection_frame" if is_parse_error else "invalid_request",
+        duration_ms=_observability.elapsed_ms(started),
+        error_category=("RequestParseError" if is_parse_error else "ValidationError"),
+        correlation_id=correlation_id,
+        transport=transport,
+    )
+
+
+def _rejection_result(parsed: ParsedRequest | None) -> _RequestResult:
+    """Build the safe response frame for a rejected request.
+
+    Returns
+    -------
+    _RequestResult
+        The encoded rejection response and its bounded correlation identifier.
+    """
+    is_parse_error = parsed is None
+    correlation_id = parsed.correlation_id if parsed is not None else None
+    message = (
+        "IPC request could not be parsed"
+        if is_parse_error
+        else "IPC request payload failed validation"
+    )
+    return _RequestResult(
+        response_bytes=_encode_response(Response(stderr=f"{message}\n", exit_code=1)),
+        correlation_id=correlation_id,
+    )
+
+
 def _request_pipeline(
     server: _BaseIPCServer[typ.Any],
     raw: bytes,
     transport: _observability.Transport | None = None,
-) -> bytes | None:
+) -> _RequestResult:
     """Parse, validate, dispatch, and encode an IPC request in order.
 
     Returns
     -------
-    bytes or None
-        The encoded response, or ``None`` when the request was unparseable or
-        failed validation.
+    _RequestResult
+        The encoded response and its validated correlation identifier, or an
+        empty response and no identifier when the connection closed without a
+        request.
     """
     # Scope the measurement to the whole pipeline so parsing, validation, and
     # hook execution are all attributed to the dispatch record.
     started = time.perf_counter()
     parsed = _parse_payload(raw)
     if parsed is None:
-        return None
+        if raw == b"":
+            return _RequestResult(response_bytes=None, correlation_id=None)
+        _emit_dispatch_outcome(_rejection_record(parsed, started, transport))
+        return _rejection_result(parsed)
 
     obj = parsed.validate()
     if obj is None:
-        _emit_dispatch_outcome(
-            _DispatchRecord(
-                kind=parsed.kind,
-                request=None,
-                outcome="invalid_request",
-                duration_ms=_observability.elapsed_ms(started),
-                error_category="ValidationError",
-                correlation_id=parsed.correlation_id,
-                transport=transport,
-            )
-        )
-        return None
+        _emit_dispatch_outcome(_rejection_record(parsed, started, transport))
+        return _rejection_result(parsed)
 
     response, error_category = _execute_request(server, parsed.processor, obj)
+    correlation_id = _resolve_correlation_id(parsed, obj)
     outcome: _DispatchOutcome = "success"
     if error_category is not None:
         outcome = "handler_error"
@@ -632,11 +642,14 @@ def _request_pipeline(
             outcome=outcome,
             duration_ms=_observability.elapsed_ms(started),
             error_category=error_category,
-            correlation_id=_resolve_correlation_id(parsed, obj),
+            correlation_id=correlation_id,
             transport=transport,
         )
     )
-    return _encode_response(response)
+    return _RequestResult(
+        response_bytes=_encode_response(response),
+        correlation_id=correlation_id,
+    )
 
 
 def _raise_invalid_request_dispatch(
