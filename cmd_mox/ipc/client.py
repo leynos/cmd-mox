@@ -209,9 +209,10 @@ def retry_with_backoff[T](
 def _pipe_handle_closer(handle: object) -> _bounded_thread.HandleCloser:
     """Return a close-once guard for a named-pipe *handle*.
 
-    ``win32file`` is resolved when the handle is closed, not when the guard is
-    created, so a host without pywin32 reaches the suppressed failure path
-    rather than raising while building the guard.
+    ``win32file`` and ``pywintypes.error`` are both bound here, while building
+    the guard; only ``CloseHandle`` itself is looked up when the handle is
+    closed. Callers therefore reach this helper only on a host where pywin32
+    is importable, which the Windows transport already guarantees.
 
     Returns
     -------

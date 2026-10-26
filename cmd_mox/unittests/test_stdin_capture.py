@@ -182,13 +182,15 @@ def _open_pipe_stream(payload: bytes) -> typ.IO[str]:
 def test_tty_stdin_is_not_read() -> None:
     """A terminal stream is returned as empty without a read call."""
     stream = _Stream("unused", is_tty=True)
-    assert _read(stream, 1.0, _Clock()) == ""
+    assert _read(stream, 1.0, _Clock()) == "", "a tty should capture no stdin"
     assert stream.read_calls == 0, "a tty must not be read"
 
 
 def test_string_io_is_read_without_a_worker() -> None:
     """An in-memory stream is read directly, even at a zero deadline."""
-    assert _read(io.StringIO("payload"), 0.0, _Clock()) == "payload"
+    assert _read(io.StringIO("payload"), 0.0, _Clock()) == "payload", (
+        "an in-memory stream should be read directly at a zero deadline"
+    )
 
 
 # --- Fallback strategy ------------------------------------------------------
@@ -197,7 +199,9 @@ def test_string_io_is_read_without_a_worker() -> None:
 def test_missing_descriptor_reads_through_a_worker() -> None:
     """A stream without ``fileno`` is read on the fallback worker."""
     stream = _NoFileno("fallback data")
-    assert _read(stream, 1.0, _Clock()) == "fallback data"
+    assert _read(stream, 1.0, _Clock()) == "fallback data", (
+        "the fallback should return the stream's text"
+    )
     assert stream.read_calls == 1, "the fallback should read exactly once"
 
 
@@ -205,7 +209,9 @@ def test_unpollable_descriptor_falls_back(monkeypatch: pytest.MonkeyPatch) -> No
     """A descriptor both pollers reject is read through the fallback worker."""
     monkeypatch.setattr(capture, "_create_stdin_poller", lambda _descriptor: None)
     stream = _DescriptorStream(0, data="unpollable")
-    assert _read(stream, 1.0, _Clock()) == "unpollable"
+    assert _read(stream, 1.0, _Clock()) == "unpollable", (
+        "an unpollable descriptor should still yield its text"
+    )
     assert stream.read_calls == 1, "the fallback should read exactly once"
 
 
@@ -303,7 +309,9 @@ def test_fallback_rereaises_worker_errors() -> None:
 
 def test_fallback_completes_before_the_deadline() -> None:
     """Data available before the deadline is returned unchanged."""
-    assert _read(_Stream("prompt data"), 1.0, _Clock()) == "prompt data"
+    assert _read(_Stream("prompt data"), 1.0, _Clock()) == "prompt data", (
+        "data available before the deadline must be returned unchanged"
+    )
 
 
 # --- Polled strategy --------------------------------------------------------
@@ -318,14 +326,18 @@ def test_expiry_exactly_at_the_deadline_raises() -> None:
 def test_polled_read_returns_data_before_the_deadline() -> None:
     """A pollable descriptor yields the text queued before the deadline."""
     with _open_pipe_stream(b"polled payload") as stream:
-        assert _read(stream, 5.0, _Clock()) == "polled payload"
+        assert _read(stream, 5.0, _Clock()) == "polled payload", (
+            "a pollable descriptor should yield the text queued for it"
+        )
 
 
 def test_polled_read_does_not_advance_the_injected_clock() -> None:
     """The polled strategy consults the injected clock, not wall time."""
     clock = _Clock()
     with _open_pipe_stream(b"injected") as stream:
-        assert _read(stream, 1.0, clock) == "injected"
+        assert _read(stream, 1.0, clock) == "injected", (
+            "the polled read should return the piped text"
+        )
     assert clock.now == pytest.approx(0.0), "a fast read must not advance the clock"
 
 
@@ -335,7 +347,9 @@ def test_polled_read_preserves_newlines_on_posix(
     """Piped carriage returns survive on POSIX, matching ``TextIOWrapper``."""
     monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
     with _open_pipe_stream(b"first\r\nsecond\rthird") as stream:
-        assert _read(stream, 5.0, _Clock()) == "first\r\nsecond\rthird"
+        assert _read(stream, 5.0, _Clock()) == "first\r\nsecond\rthird", (
+            "POSIX capture must not translate carriage returns"
+        )
 
 
 def test_decoder_matches_text_wrapper_on_windows(
@@ -343,7 +357,13 @@ def test_decoder_matches_text_wrapper_on_windows(
 ) -> None:
     """Windows decoding translates newlines exactly as ``TextIOWrapper`` does."""
     monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
-    assert capture._stdin_decoder(_Stream()).decode(b"a\r\nb\rc\n") == "a\nb\nc\n"
+    payload = b"a\r\nb\rc\n"
+    with io.TextIOWrapper(
+        io.BytesIO(payload), encoding="utf-8", errors="strict"
+    ) as reference:
+        expected = reference.read()
+    decoded = capture._stdin_decoder(_Stream()).decode(payload)
+    assert decoded == expected, "Windows capture decoding diverged from TextIOWrapper"
 
 
 def test_decoder_preserves_newlines_off_windows(
@@ -351,13 +371,15 @@ def test_decoder_preserves_newlines_off_windows(
 ) -> None:
     """POSIX decoding keeps carriage returns, matching ``TextIOWrapper``."""
     monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
-    assert capture._stdin_decoder(_Stream()).decode(b"a\r\nb\rc\n") == "a\r\nb\rc\n"
+    decoded = capture._stdin_decoder(_Stream()).decode(b"a\r\nb\rc\n")
+    assert decoded == "a\r\nb\rc\n", "POSIX decoding must preserve carriage returns"
 
 
 def test_decoder_uses_stream_encoding_for_non_ascii() -> None:
     """Non-ASCII text decodes with the stream's declared encoding."""
-    assert capture._stdin_decoder(_Stream()).decode("\N{EURO SIGN}".encode()) == (
-        "\N{EURO SIGN}"
+    decoded = capture._stdin_decoder(_Stream()).decode("\N{EURO SIGN}".encode())
+    assert decoded == "\N{EURO SIGN}", (
+        "non-ASCII text did not decode with the stream encoding"
     )
 
 
@@ -375,13 +397,14 @@ def test_poll_error_propagates() -> None:
 
 def test_buffered_strategy_reads_through_eof() -> None:
     """A stream exposing a buffered reader uses the buffered strategy."""
-
-    class _Buffered(io.TextIOWrapper):
-        pass
-
     with _open_pipe_stream(b"buffered payload") as stream:
-        assert isinstance(stream, _Buffered) or hasattr(stream, "buffer")
-        assert _read(stream, 5.0, _Clock()) == "buffered payload"
+        read_chunk = getattr(getattr(stream, "buffer", None), "read1", None)
+        assert callable(read_chunk), (
+            "the fixture must expose a buffered reader for this strategy"
+        )
+        assert _read(stream, 5.0, _Clock()) == "buffered payload", (
+            "the buffered strategy should yield the piped text"
+        )
 
 
 # --- Regular-file strategy --------------------------------------------------
@@ -395,8 +418,12 @@ def test_regular_file_strategy_is_selected(
     path = tmp_path / "input.txt"
     path.write_text("file data", encoding="utf-8")
     with path.open(encoding="utf-8") as stream:
-        assert capture._plan_stdin(stream).strategy == "regular"
-        assert _read(stream, 5.0, _Clock()) == "file data"
+        assert capture._plan_stdin(stream).strategy == "regular", (
+            "a regular file should read through the worker"
+        )
+        assert _read(stream, 5.0, _Clock()) == "file data", (
+            "the regular-file strategy should return the file contents"
+        )
 
 
 def test_regular_file_timeout_reports_expiry(
@@ -494,15 +521,23 @@ def test_windows_handle_reads_until_broken_pipe(
     harness = _Win32Harness(read_file)
     _install_windows_harness(monkeypatch, harness)
 
-    assert capture.read_stdin(_Stream(), 5.0, clock=_Clock()) == "windows"
+    assert capture.read_stdin(_Stream(), 5.0, clock=_Clock()) == "windows", (
+        "the Windows strategy should return the decoded handle data"
+    )
     assert read_handles == [_HANDLE, _HANDLE, _HANDLE], "the wrong handle was read"
     assert harness.cancelled == [], "a completed read must not be cancelled"
 
 
-def test_windows_handle_reraises_unexpected_errors(
+def test_windows_handle_reports_unexpected_errors_as_oserror(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A non-broken-pipe ``pywintypes`` error propagates to the caller."""
+    """A non-broken-pipe ``pywintypes`` error reaches the caller as ``OSError``.
+
+    ``pywintypes.error`` is not an ``OSError``, so re-raising it verbatim would
+    bypass the shim's ``(OSError, UnicodeError, ValueError, RuntimeError)``
+    stdin handler and surface as an unhandled traceback instead of the bounded
+    ``stdin read failed`` diagnostic.
+    """
 
     def read_file(_handle: object, _size: int) -> tuple[int, bytes]:
         raise _FakeWinError(
@@ -510,8 +545,18 @@ def test_windows_handle_reraises_unexpected_errors(
         )
 
     _install_windows_harness(monkeypatch, _Win32Harness(read_file))
-    with pytest.raises(_FakeWinError, match="access denied"):
+    with pytest.raises(OSError, match="stdin handle read failed") as excinfo:
         capture.read_stdin(_Stream(), 5.0, clock=_Clock())
+
+    assert excinfo.value.errno == _FakeWinError.ACCESS_DENIED, (
+        "the Windows error code was not preserved"
+    )
+    assert isinstance(excinfo.value.__cause__, _FakeWinError), (
+        "the original pywin32 failure was not preserved as the cause"
+    )
+    assert _FakeWinError.ACCESS_DENIED_MESSAGE not in str(excinfo.value), (
+        "the pywin32 message leaked into the captured error"
+    )
 
 
 def test_windows_handle_timeout_cancels_once(
@@ -551,7 +596,9 @@ def test_windows_handle_completes_without_cancellation(
     harness = _Win32Harness(lambda _handle, _size: (0, b""))
     _install_windows_harness(monkeypatch, harness)
 
-    assert capture.read_stdin(_Stream(), 5.0, clock=_Clock()) == ""
+    assert capture.read_stdin(_Stream(), 5.0, clock=_Clock()) == "", (
+        "an immediate EOF should capture no text"
+    )
     assert harness.cancelled == [], "a completed read must not be cancelled"
     assert harness.closed == [], "no thread handle should be opened"
 
@@ -564,7 +611,9 @@ def test_windows_without_a_handle_uses_the_fallback(
     monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: None)
     stream = _Stream("fallback on windows")
 
-    assert capture.read_stdin(stream, 5.0, clock=_Clock()) == "fallback on windows"
+    assert capture.read_stdin(stream, 5.0, clock=_Clock()) == "fallback on windows", (
+        "a missing handle should fall back to a direct read"
+    )
     assert stream.read_calls == 1, "the fallback should read exactly once"
 
 
@@ -583,7 +632,9 @@ def test_windows_handle_resolution_falls_back_when_msvcrt_rejects(
         types.SimpleNamespace(get_osfhandle=reject),
     )
     stream = _DescriptorStream(0)
-    assert capture._stdin_handle(stream) is None
+    assert capture._stdin_handle(stream) is None, (
+        "an unusable handle must be reported as missing"
+    )
 
 
 def test_windows_missing_pywin32_uses_the_fallback(
@@ -595,13 +646,18 @@ def test_windows_missing_pywin32_uses_the_fallback(
     monkeypatch.setattr(capture, "_windows_modules", lambda: None)
     stream = _Stream("no pywin32")
 
-    assert capture.read_stdin(stream, 5.0, clock=_Clock()) == "no pywin32"
+    assert capture.read_stdin(stream, 5.0, clock=_Clock()) == "no pywin32", (
+        "a host without pywin32 should still capture stdin"
+    )
     assert stream.read_calls == 1, "the fallback should read exactly once"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="asserts the non-Windows branch")
 def test_windows_modules_are_inert_off_windows() -> None:
     """``_windows_modules`` returns nothing on a non-Windows host."""
-    assert capture._windows_modules() is None
+    assert capture._windows_modules() is None, (
+        "the Windows modules must stay inert away from Windows"
+    )
 
 
 # --- Strategy planning ------------------------------------------------------
@@ -613,7 +669,9 @@ def test_plan_selects_win32_for_a_resolved_handle(
     """Windows resolves a handle before considering descriptors."""
     monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
     monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: _HANDLE)
-    assert capture._plan_stdin(_Stream()).strategy == "win32"
+    assert capture._plan_stdin(_Stream()).strategy == "win32", (
+        "a resolved handle should select the Windows strategy"
+    )
 
 
 def test_plan_selects_fallback_for_unsupported_stream(
@@ -621,9 +679,12 @@ def test_plan_selects_fallback_for_unsupported_stream(
 ) -> None:
     """A stream with no descriptor has no pollable strategy."""
     monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
-    assert capture._plan_stdin(_NoFileno()).strategy == "fallback"
+    assert capture._plan_stdin(_NoFileno()).strategy == "fallback", (
+        "a descriptorless stream should use the fallback worker"
+    )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_plan_selects_poll_for_a_pipe() -> None:
     """A pipe descriptor is polled rather than read blindly."""
     read_fd, write_fd = os.pipe()
@@ -636,6 +697,7 @@ def test_plan_selects_poll_for_a_pipe() -> None:
     assert plan.descriptor == read_fd, "the wrong descriptor was recorded"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
 def test_plan_treats_an_unstattable_descriptor_as_pollable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
