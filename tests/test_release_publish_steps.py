@@ -22,12 +22,14 @@ from helpers.release_workflow import (
     RELEASE_WORKFLOW_PATH,
     install_fake_tools,
     load_workflow_step,
+    provenance_bundle,
     read_tool_calls,
     run_bash_step,
     should_skip_release_tests_for_mutation_sandbox,
 )
 
 release_assets = pytest.importorskip("scripts.release_assets")
+release_adapters = pytest.importorskip("scripts.release_assets_cli")
 release_version = pytest.importorskip("scripts.release_version")
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -153,7 +155,7 @@ def test_pep691_index_resolves_relative_urls_and_missing_files_are_empty(
             "files": [
                 {
                     "filename": "cmd_mox-0.3.0.tar.gz",
-                    "hashes": {"sha256": "ABCD"},
+                    "hashes": {"sha256": "A" * 64},
                     "url": "files/cmd_mox-0.3.0.tar.gz",
                 }
             ]
@@ -161,15 +163,15 @@ def test_pep691_index_resolves_relative_urls_and_missing_files_are_empty(
         encoding="utf-8",
     )
 
-    files = release_assets.read_pypi_index(index)
-    assert files["cmd_mox-0.3.0.tar.gz"].sha256 == "abcd", (
+    files = release_adapters.read_pypi_index(index)
+    assert files["cmd_mox-0.3.0.tar.gz"].sha256 == "a" * 64, (
         "PyPI hashes must be normalized to lower-case hex"
     )
     assert files["cmd_mox-0.3.0.tar.gz"].url == (
         "https://pypi.org/simple/cmd-mox/files/cmd_mox-0.3.0.tar.gz"
     ), "relative PEP 691 URLs must resolve from the project index"
     index.write_text("{}", encoding="utf-8")
-    assert release_assets.read_pypi_index(index) == {}, (
+    assert release_adapters.read_pypi_index(index) == {}, (
         "an index without files must be treated as an empty inventory"
     )
 
@@ -303,8 +305,10 @@ def test_pypi_index_retries_only_network_rate_and_server_errors(
     assert calls, "the fake tool log must contain each recorded invocation"
 
 
+@pytest.mark.parametrize("first_status", ["200", "404"])
 def test_publish_release_waits_for_every_distribution_to_reach_pypi(
     tmp_path: Path,
+    first_status: str,
 ) -> None:
     """The propagation poll outlasts the initial retry window when needed."""
     names = ["cmd_mox-0.3.0.tar.gz", "cmd_mox-0.3.0-py3-none-any.whl"]
@@ -335,7 +339,7 @@ def test_publish_release_waits_for_every_distribution_to_reach_pypi(
                 *(['{"files": []}'] * 6),
                 complete_index_path.read_text(encoding="utf-8"),
             ]),
-            "CURL_STATUSES": ",".join(["200"] * 7),
+            "CURL_STATUSES": ",".join([first_status, *(["200"] * 6)]),
             "FAKE_TOOL_LOG": str(log),
             "PATH": f"{tools}:/usr/bin:/bin",
             "PYPI_INDEX_PATH": "index.json",
@@ -440,6 +444,20 @@ def _write_github_assets(path: Path, digests: dict[str, str]) -> None:
     )
 
 
+def _write_provenance(directory: Path, name: str, subjects: dict[str, bytes]) -> str:
+    """Write a bundle fixture and return its GitHub asset digest.
+
+    Returns
+    -------
+    str
+        SHA-256 digest of the retained bundle bytes.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    content = provenance_bundle(subjects)
+    (directory / name).write_bytes(content)
+    return hashlib.sha256(content).hexdigest()
+
+
 def test_stage_pypi_skips_published_names_and_uses_github_bytes(tmp_path: Path) -> None:
     """Only names PyPI lacks remain, using existing GitHub bytes when needed."""
     publish = tmp_path / "dist" / "publish"
@@ -453,13 +471,32 @@ def test_stage_pypi_skips_published_names_and_uses_github_bytes(tmp_path: Path) 
     (publish / carried).write_bytes(b"new wheel bytes")
     (publish / local).write_bytes(b"new extra wheel")
     (github_files / carried).write_bytes(b"canonical GitHub bytes")
+    _write_provenance(
+        tmp_path / "dist" / "attestations",
+        "cmd-mox-v0.3.0-run2-1.sigstore.json",
+        {
+            already_published: b"rebuilt but not canonical",
+            carried: b"new wheel bytes",
+            local: b"new extra wheel",
+        },
+    )
     index = tmp_path / "pypi-index.json"
     _write_index(index, [already_published])
     assets = tmp_path / "github-state" / "assets.json"
     assets.parent.mkdir(parents=True, exist_ok=True)
     _write_github_assets(
         assets,
-        {carried: hashlib.sha256(b"canonical GitHub bytes").hexdigest()},
+        {
+            carried: hashlib.sha256(b"canonical GitHub bytes").hexdigest(),
+            "cmd-mox-v0.3.0-run1-1.sigstore.json": _write_provenance(
+                github_files,
+                "cmd-mox-v0.3.0-run1-1.sigstore.json",
+                {
+                    already_published: already_published.encode(),
+                    carried: b"canonical GitHub bytes",
+                },
+            ),
+        },
     )
     (tmp_path / "github-output").touch()
     script, _ = load_workflow_step("publish-pypi", "pending")
@@ -488,16 +525,16 @@ def test_stage_pypi_skips_published_names_and_uses_github_bytes(tmp_path: Path) 
     ), "the publish action must run when files remain"
 
 
-def test_stage_pypi_reports_empty_upload_and_condition_skips_pypi_action(
+def test_historical_pypi_only_release_is_noop_and_skips_upload(
     tmp_path: Path,
 ) -> None:
-    """An all-published inventory yields remaining=false and a false action gate."""
+    """Re-tagging historical 0.2.0 skips PyPI even without retained provenance."""
     publish = tmp_path / "dist" / "publish"
     publish.mkdir(parents=True)
     (tmp_path / "github-state" / "files").mkdir(parents=True)
-    names = ["cmd_mox-0.3.0.tar.gz", "cmd_mox-0.3.0-py3-none-any.whl"]
+    names = ["cmd_mox-0.2.0.tar.gz", "cmd_mox-0.2.0-py3-none-any.whl"]
     for name in names:
-        (publish / name).write_bytes(name.encode())
+        (publish / name).write_bytes(b"rebuilt historical bytes: " + name.encode())
     index = tmp_path / "pypi-index.json"
     _write_index(index, names)
     assets = tmp_path / "github-state" / "assets.json"

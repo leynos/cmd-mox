@@ -1,32 +1,38 @@
 """Tests for draft reuse, GitHub assets and release publication.
 
-Run with ``make test`` or
-``python -m pytest -q tests/test_release_github_steps.py``. These tests execute
-the checked-in Bash steps and reconciliation CLI against recording fake tools.
+Run ``make test`` or ``python -m pytest -q tests/test_release_github_steps.py``.
+These tests execute the checked-in Bash steps and release reconciliation CLI
+against recording fake tools.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
-import typing as typ
 from pathlib import Path
 
 import pytest
+from helpers.release_github import (
+    _SDIST,
+    _TAG,
+    _WHEEL,
+    _assets,
+    _gh_call,
+    _PublicationInputs,
+    _run_github_step,
+    _write_publication_inputs,
+)
 from helpers.release_workflow import (
     RELEASE_WORKFLOW_PATH,
     install_fake_tools,
     load_workflow,
     load_workflow_step,
+    provenance_bundle,
     read_tool_calls,
     run_bash_step,
     should_skip_release_tests_for_mutation_sandbox,
 )
-
-if typ.TYPE_CHECKING:
-    import subprocess
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
@@ -42,91 +48,6 @@ pytestmark = [
         reason="release shell-step tests require Bash on a Unix-like system",
     ),
 ]
-
-_TAG = "v0.3.0-beta1"
-_SDIST = "cmd_mox-0.3.0.tar.gz"
-_WHEEL = "cmd_mox-0.3.0-py3-none-any.whl"
-
-
-class _PublicationInputs(typ.NamedTuple):
-    """Describe the release files and destination state for one test."""
-
-    github_assets: dict[str, object]
-    bundle_name: str
-    sdist: bytes = b"canonical sdist"
-    wheel: bytes = b"canonical wheel"
-    pypi_assets: dict[str, bytes] | None = None
-
-
-def _write_json(path: Path, document: object) -> None:
-    """Write a JSON document with stable UTF-8 encoding."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(document), encoding="utf-8")
-
-
-def _digest(content: bytes) -> str:
-    """Return a lowercase SHA-256 digest for test asset content.
-
-    Returns
-    -------
-    str
-        SHA-256 hexadecimal digest.
-    """
-    return hashlib.sha256(content).hexdigest()
-
-
-def _gh_call(argv: list[str]) -> dict[str, object]:
-    """Return one expected recording-stub call for the GitHub CLI.
-
-    Returns
-    -------
-    dict[str, object]
-        Tool name and exact argument vector in the fake-tool log format.
-    """
-    return {"tool": "gh", "argv": argv}
-
-
-def _assets(
-    *, sdist: bytes, wheel: bytes, bundle: str | None = None
-) -> dict[str, object]:
-    """Return a GitHub API asset response for a release's distributions.
-
-    Returns
-    -------
-    dict[str, object]
-        GitHub assets with digests and an optional provenance bundle.
-    """
-    items: list[dict[str, str]] = [
-        {"name": _SDIST, "digest": f"sha256:{_digest(sdist)}"},
-        {"name": _WHEEL, "digest": f"sha256:{_digest(wheel)}"},
-    ]
-    if bundle is not None:
-        items.append({"name": bundle, "digest": "sha256:bundle-digest"})
-    return {"assets": items}
-
-
-def _run_github_step(
-    tmp_path: Path, step_id: str, extra_env: dict[str, str]
-) -> subprocess.CompletedProcess[str]:
-    """Run one GitHub publication step with shared recording-tool defaults.
-
-    Returns
-    -------
-    subprocess.CompletedProcess[str]
-        The captured process output and exit status.
-    """
-    tools = install_fake_tools(tmp_path / "bin")
-    script, _ = load_workflow_step("publish-release", step_id)
-    return run_bash_step(
-        script,
-        cwd=tmp_path,
-        env={
-            "FAKE_TOOL_LOG": str(tmp_path / "tool-calls.jsonl"),
-            "PATH": f"{tools}:/usr/bin:/bin",
-            "TAG_NAME": _TAG,
-            **extra_env,
-        },
-    )
 
 
 @pytest.mark.parametrize("release_state", ["draft", "published"])
@@ -222,6 +143,13 @@ def test_snapshot_downloads_only_assets_carried_over_from_github(
     (publish / _SDIST).write_bytes(b"new sdist")
     (publish / _WHEEL).write_bytes(b"new wheel")
     (downloads / _WHEEL).write_bytes(b"old wheel")
+    bundles = tmp_path / "dist" / "attestations"
+    bundles.mkdir()
+    prior_bundle = f"cmd-mox-{_TAG}-run1-1.sigstore.json"
+    (bundles / f"cmd-mox-{_TAG}-run2-1.sigstore.json").write_bytes(
+        provenance_bundle({_SDIST: b"new sdist", _WHEEL: b"new wheel"})
+    )
+    (downloads / prior_bundle).write_bytes(provenance_bundle({_WHEEL: b"old wheel"}))
     script, _ = load_workflow_step("draft-release", "snapshot")
 
     result = run_bash_step(
@@ -229,7 +157,9 @@ def test_snapshot_downloads_only_assets_carried_over_from_github(
         cwd=tmp_path,
         env={
             "FAKE_TOOL_LOG": str(log),
-            "GH_ASSETS_JSON": json.dumps({"assets": [{"name": _WHEEL}]}),
+            "GH_ASSETS_JSON": json.dumps({
+                "assets": [{"name": _WHEEL}, {"name": prior_bundle}]
+            }),
             "GH_DOWNLOADS": str(downloads),
             "GH_RELEASE_EXISTS": "1",
             "PATH": f"{tools}:/usr/bin:/bin",
@@ -241,7 +171,12 @@ def test_snapshot_downloads_only_assets_carried_over_from_github(
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "github-state" / "carryover.txt").read_text(
         encoding="utf-8"
-    ) == f"{_WHEEL}\n", "only overlapping GitHub asset names need carry-over"
+    ) == f"{prior_bundle}\n{_WHEEL}\n", (
+        "carry-over must retain subjects as well as canonical distribution bytes"
+    )
+    assert (tmp_path / "github-state" / "files" / prior_bundle).read_bytes() == (
+        downloads / prior_bundle
+    ).read_bytes(), "retained bundle bytes must reach later release jobs"
     assert (
         tmp_path / "github-state" / "files" / _WHEEL
     ).read_bytes() == b"old wheel", (
@@ -256,41 +191,6 @@ def test_snapshot_downloads_only_assets_carried_over_from_github(
         "--dir",
         "github-state/files",
     ], "the workflow must download the exact asset selected by the CLI"
-
-
-def _write_publication_inputs(
-    root: Path,
-    inputs: _PublicationInputs,
-) -> tuple[Path, Path]:
-    """Create local distributions, index and provenance bundle for a release.
-
-    Returns
-    -------
-    tuple[pathlib.Path, pathlib.Path]
-        The distribution directory and current-run bundle directory.
-    """
-    publish = root / "dist" / "publish"
-    bundles = root / "dist" / "attestations"
-    publish.mkdir(parents=True)
-    bundles.mkdir()
-    (publish / _SDIST).write_bytes(inputs.sdist)
-    (publish / _WHEEL).write_bytes(inputs.wheel)
-    (bundles / inputs.bundle_name).write_bytes(b"current run provenance")
-    built_assets = {_SDIST: inputs.sdist, _WHEEL: inputs.wheel}
-    index_assets = built_assets if inputs.pypi_assets is None else inputs.pypi_assets
-    index = {
-        "files": [
-            {
-                "filename": name,
-                "hashes": {"sha256": _digest(content)},
-                "url": f"https://files.example.invalid/{name}",
-            }
-            for name, content in index_assets.items()
-        ]
-    }
-    _write_json(root / "pypi-index.json", index)
-    _write_json(root / "release-assets.json", inputs.github_assets)
-    return publish, bundles
 
 
 def test_stage_github_stages_local_assets_and_attestation_bundle(
@@ -475,9 +375,9 @@ def test_stage_rejects_carried_assets_without_retained_provenance(
     )
 
     assert result.returncode == 1, "carried bytes without retained provenance must fail"
-    assert "carried-over release assets have no retained provenance bundle" in (
-        result.stderr
-    ), "the error must identify missing retained provenance"
+    assert "has no matching provenance subject" in (result.stderr), (
+        "the error must identify missing retained provenance"
+    )
     assert not (tmp_path / "github-upload").exists(), (
         "no release assets should be staged when no matching bundle is available"
     )
@@ -564,9 +464,7 @@ def test_verify_rejects_digest_mismatches_and_missing_tag_bundle(
 
     assert result.returncode == 1, "a digest or provenance mismatch must fail"
     expected = (
-        "differs"
-        if failure == "digest"
-        else f"{bundle} is missing from the GitHub Release"
+        "differs" if failure == "digest" else "has no matching provenance subject"
     )
     assert expected in result.stderr, "verification must explain its failing invariant"
     assert len(read_tool_calls(log, tool="gh")) == 1, (
@@ -617,3 +515,45 @@ def test_successful_verification_runs_release_edit_last_with_prerelease_flag(
         "--draft=false",
         "--prerelease=true",
     ]), "the final GitHub operation must publish with the version's prerelease flag"
+
+
+@pytest.mark.parametrize(("second_view", "expected_status"), [("0", 0), ("1", 1)])
+def test_failed_release_creation_rechecks_existing_release(
+    tmp_path: Path, second_view: str, expected_status: int
+) -> None:
+    """A transient lookup cannot make an existing release fail a safe retry."""
+    tools = install_fake_tools(tmp_path / "bin")
+    log = tmp_path / "tool-calls.jsonl"
+    script, _ = load_workflow_step("draft-release", "create")
+    result = run_bash_step(
+        script,
+        cwd=tmp_path,
+        env={
+            "FAKE_TOOL_LOG": str(log),
+            "GH_VIEW_STATUSES": f"1,{second_view}",
+            "GH_CREATE_STATUS": "1",
+            "IS_PRERELEASE": "false",
+            "PATH": f"{tools}:/usr/bin:/bin",
+            "TAG_NAME": _TAG,
+        },
+    )
+    assert result.returncode == expected_status, (
+        "only a successful recovery lookup may continue"
+    )
+    expected_calls = [
+        _gh_call(["release", "view", _TAG]),
+        _gh_call([
+            "release",
+            "create",
+            _TAG,
+            "--draft",
+            "--verify-tag",
+            "--generate-notes",
+            "--title",
+            _TAG,
+        ]),
+        _gh_call(["release", "view", _TAG]),
+    ]
+    assert read_tool_calls(log, tool="gh") == expected_calls, (
+        "a failed create must be followed by exactly one quoted recovery lookup"
+    )

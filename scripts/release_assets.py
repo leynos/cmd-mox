@@ -1,41 +1,28 @@
-"""Reconcile release artefacts so PyPI and GitHub hold the same bytes.
+"""Pure decisions for immutable PyPI and GitHub Release reconciliation.
 
-Each filename's canonical bytes are the ones already published: PyPI first,
-then an existing GitHub Release asset, and this run's attested local file only
-when neither destination has the name. Each destination receives only names
-it lacks; remote assets are never overwritten. The CLI keeps network access in
-workflow ``curl`` and ``gh`` steps and uses only the standard library.
+All inputs are immutable inventory snapshots. The CLI adapter loads JSON,
+file digests, and Sigstore subjects before calling these functions, then
+executes the returned copy, download, upload, and verification decisions.
 """
 
 from __future__ import annotations
 
 import dataclasses as dc
 import enum
-import hashlib
-import json
-import os
 import re
-import shutil
-import sys
 import typing as typ
-import urllib.parse
-from pathlib import Path
+from types import MappingProxyType
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
-INDEX_URL = "https://pypi.org/simple/cmd-mox/"
+Subjects = frozenset[tuple[str, str]]
 _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]*")
-_DIGEST_PREFIX = "sha256:"
 _BUNDLE_NAME = re.compile(r"(?P<family>cmd-mox-.+)-run[0-9]+-[0-9]+\.sigstore\.json")
 
 
 class ReleaseAssetError(Exception):
     """A release asset is missing, unsafe, or holds unexpected bytes."""
-
-    def __init__(self, message: str) -> None:
-        """Store the actionable detail emitted by the workflow annotation."""
-        super().__init__(message)
 
 
 class UnsafeAssetNamesError(ReleaseAssetError):
@@ -62,14 +49,12 @@ class InsecurePypiDownloadError(ReleaseAssetError):
         super().__init__("every PyPI download must use HTTPS")
 
 
-class MissingRetainedProvenanceError(ReleaseAssetError):
-    """Carried-over release assets have no existing attestation bundle."""
+class UnattestedReleaseAssetsError(ReleaseAssetError):
+    """Canonical distributions lack matching provenance subjects."""
 
-    def __init__(self) -> None:
-        """Explain why publishing carried-over bytes must stop."""
-        super().__init__(
-            "carried-over release assets have no retained provenance bundle"
-        )
+    def __init__(self, problems: list[str]) -> None:
+        """Identify every canonical filename and digest lacking provenance."""
+        super().__init__("; ".join(problems))
 
 
 class Source(enum.StrEnum):
@@ -89,24 +74,95 @@ class Plan:
     github_uploads: frozenset[str]
 
 
-def _canonical_source(
-    name: str,
-    on_pypi: cabc.Collection[str],
-    on_github: cabc.Collection[str],
-) -> Source:
-    """Select one filename's canonical bytes in destination priority order.
+@dc.dataclass(frozen=True, slots=True)
+class PypiFile:
+    """One indexed distribution's digest and absolute download URL."""
+
+    sha256: str
+    url: str
+
+
+@dc.dataclass(frozen=True, slots=True)
+class State:
+    """Preloaded distribution, destination, and provenance inventories.
+
+    ``local`` maps this build's filenames to SHA-256 digests. Bundle
+    inventories map their immutable filenames to the exact subject/digest
+    pairs decoded by the adapter. Retained bundles are downloaded from the
+    release; current bundles may be attached when they add matching coverage.
+    """
+
+    local: cabc.Mapping[str, str]
+    pypi: cabc.Mapping[str, PypiFile]
+    github: cabc.Mapping[str, str | None]
+    current_bundles: cabc.Mapping[str, Subjects] = dc.field(default_factory=dict)
+    retained_bundles: cabc.Mapping[str, Subjects] = dc.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Copy caller-owned mappings so every query sees one accepted snapshot."""
+        object.__setattr__(self, "local", MappingProxyType(dict(self.local)))
+        object.__setattr__(self, "pypi", MappingProxyType(dict(self.pypi)))
+        object.__setattr__(self, "github", MappingProxyType(dict(self.github)))
+        object.__setattr__(
+            self,
+            "current_bundles",
+            MappingProxyType({
+                name: frozenset(subjects)
+                for name, subjects in self.current_bundles.items()
+            }),
+        )
+        object.__setattr__(
+            self,
+            "retained_bundles",
+            MappingProxyType({
+                name: frozenset(subjects)
+                for name, subjects in self.retained_bundles.items()
+            }),
+        )
+
+    def plan(self) -> Plan:
+        """Choose canonical sources and uploads without environmental reads.
+
+        Returns
+        -------
+        Plan
+            The deterministic plan for this immutable snapshot.
+        """
+        return plan(self.local, self.pypi, self.github)
+
+
+@dc.dataclass(frozen=True, slots=True)
+class GitHubStage:
+    """Explicit files to fetch or copy before a GitHub upload."""
+
+    fetch: tuple[str, ...]
+    local: tuple[str, ...]
+    bundles: tuple[str, ...]
+
+
+def safe_names(names: cabc.Iterable[str]) -> list[str]:
+    """Validate asset names and return a stable unique inventory.
+
+    Parameters
+    ----------
+    names : collections.abc.Iterable[str]
+        Untrusted filenames from local or remote inventories.
 
     Returns
     -------
-    Source
-        PyPI when it already holds the filename, otherwise GitHub when it
-        does, and local build bytes as the final source.
+    list[str]
+        Sorted, unique names accepted by the release filename rule.
+
+    Raises
+    ------
+    UnsafeAssetNamesError
+        If a name cannot safely be passed as one GitHub CLI argument.
     """
-    if name in on_pypi:
-        return Source.PYPI
-    if name in on_github:
-        return Source.GITHUB
-    return Source.LOCAL
+    result = sorted(set(names))
+    unsafe = [name for name in result if not _SAFE_NAME.fullmatch(name)]
+    if unsafe:
+        raise UnsafeAssetNamesError(unsafe)
+    return result
 
 
 def plan(
@@ -114,7 +170,7 @@ def plan(
     on_pypi: cabc.Collection[str],
     on_github: cabc.Collection[str],
 ) -> Plan:
-    """Choose canonical bytes and the names each destination still needs.
+    """Choose canonical sources in PyPI, GitHub, then local priority order.
 
     Parameters
     ----------
@@ -128,7 +184,7 @@ def plan(
     Returns
     -------
     Plan
-        PyPI takes precedence over GitHub, and GitHub over local build bytes.
+        The canonical source and missing upload sets for every local name.
 
     Examples
     --------
@@ -136,11 +192,16 @@ def plan(
     <Source.GITHUB: 'github'>
     """
     names = frozenset(local)
-    canonical = {name: _canonical_source(name, on_pypi, on_github) for name in names}
+    canonical = {
+        name: Source.PYPI
+        if name in on_pypi
+        else Source.GITHUB
+        if name in on_github
+        else Source.LOCAL
+        for name in sorted(names)
+    }
     return Plan(
-        canonical=canonical,
-        pypi_uploads=frozenset(name for name in names if name not in on_pypi),
-        github_uploads=frozenset(name for name in names if name not in on_github),
+        MappingProxyType(canonical), names - set(on_pypi), names - set(on_github)
     )
 
 
@@ -149,26 +210,21 @@ def mismatches(
     pypi_digests: cabc.Mapping[str, str],
     github_digests: cabc.Mapping[str, str | None],
 ) -> list[str]:
-    """Describe names the two destinations do not hold identically.
+    """Describe distributions the two destinations do not hold identically.
 
     Parameters
     ----------
     local : collections.abc.Iterable[str]
-        Names the release must carry.
+        Filenames this release must carry.
     pypi_digests : collections.abc.Mapping[str, str]
-        PyPI's SHA-256 digest for each name it holds.
-    github_digests : collections.abc.Mapping[str, str | None]
-        GitHub's optional SHA-256 digest for each release asset.
+        PyPI's indexed SHA-256 digests.
+    github_digests : collections.abc.Mapping[str, str or None]
+        GitHub's optional asset digests.
 
     Returns
     -------
     list[str]
-        One message per missing or differing name; empty when they agree.
-
-    Examples
-    --------
-    >>> mismatches(["cmd.whl"], {"cmd.whl": "ab"}, {"cmd.whl": "ab"})
-    []
+        Stable missing-file or differing-digest diagnostics.
     """
     return [
         problem
@@ -178,420 +234,231 @@ def mismatches(
 
 
 def _mismatch(
-    name: str,
-    pypi_digests: cabc.Mapping[str, str],
-    github_digests: cabc.Mapping[str, str | None],
+    name: str, pypi: cabc.Mapping[str, str], github: cabc.Mapping[str, str | None]
 ) -> str | None:
-    """Describe how one name differs between the destinations, if it does.
+    """Describe one destination disagreement, if present.
 
     Returns
     -------
     str or None
-        A mismatch explanation, or ``None`` when the digests agree.
+        A stable diagnostic, or ``None`` when both digests agree.
     """
-    pypi, github = pypi_digests.get(name), github_digests.get(name)
-    if pypi is None:
+    pypi_digest, github_digest = pypi.get(name), github.get(name)
+    if pypi_digest is None:
         return f"{name} is missing from PyPI"
-    if github is None:
+    if github_digest is None:
         return f"{name} is missing from the GitHub Release or has no digest"
-    if pypi != github:
-        return f"{name} differs: PyPI sha256 {pypi}, GitHub sha256 {github}"
+    if pypi_digest != github_digest:
+        return (
+            f"{name} differs: PyPI sha256 {pypi_digest}, GitHub sha256 {github_digest}"
+        )
     return None
 
 
-@dc.dataclass(frozen=True, slots=True)
-class PypiFile:
-    """One file listed by the PyPI simple index."""
+def canonical_digests(state: State) -> dict[str, str]:
+    """Resolve canonical digests from an accepted inventory snapshot.
 
-    sha256: str
-    url: str
-
-
-def read_pypi_index(path: Path) -> dict[str, PypiFile]:
-    """Map PEP 691 filenames to their SHA-256 digest and resolved URL.
+    Parameters
+    ----------
+    state : State
+        Local and destination inventories.
 
     Returns
     -------
-    dict[str, PypiFile]
-        Each index filename with its digest and absolute download URL.
+    dict[str, str]
+        The selected digest for every distribution filename.
+
+    Raises
+    ------
+    ReleaseAssetError
+        If a selected GitHub source has no SHA-256 digest.
     """
-    document = json.loads(path.read_text(encoding="utf-8"))
-    return {
-        entry["filename"]: PypiFile(
-            sha256=entry["hashes"]["sha256"].lower(),
-            url=urllib.parse.urljoin(INDEX_URL, entry["url"]),
+    result: dict[str, str] = {}
+    for name, source in state.plan().canonical.items():
+        digest = (
+            state.pypi[name].sha256
+            if source is Source.PYPI
+            else state.github[name]
+            if source is Source.GITHUB
+            else state.local[name]
         )
-        for entry in document.get("files", [])
-    }
+        if digest is None:
+            msg = f"{name} has no SHA-256 digest on its canonical source"
+            raise ReleaseAssetError(msg)
+        result[name] = digest
+    return result
 
 
-def read_github_assets(path: Path) -> dict[str, str | None]:
-    """Map GitHub Release asset names to their optional SHA-256 digest.
-
-    Returns
-    -------
-    dict[str, str or None]
-        Asset names and their parsed SHA-256 digest, when available.
-    """
-    document = json.loads(path.read_text(encoding="utf-8"))
-    return {
-        asset["name"]: _digest_hex(asset.get("digest"))
-        for asset in document.get("assets", [])
-    }
-
-
-def _digest_hex(digest: object) -> str | None:
-    """Return the hex of a ``sha256:`` digest or ``None`` for another form.
+def bundle_family(name: str) -> str | None:
+    """Return the tag identity of a run-specific provenance bundle.
 
     Returns
     -------
     str or None
-        Lower-case digest hex, or ``None`` when the value is unsupported.
-    """
-    match digest:
-        case str() as value if value.startswith(_DIGEST_PREFIX):
-            return value.removeprefix(_DIGEST_PREFIX).lower()
-        case _:
-            return None
-
-
-def sha256_of(path: Path) -> str:
-    """Return the SHA-256 hex digest of one file's bytes.
-
-    Returns
-    -------
-    str
-        Lower-case SHA-256 hex digest.
-    """
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-def local_names(directory: Path) -> list[str]:
-    """List safe filenames in ``directory`` in stable order.
-
-    Returns
-    -------
-    list[str]
-        Sorted filenames accepted by the release-asset filename rule.
-
-    Raises
-    ------
-    UnsafeAssetNamesError
-        If any filename is unsafe to pass to the GitHub CLI.
-    """
-    names = sorted(path.name for path in directory.iterdir())
-    unsafe = [name for name in names if not _SAFE_NAME.fullmatch(name)]
-    if unsafe:
-        raise UnsafeAssetNamesError(unsafe)
-    return names
-
-
-def _check_digest(path: Path, expected: str | None) -> None:
-    """Raise unless ``path`` holds bytes with the expected digest.
-
-    Raises
-    ------
-    DigestMismatchError
-        If the expected digest is absent or does not match the file.
-    """
-    actual = sha256_of(path)
-    if expected is None or actual != expected:
-        raise DigestMismatchError(path.name, actual, expected)
-
-
-def write_output(name: str, *, value: bool) -> None:
-    """Append one lower-case boolean output to ``GITHUB_OUTPUT``."""
-    with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
-        output.write(f"{name}={str(value).lower()}\n")
-
-
-@dc.dataclass(frozen=True, slots=True)
-class State:
-    """The run's artefacts and what each destination already holds."""
-
-    publish: Path
-    pypi: dict[str, PypiFile]
-    github: dict[str, str | None]
-
-    @classmethod
-    def load(cls, publish: Path, index: Path | None, assets: Path) -> State:
-        """Read the staged artefacts, PyPI index, and GitHub asset listing.
-
-        Returns
-        -------
-        State
-            The parsed index state and the paths used by reconciliation.
-        """
-        pypi = read_pypi_index(index) if index is not None else {}
-        return cls(publish, pypi, read_github_assets(assets))
-
-    def plan(self) -> Plan:
-        """Plan this run's uploads against both destinations.
-
-        Returns
-        -------
-        Plan
-            Canonical sources and the remaining uploads for each destination.
-        """
-        return plan(local_names(self.publish), self.pypi, self.github)
-
-
-def carryover(state: State) -> list[str]:
-    """Return asset names whose GitHub bytes PyPI may need.
-
-    Returns
-    -------
-    list[str]
-        Names present in this run and on the existing GitHub Release.
-    """
-    return sorted(set(local_names(state.publish)) & set(state.github))
-
-
-def missing_from_pypi(state: State) -> list[str]:
-    """Return staged distribution names absent from the current PyPI index.
-
-    Parameters
-    ----------
-    state : State
-        The staged distributions and the most recent PyPI inventory.
-
-    Returns
-    -------
-    list[str]
-        Sorted filenames that PyPI has not listed yet.
-    """
-    return sorted(set(local_names(state.publish)) - set(state.pypi))
-
-
-def stage_pypi(state: State, github_files: Path) -> bool:
-    """Leave exactly the canonical files PyPI still needs in ``publish``.
-
-    Parameters
-    ----------
-    state : State
-        The staged files and both destinations' asset listings.
-    github_files : pathlib.Path
-        Downloaded GitHub Release assets from the draft-release job.
-
-    Returns
-    -------
-    bool
-        Whether any artefact remains to upload.
-    """
-    decided = state.plan()
-    for name, source in sorted(decided.canonical.items()):
-        artefact = state.publish / name
-        if source is Source.PYPI:
-            sys.stdout.write(f"::notice::Skipping {name}: already on PyPI\n")
-            artefact.unlink()
-        elif source is Source.GITHUB:
-            carried = github_files / name
-            _check_digest(carried, state.github[name])
-            sys.stdout.write(f"::notice::Using the GitHub Release's bytes for {name}\n")
-            shutil.copyfile(carried, artefact)
-    if not decided.pypi_uploads:
-        sys.stdout.write("Every artefact is already on PyPI; nothing to publish.\n")
-    return bool(decided.pypi_uploads)
-
-
-def _pypi_fetch_list(
-    lacking: cabc.Iterable[str], pypi: cabc.Mapping[str, PypiFile]
-) -> list[tuple[str, str]]:
-    """Return PyPI (name, URL) pairs to fetch, insisting on HTTPS.
-
-    Returns
-    -------
-    list[tuple[str, str]]
-        Names that GitHub lacks and their PyPI download URLs.
-
-    Raises
-    ------
-    InsecurePypiDownloadError
-        If any selected PyPI download URL does not use HTTPS.
-    """
-    fetch = [(name, pypi[name].url) for name in lacking if name in pypi]
-    if any(not url.startswith("https://") for _, url in fetch):
-        raise InsecurePypiDownloadError
-    return fetch
-
-
-def _copy_pypi_gap(
-    lacking: cabc.Iterable[str],
-    pypi: cabc.Mapping[str, PypiFile],
-    publish: Path,
-    output: Path,
-) -> None:
-    """Copy missing names absent from PyPI into ``output``."""
-    for name in lacking:
-        if name not in pypi:
-            shutil.copyfile(publish / name, output / name)
-
-
-def _bundle_family(name: str) -> str | None:
-    """Return the tag-scoped identity of a run-specific provenance bundle.
-
-    Returns
-    -------
-    str or None
-        The tag-scoped bundle family, or ``None`` for an unrelated filename.
+        Its tag-scoped family, or ``None`` for another asset name.
     """
     match = _BUNDLE_NAME.fullmatch(name)
     return match.group("family") if match is not None else None
 
 
-def _has_bundle_for_release(name: str, github: cabc.Mapping[str, str | None]) -> bool:
-    """Report whether GitHub already carries this name or its tag's bundle.
-
-    Returns
-    -------
-    bool
-        Whether an exact asset or a bundle for the same tag already exists.
-    """
-    family = _bundle_family(name)
-    return name in github or (
-        family is not None and any(_bundle_family(asset) == family for asset in github)
-    )
-
-
-def _canonical_sources_match_build(state: State) -> bool:
-    """Report whether every canonical distribution matches this run's bytes.
-
-    Returns
-    -------
-    bool
-        True when each remote canonical digest, when present, matches this
-        run's staged distribution. This also recognizes the first PyPI upload,
-        whose index now names the attested bytes from this same workflow run.
-    """
-    canonical = state.plan().canonical
-    return bool(canonical) and all(
-        source is Source.LOCAL
-        or (
-            (expected := _canonical_digest(name, source, state)) is not None
-            and expected == sha256_of(state.publish / name)
-        )
-        for name, source in canonical.items()
-    )
-
-
-def _canonical_digest(name: str, source: Source, state: State) -> str | None:
-    """Return the selected remote source's digest, if it is available.
-
-    Returns
-    -------
-    str or None
-        The PyPI or GitHub SHA-256 digest, or ``None`` when unavailable.
-    """
-    match source:
-        case Source.PYPI:
-            return state.pypi[name].sha256
-        case Source.GITHUB:
-            return state.github[name]
-        case Source.LOCAL:
-            return None
-
-
-def _has_retained_bundle(bundles: Path, github: cabc.Mapping[str, str | None]) -> bool:
-    """Report whether GitHub retains a bundle for this tag's current bundle family.
-
-    Returns
-    -------
-    bool
-        Whether the release already has a current or earlier run's bundle.
-    """
-    return any(_has_bundle_for_release(name, github) for name in local_names(bundles))
-
-
-def _copy_unattached_bundles(
-    bundles: Path, github: cabc.Mapping[str, str | None], output: Path
-) -> None:
-    """Copy a tag's provenance bundle only when the release has none yet."""
-    for name in local_names(bundles):
-        if not _has_bundle_for_release(name, github):
-            shutil.copyfile(bundles / name, output / name)
-
-
-def stage_github(state: State, bundles: Path, output: Path) -> list[tuple[str, str]]:
-    """Stage assets GitHub lacks and return PyPI files that need fetching.
-
-    Parameters
-    ----------
-    state : State
-        The staged artefacts and both destinations' asset listings.
-    bundles : pathlib.Path
-        This run's Sigstore provenance bundle directory. Its bundle is staged
-        only when every canonical distribution matches this run's attested
-        bytes.
-    output : pathlib.Path
-        Directory receiving assets to upload and PyPI download targets.
-
-    Returns
-    -------
-    list[tuple[str, str]]
-        PyPI filenames and HTTPS URLs whose bytes GitHub must receive.
-
-    Raises
-    ------
-    MissingRetainedProvenanceError
-        If canonical bytes are carried over but the release has no retained
-        bundle for this tag.
-    """
-    lacking = sorted(state.plan().github_uploads)
-    fetch = _pypi_fetch_list(lacking, state.pypi)
-    sources_match_build = _canonical_sources_match_build(state)
-    if not sources_match_build and not _has_retained_bundle(bundles, state.github):
-        raise MissingRetainedProvenanceError
-    output.mkdir(parents=True, exist_ok=True)
-    _copy_pypi_gap(lacking, state.pypi, state.publish, output)
-    if sources_match_build:
-        _copy_unattached_bundles(bundles, state.github, output)
-    return fetch
-
-
-def check_fetched(state: State, output: Path) -> None:
-    """Raise unless fetched PyPI files match their indexed SHA-256 digests."""
-    for name in sorted(state.plan().github_uploads & set(state.pypi)):
-        _check_digest(output / name, state.pypi[name].sha256)
-
-
-def verify(state: State, bundles: Path) -> list[str]:
-    """Describe every artefact or tag bundle absent from the GitHub Release.
-
-    Parameters
-    ----------
-    state : State
-        The staged artefacts and both destinations' asset listings.
-    bundles : pathlib.Path
-        This run's Sigstore provenance bundle directory.
+def retained_bundle_names(state: State) -> list[str]:
+    """Select existing bundle names belonging to this run's release tag.
 
     Returns
     -------
     list[str]
-        Missing or mismatched artefacts and missing tag-scoped provenance.
+        Existing bundle names that must be downloaded and inspected.
     """
-    pypi = {name: file.sha256 for name, file in state.pypi.items()}
-    problems = mismatches(local_names(state.publish), pypi, state.github)
+    families = {
+        family for name in state.current_bundles if (family := bundle_family(name))
+    }
+    return sorted(name for name in state.github if bundle_family(name) in families)
+
+
+def carryover(state: State) -> list[str]:
+    """Select canonical GitHub files and retained bundles to download.
+
+    Returns
+    -------
+    list[str]
+        Distribution and tag-scoped bundle filenames required by later jobs.
+    """
+    return sorted(
+        (set(state.local) & set(state.github)) | set(retained_bundle_names(state))
+    )
+
+
+def missing_from_pypi(state: State) -> list[str]:
+    """List this run's distribution names not yet indexed by PyPI.
+
+    Returns
+    -------
+    list[str]
+        Stable missing-name inventory for propagation polling.
+    """
+    return sorted(set(state.local) - set(state.pypi))
+
+
+def _attached_subjects(state: State) -> Subjects:
+    """Collect subjects from inspected bundles attached to this release.
+
+    Returns
+    -------
+    Subjects
+        Exact claims retained by the current GitHub asset inventory.
+    """
+    return frozenset(
+        subject
+        for name, subjects in state.retained_bundles.items()
+        if name in state.github
+        for subject in subjects
+    )
+
+
+def _available_subjects(state: State) -> Subjects:
+    """Add attachable current bundles to the retained subject inventory.
+
+    Returns
+    -------
+    Subjects
+        Claims already attached or available under a new immutable name.
+    """
+    return _attached_subjects(state) | frozenset(
+        subject
+        for name, subjects in state.current_bundles.items()
+        if name not in state.github
+        for subject in subjects
+    )
+
+
+def _provenance_problems(
+    digests: cabc.Mapping[str, str], subjects: Subjects
+) -> list[str]:
+    """Describe canonical name/digest pairs absent from inspected subjects.
+
+    Returns
+    -------
+    list[str]
+        Stable diagnostics for every uncovered canonical distribution.
+    """
     return [
-        *problems,
-        *_missing_provenance(state, bundles),
+        f"{name} has no matching provenance subject for sha256 {digest}"
+        for name, digest in sorted(digests.items())
+        if (name, digest) not in subjects
     ]
 
 
-def _missing_provenance(state: State, bundles: Path) -> list[str]:
-    """Return any bundle requirement unmet by the existing GitHub Release.
+def require_provenance(state: State) -> None:
+    """Reject canonical distributions without retained or attachable subjects.
+
+    Parameters
+    ----------
+    state : State
+        Preloaded distribution and provenance inventories.
+
+    Raises
+    ------
+    UnattestedReleaseAssetsError
+        If any canonical distribution lacks an exact name/digest subject.
+    """
+    problems = _provenance_problems(
+        canonical_digests(state), _available_subjects(state)
+    )
+    if problems:
+        raise UnattestedReleaseAssetsError(problems)
+
+
+def stage_github(state: State) -> GitHubStage:
+    """Plan GitHub's missing files and contributing provenance bundles.
+
+    Canonical digest resolution and provenance validation can raise
+    ``ReleaseAssetError`` or ``UnattestedReleaseAssetsError`` before a plan
+    is returned; neither operation reads the environment.
+
+    Parameters
+    ----------
+    state : State
+        Preloaded local, destination, and decoded bundle inventories.
+
+    Returns
+    -------
+    GitHubStage
+        Distribution download identifiers and explicit local copy names.
+
+    """
+    require_provenance(state)
+    lacking = sorted(state.plan().github_uploads)
+    fetch = tuple(name for name in lacking if name in state.pypi)
+    uncovered = set(canonical_digests(state).items()) - _attached_subjects(state)
+    bundles: list[str] = []
+    for name, subjects in sorted(state.current_bundles.items()):
+        if name not in state.github and uncovered & subjects:
+            bundles.append(name)
+            uncovered -= subjects
+    return GitHubStage(
+        fetch, tuple(name for name in lacking if name not in state.pypi), tuple(bundles)
+    )
+
+
+def verify(state: State) -> list[str]:
+    """Compare destination digests and require attached matching provenance.
+
+    Canonical digest resolution raises ``ReleaseAssetError`` when a selected
+    source has no recorded digest.
+
+    Parameters
+    ----------
+    state : State
+        Final destination inventories and inspected attached bundles.
 
     Returns
     -------
     list[str]
-        Diagnostics for missing current-run or retained release provenance.
+        Every missing file, digest disagreement, or unattested canonical byte.
+
     """
-    if _canonical_sources_match_build(state):
-        return [
-            f"{name} is missing from the GitHub Release"
-            for name in local_names(bundles)
-            if not _has_bundle_for_release(name, state.github)
-        ]
-    if not _has_retained_bundle(bundles, state.github):
-        return ["carried-over release assets have no retained provenance bundle"]
-    return []
+    pypi = {name: file.sha256 for name, file in state.pypi.items()}
+    return [
+        *mismatches(state.local, pypi, state.github),
+        *_provenance_problems(canonical_digests(state), _attached_subjects(state)),
+    ]

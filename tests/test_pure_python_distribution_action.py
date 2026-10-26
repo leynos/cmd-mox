@@ -12,7 +12,9 @@ import shutil
 import typing as typ
 
 import pytest
+import yaml
 from helpers.release_workflow import (
+    REPOSITORY_ROOT,
     load_action_build_step,
     run_bash_step,
     write_executable,
@@ -46,6 +48,7 @@ def _run_build_step(
     *,
     has_sdist: bool,
     wheel_name: str = _PURE_WHEEL_NAME,
+    out_dir: str = "dist",
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
     """Run the build script with a recording uv stub."""  # ruff: ignore[docstring-missing-returns] - the private helper's tuple is explicit in its annotation.
     script, _ = load_action_build_step()
@@ -65,7 +68,7 @@ def _run_build_step(
             "FAKE_SDIST": "1" if has_sdist else "0",
             "FAKE_WHEEL": wheel_name,
             "GITHUB_OUTPUT": str(github_output),
-            "OUT_DIR": "dist",
+            "OUT_DIR": out_dir,
             "PATH": f"{fake_bin}:/usr/bin:/bin",
         },
     )
@@ -118,3 +121,42 @@ def test_build_action_rejects_platform_specific_wheels(tmp_path: Path) -> None:
         "the failure must explain the accepted wheel tag"
     )
     assert not github_output.exists(), "a rejected wheel must not be reported"
+
+
+@pytest.mark.parametrize("out_dir", ["", "/"], ids=["empty", "root"])
+def test_build_action_rejects_an_empty_or_root_output_directory(
+    tmp_path: Path, out_dir: str
+) -> None:
+    """A build cannot direct temporary output to an empty or root path."""
+    result, _, github_output, _ = _run_build_step(
+        tmp_path, has_sdist=True, out_dir=out_dir
+    )
+
+    assert result.returncode == 1, "invalid output directories must fail before build"
+    assert "output directory must be a non-root path" in result.stderr, (
+        "the guard must explain the rejected output directory"
+    )
+    assert not github_output.exists(), "a rejected output directory must not upload"
+
+
+def test_upload_artifact_includes_both_current_build_formats() -> None:
+    """The uploaded artifact covers the isolated sdist and wheel inventory."""
+    action_path = (
+        REPOSITORY_ROOT / ".github" / "actions" / "pure-python-wheel" / "action.yml"
+    )
+    action = yaml.safe_load(action_path.read_text(encoding="utf-8"))
+    upload = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+    )
+    config = upload["with"]
+    paths = config["path"].splitlines()
+
+    assert paths == [
+        "${{ steps.build.outputs.build-dir }}/*.whl",
+        "${{ steps.build.outputs.build-dir }}/*.tar.gz",
+    ], "the uploaded artifact must include only current-build wheels and sdist"
+    assert config["if-no-files-found"] == "error", (
+        "an empty artifact inventory must fail the action"
+    )

@@ -867,6 +867,35 @@ To publish a release:
    `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
    the build run that attested those bytes.
 
+For screen readers: This flowchart shows how the release workflow selects
+canonical bytes from PyPI, an existing GitHub Release, or the current attested
+build, then publishes and verifies matching assets.
+
+```mermaid
+flowchart TD
+    accTitle: Release asset selection and publication
+    accDescr: Select PyPI, GitHub, then local bytes; verify digests before publishing.
+    A[Attested sdist and wheel] --> B{Filename already on PyPI?}
+    B -- Yes --> C[Use PyPI bytes]
+    B -- No --> D{Filename already on GitHub Release?}
+    D -- Yes --> E[Use existing GitHub bytes]
+    D -- No --> F[Use local attested bytes]
+    C --> G[Skip PyPI upload]
+    E --> H[Carry bytes to PyPI if needed]
+    F --> I[Publish to PyPI]
+    G --> J{PyPI and GitHub SHA-256 match?}
+    H --> J
+    I --> K[Wait for PyPI index]
+    K --> J
+    J -- No --> L[Fail safely]
+    J -- Yes --> M[Upload only missing GitHub assets]
+    M --> N[Retain or attach provenance bundle]
+    N --> O[Publish GitHub Release]
+```
+
+_Figure: Release asset selection, idempotent publishing, and digest
+verification._
+
 The first automated release must use a version later than `0.2.0`. PyPI already
 contains the manually uploaded `0.2.0` wheel and source distribution, so
 another publication of those filenames is a no-op there. The existing GitHub

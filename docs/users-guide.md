@@ -3,6 +3,10 @@
 For CmdMox workflows, fixtures, and API details, see the
 [detailed usage guide](usage-guide.md).
 
+For installation from PyPI, its source distribution and wheel, and the
+provenance bundle included with GitHub Releases, see
+[Getting started](usage-guide.md#getting-started).
+
 ## Shim stdin and IPC timeouts
 
 `CMOX_IPC_TIMEOUT` defaults to five seconds when the IPC server starts inside

@@ -288,6 +288,44 @@ def test_release_workflow_attests_and_uploads_without_clobbering() -> None:
     assert "--clobber" not in workflow_text, "existing GitHub assets are immutable"
 
 
+def test_release_handoff_attests_and_uploads_the_same_distribution_tree() -> None:
+    """The attestation subject and release artefact include all distributions."""
+    jobs = _jobs(_workflow(RELEASE_WORKFLOW_PATH))
+    attest_steps = _steps(jobs["attest"])
+    attestation = next(
+        step
+        for step in attest_steps
+        if step.get("uses", "").startswith("actions/attest-build-provenance@")
+    )
+    assert attestation.get("with", {}).get("subject-path") == "dist/publish/*", (
+        "provenance must attest every collected distribution"
+    )
+
+    handoff = next(
+        step
+        for step in attest_steps
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+        and step.get("with", {}).get("name") == "release-dist"
+    )
+    artifact_paths = handoff["with"]["path"].splitlines()
+    assert artifact_paths == ["dist/publish", "dist/attestations"], (
+        "the release artefact must carry distributions and their Sigstore bundle"
+    )
+
+
+def test_make_build_release_uses_the_ci_uv_build_path() -> None:
+    """Local release builds invoke the same uv backend path as CI."""
+    makefile = (_REPOSITORY_ROOT / "Makefile").read_text(encoding="utf-8")
+    match = re.search(
+        r"^build-release:.*\n\t(?P<command>[^\n]+)", makefile, re.MULTILINE
+    )
+
+    assert match is not None, "Makefile must keep the documented build-release target"
+    assert match.group("command") == (
+        "$(UV_GATE) run --group dev -- uv build --out-dir dist"
+    ), "local release builds must use uv build into dist"
+
+
 def test_run_scripts_are_quoted_shell_steps_without_workflow_interpolation() -> None:
     """Release shell uses env variables, and each script enables strict Bash."""
     scripts = _run_scripts(

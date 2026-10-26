@@ -9,6 +9,8 @@ first on ``PATH``.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import shutil
@@ -25,6 +27,7 @@ ActionInputs = typ.TypedDict(
         "artifact-name": typ.NotRequired[str],
         "if-no-files-found": typ.NotRequired[str],
         "name": typ.NotRequired[str],
+        "path": typ.NotRequired[str],
         "packages-dir": typ.NotRequired[str],
         "persist-credentials": typ.NotRequired[bool],
         "python-version": typ.NotRequired[str],
@@ -264,7 +267,9 @@ with log_path.open("a", encoding="utf-8") as log:
     log.write(json.dumps({"tool": "gh", "argv": argv}) + "\n")
 
 if argv[:2] != ["release", "view"]:
-    if argv[:2] == ["release", "create"] or argv[:2] == ["release", "edit"]:
+    if argv[:2] == ["release", "create"]:
+        raise SystemExit(int(os.environ.get("GH_CREATE_STATUS", "0")))
+    if argv[:2] == ["release", "edit"]:
         raise SystemExit(0)
     if argv[:2] == ["release", "download"]:
         pattern = argv[argv.index("--pattern") + 1]
@@ -277,7 +282,18 @@ if argv[:2] != ["release", "view"]:
         raise SystemExit(0)
     raise SystemExit(2)
 
-if os.environ.get("GH_RELEASE_EXISTS", "1") != "1":
+view_count = sum(
+    json.loads(line)["argv"][:2] == ["release", "view"]
+    for line in log_path.read_text(encoding="utf-8").splitlines()
+)
+view_statuses = os.environ.get("GH_VIEW_STATUSES")
+statuses = view_statuses.split(",") if view_statuses is not None else []
+view_failed = (
+    statuses[min(view_count - 1, len(statuses) - 1)] != "0"
+    if view_statuses is not None
+    else os.environ.get("GH_RELEASE_EXISTS", "1") != "1"
+)
+if view_failed:
     sys.stderr.write("release not found\n")
     raise SystemExit(1)
 release_state = os.environ.get("GH_RELEASE_STATE")
@@ -388,3 +404,32 @@ def read_tool_calls(path: Path, *, tool: str | None = None) -> list[dict[str, ob
         return []
     calls = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     return [call for call in calls if tool is None or call["tool"] == tool]
+
+
+def provenance_bundle(subjects: dict[str, bytes]) -> bytes:
+    """Build a test DSSE bundle with exact distribution subject digests.
+
+    Parameters
+    ----------
+    subjects : dict[str, bytes]
+        Distribution filenames and the bytes attested by this fixture.
+
+    Returns
+    -------
+    bytes
+        JSON bundle bytes with an encoded SLSA in-toto statement.
+    """
+    statement = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "subject": [
+            {"name": name, "digest": {"sha256": hashlib.sha256(content).hexdigest()}}
+            for name, content in sorted(subjects.items())
+        ],
+    }
+    return json.dumps({
+        "dsseEnvelope": {
+            "payloadType": "application/vnd.in-toto+json",
+            "payload": base64.b64encode(json.dumps(statement).encode()).decode(),
+        }
+    }).encode()
