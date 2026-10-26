@@ -325,8 +325,9 @@ def _is_regular_file(descriptor: int) -> bool:
     Returns
     -------
     bool
-        ``True`` for a regular file, and also for a descriptor whose status
-        cannot be queried; such a descriptor is then read on a worker.
+        ``True`` only for a regular file. A descriptor whose status cannot be
+        queried reports ``False``, so it keeps the polled read that already
+        accepted it rather than being moved onto a worker for no reason.
     """
     try:
         return stat.S_ISREG(os.fstat(descriptor).st_mode)
