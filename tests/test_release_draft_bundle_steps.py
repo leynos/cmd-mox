@@ -48,9 +48,7 @@ class _BundleAttachmentCase(typ.NamedTuple):
     extra_bundle_attempt: str | None = None
 
 
-def _write_bundle_inventory(
-    tmp_path: Path, case: _BundleAttachmentCase
-) -> str:
+def _write_bundle_inventory(tmp_path: Path, case: _BundleAttachmentCase) -> str:
     """Create the bundle inventory carried by the release-dist artefact.
 
     Returns
