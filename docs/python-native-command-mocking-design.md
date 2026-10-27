@@ -930,20 +930,23 @@ and timeout environment variables automatically. This keeps tests and shim
 workflows from having to patch :mod:`os.environ` manually when they rely on the
 higher-level context manager.
 
-#### Shared POSIX deadline and request rejection (2026-10-09)
+#### POSIX IPC deadline and request rejection (2026-10-09)
 
-On POSIX, the shim creates one monotonic deadline from CMOX_IPC_TIMEOUT. It
-applies that deadline to waitable stdin capture, Unix socket connection
-attempts and retry backoff, request sending, response reads, and passthrough
-reporting. Each socket wait receives only the remaining budget, so partial
-response chunks and retries cannot restart the timeout. Regular-file stdin uses
-a worker because readiness polling does not bound a text read from a regular
-file. Windows keeps its named-pipe timeout behaviour. Read failures still use
-the shim's controlled IPC diagnostic.
+CMOX_IPC_TIMEOUT yields two deadlines on POSIX, not one shared budget. Stdin
+capture starts its own deadline when :func:`cmd_mox._stdin_capture.read_stdin`
+is entered, because the shim hands that function only the configured timeout.
+The IPC deadline is anchored separately where `main()` starts, and applies to
+Unix socket connection attempts and retry backoff, request sending, response
+reads, and passthrough reporting. Each socket wait receives only the remaining
+budget, so partial response chunks and retries cannot restart the IPC timeout.
+A capture that uses its whole timeout therefore leaves the IPC exchange
+correspondingly less time, and a later expiry of the anchored deadline is
+reported without retrying. Windows keeps its named-pipe timeout behaviour. Read
+failures still use the shim's controlled IPC diagnostic.
 
-> **Superseded (2026-10-26):** this decision deliberately left Windows,
-> missing-file-descriptor, and unpollable stdin on an unbounded direct text
-> read. Every one of those paths is now bounded by `CMOX_IPC_TIMEOUT`; see
+> **Superseded (2026-10-26):** the bounded stdin work that followed this
+> decision extended the capture deadline to every stream kind, and it is what
+> split stdin capture out of the single POSIX deadline described here. See
 > "Implementation Notes" above for the strategy table and the script entry
 > point that terminates the process when a reader cannot be interrupted.
 

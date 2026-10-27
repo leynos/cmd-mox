@@ -50,6 +50,104 @@ def stalled() -> cabc.Iterator[_StalledWorker]:
         worker.finish()
 
 
+class _SteppingTestClock:
+    """Mutable clock advanced explicitly by the doubles in this module."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        """Return the current fake time.
+
+        Returns
+        -------
+        float
+            The time last assigned to :attr:`now`.
+        """
+        return self.now
+
+
+class _RecordingEvent:
+    """Event double that records each wait and rejects out-of-range slices.
+
+    A real :meth:`threading.Event.wait` raises :exc:`OverflowError` for a
+    timeout beyond :data:`threading.TIMEOUT_MAX`. Sleeping for such a slice
+    would outlive the suite, so this double reproduces the rejection and
+    advances a shared clock by each accepted slice instead.
+    """
+
+    def __init__(self, clock: _SteppingTestClock) -> None:
+        self.clock = clock
+        self.waits: list[float] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Record *timeout*, rejecting values CPython cannot schedule.
+
+        Returns
+        -------
+        bool
+            ``False``, because the simulated worker never finishes.
+
+        Raises
+        ------
+        OverflowError
+            If *timeout* exceeds :data:`threading.TIMEOUT_MAX`.
+        """
+        if timeout is not None and timeout > threading.TIMEOUT_MAX:
+            msg = "timestamp out of range for platform time_t"
+            raise OverflowError(msg)
+        assert timeout is not None, "the helper always waits with a timeout"
+        self.waits.append(timeout)
+        self.clock.now += timeout
+        return False
+
+
+def test_wait_for_finish_returns_true_when_the_event_is_set() -> None:
+    """A worker that has already finished is reported as finished."""
+    event = threading.Event()
+    event.set()
+    clock = _SteppingTestClock()
+
+    assert _bounded_thread.wait_for_finish(event, 1.0, clock=clock) is True, (
+        "a set event should report completion"
+    )
+
+
+def test_wait_for_finish_returns_false_at_an_expired_deadline() -> None:
+    """An already-expired deadline reports failure without waiting."""
+    clock = _SteppingTestClock()
+    clock.now = 10.0
+    event = _RecordingEvent(clock)
+
+    assert _bounded_thread.wait_for_finish(event, 5.0, clock=clock) is False, (
+        "an expired deadline should report failure"
+    )
+    assert event.waits == [], "an expired deadline must not wait"
+
+
+def test_wait_for_finish_slices_waits_beyond_the_platform_maximum() -> None:
+    """A deadline beyond ``TIMEOUT_MAX`` is waited for in legal slices.
+
+    ``CMOX_IPC_TIMEOUT`` accepts any finite positive float, so a caller can
+    hand this helper a deadline :meth:`threading.Event.wait` cannot schedule.
+    Without slicing the helper would raise :exc:`OverflowError`, which no shim
+    stdin handler catches, instead of reporting the deadline as expired.
+    """
+    clock = _SteppingTestClock()
+    event = _RecordingEvent(clock)
+
+    finished = _bounded_thread.wait_for_finish(event, 1e10, clock=clock)
+
+    assert finished is False, "the simulated worker never finishes"
+    assert len(event.waits) > 1, "a deadline beyond the maximum was not sliced"
+    assert all(wait <= threading.TIMEOUT_MAX for wait in event.waits), (
+        "a wait beyond the platform limit reached Event.wait"
+    )
+    assert sum(event.waits) == pytest.approx(1e10), (
+        "the slices did not cover the whole deadline"
+    )
+
+
 def test_cancel_is_reissued_while_the_worker_survives(
     stalled: _StalledWorker,
 ) -> None:

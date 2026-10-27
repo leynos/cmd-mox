@@ -16,15 +16,19 @@ pywin32 builds and from every non-Windows host, where the module stand-ins are
 from __future__ import annotations
 
 import contextlib
+import threading
 import time
 import typing as typ
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
-    import threading
 
 # ``CancelSynchronousIo`` requires THREAD_TERMINATE access to its target.
 _THREAD_TERMINATE: typ.Final[int] = 0x0001
+
+# Largest single wait ``Event.wait`` accepts; beyond this it raises
+# ``OverflowError`` because the value does not fit the platform's ``time_t``.
+_MAX_EVENT_WAIT: typ.Final[float] = threading.TIMEOUT_MAX
 
 # Upper bound on one wait between cancellation attempts. Short enough that a
 # request landing between two blocking calls is retried promptly, long enough
@@ -177,6 +181,55 @@ def request_synchronous_io_cancel(
             cancel_io(handle)
         finally:
             closer.close()
+
+
+class _Waitable(typ.Protocol):
+    """Completion signal a bounded wait can be expressed against."""
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Block until set or *timeout* elapses, reporting whether it was set."""
+
+
+def wait_for_finish(
+    finished: _Waitable,
+    deadline: float,
+    *,
+    clock: cabc.Callable[[], float] = time.monotonic,
+) -> bool:
+    """Wait for *finished* until *deadline*, in schedulable slices.
+
+    :meth:`threading.Event.wait` rejects a timeout beyond
+    :data:`threading.TIMEOUT_MAX` with :exc:`OverflowError`, because the value
+    does not fit the platform's ``time_t``. ``TIMEOUT_MAX`` is also much lower
+    on Windows than on Linux, and callers can be configured with any finite
+    positive timeout, so an unsliced wait is not safe. Slicing keeps every
+    individual wait inside the range.
+
+    Parameters
+    ----------
+    finished:
+        Event the worker sets when it completes.
+    deadline:
+        Monotonic time by which the worker must finish.
+    clock:
+        Monotonic clock used to measure the remaining budget.
+
+    Returns
+    -------
+    bool
+        Whether *finished* was set before the deadline.
+    """
+    budget = deadline - clock()
+    waited = 0.0
+    while waited < budget:
+        # The budget is consumed by what was actually waited for, not by what
+        # the clock reads afterwards, so a clock that never advances cannot
+        # make the loop spin on the same slice forever.
+        slice_ = min(budget - waited, _MAX_EVENT_WAIT)
+        if finished.wait(slice_):
+            return True
+        waited += slice_
+    return False
 
 
 def cancel_and_await_worker(
