@@ -892,10 +892,10 @@ flowchart TD
     C --> G[Skip PyPI upload]
     E --> H[Carry bytes to PyPI if needed]
     F --> I[Publish to PyPI]
-    G --> J
-    H --> J
-    I --> K[Wait for PyPI index]
-    K --> J
+    G --> K[Wait for PyPI index]
+    H --> K
+    I --> K
+    K --> J{PyPI and GitHub SHA-256 digests match?}
     J -- No --> L[Fail safely]
     J -- Yes --> M[Upload only missing GitHub assets]
     M --> N[Retain or attach provenance bundle]
