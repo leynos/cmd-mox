@@ -396,7 +396,7 @@ def _output_path(invocation: _Invocation) -> Path:
         If the input is missing or violates its declared contract.
     """
     if invocation.output_path is None:
-        msg = "GITHUB_OUTPUT is required for this command"
+        msg = f"GITHUB_OUTPUT is required for {invocation.args.command}"
         raise assets.ReleaseAssetError(msg)
     return invocation.output_path
 
@@ -514,6 +514,28 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _workflow_output_path(command: str) -> Path | None:
+    """Resolve the workflow output path required by output-producing commands.
+
+    Returns
+    -------
+    pathlib.Path or None
+        The output path for a publishing command, or ``None`` otherwise.
+
+    Raises
+    ------
+    ReleaseAssetError
+        If a command that emits workflow outputs lacks ``GITHUB_OUTPUT``.
+    """
+    if command not in {"stage-pypi", "stage-github"}:
+        return None
+    raw_output = os.environ.get("GITHUB_OUTPUT")
+    if not raw_output:
+        msg = f"GITHUB_OUTPUT is required for {command}"
+        raise assets.ReleaseAssetError(msg)
+    return Path(raw_output)
+
+
 def main(argv: cabc.Sequence[str] | None = None) -> int:
     """Load environmental inputs, execute a command, and annotate failures.
 
@@ -526,24 +548,15 @@ def main(argv: cabc.Sequence[str] | None = None) -> int:
     -------
     int
         Zero on success, one for handled input, filesystem, or policy errors.
+
     """
     args = _parser().parse_args(argv, namespace=_Arguments())
     try:
-        output = (
-            Path(os.environ["GITHUB_OUTPUT"])
-            if args.command in {"stage-pypi", "stage-github"}
-            else None
-        )
+        output = _workflow_output_path(args.command)
         state, pypi_urls = _load_state(args)
         invocation = _Invocation(state, args, output, pypi_urls)
         _COMMANDS[args.command](invocation)
-    except (
-        assets.ReleaseAssetError,
-        OSError,
-        KeyError,
-        ValueError,
-        TypeError,
-    ) as error:
+    except (assets.ReleaseAssetError, OSError, ValueError) as error:
         sys.stderr.write(f"::error title=release-assets::{error}\n")
         return 1
     return 0

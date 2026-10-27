@@ -217,15 +217,8 @@ jobs:
             --purpose pypi --publish dist/publish --index "${PYPI_INDEX_PATH}" \
             --assets github-state/assets.json --bundles dist/attestations \
             --github-files github-state/files > attestation-candidates.tsv
-          : > verified-subjects.tsv
-          while IFS=$'\t' read -r artifact bundle bundle_name name digest; do
-            [[ -n "${name}" ]] || continue
-            gh attestation verify "${artifact}" --bundle "${bundle}" \
-              --repo leynos/cmd-mox \
-              --signer-workflow leynos/cmd-mox/.github/workflows/release.yml
-            printf '%s\t%s\t%s\n' "${bundle_name}" "${name}" "${digest}" \
-              >> verified-subjects.tsv
-          done < attestation-candidates.tsv
+          bash scripts/verify_attestations.sh \
+            attestation-candidates.tsv verified-subjects.tsv
           python3 -m scripts.release_assets_cli stage-pypi \
             --publish dist/publish --index "${PYPI_INDEX_PATH}" \
             --assets github-state/assets.json --github-files github-state/files \
@@ -305,15 +298,8 @@ jobs:
             --assets release-assets.json --bundles dist/attestations \
             --github-files github-state/files --output github-upload \
             > attestation-candidates.tsv
-          : > verified-subjects.tsv
-          while IFS=$'\t' read -r artifact bundle bundle_name name digest; do
-            [[ -n "${name}" ]] || continue
-            gh attestation verify "${artifact}" --bundle "${bundle}" \
-              --repo leynos/cmd-mox \
-              --signer-workflow leynos/cmd-mox/.github/workflows/release.yml
-            printf '%s\t%s\t%s\n' "${bundle_name}" "${name}" "${digest}" \
-              >> verified-subjects.tsv
-          done < attestation-candidates.tsv
+          bash scripts/verify_attestations.sh \
+            attestation-candidates.tsv verified-subjects.tsv
           python3 -m scripts.release_assets_cli stage-github \
             --publish dist/publish --index "${PYPI_INDEX_PATH}" \
             --assets release-assets.json --bundles dist/attestations \

@@ -8,6 +8,7 @@ the checked-in scripts and workflow shell steps with temporary fake tools.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import shlex
@@ -28,13 +29,23 @@ from helpers.release_workflow import (
     should_skip_release_tests_for_mutation_sandbox,
 )
 
-release_assets = pytest.importorskip("scripts.release_assets")
-release_asset_io = pytest.importorskip("scripts.release_assets_io")
-release_version = pytest.importorskip("scripts.release_version")
-
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
 _FETCH_INDEX_SCRIPT = _REPOSITORY_ROOT / "scripts" / "fetch_pypi_index.sh"
+if should_skip_release_tests_for_mutation_sandbox(
+    Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
+):
+    pytest.skip(
+        "mutmut sandbox omits the release workflow and CLI", allow_module_level=True
+    )
+
+release_assets = typ.cast("typ.Any", importlib.import_module("scripts.release_assets"))
+release_asset_io = typ.cast(
+    "typ.Any", importlib.import_module("scripts.release_assets_io")
+)
+release_version = typ.cast(
+    "typ.Any", importlib.import_module("scripts.release_version")
+)
 
 
 class _IndexFetchCase(typ.NamedTuple):

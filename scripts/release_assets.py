@@ -16,7 +16,7 @@ from types import MappingProxyType
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
-Subjects = frozenset[tuple[str, str]]
+type Subjects = frozenset[tuple[str, str]]
 _BUNDLE_NAME = re.compile(r"(?P<family>cmd-mox-.+)-run[0-9]+-[0-9]+\.sigstore\.json")
 
 

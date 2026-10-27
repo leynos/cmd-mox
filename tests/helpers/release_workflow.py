@@ -215,6 +215,12 @@ def run_bash_step(
     subprocess.CompletedProcess[str]
         The completed process, including captured output and status.
     """
+    if "bash scripts/verify_attestations.sh" in script:
+        source = REPOSITORY_ROOT / "scripts" / "verify_attestations.sh"
+        target = cwd / "scripts" / "verify_attestations.sh"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+
     python_shim = cwd / ".python-shim"
     python_shim.mkdir(exist_ok=True)
     python3 = python_shim / "python3"

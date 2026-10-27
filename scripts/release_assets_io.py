@@ -132,17 +132,26 @@ def read_pypi_index(path: Path) -> PypiIndex:
     -------
     PypiIndex
         Validated digests and URLs; an absent ``files`` field is empty.
+
+    Raises
+    ------
+    ReleaseAssetError
+        If the PEP 691 document has an invalid schema or unsafe filename.
     """
-    document = typ.cast("_Index", json.loads(path.read_text(encoding="utf-8")))
-    entries = document.get("files", [])
-    digests = {
-        entry["filename"]: _digest(entry["hashes"]["sha256"]) for entry in entries
-    }
-    urls = {
-        entry["filename"]: urllib.parse.urljoin(INDEX_URL, entry["url"])
-        for entry in entries
-    }
-    safe_names(digests)
+    try:
+        document = typ.cast("_Index", json.loads(path.read_text(encoding="utf-8")))
+        entries = document.get("files", [])
+        digests = {
+            entry["filename"]: _digest(entry["hashes"]["sha256"]) for entry in entries
+        }
+        urls = {
+            entry["filename"]: urllib.parse.urljoin(INDEX_URL, entry["url"])
+            for entry in entries
+        }
+        safe_names(digests)
+    except (AttributeError, KeyError, TypeError) as error:
+        msg = f"invalid PEP 691 PyPI index: {path.name}"
+        raise assets.ReleaseAssetError(msg) from error
     return PypiIndex(digests, urls)
 
 
@@ -153,13 +162,24 @@ def read_github_assets(path: Path) -> dict[str, str | None]:
     -------
     dict[str, str or None]
         Asset inventory with unsupported digest types represented as absent.
+
+    Raises
+    ------
+    ReleaseAssetError
+        If the release response has an invalid schema or unsafe filename.
     """
-    document = typ.cast("_GitHubAssets", json.loads(path.read_text(encoding="utf-8")))
-    result = {
-        entry["name"]: _github_digest(entry.get("digest"))
-        for entry in document.get("assets", [])
-    }
-    safe_names(result)
+    try:
+        document = typ.cast(
+            "_GitHubAssets", json.loads(path.read_text(encoding="utf-8"))
+        )
+        result = {
+            entry["name"]: _github_digest(entry.get("digest"))
+            for entry in document.get("assets", [])
+        }
+        safe_names(result)
+    except (AttributeError, KeyError, TypeError) as error:
+        msg = f"invalid GitHub release asset inventory: {path.name}"
+        raise assets.ReleaseAssetError(msg) from error
     return result
 
 
@@ -250,25 +270,50 @@ def read_bundle_subjects(path: Path) -> assets.Subjects:
     ReleaseAssetError
         If the payload is not an in-toto SLSA build-provenance statement.
     """
-    document = typ.cast("_Bundle", json.loads(path.read_text(encoding="utf-8")))
-    envelope = document["dsseEnvelope"]
-    if envelope["payloadType"] != "application/vnd.in-toto+json":
-        msg = f"{path.name} is not an in-toto DSSE bundle"
-        raise assets.ReleaseAssetError(msg)
-    payload = base64.b64decode(envelope["payload"], validate=True)
-    statement = typ.cast("_Statement", json.loads(payload))
-    if (
-        statement["_type"] != "https://in-toto.io/Statement/v1"
-        or statement["predicateType"] != "https://slsa.dev/provenance/v1"
-    ):
-        msg = f"{path.name} is not SLSA build provenance"
-        raise assets.ReleaseAssetError(msg)
-    subjects = frozenset(
-        (entry["name"], _digest(entry["digest"]["sha256"]))
-        for entry in statement["subject"]
-    )
-    safe_names(name for name, _ in subjects)
+    statement = _provenance_statement(path)
+    try:
+        subjects = frozenset(
+            (entry["name"], _digest(entry["digest"]["sha256"]))
+            for entry in statement["subject"]
+        )
+        safe_names(name for name, _ in subjects)
+    except (AttributeError, KeyError, TypeError) as error:
+        msg = f"invalid Sigstore bundle structure: {path.name}"
+        raise assets.ReleaseAssetError(msg) from error
     return subjects
+
+
+def _provenance_statement(path: Path) -> _Statement:
+    """Decode and validate the SLSA statement carried by one bundle.
+
+    Returns
+    -------
+    _Statement
+        A decoded SLSA build-provenance statement.
+
+    Raises
+    ------
+    ReleaseAssetError
+        If the bundle envelope is malformed or uses another statement type.
+    """
+    try:
+        document = typ.cast("_Bundle", json.loads(path.read_text(encoding="utf-8")))
+        envelope = document["dsseEnvelope"]
+        if envelope["payloadType"] != "application/vnd.in-toto+json":
+            msg = f"{path.name} is not an in-toto DSSE bundle"
+            raise assets.ReleaseAssetError(msg)
+        payload = base64.b64decode(envelope["payload"], validate=True)
+        statement = typ.cast("_Statement", json.loads(payload))
+        if (
+            statement["_type"] != "https://in-toto.io/Statement/v1"
+            or statement["predicateType"] != "https://slsa.dev/provenance/v1"
+        ):
+            msg = f"{path.name} is not SLSA build provenance"
+            raise assets.ReleaseAssetError(msg)
+    except (AttributeError, KeyError, TypeError) as error:
+        msg = f"invalid Sigstore bundle structure: {path.name}"
+        raise assets.ReleaseAssetError(msg) from error
+    return statement
 
 
 def write_output(path: Path, name: str, *, value: bool) -> None:

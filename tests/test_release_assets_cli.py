@@ -3,22 +3,32 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import typing as typ
+from pathlib import Path
 
 import pytest
 from helpers.release_workflow import (
+    RELEASE_WORKFLOW_PATH,
     digest_bundle,
     install_fake_tools,
+    should_skip_release_tests_for_mutation_sandbox,
 )
 
-if typ.TYPE_CHECKING:
-    from pathlib import Path
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+_RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
+if should_skip_release_tests_for_mutation_sandbox(
+    Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
+):
+    pytest.skip(
+        "mutmut sandbox omits the release workflow and CLI", allow_module_level=True
+    )
 
-assets = pytest.importorskip("scripts.release_assets")
-adapters = pytest.importorskip("scripts.release_assets_cli")
-asset_io = pytest.importorskip("scripts.release_assets_io")
+assets = typ.cast("typ.Any", importlib.import_module("scripts.release_assets"))
+adapters = typ.cast("typ.Any", importlib.import_module("scripts.release_assets_cli"))
+asset_io = typ.cast("typ.Any", importlib.import_module("scripts.release_assets_io"))
 
 
 class _CLIInventories(typ.NamedTuple):
@@ -181,6 +191,34 @@ def test_adapter_rejects_malformed_or_unrelated_provenance(
     path = _write(tmp_path, "bundle.sigstore.json", content)
     with pytest.raises((assets.ReleaseAssetError, ValueError)):
         asset_io.read_bundle_subjects(path)
+
+
+def test_adapter_reports_malformed_registry_shapes_as_release_errors(
+    tmp_path: Path,
+) -> None:
+    """Malformed registry mappings are handled at their JSON input boundary."""
+    index = _write(
+        tmp_path,
+        "index.json",
+        b'{"files":[{"filename":"a.whl"}]}',
+    )
+    github = _write(tmp_path, "assets.json", b'{"assets":[null]}')
+    bundle = _write(
+        tmp_path,
+        "bundle.sigstore.json",
+        b'{"dsseEnvelope":[]}',
+    )
+
+    with pytest.raises(assets.ReleaseAssetError, match="invalid PEP 691 PyPI index"):
+        asset_io.read_pypi_index(index)
+    with pytest.raises(
+        assets.ReleaseAssetError, match="invalid GitHub release asset inventory"
+    ):
+        asset_io.read_github_assets(github)
+    with pytest.raises(
+        assets.ReleaseAssetError, match="invalid Sigstore bundle structure"
+    ):
+        asset_io.read_bundle_subjects(bundle)
 
 
 def _write_build_inputs(root: Path, built: dict[str, bytes]) -> None:
@@ -509,9 +547,9 @@ def test_cli_annotates_missing_github_output(
     assert adapters.main(["stage-pypi", *argv]) == 1, (
         "output-producing commands require their environment path"
     )
-    assert "::error title=release-assets::" in capsys.readouterr().err, (
-        "handled input failures need workflow annotations"
-    )
+    assert capsys.readouterr().err.strip() == (
+        "::error title=release-assets::GITHUB_OUTPUT is required for stage-pypi"
+    ), "missing workflow output must identify the required variable and command"
 
 
 def test_cli_rejects_insecure_selected_download_before_staging(

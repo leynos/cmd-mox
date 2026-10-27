@@ -2,14 +2,29 @@
 
 from __future__ import annotations
 
+import importlib
 import typing as typ
+from pathlib import Path
 from types import MappingProxyType
 
 import hypothesis.strategies as st
 import pytest
+from helpers.release_workflow import (
+    RELEASE_WORKFLOW_PATH,
+    should_skip_release_tests_for_mutation_sandbox,
+)
 from hypothesis import given
 
-assets = pytest.importorskip("scripts.release_assets")
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+_RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
+if should_skip_release_tests_for_mutation_sandbox(
+    Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
+):
+    pytest.skip(
+        "mutmut sandbox omits the release workflow and CLI", allow_module_level=True
+    )
+
+assets = typ.cast("typ.Any", importlib.import_module("scripts.release_assets"))
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
