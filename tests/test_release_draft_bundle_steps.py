@@ -39,15 +39,42 @@ pytestmark = [
 ]
 
 
+class _BundleAttachmentCase(typ.NamedTuple):
+    """Inputs for one release and provenance-bundle inventory."""
+
+    release_state: str
+    bundle_state: str
+    bundle_attempt: str | None = "2"
+    extra_bundle_attempt: str | None = None
+
+
+def _write_bundle_inventory(
+    tmp_path: Path, case: _BundleAttachmentCase
+) -> str:
+    """Create the bundle inventory carried by the release-dist artefact.
+
+    Returns
+    -------
+    str
+        Filename of the bundle representing the selected run attempt.
+    """
+    bundle_attempt = case.bundle_attempt or "2"
+    bundle_name = f"cmd-mox-{TAG}-run73-{bundle_attempt}.sigstore.json"
+    if case.bundle_attempt is not None:
+        bundle_path = tmp_path / "dist" / "attestations" / bundle_name
+        bundle_path.parent.mkdir(parents=True)
+        bundle_path.write_bytes(b"current attested bytes")
+        if case.extra_bundle_attempt is not None:
+            extra_path = bundle_path.with_name(
+                f"cmd-mox-{TAG}-run73-{case.extra_bundle_attempt}.sigstore.json"
+            )
+            extra_path.write_bytes(b"another attested bundle")
+    return bundle_name
+
+
 def _run_bundle_attachment(
     tmp_path: Path,
-    *,
-    release_state: str,
-    bundle_state: str,
-    bundle_present: bool = True,
-    bundle_attempt: str = "2",
-    current_attempt: str = "2",
-    extra_bundle_attempt: str | None = None,
+    case: _BundleAttachmentCase,
 ) -> tuple[
     subprocess.CompletedProcess[str],
     dict[str, str],
@@ -62,17 +89,7 @@ def _run_bundle_attachment(
         Shell result, declared environment, recorded GitHub calls, and bundle
         filename.
     """
-    bundle_name = f"cmd-mox-{TAG}-run73-{bundle_attempt}.sigstore.json"
-    bundle_path = tmp_path / "dist" / "attestations" / bundle_name
-    if bundle_present:
-        bundle_path.parent.mkdir(parents=True)
-        bundle_path.write_bytes(b"current attested bytes")
-        if extra_bundle_attempt is not None:
-            extra_path = bundle_path.with_name(
-                f"cmd-mox-{TAG}-run73-{extra_bundle_attempt}.sigstore.json"
-            )
-            extra_path.write_bytes(b"another attested bundle")
-    assets = [{"name": bundle_name}] if bundle_state == "present" else [{"name": WHEEL}]
+    bundle_name = _write_bundle_inventory(tmp_path, case)
     tools = install_fake_tools(tmp_path / "bin")
     log = tmp_path / "tool-calls.jsonl"
     script, declared_env = load_workflow_step("draft-release", "attach-bundle")
@@ -82,13 +99,15 @@ def _run_bundle_attachment(
         env={
             "FAKE_TOOL_LOG": str(log),
             "GH_ASSETS_JSON": json.dumps({
-                "assets": assets,
-                "isDraft": release_state == "draft",
+                "assets": [
+                    {"name": bundle_name}
+                    if case.bundle_state == "present"
+                    else {"name": WHEEL}
+                ],
+                "isDraft": case.release_state == "draft",
             }),
             "GH_RELEASE_EXISTS": "1",
             "PATH": f"{tools}:/usr/bin:/bin",
-            "RUN_ATTEMPT": current_attempt,
-            "GITHUB_RUN_ATTEMPT": current_attempt,
             "RUN_ID": "73",
             "TAG_NAME": TAG,
         },
@@ -107,7 +126,7 @@ def test_draft_step_attaches_current_bundle_only_when_missing(
 ) -> None:
     """A draft retains this run's bundle without overwriting existing assets."""
     result, declared_env, calls, bundle_name = _run_bundle_attachment(
-        tmp_path, release_state=release_state, bundle_state=bundle_state
+        tmp_path, _BundleAttachmentCase(release_state, bundle_state)
     )
     expected_calls = [gh_call(["release", "view", TAG, "--json", "isDraft,assets"])]
     if release_state == "draft" and bundle_state == "missing":
@@ -137,10 +156,7 @@ def test_draft_rerun_reuses_bundle_from_earlier_attempt(tmp_path: Path) -> None:
     """A failed-jobs rerun reuses the attested bundle from attempt one."""
     result, _, calls, bundle_name = _run_bundle_attachment(
         tmp_path,
-        release_state="draft",
-        bundle_state="missing",
-        bundle_attempt="1",
-        current_attempt="2",
+        _BundleAttachmentCase("draft", "missing", bundle_attempt="1"),
     )
 
     assert result.returncode == 0, result.stderr
@@ -158,9 +174,7 @@ def test_draft_step_fails_when_multiple_current_run_bundles_exist(
     """Ambiguous current-run bundle inventory must stop before GitHub calls."""
     result, _, calls, _ = _run_bundle_attachment(
         tmp_path,
-        release_state="draft",
-        bundle_state="missing",
-        extra_bundle_attempt="1",
+        _BundleAttachmentCase("draft", "missing", extra_bundle_attempt="1"),
     )
 
     assert result.returncode == 1, "multiple matching bundles must fail safely"
@@ -174,9 +188,7 @@ def test_draft_step_fails_when_current_bundle_is_missing(tmp_path: Path) -> None
     """A release cannot continue without the bundle attested by this run."""
     result, _, calls, _ = _run_bundle_attachment(
         tmp_path,
-        release_state="draft",
-        bundle_state="missing",
-        bundle_present=False,
+        _BundleAttachmentCase("draft", "missing", bundle_attempt=None),
     )
 
     assert result.returncode == 1, "a missing bundle must stop draft publication"
