@@ -1,7 +1,9 @@
-"""Capture a command shim's stdin under one monotonic deadline.
+"""Capture a command shim's stdin under one monotonic capture deadline.
 
-The shim must never wait on stdin for longer than ``CMOX_IPC_TIMEOUT``. How
-that can be enforced depends on what the host exposes:
+The shim must never wait on stdin for longer than ``CMOX_IPC_TIMEOUT``. Capture
+starts its own deadline when :func:`read_stdin` is entered; the shim's IPC
+exchange runs against a separate deadline anchored where the shim starts. How
+the capture deadline can be enforced depends on what the host exposes:
 
 ``poll``
     A POSIX descriptor that both ``select.poll`` and ``select.select`` accept.
@@ -135,13 +137,20 @@ class _SelectPoller:
         list[tuple[int, int]]
             A single readiness event when stdin is ready, or an empty list on
             timeout.
-        """
-        try:
-            readable, _, _ = select.select([self.descriptor], [], [], timeout / 1_000)
-        except ValueError:
-            # select() rejects negative timeouts; the caller has already
-            # established that the deadline is in the future.
-            return []
+
+        Raises
+        ------
+        ValueError
+            If *descriptor* cannot be watched by ``select``: it is negative, or
+            at or above ``FD_SETSIZE``. Propagating it is what lets
+            :func:`_create_stdin_poller` reject the adapter and fall back to a
+            direct read; swallowing it would hand back a poller that can never
+            report readiness, so readable input would end in a spurious
+            timeout.
+        """  # ruff: ignore[docstring-extraneous-exception] - select() raises it, so no in-body raise is visible
+        # select.select raises ValueError for a descriptor it cannot watch. It
+        # must reach _create_stdin_poller so that probe rejects this adapter.
+        readable, _, _ = select.select([self.descriptor], [], [], timeout / 1_000)
         return [(self.descriptor, 1)] if readable else []
 
 
@@ -407,7 +416,7 @@ def _stdin_decoder(stream: _StdinStream) -> io.IncrementalNewlineDecoder:
 
 
 def _decode(decoder: io.IncrementalNewlineDecoder, chunk: bytes) -> str:
-    """Decode one chunk, finalising the decoder at EOF.
+    """Decode one chunk, finalizing the decoder at EOF.
 
     Returns
     -------
@@ -461,8 +470,10 @@ def _await_worker[T](func: cabc.Callable[[], T], spec: _WorkerSpec) -> T:
 
     worker = threading.Thread(target=run, name=spec.name, daemon=True)
     worker.start()
-    remaining = spec.deadline - spec.clock()
-    if remaining > 0 and finished.wait(remaining):
+    # Deadlines arrive from a validated but arbitrary finite float. Slicing the
+    # wait inside ``wait_for_finish`` keeps an over-large one from raising
+    # ``OverflowError`` past the shim's bounded diagnostic.
+    if _bounded_thread.wait_for_finish(finished, spec.deadline, clock=spec.clock):
         return _worker_value(outcome)
     spec.abandon(worker)
     _register_worker(worker)

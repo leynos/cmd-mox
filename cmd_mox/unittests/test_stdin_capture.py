@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import os
 import threading
+import types
 import typing as typ
 
 import pytest
@@ -106,6 +107,134 @@ def test_pollnval_probe_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(capture.select, "poll", _InvalidPoller)
     monkeypatch.setattr(capture, "_SelectPoller", reject)
     assert capture._create_stdin_poller(0) is None, "POLLNVAL was not detected"
+
+
+class _PoisonedPoller:
+    """Poller that rejects every registration, forcing the ``select`` probe."""
+
+    def register(self, _descriptor: int, _mask: int) -> None:
+        """Refuse the descriptor.
+
+        Raises
+        ------
+        ValueError
+            Always, so the first probe fails.
+        """
+        msg = "descriptor out of range"
+        raise ValueError(msg)
+
+    def poll(self, _timeout: int, /) -> list[tuple[int, int]]:
+        """Never reached, because registration already failed.
+
+        Returns
+        -------
+        list[tuple[int, int]]
+            No events.
+        """
+        return []
+
+
+def test_unselectable_descriptor_plan_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A descriptor ``select`` cannot watch is read directly, not waited on.
+
+    ``select.poll`` has no ``FD_SETSIZE`` limit but ``select.select`` does, so
+    a high-numbered descriptor is rejected only when ``_SelectPoller`` is the
+    fallback. Swallowing that ``ValueError`` would accept the probe and then
+    wait on a poller that can never report readiness, turning a readable
+    descriptor into a spurious timeout instead of a direct read.
+    """
+    monkeypatch.setattr(capture.select, "poll", _PoisonedPoller)
+
+    def reject_select(
+        _readables: object, _writables: object, _exceptables: object, _timeout: object
+    ) -> tuple[list[int], list[int], list[int]]:
+        msg = "filedescriptor out of range in select()"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(capture.select, "select", reject_select)
+    stream = _DescriptorStream(0, data="unselectable")
+
+    assert capture._plan_stdin(stream).strategy == "fallback", (
+        "an unselectable descriptor must plan a direct read"
+    )
+    assert _read(stream, 0.05, _Clock()) == "unselectable", (
+        "the fallback should still capture the stream's text"
+    )
+
+
+class _OverflowingEvent:
+    """Event double whose wait mirrors CPython's timeout range check.
+
+    A real :meth:`threading.Event.wait` raises :exc:`OverflowError` once its
+    timeout exceeds :data:`threading.TIMEOUT_MAX`. Waiting for such a slice in
+    a test would outlive the suite, so this double reproduces the rejection and
+    advances a shared clock by each accepted slice instead.
+    """
+
+    def __init__(self, clock: _Clock) -> None:
+        self.clock = clock
+        self.waits: list[float] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Record *timeout*, rejecting values CPython cannot schedule.
+
+        Returns
+        -------
+        bool
+            ``False``, because the blocked worker never sets the event.
+
+        Raises
+        ------
+        OverflowError
+            If *timeout* exceeds :data:`threading.TIMEOUT_MAX`.
+        """
+        if timeout is not None and timeout > threading.TIMEOUT_MAX:
+            msg = "timestamp out of range for platform time_t"
+            raise OverflowError(msg)
+        assert timeout is not None, "the capture always waits with a timeout"
+        self.waits.append(timeout)
+        self.clock.now += timeout
+        return False
+
+    def set(self) -> None:
+        """Accept the worker's completion signal without changing the wait."""
+
+
+def test_worker_wait_is_sliced_at_the_platform_timeout_max(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timeout beyond ``threading.TIMEOUT_MAX`` still ends in a diagnostic.
+
+    ``CMOX_IPC_TIMEOUT`` accepts any finite positive float, but
+    :meth:`threading.Event.wait` rejects a wait longer than
+    :data:`threading.TIMEOUT_MAX`. The worker strategies wait on an event, so
+    an unsliced wait would raise :exc:`OverflowError`, which the shim's stdin
+    handler does not catch, instead of the bounded timeout diagnostic.
+    """
+    clock = _Clock()
+    stream = _BlockingStream("never returned")
+    event = _OverflowingEvent(clock)
+    # Only the capture module's view of ``threading`` is replaced; patching the
+    # real module would also divert the events ``Thread.__init__`` creates.
+    monkeypatch.setattr(
+        capture,
+        "threading",
+        types.SimpleNamespace(Event=lambda: event, Thread=threading.Thread),
+    )
+    try:
+        with pytest.raises(StdinTimeoutError):
+            _read(stream, 1e10, clock)
+    finally:
+        stream.release.set()
+        stream.finished.wait(5.0)
+
+    assert event.waits, "the worker was never awaited"
+    assert all(wait <= threading.TIMEOUT_MAX for wait in event.waits), (
+        "a wait beyond the platform limit reached Event.wait"
+    )
+    assert len(event.waits) > 1, "a timeout beyond the limit was not sliced"
 
 
 def test_fallback_timeout_discards_partial_input() -> None:
