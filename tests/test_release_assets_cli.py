@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import typing as typ
 
 import pytest
+from helpers.release_workflow import digest_bundle
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -34,30 +34,6 @@ def _sha256(content: bytes) -> str:
         The lower-case hexadecimal digest.
     """
     return hashlib.sha256(content).hexdigest()
-
-
-def _bundle(subjects: dict[str, str]) -> bytes:
-    """Encode the DSSE shape produced by the provenance action.
-
-    Returns
-    -------
-    bytes
-        A test bundle carrying an encoded in-toto statement.
-    """
-    statement = {
-        "_type": "https://in-toto.io/Statement/v1",
-        "predicateType": "https://slsa.dev/provenance/v1",
-        "subject": [
-            {"name": name, "digest": {"sha256": digest}}
-            for name, digest in subjects.items()
-        ],
-    }
-    return json.dumps({
-        "dsseEnvelope": {
-            "payloadType": "application/vnd.in-toto+json",
-            "payload": base64.b64encode(json.dumps(statement).encode()).decode(),
-        }
-    }).encode()
 
 
 def _write(directory: Path, name: str, content: bytes) -> Path:
@@ -128,7 +104,7 @@ def test_adapter_reads_safe_names_hashes_json_and_sigstore_subjects(
     bundle = _write(
         tmp_path / "bundles",
         "cmd-mox-v0.3.0-run1-1.sigstore.json",
-        _bundle({"a.whl": _sha256(b"wheel")}),
+        digest_bundle({"a.whl": _sha256(b"wheel")}),
     )
     assert adapters.read_bundle_subjects(bundle) == frozenset({
         ("a.whl", _sha256(b"wheel"))
@@ -146,7 +122,7 @@ def test_adapter_reads_safe_names_hashes_json_and_sigstore_subjects(
         b"not JSON",
         b'{"dsseEnvelope":{"payloadType":"wrong","payload":""}}',
         b'{"dsseEnvelope":{"payloadType":"application/vnd.in-toto+json","payload":"?"}}',
-        _bundle({"a.whl": "not-sha256"}),
+        digest_bundle({"a.whl": "not-sha256"}),
     ],
 )
 def test_adapter_rejects_malformed_or_unrelated_provenance(
@@ -165,7 +141,7 @@ def _write_build_inputs(root: Path, built: dict[str, bytes]) -> None:
     _write(
         root / "bundles",
         "cmd-mox-v0.3.0-run2-1.sigstore.json",
-        _bundle({name: _sha256(content) for name, content in built.items()}),
+        digest_bundle({name: _sha256(content) for name, content in built.items()}),
     )
 
 
@@ -183,7 +159,7 @@ def _write_retained_inputs(
     directory.mkdir(exist_ok=True)
     remote = dict(github)
     for name, subjects in (retained or {}).items():
-        remote[name] = _bundle({
+        remote[name] = digest_bundle({
             subject: _sha256(content) for subject, content in subjects.items()
         })
     for name, content in remote.items():
@@ -342,7 +318,11 @@ def test_cli_github_commands_check_downloads_and_final_attached_subjects(
     assert "hold the same bytes" in capsys.readouterr().out, (
         "verification emits a digest agreement message"
     )
-    _write(tmp_path / "bundles", bundle, _bundle({"a.whl": _sha256(b"wrong")}))
+    _write(
+        tmp_path / "bundles",
+        bundle,
+        digest_bundle({"a.whl": _sha256(b"wrong")}),
+    )
     assert adapters.main(["verify", *argv]) == 1, (
         "an attached name with changed bundle bytes must fail its asset digest"
     )

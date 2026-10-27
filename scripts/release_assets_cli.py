@@ -120,7 +120,11 @@ def _digest(value: object) -> str:
     ReleaseAssetError
         If the input is missing or violates its declared contract.
     """
-    digest = value.lower() if isinstance(value, str) else ""
+    match value:
+        case str() as text:
+            digest = text.lower()
+        case _:
+            digest = ""
     if not _SHA256.fullmatch(digest):
         msg = f"invalid SHA-256 digest: {value}"
         raise assets.ReleaseAssetError(msg)
@@ -192,11 +196,11 @@ def _github_digest(value: object) -> str | None:
     str or None
         The supported digest, or ``None`` for another digest form.
     """
-    return (
-        _digest(value.removeprefix("sha256:"))
-        if isinstance(value, str) and value.startswith("sha256:")
-        else None
-    )
+    match value:
+        case str() as digest if digest.startswith("sha256:"):
+            return _digest(digest.removeprefix("sha256:"))
+        case _:
+            return None
 
 
 def sha256_of(path: Path) -> str:
@@ -402,22 +406,32 @@ def _carryover(invocation: _Invocation) -> None:
         sys.stdout.write(f"{name}\n")
 
 
+def _stage_pypi_asset(
+    invocation: _Invocation, name: str, source: assets.Source
+) -> None:
+    """Apply one PyPI staging decision without replacing an existing upload."""
+    state, args = invocation.state, invocation.args
+    match source:
+        case assets.Source.PYPI:
+            sys.stdout.write(f"::notice::Skipping {name}: already on PyPI\n")
+            (args.publish / name).unlink()
+        case assets.Source.GITHUB:
+            carried = _path(args, "github_files") / name
+            check_digest(carried, state.github[name])
+            sys.stdout.write(f"::notice::Using the GitHub Release's bytes for {name}\n")
+            shutil.copyfile(carried, args.publish / name)
+        case assets.Source.LOCAL:
+            return
+
+
 def _stage_pypi(invocation: _Invocation) -> None:
     """Execute the canonical PyPI copy/delete plan after provenance validation."""
-    state, args = invocation.state, invocation.args
+    state = invocation.state
     decided = state.plan()
     if decided.pypi_uploads:
         assets.require_provenance(state)
     for name, source in sorted(decided.canonical.items()):
-        artefact = args.publish / name
-        if source is assets.Source.PYPI:
-            sys.stdout.write(f"::notice::Skipping {name}: already on PyPI\n")
-            artefact.unlink()
-        elif source is assets.Source.GITHUB:
-            carried = _path(args, "github_files") / name
-            check_digest(carried, state.github[name])
-            sys.stdout.write(f"::notice::Using the GitHub Release's bytes for {name}\n")
-            shutil.copyfile(carried, artefact)
+        _stage_pypi_asset(invocation, name, source)
     if not decided.pypi_uploads:
         sys.stdout.write("Every artefact is already on PyPI; nothing to publish.\n")
     write_output(

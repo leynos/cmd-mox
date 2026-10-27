@@ -419,12 +419,31 @@ def provenance_bundle(subjects: dict[str, bytes]) -> bytes:
     bytes
         JSON bundle bytes with an encoded SLSA in-toto statement.
     """
+    digests = {
+        name: hashlib.sha256(content).hexdigest() for name, content in subjects.items()
+    }
+    return digest_bundle(digests)
+
+
+def digest_bundle(digests: dict[str, str]) -> bytes:
+    """Build the shared DSSE test shape from exact subject digests.
+
+    Parameters
+    ----------
+    digests : dict[str, str]
+        Distribution filenames and their lower-case SHA-256 digests.
+
+    Returns
+    -------
+    bytes
+        JSON bundle bytes with an encoded SLSA in-toto statement.
+    """
     statement = {
         "_type": "https://in-toto.io/Statement/v1",
         "predicateType": "https://slsa.dev/provenance/v1",
         "subject": [
-            {"name": name, "digest": {"sha256": hashlib.sha256(content).hexdigest()}}
-            for name, content in sorted(subjects.items())
+            {"name": name, "digest": {"sha256": digest}}
+            for name, digest in sorted(digests.items())
         ],
     }
     return json.dumps({

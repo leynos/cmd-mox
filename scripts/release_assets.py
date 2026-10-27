@@ -165,6 +165,28 @@ def safe_names(names: cabc.Iterable[str]) -> list[str]:
     return result
 
 
+def _canonical_source(
+    name: str,
+    on_pypi: cabc.Collection[str],
+    on_github: cabc.Collection[str],
+) -> Source:
+    """Select the first existing source in release priority order.
+
+    Returns
+    -------
+    Source
+        The preferred existing source, or the local build when neither
+        destination has the filename.
+    """
+    match (name in on_pypi, name in on_github):
+        case (True, _):
+            return Source.PYPI
+        case (False, True):
+            return Source.GITHUB
+        case (False, False):
+            return Source.LOCAL
+
+
 def plan(
     local: cabc.Iterable[str],
     on_pypi: cabc.Collection[str],
@@ -193,12 +215,7 @@ def plan(
     """
     names = frozenset(local)
     canonical = {
-        name: Source.PYPI
-        if name in on_pypi
-        else Source.GITHUB
-        if name in on_github
-        else Source.LOCAL
-        for name in sorted(names)
+        name: _canonical_source(name, on_pypi, on_github) for name in sorted(names)
     }
     return Plan(
         MappingProxyType(canonical), names - set(on_pypi), names - set(on_github)
@@ -275,18 +292,29 @@ def canonical_digests(state: State) -> dict[str, str]:
     """
     result: dict[str, str] = {}
     for name, source in state.plan().canonical.items():
-        digest = (
-            state.pypi[name].sha256
-            if source is Source.PYPI
-            else state.github[name]
-            if source is Source.GITHUB
-            else state.local[name]
-        )
+        digest = _source_digest(state, name, source)
         if digest is None:
             msg = f"{name} has no SHA-256 digest on its canonical source"
             raise ReleaseAssetError(msg)
         result[name] = digest
     return result
+
+
+def _source_digest(state: State, name: str, source: Source) -> str | None:
+    """Read the selected source digest from one accepted inventory snapshot.
+
+    Returns
+    -------
+    str or None
+        The selected SHA-256 digest, or ``None`` when GitHub omitted it.
+    """
+    match source:
+        case Source.PYPI:
+            return state.pypi[name].sha256
+        case Source.GITHUB:
+            return state.github[name]
+        case Source.LOCAL:
+            return state.local[name]
 
 
 def bundle_family(name: str) -> str | None:

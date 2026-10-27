@@ -896,6 +896,54 @@ flowchart TD
 _Figure: Release asset selection, idempotent publishing, and digest
 verification._
 
+### Release tooling
+
+[`scripts/release_assets.py`](../scripts/release_assets.py) contains the pure
+reconciliation decisions. Its immutable `State` records local, PyPI, GitHub,
+and provenance inventories. Its `Plan` selects each filename's canonical source
+in PyPI, GitHub Release, then local-build order, and lists only missing
+uploads. Existing assets are never overwritten. The CLI adapter in
+[`scripts/release_assets_cli.py`](../scripts/release_assets_cli.py) loads those
+inventories from files, executes the selected copy or removal steps, and
+reports workflow outputs.
+
+Every CLI command requires `--publish` and `--assets`. The remaining options
+are required by the commands that read them:
+
+| Command         | Additional inputs                                                  | Result                                                                                                               |
+| --------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `carryover`     | `--bundles`                                                        | Prints existing distribution and provenance filenames to carry forward.                                              |
+| `stage-pypi`    | `--index`; with publication work, `--bundles` and `--github-files` | Removes names already on PyPI, stages GitHub bytes where needed, and writes the `remaining` flag to `GITHUB_OUTPUT`. |
+| `stage-github`  | `--index`, `--bundles`, `--github-files`, `--output`               | Stages local or PyPI bytes, prints PyPI download rows, and writes the `pending` flag to `GITHUB_OUTPUT`.             |
+| `check-fetched` | `--index`, `--output`                                              | Checks downloaded files against the PyPI index digests.                                                              |
+| `missing-pypi`  | `--index`                                                          | Prints distribution names still absent from the latest PyPI index.                                                   |
+| `verify`        | `--index`, `--bundles`, `--github-files`                           | Confirms matching PyPI and GitHub digests and provenance coverage.                                                   |
+
+The release workflow invokes the adapter as
+`python3 -m scripts.release_assets_cli`. Its separate
+[`scripts/release_version.py`](../scripts/release_version.py) compares
+`TAG_VERSION` with `project.version` from `pyproject.toml` exactly, then reports
+`prerelease=true|false` through `GITHUB_OUTPUT`. Each staging run takes a
+fresh inventory snapshot so retries can skip filenames already published.
+
+[`scripts/fetch_pypi_index.sh`](../scripts/fetch_pypi_index.sh) fetches the PEP
+691 index. Its initial lookup makes up to six attempts, retrying transport
+failures, HTTP 429, and 5xx responses; HTTP 404 represents an empty project
+index. After publication, the script makes up to ten attempts and waits for the
+index to list every expected filename before GitHub publication can continue.
+It writes the final attempt count and HTTP status to `GITHUB_OUTPUT`.
+
+The
+[`pure-python-wheel` composite action](../.github/actions/pure-python-wheel/action.yml)
+accepts `python-version`, `out-dir`, and `artifact-name`, and exposes
+`build-dir` for the isolated build output. It runs plain `uv build`, fails
+unless it finds exactly one `.tar.gz` sdist and at least one `py3-none-any`
+wheel, and uploads both formats with `if-no-files-found: error`. The
+[`release workflow`](../.github/workflows/release.yml) uses this action before
+attesting the distributions and handing them to later jobs as `release-dist`.
+The design rationale and operating decision are recorded in
+[ADR 003](./adr-003-release-pipeline.md).
+
 The first automated release must use a version later than `0.2.0`. PyPI already
 contains the manually uploaded `0.2.0` wheel and source distribution, so
 another publication of those filenames is a no-op there. The existing GitHub

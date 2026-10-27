@@ -11,6 +11,9 @@ from hypothesis import given
 
 assets = pytest.importorskip("scripts.release_assets")
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 _SAFE_NAMES = st.sets(
     st.integers(min_value=0, max_value=12).map(lambda n: f"asset-{n}.whl"), max_size=8
 )
@@ -23,11 +26,31 @@ class _Provenance(typ.NamedTuple):
     retained: dict[str, assets.Subjects] | None = None
 
 
+class _SourceInventories(typ.NamedTuple):
+    """Generated destination inventories and their original plan."""
+
+    local: dict[str, str]
+    pypi: dict[str, assets.PypiFile]
+    github: dict[str, str]
+    decision: assets.Plan
+    selected: dict[str, str]
+
+
+class _ReconciliationExample(typ.NamedTuple):
+    """One generated starting state and its modeled completed transition."""
+
+    initial: assets.State
+    completed: assets.State
+    selected: dict[str, str]
+    stage: assets.GitHubStage
+    has_digest_conflict: bool
+
+
 def _state(
     *,
     local: dict[str, str],
     pypi: dict[str, str] | None = None,
-    github: dict[str, str | None] | None = None,
+    github: cabc.Mapping[str, str | None] | None = None,
     provenance: _Provenance | None = None,
 ) -> assets.State:
     """Build immutable inventories without filesystem or environment access.
@@ -47,6 +70,185 @@ def _state(
         (provenance.current or {}) if provenance is not None else {},
         (provenance.retained or {}) if provenance is not None else {},
     )
+
+
+def _source_inventories(
+    local_names: set[str],
+    pypi_names: set[str],
+    github_names: set[str],
+    digest_seed: int,
+) -> _SourceInventories:
+    """Generate valid local and destination inventories for one model case.
+
+    Returns
+    -------
+    _SourceInventories
+        The inventories, selected plan, and canonical digests.
+    """
+    local = {
+        name: f"{digest_seed + index:064x}"
+        for index, name in enumerate(sorted(local_names))
+    }
+    pypi = {
+        name: assets.PypiFile(
+            f"{digest_seed + 100 + index:064x}", f"https://pypi.test/{name}"
+        )
+        for index, name in enumerate(sorted(local_names & pypi_names))
+    }
+    github = {
+        name: f"{digest_seed + 200 + index:064x}"
+        for index, name in enumerate(sorted(local_names & github_names))
+    }
+    decision = assets.plan(local, pypi, github)
+    selected = {
+        name: (
+            pypi[name].sha256
+            if source is assets.Source.PYPI
+            else github[name]
+            if source is assets.Source.GITHUB
+            else local[name]
+        )
+        for name, source in decision.canonical.items()
+    }
+    return _SourceInventories(local, pypi, github, decision, selected)
+
+
+def _provenance_inventories(
+    inventories: _SourceInventories, digest_seed: int
+) -> tuple[dict[str, str], _Provenance]:
+    """Create retained remote and current local subject inventories.
+
+    Returns
+    -------
+    tuple[dict[str, str], _Provenance]
+        The GitHub bundle asset and decoded current/retained subjects.
+    """
+    remote_subjects = frozenset(
+        (name, digest)
+        for name, digest in inventories.selected.items()
+        if inventories.decision.canonical[name] is not assets.Source.LOCAL
+    )
+    local_subjects = frozenset(
+        (name, digest)
+        for name, digest in inventories.selected.items()
+        if inventories.decision.canonical[name] is assets.Source.LOCAL
+    )
+    retained_name = "cmd-mox-v1.2.3-run1-1.sigstore.json"
+    current_name = "cmd-mox-v1.2.3-run2-1.sigstore.json"
+    github = dict(inventories.github)
+    if remote_subjects:
+        github[retained_name] = f"{digest_seed + 300:064x}"
+    retained = {retained_name: remote_subjects} if remote_subjects else {}
+    current = {current_name: local_subjects}
+    return github, _Provenance(current=current, retained=retained)
+
+
+def _initial_reconciliation_state(
+    inventories: _SourceInventories, digest_seed: int
+) -> assets.State:
+    """Build a state with subjects for its selected existing or local bytes.
+
+    Returns
+    -------
+    assets.State
+        The generated immutable starting inventory.
+    """
+    github, provenance = _provenance_inventories(inventories, digest_seed)
+    return _state(
+        local=inventories.local,
+        pypi={name: file.sha256 for name, file in inventories.pypi.items()},
+        github=github,
+        provenance=provenance,
+    )
+
+
+def _complete_reconciliation(
+    state: assets.State, inventories: _SourceInventories, digest_seed: int
+) -> tuple[assets.State, assets.GitHubStage]:
+    """Model uploads of missing assets and attachment of needed bundles.
+
+    Returns
+    -------
+    tuple[assets.State, assets.GitHubStage]
+        The completed inventory and the initial GitHub staging decision.
+    """
+    stage = assets.stage_github(state)
+    pypi_after = dict(state.pypi)
+    for name in inventories.decision.pypi_uploads:
+        pypi_after[name] = assets.PypiFile(
+            inventories.selected[name], f"https://pypi.test/{name}"
+        )
+    github_after = dict(state.github)
+    for name in inventories.decision.github_uploads:
+        github_after[name] = inventories.selected[name]
+    retained_after = dict(state.retained_bundles)
+    for name in stage.bundles:
+        github_after[name] = f"{digest_seed + 400:064x}"
+        retained_after[name] = state.current_bundles[name]
+    return (
+        assets.State(
+            state.local,
+            pypi_after,
+            github_after,
+            state.current_bundles,
+            retained_after,
+        ),
+        stage,
+    )
+
+
+def _reconciliation_example(
+    local_names: set[str],
+    pypi_names: set[str],
+    github_names: set[str],
+    digest_seed: int,
+) -> _ReconciliationExample:
+    """Create an initial inventory and model one complete transition.
+
+    Returns
+    -------
+    _ReconciliationExample
+        The generated states, canonical digests, staging plan, and conflict bit.
+    """
+    inventories = _source_inventories(
+        local_names, pypi_names, github_names, digest_seed
+    )
+    initial = _initial_reconciliation_state(inventories, digest_seed)
+    completed, stage = _complete_reconciliation(initial, inventories, digest_seed)
+    has_conflict = any(
+        name in initial.github and file.sha256 != initial.github[name]
+        for name, file in initial.pypi.items()
+    )
+    return _ReconciliationExample(
+        initial, completed, inventories.selected, stage, has_conflict
+    )
+
+
+def _assert_missing_provenance_is_rejected(
+    example: _ReconciliationExample,
+) -> None:
+    """Prove every generated nonempty inventory fails without any bundle."""
+    if not example.selected:
+        return
+    without_provenance = _state(
+        local=dict(example.initial.local),
+        pypi={name: file.sha256 for name, file in example.initial.pypi.items()},
+        github=dict(example.initial.github),
+    )
+    with pytest.raises(assets.UnattestedReleaseAssetsError):
+        assets.stage_github(without_provenance)
+
+
+def _assert_preexisting_assets_are_unchanged(example: _ReconciliationExample) -> None:
+    """Assert the modeled transition leaves every initial filename intact."""
+    for name, file in example.initial.pypi.items():
+        assert example.completed.pypi[name] == file, (
+            "existing PyPI files must never change"
+        )
+    for name, digest in example.initial.github.items():
+        assert example.completed.github[name] == digest, (
+            "existing GitHub files must never change"
+        )
 
 
 @given(local=_SAFE_NAMES, pypi=_SAFE_NAMES, github=_SAFE_NAMES)
@@ -84,6 +286,54 @@ def test_plan_preserves_priority_partitioning_and_order_independence(
     )
     assert not rerun.pypi_uploads, "a completed PyPI upload has no work on rerun"
     assert not rerun.github_uploads, "a completed GitHub upload has no work on rerun"
+
+
+@given(
+    local_names=_SAFE_NAMES,
+    pypi_names=_SAFE_NAMES,
+    github_names=_SAFE_NAMES,
+    digest_seed=st.integers(min_value=1, max_value=2**32),
+)
+def test_reconciliation_reruns_preserve_canonical_bytes_without_overwrites(
+    local_names: set[str],
+    pypi_names: set[str],
+    github_names: set[str],
+    digest_seed: int,
+) -> None:
+    """A completed reconciliation is a no-op and preserves every chosen digest."""
+    example = _reconciliation_example(
+        local_names, pypi_names, github_names, digest_seed
+    )
+    reordered = assets.State(
+        dict(reversed(tuple(example.initial.local.items()))),
+        dict(reversed(tuple(example.initial.pypi.items()))),
+        dict(reversed(tuple(example.initial.github.items()))),
+        dict(reversed(tuple(example.initial.current_bundles.items()))),
+        dict(reversed(tuple(example.initial.retained_bundles.items()))),
+    )
+    assert assets.stage_github(reordered) == example.stage, (
+        "inventory insertion order must not change staging decisions"
+    )
+    assert assets.canonical_digests(reordered) == example.selected, (
+        "inventory insertion order must not change canonical bytes"
+    )
+    _assert_missing_provenance_is_rejected(example)
+    assert bool(assets.verify(example.completed)) is example.has_digest_conflict, (
+        "pre-existing conflicting assets must fail verification safely"
+    )
+    _assert_preexisting_assets_are_unchanged(example)
+    assert assets.canonical_digests(example.completed) == example.selected, (
+        "staging must preserve the digest selected from the original inventories"
+    )
+    assert not example.completed.plan().pypi_uploads, (
+        "a second PyPI plan must not request an overwrite"
+    )
+    assert not example.completed.plan().github_uploads, (
+        "a second GitHub plan must not request an overwrite"
+    )
+    assert assets.stage_github(example.completed).bundles == (), (
+        "a second GitHub staging pass must not attach provenance again"
+    )
 
 
 def test_state_copies_inventory_values_before_pure_queries() -> None:
