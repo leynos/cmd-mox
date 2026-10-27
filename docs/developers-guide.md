@@ -406,6 +406,15 @@ platform-gated code can run off Windows. Add a new Win32 operation to the port,
 both adapters, and the fake together — a transport call that bypasses the
 backend reintroduces the module-global dependency the seam exists to remove.
 
+The real adapter is tested too. `Win32NamedPipeBackend` would otherwise be
+uncovered on POSIX, because every transport test injects the fake, and an
+unexercised adapter drags the repository's line-coverage ratchet down for code
+that only runs on Windows. `test_win32_named_pipe_backend.py` patches recording
+stand-ins for the four modules onto the adapter's namespace and asserts that
+each port method forwards to the one pywin32 call it names, with the arguments
+in call order. That keeps the adapter honest on any platform and costs no
+Windows runner.
+
 ## Skylos dead-code policy
 
 Treat a Skylos report as genuine dead code until a runtime caller has been
