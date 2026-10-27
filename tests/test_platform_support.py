@@ -156,7 +156,7 @@ def test_cmd_mox_fixture_runs_on_supported_platform(
         def test_supported(cmd_mox):
             cmd_mox.stub("hello").returns(stdout="works")
             shim_dir = cmd_mox.environment.shim_dir
-            assert shim_dir is not None
+            assert shim_dir is not None, "the fixture did not provide a shim directory"
             shim_name = "hello.cmd" if os.name == "nt" else "hello"
             result = subprocess.run(
                 [str(shim_dir / shim_name)],
@@ -164,7 +164,9 @@ def test_cmd_mox_fixture_runs_on_supported_platform(
                 check=True,
                 text=True,
             )
-            assert result.stdout.strip() == "works"
+            assert result.stdout.strip() == "works", (
+                "the shim did not produce the expected stub output"
+            )
         """
     )
 
@@ -191,12 +193,24 @@ def test_nested_pytester_anchors_cwd_and_configuration(
         package_root = Path({str(package_root)!r})
 
         def test_nested_roots(request):
-            assert Path.cwd() == expected_invocation_dir
-            assert (package_root / "cmd_mox").is_dir()
-            assert Path(cmd_mox.__file__).resolve().parent == package_root / "cmd_mox"
+            assert Path.cwd() == expected_invocation_dir, (
+                "the nested run did not retain the outer invocation directory"
+            )
+            assert (package_root / "cmd_mox").is_dir(), (
+                "the expected package directory is absent from the checkout root"
+            )
+            assert Path(cmd_mox.__file__).resolve().parent == (
+                package_root / "cmd_mox"
+            ), (
+                "cmd_mox was imported from outside the checkout package root"
+            )
             if expected_invocation_dir == package_root:
-                assert Path("cmd_mox").is_dir()
-            assert request.config.inipath == Path({str(expected_ini)!r})
+                assert Path("cmd_mox").is_dir(), (
+                    "the process cwd does not contain the checkout package"
+                )
+            assert request.config.inipath == Path({str(expected_ini)!r}), (
+                "the nested run did not use pytester's isolated ini file"
+            )
         """
     )
 
