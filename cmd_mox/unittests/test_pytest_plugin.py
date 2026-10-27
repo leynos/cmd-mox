@@ -174,8 +174,12 @@ def test_parallel_workers_use_isolated_directories(
     assert len(workers) == len(records)
 
     for record in records:
-        assert record.cwd == Path(request.config.invocation_params.dir).resolve()
-        assert record.package_origin == Path(cmd_mox_package.__file__).resolve()
+        assert record.cwd == Path(request.config.invocation_params.dir).resolve(), (
+            "the worker's process cwd differs from the outer invocation directory"
+        )
+        assert record.package_origin == Path(cmd_mox_package.__file__).resolve(), (
+            "the worker imported cmd_mox from a different package origin"
+        )
         assert record.socket.parent == record.shim_dir
         assert not record.shim_dir.exists()
         assert not record.socket.exists()
