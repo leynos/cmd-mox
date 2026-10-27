@@ -107,12 +107,6 @@ def _write_pypi_stage_fixture(root: Path) -> _PypiStageFixture:
 
 pytestmark = [
     pytest.mark.skipif(
-        should_skip_release_tests_for_mutation_sandbox(
-            Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
-        ),
-        reason="mutmut sandbox omits the release workflow and CLI",
-    ),
-    pytest.mark.skipif(
         os.name == "nt" or shutil.which("bash") is None,
         reason="release shell-step tests require Bash on a Unix-like system",
     ),
