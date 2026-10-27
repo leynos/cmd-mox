@@ -423,6 +423,47 @@ def test_attestation_checks_lists_exact_current_and_retained_pairs(
     ), "the current distribution must be verified against its current bundle"
 
 
+def test_attestation_checks_hashes_downloaded_github_assets_without_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Downloaded release bytes supply a digest when GitHub omits one."""
+    prior = "cmd-mox-v0.3.0-run1-1.sigstore.json"
+    canonical_bytes = b"retained GitHub distribution"
+    argv = _cli_inputs(
+        tmp_path,
+        _CLIInventories(
+            built={"github.whl": b"rebuilt distribution"},
+            pypi={},
+            github={"github.whl": canonical_bytes},
+            retained={prior: {"github.whl": canonical_bytes}},
+        ),
+    )
+    assets_path = tmp_path / "assets.json"
+    inventory = json.loads(assets_path.read_text(encoding="utf-8"))
+    next(asset for asset in inventory["assets"] if asset["name"] == "github.whl")[
+        "digest"
+    ] = None
+    assets_path.write_text(json.dumps(inventory), encoding="utf-8")
+
+    assert adapters.main(["attestation-checks", "--purpose", "pypi", *argv]) == 0, (
+        "attestation planning hashes the downloaded canonical GitHub bytes"
+    )
+    candidate = _attestation_candidate(capsys.readouterr().out.strip())
+    assert candidate.digest == _sha256(canonical_bytes), (
+        "the signature check uses the digest of downloaded GitHub bytes"
+    )
+
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "workflow-output"))
+    assert adapters.main(["stage-pypi", *argv]) == 0, (
+        "PyPI staging accepts the digest recovered from downloaded GitHub bytes"
+    )
+    assert (tmp_path / "publish" / "github.whl").read_bytes() == canonical_bytes, (
+        "the existing GitHub bytes remain canonical"
+    )
+
+
 def test_pypi_staging_rejects_subjects_missing_from_verified_manifest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

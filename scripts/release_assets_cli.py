@@ -205,7 +205,11 @@ def _load_index(args: _Arguments) -> asset_io.PypiIndex:
 
 
 def _read_base_state(args: _Arguments, index: asset_io.PypiIndex) -> assets.State:
-    """Snapshot local build, PyPI, and GitHub inventories for one command.
+    """Snapshot local build and destination inventories for one command.
+
+    When GitHub omits an asset digest, downloaded bytes from the release
+    snapshot or this run's upload staging directory provide the SHA-256. An
+    asset with no downloaded bytes stays unresolved and fails closed if chosen.
 
     Returns
     -------
@@ -217,6 +221,20 @@ def _read_base_state(args: _Arguments, index: asset_io.PypiIndex) -> assets.Stat
         for name in asset_io.local_names(args.publish)
     }
     github = asset_io.read_github_assets(args.assets)
+    download_directories = (args.github_files, args.output)
+    for name, digest in github.items():
+        if digest is not None:
+            continue
+        downloaded = next(
+            (
+                directory / name
+                for directory in download_directories
+                if directory is not None and (directory / name).is_file()
+            ),
+            None,
+        )
+        if downloaded is not None:
+            github[name] = asset_io.sha256_of(downloaded)
     return assets.State(local, index.digests, github)
 
 
