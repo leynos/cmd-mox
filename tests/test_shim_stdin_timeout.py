@@ -92,6 +92,22 @@ def _drain(stream: typ.BinaryIO, sink: list[bytes]) -> None:
         sink.append(chunk)
 
 
+def _as_written(text: str) -> bytes:
+    r"""Return the bytes the shim's text-mode streams emit for *text*.
+
+    ``sys.stdout`` and ``sys.stderr`` translate each ``\n`` written to them to
+    the platform's line separator, so a Windows shim emits ``\r\n`` where a
+    POSIX one emits ``\n``. Comparing against raw ``\n`` bytes would therefore
+    only hold on POSIX, not where the smoke job actually runs.
+
+    Returns
+    -------
+    bytes
+        *text* encoded as UTF-8 with its newlines translated for this host.
+    """
+    return text.replace("\n", os.linesep).encode()
+
+
 def test_stalled_stdin_exits_while_the_writer_stays_open(tmp_path: Path) -> None:
     """A stdin pipe held open past the deadline ends the shim with status 1."""
     stdout: list[bytes] = []
@@ -132,7 +148,7 @@ def test_stalled_stdin_exits_while_the_writer_stays_open(tmp_path: Path) -> None
         f"a stalled stdin read must exit 1, got {process.returncode}"
     )
     assert b"".join(stdout) == b"", "stdin expiry must not write response stdout"
-    assert b"".join(stderr).decode() == (
+    assert b"".join(stderr) == _as_written(
         f"IPC error: stdin read timed out after {_SHIM_TIMEOUT:g} seconds\n"
     ), "the shim did not report the bounded stdin diagnostic"
 
@@ -180,7 +196,9 @@ def test_closed_stdin_completes_and_forwarding_is_unchanged(tmp_path: Path) -> N
         "the configured command exit code must survive the bounded capture, "
         f"stderr: {result.stderr.decode()}"
     )
-    assert result.stdout == b"forwarded\n", "the shim did not copy response stdout"
+    assert result.stdout == _as_written("forwarded\n"), (
+        "the shim did not copy response stdout"
+    )
     assert result.stderr == b"", "a completed capture must not report a diagnostic"
     assert [invocation.stdin for invocation in received] == [""], (
         "a closed stdin must dispatch the same empty body as before"
