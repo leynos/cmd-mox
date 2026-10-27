@@ -299,6 +299,18 @@ a failure into a diagnostic. The strategies are:
 - the stream's own `read()` on a tracked daemon worker when there is no usable
   descriptor or handle.
 
+The Windows arms of that list are covered on POSIX, for the same reason the
+named-pipe adapter is: code that only runs on Windows would otherwise sit
+uncovered and drag the line-coverage ratchet down, and no Windows runner is
+needed to reach it. `test_stdin_capture_windows.py` patches `IS_WINDOWS` on
+`path_utils` and supplies stand-in `win32file`, `win32api`, and `pywintypes`
+modules through the `_windows_modules` seam. Its `_Win32Harness` records
+`ReadFile`, `OpenThread`, `CancelSynchronousIo`, and `CloseHandle` calls, so
+the cancellation path — including `request_synchronous_io_cancel` and
+`HandleCloser` in `_bounded_thread` — is driven without a Windows host. Keep
+new Windows behaviour behind `_windows_modules` rather than importing `pywin32`
+at module scope, where those stand-ins could not replace it.
+
 A stream that never reaches EOF leaves its reader blocked inside the stream.
 That thread cannot be joined because only the stream's owner can end the read,
 so a finished worker is pruned from the registry and a live one stays in it.
