@@ -137,6 +137,19 @@ def run_github_step(
     )
 
 
+def _write_matching_distribution_snapshot(
+    retained: Path,
+    asset: dict[str, str],
+    index_assets: dict[str, bytes],
+) -> None:
+    """Write a retained distribution only when its GitHub digest matches."""
+    name = asset["name"]
+    content = index_assets.get(name)
+    if content is None or asset.get("digest") != f"sha256:{digest(content)}":
+        return
+    (retained / name).write_bytes(content)
+
+
 def write_publication_inputs(
     root: Path,
     inputs: PublicationInputs,
@@ -183,10 +196,8 @@ def write_publication_inputs(
             content = provenance_bundle(subjects)
             (retained / name).write_bytes(content)
             asset["digest"] = f"sha256:{digest(content)}"
-        elif name in index_assets:
-            content = index_assets[name]
-            if asset.get("digest") == f"sha256:{digest(content)}":
-                (retained / name).write_bytes(content)
+        else:
+            _write_matching_distribution_snapshot(retained, asset, index_assets)
     _write_json(root / "pypi-index.json", index)
     _write_json(root / "release-assets.json", inputs.github_assets)
     _write_json(root / "github-state" / "assets.json", inputs.github_assets)
