@@ -803,8 +803,10 @@ view. The root `conftest.py` anchors mutmut's relative source paths for each
 test and restores them afterwards, before mutmut scans mutation targets. Its
 `run_nested_pytester` fixture also restores the outer invocation directory and
 pins the inner run's configuration and root to pytester's project. Use this
-fixture for every nested pytester test that executes `cmd_mox` code; do not
-call pytester's run methods directly from those tests.
+fixture for every nested in-process pytester test that executes `cmd_mox` code.
+Tests that specifically exercise subprocess behaviour should pass `-c`,
+`--rootdir`, and `--confcutdir` tied to pytester's project so configuration
+discovery stays within its temporary root.
 
 Reproduce the clean baseline and mutation run with:
 
