@@ -357,12 +357,13 @@ def test_make_build_release_uses_the_ci_uv_build_path() -> None:
     """Local release builds invoke the same uv backend path as CI."""
     makefile = (_REPOSITORY_ROOT / "Makefile").read_text(encoding="utf-8")
     match = re.search(
-        r"^build-release:.*\n\t(?P<command>[^\n]+)", makefile, re.MULTILINE
+        r"^build-release:.*\n(?P<recipe>(?:\t[^\n]*\n)+)", makefile, re.MULTILINE
     )
 
     assert match is not None, "Makefile must keep the documented build-release target"
-    assert match.group("command") == ("$(UV) build --out-dir dist"), (
-        "local release builds must use uv build into dist"
+    commands = [line[1:] for line in match.group("recipe").splitlines()]
+    assert commands == ["rm -rf dist", "$(UV) build --out-dir dist"], (
+        "local release builds must clear stale artefacts before using uv build"
     )
 
 

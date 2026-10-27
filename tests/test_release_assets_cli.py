@@ -189,7 +189,7 @@ def test_adapter_rejects_malformed_or_unrelated_provenance(
 ) -> None:
     """A malformed bundle never supplies provenance coverage."""
     path = _write(tmp_path, "bundle.sigstore.json", content)
-    with pytest.raises((assets.ReleaseAssetError, ValueError)):
+    with pytest.raises(assets.ReleaseAssetError):
         asset_io.read_bundle_subjects(path)
 
 
@@ -219,6 +219,21 @@ def test_adapter_reports_malformed_registry_shapes_as_release_errors(
         assets.ReleaseAssetError, match="invalid Sigstore bundle structure"
     ):
         asset_io.read_bundle_subjects(bundle)
+
+
+def test_adapter_reports_malformed_registry_json_as_release_errors(
+    tmp_path: Path,
+) -> None:
+    """Invalid JSON from either registry is translated at the input boundary."""
+    index = _write(tmp_path, "invalid-index.json", b"{")
+    github = _write(tmp_path, "invalid-assets.json", b"{")
+
+    with pytest.raises(assets.ReleaseAssetError, match="invalid PEP 691 PyPI index"):
+        asset_io.read_pypi_index(index)
+    with pytest.raises(
+        assets.ReleaseAssetError, match="invalid GitHub release asset inventory"
+    ):
+        asset_io.read_github_assets(github)
 
 
 def _write_build_inputs(root: Path, built: dict[str, bytes]) -> None:

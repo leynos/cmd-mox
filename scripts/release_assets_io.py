@@ -154,7 +154,7 @@ def read_pypi_index(path: Path) -> PypiIndex:
             for entry in entries
         }
         safe_names(digests)
-    except (AttributeError, KeyError, TypeError) as error:
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
         msg = f"invalid PEP 691 PyPI index: {path.name}"
         raise assets.ReleaseAssetError(msg) from error
     return PypiIndex(digests, urls)
@@ -187,7 +187,7 @@ def read_github_assets(path: Path) -> dict[str, str | None]:
             for entry in document.get("assets", [])
         }
         safe_names(result)
-    except (AttributeError, KeyError, TypeError) as error:
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
         msg = f"invalid GitHub release asset inventory: {path.name}"
         raise assets.ReleaseAssetError(msg) from error
     return result
@@ -314,7 +314,7 @@ def read_bundle_subjects(path: Path) -> assets.Subjects:
             for entry in statement["subject"]
         )
         safe_names(name for name, _ in subjects)
-    except (AttributeError, KeyError, TypeError) as error:
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
         msg = f"invalid Sigstore bundle structure: {path.name}"
         raise assets.ReleaseAssetError(msg) from error
     return subjects
@@ -347,7 +347,7 @@ def _provenance_statement(path: Path) -> _Statement:
         ):
             msg = f"{path.name} is not SLSA build provenance"
             raise assets.ReleaseAssetError(msg)
-    except (AttributeError, KeyError, TypeError) as error:
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
         msg = f"invalid Sigstore bundle structure: {path.name}"
         raise assets.ReleaseAssetError(msg) from error
     return statement

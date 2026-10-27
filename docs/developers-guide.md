@@ -876,14 +876,16 @@ provenance bundle. For each filename, the workflow prefers bytes already on
 PyPI, then existing GitHub Release bytes, then the local attested build. It
 skips PyPI uploads for existing filenames, carries existing GitHub bytes to
 PyPI when needed, and publishes local bytes when neither destination has them.
-After the PyPI index catches up, the workflow compares SHA-256 digests, fails
-safely on a mismatch, uploads only missing GitHub assets, and publishes with
-the retained provenance bundle.
+After the PyPI index catches up, the workflow uploads only missing assets to
+the draft and retains or attaches the provenance bundle. It then compares
+SHA-256 digests. A mismatch fails the job and leaves the release as a draft;
+any assets already uploaded remain on that draft. A match publishes the GitHub
+Release.
 
 ```mermaid
 flowchart TD
     accTitle: Release asset selection and publication
-    accDescr: Prefer PyPI, then GitHub, then local bytes; verify SHA-256, attach provenance, and publish.
+    accDescr: Prefer PyPI, GitHub, then local; wait, stage, retain provenance, verify, then publish on a match.
     A[Attested sdist and wheel] --> B{Filename already on PyPI?}
     B -- Yes --> C[Use PyPI bytes]
     B -- No --> D{Filename already on GitHub Release?}
@@ -895,15 +897,16 @@ flowchart TD
     G --> K[Wait for PyPI index]
     H --> K
     I --> K
-    K --> J{PyPI and GitHub SHA-256 digests match?}
-    J -- No --> L[Fail safely]
-    J -- Yes --> M[Upload only missing GitHub assets]
+    K --> M[Upload only missing GitHub assets to the draft]
     M --> N[Retain or attach provenance bundle]
-    N --> O[Publish GitHub Release]
+    N --> J{PyPI and GitHub SHA-256 digests match?}
+    J -- No --> L[Fail safely, keep release as draft]
+    J -- Yes --> O[Publish GitHub Release]
 ```
 
-_Figure: Release asset selection, idempotent staging, digest verification, and
-draft publication._
+_Figure: Release asset selection and draft staging, followed by provenance
+retention, digest verification, and publication only when the destinations
+match._
 
 ### Release tooling
 

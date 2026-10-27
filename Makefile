@@ -119,6 +119,7 @@ prepare: $(UV) ## Install the locked development environment, offline first
 build: prepare ## Build virtual-env and install deps
 
 build-release: ## Build artefacts (sdist & wheel)
+	rm -rf dist
 	$(UV) build --out-dir dist
 
 clean: ## Remove build artifacts
