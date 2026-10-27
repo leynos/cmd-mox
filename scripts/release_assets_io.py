@@ -128,6 +128,11 @@ def _digest(value: object) -> str:
 def read_pypi_index(path: Path) -> PypiIndex:
     """Load PEP 691 filenames, digests, and resolved download URLs.
 
+    Parameters
+    ----------
+    path : pathlib.Path
+        JSON file containing the PyPI project's PEP 691 simple index.
+
     Returns
     -------
     PypiIndex
@@ -157,6 +162,11 @@ def read_pypi_index(path: Path) -> PypiIndex:
 
 def read_github_assets(path: Path) -> dict[str, str | None]:
     """Load safe GitHub asset names and optional SHA-256 digests.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        JSON file containing the GitHub release asset response.
 
     Returns
     -------
@@ -201,6 +211,11 @@ def _github_digest(value: object) -> str | None:
 def sha256_of(path: Path) -> str:
     """Read one file and return its lower-case SHA-256 digest.
 
+    Parameters
+    ----------
+    path : pathlib.Path
+        File whose bytes are hashed.
+
     Returns
     -------
     str
@@ -212,6 +227,11 @@ def sha256_of(path: Path) -> str:
 
 def safe_names(names: cabc.Iterable[str]) -> list[str]:
     """Validate untrusted asset names and return a stable inventory.
+
+    Parameters
+    ----------
+    names : collections.abc.Iterable of str
+        Candidate filenames to validate and deduplicate.
 
     Returns
     -------
@@ -233,6 +253,11 @@ def safe_names(names: cabc.Iterable[str]) -> list[str]:
 def local_names(directory: Path) -> list[str]:
     """Read a directory and validate its stable filename inventory.
 
+    Parameters
+    ----------
+    directory : pathlib.Path
+        Directory whose immediate entries form the local inventory.
+
     Returns
     -------
     list[str]
@@ -243,6 +268,13 @@ def local_names(directory: Path) -> list[str]:
 
 def check_digest(path: Path, expected: str | None) -> None:
     """Read a file and reject bytes that differ from an expected digest.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        File whose actual SHA-256 digest is checked.
+    expected : str or None
+        Expected lower-case hexadecimal SHA-256 digest. ``None`` is rejected.
 
     Raises
     ------
@@ -259,6 +291,11 @@ def read_bundle_subjects(path: Path) -> assets.Subjects:
 
     The returned claims remain untrusted until separately checked against an
     artefact and the expected signer identity.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        JSON file containing a Sigstore DSSE bundle.
 
     Returns
     -------
@@ -317,13 +354,28 @@ def _provenance_statement(path: Path) -> _Statement:
 
 
 def write_output(path: Path, name: str, *, value: bool) -> None:
-    """Append one workflow boolean to an explicitly supplied output path."""
+    """Append one workflow boolean to an explicitly supplied output path.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Workflow output file to append to.
+    name : str
+        Output variable name written before the equals sign.
+    value : bool
+        Boolean value written as lower-case ``true`` or ``false``.
+    """
     with path.open("a", encoding="utf-8") as output:
         output.write(f"{name}={str(value).lower()}\n")
 
 
 def read_verified_subjects(path: Path) -> dict[str, assets.Subjects]:
     """Read subject rows verified by the workflow's GitHub CLI step.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Tab-separated file of verified bundle, filename, and digest rows.
 
     Returns
     -------
@@ -352,6 +404,15 @@ def matching_artifact(
 ) -> Path | None:
     """Find local bytes that match one untrusted bundle subject exactly.
 
+    Parameters
+    ----------
+    name : str
+        Candidate artefact filename.
+    digest : str
+        Expected SHA-256 digest for the artefact bytes.
+    directories : collections.abc.Iterable of pathlib.Path
+        Directories searched in order for the named artefact.
+
     Returns
     -------
     pathlib.Path or None
@@ -368,6 +429,13 @@ def pypi_fetches(
     pypi_urls: cabc.Mapping[str, str], names: cabc.Iterable[str]
 ) -> list[tuple[str, str]]:
     """Return selected PyPI downloads after enforcing HTTPS transport.
+
+    Parameters
+    ----------
+    pypi_urls : collections.abc.Mapping of str to str
+        Download URLs keyed by distribution filename.
+    names : collections.abc.Iterable of str
+        Filenames selected for download.
 
     Returns
     -------

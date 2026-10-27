@@ -278,6 +278,11 @@ def _source_digest(state: State, name: str, source: Source) -> str | None:
 def bundle_family(name: str) -> str | None:
     """Return the tag identity of a run-specific provenance bundle.
 
+    Parameters
+    ----------
+    name : str
+        Candidate provenance bundle filename.
+
     Returns
     -------
     str or None
@@ -289,6 +294,11 @@ def bundle_family(name: str) -> str | None:
 
 def retained_bundle_names(state: State) -> list[str]:
     """Select existing bundle names belonging to this run's release tag.
+
+    Parameters
+    ----------
+    state : State
+        Snapshot of local, PyPI, GitHub, and provenance inventories.
 
     Returns
     -------
@@ -304,6 +314,12 @@ def retained_bundle_names(state: State) -> list[str]:
 def carryover(state: State) -> list[str]:
     """Select canonical GitHub files and retained bundles to download.
 
+    Parameters
+    ----------
+    state : State
+        Snapshot containing local files, existing GitHub assets, and current
+        run bundle names.
+
     Returns
     -------
     list[str]
@@ -316,6 +332,11 @@ def carryover(state: State) -> list[str]:
 
 def missing_from_pypi(state: State) -> list[str]:
     """List this run's distribution names not yet indexed by PyPI.
+
+    Parameters
+    ----------
+    state : State
+        Snapshot of local distributions and the current PyPI inventory.
 
     Returns
     -------
