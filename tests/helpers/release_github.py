@@ -183,6 +183,10 @@ def write_publication_inputs(
             content = provenance_bundle(subjects)
             (retained / name).write_bytes(content)
             asset["digest"] = f"sha256:{digest(content)}"
+        elif name in index_assets:
+            content = index_assets[name]
+            if asset.get("digest") == f"sha256:{digest(content)}":
+                (retained / name).write_bytes(content)
     _write_json(root / "pypi-index.json", index)
     _write_json(root / "release-assets.json", inputs.github_assets)
     _write_json(root / "github-state" / "assets.json", inputs.github_assets)

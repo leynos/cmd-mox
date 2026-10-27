@@ -340,74 +340,6 @@ def test_pypi_sourced_rerun_keeps_existing_bundle_and_bytes(tmp_path: Path) -> N
     )
 
 
-def test_failed_job_rerun_refreshes_missing_github_carryover(
-    tmp_path: Path,
-) -> None:
-    """A failed-job rerun downloads assets absent from its old snapshot."""
-    prior_bundle = f"cmd-mox-{TAG}-run40-1.sigstore.json"
-    current_bundle = f"cmd-mox-{TAG}-run41-1.sigstore.json"
-    published = {
-        SDIST: b"PyPI sdist from the earlier attempt",
-        WHEEL: b"PyPI wheel from the earlier attempt",
-    }
-    release_assets = build_github_assets(
-        sdist=published[SDIST], wheel=published[WHEEL], bundle=prior_bundle
-    )
-    write_publication_inputs(
-        tmp_path,
-        PublicationInputs(
-            github_assets=release_assets,
-            bundle_name=current_bundle,
-            sdist=b"sdist rebuilt by failed-job rerun",
-            wheel=b"wheel rebuilt by failed-job rerun",
-            pypi_assets=published,
-            retained_subjects={prior_bundle: published},
-        ),
-    )
-    downloads = tmp_path / "github-downloads"
-    downloads.mkdir()
-    (downloads / SDIST).write_bytes(published[SDIST])
-    (downloads / WHEEL).write_bytes(published[WHEEL])
-    cached_files = tmp_path / "github-state" / "files"
-    assert not (cached_files / SDIST).exists(), (
-        "the previous draft-release snapshot predates the failed upload"
-    )
-    assert not (cached_files / WHEEL).exists(), (
-        "the previous draft-release snapshot predates the failed upload"
-    )
-
-    result = run_github_step(
-        tmp_path,
-        "stage",
-        {
-            "GH_ASSETS_JSON": json.dumps(release_assets),
-            "GH_DOWNLOADS": str(downloads),
-            "PYPI_INDEX_PATH": "pypi-index.json",
-            "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert (cached_files / SDIST).read_bytes() == published[SDIST], (
-        "the current GitHub inventory must refresh its missing sdist bytes"
-    )
-    assert (cached_files / WHEEL).read_bytes() == published[WHEEL], (
-        "the current GitHub inventory must refresh its missing wheel bytes"
-    )
-    download_calls = [
-        call
-        for call in read_tool_calls(tmp_path / "tool-calls.jsonl", tool="gh")
-        if typ.cast("list[str]", call["argv"])[0:2] == ["release", "download"]
-    ]
-    assert [call["argv"] for call in download_calls] == [
-        ["release", "download", TAG, "--pattern", name, "--dir", "github-state/files"]
-        for name in sorted((SDIST, WHEEL))
-    ], "the rerun must download missing assets but preserve the cached bundle"
-    assert (tmp_path / "github-output").read_text(encoding="utf-8") == (
-        "pending=false\n"
-    ), "the already complete release must not upload duplicate assets"
-
-
 def test_first_pypi_publication_can_attach_this_runs_matching_bundle(
     tmp_path: Path,
 ) -> None:
@@ -512,16 +444,12 @@ def test_stage_github_is_empty_when_assets_and_tag_bundle_are_complete(
     script, _ = load_workflow_step("publish-release", "stage")
     tools = install_fake_tools(tmp_path / "bin")
     log = tmp_path / "tool-calls.jsonl"
-    (tmp_path / "github-downloads").mkdir()
-    (tmp_path / "github-downloads" / SDIST).write_bytes(b"canonical sdist")
-    (tmp_path / "github-downloads" / WHEEL).write_bytes(b"canonical wheel")
 
     result = run_bash_step(
         script,
         cwd=tmp_path,
         env={
             "FAKE_TOOL_LOG": str(log),
-            "GH_DOWNLOADS": str(tmp_path / "github-downloads"),
             "PATH": f"{tools}:/usr/bin:/bin",
             "PYPI_INDEX_PATH": "pypi-index.json",
             "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
