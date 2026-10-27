@@ -305,6 +305,8 @@ def test_release_workflow_skips_existing_pypi_files_without_clobbering() -> None
 
 def test_release_publishers_verify_signer_before_staging() -> None:
     """Both publication paths use one verifier for the release signer."""
+    workflow = _workflow(RELEASE_WORKFLOW_PATH)
+    jobs = _jobs(workflow)
     pending_script, _ = load_workflow_step("publish-pypi", "pending")
     release_script, _ = load_workflow_step("publish-release", "stage")
     verifier_path = _REPOSITORY_ROOT / "scripts" / "verify_attestations.sh"
@@ -313,12 +315,28 @@ def test_release_publishers_verify_signer_before_staging() -> None:
     assert verifier_script.splitlines()[0] == "set -euo pipefail", (
         "the shared verifier must use strict Bash mode"
     )
-    assert "--repo leynos/cmd-mox" in verifier_script, (
-        "the verifier must authenticate the expected repository"
+    signer_constraints = [
+        line.strip().removesuffix("\\").rstrip()
+        for line in verifier_script.splitlines()
+        if line.strip().startswith((
+            "--repo",
+            "--signer-workflow",
+            "--source-ref",
+            "--deny-self-hosted-runners",
+        ))
+    ]
+    assert signer_constraints == [
+        "--repo leynos/cmd-mox",
+        "--signer-workflow leynos/cmd-mox/.github/workflows/release.yml",
+        '--source-ref "refs/tags/${TAG_NAME}"',
+        "--deny-self-hosted-runners",
+    ], (
+        "the verifier must authenticate the repository, workflow, release tag, "
+        "and GitHub-hosted runner"
     )
-    assert "--signer-workflow leynos/cmd-mox/.github/workflows/release.yml" in (
-        verifier_script
-    ), "the verifier must authenticate the expected workflow"
+    assert jobs["publish-pypi"]["env"].get("TAG_NAME") == "${{ github.ref_name }}", (
+        "PyPI publication must pass its tag to provenance verification"
+    )
     for script in (pending_script, release_script):
         assert "bash scripts/verify_attestations.sh" in script, (
             "both publishers must use the same signer verification script"

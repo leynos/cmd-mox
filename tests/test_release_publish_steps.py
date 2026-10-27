@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from helpers.release_github import TAG
 from helpers.release_workflow import (
     RELEASE_WORKFLOW_PATH,
     install_fake_tools,
@@ -548,6 +549,7 @@ def test_stage_pypi_skips_published_names_and_uses_github_bytes(tmp_path: Path) 
             "FAKE_TOOL_LOG": str(log),
             "PATH": f"{tools}:/usr/bin:/bin",
             "PYPI_INDEX_PATH": str(fixture.index),
+            "TAG_NAME": TAG,
         },
     )
 
@@ -585,6 +587,7 @@ def test_pypi_staging_stops_when_github_rejects_retained_attestation(
             "GH_ATTESTATION_STATUS": "1",
             "PATH": f"{tools}:/usr/bin:/bin",
             "PYPI_INDEX_PATH": str(fixture.index),
+            "TAG_NAME": TAG,
         },
     )
 
@@ -628,7 +631,11 @@ def test_historical_pypi_only_release_is_noop_and_skips_upload(
     result = run_bash_step(
         script,
         cwd=tmp_path,
-        env={"PATH": "/usr/bin:/bin", "PYPI_INDEX_PATH": str(index)},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYPI_INDEX_PATH": str(index),
+            "TAG_NAME": TAG,
+        },
         output_path=output,
     )
     publish_job = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))[

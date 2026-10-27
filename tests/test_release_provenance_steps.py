@@ -181,7 +181,11 @@ def test_uncovered_canonical_digest_blocks_pypi_and_github_before_staging(
     pypi_result = run_bash_step(
         script,
         cwd=tmp_path,
-        env={"PATH": "/usr/bin:/bin", "PYPI_INDEX_PATH": "pypi-index.json"},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYPI_INDEX_PATH": "pypi-index.json",
+            "TAG_NAME": TAG,
+        },
     )
     assert pypi_result.returncode == 1, (
         "uncovered carried bytes must fail before PyPI publication"

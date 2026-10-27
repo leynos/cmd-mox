@@ -155,15 +155,16 @@ jobs:
         id: attach-bundle
         env:
           RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          bundle_name="cmd-mox-${TAG_NAME}-run${RUN_ID}-${RUN_ATTEMPT}.sigstore.json"
-          bundle_path="dist/attestations/${bundle_name}"
-          if [[ ! -f "${bundle_path}" ]]; then
-            echo "::error title=release-bundle::current run's provenance bundle is missing"
+          shopt -s nullglob
+          bundle_candidates=("dist/attestations/cmd-mox-${TAG_NAME}-run${RUN_ID}-"*.sigstore.json)
+          if [[ ${#bundle_candidates[@]} -ne 1 ]]; then
+            echo "::error title=release-bundle::expected exactly one current-run provenance bundle"
             exit 1
           fi
+          bundle_path="${bundle_candidates[0]}"
+          bundle_name="${bundle_path##*/}"
           mkdir -p github-state
           gh release view "${TAG_NAME}" --json isDraft,assets \
             > github-state/release-assets-before-bundle.json
@@ -242,6 +243,7 @@ jobs:
       id-token: write # Required for PyPI Trusted Publishing via GitHub OIDC.
     env:
       GH_TOKEN: ${{ github.token }}
+      TAG_NAME: ${{ github.ref_name }}
       PYPI_INDEX_URL: https://pypi.org/simple/cmd-mox/
       PYPI_INDEX_PATH: pypi-index.json
     steps:

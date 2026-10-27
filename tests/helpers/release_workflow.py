@@ -67,6 +67,7 @@ class WorkflowJob(typ.TypedDict):
     """Workflow job fields used by release contract tests."""
 
     steps: list[WorkflowStep]
+    env: typ.NotRequired[dict[str, str]]
     needs: typ.NotRequired[str | list[str]]
     permissions: typ.NotRequired[dict[str, str]]
     environment: typ.NotRequired[dict[str, str]]
