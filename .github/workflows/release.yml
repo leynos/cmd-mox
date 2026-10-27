@@ -185,6 +185,7 @@ jobs:
       contents: read
       id-token: write # Required for PyPI Trusted Publishing via GitHub OIDC.
     env:
+      GH_TOKEN: ${{ github.token }}
       PYPI_INDEX_URL: https://pypi.org/simple/cmd-mox/
       PYPI_INDEX_PATH: pypi-index.json
     steps:
@@ -212,10 +213,24 @@ jobs:
         id: pending
         run: |
           set -euo pipefail
+          python3 -m scripts.release_assets_cli attestation-checks \
+            --purpose pypi --publish dist/publish --index "${PYPI_INDEX_PATH}" \
+            --assets github-state/assets.json --bundles dist/attestations \
+            --github-files github-state/files > attestation-candidates.tsv
+          : > verified-subjects.tsv
+          while IFS=$'\t' read -r artifact bundle bundle_name name digest; do
+            [[ -n "${name}" ]] || continue
+            gh attestation verify "${artifact}" --bundle "${bundle}" \
+              --repo leynos/cmd-mox \
+              --signer-workflow leynos/cmd-mox/.github/workflows/release.yml
+            printf '%s\t%s\t%s\n' "${bundle_name}" "${name}" "${digest}" \
+              >> verified-subjects.tsv
+          done < attestation-candidates.tsv
           python3 -m scripts.release_assets_cli stage-pypi \
             --publish dist/publish --index "${PYPI_INDEX_PATH}" \
             --assets github-state/assets.json --github-files github-state/files \
-            --bundles dist/attestations
+            --bundles dist/attestations \
+            --verified-subjects verified-subjects.tsv
       - name: Publish distributions to PyPI
         id: upload
         if: steps.pending.outputs.remaining == 'true'
@@ -271,10 +286,10 @@ jobs:
         id: stage
         run: |
           set -euo pipefail
-          python3 -m scripts.release_assets_cli stage-github \
+          mkdir -p github-upload
+          python3 -m scripts.release_assets_cli fetch-github \
             --publish dist/publish --index "${PYPI_INDEX_PATH}" \
-            --assets release-assets.json --bundles dist/attestations \
-            --github-files github-state/files --output github-upload > pypi-fetch.tsv
+            --assets release-assets.json > pypi-fetch.tsv
           while IFS=$'\t' read -r name url; do
             [[ -n "${name}" ]] || continue
             curl --silent --show-error --location --fail \
@@ -282,13 +297,28 @@ jobs:
               --connect-timeout 10 --max-time 300 \
               --output "github-upload/${name}" "${url}"
           done < pypi-fetch.tsv
-      - name: Verify downloaded PyPI bytes
-        id: fetched
-        run: |
-          set -euo pipefail
           python3 -m scripts.release_assets_cli check-fetched \
             --publish dist/publish --index "${PYPI_INDEX_PATH}" \
             --assets release-assets.json --output github-upload
+          python3 -m scripts.release_assets_cli attestation-checks \
+            --purpose github --publish dist/publish --index "${PYPI_INDEX_PATH}" \
+            --assets release-assets.json --bundles dist/attestations \
+            --github-files github-state/files --output github-upload \
+            > attestation-candidates.tsv
+          : > verified-subjects.tsv
+          while IFS=$'\t' read -r artifact bundle bundle_name name digest; do
+            [[ -n "${name}" ]] || continue
+            gh attestation verify "${artifact}" --bundle "${bundle}" \
+              --repo leynos/cmd-mox \
+              --signer-workflow leynos/cmd-mox/.github/workflows/release.yml
+            printf '%s\t%s\t%s\n' "${bundle_name}" "${name}" "${digest}" \
+              >> verified-subjects.tsv
+          done < attestation-candidates.tsv
+          python3 -m scripts.release_assets_cli stage-github \
+            --publish dist/publish --index "${PYPI_INDEX_PATH}" \
+            --assets release-assets.json --bundles dist/attestations \
+            --github-files github-state/files --output github-upload \
+            --verified-subjects verified-subjects.tsv
       - name: Upload missing release assets
         id: upload
         if: steps.stage.outputs.pending == 'true'
@@ -303,7 +333,8 @@ jobs:
           python3 -m scripts.release_assets_cli verify \
             --publish dist/publish --index "${PYPI_INDEX_PATH}" \
             --assets release-assets.json --bundles dist/attestations \
-            --github-files github-state/files
+            --github-files github-state/files --output github-upload \
+            --verified-subjects verified-subjects.tsv
       - name: Publish the GitHub Release
         id: publish
         env:

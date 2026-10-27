@@ -869,12 +869,14 @@ To publish a release:
 
 For screen readers: This flowchart shows how the release workflow selects
 canonical bytes from PyPI, an existing GitHub Release, or the current attested
-build, then publishes and verifies matching assets.
+build. It waits for PyPI, uploads missing assets to the draft GitHub Release,
+then verifies matching digests before publication. A mismatch leaves the draft
+unpublished.
 
 ```mermaid
 flowchart TD
     accTitle: Release asset selection and publication
-    accDescr: Select PyPI, GitHub, then local bytes; verify digests before publishing.
+    accDescr: Choose canonical bytes, publish to PyPI if needed, upload draft assets, then verify digests before release.
     A[Attested sdist and wheel] --> B{Filename already on PyPI?}
     B -- Yes --> C[Use PyPI bytes]
     B -- No --> D{Filename already on GitHub Release?}
@@ -883,18 +885,18 @@ flowchart TD
     C --> G[Skip PyPI upload]
     E --> H[Carry bytes to PyPI if needed]
     F --> I[Publish to PyPI]
-    G --> J{PyPI and GitHub SHA-256 match?}
-    H --> J
-    I --> K[Wait for PyPI index]
-    K --> J
-    J -- No --> L[Fail safely]
-    J -- Yes --> M[Upload only missing GitHub assets]
+    G --> K
+    H --> K[Wait for PyPI index]
+    I --> K
+    K --> M[Upload only missing GitHub assets]
     M --> N[Retain or attach provenance bundle]
-    N --> O[Publish GitHub Release]
+    N --> J{PyPI and GitHub SHA-256 match?}
+    J -- No --> L[Fail safely]
+    J -- Yes --> O[Publish GitHub Release]
 ```
 
-_Figure: Release asset selection, idempotent publishing, and digest
-verification._
+_Figure: Release asset selection, idempotent staging, digest verification, and
+draft publication._
 
 ### Release tooling
 
@@ -910,17 +912,25 @@ reports workflow outputs.
 Every CLI command requires `--publish` and `--assets`. The remaining options
 are required by the commands that read them:
 
-| Command         | Additional inputs                                                  | Result                                                                                                               |
-| --------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `carryover`     | `--bundles`                                                        | Prints existing distribution and provenance filenames to carry forward.                                              |
-| `stage-pypi`    | `--index`; with publication work, `--bundles` and `--github-files` | Removes names already on PyPI, stages GitHub bytes where needed, and writes the `remaining` flag to `GITHUB_OUTPUT`. |
-| `stage-github`  | `--index`, `--bundles`, `--github-files`, `--output`               | Stages local or PyPI bytes, prints PyPI download rows, and writes the `pending` flag to `GITHUB_OUTPUT`.             |
-| `check-fetched` | `--index`, `--output`                                              | Checks downloaded files against the PyPI index digests.                                                              |
-| `missing-pypi`  | `--index`                                                          | Prints distribution names still absent from the latest PyPI index.                                                   |
-| `verify`        | `--index`, `--bundles`, `--github-files`                           | Confirms matching PyPI and GitHub digests and provenance coverage.                                                   |
+| Command              | Additional inputs                                                                      | Result                                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `carryover`          | `--bundles`                                                                            | Prints existing distribution and provenance filenames to carry forward.                                              |
+| `attestation-checks` | `--index`, `--bundles`, `--github-files`, `--purpose`; for GitHub, `--output`          | Prints digest-matched artefact and bundle pairs for the workflow's signature checks.                                 |
+| `stage-pypi`         | `--index`; with publication work, `--bundles`, `--github-files`, `--verified-subjects` | Removes names already on PyPI, stages GitHub bytes where needed, and writes the `remaining` flag to `GITHUB_OUTPUT`. |
+| `fetch-github`       | `--index`                                                                              | Prints PyPI download rows for missing GitHub Release assets before provenance checks.                                |
+| `stage-github`       | `--index`, `--bundles`, `--github-files`, `--output`, `--verified-subjects`            | Stages verified local or PyPI bytes and writes the `pending` flag to `GITHUB_OUTPUT`.                                |
+| `check-fetched`      | `--index`, `--output`                                                                  | Checks downloaded files against the PyPI index digests.                                                              |
+| `missing-pypi`       | `--index`                                                                              | Prints distribution names still absent from the latest PyPI index.                                                   |
+| `verify`             | `--index`, `--bundles`, `--github-files`, `--output`, `--verified-subjects`            | Confirms matching PyPI and GitHub digests and verified provenance coverage.                                          |
+
+_Table 2: Inputs and results for the release asset commands._
 
 The release workflow invokes the adapter as
-`python3 -m scripts.release_assets_cli`. Its separate
+`python3 -m scripts.release_assets_cli`. Before trusting a current or retained
+bundle's subjects, its Bash steps run `gh attestation verify` against each
+matching distribution and require the cmd-mox release workflow as signer. The
+steps pass only successful bundle/name/digest rows to the adapter through
+`--verified-subjects`. Its separate
 [`scripts/release_version.py`](../scripts/release_version.py) compares
 `TAG_VERSION` with `project.version` from `pyproject.toml` exactly, then reports
 `prerelease=true|false` through `GITHUB_OUTPUT`. Each staging run takes a
@@ -964,7 +974,7 @@ values:
 | Workflow filename | `release.yml` |
 | Environment name  | `pypi`        |
 
-_Table 1: GitHub Trusted Publishing settings for the `cmd-mox` project._
+_Table 3: GitHub Trusted Publishing settings for the `cmd-mox` project._
 
 For a local release build, run `make build-release`. The target uses `uv build`
 to create the source distribution first and then build the wheel from it in

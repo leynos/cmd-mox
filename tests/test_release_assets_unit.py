@@ -30,14 +30,22 @@ class _SourceInventories(typ.NamedTuple):
     """Generated destination inventories and their original plan."""
 
     local: dict[str, str]
-    pypi: dict[str, assets.PypiFile]
+    pypi: dict[str, str]
     github: dict[str, str]
     decision: assets.Plan
     selected: dict[str, str]
 
 
+class _DigestInventories(typ.NamedTuple):
+    """Independent digest maps used to calculate expected source bytes."""
+
+    local: dict[str, str]
+    pypi: dict[str, str]
+    github: dict[str, str]
+
+
 class _ReconciliationExample(typ.NamedTuple):
-    """One generated starting state and its modeled completed transition."""
+    """One generated starting state and its modelled completed transition."""
 
     initial: assets.State
     completed: assets.State
@@ -62,14 +70,56 @@ def _state(
     """
     return assets.State(
         local,
-        {
-            name: assets.PypiFile(digest, f"https://pypi.test/{name}")
-            for name, digest in (pypi or {}).items()
-        },
+        pypi or {},
         github or {},
         (provenance.current or {}) if provenance is not None else {},
         (provenance.retained or {}) if provenance is not None else {},
     )
+
+
+def _expected_digest(
+    name: str,
+    source: assets.Source,
+    inventories: _DigestInventories,
+) -> str:
+    """Select an expected digest independently from the production resolver.
+
+    Returns
+    -------
+    str
+        The digest from the independently supplied source inventory.
+
+    Raises
+    ------
+    AssertionError
+        If the source enum gains an unsupported member.
+    """
+    match source:
+        case assets.Source.PYPI:
+            return inventories.pypi[name]
+        case assets.Source.GITHUB:
+            return inventories.github[name]
+        case assets.Source.LOCAL:
+            return inventories.local[name]
+        case _:
+            raise AssertionError
+
+
+def _expected_source(
+    name: str, pypi_names: set[str], github_names: set[str]
+) -> assets.Source:
+    """Select the expected source from independently supplied name sets.
+
+    Returns
+    -------
+    assets.Source
+        Canonical source under PyPI, GitHub, then local priority.
+    """
+    if name in pypi_names:
+        return assets.Source.PYPI
+    if name in github_names:
+        return assets.Source.GITHUB
+    return assets.Source.LOCAL
 
 
 def _source_inventories(
@@ -90,9 +140,7 @@ def _source_inventories(
         for index, name in enumerate(sorted(local_names))
     }
     pypi = {
-        name: assets.PypiFile(
-            f"{digest_seed + 100 + index:064x}", f"https://pypi.test/{name}"
-        )
+        name: f"{digest_seed + 100 + index:064x}"
         for index, name in enumerate(sorted(local_names & pypi_names))
     }
     github = {
@@ -100,14 +148,9 @@ def _source_inventories(
         for index, name in enumerate(sorted(local_names & github_names))
     }
     decision = assets.plan(local, pypi, github)
+    digest_inventories = _DigestInventories(local, pypi, github)
     selected = {
-        name: (
-            pypi[name].sha256
-            if source is assets.Source.PYPI
-            else github[name]
-            if source is assets.Source.GITHUB
-            else local[name]
-        )
+        name: _expected_digest(name, source, digest_inventories)
         for name, source in decision.canonical.items()
     }
     return _SourceInventories(local, pypi, github, decision, selected)
@@ -156,7 +199,7 @@ def _initial_reconciliation_state(
     github, provenance = _provenance_inventories(inventories, digest_seed)
     return _state(
         local=inventories.local,
-        pypi={name: file.sha256 for name, file in inventories.pypi.items()},
+        pypi=inventories.pypi,
         github=github,
         provenance=provenance,
     )
@@ -175,9 +218,7 @@ def _complete_reconciliation(
     stage = assets.stage_github(state)
     pypi_after = dict(state.pypi)
     for name in inventories.decision.pypi_uploads:
-        pypi_after[name] = assets.PypiFile(
-            inventories.selected[name], f"https://pypi.test/{name}"
-        )
+        pypi_after[name] = inventories.selected[name]
     github_after = dict(state.github)
     for name in inventories.decision.github_uploads:
         github_after[name] = inventories.selected[name]
@@ -216,8 +257,8 @@ def _reconciliation_example(
     initial = _initial_reconciliation_state(inventories, digest_seed)
     completed, stage = _complete_reconciliation(initial, inventories, digest_seed)
     has_conflict = any(
-        name in initial.github and file.sha256 != initial.github[name]
-        for name, file in initial.pypi.items()
+        name in initial.github and digest != initial.github[name]
+        for name, digest in initial.pypi.items()
     )
     return _ReconciliationExample(
         initial, completed, inventories.selected, stage, has_conflict
@@ -232,7 +273,7 @@ def _assert_missing_provenance_is_rejected(
         return
     without_provenance = _state(
         local=dict(example.initial.local),
-        pypi={name: file.sha256 for name, file in example.initial.pypi.items()},
+        pypi=dict(example.initial.pypi),
         github=dict(example.initial.github),
     )
     with pytest.raises(assets.UnattestedReleaseAssetsError):
@@ -240,9 +281,9 @@ def _assert_missing_provenance_is_rejected(
 
 
 def _assert_preexisting_assets_are_unchanged(example: _ReconciliationExample) -> None:
-    """Assert the modeled transition leaves every initial filename intact."""
-    for name, file in example.initial.pypi.items():
-        assert example.completed.pypi[name] == file, (
+    """Assert the modelled transition leaves every initial filename intact."""
+    for name, digest in example.initial.pypi.items():
+        assert example.completed.pypi[name] == digest, (
             "existing PyPI files must never change"
         )
     for name, digest in example.initial.github.items():
@@ -271,13 +312,7 @@ def test_plan_preserves_priority_partitioning_and_order_independence(
         "every local name needs one canonical source"
     )
     for name, source in decision.canonical.items():
-        expected = (
-            assets.Source.PYPI
-            if name in pypi
-            else assets.Source.GITHUB
-            if name in github
-            else assets.Source.LOCAL
-        )
+        expected = _expected_source(name, pypi, github)
         assert source is expected, (
             "canonical source priority must remain PyPI, GitHub, local"
         )
@@ -466,7 +501,7 @@ def test_pure_staging_returns_file_identifiers_without_transport_decisions() -> 
     assert decision.bundles == (bundle,), "their contributing bundle must be staged"
     insecure = assets.State(
         state.local,
-        {"a.whl": assets.PypiFile("digest", "http://pypi.test/a.whl")},
+        {"a.whl": "digest"},
         {},
         state.current_bundles,
         {},

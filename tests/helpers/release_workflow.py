@@ -266,6 +266,12 @@ log_path = Path(os.environ["FAKE_TOOL_LOG"])
 with log_path.open("a", encoding="utf-8") as log:
     log.write(json.dumps({"tool": "gh", "argv": argv}) + "\n")
 
+if argv[:2] == ["attestation", "verify"]:
+    status = int(os.environ.get("GH_ATTESTATION_STATUS", "0"))
+    if status:
+        sys.stderr.write("attestation verification failed\n")
+    raise SystemExit(status)
+
 if argv[:2] != ["release", "view"]:
     if argv[:2] == ["release", "create"]:
         raise SystemExit(int(os.environ.get("GH_CREATE_STATUS", "0")))

@@ -29,7 +29,7 @@ from helpers.release_workflow import (
 )
 
 release_assets = pytest.importorskip("scripts.release_assets")
-release_adapters = pytest.importorskip("scripts.release_assets_cli")
+release_asset_io = pytest.importorskip("scripts.release_assets_io")
 release_version = pytest.importorskip("scripts.release_version")
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +44,71 @@ class _IndexFetchCase(typ.NamedTuple):
     expected_status: int
     expected_calls: int
     expected_sleeps: int
+
+
+class _PypiStageFixture(typ.NamedTuple):
+    """Filesystem paths and names for one mixed-source publication case."""
+
+    publish: Path
+    published_name: str
+    carried_name: str
+    local_name: str
+    index: Path
+    curl_downloads: Path
+
+
+def _write_pypi_stage_fixture(root: Path) -> _PypiStageFixture:
+    """Create local, PyPI, and retained GitHub inputs for a staging test.
+
+    Returns
+    -------
+    _PypiStageFixture
+        Paths and filenames used by the mixed-source staging case.
+    """
+    publish = root / "dist" / "publish"
+    github_files = root / "github-state" / "files"
+    publish.mkdir(parents=True)
+    github_files.mkdir(parents=True)
+    published_name = "cmd_mox-0.3.0.tar.gz"
+    carried_name = "cmd_mox-0.3.0-py3-none-any.whl"
+    local_name = "cmd_mox-0.3.0-extra.whl"
+    (publish / published_name).write_bytes(b"rebuilt but not canonical")
+    (publish / carried_name).write_bytes(b"new wheel bytes")
+    (publish / local_name).write_bytes(b"new extra wheel")
+    (github_files / carried_name).write_bytes(b"canonical GitHub bytes")
+    _write_provenance(
+        root / "dist" / "attestations",
+        "cmd-mox-v0.3.0-run2-1.sigstore.json",
+        {
+            published_name: b"rebuilt but not canonical",
+            carried_name: b"new wheel bytes",
+            local_name: b"new extra wheel",
+        },
+    )
+    index = root / "pypi-index.json"
+    _write_index(index, [published_name])
+    curl_downloads = root / "curl-downloads"
+    curl_downloads.mkdir()
+    (curl_downloads / published_name).write_bytes(published_name.encode())
+    assets = root / "github-state" / "assets.json"
+    assets.parent.mkdir(parents=True, exist_ok=True)
+    _write_github_assets(
+        assets,
+        {
+            carried_name: hashlib.sha256(b"canonical GitHub bytes").hexdigest(),
+            "cmd-mox-v0.3.0-run1-1.sigstore.json": _write_provenance(
+                github_files,
+                "cmd-mox-v0.3.0-run1-1.sigstore.json",
+                {
+                    published_name: published_name.encode(),
+                    carried_name: b"canonical GitHub bytes",
+                },
+            ),
+        },
+    )
+    return _PypiStageFixture(
+        publish, published_name, carried_name, local_name, index, curl_downloads
+    )
 
 
 pytestmark = [
@@ -163,15 +228,15 @@ def test_pep691_index_resolves_relative_urls_and_missing_files_are_empty(
         encoding="utf-8",
     )
 
-    files = release_adapters.read_pypi_index(index)
-    assert files["cmd_mox-0.3.0.tar.gz"].sha256 == "a" * 64, (
+    files = release_asset_io.read_pypi_index(index)
+    assert files.digests["cmd_mox-0.3.0.tar.gz"] == "a" * 64, (
         "PyPI hashes must be normalized to lower-case hex"
     )
-    assert files["cmd_mox-0.3.0.tar.gz"].url == (
+    assert files.urls["cmd_mox-0.3.0.tar.gz"] == (
         "https://pypi.org/simple/cmd-mox/files/cmd_mox-0.3.0.tar.gz"
     ), "relative PEP 691 URLs must resolve from the project index"
     index.write_text("{}", encoding="utf-8")
-    assert release_adapters.read_pypi_index(index) == {}, (
+    assert release_asset_io.read_pypi_index(index).digests == {}, (
         "an index without files must be treated as an empty inventory"
     )
 
@@ -460,69 +525,73 @@ def _write_provenance(directory: Path, name: str, subjects: dict[str, bytes]) ->
 
 def test_stage_pypi_skips_published_names_and_uses_github_bytes(tmp_path: Path) -> None:
     """Only names PyPI lacks remain, using existing GitHub bytes when needed."""
-    publish = tmp_path / "dist" / "publish"
-    github_files = tmp_path / "github-state" / "files"
-    publish.mkdir(parents=True)
-    github_files.mkdir(parents=True)
-    already_published = "cmd_mox-0.3.0.tar.gz"
-    carried = "cmd_mox-0.3.0-py3-none-any.whl"
-    local = "cmd_mox-0.3.0-extra.whl"
-    (publish / already_published).write_bytes(b"rebuilt but not canonical")
-    (publish / carried).write_bytes(b"new wheel bytes")
-    (publish / local).write_bytes(b"new extra wheel")
-    (github_files / carried).write_bytes(b"canonical GitHub bytes")
-    _write_provenance(
-        tmp_path / "dist" / "attestations",
-        "cmd-mox-v0.3.0-run2-1.sigstore.json",
-        {
-            already_published: b"rebuilt but not canonical",
-            carried: b"new wheel bytes",
-            local: b"new extra wheel",
-        },
-    )
-    index = tmp_path / "pypi-index.json"
-    _write_index(index, [already_published])
-    assets = tmp_path / "github-state" / "assets.json"
-    assets.parent.mkdir(parents=True, exist_ok=True)
-    _write_github_assets(
-        assets,
-        {
-            carried: hashlib.sha256(b"canonical GitHub bytes").hexdigest(),
-            "cmd-mox-v0.3.0-run1-1.sigstore.json": _write_provenance(
-                github_files,
-                "cmd-mox-v0.3.0-run1-1.sigstore.json",
-                {
-                    already_published: already_published.encode(),
-                    carried: b"canonical GitHub bytes",
-                },
-            ),
-        },
-    )
-    (tmp_path / "github-output").touch()
+    fixture = _write_pypi_stage_fixture(tmp_path)
     script, _ = load_workflow_step("publish-pypi", "pending")
 
+    tools = install_fake_tools(tmp_path / "bin")
+    log = tmp_path / "tool-calls.jsonl"
     result = run_bash_step(
         script,
         cwd=tmp_path,
         env={
-            "PATH": "/usr/bin:/bin",
-            "PYPI_INDEX_PATH": str(index),
+            "FAKE_TOOL_LOG": str(log),
+            "PATH": f"{tools}:/usr/bin:/bin",
+            "PYPI_INDEX_PATH": str(fixture.index),
         },
     )
 
     assert result.returncode == 0, result.stderr
-    assert not (publish / already_published).exists(), (
+    assert not (fixture.publish / fixture.published_name).exists(), (
         "a filename already on PyPI must be removed from the upload directory"
     )
-    assert (publish / carried).read_bytes() == b"canonical GitHub bytes", (
+    assert (
+        fixture.publish / fixture.carried_name
+    ).read_bytes() == b"canonical GitHub bytes", (
         "PyPI must receive GitHub's canonical bytes for an existing asset"
     )
-    assert (publish / local).read_bytes() == b"new extra wheel", (
+    assert (fixture.publish / fixture.local_name).read_bytes() == b"new extra wheel", (
         "an unpublished local distribution must remain staged"
     )
     assert (tmp_path / "github-output").read_text(encoding="utf-8") == (
         "remaining=true\n"
     ), "the publish action must run when files remain"
+
+
+def test_pypi_staging_stops_when_github_rejects_retained_attestation(
+    tmp_path: Path,
+) -> None:
+    """A rejected retained bundle cannot authorize PyPI staging."""
+    fixture = _write_pypi_stage_fixture(tmp_path)
+    tools = install_fake_tools(tmp_path / "bin")
+    script, _ = load_workflow_step("publish-pypi", "pending")
+    log = tmp_path / "tool-calls.jsonl"
+    result = run_bash_step(
+        script,
+        cwd=tmp_path,
+        env={
+            "CURL_DOWNLOADS": str(fixture.curl_downloads),
+            "FAKE_TOOL_LOG": str(log),
+            "GH_ATTESTATION_STATUS": "1",
+            "PATH": f"{tools}:/usr/bin:/bin",
+            "PYPI_INDEX_PATH": str(fixture.index),
+        },
+    )
+
+    assert result.returncode != 0, "a failed GitHub signer check must stop publication"
+    assert "attestation verification failed" in result.stderr, (
+        "GitHub CLI's rejection must remain visible in the failed step"
+    )
+    assert (
+        fixture.publish / fixture.carried_name
+    ).read_bytes() == b"new wheel bytes", (
+        "PyPI staging must not run after a retained attestation fails"
+    )
+    assert not (tmp_path / "github-output").exists(), (
+        "a failed signer check must not emit the PyPI pending flag"
+    )
+    assert read_tool_calls(log, tool="gh"), (
+        "the workflow must invoke GitHub attestation verification"
+    )
 
 
 def test_historical_pypi_only_release_is_noop_and_skips_upload(
@@ -532,6 +601,7 @@ def test_historical_pypi_only_release_is_noop_and_skips_upload(
     publish = tmp_path / "dist" / "publish"
     publish.mkdir(parents=True)
     (tmp_path / "github-state" / "files").mkdir(parents=True)
+    (tmp_path / "dist" / "attestations").mkdir()
     names = ["cmd_mox-0.2.0.tar.gz", "cmd_mox-0.2.0-py3-none-any.whl"]
     for name in names:
         (publish / name).write_bytes(b"rebuilt historical bytes: " + name.encode())

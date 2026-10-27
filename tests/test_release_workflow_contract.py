@@ -8,6 +8,7 @@ parse only the release and CI workflows plus the local distribution action.
 from __future__ import annotations
 
 import re
+import tomllib
 import typing as typ
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from helpers.release_workflow import (
     Workflow,
     WorkflowJob,
     WorkflowStep,
+    load_workflow_step,
     should_skip_release_tests_for_mutation_sandbox,
     workflow_triggers,
 )
@@ -256,17 +258,25 @@ def test_every_release_checkout_disables_persisted_credentials() -> None:
         )
 
 
-def test_release_workflow_attests_and_uploads_without_clobbering() -> None:
-    """One release-dist artefact carries provenance and PyPI skips existing files."""
+def _workflow_steps(jobs: dict[str, WorkflowJob]) -> list[WorkflowStep]:
+    """Flatten workflow steps for focused contract assertions.
+
+    Returns
+    -------
+    list[WorkflowStep]
+        Steps from every job in insertion order.
+    """
+    return [step for job in jobs.values() for step in _steps(job)]
+
+
+def test_release_workflow_attests_and_uploads_release_dist() -> None:
+    """The attested files and bundle move through one release-dist artefact."""
     workflow_text = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
-    workflow = _workflow(RELEASE_WORKFLOW_PATH)
-    jobs = _jobs(workflow)
-    all_uses = [
-        step["uses"] for job in jobs.values() for step in _steps(job) if "uses" in step
-    ]
+    steps = _workflow_steps(_jobs(_workflow(RELEASE_WORKFLOW_PATH)))
 
     assert any(
-        uses.startswith("actions/attest-build-provenance@") for uses in all_uses
+        step.get("uses", "").startswith("actions/attest-build-provenance@")
+        for step in steps
     ), "the workflow must create a build provenance attestation"
     assert "name: release-dist" in workflow_text, (
         "attested files and their bundle must share release-dist"
@@ -274,9 +284,14 @@ def test_release_workflow_attests_and_uploads_without_clobbering() -> None:
     assert any(
         step.get("uses", "").startswith("actions/download-artifact@")
         and step.get("with", {}).get("name") == "release-dist"
-        for job in jobs.values()
-        for step in _steps(job)
+        for step in steps
     ), "later phases must download the attested release-dist artefact"
+
+
+def test_release_workflow_skips_existing_pypi_files_without_clobbering() -> None:
+    """PyPI tolerates retries while existing GitHub assets remain immutable."""
+    workflow_text = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
+    jobs = _jobs(_workflow(RELEASE_WORKFLOW_PATH))
     pypi_publish = next(
         step
         for step in _steps(jobs["publish-pypi"])
@@ -286,6 +301,22 @@ def test_release_workflow_attests_and_uploads_without_clobbering() -> None:
         "PyPI uploads must tolerate an earlier partial upload"
     )
     assert "--clobber" not in workflow_text, "existing GitHub assets are immutable"
+
+
+def test_release_publishers_verify_signer_before_staging() -> None:
+    """Both publication paths stage only subjects verified for the release signer."""
+    pending_script, _ = load_workflow_step("publish-pypi", "pending")
+    release_script, _ = load_workflow_step("publish-release", "stage")
+    verifier_flow = re.compile(
+        r"attestation-checks(?s:.*?)gh attestation verify(?s:.*?)"
+        r"--signer-workflow leynos/cmd-mox/\.github/workflows/release\.yml"
+        r"(?s:.*?)--verified-subjects verified-subjects\.tsv"
+    )
+    for script in (pending_script, release_script):
+        assert verifier_flow.search(script), (
+            "each publisher must select digest-matched bundles, verify the cmd-mox "
+            "release signer, then stage only the verified subject manifest"
+        )
 
 
 def test_release_handoff_attests_and_uploads_the_same_distribution_tree() -> None:
@@ -321,9 +352,9 @@ def test_make_build_release_uses_the_ci_uv_build_path() -> None:
     )
 
     assert match is not None, "Makefile must keep the documented build-release target"
-    assert match.group("command") == (
-        "$(UV_GATE) run --group dev -- uv build --out-dir dist"
-    ), "local release builds must use uv build into dist"
+    assert match.group("command") == ("$(UV) build --out-dir dist"), (
+        "local release builds must use uv build into dist"
+    )
 
 
 def test_run_scripts_are_quoted_shell_steps_without_workflow_interpolation() -> None:
@@ -371,4 +402,33 @@ def test_ci_builds_distributions_on_pull_requests_and_native_matrix_is_removed()
     ).exists(), "the unused native wheel matrix workflow must be removed"
     assert not (_REPOSITORY_ROOT / ".github" / "actions" / "build-wheels").exists(), (
         "the unused native wheel action must be removed"
+    )
+
+
+def test_coverage_selection_matches_between_pull_requests_and_publisher() -> None:
+    """Coverage lanes and the CV-005 contract use the same package selection."""
+    ci = _workflow(_CI_WORKFLOW)
+    main_path = _REPOSITORY_ROOT / ".github" / "workflows" / "coverage-main.yml"
+    main_workflow = _workflow(main_path)
+    ci_coverage = next(
+        step
+        for step in _steps(_jobs(ci)["quality"])
+        if step.get("name") == "Generate coverage"
+    )
+    main_coverage = next(
+        step
+        for step in _steps(_jobs(main_workflow)["coverage-upload"])
+        if step.get("name") == "Generate coverage"
+    )
+    contract_path = _REPOSITORY_ROOT / ".github" / "cv005.toml"
+    contract = tomllib.loads(contract_path.read_text(encoding="utf-8"))
+
+    assert ci_coverage.get("with", {}).get("python-source") == "cmd_mox", (
+        "pull-request coverage must measure the installed package"
+    )
+    assert main_coverage.get("with", {}).get("python-source") == "cmd_mox", (
+        "the main-branch publisher must measure the same package"
+    )
+    assert contract.get("selection", {}).get("python-source") == "cmd_mox", (
+        "CV-005 must pin the same package selection"
     )

@@ -10,19 +10,20 @@ from pathlib import Path
 
 import pytest
 from helpers.release_github import (
-    _SDIST,
-    _TAG,
-    _WHEEL,
-    _assets,
-    _digest,
-    _PublicationInputs,
-    _run_github_step,
-    _write_publication_inputs,
+    SDIST,
+    TAG,
+    WHEEL,
+    PublicationInputs,
+    build_github_assets,
+    digest,
+    run_github_step,
+    write_publication_inputs,
 )
 from helpers.release_workflow import (
     RELEASE_WORKFLOW_PATH,
     load_workflow_step,
     provenance_bundle,
+    read_tool_calls,
     run_bash_step,
     should_skip_release_tests_for_mutation_sandbox,
 )
@@ -43,18 +44,67 @@ pytestmark = [
 ]
 
 
+def test_failed_job_rerun_verifies_attached_current_bundle_from_dist(
+    tmp_path: Path,
+) -> None:
+    """A just-uploaded bundle remains verifiable when the snapshot lacks it."""
+    bundle = f"cmd-mox-{TAG}-run41-1.sigstore.json"
+    _, current_bundles = write_publication_inputs(
+        tmp_path,
+        PublicationInputs(
+            github_assets=build_github_assets(
+                sdist=b"canonical sdist",
+                wheel=b"canonical wheel",
+                bundle=bundle,
+            ),
+            bundle_name=bundle,
+        ),
+    )
+    snapshot_bundle = tmp_path / "github-state" / "files" / bundle
+    snapshot_bundle.unlink()
+
+    result = run_github_step(
+        tmp_path,
+        "stage",
+        {
+            "PYPI_INDEX_PATH": "pypi-index.json",
+            "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
+        },
+    )
+
+    calls = read_tool_calls(tmp_path / "tool-calls.jsonl", tool="gh")
+    attestation_calls = [
+        typ.cast("list[str]", call["argv"])
+        for call in calls
+        if typ.cast("list[str]", call["argv"])[0:2] == ["attestation", "verify"]
+    ]
+    assert result.returncode == 0, result.stderr
+    assert len(attestation_calls) == 2, "both distributions must be verified"
+    bundle_paths = {
+        (tmp_path / Path(argv[argv.index("--bundle") + 1])).resolve()
+        for argv in attestation_calls
+    }
+    current_bundle_path = (current_bundles / bundle).resolve()
+    assert bundle_paths == {current_bundle_path}, (
+        "verification must use the current-run bundle after snapshot fallback"
+    )
+    assert current_bundle_path.is_file(), (
+        "the bundle passed to gh must exist on a retry"
+    )
+
+
 def test_new_filename_retains_old_subjects_and_adds_its_matching_current_bundle(
     tmp_path: Path,
 ) -> None:
     """A same-version addition needs both the retained and current provenance."""
-    prior = f"cmd-mox-{_TAG}-run40-1.sigstore.json"
-    current = f"cmd-mox-{_TAG}-run41-1.sigstore.json"
+    prior = f"cmd-mox-{TAG}-run40-1.sigstore.json"
+    current = f"cmd-mox-{TAG}-run41-1.sigstore.json"
     extra = "cmd_mox-0.3.0-extra-py3-none-any.whl"
-    old = {_SDIST: b"canonical sdist", _WHEEL: b"old wheel"}
-    gh_assets = _assets(sdist=old[_SDIST], wheel=old[_WHEEL], bundle=prior)
-    publish, bundles = _write_publication_inputs(
+    old = {SDIST: b"canonical sdist", WHEEL: b"old wheel"}
+    gh_assets = build_github_assets(sdist=old[SDIST], wheel=old[WHEEL], bundle=prior)
+    publish, bundles = write_publication_inputs(
         tmp_path,
-        _PublicationInputs(
+        PublicationInputs(
             github_assets=gh_assets,
             bundle_name=current,
             wheel=b"rebuilt wheel",
@@ -65,14 +115,16 @@ def test_new_filename_retains_old_subjects_and_adds_its_matching_current_bundle(
     (publish / extra).write_bytes(b"new wheel filename")
     (bundles / current).write_bytes(
         provenance_bundle({
-            _SDIST: b"canonical sdist",
-            _WHEEL: b"rebuilt wheel",
+            SDIST: b"canonical sdist",
+            WHEEL: b"rebuilt wheel",
             extra: b"new wheel filename",
         })
     )
+    for name, content in old.items():
+        (tmp_path / "github-state" / "files" / name).write_bytes(content)
     (tmp_path / "downloads").mkdir()
     (tmp_path / "downloads" / extra).write_bytes(b"new wheel filename")
-    result = _run_github_step(
+    result = run_github_step(
         tmp_path,
         "stage",
         {
@@ -89,13 +141,13 @@ def test_new_filename_retains_old_subjects_and_adds_its_matching_current_bundle(
         "the new bundle must retain its attested subject claims"
     )
     typ.cast("list[dict[str, str]]", gh_assets["assets"]).extend([
-        {"name": extra, "digest": f"sha256:{_digest(b'new wheel filename')}"},
+        {"name": extra, "digest": f"sha256:{digest(b'new wheel filename')}"},
         {
             "name": current,
-            "digest": f"sha256:{_digest((bundles / current).read_bytes())}",
+            "digest": f"sha256:{digest((bundles / current).read_bytes())}",
         },
     ])
-    result = _run_github_step(
+    result = run_github_step(
         tmp_path,
         "verify",
         {"GH_ASSETS_JSON": json.dumps(gh_assets), "PYPI_INDEX_PATH": "pypi-index.json"},
@@ -108,18 +160,20 @@ def test_uncovered_canonical_digest_blocks_pypi_and_github_before_staging(
     tmp_path: Path, *, missing_subject: bool
 ) -> None:
     """A retained bundle name cannot cover missing or mismatched wheel subjects."""
-    prior = f"cmd-mox-{_TAG}-run40-1.sigstore.json"
+    prior = f"cmd-mox-{TAG}-run40-1.sigstore.json"
     old_sdist, old_wheel = b"canonical sdist", b"old wheel"
-    subjects = {_SDIST: old_sdist}
+    subjects = {SDIST: old_sdist}
     if not missing_subject:
-        subjects[_WHEEL] = b"different wheel digest"
-    publish, _ = _write_publication_inputs(
+        subjects[WHEEL] = b"different wheel digest"
+    publish, _ = write_publication_inputs(
         tmp_path,
-        _PublicationInputs(
-            github_assets=_assets(sdist=old_sdist, wheel=old_wheel, bundle=prior),
-            bundle_name=f"cmd-mox-{_TAG}-run41-1.sigstore.json",
+        PublicationInputs(
+            github_assets=build_github_assets(
+                sdist=old_sdist, wheel=old_wheel, bundle=prior
+            ),
+            bundle_name=f"cmd-mox-{TAG}-run41-1.sigstore.json",
             wheel=b"rebuilt wheel",
-            pypi_assets={_SDIST: old_sdist},
+            pypi_assets={SDIST: old_sdist},
             retained_subjects={prior: subjects},
         ),
     )
@@ -135,15 +189,15 @@ def test_uncovered_canonical_digest_blocks_pypi_and_github_before_staging(
     assert "has no matching provenance subject" in pypi_result.stderr, (
         "the error must identify subject-level coverage"
     )
-    assert (publish / _WHEEL).read_bytes() == b"rebuilt wheel", (
+    assert (publish / WHEEL).read_bytes() == b"rebuilt wheel", (
         "failed provenance checks must precede filesystem mutations"
     )
-    github_result = _run_github_step(
+    github_result = run_github_step(
         tmp_path, "stage", {"PYPI_INDEX_PATH": "pypi-index.json"}
     )
     assert github_result.returncode == 1, (
         "uncovered carried bytes must also block GitHub staging"
     )
-    assert not (tmp_path / "github-upload").exists(), (
+    assert not list((tmp_path / "github-upload").iterdir()), (
         "no assets may be staged after failed provenance validation"
     )

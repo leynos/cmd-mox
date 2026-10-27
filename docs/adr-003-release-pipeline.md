@@ -79,7 +79,7 @@ The first automated release must be a version above `0.2.0`. PyPI already holds
 the hand-uploaded `0.2.0` wheel and sdist, so re-tagging `0.2.0` is a PyPI
 no-op. Its GitHub Release has no sdist or bundle from this workflow.
 
-## Risks
+## Known risks and limitations
 
 - PyPI's Trusted Publisher and the GitHub `pypi` environment must agree on the
   owner, repository, workflow filename and environment name. A mismatch blocks

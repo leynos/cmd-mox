@@ -17,7 +17,6 @@ if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
 Subjects = frozenset[tuple[str, str]]
-_SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]*")
 _BUNDLE_NAME = re.compile(r"(?P<family>cmd-mox-.+)-run[0-9]+-[0-9]+\.sigstore\.json")
 
 
@@ -25,12 +24,12 @@ class ReleaseAssetError(Exception):
     """A release asset is missing, unsafe, or holds unexpected bytes."""
 
 
-class UnsafeAssetNamesError(ReleaseAssetError):
-    """One or more filenames cannot safely be passed to GitHub CLI."""
+class InvalidAttestationPurposeError(ReleaseAssetError):
+    """The attestation candidate command has an unsupported purpose."""
 
-    def __init__(self, names: list[str]) -> None:
-        """Include unsafe names in the workflow error detail."""
-        super().__init__(f"refusing unsafe artefact names: {names}")
+    def __init__(self) -> None:
+        """Explain the supported workflow destinations."""
+        super().__init__("--purpose must be pypi or github")
 
 
 class DigestMismatchError(ReleaseAssetError):
@@ -39,14 +38,6 @@ class DigestMismatchError(ReleaseAssetError):
     def __init__(self, name: str, actual: str, expected: str | None) -> None:
         """Include the actual and expected digest in the error detail."""
         super().__init__(f"{name} has sha256 {actual}, expected {expected}")
-
-
-class InsecurePypiDownloadError(ReleaseAssetError):
-    """A selected PyPI download URL does not use HTTPS."""
-
-    def __init__(self) -> None:
-        """Explain why an insecure download cannot be used."""
-        super().__init__("every PyPI download must use HTTPS")
 
 
 class UnattestedReleaseAssetsError(ReleaseAssetError):
@@ -75,14 +66,6 @@ class Plan:
 
 
 @dc.dataclass(frozen=True, slots=True)
-class PypiFile:
-    """One indexed distribution's digest and absolute download URL."""
-
-    sha256: str
-    url: str
-
-
-@dc.dataclass(frozen=True, slots=True)
 class State:
     """Preloaded distribution, destination, and provenance inventories.
 
@@ -93,7 +76,7 @@ class State:
     """
 
     local: cabc.Mapping[str, str]
-    pypi: cabc.Mapping[str, PypiFile]
+    pypi: cabc.Mapping[str, str]
     github: cabc.Mapping[str, str | None]
     current_bundles: cabc.Mapping[str, Subjects] = dc.field(default_factory=dict)
     retained_bundles: cabc.Mapping[str, Subjects] = dc.field(default_factory=dict)
@@ -138,31 +121,6 @@ class GitHubStage:
     fetch: tuple[str, ...]
     local: tuple[str, ...]
     bundles: tuple[str, ...]
-
-
-def safe_names(names: cabc.Iterable[str]) -> list[str]:
-    """Validate asset names and return a stable unique inventory.
-
-    Parameters
-    ----------
-    names : collections.abc.Iterable[str]
-        Untrusted filenames from local or remote inventories.
-
-    Returns
-    -------
-    list[str]
-        Sorted, unique names accepted by the release filename rule.
-
-    Raises
-    ------
-    UnsafeAssetNamesError
-        If a name cannot safely be passed as one GitHub CLI argument.
-    """
-    result = sorted(set(names))
-    unsafe = [name for name in result if not _SAFE_NAME.fullmatch(name)]
-    if unsafe:
-        raise UnsafeAssetNamesError(unsafe)
-    return result
 
 
 def _canonical_source(
@@ -310,7 +268,7 @@ def _source_digest(state: State, name: str, source: Source) -> str | None:
     """
     match source:
         case Source.PYPI:
-            return state.pypi[name].sha256
+            return state.pypi[name]
         case Source.GITHUB:
             return state.github[name]
         case Source.LOCAL:
@@ -416,22 +374,25 @@ def _provenance_problems(
     ]
 
 
-def require_provenance(state: State) -> None:
+def require_provenance(state: State, names: cabc.Iterable[str] | None = None) -> None:
     """Reject canonical distributions without retained or attachable subjects.
 
     Parameters
     ----------
     state : State
         Preloaded distribution and provenance inventories.
+    names : collections.abc.Iterable[str] or None, optional
+        A subset whose bytes are about to be uploaded. ``None`` checks every
+        canonical distribution.
 
     Raises
     ------
     UnattestedReleaseAssetsError
         If any canonical distribution lacks an exact name/digest subject.
     """
-    problems = _provenance_problems(
-        canonical_digests(state), _available_subjects(state)
-    )
+    digests = canonical_digests(state)
+    selected = digests if names is None else {name: digests[name] for name in names}
+    problems = _provenance_problems(selected, _available_subjects(state))
     if problems:
         raise UnattestedReleaseAssetsError(problems)
 
@@ -485,7 +446,7 @@ def verify(state: State) -> list[str]:
         Every missing file, digest disagreement, or unattested canonical byte.
 
     """
-    pypi = {name: file.sha256 for name, file in state.pypi.items()}
+    pypi = dict(state.pypi)
     return [
         *mismatches(state.local, pypi, state.github),
         *_provenance_problems(canonical_digests(state), _attached_subjects(state)),

@@ -18,12 +18,12 @@ if typ.TYPE_CHECKING:
     from pathlib import Path
 
 
-_TAG = "v0.3.0-beta1"
-_SDIST = "cmd_mox-0.3.0.tar.gz"
-_WHEEL = "cmd_mox-0.3.0-py3-none-any.whl"
+TAG = "v0.3.0-beta1"
+SDIST = "cmd_mox-0.3.0.tar.gz"
+WHEEL = "cmd_mox-0.3.0-py3-none-any.whl"
 
 
-class _PublicationInputs(typ.NamedTuple):
+class PublicationInputs(typ.NamedTuple):
     """Describe the release files and destination state for one test."""
 
     github_assets: dict[str, object]
@@ -40,7 +40,38 @@ def _write_json(path: Path, document: object) -> None:
     path.write_text(json.dumps(document), encoding="utf-8")
 
 
-def _digest(content: bytes) -> str:
+def _write_verified_subject_manifest(
+    root: Path,
+    inputs: PublicationInputs,
+    built_assets: dict[str, bytes],
+) -> None:
+    """Model successful workflow signature checks for a later verify step."""
+    index_assets = built_assets if inputs.pypi_assets is None else inputs.pypi_assets
+    listed_assets = typ.cast(
+        "list[dict[str, str]]", inputs.github_assets.get("assets", [])
+    )
+    rows = [
+        f"{inputs.bundle_name}\t{name}\t{digest(content)}"
+        for name, content in sorted(built_assets.items())
+    ]
+    for asset in listed_assets:
+        name = asset["name"]
+        if name.endswith(".sigstore.json"):
+            subjects = (
+                index_assets
+                if inputs.retained_subjects is None
+                else inputs.retained_subjects[name]
+            )
+            rows.extend(
+                f"{name}\t{subject}\t{digest(content)}"
+                for subject, content in sorted(subjects.items())
+            )
+    (root / "verified-subjects.tsv").write_text(
+        "\n".join(rows) + "\n", encoding="utf-8"
+    )
+
+
+def digest(content: bytes) -> str:
     """Return a lowercase SHA-256 digest for test asset content.
 
     Returns
@@ -51,7 +82,7 @@ def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def _gh_call(argv: list[str]) -> dict[str, object]:
+def gh_call(argv: list[str]) -> dict[str, object]:
     """Return one expected recording-stub call for the GitHub CLI.
 
     Returns
@@ -62,7 +93,7 @@ def _gh_call(argv: list[str]) -> dict[str, object]:
     return {"tool": "gh", "argv": argv}
 
 
-def _assets(
+def build_github_assets(
     *, sdist: bytes, wheel: bytes, bundle: str | None = None
 ) -> dict[str, object]:
     """Return a GitHub API asset response for a release's distributions.
@@ -73,16 +104,16 @@ def _assets(
         GitHub assets with digests and an optional provenance bundle.
     """
     items: list[dict[str, str]] = [
-        {"name": _SDIST, "digest": f"sha256:{_digest(sdist)}"},
-        {"name": _WHEEL, "digest": f"sha256:{_digest(wheel)}"},
+        {"name": SDIST, "digest": f"sha256:{digest(sdist)}"},
+        {"name": WHEEL, "digest": f"sha256:{digest(wheel)}"},
     ]
     if bundle is not None:
-        bundle_digest = _digest(provenance_bundle({_SDIST: sdist, _WHEEL: wheel}))
+        bundle_digest = digest(provenance_bundle({SDIST: sdist, WHEEL: wheel}))
         items.append({"name": bundle, "digest": f"sha256:{bundle_digest}"})
     return {"assets": items}
 
 
-def _run_github_step(
+def run_github_step(
     tmp_path: Path, step_id: str, extra_env: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
     """Run one GitHub publication step with shared recording-tool defaults.
@@ -100,15 +131,15 @@ def _run_github_step(
         env={
             "FAKE_TOOL_LOG": str(tmp_path / "tool-calls.jsonl"),
             "PATH": f"{tools}:/usr/bin:/bin",
-            "TAG_NAME": _TAG,
+            "TAG_NAME": TAG,
             **extra_env,
         },
     )
 
 
-def _write_publication_inputs(
+def write_publication_inputs(
     root: Path,
-    inputs: _PublicationInputs,
+    inputs: PublicationInputs,
 ) -> tuple[Path, Path]:
     """Create local distributions, index and provenance bundle for a release.
 
@@ -121,16 +152,16 @@ def _write_publication_inputs(
     bundles = root / "dist" / "attestations"
     publish.mkdir(parents=True)
     bundles.mkdir()
-    (publish / _SDIST).write_bytes(inputs.sdist)
-    (publish / _WHEEL).write_bytes(inputs.wheel)
-    built_assets = {_SDIST: inputs.sdist, _WHEEL: inputs.wheel}
+    (publish / SDIST).write_bytes(inputs.sdist)
+    (publish / WHEEL).write_bytes(inputs.wheel)
+    built_assets = {SDIST: inputs.sdist, WHEEL: inputs.wheel}
     (bundles / inputs.bundle_name).write_bytes(provenance_bundle(built_assets))
     index_assets = built_assets if inputs.pypi_assets is None else inputs.pypi_assets
     index = {
         "files": [
             {
                 "filename": name,
-                "hashes": {"sha256": _digest(content)},
+                "hashes": {"sha256": digest(content)},
                 "url": f"https://files.example.invalid/{name}",
             }
             for name, content in index_assets.items()
@@ -151,8 +182,9 @@ def _write_publication_inputs(
             )
             content = provenance_bundle(subjects)
             (retained / name).write_bytes(content)
-            asset["digest"] = f"sha256:{_digest(content)}"
+            asset["digest"] = f"sha256:{digest(content)}"
     _write_json(root / "pypi-index.json", index)
     _write_json(root / "release-assets.json", inputs.github_assets)
     _write_json(root / "github-state" / "assets.json", inputs.github_assets)
+    _write_verified_subject_manifest(root, inputs, built_assets)
     return publish, bundles

@@ -1,89 +1,26 @@
 #!/usr/bin/env python3
-"""Filesystem and workflow adapters for pure release reconciliation decisions.
+"""Command-line workflow adapter for release reconciliation decisions.
 
 The workflow invokes this module as ``python3 -m scripts.release_assets_cli``.
-All network access remains in its quoted ``curl`` and ``gh`` steps. This
-adapter explicitly loads inventories, file digests, and DSSE subject claims;
-it does not replace consumers' cryptographic Sigstore verification.
+It coordinates filesystem adapters with the workflow's GitHub CLI signature
+checks before exposing release decisions.
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
 import dataclasses as dc
-import hashlib
-import json
 import os
-import re
 import shutil
 import sys
 import typing as typ
-import urllib.parse
 from pathlib import Path
 
 from scripts import release_assets as assets
+from scripts import release_assets_io as asset_io
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
-
-INDEX_URL = "https://pypi.org/simple/cmd-mox/"
-_SHA256 = re.compile(r"[0-9a-f]{64}")
-
-
-class _IndexFile(typ.TypedDict):
-    """One PEP 691 file record."""
-
-    filename: str
-    hashes: dict[str, str]
-    url: str
-
-
-class _Index(typ.TypedDict, total=False):
-    """A PEP 691 document with an optional file inventory."""
-
-    files: list[_IndexFile]
-
-
-class _GitHubAsset(typ.TypedDict):
-    """One GitHub asset record."""
-
-    name: str
-    digest: typ.NotRequired[str | None]
-
-
-class _GitHubAssets(typ.TypedDict, total=False):
-    """A GitHub release asset response."""
-
-    assets: list[_GitHubAsset]
-
-
-class _Subject(typ.TypedDict):
-    """One decoded in-toto subject."""
-
-    name: str
-    digest: dict[str, str]
-
-
-class _Statement(typ.TypedDict):
-    """The build-provenance statement fields this adapter consumes."""
-
-    _type: str
-    predicateType: str
-    subject: list[_Subject]
-
-
-class _Envelope(typ.TypedDict):
-    """The DSSE content fields needed to inspect subject claims."""
-
-    payloadType: str
-    payload: str
-
-
-class _Bundle(typ.TypedDict):
-    """A Sigstore bundle containing a DSSE envelope."""
-
-    dsseEnvelope: _Envelope
 
 
 class _Arguments(argparse.Namespace):
@@ -96,6 +33,8 @@ class _Arguments(argparse.Namespace):
     github_files: Path | None
     bundles: Path | None
     output: Path | None
+    verified_subjects: Path | None
+    purpose: str | None
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -105,202 +44,18 @@ class _Invocation:
     state: assets.State
     args: _Arguments
     output_path: Path | None
+    pypi_urls: dict[str, str]
 
 
-def _digest(value: object) -> str:
-    """Validate one expected SHA-256 digest.
+@dc.dataclass(frozen=True, slots=True)
+class _BundleInventory:
+    """Current and retained bundle claims with their verified file paths."""
 
-    Returns
-    -------
-    str
-        The validated lower-case hexadecimal digest.
-
-    Raises
-    ------
-    ReleaseAssetError
-        If the input is missing or violates its declared contract.
-    """
-    match value:
-        case str() as text:
-            digest = text.lower()
-        case _:
-            digest = ""
-    if not _SHA256.fullmatch(digest):
-        msg = f"invalid SHA-256 digest: {value}"
-        raise assets.ReleaseAssetError(msg)
-    return digest
-
-
-def read_pypi_index(path: Path) -> dict[str, assets.PypiFile]:
-    """Load PEP 691 filenames, SHA-256 digests, and resolved download URLs.
-
-    File reads may raise ``OSError``; malformed JSON, fields, names, or
-    digests raise ``ValueError``, ``KeyError``, ``TypeError``, or
-    ``ReleaseAssetError``. The command boundary handles those failures.
-
-    Parameters
-    ----------
-    path : pathlib.Path
-        Saved PyPI Simple index JSON document.
-
-    Returns
-    -------
-    dict[str, scripts.release_assets.PypiFile]
-        Validated files keyed by safe filename; absent ``files`` means empty.
-
-    """
-    document = typ.cast("_Index", json.loads(path.read_text(encoding="utf-8")))
-    result = {
-        entry["filename"]: assets.PypiFile(
-            _digest(entry["hashes"]["sha256"]),
-            urllib.parse.urljoin(INDEX_URL, entry["url"]),
-        )
-        for entry in document.get("files", [])
-    }
-    assets.safe_names(result)
-    return result
-
-
-def read_github_assets(path: Path) -> dict[str, str | None]:
-    """Load safe GitHub asset names and their optional SHA-256 digests.
-
-    File reads may raise ``OSError``; malformed JSON, fields, names, or
-    digests raise ``ValueError``, ``KeyError``, ``TypeError``, or
-    ``ReleaseAssetError``. The command boundary handles those failures.
-
-    Parameters
-    ----------
-    path : pathlib.Path
-        Saved ``gh release view --json assets`` response.
-
-    Returns
-    -------
-    dict[str, str or None]
-        Asset inventory with unsupported digest types represented as absent.
-
-    """
-    document = typ.cast("_GitHubAssets", json.loads(path.read_text(encoding="utf-8")))
-    result = {
-        entry["name"]: _github_digest(entry.get("digest"))
-        for entry in document.get("assets", [])
-    }
-    assets.safe_names(result)
-    return result
-
-
-def _github_digest(value: object) -> str | None:
-    """Decode a supported GitHub digest without inventing absent hashes.
-
-    Returns
-    -------
-    str or None
-        The supported digest, or ``None`` for another digest form.
-    """
-    match value:
-        case str() as digest if digest.startswith("sha256:"):
-            return _digest(digest.removeprefix("sha256:"))
-        case _:
-            return None
-
-
-def sha256_of(path: Path) -> str:
-    """Read one file and return its SHA-256 digest.
-
-    Opening or reading the file may raise ``OSError``.
-
-    Returns
-    -------
-    str
-        Lower-case hexadecimal digest.
-
-    """
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-def local_names(directory: Path) -> list[str]:
-    """Read a directory and validate its stable filename inventory.
-
-    Directory reads may raise ``OSError``; unsafe entries raise
-    ``UnsafeAssetNamesError``.
-
-    Returns
-    -------
-    list[str]
-        Sorted safe filenames.
-
-    """
-    return assets.safe_names(path.name for path in directory.iterdir())
-
-
-def check_digest(path: Path, expected: str | None) -> None:
-    """Read a file and reject bytes differing from an expected digest.
-
-    Opening or reading the file may raise ``OSError``.
-
-    Raises
-    ------
-    DigestMismatchError
-        If the expected digest is absent or differs from the actual bytes.
-    """
-    actual = sha256_of(path)
-    if actual != expected:
-        raise assets.DigestMismatchError(path.name, actual, expected)
-
-
-def read_bundle_subjects(path: Path) -> assets.Subjects:
-    """Load exact filename/digest claims from a Sigstore DSSE bundle.
-
-    File reads may raise ``OSError``; malformed JSON, base64, fields, or
-    digests raise ``ValueError``, ``KeyError``, ``TypeError``, or
-    ``ReleaseAssetError`` at this adapter boundary.
-
-    Parameters
-    ----------
-    path : pathlib.Path
-        Bundle emitted by ``actions/attest-build-provenance`` or retained by
-        an earlier run. This reads claims; signature verification remains a
-        separate consumer operation.
-
-    Returns
-    -------
-    frozenset[tuple[str, str]]
-        Safe subject names paired with validated SHA-256 digests.
-
-    Raises
-    ------
-    ReleaseAssetError
-        If the payload is not an in-toto SLSA build-provenance statement.
-    """
-    document = typ.cast("_Bundle", json.loads(path.read_text(encoding="utf-8")))
-    envelope = document["dsseEnvelope"]
-    if envelope["payloadType"] != "application/vnd.in-toto+json":
-        msg = f"{path.name} is not an in-toto DSSE bundle"
-        raise assets.ReleaseAssetError(msg)
-    payload = base64.b64decode(envelope["payload"], validate=True)
-    statement = typ.cast("_Statement", json.loads(payload))
-    if (
-        statement["_type"] != "https://in-toto.io/Statement/v1"
-        or statement["predicateType"] != "https://slsa.dev/provenance/v1"
-    ):
-        msg = f"{path.name} is not SLSA build provenance"
-        raise assets.ReleaseAssetError(msg)
-    subjects = frozenset(
-        (entry["name"], _digest(entry["digest"]["sha256"]))
-        for entry in statement["subject"]
-    )
-    assets.safe_names(name for name, _ in subjects)
-    return subjects
-
-
-def write_output(path: Path, name: str, *, value: bool) -> None:
-    """Append one workflow boolean to an explicitly supplied output path.
-
-    Opening or writing the output file may raise ``OSError``.
-
-    """
-    with path.open("a", encoding="utf-8") as output:
-        output.write(f"{name}={str(value).lower()}\n")
+    state: assets.State
+    current: dict[str, assets.Subjects]
+    retained: dict[str, assets.Subjects]
+    paths: dict[str, Path]
+    combined: dict[str, assets.Subjects]
 
 
 def _path(args: _Arguments, option: str) -> Path:
@@ -321,6 +76,7 @@ def _path(args: _Arguments, option: str) -> Path:
         "github_files": args.github_files,
         "bundles": args.bundles,
         "output": args.output,
+        "verified_subjects": args.verified_subjects,
     }
     value = paths[option]
     if value is None:
@@ -336,68 +92,255 @@ def _current_bundles(directory: Path) -> dict[str, assets.Subjects]:
     -------
     dict[str, assets.Subjects]
         Current bundle names and their validated subject claims.
+    """
+    result: dict[str, assets.Subjects] = {}
+    for name in _validated_bundle_names(directory):
+        result[name] = asset_io.read_bundle_subjects(directory / name)
+    return result
+
+
+def _validated_bundle_names(directory: Path) -> list[str]:
+    """Return provenance bundle names after validating their tag family.
+
+    Returns
+    -------
+    list[str]
+        Valid bundle filenames in directory order.
 
     Raises
     ------
     ReleaseAssetError
-        If the input is missing or violates its declared contract.
+        If a filename is not a release provenance bundle.
     """
-    result: dict[str, assets.Subjects] = {}
-    for name in local_names(directory):
+    names = asset_io.local_names(directory)
+    for name in names:
         if assets.bundle_family(name) is None:
             msg = f"unexpected provenance bundle name: {name}"
             raise assets.ReleaseAssetError(msg)
-        result[name] = read_bundle_subjects(directory / name)
-    return result
+    return names
 
 
-def _retained_bundles(
-    state: assets.State, directory: Path, current_directory: Path
-) -> dict[str, assets.Subjects]:
-    """Read retained claims and check available GitHub asset digests.
+def _current_bundle_names(directory: Path) -> dict[str, assets.Subjects]:
+    """Read current-run bundle names without interpreting their claims.
 
     Returns
     -------
     dict[str, assets.Subjects]
-        Inspected subject claims for bundles attached to this tag.
+        Current bundle names mapped to empty subject inventories.
+    """
+    return {name: frozenset() for name in _validated_bundle_names(directory)}
+
+
+def _retained_bundles(
+    state: assets.State, directory: Path, current_directory: Path
+) -> tuple[dict[str, assets.Subjects], dict[str, Path]]:
+    """Read retained claims and check available GitHub asset digests.
+
+    Returns
+    -------
+    tuple[dict[str, assets.Subjects], dict[str, pathlib.Path]]
+        Inspected subject claims and their resolved input paths.
     """
     result: dict[str, assets.Subjects] = {}
+    paths: dict[str, Path] = {}
     for name in assets.retained_bundle_names(state):
         path = directory / name
         if not path.is_file() and name in state.current_bundles:
             path = current_directory / name
-            check_digest(path, state.github[name])
+            asset_io.check_digest(path, state.github[name])
         elif state.github[name] is not None:
-            check_digest(path, state.github[name])
-        result[name] = read_bundle_subjects(path)
-    return result
+            asset_io.check_digest(path, state.github[name])
+        result[name] = asset_io.read_bundle_subjects(path)
+        paths[name] = path
+    return result, paths
 
 
-def _load_state(args: _Arguments) -> assets.State:
+def _verified_bundle_subjects(
+    bundles: dict[str, assets.Subjects],
+    verified: dict[str, assets.Subjects],
+) -> dict[str, assets.Subjects]:
+    """Keep only bundle subjects recorded by the workflow verifier.
+
+    Returns
+    -------
+    dict[str, assets.Subjects]
+        Subject claims grouped by bundle filename, limited to verified rows.
+    """
+    return {
+        bundle: subjects & verified.get(bundle, frozenset())
+        for bundle, subjects in bundles.items()
+    }
+
+
+def _load_state(args: _Arguments) -> tuple[assets.State, dict[str, str]]:
     """Load environmental inventories once before pure reconciliation.
 
     Returns
     -------
-    assets.State
-        An immutable snapshot with every required environmental input loaded.
+    tuple[assets.State, dict[str, str]]
+        The immutable release snapshot and its adapter-owned PyPI URLs.
     """
-    index = _path(args, "index") if args.command in _INDEX_COMMANDS else None
-    state = assets.State(
-        {name: sha256_of(args.publish / name) for name in local_names(args.publish)},
-        read_pypi_index(index) if index is not None else {},
-        read_github_assets(args.assets),
+    index = _load_index(args)
+    state = _read_base_state(args, index)
+    if args.command == "carryover":
+        state = _with_current_bundle_names(args, state)
+    if args.command in _OUTPUT_COMMANDS:
+        _path(args, "output")
+    if _needs_provenance(args, state):
+        state = _with_verified_provenance(args, state)
+    return state, index.urls
+
+
+def _load_index(args: _Arguments) -> asset_io.PypiIndex:
+    """Read the PyPI index only for commands that consume its inventory.
+
+    Returns
+    -------
+    asset_io.PypiIndex
+        Index digests and URLs, or empty maps for commands that do not need it.
+    """
+    if args.command not in _INDEX_COMMANDS:
+        return asset_io.PypiIndex({}, {})
+    return asset_io.read_pypi_index(_path(args, "index"))
+
+
+def _read_base_state(args: _Arguments, index: asset_io.PypiIndex) -> assets.State:
+    """Snapshot local build, PyPI, and GitHub inventories for one command.
+
+    Returns
+    -------
+    assets.State
+        The immutable release inventory snapshot.
+    """
+    local = {
+        name: asset_io.sha256_of(args.publish / name)
+        for name in asset_io.local_names(args.publish)
+    }
+    github = asset_io.read_github_assets(args.assets)
+    return assets.State(local, index.digests, github)
+
+
+def _with_current_bundle_names(args: _Arguments, state: assets.State) -> assets.State:
+    """Attach checked current-run bundle names for the carry-over listing.
+
+    Returns
+    -------
+    assets.State
+        The state with current-run bundle names attached.
+    """
+    names = _current_bundle_names(_path(args, "bundles"))
+    return dc.replace(state, current_bundles=names)
+
+
+def _needs_provenance(args: _Arguments, state: assets.State) -> bool:
+    """Select commands needing trusted subjects for actual publication bytes.
+
+    Returns
+    -------
+    bool
+        Whether command execution needs verified bundle subjects.
+    """
+    if args.command not in _PROVENANCE_COMMANDS:
+        return False
+    return args.command != "stage-pypi" or bool(state.plan().pypi_uploads)
+
+
+def _with_verified_provenance(args: _Arguments, state: assets.State) -> assets.State:
+    """Load bundle claims and keep subjects verified against exact bytes.
+
+    Returns
+    -------
+    assets.State
+        The state with only cryptographically verified subjects retained.
+    """
+    inventory = _read_bundle_inventory(args, state)
+    verified_rows = asset_io.read_verified_subjects(_path(args, "verified_subjects"))
+    verified = _verified_bundle_subjects(inventory.combined, verified_rows)
+    canonical = assets.canonical_digests(inventory.state)
+    relevant_names = (
+        inventory.state.plan().pypi_uploads
+        if args.command == "stage-pypi"
+        else canonical
     )
-    needs_provenance = args.command in _PROVENANCE_COMMANDS and not (
-        args.command == "stage-pypi" and not state.plan().pypi_uploads
+    required_subjects = frozenset((name, canonical[name]) for name in relevant_names)
+    verified = {
+        bundle: subjects & required_subjects for bundle, subjects in verified.items()
+    }
+    return dc.replace(
+        inventory.state,
+        current_bundles={name: verified[name] for name in inventory.current},
+        retained_bundles={name: verified[name] for name in inventory.retained},
     )
-    if not needs_provenance:
-        return state
+
+
+def _read_bundle_inventory(args: _Arguments, state: assets.State) -> _BundleInventory:
+    """Load current and retained bundle claims without trusting their subjects.
+
+    Returns
+    -------
+    _BundleInventory
+        Raw subject claims and their bundle paths for later verification.
+    """
     current_dir = _path(args, "bundles")
-    state = dc.replace(state, current_bundles=_current_bundles(current_dir))
-    if args.command in _RETAINED_COMMANDS:
-        retained = _retained_bundles(state, _path(args, "github_files"), current_dir)
-        return dc.replace(state, retained_bundles=retained)
-    return state
+    current = _current_bundles(current_dir)
+    state_with_current = dc.replace(state, current_bundles=current)
+    retained_dir = (
+        _path(args, "github_files") if args.command in _RETAINED_COMMANDS else None
+    )
+    retained, retained_paths = (
+        _retained_bundles(state_with_current, retained_dir, current_dir)
+        if retained_dir is not None
+        else ({}, {})
+    )
+    paths = {name: current_dir / name for name in current}
+    paths.update(retained_paths)
+    return _BundleInventory(
+        state_with_current, current, retained, paths, {**current, **retained}
+    )
+
+
+def _artifact_directories(args: _Arguments) -> list[Path]:
+    """Collect directories that may contain bytes matching bundle subjects.
+
+    Returns
+    -------
+    list[pathlib.Path]
+        Existing workflow input directories in which artifact bytes may occur.
+    """
+    result = [args.publish]
+    if args.github_files is not None:
+        result.append(args.github_files)
+    if args.output is not None:
+        result.append(args.output)
+    return result
+
+
+def _attestation_checks(invocation: _Invocation) -> None:
+    """Print digest-matched artifact/bundle pairs for the workflow verifier.
+
+    Raises
+    ------
+    InvalidAttestationPurposeError
+        If the requested workflow destination is not supported.
+    """
+    args, state = invocation.args, invocation.state
+    if args.purpose not in {"pypi", "github"}:
+        raise assets.InvalidAttestationPurposeError
+    if args.purpose == "github":
+        _path(args, "output")
+    inventory = _read_bundle_inventory(args, state)
+    canonical = assets.canonical_digests(inventory.state)
+    names = state.plan().pypi_uploads if args.purpose == "pypi" else canonical.keys()
+    required = frozenset((name, canonical[name]) for name in names)
+    directories = _artifact_directories(args)
+    for bundle, subjects in sorted(inventory.combined.items()):
+        bundle_path = inventory.paths[bundle]
+        for name, digest in sorted(subjects & required):
+            artifact = asset_io.matching_artifact(name, digest, directories)
+            if artifact is not None:
+                sys.stdout.write(
+                    f"{artifact}\t{bundle_path}\t{bundle}\t{name}\t{digest}\n"
+                )
 
 
 def _carryover(invocation: _Invocation) -> None:
@@ -417,7 +360,7 @@ def _stage_pypi_asset(
             (args.publish / name).unlink()
         case assets.Source.GITHUB:
             carried = _path(args, "github_files") / name
-            check_digest(carried, state.github[name])
+            asset_io.check_digest(carried, state.github[name])
             sys.stdout.write(f"::notice::Using the GitHub Release's bytes for {name}\n")
             shutil.copyfile(carried, args.publish / name)
         case assets.Source.LOCAL:
@@ -429,12 +372,12 @@ def _stage_pypi(invocation: _Invocation) -> None:
     state = invocation.state
     decided = state.plan()
     if decided.pypi_uploads:
-        assets.require_provenance(state)
+        assets.require_provenance(state, decided.pypi_uploads)
     for name, source in sorted(decided.canonical.items()):
         _stage_pypi_asset(invocation, name, source)
     if not decided.pypi_uploads:
         sys.stdout.write("Every artefact is already on PyPI; nothing to publish.\n")
-    write_output(
+    asset_io.write_output(
         _output_path(invocation), "remaining", value=bool(decided.pypi_uploads)
     )
 
@@ -458,32 +401,6 @@ def _output_path(invocation: _Invocation) -> Path:
     return invocation.output_path
 
 
-def _pypi_fetches(state: assets.State, names: tuple[str, ...]) -> list[tuple[str, str]]:
-    """Return selected PyPI downloads after enforcing HTTPS transport.
-
-    Parameters
-    ----------
-    state : scripts.release_assets.State
-        The immutable release inventory.
-    names : tuple[str, ...]
-        Selected filenames whose indexed URLs will be fetched.
-
-    Returns
-    -------
-    list[tuple[str, str]]
-        Filename and HTTPS URL pairs for the selected downloads.
-
-    Raises
-    ------
-    scripts.release_assets.InsecurePypiDownloadError
-        If any selected URL does not use HTTPS.
-    """
-    fetches = [(name, state.pypi[name].url) for name in names]
-    if any(not url.startswith("https://") for _, url in fetches):
-        raise assets.InsecurePypiDownloadError
-    return fetches
-
-
 def _copy_github_assets(
     args: _Arguments,
     decision: assets.GitHubStage,
@@ -498,27 +415,33 @@ def _copy_github_assets(
 
 
 def _stage_github(invocation: _Invocation) -> None:
-    """Execute copy decisions and print validated PyPI fetch rows."""
+    """Execute verified copy decisions after the workflow fetched PyPI bytes."""
     state, args = invocation.state, invocation.args
     decided = assets.stage_github(state)
-    fetches = _pypi_fetches(state, decided.fetch)
     output = _path(args, "output")
     output.mkdir(parents=True, exist_ok=True)
     _copy_github_assets(args, decided, output)
-    for name, url in fetches:
-        sys.stdout.write(f"{name}\t{url}\n")
-    write_output(
+    asset_io.write_output(
         _output_path(invocation),
         "pending",
         value=bool(decided.fetch or decided.local or decided.bundles),
     )
 
 
+def _fetch_github(invocation: _Invocation) -> None:
+    """Print PyPI downloads needed before provenance validation for GitHub."""
+    names = tuple(
+        sorted(invocation.state.plan().github_uploads & set(invocation.state.pypi))
+    )
+    for name, url in asset_io.pypi_fetches(invocation.pypi_urls, names):
+        sys.stdout.write(f"{name}\t{url}\n")
+
+
 def _check_fetched(invocation: _Invocation) -> None:
     """Read each downloaded PyPI file and require its indexed digest."""
     state, args = invocation.state, invocation.args
     for name in sorted(state.plan().github_uploads & set(state.pypi)):
-        check_digest(_path(args, "output") / name, state.pypi[name].sha256)
+        asset_io.check_digest(_path(args, "output") / name, state.pypi[name])
 
 
 def _missing_pypi(invocation: _Invocation) -> None:
@@ -545,21 +468,31 @@ def _verify(invocation: _Invocation) -> None:
 
 _COMMANDS: dict[str, cabc.Callable[[_Invocation], None]] = {
     "carryover": _carryover,
+    "attestation-checks": _attestation_checks,
     "stage-pypi": _stage_pypi,
+    "fetch-github": _fetch_github,
     "stage-github": _stage_github,
     "check-fetched": _check_fetched,
     "missing-pypi": _missing_pypi,
     "verify": _verify,
 }
 _INDEX_COMMANDS = frozenset({
+    "attestation-checks",
     "stage-pypi",
+    "fetch-github",
     "stage-github",
     "check-fetched",
     "missing-pypi",
     "verify",
 })
-_PROVENANCE_COMMANDS = frozenset({"carryover", "stage-pypi", "stage-github", "verify"})
-_RETAINED_COMMANDS = frozenset({"stage-pypi", "stage-github", "verify"})
+_PROVENANCE_COMMANDS = frozenset({"stage-pypi", "stage-github", "verify"})
+_RETAINED_COMMANDS = frozenset({
+    "attestation-checks",
+    "stage-pypi",
+    "stage-github",
+    "verify",
+})
+_OUTPUT_COMMANDS = frozenset({"stage-github", "verify"})
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -576,6 +509,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--assets", type=Path, required=True)
     for option in ("index", "github-files", "bundles", "output"):
         parser.add_argument(f"--{option}", type=Path)
+    parser.add_argument("--verified-subjects", type=Path)
+    parser.add_argument("--purpose", choices=("pypi", "github"))
     return parser
 
 
@@ -599,7 +534,8 @@ def main(argv: cabc.Sequence[str] | None = None) -> int:
             if args.command in {"stage-pypi", "stage-github"}
             else None
         )
-        invocation = _Invocation(_load_state(args), args, output)
+        state, pypi_urls = _load_state(args)
+        invocation = _Invocation(state, args, output, pypi_urls)
         _COMMANDS[args.command](invocation)
     except (
         assets.ReleaseAssetError,
