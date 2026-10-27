@@ -3,36 +3,25 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from pathlib import Path
 
 import pytest
 from helpers.release_publish import _IndexFetchCase, _tool_arguments, _write_index
 from helpers.release_workflow import (
-    RELEASE_WORKFLOW_PATH,
     install_fake_tools,
     load_workflow_step,
     read_tool_calls,
     run_bash_step,
-    should_skip_release_tests_for_mutation_sandbox,
+)
+from helpers.release_workflow import (
+    release_shell_marks as pytestmark,
 )
 
+__all__ = ["pytestmark"]
+
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-_RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
 _FETCH_INDEX_SCRIPT = _REPOSITORY_ROOT / "scripts" / "fetch_pypi_index.sh"
-pytestmark = [
-    pytest.mark.skipif(
-        should_skip_release_tests_for_mutation_sandbox(
-            Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
-        ),
-        reason="mutmut sandbox omits the release workflow and CLI",
-    ),
-    pytest.mark.skipif(
-        os.name == "nt" or shutil.which("bash") is None,
-        reason="release shell-step tests require Bash on a Unix-like system",
-    ),
-]
 
 
 @pytest.mark.parametrize(

@@ -19,6 +19,7 @@ import sys
 import typing as typ
 from pathlib import Path
 
+import pytest
 import yaml
 
 ActionInputs = typ.TypedDict(
@@ -83,6 +84,7 @@ class Workflow(typ.TypedDict):
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 RELEASE_WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_ASSETS_CLI_PATH = REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
 
 
 def should_skip_release_tests_for_mutation_sandbox(
@@ -107,6 +109,19 @@ def should_skip_release_tests_for_mutation_sandbox(
     return working_root.name == "mutants" and not (
         workflow_path.is_file() and cli_path.is_file()
     )
+
+
+mutation_sandbox_skip = pytest.mark.skipif(
+    should_skip_release_tests_for_mutation_sandbox(
+        Path.cwd(), RELEASE_WORKFLOW_PATH, RELEASE_ASSETS_CLI_PATH
+    ),
+    reason="mutmut sandbox omits the release workflow and CLI",
+)
+unix_bash_only = pytest.mark.skipif(
+    os.name == "nt" or shutil.which("bash") is None,
+    reason="release shell-step tests require Bash on a Unix-like system",
+)
+release_shell_marks = [mutation_sandbox_skip, unix_bash_only]
 
 
 def load_workflow() -> Workflow:

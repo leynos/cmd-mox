@@ -5,22 +5,16 @@ from __future__ import annotations
 import importlib
 import json
 import typing as typ
-from pathlib import Path
 
 import pytest
 from helpers.release_workflow import (
-    RELEASE_WORKFLOW_PATH,
-    should_skip_release_tests_for_mutation_sandbox,
+    mutation_sandbox_skip as pytestmark,
 )
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-_RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
-pytestmark = pytest.mark.skipif(
-    should_skip_release_tests_for_mutation_sandbox(
-        Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
-    ),
-    reason="mutmut sandbox omits the release workflow and CLI",
-)
+__all__ = ["pytestmark"]
+
+if typ.TYPE_CHECKING:
+    from pathlib import Path
 
 release_assets = typ.cast("typ.Any", importlib.import_module("scripts.release_assets"))
 release_asset_io = typ.cast(

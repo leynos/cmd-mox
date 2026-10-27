@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import typing as typ
 from pathlib import Path
 
@@ -20,28 +18,16 @@ from helpers.release_github import (
     write_publication_inputs,
 )
 from helpers.release_workflow import (
-    RELEASE_WORKFLOW_PATH,
     load_workflow_step,
     provenance_bundle,
     read_tool_calls,
     run_bash_step,
-    should_skip_release_tests_for_mutation_sandbox,
+)
+from helpers.release_workflow import (
+    release_shell_marks as pytestmark,
 )
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-_RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
-pytestmark = [
-    pytest.mark.skipif(
-        should_skip_release_tests_for_mutation_sandbox(
-            Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
-        ),
-        reason="mutmut sandbox omits the release workflow and CLI",
-    ),
-    pytest.mark.skipif(
-        os.name == "nt" or shutil.which("bash") is None,
-        reason="release shell-step tests require Bash on a Unix-like system",
-    ),
-]
+__all__ = ["pytestmark"]
 
 
 def test_failed_job_rerun_refreshes_attached_current_bundle_from_github(

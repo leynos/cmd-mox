@@ -3,40 +3,26 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import typing as typ
-from pathlib import Path
 
 import pytest
 from helpers.release_github import TAG, WHEEL, gh_call
 from helpers.release_workflow import (
-    RELEASE_WORKFLOW_PATH,
     install_fake_tools,
     load_workflow,
     load_workflow_step,
     read_tool_calls,
     run_bash_step,
-    should_skip_release_tests_for_mutation_sandbox,
 )
+from helpers.release_workflow import (
+    release_shell_marks as pytestmark,
+)
+
+__all__ = ["pytestmark"]
 
 if typ.TYPE_CHECKING:
     import subprocess
-
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-_RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
-pytestmark = [
-    pytest.mark.skipif(
-        should_skip_release_tests_for_mutation_sandbox(
-            Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
-        ),
-        reason="mutmut sandbox omits the release workflow and CLI",
-    ),
-    pytest.mark.skipif(
-        os.name == "nt" or shutil.which("bash") is None,
-        reason="release shell-step tests require Bash on a Unix-like system",
-    ),
-]
+    from pathlib import Path
 
 
 class _BundleAttachmentCase(typ.NamedTuple):

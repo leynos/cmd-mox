@@ -12,7 +12,6 @@ import tomllib
 import typing as typ
 from pathlib import Path
 
-import pytest
 import yaml
 from helpers.release_workflow import (
     RELEASE_WORKFLOW_PATH,
@@ -23,6 +22,11 @@ from helpers.release_workflow import (
     should_skip_release_tests_for_mutation_sandbox,
     workflow_triggers,
 )
+from helpers.release_workflow import (
+    mutation_sandbox_skip as pytestmark,
+)
+
+__all__ = ["pytestmark"]
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
@@ -30,13 +34,6 @@ _CI_WORKFLOW = _REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
 _BUILD_ACTION = (
     _REPOSITORY_ROOT / ".github" / "actions" / "pure-python-wheel" / "action.yml"
 )
-pytestmark = pytest.mark.skipif(
-    should_skip_release_tests_for_mutation_sandbox(
-        Path.cwd(), RELEASE_WORKFLOW_PATH, _ASSETS_CLI
-    ),
-    reason="mutmut sandbox omits the release workflow and CLI",
-)
-
 _EXPECTED_PERMISSIONS = {
     "check-version": {"contents": "read"},
     "build-dist": {"contents": "read"},
@@ -480,3 +477,37 @@ def test_release_test_modules_keep_fail_closed_imports() -> None:
         assert "should_skip_release_tests_for_mutation_sandbox" in source, (
             f"{path.name} must retain the sparse mutmut sandbox exemption"
         )
+
+
+def test_release_test_modules_share_skip_markers() -> None:
+    """Release modules reuse the shared mutation and shell test markers."""
+    expected_markers = {
+        "test_release_github_steps.py": "release_shell_marks",
+        "test_release_draft_bundle_steps.py": "release_shell_marks",
+        "test_release_distribution_steps.py": "release_shell_marks",
+        "test_release_index_steps.py": "release_shell_marks",
+        "test_release_provenance_steps.py": "release_shell_marks",
+        "test_release_retry_steps.py": "release_shell_marks",
+        "test_release_version_steps.py": "mutation_sandbox_skip",
+        "test_release_publish_steps.py": "unix_bash_only",
+        "test_release_workflow_contract.py": "mutation_sandbox_skip",
+    }
+    for module_name, marker in expected_markers.items():
+        source = (_REPOSITORY_ROOT / "tests" / module_name).read_text(encoding="utf-8")
+        assert f"{marker} as pytestmark" in source, (
+            f"{module_name} must import the shared {marker} mark as pytestmark"
+        )
+    helper_source = (
+        _REPOSITORY_ROOT / "tests" / "helpers" / "release_workflow.py"
+    ).read_text(encoding="utf-8")
+    for marker in (
+        "mutation_sandbox_skip",
+        "unix_bash_only",
+        "release_shell_marks",
+    ):
+        assert f"{marker} =" in helper_source, (
+            f"the shared release test helper must define {marker}"
+        )
+    assert should_skip_release_tests_for_mutation_sandbox.__name__ in helper_source, (
+        "the shared markers must preserve the mutation-sandbox skip helper"
+    )

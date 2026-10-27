@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shlex
-import shutil
 import sys
 import typing as typ
 from pathlib import Path
@@ -21,6 +19,7 @@ import yaml
 from helpers.release_github import TAG
 from helpers.release_publish import _write_index
 from helpers.release_workflow import (
+    RELEASE_ASSETS_CLI_PATH,
     RELEASE_WORKFLOW_PATH,
     install_fake_tools,
     load_workflow_step,
@@ -29,11 +28,14 @@ from helpers.release_workflow import (
     run_bash_step,
     should_skip_release_tests_for_mutation_sandbox,
 )
+from helpers.release_workflow import (
+    unix_bash_only as pytestmark,
+)
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-_RELEASE_ASSETS_CLI = _REPOSITORY_ROOT / "scripts" / "release_assets_cli.py"
+__all__ = ["pytestmark"]
+
 if should_skip_release_tests_for_mutation_sandbox(
-    Path.cwd(), RELEASE_WORKFLOW_PATH, _RELEASE_ASSETS_CLI
+    Path.cwd(), RELEASE_WORKFLOW_PATH, RELEASE_ASSETS_CLI_PATH
 ):
     pytest.skip(
         "mutmut sandbox omits the release workflow and CLI", allow_module_level=True
@@ -103,14 +105,6 @@ def _write_pypi_stage_fixture(root: Path) -> _PypiStageFixture:
     return _PypiStageFixture(
         publish, published_name, carried_name, local_name, index, curl_downloads
     )
-
-
-pytestmark = [
-    pytest.mark.skipif(
-        os.name == "nt" or shutil.which("bash") is None,
-        reason="release shell-step tests require Bash on a Unix-like system",
-    ),
-]
 
 
 def _write_github_assets(path: Path, digests: dict[str, str]) -> None:
