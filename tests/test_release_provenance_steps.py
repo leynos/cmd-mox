@@ -44,10 +44,10 @@ pytestmark = [
 ]
 
 
-def test_failed_job_rerun_verifies_attached_current_bundle_from_dist(
+def test_failed_job_rerun_refreshes_attached_current_bundle_from_github(
     tmp_path: Path,
 ) -> None:
-    """A just-uploaded bundle remains verifiable when the snapshot lacks it."""
+    """A bundle uploaded in a failed job is refreshed from current release state."""
     bundle = f"cmd-mox-{TAG}-run41-1.sigstore.json"
     _, current_bundles = write_publication_inputs(
         tmp_path,
@@ -62,11 +62,18 @@ def test_failed_job_rerun_verifies_attached_current_bundle_from_dist(
     )
     snapshot_bundle = tmp_path / "github-state" / "files" / bundle
     snapshot_bundle.unlink()
+    bundle_bytes = (current_bundles / bundle).read_bytes()
+    downloads = tmp_path / "github-downloads"
+    downloads.mkdir()
+    (downloads / SDIST).write_bytes(b"canonical sdist")
+    (downloads / WHEEL).write_bytes(b"canonical wheel")
+    (downloads / bundle).write_bytes(bundle_bytes)
 
     result = run_github_step(
         tmp_path,
         "stage",
         {
+            "GH_DOWNLOADS": str(downloads),
             "PYPI_INDEX_PATH": "pypi-index.json",
             "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
         },
@@ -84,12 +91,11 @@ def test_failed_job_rerun_verifies_attached_current_bundle_from_dist(
         (tmp_path / Path(argv[argv.index("--bundle") + 1])).resolve()
         for argv in attestation_calls
     }
-    current_bundle_path = (current_bundles / bundle).resolve()
-    assert bundle_paths == {current_bundle_path}, (
-        "verification must use the current-run bundle after snapshot fallback"
+    assert bundle_paths == {snapshot_bundle.resolve()}, (
+        "verification must use the bundle downloaded from the fresh GitHub inventory"
     )
-    assert current_bundle_path.is_file(), (
-        "the bundle passed to gh must exist on a retry"
+    assert snapshot_bundle.read_bytes() == bundle_bytes, (
+        "the fresh release bundle must reach the later staging decisions"
     )
 
 

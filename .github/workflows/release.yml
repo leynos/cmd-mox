@@ -338,6 +338,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p github-upload
+          mkdir -p github-state/files
+          python3 -m scripts.release_assets_cli carryover \
+            --publish dist/publish --assets release-assets.json \
+            --bundles dist/attestations > fresh-carryover.txt
+          while IFS= read -r name; do
+            [[ -n "${name}" ]] || continue
+            [[ -f "github-state/files/${name}" ]] && continue
+            gh release download "${TAG_NAME}" --pattern "${name}" \
+              --dir github-state/files
+          done < fresh-carryover.txt
           python3 -m scripts.release_assets_cli fetch-github \
             --publish dist/publish --index "${PYPI_INDEX_PATH}" \
             --assets release-assets.json > pypi-fetch.tsv
