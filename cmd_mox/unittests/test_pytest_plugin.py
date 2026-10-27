@@ -49,6 +49,23 @@ class BodyExceptionTestCase:
     expected_exit: pytest.ExitCode
 
 
+@dc.dataclass(slots=True, frozen=True)
+class WorkerPrefixTestCase:
+    """Test case data for worker-specific shim prefixes."""
+
+    worker_id: str | None
+    expected_fragment: str
+
+
+@dc.dataclass(slots=True, frozen=True)
+class VerificationTestCase:
+    """Test module and expected outcomes for verification behavior."""
+
+    test_definition: str
+    expected_outcomes: dict[str, int]
+    expected_output: str
+
+
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
 
 # Flags that disable CI-injected plugins (e.g. slipcover) which can fail
@@ -88,40 +105,33 @@ def test_fixture_basic(
 
 
 @pytest.mark.parametrize(
-    ("worker_id", "expected_fragment"),
-    [("gw99", "gw99"), (None, "main")],
-    ids=["xdist-worker", "main-process"],
+    "test_case",
+    [
+        pytest.param(WorkerPrefixTestCase("gw99", "gw99"), id="xdist-worker"),
+        pytest.param(WorkerPrefixTestCase(None, "main"), id="main-process"),
+    ],
 )
 def test_worker_prefixes(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
     run_nested_pytester: cabc.Callable[..., RunResult],
-    worker_id: str | None,
-    expected_fragment: str,
+    test_case: WorkerPrefixTestCase,
 ) -> None:
     """Worker ID is reflected in the environment prefix; falls back to 'main'."""
-    _run_prefix_scenario(
-        pytester,
-        monkeypatch,
-        run_nested_pytester,
-        worker_id=worker_id,
-        expected_fragment=expected_fragment,
-    )
+    _run_prefix_scenario(pytester, monkeypatch, run_nested_pytester, test_case)
 
 
 def _run_prefix_scenario(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
     run_nested_pytester: cabc.Callable[..., RunResult],
-    *,
-    worker_id: str | None,
-    expected_fragment: str,
+    test_case: WorkerPrefixTestCase,
 ) -> None:
     """Execute a minimal test module and assert the shim prefix fragment."""
-    if worker_id is None:
+    if test_case.worker_id is None:
         monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     else:
-        monkeypatch.setenv("PYTEST_XDIST_WORKER", worker_id)
+        monkeypatch.setenv("PYTEST_XDIST_WORKER", test_case.worker_id)
 
     test_module = textwrap.dedent(
         f"""
@@ -140,7 +150,7 @@ def _run_prefix_scenario(
             res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
             assert res.stdout.strip() == 'bar'
             shim_base = Path(cmd_mox.environment.shim_dir).name
-            assert '{expected_fragment}' in shim_base
+            assert '{test_case.expected_fragment}' in shim_base
         """
     )
     pytester.makepyfile(test_module)
@@ -185,53 +195,51 @@ def test_parallel_workers_use_isolated_directories(
         assert not record.socket.exists()
 
 
-def test_missing_invocation_fails_during_teardown(
+@pytest.mark.parametrize(
+    "test_case",
+    [
+        pytest.param(
+            VerificationTestCase(
+                test_definition="""
+def test_missing_invocation(cmd_mox):
+    cmd_mox.mock("hello").returns(stdout="hi")
+""",
+                expected_outcomes={"passed": 1, "errors": 1},
+                expected_output="*UnfulfilledExpectationError*",
+            ),
+            id="missing-invocation-fails-during-teardown",
+        ),
+        pytest.param(
+            VerificationTestCase(
+                test_definition="""
+def test_failure(cmd_mox):
+    cmd_mox.mock("late").returns(stdout="ok")
+    assert False
+""",
+                expected_outcomes={"failed": 1},
+                expected_output="*assert False*",
+            ),
+            id="verification-error-suppressed-on-test-failure",
+        ),
+    ],
+)
+def test_verification_outcomes(
     pytester: pytest.Pytester,
     run_nested_pytester: cabc.Callable[..., RunResult],
+    test_case: VerificationTestCase,
 ) -> None:
-    """Verification failures should fail the test even without explicit calls."""
+    """Check distinct verification outcomes through the same nested setup."""
     test_file = pytester.makepyfile(
-        """
-        import pytest
-
-        pytest_plugins = ("cmd_mox.pytest_plugin",)
-
-        def test_missing_invocation(cmd_mox):
-            cmd_mox.mock("hello").returns(stdout="hi")
-        """
+        'pytest_plugins = ("cmd_mox.pytest_plugin",)\n\n'
+        + textwrap.dedent(test_case.test_definition)
     )
 
     result = run_nested_pytester(
         *_DISABLE_CI_PLUGINS,
         test_path=test_file,
     )
-    result.assert_outcomes(passed=1, errors=1)
-    result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
-
-
-def test_verification_error_suppressed_on_test_failure(
-    pytester: pytest.Pytester,
-    run_nested_pytester: cabc.Callable[..., RunResult],
-) -> None:
-    """Primary test failures should mask verification errors."""
-    test_file = pytester.makepyfile(
-        """
-        import pytest
-
-        pytest_plugins = ("cmd_mox.pytest_plugin",)
-
-        def test_failure(cmd_mox):
-            cmd_mox.mock("late").returns(stdout="ok")
-            assert False
-        """
-    )
-
-    result = run_nested_pytester(
-        *_DISABLE_CI_PLUGINS,
-        test_path=test_file,
-    )
-    result.assert_outcomes(failed=1)
-    result.stdout.fnmatch_lines(["*assert False*"])
+    result.assert_outcomes(**test_case.expected_outcomes)
+    result.stdout.fnmatch_lines([test_case.expected_output])
 
 
 def test_call_hook_does_not_warn_on_ordinary_test_failure(
