@@ -68,12 +68,17 @@ missing project index is treated as empty. A repeated tag therefore succeeds
 without uploading an existing filename.
 
 The workflow creates or reuses a draft GitHub Release before publishing to
-PyPI. After PyPI contains every distribution, the final job reconciles the
-GitHub assets with PyPI's SHA-256 digests and then publishes the release. For
-each filename, source priority is PyPI, then an existing GitHub asset, then
-this run's local build. Existing assets are never overwritten. When bytes are
-carried over, their original provenance bundle is retained; the workflow does
-not replace it with a bundle for different bytes.
+PyPI. Before taking the asset snapshot, it attaches the current run's
+provenance bundle to a draft when that filename is absent. Later runs carry
+that bundle forward, preserving the attestation for PyPI's canonical bytes if
+the earlier run published to PyPI but failed before GitHub publication. An
+already-published release is not changed by this early attachment step. After
+PyPI contains every distribution, the final job reconciles the GitHub assets
+with PyPI's SHA-256 digests and then publishes the release. For each filename,
+source priority is PyPI, then an existing GitHub asset, then this run's local
+build. Existing assets are never overwritten. When bytes are carried over,
+their original provenance bundle is retained; the workflow does not replace it
+with a bundle for different bytes.
 
 The first automated release must be a version above `0.2.0`. PyPI already holds
 the hand-uploaded `0.2.0` wheel and sdist, so re-tagging `0.2.0` is a PyPI

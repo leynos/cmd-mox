@@ -151,6 +151,62 @@ jobs:
               gh release view "${TAG_NAME}" >/dev/null
             fi
           fi
+      - name: Retain the current provenance bundle on the draft
+        id: attach-bundle
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          bundle_name="cmd-mox-${TAG_NAME}-run${RUN_ID}-${RUN_ATTEMPT}.sigstore.json"
+          bundle_path="dist/attestations/${bundle_name}"
+          if [[ ! -f "${bundle_path}" ]]; then
+            echo "::error title=release-bundle::current run's provenance bundle is missing"
+            exit 1
+          fi
+          mkdir -p github-state
+          gh release view "${TAG_NAME}" --json isDraft,assets \
+            > github-state/release-assets-before-bundle.json
+          bundle_state="$(
+            python3 - "${bundle_name}" \
+              github-state/release-assets-before-bundle.json <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          name = sys.argv[1]
+          document = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          if not isinstance(document, dict):
+              raise SystemExit("release inventory must be a JSON object")
+          is_draft = document.get("isDraft")
+          assets = document.get("assets")
+          if not isinstance(is_draft, bool) or not isinstance(assets, list):
+              raise SystemExit("release inventory is missing draft state or assets")
+          if not all(isinstance(asset, dict) for asset in assets):
+              raise SystemExit("release inventory contains an invalid asset")
+          if not is_draft:
+              print("published")
+          elif any(asset.get("name") == name for asset in assets):
+              print("present")
+          else:
+              print("missing")
+          PY
+          )"
+          case "${bundle_state}" in
+            missing)
+              gh release upload "${TAG_NAME}" "${bundle_path}"
+              ;;
+            present)
+              echo "The current run's bundle is already attached."
+              ;;
+            published)
+              echo "The release is already published; early attachment is skipped."
+              ;;
+            *)
+              echo "::error title=release-bundle::release returned an invalid bundle state"
+              exit 1
+              ;;
+          esac
       - name: Snapshot existing release assets
         id: snapshot
         run: |

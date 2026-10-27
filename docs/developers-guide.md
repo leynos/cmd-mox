@@ -856,27 +856,34 @@ To publish a release:
 3. Watch the workflow graph. `check-version` and `build-dist` run first;
    attestation, the draft GitHub Release and PyPI publication follow before the
    GitHub Release is published.
-4. If a run needs retrying, re-run only its failed jobs so they reuse the
-   attested `release-dist` from the original run. PyPI filenames already
-   present in the project index are skipped, and existing GitHub assets are not
-   overwritten. A full rerun builds new distributions; if their bytes differ
-   from PyPI's files and the GitHub Release has no retained bundle for those
-   canonical bytes, the workflow fails safely. The final job waits for PyPI to
-   list every distribution before publishing the GitHub Release.
+4. For a draft release, the workflow attaches the current run's provenance
+   bundle before PyPI publication, then snapshots it with existing release
+   assets. If a run needs retrying, re-run only its failed jobs so they reuse
+   the attested `release-dist` from the original run. A full rerun builds new
+   distributions, but it can carry the prior bundle from the draft to verify
+   PyPI's canonical bytes. PyPI filenames already present in the project index
+   are skipped, and existing GitHub assets are not overwritten. If no retained
+   bundle matches the canonical bytes, the workflow fails safely. The final job
+   waits for PyPI to list every distribution before publishing the GitHub
+   Release.
 5. Verify the provenance attestations for the sdist and each wheel against the
    `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
    the build run that attested those bytes.
 
-For screen readers: This flowchart shows how the release workflow selects
-canonical bytes from PyPI, an existing GitHub Release, or the current attested
-build. It waits for PyPI, uploads missing assets to the draft GitHub Release,
-then verifies matching digests before publication. A mismatch leaves the draft
-unpublished.
+For screen readers: This flowchart starts with the attested sdist and wheel.
+Before PyPI publication, the draft release receives the current run's
+provenance bundle. For each filename, the workflow prefers bytes already on
+PyPI, then existing GitHub Release bytes, then the local attested build. It
+skips PyPI uploads for existing filenames, carries existing GitHub bytes to
+PyPI when needed, and publishes local bytes when neither destination has them.
+After the PyPI index catches up, the workflow compares SHA-256 digests, fails
+safely on a mismatch, uploads only missing GitHub assets, and publishes with
+the retained provenance bundle.
 
 ```mermaid
 flowchart TD
     accTitle: Release asset selection and publication
-    accDescr: Choose canonical bytes, publish to PyPI if needed, upload draft assets, then verify digests before release.
+    accDescr: Prefer PyPI, then GitHub, then local bytes; verify SHA-256, attach provenance, and publish.
     A[Attested sdist and wheel] --> B{Filename already on PyPI?}
     B -- Yes --> C[Use PyPI bytes]
     B -- No --> D{Filename already on GitHub Release?}
@@ -885,14 +892,14 @@ flowchart TD
     C --> G[Skip PyPI upload]
     E --> H[Carry bytes to PyPI if needed]
     F --> I[Publish to PyPI]
-    G --> K
-    H --> K[Wait for PyPI index]
-    I --> K
-    K --> M[Upload only missing GitHub assets]
-    M --> N[Retain or attach provenance bundle]
-    N --> J{PyPI and GitHub SHA-256 match?}
+    G --> J
+    H --> J
+    I --> K[Wait for PyPI index]
+    K --> J
     J -- No --> L[Fail safely]
-    J -- Yes --> O[Publish GitHub Release]
+    J -- Yes --> M[Upload only missing GitHub assets]
+    M --> N[Retain or attach provenance bundle]
+    N --> O[Publish GitHub Release]
 ```
 
 _Figure: Release asset selection, idempotent staging, digest verification, and
