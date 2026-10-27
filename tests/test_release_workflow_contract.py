@@ -51,6 +51,7 @@ _EXPECTED_NEEDS = {
     "publish-release": ["check-version", "draft-release", "publish-pypi"],
 }
 _SHA_PIN = re.compile(r"^[0-9a-f]{40}$")
+_SETUP_PYTHON = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
 
 
 def _workflow(path: Path) -> Workflow:
@@ -252,6 +253,36 @@ def test_every_release_checkout_disables_persisted_credentials() -> None:
     for step in checkouts:
         assert step.get("with", {}).get("persist-credentials") is False, (
             "every release checkout must disable persisted credentials"
+        )
+
+
+def test_release_script_jobs_pin_python_after_checkout() -> None:
+    """Every job that runs release scripts uses the project's Python floor."""
+    jobs = _jobs(_workflow(RELEASE_WORKFLOW_PATH))
+
+    for job_id in (
+        "check-version",
+        "draft-release",
+        "publish-pypi",
+        "publish-release",
+    ):
+        steps = _steps(jobs[job_id])
+        checkout_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("uses", "").startswith("actions/checkout@")
+        )
+        setup_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("uses") == _SETUP_PYTHON
+        )
+
+        assert setup_index == checkout_index + 1, (
+            f"{job_id} must set up Python immediately after checkout"
+        )
+        assert steps[setup_index].get("with", {}).get("python-version") == "3.13", (
+            f"{job_id} must use the tested Python 3.13 interpreter"
         )
 
 
