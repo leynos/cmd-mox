@@ -290,9 +290,10 @@ a failure into a diagnostic. The strategies are:
 - a zero-timeout readiness probe on a POSIX descriptor, using `select.poll`
   first and `select.select` second, so an unpollable descriptor is detected
   before any bytes are read;
-- chunked `os.read` against the remaining budget for pollable descriptors, and
-  the same reads on a daemon worker for regular files, which cannot be waited
-  on;
+- chunked reads against the remaining budget for pollable descriptors, taken
+  through a buffered stream's `read1` when it has one and `os.read` when it
+  does not, and `os.read` on a daemon worker for regular files, which cannot be
+  waited on;
 - bounded `ReadFile` chunks on a daemon worker for a resolved Windows handle,
   with `CancelSynchronousIo` followed by a bounded join when the deadline
   expires;
