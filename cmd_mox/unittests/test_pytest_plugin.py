@@ -56,6 +56,25 @@ pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
 _DISABLE_CI_PLUGINS = ("-p", "no:slipcover")
 
 
+def _isolated_pytester_subprocess_args(pytester: pytest.Pytester) -> tuple[str, ...]:
+    """Keep subprocess runs from discovering configuration above pytester's root.
+
+    Returns
+    -------
+    tuple[str, ...]
+        CLI options that isolate pytest configuration in the temporary project.
+    """
+    inner_ini = pytester.makeini("[pytest]\n")
+    return (
+        "-c",
+        str(inner_ini),
+        "--rootdir",
+        str(pytester.path),
+        "--confcutdir",
+        str(pytester.path),
+    )
+
+
 def test_fixture_basic(
     cmd_mox: CmdMox,
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
@@ -228,7 +247,13 @@ def test_call_hook_does_not_warn_on_ordinary_test_failure(
         )
     )
 
-    result = pytester.runpytest_subprocess("-q", "-s", *_DISABLE_CI_PLUGINS, timeout=30)
+    result = pytester.runpytest_subprocess(
+        *_isolated_pytester_subprocess_args(pytester),
+        "-q",
+        "-s",
+        *_DISABLE_CI_PLUGINS,
+        timeout=30,
+    )
     output = result.stdout.str() + result.stderr.str()
 
     assert result.ret == pytest.ExitCode.TESTS_FAILED, "Assertion failed"
@@ -289,7 +314,12 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
         )
     )
 
-    result = pytester.runpytest_subprocess("-q", "-s", timeout=30)
+    result = pytester.runpytest_subprocess(
+        *_isolated_pytester_subprocess_args(pytester),
+        "-q",
+        "-s",
+        timeout=30,
+    )
     output = result.stdout.str() + result.stderr.str()
 
     assert result.ret == test_case.expected_exit, "Assertion failed"
