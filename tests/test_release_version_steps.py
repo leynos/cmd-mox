@@ -28,7 +28,7 @@ release_version = typ.cast(
 @pytest.mark.parametrize(
     ("version", "is_prerelease"),
     [
-        ("0.2.0", "false"),
+        ("0.3.0-beta1", "true"),
         ("0.2.0-beta1", "true"),
         ("0.2.0.dev1", "true"),
         ("0.2.0+local", "false"),
@@ -63,6 +63,26 @@ def test_plan_uses_pypi_then_github_then_local_as_the_source_order() -> None:
 def test_version_check_accepts_the_exact_v_prefixed_beta_tag(tmp_path: Path) -> None:
     """A leading tag ``v`` is removed before exact project-version comparison."""
     (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "cmd-mox"\nversion = "0.3.0-beta1"\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "github-output"
+
+    result = release_version.main(
+        {"TAG_VERSION": "v0.3.0-beta1", "GITHUB_OUTPUT": str(output)}, tmp_path
+    )
+
+    assert result == 0, "the matching beta tag must pass"
+    assert output.read_text(encoding="utf-8") == "prerelease=true\n", (
+        "the version check must export its pre-release result"
+    )
+
+
+def test_version_check_matches_but_rejects_the_historical_beta_tag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The exact historical beta spelling reaches the version-age guard."""
+    (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "cmd-mox"\nversion = "0.2.0-beta1"\n',
         encoding="utf-8",
     )
@@ -72,10 +92,63 @@ def test_version_check_accepts_the_exact_v_prefixed_beta_tag(tmp_path: Path) -> 
         {"TAG_VERSION": "v0.2.0-beta1", "GITHUB_OUTPUT": str(output)}, tmp_path
     )
 
-    assert result == 0, "the matching beta tag must pass"
-    assert output.read_text(encoding="utf-8") == "prerelease=true\n", (
-        "the version check must export its pre-release result"
+    assert result == 1, "the historical release segment must not be automated"
+    error = capsys.readouterr().err
+    assert "Unsupported initial release" in error, (
+        "an exact historical beta match must reach the release-age guard"
     )
+    assert "Tag/pyproject.toml mismatch" not in error, (
+        "the exact v-prefixed beta spelling must match the project version"
+    )
+    assert not output.exists(), "a blocked release must not publish version output"
+
+
+def test_version_check_rejects_the_historical_release_tag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The hand-built 0.2.0 release cannot enter automated publication."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "cmd-mox"\nversion = "0.2.0"\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "github-output"
+
+    result = release_version.main(
+        {"TAG_VERSION": "v0.2.0", "GITHUB_OUTPUT": str(output)}, tmp_path
+    )
+
+    assert result == 1, "the historical release tag must not be automated"
+    assert "Unsupported initial release" in capsys.readouterr().err, (
+        "the guard must identify the blocked historical release"
+    )
+    assert not output.exists(), "a blocked release must not publish version output"
+
+
+@pytest.mark.parametrize(
+    "version",
+    ["0.1.9", "0.2.0rc1", "0.2.0.post1", "0.2.0+local"],
+)
+def test_version_check_rejects_versions_not_after_the_historical_release(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    version: str,
+) -> None:
+    """Older and suffixed versions in the 0.2.0 release family are blocked."""
+    (tmp_path / "pyproject.toml").write_text(
+        f'[project]\nname = "cmd-mox"\nversion = "{version}"\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "github-output"
+
+    result = release_version.main(
+        {"TAG_VERSION": f"v{version}", "GITHUB_OUTPUT": str(output)}, tmp_path
+    )
+
+    assert result == 1, f"release {version} must not reach publication"
+    assert "Unsupported initial release" in capsys.readouterr().err, (
+        f"release {version} must fail the release-age guard"
+    )
+    assert not output.exists(), "a blocked release must not publish version output"
 
 
 def test_version_check_annotates_an_exact_spelling_mismatch(

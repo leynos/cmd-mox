@@ -80,9 +80,13 @@ build. Existing assets are never overwritten. When bytes are carried over,
 their original provenance bundle is retained; the workflow does not replace it
 with a bundle for different bytes.
 
-The first automated release must be a version above `0.2.0`. PyPI already holds
-the hand-uploaded `0.2.0` wheel and sdist, so re-tagging `0.2.0` is a PyPI
-no-op. Its GitHub Release has no sdist or bundle from this workflow.
+The first automated release must have a numeric release segment greater than
+`0.2.0`. The version check rejects older versions and pre-release,
+post-release, or local variants with the `0.2.0` release segment. This keeps
+the historical version family out of the automated workflow: its GitHub Release
+does not contain the PyPI-matching sdist or a bundle from this workflow. PyPI
+already holds the hand-uploaded `0.2.0` wheel and sdist, so a PyPI staging run
+for those filenames is a no-op.
 
 ## Known risks and limitations
 

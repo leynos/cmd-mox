@@ -36,6 +36,9 @@ mkdir -p "$3"
 if [ "$FAKE_SDIST" = 1 ]; then
   : > "$3/cmd_mox-0.2.0.tar.gz"
 fi
+if [ "$FAKE_EXTRA_SDIST" = 1 ]; then
+  : > "$3/cmd_mox-extra-0.2.0.tar.gz"
+fi
 : > "$3/$FAKE_WHEEL"
 """
 _PURE_WHEEL_NAME = "cmd_mox-0.2.0-py3-none-any.whl"
@@ -45,6 +48,7 @@ def _run_build_step(
     tmp_path: Path,
     *,
     has_sdist: bool,
+    additional_sdist: bool = False,
     wheel_name: str = _PURE_WHEEL_NAME,
     out_dir: str = "dist",
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
@@ -63,6 +67,7 @@ def _run_build_step(
         script,
         cwd=tmp_path,
         env={
+            "FAKE_EXTRA_SDIST": "1" if additional_sdist else "0",
             "FAKE_SDIST": "1" if has_sdist else "0",
             "FAKE_WHEEL": wheel_name,
             "GITHUB_OUTPUT": str(github_output),
@@ -102,6 +107,22 @@ def test_build_action_fails_when_current_build_has_no_sdist(tmp_path: Path) -> N
     assert result.returncode == 1, "a build without an sdist must fail"
     assert "Expected exactly one sdist" in result.stderr, (
         "the failure must identify the invalid sdist inventory"
+    )
+    assert not github_output.exists(), "a failed build must not report upload files"
+
+
+def test_build_action_fails_when_current_build_has_two_sdists(tmp_path: Path) -> None:
+    """Multiple source archives cannot pass the exact inventory check."""
+    result, _, github_output, _ = _run_build_step(
+        tmp_path, has_sdist=True, additional_sdist=True
+    )
+
+    assert result.returncode == 1, "a build with two sdists must fail"
+    assert "Expected exactly one sdist and at least one wheel" in result.stderr, (
+        "the failure must explain the exact accepted inventory"
+    )
+    assert "found 2 sdist(s) and 1 wheel(s)" in result.stderr, (
+        "the failure must report the observed inventory counts"
     )
     assert not github_output.exists(), "a failed build must not report upload files"
 

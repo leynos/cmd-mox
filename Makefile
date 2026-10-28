@@ -18,6 +18,8 @@ TOOLS = $(UV)
 export PATH := $(patsubst %/,%,$(dir $(UV))):$(PATH)
 VENV_TOOLS = pytest
 MAKEUTIL = makeutil
+# Keep nested pytest subprocesses within the 30-second per-test timeout.
+PYTEST_WORKERS ?= 4
 # The CV-005 CodeScene contracts live in shared-actions and run from a full
 # commit, so a fix is a pin bump. `.github/cv005.toml` holds this repository's
 # only parameters.
@@ -273,7 +275,7 @@ makeutil: ## Verify the Makefile parser used by contract tests
 	$(call ensure_tool,$@)
 
 test: build $(UV) $(VENV_TOOLS) makeutil test-workflow-contracts ## Run tests
-	$(UV_GATE) run --group dev -- pytest -v -n auto
+	$(UV_GATE) run --group dev -- pytest -v -n $(PYTEST_WORKERS)
 
 test-workflow-contracts: $(UV) ## Run the shared CV-005 CodeScene contracts
 	$(CV005_CONTRACTS) check --repository .

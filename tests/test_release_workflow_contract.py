@@ -51,7 +51,7 @@ _EXPECTED_NEEDS = {
     "publish-release": ["check-version", "draft-release", "publish-pypi"],
 }
 _SHA_PIN = re.compile(r"^[0-9a-f]{40}$")
-_SETUP_PYTHON = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+_SETUP_PYTHON_PREFIX = "actions/setup-python@"
 
 
 def _workflow(path: Path) -> Workflow:
@@ -227,6 +227,9 @@ def test_release_jobs_have_exact_permissions_and_dependencies() -> None:
     assert "attest" in jobs["publish-pypi"]["needs"], (
         "PyPI must wait for validated, attested distributions"
     )
+    assert jobs["build-dist"].get("if") == "github.ref_name != 'v0.2.0'", (
+        "the legacy release tag must not build or upload a release artifact"
+    )
 
 
 def test_every_action_is_local_or_pinned() -> None:
@@ -275,7 +278,7 @@ def test_release_script_jobs_pin_python_after_checkout() -> None:
         setup_index = next(
             index
             for index, step in enumerate(steps)
-            if step.get("uses") == _SETUP_PYTHON
+            if step.get("uses", "").startswith(_SETUP_PYTHON_PREFIX)
         )
 
         assert setup_index == checkout_index + 1, (

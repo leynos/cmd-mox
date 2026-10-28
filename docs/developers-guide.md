@@ -872,29 +872,25 @@ To publish a release:
    `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
    the build run that attested those bytes.
 
-For screen readers: For each attested distribution, the workflow chooses bytes
-from PyPI when that filename already exists there, otherwise from the GitHub
-Release when available, otherwise from the local attested build. It skips
-existing PyPI filenames, carries existing GitHub bytes to PyPI when needed, and
-publishes local bytes when neither destination has the filename. The workflow
-waits for each newly published filename to appear in the PyPI index. It then
-stages and uploads only missing GitHub Release assets and required provenance,
-refreshes the release asset list, and checks that PyPI and GitHub have matching
-SHA-256 digests and provenance. A mismatch fails safely and leaves the release
-in draft; a match publishes the release.
+For screen readers: For each distribution filename, the workflow uses PyPI's
+bytes when the filename is already there. Otherwise, it uses matching bytes
+from the GitHub Release and carries them to PyPI when needed, or publishes the
+local attested bytes to PyPI when neither destination has the filename. It
+waits for files published or carried to PyPI to appear in the index, then
+compares SHA-256 digests. A mismatch fails safely. A match allows the workflow
+to upload missing GitHub Release assets, retain or attach the provenance bundle,
+and publish the GitHub Release.
 
 ```mermaid
 flowchart TD
-    accTitle: Idempotent release publication
+    accTitle: Idempotent release asset reconciliation
     accDescr {
-      Choose PyPI, GitHub Release, then local attested bytes for each filename.
-      Skip PyPI uploads for existing names and carry existing GitHub bytes to
-      PyPI when needed. Wait for the PyPI index after publishing or carrying
-      bytes to PyPI.
-      Stage and upload missing GitHub Release assets and required provenance,
-      then refresh the release asset list. Compare PyPI and GitHub SHA-256
-      digests and provenance. Publish only on a match; otherwise fail safely
-      and keep the release in draft.
+      Use PyPI bytes when a filename already exists there. Otherwise use
+      existing GitHub Release bytes and carry them to PyPI if needed, or
+      publish the local attested bytes to PyPI. Wait for newly published or
+      carried bytes to appear in the PyPI index. Compare PyPI and GitHub SHA-256 digests;
+      fail safely on a mismatch. On a match, upload only missing GitHub assets,
+      retain or attach the provenance bundle, and publish the GitHub Release.
     }
     A[Attested sdist and wheel] --> B{Filename already on PyPI?}
     B -- Yes --> C[Use PyPI bytes]
@@ -904,18 +900,18 @@ flowchart TD
     C --> G[Skip PyPI upload]
     E --> H[Carry bytes to PyPI if needed]
     F --> I[Publish to PyPI]
-    G --> J[Stage GitHub assets and required provenance]
-    H --> K[Wait for PyPI index]
+    G --> J{PyPI and GitHub SHA-256 match?}
+    H --> K
     I --> K[Wait for PyPI index]
     K --> J
-    J --> M[Upload only missing assets and provenance]
-    M --> N[Refresh GitHub Release asset list]
-    N --> O{PyPI and GitHub digests and provenance match?}
-    O -- No --> L[Fail safely and keep draft]
-    O -- Yes --> P[Publish GitHub Release]
+    J -- No --> L[Fail safely]
+    J -- Yes --> M[Upload only missing GitHub assets]
+    M --> N[Retain or attach provenance bundle]
+    N --> O[Publish GitHub Release]
 ```
 
-_Figure: Release asset source priority, digest verification and publication._
+_Figure: PyPI-first asset selection, digest verification, and GitHub Release
+publication._
 
 ### Release tooling
 
@@ -973,7 +969,9 @@ attesting the distributions and handing them to later jobs as `release-dist`.
 The design rationale and operating decision are recorded in
 [ADR 003](./adr-003-release-pipeline.md).
 
-The first automated release must use a version later than `0.2.0`. PyPI already
+The first automated release must use a numeric release segment later than
+`0.2.0`. The version check rejects older versions and `0.2.0` pre-release,
+post-release and local variants before attestation or publication. PyPI already
 contains the manually uploaded `0.2.0` wheel and source distribution, so
 another publication of those filenames is a no-op there. The existing GitHub
 Release does not contain the sdist or provenance bundle from this workflow.

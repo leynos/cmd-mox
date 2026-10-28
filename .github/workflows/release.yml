@@ -37,6 +37,7 @@ jobs:
           python3 scripts/release_version.py
 
   build-dist:
+    if: github.ref_name != 'v0.2.0'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
