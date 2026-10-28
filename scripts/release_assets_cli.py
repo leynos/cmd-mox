@@ -338,12 +338,13 @@ def _attestation_checks(invocation: _Invocation) -> None:
 
     Raises
     ------
-    InvalidAttestationPurposeError
+    ValueError
         If the requested workflow destination is not supported.
     """
     args, state = invocation.args, invocation.state
     if args.purpose not in {"pypi", "github"}:
-        raise assets.InvalidAttestationPurposeError
+        msg = "--purpose must be pypi or github"
+        raise ValueError(msg)
     if args.purpose == "github":
         _path(args, "output")
     inventory = _read_bundle_inventory(args, state)

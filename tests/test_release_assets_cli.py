@@ -423,6 +423,28 @@ def test_attestation_checks_lists_exact_current_and_retained_pairs(
     ), "the current distribution must be verified against its current bundle"
 
 
+def test_attestation_purpose_validation_stays_in_cli_adapter(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A CLI option error is handled without a CLI-specific domain exception."""
+    argv = _cli_inputs(
+        tmp_path,
+        _CLIInventories(built={"local.whl": b"current"}, pypi={}, github={}),
+    )
+
+    assert "InvalidAttestationPurposeError" not in vars(assets), (
+        "the pure release model must not own a CLI option error"
+    )
+    assert adapters.main(["attestation-checks", *argv]) == 1, (
+        "a missing workflow purpose is a handled CLI error"
+    )
+    captured = capsys.readouterr()
+    assert not captured.out, "invalid invocations must not emit candidates"
+    assert captured.err == (
+        "::error title=release-assets::--purpose must be pypi or github\n"
+    ), "the adapter preserves the workflow annotation"
+
+
 def test_attestation_checks_hashes_downloaded_github_assets_without_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

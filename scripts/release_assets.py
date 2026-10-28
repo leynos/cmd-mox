@@ -24,14 +24,6 @@ class ReleaseAssetError(Exception):
     """A release asset is missing, unsafe, or holds unexpected bytes."""
 
 
-class InvalidAttestationPurposeError(ReleaseAssetError):
-    """The attestation candidate command has an unsupported purpose."""
-
-    def __init__(self) -> None:
-        """Explain the supported workflow destinations."""
-        super().__init__("--purpose must be pypi or github")
-
-
 class DigestMismatchError(ReleaseAssetError):
     """A local or downloaded file does not match its expected SHA-256."""
 
