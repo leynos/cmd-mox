@@ -856,43 +856,56 @@ To publish a release:
 3. Watch the workflow graph. `check-version` and `build-dist` run first;
    attestation, the draft GitHub Release and PyPI publication follow before the
    GitHub Release is published.
-4. For a draft release, the workflow attaches the current run's provenance
-   bundle before PyPI publication, then snapshots it with existing release
-   assets. If a run needs retrying, re-run only its failed jobs so they reuse
-   the attested `release-dist` from the original run. A full rerun builds new
-   distributions, but it can carry the prior bundle from the draft to verify
-   PyPI's canonical bytes. PyPI filenames already present in the project index
-   are skipped, and existing GitHub assets are not overwritten. If no retained
-   bundle matches the canonical bytes, the workflow fails safely. The final job
-   waits for PyPI to list every distribution before publishing the GitHub
-   Release. If final digest verification detects a conflict, the GitHub Release
-   remains an unpublished draft; assets uploaded during that attempt can remain
-   attached to the draft.
+4. Before PyPI publication, the draft retains the complete canonical sdist,
+   wheels and the provenance bundle that covers them. Source priority remains
+   PyPI, GitHub Release, then the local build, and existing GitHub assets are
+   never overwritten. If a run needs retrying, re-run only its failed jobs so
+   they reuse the attested `release-dist` from the original run. A full rerun
+   builds new distributions but reuses the pair retained on the draft. This
+   keeps a wheel from a retry from being paired with an sdist already accepted
+   by PyPI. One provenance bundle must cover the complete canonical set; if the
+   original pair or its matching bundle is unavailable, the workflow fails
+   before another PyPI upload. The final job waits for PyPI to list every
+   distribution before publishing the GitHub Release. If final digest
+   verification detects a conflict, the GitHub Release remains an unpublished
+   draft; assets uploaded during that attempt can remain attached to the draft.
+   If only part of the seed reached the draft and PyPI accepted no
+   distribution, re-run the failed jobs to reuse the original `release-dist`.
+   If the retained pair is defective and PyPI accepted no distribution, remove
+   the draft's distributions and matching bundle, then run the whole workflow
+   again. After PyPI accepts any distribution, advance `project.version` and
+   cut a new tag for corrected bytes because PyPI reserves uploaded filenames
+   permanently.
 5. Verify the provenance attestations for the sdist and each wheel against the
    `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
    the build run that attested those bytes.
 
 For screen readers: For each distribution filename, the workflow uses PyPI's
 bytes when the filename is already there. Otherwise, it uses matching bytes
-from the GitHub Release and carries them to PyPI when needed, or publishes the
-local attested bytes to PyPI when neither destination has the filename. It
-waits for files published or carried to PyPI to appear in the index, then
-compares SHA-256 digests. A mismatch fails safely. A match allows the workflow
-to upload missing GitHub Release assets, retain or attach the provenance
-bundle, and publish the GitHub Release.
+from the GitHub Release and carries them to PyPI when needed, or selects the
+local attested bytes when neither destination has the filename. Before PyPI
+publication, the draft retains the complete canonical distribution set and the
+single provenance bundle that attests those bytes. PyPI skips existing
+filenames and uploads only the rest. The workflow waits for new files to appear
+in the index, then compares SHA-256 digests. A mismatch fails safely. A match
+allows the workflow to upload any missing GitHub Release assets and publish the
+GitHub Release.
 
 ```mermaid
 flowchart TD
     accTitle: Idempotent release asset reconciliation
     accDescr {
-      Use PyPI bytes when a filename already exists there. Otherwise use
-      existing GitHub Release bytes and carry them to PyPI if needed, or
-      publish the local attested bytes to PyPI. Wait for newly published or
-      carried bytes to appear in the PyPI index. Compare PyPI and GitHub SHA-256 digests;
-      fail safely on a mismatch. On a match, upload only missing GitHub assets,
-      retain or attach the provenance bundle, and publish the GitHub Release.
+      Retain the canonical distributions and their single provenance bundle
+      on the draft before PyPI publication. For each filename, prefer PyPI
+      bytes, then existing GitHub Release bytes, then local attested bytes.
+      Skip PyPI uploads for existing filenames; carry GitHub bytes to PyPI when
+      needed or publish local bytes, then wait for the PyPI index. Compare
+      PyPI and GitHub SHA-256 digests and fail safely on a mismatch. On a match,
+      verify the matching provenance bundle, upload missing GitHub assets,
+      retain or attach the bundle, and publish the GitHub Release.
     }
-    A[Attested sdist and wheel] --> B{Filename already on PyPI?}
+    A[Attested sdist and wheel] --> A2[Retain pair and bundle on draft]
+    A2 --> B{Filename already on PyPI?}
     B -- Yes --> C[Use PyPI bytes]
     B -- No --> D{Filename already on GitHub Release?}
     D -- Yes --> E[Use existing GitHub bytes]
@@ -901,17 +914,18 @@ flowchart TD
     E --> H[Carry bytes to PyPI if needed]
     F --> I[Publish to PyPI]
     G --> J{PyPI and GitHub SHA-256 match?}
-    H --> K
+    H --> J
     I --> K[Wait for PyPI index]
     K --> J
     J -- No --> L[Fail safely]
-    J -- Yes --> M[Upload only missing GitHub assets]
+    J -- Yes --> V[Verify matching provenance bundle]
+    V --> M[Upload only missing GitHub assets]
     M --> N[Retain or attach provenance bundle]
     N --> O[Publish GitHub Release]
 ```
 
-_Figure: PyPI-first asset selection, digest verification, and GitHub Release
-publication._
+_Figure: Draft retention, PyPI-first source selection, digest and provenance
+verification, and GitHub Release publication._
 
 ### Release tooling
 
@@ -922,7 +936,10 @@ in PyPI, GitHub Release, then local-build order, and lists only missing
 uploads. Existing assets are never overwritten. The CLI adapter in
 [`scripts/release_assets_cli.py`](../scripts/release_assets_cli.py) loads those
 inventories from files, executes the selected copy or removal steps, and
-reports workflow outputs.
+reports workflow outputs. The `draft-release` seed and `publish-release` stage
+steps use [`scripts/stage_github_assets.sh`](../scripts/stage_github_assets.sh)
+to carry forward existing bytes, stage only missing assets and verify
+provenance before either upload.
 
 Every CLI command requires `--publish` and `--assets`. The remaining options
 are required by the commands that read them:

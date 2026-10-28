@@ -181,11 +181,6 @@ def _provenance_inventories(
     tuple[dict[str, str], _Provenance]
         The GitHub bundle asset and decoded current/retained subjects.
     """
-    remote_subjects = frozenset(
-        (name, digest)
-        for name, digest in inventories.selected.items()
-        if inventories.decision.canonical[name] is not assets.Source.LOCAL
-    )
     local_subjects = frozenset(
         (name, digest)
         for name, digest in inventories.selected.items()
@@ -194,10 +189,16 @@ def _provenance_inventories(
     retained_name = "cmd-mox-v1.2.3-run1-1.sigstore.json"
     current_name = "cmd-mox-v1.2.3-run2-1.sigstore.json"
     github = dict(inventories.github)
-    if remote_subjects:
+    if any(
+        source is not assets.Source.LOCAL
+        for source in inventories.decision.canonical.values()
+    ):
         github[retained_name] = f"{digest_seed + 300:064x}"
-    retained = {retained_name: remote_subjects} if remote_subjects else {}
-    current = {current_name: local_subjects}
+        retained = {retained_name: frozenset(inventories.selected.items())}
+        current = {current_name: local_subjects}
+    else:
+        retained = {}
+        current = {current_name: frozenset(inventories.selected.items())}
     return github, _Provenance(current=current, retained=retained)
 
 
@@ -412,8 +413,8 @@ def test_mismatches_describe_missing_and_different_destination_assets() -> None:
     ], "each missing or differing destination must be identified"
 
 
-def test_provenance_coverage_uses_subject_digests_instead_of_bundle_names() -> None:
-    """A same-family bundle cannot authorize a new or changed distribution."""
+def test_provenance_coverage_rejects_subjects_split_across_bundles() -> None:
+    """Separate builds cannot jointly attest one canonical distribution set."""
     old = "cmd-mox-v0.3.0-run1-1.sigstore.json"
     current = "cmd-mox-v0.3.0-run2-1.sigstore.json"
     state = _state(
@@ -425,35 +426,44 @@ def test_provenance_coverage_uses_subject_digests_instead_of_bundle_names() -> N
             retained={old: frozenset({("a.whl", "old")})},
         ),
     )
-    decision = assets.stage_github(state)
-    assert decision.bundles == (current,), (
-        "a new canonical subject needs its current bundle"
-    )
-    assert decision.fetch == ("new.whl",), (
-        "only the missing canonical distribution is fetched"
-    )
-    assert assets.verify(state) == [
-        "new.whl is missing from the GitHub Release or has no digest",
-        "new.whl has no matching provenance subject for sha256 new",
-    ], "an unattached current bundle must not pass final verification"
-    complete = _state(
-        local=dict(state.local),
-        pypi={"a.whl": "old", "new.whl": "new"},
-        github={"a.whl": "old", "new.whl": "new", old: "bundle", current: "new-bundle"},
+    with pytest.raises(
+        assets.UnattestedReleaseAssetsError,
+        match="no single provenance bundle covers the complete distribution set",
+    ):
+        assets.stage_github(state)
+
+
+def test_one_provenance_bundle_must_cover_the_complete_distribution_set() -> None:
+    """Distinct builds cannot jointly attest one canonical sdist and wheel pair."""
+    first = "cmd-mox-v0.3.0-run1-1.sigstore.json"
+    second = "cmd-mox-v0.3.0-run2-1.sigstore.json"
+    split = _state(
+        local={"cmd_mox-0.3.0.tar.gz": "sdist-a", "cmd_mox-0.3.0.whl": "wheel-a"},
+        github={second: "bundle"},
         provenance=_Provenance(
-            current=dict(state.current_bundles),
-            retained={
-                **state.retained_bundles,
-                current: state.current_bundles[current],
-            },
+            current={first: frozenset({("cmd_mox-0.3.0.tar.gz", "sdist-a")})},
+            retained={second: frozenset({("cmd_mox-0.3.0.whl", "wheel-a")})},
         ),
     )
-    assert assets.verify(complete) == [], (
-        "attached matching subjects cover every canonical byte sequence"
+
+    with pytest.raises(
+        assets.UnattestedReleaseAssetsError,
+        match="no single provenance bundle covers the complete distribution set",
+    ):
+        assets.require_provenance(split)
+
+    complete = _state(
+        local=dict(split.local),
+        provenance=_Provenance(
+            current={
+                first: frozenset({
+                    ("cmd_mox-0.3.0.tar.gz", "sdist-a"),
+                    ("cmd_mox-0.3.0.whl", "wheel-a"),
+                })
+            }
+        ),
     )
-    assert assets.stage_github(complete).bundles == (), (
-        "reruns must not attach redundant bundles"
-    )
+    assets.require_provenance(complete)
 
 
 def test_unattested_carryover_fails_before_any_staging_decision() -> None:

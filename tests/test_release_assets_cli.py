@@ -347,12 +347,18 @@ def test_cli_pypi_commands_validate_then_copy_or_remove_canonical_files(
         _CLIInventories(
             built={
                 "local.whl": b"new",
-                "github.whl": b"rebuilt",
-                "pypi.whl": b"rebuilt",
+                "github.whl": b"rebuilt github",
+                "pypi.whl": b"old pypi",
             },
             pypi={"pypi.whl": b"old pypi"},
             github={"github.whl": b"old github"},
-            retained={prior: {"github.whl": b"old github", "pypi.whl": b"old pypi"}},
+            retained={
+                prior: {
+                    "local.whl": b"new",
+                    "github.whl": b"old github",
+                    "pypi.whl": b"old pypi",
+                }
+            },
         ),
     )
     _enable_fake_gh(tmp_path, monkeypatch)

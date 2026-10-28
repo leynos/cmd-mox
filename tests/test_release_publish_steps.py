@@ -48,9 +48,7 @@ class _PypiStageFixture(typ.NamedTuple):
     publish: Path
     published_name: str
     carried_name: str
-    local_name: str
     index: Path
-    curl_downloads: Path
 
 
 def _write_pypi_stage_fixture(root: Path) -> _PypiStageFixture:
@@ -67,44 +65,51 @@ def _write_pypi_stage_fixture(root: Path) -> _PypiStageFixture:
     github_files.mkdir(parents=True)
     published_name = "cmd_mox-0.3.0.tar.gz"
     carried_name = "cmd_mox-0.3.0-py3-none-any.whl"
-    local_name = "cmd_mox-0.3.0-extra.whl"
+    original_sdist = b"published original sdist"
+    original_wheel = b"canonical GitHub bytes"
     (publish / published_name).write_bytes(b"rebuilt but not canonical")
     (publish / carried_name).write_bytes(b"new wheel bytes")
-    (publish / local_name).write_bytes(b"new extra wheel")
-    (github_files / carried_name).write_bytes(b"canonical GitHub bytes")
+    (github_files / published_name).write_bytes(original_sdist)
+    (github_files / carried_name).write_bytes(original_wheel)
     _write_provenance(
         root / "dist" / "attestations",
         "cmd-mox-v0.3.0-run2-1.sigstore.json",
         {
             published_name: b"rebuilt but not canonical",
             carried_name: b"new wheel bytes",
-            local_name: b"new extra wheel",
         },
     )
     index = root / "pypi-index.json"
-    _write_index(index, [published_name])
-    curl_downloads = root / "curl-downloads"
-    curl_downloads.mkdir()
-    (curl_downloads / published_name).write_bytes(published_name.encode())
+    index.write_text(
+        json.dumps({
+            "files": [
+                {
+                    "filename": published_name,
+                    "hashes": {"sha256": hashlib.sha256(original_sdist).hexdigest()},
+                    "url": f"https://pypi.test/{published_name}",
+                }
+            ]
+        }),
+        encoding="utf-8",
+    )
     assets = root / "github-state" / "assets.json"
     assets.parent.mkdir(parents=True, exist_ok=True)
     _write_github_assets(
         assets,
         {
-            carried_name: hashlib.sha256(b"canonical GitHub bytes").hexdigest(),
+            published_name: hashlib.sha256(original_sdist).hexdigest(),
+            carried_name: hashlib.sha256(original_wheel).hexdigest(),
             "cmd-mox-v0.3.0-run1-1.sigstore.json": _write_provenance(
                 github_files,
                 "cmd-mox-v0.3.0-run1-1.sigstore.json",
                 {
-                    published_name: published_name.encode(),
-                    carried_name: b"canonical GitHub bytes",
+                    published_name: original_sdist,
+                    carried_name: original_wheel,
                 },
             ),
         },
     )
-    return _PypiStageFixture(
-        publish, published_name, carried_name, local_name, index, curl_downloads
-    )
+    return _PypiStageFixture(publish, published_name, carried_name, index)
 
 
 def _write_github_assets(path: Path, digests: dict[str, str]) -> None:
@@ -161,9 +166,6 @@ def test_stage_pypi_skips_published_names_and_uses_github_bytes(tmp_path: Path) 
     ).read_bytes() == b"canonical GitHub bytes", (
         "PyPI must receive GitHub's canonical bytes for an existing asset"
     )
-    assert (fixture.publish / fixture.local_name).read_bytes() == b"new extra wheel", (
-        "an unpublished local distribution must remain staged"
-    )
     assert (tmp_path / "github-output").read_text(encoding="utf-8") == (
         "remaining=true\n"
     ), "the publish action must run when files remain"
@@ -181,7 +183,6 @@ def test_pypi_staging_stops_when_github_rejects_retained_attestation(
         script,
         cwd=tmp_path,
         env={
-            "CURL_DOWNLOADS": str(fixture.curl_downloads),
             "FAKE_TOOL_LOG": str(log),
             "GH_ATTESTATION_STATUS": "1",
             "PATH": f"{tools}:/usr/bin:/bin",

@@ -125,13 +125,22 @@ def run_github_step(
     """
     tools = install_fake_tools(tmp_path / "bin")
     script, _ = load_workflow_step("publish-release", step_id)
+    assets_path = tmp_path / "release-assets.json"
+    assets_json = (
+        assets_path.read_text(encoding="utf-8")
+        if assets_path.is_file()
+        else '{"assets": []}'
+    )
     return run_bash_step(
         script,
         cwd=tmp_path,
         env={
             "FAKE_TOOL_LOG": str(tmp_path / "tool-calls.jsonl"),
             "PATH": f"{tools}:/usr/bin:/bin",
+            "GH_ASSETS_JSON": assets_json,
             "TAG_NAME": TAG,
+            "PYPI_INDEX_URL": "https://pypi.org/simple/cmd-mox/",
+            "PYPI_INDEX_PATH": "pypi-index.json",
             **extra_env,
         },
     )
@@ -203,3 +212,44 @@ def write_publication_inputs(
     _write_json(root / "github-state" / "assets.json", inputs.github_assets)
     _write_verified_subject_manifest(root, inputs, built_assets)
     return publish, bundles
+
+
+def prepare_snapshot_files(root: Path, *, missing_bundle: bool) -> tuple[Path, str]:
+    """Seed local, remote and cached bytes for the draft snapshot step test.
+
+    Parameters
+    ----------
+    root : pathlib.Path
+        Scratch directory used by the shell-step test.
+    missing_bundle : bool
+        Whether the retained bundle should be absent from the local cache.
+
+    Returns
+    -------
+    tuple[pathlib.Path, str]
+        Download source directory and retained bundle filename.
+    """
+    publish = root / "dist" / "publish"
+    publish.mkdir(parents=True)
+    (publish / SDIST).write_bytes(b"new sdist")
+    (publish / WHEEL).write_bytes(b"new wheel")
+
+    downloads = root / "downloads"
+    downloads.mkdir()
+    (downloads / WHEEL).write_bytes(b"old wheel")
+    prior_bundle = f"cmd-mox-{TAG}-run1-1.sigstore.json"
+    (downloads / prior_bundle).write_bytes(provenance_bundle({WHEEL: b"old wheel"}))
+    bundles = root / "dist" / "attestations"
+    bundles.mkdir()
+    (bundles / f"cmd-mox-{TAG}-run2-1.sigstore.json").write_bytes(
+        provenance_bundle({SDIST: b"new sdist", WHEEL: b"new wheel"})
+    )
+
+    cached_files = root / "github-state" / "files"
+    cached_files.mkdir(parents=True)
+    (cached_files / WHEEL).write_bytes(b"old wheel")
+    if not missing_bundle:
+        (cached_files / prior_bundle).write_bytes(
+            (downloads / prior_bundle).read_bytes()
+        )
+    return downloads, prior_bundle

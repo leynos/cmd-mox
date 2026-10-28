@@ -33,10 +33,10 @@ class DigestMismatchError(ReleaseAssetError):
 
 
 class UnattestedReleaseAssetsError(ReleaseAssetError):
-    """Canonical distributions lack matching provenance subjects."""
+    """Canonical distributions lack one bundle with matching subjects."""
 
     def __init__(self, problems: list[str]) -> None:
-        """Identify every canonical filename and digest lacking provenance."""
+        """Describe missing or split provenance coverage for canonical bytes."""
         super().__init__("; ".join(problems))
 
 
@@ -353,26 +353,47 @@ def _attached_subjects(state: State) -> Subjects:
     """
     return frozenset(
         subject
-        for name, subjects in state.retained_bundles.items()
-        if name in state.github
+        for subjects in _attached_bundles(state).values()
         for subject in subjects
     )
 
 
-def _available_subjects(state: State) -> Subjects:
-    """Add attachable current bundles to the retained subject inventory.
+def _attached_bundles(state: State) -> dict[str, Subjects]:
+    """Return only provenance bundles present in the GitHub asset snapshot.
 
     Returns
     -------
-    Subjects
-        Claims already attached or available under a new immutable name.
+    dict[str, Subjects]
+        Attached provenance bundles and their subject claims.
     """
-    return _attached_subjects(state) | frozenset(
-        subject
+    bundles = {
+        name: subjects
+        for name, subjects in state.retained_bundles.items()
+        if name in state.github
+    }
+    bundles.update({
+        name: subjects
+        for name, subjects in state.current_bundles.items()
+        if name in state.github and name not in bundles
+    })
+    return bundles
+
+
+def _available_bundles(state: State) -> dict[str, Subjects]:
+    """Return attached and newly attachable bundles without joining claims.
+
+    Returns
+    -------
+    dict[str, Subjects]
+        Attached and local bundles with their separate subject claims.
+    """
+    bundles = _attached_bundles(state)
+    bundles.update({
+        name: subjects
         for name, subjects in state.current_bundles.items()
         if name not in state.github
-        for subject in subjects
-    )
+    })
+    return bundles
 
 
 def _provenance_problems(
@@ -392,25 +413,43 @@ def _provenance_problems(
     ]
 
 
-def require_provenance(state: State, names: cabc.Iterable[str] | None = None) -> None:
-    """Reject canonical distributions without retained or attachable subjects.
+def _bundle_coverage_problems(
+    digests: cabc.Mapping[str, str], bundles: cabc.Mapping[str, Subjects]
+) -> list[str]:
+    """Require one bundle to attest every selected canonical distribution.
+
+    Returns
+    -------
+    list[str]
+        Provenance coverage problems, or an empty list when covered.
+    """
+    required = frozenset(digests.items())
+    if not required or any(required <= subjects for subjects in bundles.values()):
+        return []
+    covered = frozenset(
+        subject for subjects in bundles.values() for subject in subjects
+    )
+    problems = _provenance_problems(digests, covered)
+    if not problems:
+        return ["no single provenance bundle covers the complete distribution set"]
+    return problems
+
+
+def require_provenance(state: State) -> None:
+    """Require one retained or attachable bundle for every canonical file.
 
     Parameters
     ----------
     state : State
         Preloaded distribution and provenance inventories.
-    names : collections.abc.Iterable[str] or None, optional
-        A subset whose bytes are about to be uploaded. ``None`` checks every
-        canonical distribution.
 
     Raises
     ------
     UnattestedReleaseAssetsError
-        If any canonical distribution lacks an exact name/digest subject.
+        If no single bundle covers every canonical name and digest.
     """
     digests = canonical_digests(state)
-    selected = digests if names is None else {name: digests[name] for name in names}
-    problems = _provenance_problems(selected, _available_subjects(state))
+    problems = _bundle_coverage_problems(digests, _available_bundles(state))
     if problems:
         raise UnattestedReleaseAssetsError(problems)
 
@@ -448,7 +487,7 @@ def stage_github(state: State) -> GitHubStage:
 
 
 def verify(state: State) -> list[str]:
-    """Compare destination digests and require attached matching provenance.
+    """Compare destination digests and require one attached matching bundle.
 
     Canonical digest resolution raises ``ReleaseAssetError`` when a selected
     source has no recorded digest.
@@ -461,11 +500,11 @@ def verify(state: State) -> list[str]:
     Returns
     -------
     list[str]
-        Every missing file, digest disagreement, or unattested canonical byte.
+        Every missing file, digest disagreement, or incomplete bundle coverage.
 
     """
     pypi = dict(state.pypi)
     return [
         *mismatches(state.local, pypi, state.github),
-        *_provenance_problems(canonical_digests(state), _attached_subjects(state)),
+        *_bundle_coverage_problems(canonical_digests(state), _attached_bundles(state)),
     ]

@@ -130,6 +130,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAG_NAME: ${{ github.ref_name }}
       IS_PRERELEASE: ${{ needs.check-version.outputs.prerelease }}
+      PYPI_INDEX_URL: https://pypi.org/simple/cmd-mox/
+      PYPI_INDEX_PATH: pypi-index.json
     steps:
       - name: Check out release scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -160,63 +162,22 @@ jobs:
               gh release view "${TAG_NAME}" >/dev/null
             fi
           fi
-      - name: Retain the current provenance bundle on the draft
-        id: attach-bundle
-        env:
-          RUN_ID: ${{ github.run_id }}
+      - name: Fetch the PyPI simple index
+        id: index
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          bundle_candidates=("dist/attestations/cmd-mox-${TAG_NAME}-run${RUN_ID}-"*.sigstore.json)
-          if [[ ${#bundle_candidates[@]} -ne 1 ]]; then
-            echo "::error title=release-bundle::expected exactly one current-run provenance bundle"
-            exit 1
-          fi
-          bundle_path="${bundle_candidates[0]}"
-          bundle_name="${bundle_path##*/}"
-          mkdir -p github-state
-          gh release view "${TAG_NAME}" --json isDraft,assets \
-            > github-state/release-assets-before-bundle.json
-          bundle_state="$(
-            python3 - "${bundle_name}" \
-              github-state/release-assets-before-bundle.json <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          name = sys.argv[1]
-          document = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-          if not isinstance(document, dict):
-              raise SystemExit("release inventory must be a JSON object")
-          is_draft = document.get("isDraft")
-          assets = document.get("assets")
-          if not isinstance(is_draft, bool) or not isinstance(assets, list):
-              raise SystemExit("release inventory is missing draft state or assets")
-          if not all(isinstance(asset, dict) for asset in assets):
-              raise SystemExit("release inventory contains an invalid asset")
-          if not is_draft:
-              print("published")
-          elif any(asset.get("name") == name for asset in assets):
-              print("present")
-          else:
-              print("missing")
-          PY
-          )"
-          case "${bundle_state}" in
-            missing)
-              gh release upload "${TAG_NAME}" "${bundle_path}"
-              ;;
-            present)
-              echo "The current run's bundle is already attached."
-              ;;
-            published)
-              echo "The release is already published; early attachment is skipped."
-              ;;
-            *)
-              echo "::error title=release-bundle::release returned an invalid bundle state"
-              exit 1
-              ;;
-          esac
+          bash scripts/fetch_pypi_index.sh
+      - name: Retain the canonical distributions on the draft
+        id: seed
+        run: |
+          set -euo pipefail
+          bash scripts/stage_github_assets.sh
+      - name: Upload missing canonical assets to the draft
+        id: seed-upload
+        if: steps.seed.outputs.pending == 'true'
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG_NAME}" github-upload/*
       - name: Snapshot existing release assets
         id: snapshot
         run: |
@@ -228,6 +189,7 @@ jobs:
             --bundles dist/attestations > github-state/carryover.txt
           while IFS= read -r name; do
             [[ -n "${name}" ]] || continue
+            [[ -f "github-state/files/${name}" ]] && continue
             gh release download "${TAG_NAME}" --pattern "${name}" \
               --dir github-state/files
           done < github-state/carryover.txt
@@ -354,42 +316,7 @@ jobs:
         id: stage
         run: |
           set -euo pipefail
-          mkdir -p github-upload
-          mkdir -p github-state/files
-          python3 -m scripts.release_assets_cli carryover \
-            --publish dist/publish --assets release-assets.json \
-            --bundles dist/attestations > fresh-carryover.txt
-          while IFS= read -r name; do
-            [[ -n "${name}" ]] || continue
-            [[ -f "github-state/files/${name}" ]] && continue
-            gh release download "${TAG_NAME}" --pattern "${name}" \
-              --dir github-state/files
-          done < fresh-carryover.txt
-          python3 -m scripts.release_assets_cli fetch-github \
-            --publish dist/publish --index "${PYPI_INDEX_PATH}" \
-            --assets release-assets.json > pypi-fetch.tsv
-          while IFS=$'\t' read -r name url; do
-            [[ -n "${name}" ]] || continue
-            curl --silent --show-error --location --fail \
-              --retry 5 --retry-all-errors --retry-delay 2 \
-              --connect-timeout 10 --max-time 300 \
-              --output "github-upload/${name}" "${url}"
-          done < pypi-fetch.tsv
-          python3 -m scripts.release_assets_cli check-fetched \
-            --publish dist/publish --index "${PYPI_INDEX_PATH}" \
-            --assets release-assets.json --output github-upload
-          python3 -m scripts.release_assets_cli attestation-checks \
-            --purpose github --publish dist/publish --index "${PYPI_INDEX_PATH}" \
-            --assets release-assets.json --bundles dist/attestations \
-            --github-files github-state/files --output github-upload \
-            > attestation-candidates.tsv
-          bash scripts/verify_attestations.sh \
-            attestation-candidates.tsv verified-subjects.tsv
-          python3 -m scripts.release_assets_cli stage-github \
-            --publish dist/publish --index "${PYPI_INDEX_PATH}" \
-            --assets release-assets.json --bundles dist/attestations \
-            --github-files github-state/files --output github-upload \
-            --verified-subjects verified-subjects.tsv
+          bash scripts/stage_github_assets.sh
       - name: Upload missing release assets
         id: upload
         if: steps.stage.outputs.pending == 'true'

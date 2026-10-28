@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import typing as typ
 from pathlib import Path
 
@@ -13,11 +12,11 @@ from helpers.release_github import (
     WHEEL,
     PublicationInputs,
     build_github_assets,
-    digest,
     run_github_step,
     write_publication_inputs,
 )
 from helpers.release_workflow import (
+    install_fake_tools,
     load_workflow_step,
     provenance_bundle,
     read_tool_calls,
@@ -85,10 +84,10 @@ def test_failed_job_rerun_refreshes_attached_current_bundle_from_github(
     )
 
 
-def test_new_filename_retains_old_subjects_and_adds_its_matching_current_bundle(
+def test_new_filename_split_across_builds_fails_before_github_upload(
     tmp_path: Path,
 ) -> None:
-    """A same-version addition needs both the retained and current provenance."""
+    """A new filename cannot combine a second bundle with the original pair."""
     prior = f"cmd-mox-{TAG}-run40-1.sigstore.json"
     current = f"cmd-mox-{TAG}-run41-1.sigstore.json"
     extra = "cmd_mox-0.3.0-extra-py3-none-any.whl"
@@ -124,27 +123,18 @@ def test_new_filename_retains_old_subjects_and_adds_its_matching_current_bundle(
             "PYPI_INDEX_PATH": "pypi-index.json",
         },
     )
-    assert result.returncode == 0, result.stderr
-    output = tmp_path / "github-upload"
-    assert {path.name for path in output.iterdir()} == {extra, current}, (
-        "the new file needs its bundle while old subjects keep retained provenance"
+    assert result.returncode == 1, (
+        "a partial retry must not combine different builds into one release"
     )
-    assert (output / current).read_bytes() == (bundles / current).read_bytes(), (
-        "the new bundle must retain its attested subject claims"
-    )
-    typ.cast("list[dict[str, str]]", gh_assets["assets"]).extend([
-        {"name": extra, "digest": f"sha256:{digest(b'new wheel filename')}"},
-        {
-            "name": current,
-            "digest": f"sha256:{digest((bundles / current).read_bytes())}",
-        },
-    ])
-    result = run_github_step(
-        tmp_path,
-        "verify",
-        {"GH_ASSETS_JSON": json.dumps(gh_assets), "PYPI_INDEX_PATH": "pypi-index.json"},
-    )
-    assert result.returncode == 0, result.stderr
+    assert "no single provenance bundle covers the complete distribution set" in (
+        result.stderr
+    ), "the error must identify the split provenance coverage"
+    uploads = [
+        call
+        for call in read_tool_calls(tmp_path / "tool-calls.jsonl", tool="gh")
+        if typ.cast("list[str]", call["argv"])[0:2] == ["release", "upload"]
+    ]
+    assert uploads == [], "the incomplete distribution set must fail before upload"
 
 
 @pytest.mark.parametrize("missing_subject", [True, False])
@@ -153,7 +143,7 @@ def test_uncovered_canonical_digest_blocks_pypi_and_github_before_staging(
 ) -> None:
     """A retained bundle name cannot cover missing or mismatched wheel subjects."""
     prior = f"cmd-mox-{TAG}-run40-1.sigstore.json"
-    old_sdist, old_wheel = b"canonical sdist", b"old wheel"
+    old_sdist = b"canonical sdist"
     subjects = {SDIST: old_sdist}
     if not missing_subject:
         subjects[WHEEL] = b"different wheel digest"
@@ -161,7 +151,7 @@ def test_uncovered_canonical_digest_blocks_pypi_and_github_before_staging(
         tmp_path,
         PublicationInputs(
             github_assets=build_github_assets(
-                sdist=old_sdist, wheel=old_wheel, bundle=prior
+                sdist=old_sdist, wheel=b"old wheel", bundle=prior
             ),
             bundle_name=f"cmd-mox-{TAG}-run41-1.sigstore.json",
             wheel=b"rebuilt wheel",
@@ -169,12 +159,13 @@ def test_uncovered_canonical_digest_blocks_pypi_and_github_before_staging(
             retained_subjects={prior: subjects},
         ),
     )
-    script, _ = load_workflow_step("publish-pypi", "pending")
+    log = tmp_path / "tool-calls.jsonl"
     pypi_result = run_bash_step(
-        script,
+        load_workflow_step("publish-pypi", "pending")[0],
         cwd=tmp_path,
         env={
-            "PATH": "/usr/bin:/bin",
+            "FAKE_TOOL_LOG": str(log),
+            "PATH": f"{install_fake_tools(tmp_path / 'bin')}:/usr/bin:/bin",
             "PYPI_INDEX_PATH": "pypi-index.json",
             "TAG_NAME": TAG,
         },

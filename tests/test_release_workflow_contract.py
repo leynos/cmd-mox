@@ -340,6 +340,9 @@ def test_release_publishers_verify_signer_before_staging() -> None:
     jobs = _jobs(workflow)
     pending_script, _ = load_workflow_step("publish-pypi", "pending")
     release_script, _ = load_workflow_step("publish-release", "stage")
+    release_asset_script = (
+        _REPOSITORY_ROOT / "scripts" / "stage_github_assets.sh"
+    ).read_text(encoding="utf-8")
     verifier_path = _REPOSITORY_ROOT / "scripts" / "verify_attestations.sh"
     verifier_script = verifier_path.read_text(encoding="utf-8")
 
@@ -368,13 +371,46 @@ def test_release_publishers_verify_signer_before_staging() -> None:
     assert jobs["publish-pypi"]["env"].get("TAG_NAME") == "${{ github.ref_name }}", (
         "PyPI publication must pass its tag to provenance verification"
     )
-    for script in (pending_script, release_script):
+    assert "bash scripts/verify_attestations.sh" in release_asset_script, (
+        "draft seeding and final release staging must authenticate bundle subjects"
+    )
+    assert "attestation-candidates.tsv verified-subjects.tsv" in release_asset_script, (
+        "GitHub staging must verify the subject manifest before copying assets"
+    )
+    assert "bash scripts/stage_github_assets.sh" in release_script, (
+        "the final publisher must use the shared GitHub reconciliation script"
+    )
+    for script in (pending_script, release_asset_script):
         assert "bash scripts/verify_attestations.sh" in script, (
             "both publishers must use the same signer verification script"
         )
         assert "attestation-candidates.tsv verified-subjects.tsv" in script, (
             "both publishers must verify the same candidate and output manifests"
         )
+
+
+def test_draft_retains_the_distribution_pair_before_pypi_publication() -> None:
+    """The draft stage persists verified bytes before the independent PyPI job."""
+    jobs = _jobs(_workflow(RELEASE_WORKFLOW_PATH))
+    steps = _steps(jobs["draft-release"])
+    step_ids = [step.get("id") for step in steps]
+
+    assert (
+        step_ids.index("seed")
+        < step_ids.index("seed-upload")
+        < step_ids.index("snapshot")
+    ), "the draft must retain files before handing its state to PyPI"
+    seed, _ = load_workflow_step("draft-release", "seed")
+    seed_upload = next(step for step in steps if step.get("id") == "seed-upload")
+    assert "bash scripts/stage_github_assets.sh" in seed, (
+        "draft seeding must use shared source-priority and attestation checks"
+    )
+    assert seed_upload.get("if") == "steps.seed.outputs.pending == 'true'", (
+        "the draft uploads only distribution names and bundles that it lacks"
+    )
+    assert "github-upload/*" in seed_upload.get("run", ""), (
+        "draft seeding must attach the staged canonical files"
+    )
 
 
 def test_release_handoff_attests_and_uploads_the_same_distribution_tree() -> None:

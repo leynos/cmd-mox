@@ -231,9 +231,9 @@ def run_bash_step(
     subprocess.CompletedProcess[str]
         The completed process, including captured output and status.
     """
-    if "bash scripts/verify_attestations.sh" in script:
-        source = REPOSITORY_ROOT / "scripts" / "verify_attestations.sh"
-        target = cwd / "scripts" / "verify_attestations.sh"
+    for script_name in _workflow_scripts_to_copy(script):
+        source = REPOSITORY_ROOT / "scripts" / script_name
+        target = cwd / "scripts" / script_name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
 
@@ -260,6 +260,27 @@ def run_bash_step(
         text=True,
         timeout=30,
     )
+
+
+def _workflow_scripts_to_copy(script: str) -> list[str]:
+    """Select checked-in helper scripts referenced by a workflow step.
+
+    Returns
+    -------
+    list[str]
+        Helper filenames needed to execute the workflow step in isolation.
+    """
+    if "bash scripts/stage_github_assets.sh" in script:
+        return [
+            "stage_github_assets.sh",
+            "fetch_pypi_index.sh",
+            "verify_attestations.sh",
+        ]
+    return [
+        name
+        for name in ("fetch_pypi_index.sh", "verify_attestations.sh")
+        if f"scripts/{name}" in script
+    ]
 
 
 def write_executable(path: Path, contents: str) -> None:
@@ -304,7 +325,11 @@ if argv[:2] != ["release", "view"]:
         directory = Path(argv[argv.index("--dir") + 1])
         source = Path(os.environ["GH_DOWNLOADS"]) / pattern
         directory.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, directory / pattern)
+        target = directory / pattern
+        if target.exists() and "--clobber" not in argv:
+            sys.stderr.write(f"refusing to overwrite existing asset: {pattern}\n")
+            raise SystemExit(1)
+        shutil.copyfile(source, target)
         raise SystemExit(0)
     if argv[:2] == ["release", "upload"]:
         raise SystemExit(0)

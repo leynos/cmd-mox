@@ -275,12 +275,7 @@ def _with_verified_provenance(args: _Arguments, state: assets.State) -> assets.S
     verified_rows = asset_io.read_verified_subjects(_path(args, "verified_subjects"))
     verified = _verified_bundle_subjects(inventory.combined, verified_rows)
     canonical = assets.canonical_digests(inventory.state)
-    relevant_names = (
-        inventory.state.plan().pypi_uploads
-        if args.command == "stage-pypi"
-        else canonical
-    )
-    required_subjects = frozenset((name, canonical[name]) for name in relevant_names)
+    required_subjects = frozenset(canonical.items())
     verified = {
         bundle: subjects & required_subjects for bundle, subjects in verified.items()
     }
@@ -349,9 +344,32 @@ def _attestation_checks(invocation: _Invocation) -> None:
         _path(args, "output")
     inventory = _read_bundle_inventory(args, state)
     canonical = assets.canonical_digests(inventory.state)
-    names = state.plan().pypi_uploads if args.purpose == "pypi" else canonical.keys()
-    required = frozenset((name, canonical[name]) for name in names)
     directories = _artifact_directories(args)
+    required = _required_attestation_subjects(canonical, state, args.purpose)
+    _print_attestation_candidates(inventory, required, directories)
+
+
+def _required_attestation_subjects(
+    canonical: dict[str, str], state: assets.State, purpose: str
+) -> frozenset[tuple[str, str]]:
+    """Select canonical subjects required for the destination's verification.
+
+    Returns
+    -------
+    frozenset[tuple[str, str]]
+        Canonical filenames and digests requiring a provenance check.
+    """
+    if purpose == "github" or state.plan().pypi_uploads:
+        return frozenset(canonical.items())
+    return frozenset()
+
+
+def _print_attestation_candidates(
+    inventory: _BundleInventory,
+    required: frozenset[tuple[str, str]],
+    directories: list[Path],
+) -> None:
+    """Print bundle/artifact pairs whose bytes match required subjects."""
     for bundle, subjects in sorted(inventory.combined.items()):
         bundle_path = inventory.paths[bundle]
         for name, digest in sorted(subjects & required):
@@ -391,7 +409,7 @@ def _stage_pypi(invocation: _Invocation) -> None:
     state = invocation.state
     decided = state.plan()
     if decided.pypi_uploads:
-        assets.require_provenance(state, decided.pypi_uploads)
+        assets.require_provenance(state)
     for name, source in sorted(decided.canonical.items()):
         _stage_pypi_asset(invocation, name, source)
     if not decided.pypi_uploads:
