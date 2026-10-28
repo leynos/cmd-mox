@@ -59,7 +59,7 @@ The `check-version` job compares the tag and `project.version` as exact strings
 after removing a leading `v`. It also determines whether the public version is
 a pre-release. Attestation waits for both this check and the build. It attests
 all wheels and the single sdist, then hands the files and Sigstore bundle off
-together as `release-dist` so later jobs use the attested bytes.
+together as `release-dist`, so later jobs use the attested bytes.
 
 PyPI publication runs with Trusted Publishing in the `pypi` environment. The
 workflow reads the PyPI Simple index and drops every filename already present

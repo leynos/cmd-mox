@@ -948,7 +948,7 @@ steps pass only successful bundle/name/digest rows to the adapter through
 [`scripts/release_version.py`](../scripts/release_version.py) compares
 `TAG_VERSION` with `project.version` from `pyproject.toml` exactly, then reports
 `prerelease=true|false` through `GITHUB_OUTPUT`. Each staging run takes a
-fresh inventory snapshot so retries can skip filenames already published.
+fresh inventory snapshot, so retries can skip filenames already published.
 
 [`scripts/fetch_pypi_index.sh`](../scripts/fetch_pypi_index.sh) fetches the PEP
 691 index. Its initial lookup makes up to six attempts, retrying transport
