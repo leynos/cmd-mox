@@ -8,6 +8,21 @@ on:
 permissions: {}
 
 jobs:
+  build-dist:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build Python distributions
+        uses: ./.github/actions/pure-python-wheel
+        with:
+          python-version: '3.13'
+          artifact-name: wheels-pure
+
   quality:
     permissions:
       contents: read
@@ -169,6 +184,8 @@ jobs:
         with:
           output-path: coverage.xml
           format: cobertura
+          # Track the installed package, not test harness or release tooling.
+          python-source: cmd_mox
           # The suite currently runs serially (the previous slipcover step
           # used pytest-forked without xdist); keep it serial to stay
           # behaviour-preserving. Follow-up 4 removes this pin to adopt

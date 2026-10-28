@@ -67,6 +67,8 @@ jobs:
         with:
           output-path: coverage.xml
           format: cobertura
+          # Track the installed package, not test harness or release tooling.
+          python-source: cmd_mox
           # Keep the run serial to match the pull-request coverage job;
           # see the note in ci.yml.
           pytest-workers: ''

@@ -1,33 +1,68 @@
-name: Build Pure Python Wheel
-description: Builds a pure Python wheel using UV and uploads it as an artifact.
+name: Build Pure Python Wheel and Sdist
+description: >-
+  Builds the source distribution and, from it, the pure Python wheel using uv,
+  then uploads both as one artefact.
 inputs:
   python-version:
     description: Python version to set up
     required: true
   out-dir:
-    description: Directory to place built wheel
+    description: Directory to place the built sdist and wheel
     required: false
     default: dist
   artifact-name:
     description: Name of the uploaded artifact
     required: true
+outputs:
+  build-dir:
+    description: Directory containing this invocation's distributions
+    value: ${{ steps.build.outputs.build-dir }}
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v7
-      with:
-        fetch-depth: 0
     - name: Set up Python
-      uses: actions/setup-python@v7
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: ${{ inputs.python-version }}
     - name: Install uv
       uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa
-    - name: Build wheel
+      with:
+        enable-cache: false
+    # Without --sdist or --wheel, uv builds the sdist first and then the wheel
+    # from that sdist, so every run also proves the sdist is buildable.
+    - name: Build sdist and wheel
+      id: build
       shell: bash
-      run: uv build --wheel --out-dir ${{ inputs.out-dir }}
-    - name: Upload wheel artifact
-      uses: actions/upload-artifact@v7
+      env:
+        OUT_DIR: ${{ inputs.out-dir }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${OUT_DIR}" || "${OUT_DIR}" == "/" ]]; then
+          echo "::error::The output directory must be a non-root path." >&2
+          exit 1
+        fi
+        mkdir -p -- "${OUT_DIR}"
+        BUILD_DIR="$(mktemp -d -- "${OUT_DIR%/}/release-build.XXXXXXXX")"
+        uv build --out-dir "${BUILD_DIR}"
+        shopt -s nullglob
+        sdists=("${BUILD_DIR}"/*.tar.gz)
+        wheels=("${BUILD_DIR}"/*.whl)
+        if [[ ${#sdists[@]} -ne 1 || ${#wheels[@]} -lt 1 ]]; then
+          echo "::error::Expected exactly one sdist and at least one wheel in ${BUILD_DIR}; found ${#sdists[@]} sdist(s) and ${#wheels[@]} wheel(s)." >&2
+          exit 1
+        fi
+        for wheel in "${wheels[@]}"; do
+          if [[ "${wheel##*/}" != *-py3-none-any.whl ]]; then
+            echo "::error::Pure-Python wheels must use the py3-none-any tag: ${wheel##*/}." >&2
+            exit 1
+          fi
+        done
+        printf 'build-dir=%s\n' "${BUILD_DIR}" >> "${GITHUB_OUTPUT}"
+    - name: Upload sdist and wheel artefact
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: ${{ inputs.artifact-name }}
-        path: ${{ inputs.out-dir }}/*.whl
+        path: |
+          ${{ steps.build.outputs.build-dir }}/*.whl
+          ${{ steps.build.outputs.build-dir }}/*.tar.gz
+        if-no-files-found: error

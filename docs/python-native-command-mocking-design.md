@@ -1640,6 +1640,22 @@ maintainable. The inclusion of stubs, strict mocks, and observational spies
 (including a passthrough mode) provides a complete toolkit for tackling a wide
 range of testing scenarios.
 
+#### Packaging and release
+
+CmdMox is currently distributed as a pure-Python wheel and source distribution.
+The shared build action runs plain `uv build`, which creates the source
+distribution first and builds the wheel from that archive. Pull-request CI
+checks that each build contains exactly one source distribution.
+
+Tagged releases check the tag against `project.version`, attest every
+distribution, and pass the attested files and Sigstore bundle together as the
+`release-dist` artefact. Trusted Publishing sends only files PyPI does not
+already list. The workflow then reconciles the draft GitHub Release with PyPI
+using SHA-256 digests, preserving existing assets and attaching the bytes PyPI
+holds. The published GitHub Release carries the same distribution bytes and
+their provenance bundle. See [ADR 003](./adr-003-release-pipeline.md) for the
+decision and operating constraints.
+
 ### 8.2 Future Roadmap
 
 While the design for version 1.0 is comprehensive for Linux, FreeBSD, and

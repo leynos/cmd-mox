@@ -14,5 +14,6 @@ guards = ["matrix.run-windows-smoke == false"]
 [selection]
 output-path = "coverage.xml"
 format = "cobertura"
+python-source = "cmd_mox"
 pytest-workers = ""
 with-ratchet = "true"

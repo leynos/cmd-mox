@@ -839,3 +839,177 @@ The test validates:
   and
 - the triggers keep the daily schedule and a plain `workflow_dispatch` with
   no inputs.
+
+## Publishing a release
+
+The release workflow publishes pure-Python source distributions and wheels to
+PyPI, then reconciles the GitHub Release with PyPI. The decision and its
+trade-offs are recorded in [ADR 003](./adr-003-release-pipeline.md).
+
+To publish a release:
+
+1. Set `project.version` in `pyproject.toml` to the release version and commit
+   that change.
+2. Create and push the matching version tag, for example `vX.Y.Z`. The version
+   check compares the tag and project version as exact strings after removing
+   the leading `v`.
+3. Watch the workflow graph. `check-version` and `build-dist` run first;
+   attestation, the draft GitHub Release and PyPI publication follow before the
+   GitHub Release is published.
+4. Before PyPI publication, the draft retains the complete canonical sdist,
+   wheels and the provenance bundle that covers them. Source priority remains
+   PyPI, GitHub Release, then the local build, and existing GitHub assets are
+   never overwritten. If a run needs retrying, re-run only its failed jobs so
+   they reuse the attested `release-dist` from the original run. A full rerun
+   builds new distributions but reuses the pair retained on the draft. This
+   keeps a wheel from a retry from being paired with an sdist already accepted
+   by PyPI. One provenance bundle must cover the complete canonical set; if the
+   original pair or its matching bundle is unavailable, the workflow fails
+   before another PyPI upload. The final job waits for PyPI to list every
+   distribution before publishing the GitHub Release. If final digest
+   verification detects a conflict, the GitHub Release remains an unpublished
+   draft; assets uploaded during that attempt can remain attached to the draft.
+   If only part of the seed reached the draft and PyPI accepted no
+   distribution, re-run the failed jobs to reuse the original `release-dist`.
+   If the retained pair is defective and PyPI accepted no distribution, remove
+   the draft's distributions and matching bundle, then run the whole workflow
+   again. After PyPI accepts any distribution, advance `project.version` and
+   cut a new tag for corrected bytes because PyPI reserves uploaded filenames
+   permanently.
+5. Verify the provenance attestations for the sdist and each wheel against the
+   `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
+   the build run that attested those bytes.
+
+For screen readers: For each distribution filename, the workflow uses PyPI's
+bytes when the filename is already there. Otherwise, it uses matching bytes
+from the GitHub Release and carries them to PyPI when needed, or selects the
+local attested bytes when neither destination has the filename. Before PyPI
+publication, the draft retains the complete canonical distribution set and the
+single provenance bundle that attests those bytes. PyPI skips existing
+filenames and uploads only the rest. The workflow waits for new files to appear
+in the index, then compares SHA-256 digests. A mismatch fails safely. A match
+allows the workflow to upload any missing GitHub Release assets and publish the
+GitHub Release.
+
+```mermaid
+flowchart TD
+    accTitle: Idempotent release asset reconciliation
+    accDescr {
+      Retain the canonical distributions and their single provenance bundle
+      on the draft before PyPI publication. For each filename, prefer PyPI
+      bytes, then existing GitHub Release bytes, then local attested bytes.
+      Skip PyPI uploads for existing filenames; carry GitHub bytes to PyPI when
+      needed or publish local bytes, then wait for the PyPI index. Compare
+      PyPI and GitHub SHA-256 digests and fail safely on a mismatch. On a match,
+      verify the matching provenance bundle, upload missing GitHub assets,
+      retain or attach the bundle, and publish the GitHub Release.
+    }
+    A[Attested sdist and wheel] --> A2[Retain pair and bundle on draft]
+    A2 --> B{Filename already on PyPI?}
+    B -- Yes --> C[Use PyPI bytes]
+    B -- No --> D{Filename already on GitHub Release?}
+    D -- Yes --> E[Use existing GitHub bytes]
+    D -- No --> F[Use local attested bytes]
+    C --> G[Skip PyPI upload]
+    E --> H[Carry bytes to PyPI if needed]
+    F --> I[Publish to PyPI]
+    G --> J{PyPI and GitHub SHA-256 match?}
+    H --> J
+    I --> K[Wait for PyPI index]
+    K --> J
+    J -- No --> L[Fail safely]
+    J -- Yes --> V[Verify matching provenance bundle]
+    V --> M[Upload only missing GitHub assets]
+    M --> N[Retain or attach provenance bundle]
+    N --> O[Publish GitHub Release]
+```
+
+_Figure: Draft retention, PyPI-first source selection, digest and provenance
+verification, and GitHub Release publication._
+
+### Release tooling
+
+[`scripts/release_assets.py`](../scripts/release_assets.py) contains the pure
+reconciliation decisions. Its immutable `State` records local, PyPI, GitHub,
+and provenance inventories. Its `Plan` selects each filename's canonical source
+in PyPI, GitHub Release, then local-build order, and lists only missing
+uploads. Existing assets are never overwritten. The CLI adapter in
+[`scripts/release_assets_cli.py`](../scripts/release_assets_cli.py) loads those
+inventories from files, executes the selected copy or removal steps, and
+reports workflow outputs. The `draft-release` seed and `publish-release` stage
+steps use [`scripts/stage_github_assets.sh`](../scripts/stage_github_assets.sh)
+to carry forward existing bytes, stage only missing assets and verify
+provenance before either upload.
+
+Every CLI command requires `--publish` and `--assets`. The remaining options
+are required by the commands that read them:
+
+| Command              | Additional inputs                                                                      | Result                                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `carryover`          | `--bundles`                                                                            | Prints existing distribution and provenance filenames to carry forward.                                              |
+| `attestation-checks` | `--index`, `--bundles`, `--github-files`, `--purpose`; for GitHub, `--output`          | Prints digest-matched artefact and bundle pairs for the workflow's signature checks.                                 |
+| `stage-pypi`         | `--index`; with publication work, `--bundles`, `--github-files`, `--verified-subjects` | Removes names already on PyPI, stages GitHub bytes where needed, and writes the `remaining` flag to `GITHUB_OUTPUT`. |
+| `fetch-github`       | `--index`                                                                              | Prints PyPI download rows for missing GitHub Release assets before provenance checks.                                |
+| `stage-github`       | `--index`, `--bundles`, `--github-files`, `--output`, `--verified-subjects`            | Stages verified local or PyPI bytes and writes the `pending` flag to `GITHUB_OUTPUT`.                                |
+| `check-fetched`      | `--index`, `--output`                                                                  | Checks downloaded files against the PyPI index digests.                                                              |
+| `missing-pypi`       | `--index`                                                                              | Prints distribution names still absent from the latest PyPI index.                                                   |
+| `verify`             | `--index`, `--bundles`, `--github-files`, `--output`, `--verified-subjects`            | Confirms matching PyPI and GitHub digests and verified provenance coverage.                                          |
+
+_Table 2: Inputs and results for the release asset commands._
+
+The release workflow invokes the adapter as
+`python3 -m scripts.release_assets_cli`. Before trusting a current or retained
+bundle's subjects, its Bash steps run `gh attestation verify` against each
+matching distribution and require the cmd-mox release workflow as signer. The
+steps pass only successful bundle/name/digest rows to the adapter through
+`--verified-subjects`. Its separate
+[`scripts/release_version.py`](../scripts/release_version.py) compares
+`TAG_VERSION` with `project.version` from `pyproject.toml` exactly, then reports
+`prerelease=true|false` through `GITHUB_OUTPUT`. Each staging run takes a
+fresh inventory snapshot, so retries can skip filenames already published.
+
+[`scripts/fetch_pypi_index.sh`](../scripts/fetch_pypi_index.sh) fetches the PEP
+691 index. Its initial lookup makes up to six attempts, retrying transport
+failures, HTTP 429, and 5xx responses; HTTP 404 represents an empty project
+index. After publication, the script makes up to ten attempts and waits for the
+index to list every expected filename before GitHub publication can continue.
+It writes the final attempt count and HTTP status to `GITHUB_OUTPUT`.
+
+The
+[`pure-python-wheel` composite action](../.github/actions/pure-python-wheel/action.yml)
+accepts `python-version`, `out-dir`, and `artifact-name`, and exposes
+`build-dir` for the isolated build output. It runs plain `uv build`, fails
+unless it finds exactly one `.tar.gz` sdist and at least one `py3-none-any`
+wheel, and uploads both formats with `if-no-files-found: error`. The
+[`release workflow`](../.github/workflows/release.yml) uses this action before
+attesting the distributions and handing them to later jobs as `release-dist`.
+The design rationale and operating decision are recorded in
+[ADR 003](./adr-003-release-pipeline.md).
+
+The first automated release must use a numeric release segment later than
+`0.2.0`. The version check rejects older versions and `0.2.0` pre-release,
+post-release and local variants before attestation or publication. PyPI already
+contains the manually uploaded `0.2.0` wheel and source distribution, so
+another publication of those filenames is a no-op there. The existing GitHub
+Release does not contain the sdist or provenance bundle from this workflow.
+
+### Release publishing settings
+
+The GitHub repository needs an environment named `pypi`. Its deployment branch
+policy must be a tag policy restricted to `v*.*.*`.
+
+The PyPI project `cmd-mox` needs a Trusted Publisher configured with these
+values:
+
+| Setting           | Value         |
+| ----------------- | ------------- |
+| Owner             | `leynos`      |
+| Repository        | `cmd-mox`     |
+| Workflow filename | `release.yml` |
+| Environment name  | `pypi`        |
+
+_Table 3: GitHub Trusted Publishing settings for the `cmd-mox` project._
+
+For a local release build, run `make build-release`. The target uses `uv build`
+to create the source distribution first and then build the wheel from it in
+`dist/`.

@@ -1,7 +1,9 @@
 NIXIE ?= nixie
-# Every uv call goes through the vendored helper, which cleans the environment,
-# uses the global uv cache, runs offline first and goes online at most once. See
-# https://github.com/leynos/shared-actions/tree/main/uv_gate for the contract.
+# Development and tool uv calls go through the vendored helper, which cleans the
+# environment, uses the global uv cache, runs offline first and goes online at
+# most once. The release build uses plain `uv build` to match CI and let the
+# isolated build environment resolve its own backend requirements. See
+# https://github.com/leynos/shared-actions/tree/main/uv_gate for the helper contract.
 UV_GATE ?= python3 scripts/uv_gate.py
 PROJECT_ROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
 # The helper asks uv for its cache directory and takes the answer verbatim, so a
@@ -16,6 +18,8 @@ TOOLS = $(UV)
 export PATH := $(patsubst %/,%,$(dir $(UV))):$(PATH)
 VENV_TOOLS = pytest
 MAKEUTIL = makeutil
+# Keep nested pytest subprocesses within the 30-second per-test timeout.
+PYTEST_WORKERS ?= 4
 # The CV-005 CodeScene contracts live in shared-actions and run from a full
 # commit, so a fix is a pin bump. `.github/cv005.toml` holds this repository's
 # only parameters.
@@ -117,7 +121,8 @@ prepare: $(UV) ## Install the locked development environment, offline first
 build: prepare ## Build virtual-env and install deps
 
 build-release: ## Build artefacts (sdist & wheel)
-	python -m build --sdist --wheel
+	rm -rf dist
+	$(UV) build --out-dir dist
 
 clean: ## Remove build artifacts
 	rm -rf build dist *.egg-info \
@@ -270,7 +275,7 @@ makeutil: ## Verify the Makefile parser used by contract tests
 	$(call ensure_tool,$@)
 
 test: build $(UV) $(VENV_TOOLS) makeutil test-workflow-contracts ## Run tests
-	$(UV_GATE) run --group dev -- pytest -v -n auto
+	$(UV_GATE) run --group dev -- pytest -v -n $(PYTEST_WORKERS)
 
 test-workflow-contracts: $(UV) ## Run the shared CV-005 CodeScene contracts
 	$(CV005_CONTRACTS) check --repository .
