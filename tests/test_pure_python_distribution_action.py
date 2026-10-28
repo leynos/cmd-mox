@@ -7,8 +7,6 @@ execute the checked-in Bash step with a temporary fake ``uv`` command.
 
 from __future__ import annotations
 
-import os
-import shutil
 import typing as typ
 
 import pytest
@@ -19,15 +17,15 @@ from helpers.release_workflow import (
     run_bash_step,
     write_executable,
 )
+from helpers.release_workflow import (
+    release_shell_marks as pytestmark,
+)
+
+__all__ = ["pytestmark"]
 
 if typ.TYPE_CHECKING:
     import subprocess
     from pathlib import Path
-
-pytestmark = pytest.mark.skipif(
-    os.name == "nt" or shutil.which("bash") is None,
-    reason="the composite build action requires Bash on a Unix-like system",
-)
 
 _FAKE_UV = """#!/bin/sh
 set -eu

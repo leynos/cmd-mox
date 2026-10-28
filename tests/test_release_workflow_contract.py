@@ -513,6 +513,7 @@ def test_release_test_modules_keep_fail_closed_imports() -> None:
 def test_release_test_modules_share_skip_markers() -> None:
     """Release modules reuse the shared mutation and shell test markers."""
     expected_markers = {
+        "test_pure_python_distribution_action.py": "release_shell_marks",
         "test_release_github_steps.py": "release_shell_marks",
         "test_release_draft_bundle_steps.py": "release_shell_marks",
         "test_release_distribution_steps.py": "release_shell_marks",

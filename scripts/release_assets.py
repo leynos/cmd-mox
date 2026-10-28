@@ -136,13 +136,16 @@ def _canonical_source(
         The preferred existing source, or the local build when neither
         destination has the filename.
     """
-    match (name in on_pypi, name in on_github):
+    present = (name in on_pypi, name in on_github)
+    match present:
         case (True, _):
             return Source.PYPI
         case (False, True):
             return Source.GITHUB
         case (False, False):
             return Source.LOCAL
+        case _:
+            typ.assert_never(present)
 
 
 def plan(
@@ -273,6 +276,8 @@ def _source_digest(state: State, name: str, source: Source) -> str | None:
             return state.github[name]
         case Source.LOCAL:
             return state.local[name]
+        case _:
+            typ.assert_never(source)
 
 
 def bundle_family(name: str) -> str | None:

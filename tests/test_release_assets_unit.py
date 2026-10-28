@@ -504,6 +504,14 @@ def test_canonical_sources_and_carryover_include_only_matching_tag_bundles() -> 
         assets.canonical_digests(incomplete)
 
 
+def test_source_digest_rejects_an_unhandled_source_member() -> None:
+    """An invalid source value fails at the exhaustive match boundary."""
+    state = _state(local={"a.whl": "local"})
+
+    with pytest.raises(AssertionError):
+        assets._source_digest(state, "a.whl", typ.cast("assets.Source", "unknown"))
+
+
 def test_pure_staging_returns_file_identifiers_without_transport_decisions() -> None:
     """Pure staging returns copy and fetch decisions without opening paths."""
     bundle = "cmd-mox-v0.3.0-run1-1.sigstore.json"

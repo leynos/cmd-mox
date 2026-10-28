@@ -865,7 +865,9 @@ To publish a release:
    are skipped, and existing GitHub assets are not overwritten. If no retained
    bundle matches the canonical bytes, the workflow fails safely. The final job
    waits for PyPI to list every distribution before publishing the GitHub
-   Release.
+   Release. If final digest verification detects a conflict, the GitHub Release
+   remains an unpublished draft; assets uploaded during that attempt can remain
+   attached to the draft.
 5. Verify the provenance attestations for the sdist and each wheel against the
    `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
    the build run that attested those bytes.
@@ -874,15 +876,21 @@ For screen readers: For each attested distribution, the workflow chooses bytes
 from PyPI when that filename already exists there, otherwise from the GitHub
 Release when available, otherwise from the local attested build. It skips
 existing PyPI filenames, carries GitHub bytes to PyPI when needed, and uploads
-local bytes when neither destination has them. After PyPI is updated, it checks
-that PyPI and GitHub have matching SHA-256 digests. A mismatch fails safely. A
-match allows the workflow to upload missing GitHub assets, retain or attach the
-provenance bundle, and publish the GitHub Release.
+local bytes when neither destination has them. Every path then waits for PyPI's
+index. The workflow uploads missing GitHub assets and required provenance
+bundles, then checks that PyPI and GitHub have matching SHA-256 digests. If
+they do not match, the release remains an unpublished draft. It publishes the
+release only after the digests match.
 
 ```mermaid
 flowchart TD
     accTitle: Idempotent release publication
-    accDescr: Prefer PyPI, then GitHub, then local; wait for the index, verify digests, and publish on a match.
+    accDescr {
+      Choose PyPI, GitHub, then local bytes for each distribution.
+      Wait for the PyPI index, upload missing GitHub assets and provenance,
+      then verify digests. Publish only on a match; otherwise keep the release
+      in draft.
+    }
     A[Attested sdist and wheel] --> B{Filename already on PyPI?}
     B -- Yes --> C[Use PyPI bytes]
     B -- No --> D{Filename already on GitHub Release?}
@@ -891,14 +899,14 @@ flowchart TD
     C --> G[Skip PyPI upload]
     E --> H[Carry bytes to PyPI if needed]
     F --> I[Publish to PyPI]
-    G --> J{PyPI and GitHub SHA-256 match?}
-    H --> J
-    I --> K[Wait for PyPI index]
-    K --> J
-    J -- No --> L[Fail safely]
-    J -- Yes --> M[Upload only missing GitHub assets]
-    M --> N[Retain or attach provenance bundle]
-    N --> O[Publish GitHub Release]
+    G --> K[Wait for PyPI index]
+    H --> K
+    I --> K
+    K --> M[Upload only missing GitHub assets]
+    M --> N[Retain or attach required provenance]
+    N --> J{PyPI and GitHub SHA-256 match?}
+    J -- No --> L["Fail safely; keep the release in draft"]
+    J -- Yes --> O[Publish GitHub Release]
 ```
 
 _Figure: Idempotent asset selection, PyPI publication and digest-verified
