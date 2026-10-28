@@ -103,37 +103,16 @@ def test_version_check_matches_but_rejects_the_historical_beta_tag(
     assert not output.exists(), "a blocked release must not publish version output"
 
 
-def test_version_check_rejects_the_historical_release_tag(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The hand-built 0.2.0 release cannot enter automated publication."""
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "cmd-mox"\nversion = "0.2.0"\n',
-        encoding="utf-8",
-    )
-    output = tmp_path / "github-output"
-
-    result = release_version.main(
-        {"TAG_VERSION": "v0.2.0", "GITHUB_OUTPUT": str(output)}, tmp_path
-    )
-
-    assert result == 1, "the historical release tag must not be automated"
-    assert "Unsupported initial release" in capsys.readouterr().err, (
-        "the guard must identify the blocked historical release"
-    )
-    assert not output.exists(), "a blocked release must not publish version output"
-
-
 @pytest.mark.parametrize(
     "version",
-    ["0.1.9", "0.2.0rc1", "0.2.0.post1", "0.2.0+local"],
+    ["0.1.9", "0.2.0", "0.2.0rc1", "0.2.0.post1", "0.2.0+local"],
 )
 def test_version_check_rejects_versions_not_after_the_historical_release(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     version: str,
 ) -> None:
-    """Older and suffixed versions in the 0.2.0 release family are blocked."""
+    """Versions at or below the historical release are blocked."""
     (tmp_path / "pyproject.toml").write_text(
         f'[project]\nname = "cmd-mox"\nversion = "{version}"\n',
         encoding="utf-8",

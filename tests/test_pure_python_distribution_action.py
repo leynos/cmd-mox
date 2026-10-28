@@ -33,10 +33,10 @@ test "$#" -eq 3
 test "$1" = build
 test "$2" = --out-dir
 mkdir -p "$3"
-if [ "$FAKE_SDIST" = 1 ]; then
+if [ "$FAKE_SDIST_COUNT" -ge 1 ]; then
   : > "$3/cmd_mox-0.2.0.tar.gz"
 fi
-if [ "$FAKE_EXTRA_SDIST" = 1 ]; then
+if [ "$FAKE_SDIST_COUNT" -ge 2 ]; then
   : > "$3/cmd_mox-extra-0.2.0.tar.gz"
 fi
 : > "$3/$FAKE_WHEEL"
@@ -47,8 +47,7 @@ _PURE_WHEEL_NAME = "cmd_mox-0.2.0-py3-none-any.whl"
 def _run_build_step(
     tmp_path: Path,
     *,
-    has_sdist: bool,
-    additional_sdist: bool = False,
+    sdist_count: int = 1,
     wheel_name: str = _PURE_WHEEL_NAME,
     out_dir: str = "dist",
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
@@ -67,8 +66,7 @@ def _run_build_step(
         script,
         cwd=tmp_path,
         env={
-            "FAKE_EXTRA_SDIST": "1" if additional_sdist else "0",
-            "FAKE_SDIST": "1" if has_sdist else "0",
+            "FAKE_SDIST_COUNT": str(sdist_count),
             "FAKE_WHEEL": wheel_name,
             "GITHUB_OUTPUT": str(github_output),
             "OUT_DIR": out_dir,
@@ -81,7 +79,7 @@ def _run_build_step(
 def test_build_action_uses_only_the_current_sdist_and_wheel(tmp_path: Path) -> None:
     """Old files in dist cannot enter the new build inventory or upload."""
     result, output_dir, github_output, stale_sdist = _run_build_step(
-        tmp_path, has_sdist=True
+        tmp_path, sdist_count=1
     )
 
     assert result.returncode == 0, result.stderr
@@ -102,7 +100,7 @@ def test_build_action_uses_only_the_current_sdist_and_wheel(tmp_path: Path) -> N
 
 def test_build_action_fails_when_current_build_has_no_sdist(tmp_path: Path) -> None:
     """A stale sdist cannot hide a missing sdist from this build."""
-    result, _, github_output, _ = _run_build_step(tmp_path, has_sdist=False)
+    result, _, github_output, _ = _run_build_step(tmp_path, sdist_count=0)
 
     assert result.returncode == 1, "a build without an sdist must fail"
     assert "Expected exactly one sdist" in result.stderr, (
@@ -113,9 +111,7 @@ def test_build_action_fails_when_current_build_has_no_sdist(tmp_path: Path) -> N
 
 def test_build_action_fails_when_current_build_has_two_sdists(tmp_path: Path) -> None:
     """Multiple source archives cannot pass the exact inventory check."""
-    result, _, github_output, _ = _run_build_step(
-        tmp_path, has_sdist=True, additional_sdist=True
-    )
+    result, _, github_output, _ = _run_build_step(tmp_path, sdist_count=2)
 
     assert result.returncode == 1, "a build with two sdists must fail"
     assert "Expected exactly one sdist and at least one wheel" in result.stderr, (
@@ -131,7 +127,6 @@ def test_build_action_rejects_platform_specific_wheels(tmp_path: Path) -> None:
     """The pure-Python action rejects a platform wheel before upload."""
     result, _, github_output, _ = _run_build_step(
         tmp_path,
-        has_sdist=True,
         wheel_name="cmd_mox-0.2.0-cp312-cp312-manylinux_x86_64.whl",
     )
 
@@ -147,9 +142,7 @@ def test_build_action_rejects_an_empty_or_root_output_directory(
     tmp_path: Path, out_dir: str
 ) -> None:
     """A build cannot direct temporary output to an empty or root path."""
-    result, _, github_output, _ = _run_build_step(
-        tmp_path, has_sdist=True, out_dir=out_dir
-    )
+    result, _, github_output, _ = _run_build_step(tmp_path, out_dir=out_dir)
 
     assert result.returncode == 1, "invalid output directories must fail before build"
     assert "output directory must be a non-root path" in result.stderr, (

@@ -878,8 +878,8 @@ from the GitHub Release and carries them to PyPI when needed, or publishes the
 local attested bytes to PyPI when neither destination has the filename. It
 waits for files published or carried to PyPI to appear in the index, then
 compares SHA-256 digests. A mismatch fails safely. A match allows the workflow
-to upload missing GitHub Release assets, retain or attach the provenance bundle,
-and publish the GitHub Release.
+to upload missing GitHub Release assets, retain or attach the provenance
+bundle, and publish the GitHub Release.
 
 ```mermaid
 flowchart TD
