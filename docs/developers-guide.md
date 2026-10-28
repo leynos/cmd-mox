@@ -875,13 +875,13 @@ To publish a release:
 For screen readers: For each attested distribution, the workflow chooses bytes
 from PyPI when that filename already exists there, otherwise from the GitHub
 Release when available, otherwise from the local attested build. It skips
-existing PyPI filenames, carries existing GitHub bytes to PyPI when needed,
-and publishes local bytes when neither destination has the filename. The
-workflow waits for each newly published filename to appear in the PyPI index.
-It then stages and uploads only missing GitHub Release assets and required
-provenance, refreshes the release asset list, and checks that PyPI and GitHub
-have matching SHA-256 digests and provenance. A mismatch fails safely and
-leaves the release in draft; a match publishes the release.
+existing PyPI filenames, carries existing GitHub bytes to PyPI when needed, and
+publishes local bytes when neither destination has the filename. The workflow
+waits for each newly published filename to appear in the PyPI index. It then
+stages and uploads only missing GitHub Release assets and required provenance,
+refreshes the release asset list, and checks that PyPI and GitHub have matching
+SHA-256 digests and provenance. A mismatch fails safely and leaves the release
+in draft; a match publishes the release.
 
 ```mermaid
 flowchart TD
