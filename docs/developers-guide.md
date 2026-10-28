@@ -889,7 +889,8 @@ flowchart TD
     accDescr {
       Choose PyPI, GitHub Release, then local attested bytes for each filename.
       Skip PyPI uploads for existing names and carry existing GitHub bytes to
-      PyPI when needed. Wait for the PyPI index after publishing local bytes.
+      PyPI when needed. Wait for the PyPI index after publishing or carrying
+      bytes to PyPI.
       Stage and upload missing GitHub Release assets and required provenance,
       then refresh the release asset list. Compare PyPI and GitHub SHA-256
       digests and provenance. Publish only on a match; otherwise fail safely
