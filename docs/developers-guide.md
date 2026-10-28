@@ -875,21 +875,24 @@ To publish a release:
 For screen readers: For each attested distribution, the workflow chooses bytes
 from PyPI when that filename already exists there, otherwise from the GitHub
 Release when available, otherwise from the local attested build. It skips
-existing PyPI filenames, carries GitHub bytes to PyPI when needed, and uploads
-local bytes when neither destination has them. Every path then waits for PyPI's
-index. The workflow uploads missing GitHub assets and required provenance
-bundles, then checks that PyPI and GitHub have matching SHA-256 digests. If
-they do not match, the release remains an unpublished draft. It publishes the
-release only after the digests match.
+existing PyPI filenames and carries existing GitHub bytes to PyPI when needed.
+When neither destination has a filename, it publishes the local attested bytes
+to PyPI and waits for the filename to appear in the index. The workflow then
+checks that PyPI and GitHub have matching SHA-256 digests. If they do not
+match, it fails safely and leaves the release in draft. If they match, it
+uploads only missing GitHub assets, retains or attaches provenance, and
+publishes the release.
 
 ```mermaid
 flowchart TD
     accTitle: Idempotent release publication
     accDescr {
-      Choose PyPI, GitHub, then local bytes for each distribution.
-      Wait for the PyPI index, upload missing GitHub assets and provenance,
-      then verify digests. Publish only on a match; otherwise keep the release
-      in draft.
+      Choose PyPI, GitHub Release, then local attested bytes for each filename.
+      Skip PyPI uploads for existing names and carry existing GitHub bytes to
+      PyPI when needed. Wait for the PyPI index after publishing local bytes.
+      Compare PyPI and GitHub SHA-256 digests. On a match, upload missing
+      GitHub assets, retain or attach provenance and publish the release;
+      otherwise fail safely and keep it in draft.
     }
     A[Attested sdist and wheel] --> B{Filename already on PyPI?}
     B -- Yes --> C[Use PyPI bytes]
@@ -899,18 +902,17 @@ flowchart TD
     C --> G[Skip PyPI upload]
     E --> H[Carry bytes to PyPI if needed]
     F --> I[Publish to PyPI]
-    G --> K[Wait for PyPI index]
-    H --> K
-    I --> K
-    K --> M[Upload only missing GitHub assets]
+    G --> J{PyPI and GitHub SHA-256 match?}
+    H --> J
+    I --> K[Wait for PyPI index]
+    K --> J
+    J -- No --> L[Fail safely]
+    J -- Yes --> M[Upload only missing GitHub assets]
     M --> N[Retain or attach required provenance]
-    N --> J{PyPI and GitHub SHA-256 match?}
-    J -- No --> L["Fail safely; keep the release in draft"]
-    J -- Yes --> O[Publish GitHub Release]
+    N --> O[Publish GitHub Release]
 ```
 
-_Figure: Idempotent asset selection, PyPI publication and digest-verified
-GitHub Release publication._
+_Figure: Release asset source priority, digest verification and publication._
 
 ### Release tooling
 
