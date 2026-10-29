@@ -34,6 +34,13 @@ finish reading before it sends the IPC request. For the precise timeout scope
 and error behaviour, see the
 [canonical `CMOX_IPC_TIMEOUT` guidance](usage-guide.md#environment-variables).
 
+When upgrading to a release that writes three-component fixture versions,
+upgrade every CmdMox consumer before sharing newly written fixtures. Earlier
+releases that require two-component versions cannot read them. Existing `1.0`
+fixtures continue to load in the new release and normalize to `1.0.0`; see the
+[fixture schema migration note](fixture-schema-migration-note.md) before
+upgrading shared fixture workflows.
+
 Invalid non-empty requests receive a bounded error on stderr and exit with
 status 1. An empty read, including a readiness probe that closes without a
 request, is treated as a closed connection and gets no response frame. Other

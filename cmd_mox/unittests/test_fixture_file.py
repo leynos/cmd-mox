@@ -16,6 +16,8 @@ from cmd_mox.record.scrubber import ScrubbingRule
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+    from syrupy.assertion import SnapshotAssertion
+
 #: Every ``RecordedInvocation`` field is plain JSON-compatible data, so the
 #: whole space can be generated from built-in strategies.
 _RECORDED_INVOCATIONS = st.builds(
@@ -167,6 +169,29 @@ def _assert_normalized_to_v1(result: FixtureFile) -> None:
 
 class TestFixtureFile:
     """Tests for FixtureFile serialization and persistence."""
+
+    @pytest.mark.parametrize("source_version", ["1.0.0", "0.9"])
+    def test_serialized_fixture_schema_snapshot(
+        self, source_version: str, snapshot: SnapshotAssertion
+    ) -> None:
+        """Pin the complete canonical and migrated fixture mappings."""
+        fixture = FixtureFile(
+            version=source_version,
+            metadata=FixtureMetadata(
+                created_at="2025-01-15T10:30:00Z",
+                cmdmox_version="0.2.0",
+                platform="linux",
+                python_version="3.12.0",
+                test_module="tests/test_example.py",
+                test_function="test_recording",
+            ),
+            recordings=[_sample_invocation()],
+            scrubbing_rules=[ScrubbingRule(pattern="secret", replacement="[redacted]")],
+        )
+        result = FixtureFile.from_dict(fixture.to_dict())
+
+        assert result.version == "1.0.0"
+        assert result.to_dict() == snapshot
 
     def test_to_dict_schema_structure(self) -> None:
         """to_dict() produces the 1.0.0 schema structure."""
