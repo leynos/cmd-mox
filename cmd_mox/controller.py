@@ -25,13 +25,15 @@ from .ipc import (
     Response,
 )
 from .passthrough import PassthroughConfig, PassthroughCoordinator
-from .response_strategy import (
+from .response_policy import (
     ResponseStrategy,
     apply_expectation_env,
+    select_response_strategy,
+)
+from .response_strategy import (
     default_response,
     execute_handler,
     finalize_response_env,
-    select_response_strategy,
 )
 from .shimgen import (
     create_shim_symlinks,
