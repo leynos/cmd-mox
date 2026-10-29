@@ -18,6 +18,13 @@ the
 [schema versioning and migration guide](usage-guide.md#schema-versioning-and-migration)
 for details.
 
+When upgrading to a release that writes three-component fixture versions,
+upgrade every CmdMox consumer before sharing newly written fixtures. Earlier
+releases that require two-component versions cannot read them. Existing `1.0`
+fixtures continue to load in the new release and normalize to `1.0.0`; see the
+[fixture schema migration note](fixture-schema-migration-note.md) before
+upgrading shared fixture workflows.
+
 ## Shim stdin and IPC timeouts
 
 `CMOX_IPC_TIMEOUT` defaults to five seconds when the IPC server starts inside
@@ -33,13 +40,6 @@ redirect stdin from a source that is already complete. This lets the shim
 finish reading before it sends the IPC request. For the precise timeout scope
 and error behaviour, see the
 [canonical `CMOX_IPC_TIMEOUT` guidance](usage-guide.md#environment-variables).
-
-When upgrading to a release that writes three-component fixture versions,
-upgrade every CmdMox consumer before sharing newly written fixtures. Earlier
-releases that require two-component versions cannot read them. Existing `1.0`
-fixtures continue to load in the new release and normalize to `1.0.0`; see the
-[fixture schema migration note](fixture-schema-migration-note.md) before
-upgrading shared fixture workflows.
 
 Invalid non-empty requests receive a bounded error on stderr and exit with
 status 1. An empty read, including a readiness probe that closes without a
