@@ -1,4 +1,13 @@
-"""Convert domain values to and from IPC wire payloads."""
+"""Convert domain values to and from IPC wire payloads.
+
+Use these functions at the transport boundary when sending or receiving
+JSON-ready mappings; domain values do not encode themselves.
+
+Examples
+--------
+>>> invocation_to_payload(Invocation("git", [], "", {}))["command"]
+'git'
+"""
 
 from __future__ import annotations
 
@@ -60,19 +69,22 @@ def passthrough_to_payload(
     dict[str, typing.Any]
         The JSON-ready fields for the request or result.
     """
-    if isinstance(passthrough, PassthroughRequest):
-        return {
-            "invocation_id": passthrough.invocation_id,
-            "lookup_path": passthrough.lookup_path,
-            "extra_env": dict(passthrough.extra_env),
-            "timeout": passthrough.timeout,
-        }
-    return {
-        "invocation_id": passthrough.invocation_id,
-        "stdout": passthrough.stdout,
-        "stderr": passthrough.stderr,
-        "exit_code": passthrough.exit_code,
-    }
+    match passthrough:
+        case PassthroughRequest():
+            return {
+                "invocation_id": passthrough.invocation_id,
+                "lookup_path": passthrough.lookup_path,
+                "extra_env": dict(passthrough.extra_env),
+                "timeout": passthrough.timeout,
+            }
+        case PassthroughResult():
+            return {
+                "invocation_id": passthrough.invocation_id,
+                "stdout": passthrough.stdout,
+                "stderr": passthrough.stderr,
+                "exit_code": passthrough.exit_code,
+            }
+    typ.assert_never(passthrough)
 
 
 def response_to_payload(response: Response) -> dict[str, typ.Any]:

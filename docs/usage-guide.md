@@ -454,6 +454,8 @@ code as follows:
 | `request.to_dict()`              | `passthrough_to_payload(request)`   |
 | `result.to_dict()`               | `passthrough_to_payload(result)`    |
 
+_Table: Replacements for removed IPC payload conversion methods._
+
 Import the replacement functions from `cmd_mox.ipc.wire` when mapping these
 values to or from IPC payloads. The domain classes no longer perform JSON
 conversion themselves.

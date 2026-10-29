@@ -6,6 +6,7 @@ import typing as typ
 
 import pytest
 
+from cmd_mox import response_strategy
 from cmd_mox.controller import CmdMox
 from cmd_mox.domain import Invocation
 from cmd_mox.errors import UnexpectedCommandError
@@ -17,6 +18,17 @@ from cmd_mox.response_policy import (
 
 if typ.TYPE_CHECKING:
     from cmd_mox.test_doubles import CommandDouble
+
+
+def test_execution_adapter_reexports_policy_names() -> None:
+    """Existing adapter imports retain the policy objects' identities."""
+    assert response_strategy.ResponseStrategy is ResponseStrategy, "Strategy moved"
+    assert response_strategy.select_response_strategy is select_response_strategy, (
+        "Strategy selector moved"
+    )
+    assert response_strategy.apply_expectation_env is apply_expectation_env, (
+        "Environment policy moved"
+    )
 
 
 @pytest.fixture

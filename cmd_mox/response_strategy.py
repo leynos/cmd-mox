@@ -1,7 +1,7 @@
 """Execute chosen response strategies and build domain responses.
 
 The strategy selection and environment validation policy lives in
-:mod:`cmd_mox.response_policy`.
+:mod:`cmd_mox.response_policy`; its former imports remain available here.
 """
 
 from __future__ import annotations
@@ -11,6 +11,11 @@ import typing as typ
 
 from .domain import Response
 from .environment import temporary_env
+from .response_policy import (
+    ResponseStrategy,
+    apply_expectation_env,
+    select_response_strategy,
+)
 
 if typ.TYPE_CHECKING:
     from .domain import Invocation
@@ -62,7 +67,10 @@ def finalize_response_env(resp: Response, overrides: dict[str, str]) -> None:
 
 
 __all__ = [
+    "ResponseStrategy",
+    "apply_expectation_env",
     "default_response",
     "execute_handler",
     "finalize_response_env",
+    "select_response_strategy",
 ]

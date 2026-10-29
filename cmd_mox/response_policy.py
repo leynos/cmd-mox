@@ -1,4 +1,13 @@
-"""Domain rules for selecting responses and validating expectation environments."""
+"""Domain rules for selecting responses and validating expectation environments.
+
+Select a strategy for a command double, then validate and merge its
+expectation environment into the invocation before executing the strategy.
+
+Examples
+--------
+>>> select_response_strategy(None) is ResponseStrategy.MISSING_DOUBLE
+True
+"""
 
 from __future__ import annotations
 

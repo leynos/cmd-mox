@@ -1,4 +1,15 @@
-"""Transport-independent values used by command mocking and IPC."""
+"""Transport-independent values used by command mocking and IPC.
+
+Create :class:`Invocation` and :class:`Response` values for handlers and
+recording. Existing imports from :mod:`cmd_mox.ipc` expose the same classes.
+
+Examples
+--------
+>>> invocation = Invocation("git", ["status"], "", {})
+>>> invocation.apply(Response(stdout="ok"))
+>>> invocation.stdout
+'ok'
+"""
 
 from __future__ import annotations
 
