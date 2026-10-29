@@ -338,10 +338,10 @@ calls `cmd_mox.response_strategy` to execute the selected handler and build a
 domain response, applying temporary environment overrides at that execution
 boundary.
 
-The following diagram groups the response-strategy concepts. It is a
-conceptual overview, not the literal call order: environment validation occurs
-before handler execution; passthrough prepares a request rather than executing
-the handler here; and a missing double bypasses strategy selection.
+The following diagram groups the response-strategy concepts. It is a conceptual
+overview, not the literal call order: environment validation occurs before
+handler execution; passthrough prepares a request rather than executing the
+handler here; and a missing double bypasses strategy selection.
 
 For screen readers: The diagram shows an invocation passing through strategy
 selection. A missing double leads to a default response; passthrough and
