@@ -343,11 +343,11 @@ conceptual overview, not the literal call order: environment validation occurs
 before handler execution; passthrough prepares a request rather than executing
 the handler here; and a missing double bypasses strategy selection.
 
-For screen readers: An invocation can result in a default response when no
-double exists, a passthrough request, or a regular handler response. The latter
-two paths validate expectation environment overrides before proceeding. The
-regular path applies those overrides during handler execution and finalizes the
-response environment. Each path produces a domain response.
+For screen readers: The diagram shows an invocation passing through strategy
+selection. A missing double leads to a default response; passthrough and
+regular strategies lead through handler execution, expectation environment
+validation, and response environment finalization. Each path leads to a domain
+response. The preceding paragraph explains how the actual call order differs.
 
 ```mermaid
 flowchart TD
@@ -361,6 +361,8 @@ flowchart TD
     Missing --> Response[Domain Response]
     Finalize --> Response
 ```
+
+_Figure: Conceptual response-strategy flow for one invocation._
 
 ### Unix server-base selection
 
