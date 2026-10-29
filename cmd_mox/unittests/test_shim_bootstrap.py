@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 import typing as typ
@@ -202,9 +203,41 @@ def test_should_remove_path_entry_skips_entry_when_cwd_is_gone(
     doomed_cwd = tmp_path / "doomed"
     doomed_cwd.mkdir()
     monkeypatch.chdir(doomed_cwd)
-    doomed_cwd.rmdir()
+    try:
+        doomed_cwd.rmdir()
+    except OSError as exc:
+        # Windows refuses to delete the working directory of a live process.
+        pytest.skip(f"Platform keeps a deleted working directory: {exc}")
 
     assert not _should_remove_path_entry(".", package_dir), (
+        "bootstrap removed an entry it could not resolve"
+    )
+
+
+def test_should_remove_path_entry_skips_entry_raising_eloop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A resolution failure such as ``ELOOP`` must leave the entry in place."""
+    from cmd_mox import _shim_bootstrap
+
+    package_dir = tmp_path / "cmd_mox"
+    package_dir.mkdir()
+
+    class _LoopingPath:
+        """Stand-in for ``Path`` whose resolution reports a symlink loop."""
+
+        def __init__(self, entry: str) -> None:
+            self._entry = entry
+
+        def resolve(self) -> Path:
+            raise OSError(errno.ELOOP, "Too many levels of symbolic links", self._entry)
+
+    # Patching only this module's ``Path`` keeps the stand-in off every other
+    # caller, so the case exercises our guard on platforms and interpreters
+    # where ``Path.resolve()`` would otherwise tolerate the malformed entry.
+    monkeypatch.setattr(_shim_bootstrap, "Path", _LoopingPath)
+
+    assert not _should_remove_path_entry("looping", package_dir), (
         "bootstrap removed an entry it could not resolve"
     )
 
