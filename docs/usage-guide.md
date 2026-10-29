@@ -446,13 +446,13 @@ available from `cmd_mox.ipc`. Their JSON conversion methods have moved to
 functions in `cmd_mox.ipc.wire`. Callers using those methods must update their
 code as follows:
 
-| Previous call                    | Replacement function                      |
-| -------------------------------- | ----------------------------------------- |
-| `invocation.to_dict()`           | `invocation_to_payload(invocation)`       |
-| `response.to_dict()`             | `response_to_payload(response)`           |
-| `Response.from_payload(payload)` | `response_from_payload(payload)`          |
-| `request.to_dict()`              | `passthrough_request_to_payload(request)` |
-| `result.to_dict()`               | `passthrough_result_to_payload(result)`   |
+| Previous call                    | Replacement function                |
+| -------------------------------- | ----------------------------------- |
+| `invocation.to_dict()`           | `invocation_to_payload(invocation)` |
+| `response.to_dict()`             | `response_to_payload(response)`     |
+| `Response.from_payload(payload)` | `response_from_payload(payload)`    |
+| `request.to_dict()`              | `passthrough_to_payload(request)`   |
+| `result.to_dict()`               | `passthrough_to_payload(result)`    |
 
 Import the replacement functions from `cmd_mox.ipc.wire` when mapping these
 values to or from IPC payloads. The domain classes no longer perform JSON

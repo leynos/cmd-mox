@@ -18,7 +18,7 @@ from cmd_mox.domain import (
 )
 from cmd_mox.ipc.wire import (
     invocation_to_payload,
-    passthrough_request_to_payload,
+    passthrough_to_payload,
     response_from_payload,
     response_to_payload,
 )
@@ -66,12 +66,27 @@ def test_passthrough_request_to_payload_includes_defaults() -> None:
         lookup_path="/bin/echo",
     )
 
-    assert passthrough_request_to_payload(request) == {
+    assert passthrough_to_payload(request) == {
         "invocation_id": "123",
         "lookup_path": "/bin/echo",
         "extra_env": {},
         "timeout": 30.0,
     }, "Assertion failed"
+
+
+def test_passthrough_result_to_payload() -> None:
+    """Passthrough results retain their established wire fields."""
+    result = PassthroughResult(
+        invocation_id="123", stdout="out", stderr="err", exit_code=2
+    )
+    expected = {
+        "invocation_id": "123",
+        "stdout": "out",
+        "stderr": "err",
+        "exit_code": 2,
+    }
+
+    assert passthrough_to_payload(result) == expected, "Result payload changed"
 
 
 def test_response_from_payload_warns_on_invalid_env(

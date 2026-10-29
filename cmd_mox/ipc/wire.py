@@ -7,6 +7,9 @@ import typing as typ
 
 from cmd_mox.domain import Invocation, PassthroughRequest, PassthroughResult, Response
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,49 +45,33 @@ def invocation_to_payload(invocation: Invocation) -> dict[str, typ.Any]:
     return payload
 
 
-def passthrough_request_to_payload(
-    request: PassthroughRequest,
+def passthrough_to_payload(
+    passthrough: PassthroughRequest | PassthroughResult,
 ) -> dict[str, typ.Any]:
-    """Encode a passthrough request as a JSON-ready IPC payload.
+    """Encode a passthrough request or result as an IPC payload.
 
     Parameters
     ----------
-    request : PassthroughRequest
-        Domain request to encode.
+    passthrough : PassthroughRequest or PassthroughResult
+        Domain value to encode.
 
     Returns
     -------
     dict[str, typing.Any]
-        A copy of all request fields, including default values.
+        The JSON-ready fields for the request or result.
     """
+    if isinstance(passthrough, PassthroughRequest):
+        return {
+            "invocation_id": passthrough.invocation_id,
+            "lookup_path": passthrough.lookup_path,
+            "extra_env": dict(passthrough.extra_env),
+            "timeout": passthrough.timeout,
+        }
     return {
-        "invocation_id": request.invocation_id,
-        "lookup_path": request.lookup_path,
-        "extra_env": dict(request.extra_env),
-        "timeout": request.timeout,
-    }
-
-
-def passthrough_result_to_payload(
-    result: PassthroughResult,
-) -> dict[str, typ.Any]:
-    """Encode a passthrough result as a JSON-ready IPC payload.
-
-    Parameters
-    ----------
-    result : PassthroughResult
-        Domain result to encode.
-
-    Returns
-    -------
-    dict[str, typing.Any]
-        The result fields using the established wire names.
-    """
-    return {
-        "invocation_id": result.invocation_id,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-        "exit_code": result.exit_code,
+        "invocation_id": passthrough.invocation_id,
+        "stdout": passthrough.stdout,
+        "stderr": passthrough.stderr,
+        "exit_code": passthrough.exit_code,
     }
 
 
@@ -108,52 +95,34 @@ def response_to_payload(response: Response) -> dict[str, typ.Any]:
         "env": dict(response.env),
     }
     if response.passthrough is not None:
-        payload["passthrough"] = passthrough_request_to_payload(response.passthrough)
+        payload["passthrough"] = passthrough_to_payload(response.passthrough)
     return payload
 
 
-def invocation_from_payload(payload: dict[str, typ.Any]) -> Invocation:
-    """Build an invocation from its decoded IPC payload.
+def request_from_payload[PayloadT](
+    payload: dict[str, typ.Any], model: cabc.Callable[..., PayloadT]
+) -> PayloadT | None:
+    """Build a request value from a decoded IPC payload.
+
+    Malformed payloads are not logged here: the dispatch boundary emits a
+    bounded ``invalid_request`` record without exposing payload contents.
 
     Parameters
     ----------
     payload : dict[str, typing.Any]
-        Decoded payload containing invocation fields.
+        Decoded payload containing request fields.
+    model : collections.abc.Callable[..., PayloadT]
+        Domain constructor accepting the payload fields as keyword arguments.
 
     Returns
     -------
-    Invocation
-        The domain invocation represented by *payload*.
-
-    Notes
-    -----
-    The domain constructor reports missing or unexpected fields with
-    ``TypeError``.
+    PayloadT or None
+        The request value, or ``None`` when its fields do not fit the model.
     """
-    return Invocation(**payload)
-
-
-def passthrough_result_from_payload(
-    payload: dict[str, typ.Any],
-) -> PassthroughResult:
-    """Build a passthrough result from its decoded IPC payload.
-
-    Parameters
-    ----------
-    payload : dict[str, typing.Any]
-        Decoded payload containing passthrough result fields.
-
-    Returns
-    -------
-    PassthroughResult
-        The domain result represented by *payload*.
-
-    Notes
-    -----
-    The domain constructor reports missing or unexpected fields with
-    ``TypeError``.
-    """
-    return PassthroughResult(**payload)
+    try:
+        return model(**payload)
+    except TypeError:
+        return None
 
 
 def _build_passthrough_request(
@@ -235,11 +204,9 @@ def response_from_payload(payload: dict[str, typ.Any]) -> Response:
 
 
 __all__ = [
-    "invocation_from_payload",
     "invocation_to_payload",
-    "passthrough_request_to_payload",
-    "passthrough_result_from_payload",
-    "passthrough_result_to_payload",
+    "passthrough_to_payload",
+    "request_from_payload",
     "response_from_payload",
     "response_to_payload",
 ]

@@ -52,6 +52,13 @@ def test_validate_invocation_payload_handles_missing_fields() -> None:
     assert validate_invocation_payload({}) is None, "Assertion failed"
 
 
+def test_validate_invocation_payload_rejects_unexpected_fields() -> None:
+    """Unexpected invocation fields should return None."""
+    payload = {"command": "cmd", "args": [], "stdin": "", "env": {}, "extra": 1}
+
+    assert validate_invocation_payload(payload) is None, "Unexpected field accepted"
+
+
 def test_validate_passthrough_payload_returns_model() -> None:
     """validate_passthrough_payload should build PassthroughResult instances."""
     payload = {
@@ -70,3 +77,16 @@ def test_validate_passthrough_payload_returns_model() -> None:
 def test_validate_passthrough_payload_handles_missing_fields() -> None:
     """Missing passthrough fields should return None."""
     assert validate_passthrough_payload({}) is None, "Assertion failed"
+
+
+def test_validate_passthrough_payload_rejects_unexpected_fields() -> None:
+    """Unexpected passthrough fields should return None."""
+    payload = {
+        "invocation_id": "1",
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+        "extra": 1,
+    }
+
+    assert validate_passthrough_payload(payload) is None, "Unexpected field accepted"

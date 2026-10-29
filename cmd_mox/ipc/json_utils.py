@@ -5,12 +5,9 @@ from __future__ import annotations
 import json
 import typing as typ
 
-from .wire import invocation_from_payload, passthrough_result_from_payload
+from cmd_mox.domain import Invocation, PassthroughResult
 
-if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import collections.abc as cabc
-
-    from cmd_mox.domain import Invocation, PassthroughResult
+from .wire import request_from_payload
 
 
 def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
@@ -30,34 +27,6 @@ def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
     return payload
 
 
-def _build_payload[PayloadT](
-    payload: dict[str, typ.Any],
-    payload_builder: cabc.Callable[[dict[str, typ.Any]], PayloadT],
-) -> PayloadT | None:
-    """Build a domain value from *payload*, reporting malformed data by ``None``.
-
-    A payload that does not fit its model is not logged here. The dispatch
-    boundary already emits one bounded ``invalid_request`` record carrying the
-    error category, and payload contents must never reach the logs.
-
-    Parameters
-    ----------
-    payload : dict[str, typing.Any]
-        Decoded JSON object received from the IPC peer.
-    payload_builder : collections.abc.Callable[..., PayloadT]
-        Wire decoder that constructs the value from the payload.
-
-    Returns
-    -------
-    PayloadT or None
-        The built model, or ``None`` when the payload did not fit it.
-    """
-    try:
-        return payload_builder(payload)
-    except TypeError:
-        return None
-
-
 def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | None:
     """Return an :class:`Invocation` if *payload* has the required fields.
 
@@ -66,7 +35,7 @@ def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | Non
     Invocation or None
         The validated invocation, or ``None`` for malformed payloads.
     """
-    return _build_payload(payload, invocation_from_payload)
+    return request_from_payload(payload, Invocation)
 
 
 def validate_passthrough_payload(
@@ -79,7 +48,7 @@ def validate_passthrough_payload(
     PassthroughResult or None
         The validated result, or ``None`` for malformed payloads.
     """
-    return _build_payload(payload, passthrough_result_from_payload)
+    return request_from_payload(payload, PassthroughResult)
 
 
 __all__ = [

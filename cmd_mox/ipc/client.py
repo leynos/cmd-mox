@@ -778,7 +778,7 @@ def report_passthrough_result(
     """
     return _send_request(
         KIND_PASSTHROUGH_RESULT,
-        wire.passthrough_result_to_payload(result),
+        wire.passthrough_to_payload(result),
         _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
     )
 
