@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
+from cmd_mox.domain import Invocation, PassthroughResult
 from cmd_mox.ipc.json_utils import (
     parse_json_safely,
     validate_invocation_payload,
     validate_passthrough_payload,
 )
-from cmd_mox.ipc.models import Invocation, PassthroughResult
 
 
 def test_parse_json_safely_accepts_valid_object() -> None:

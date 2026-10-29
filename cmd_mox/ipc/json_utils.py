@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import typing as typ
 
-from .models import Invocation, PassthroughResult
+from .wire import invocation_from_payload, passthrough_result_from_payload
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
+
+    from cmd_mox.domain import Invocation, PassthroughResult
 
 
 def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
@@ -30,9 +32,9 @@ def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
 
 def _build_payload[PayloadT](
     payload: dict[str, typ.Any],
-    model: cabc.Callable[..., PayloadT],
+    payload_builder: cabc.Callable[[dict[str, typ.Any]], PayloadT],
 ) -> PayloadT | None:
-    """Build *model* from *payload*, reporting malformed payloads by ``None``.
+    """Build a domain value from *payload*, reporting malformed data by ``None``.
 
     A payload that does not fit its model is not logged here. The dispatch
     boundary already emits one bounded ``invalid_request`` record carrying the
@@ -42,8 +44,8 @@ def _build_payload[PayloadT](
     ----------
     payload : dict[str, typing.Any]
         Decoded JSON object received from the IPC peer.
-    model : collections.abc.Callable[..., PayloadT]
-        IPC model whose keyword arguments the payload must supply.
+    payload_builder : collections.abc.Callable[..., PayloadT]
+        Wire decoder that constructs the value from the payload.
 
     Returns
     -------
@@ -51,7 +53,7 @@ def _build_payload[PayloadT](
         The built model, or ``None`` when the payload did not fit it.
     """
     try:
-        return model(**payload)
+        return payload_builder(payload)
     except TypeError:
         return None
 
@@ -64,7 +66,7 @@ def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | Non
     Invocation or None
         The validated invocation, or ``None`` for malformed payloads.
     """
-    return _build_payload(payload, Invocation)
+    return _build_payload(payload, invocation_from_payload)
 
 
 def validate_passthrough_payload(
@@ -77,7 +79,7 @@ def validate_passthrough_payload(
     PassthroughResult or None
         The validated result, or ``None`` for malformed payloads.
     """
-    return _build_payload(payload, PassthroughResult)
+    return _build_payload(payload, passthrough_result_from_payload)
 
 
 __all__ = [

@@ -17,19 +17,16 @@ import re
 import typing as typ
 from pathlib import PureWindowsPath
 
+from .domain import (
+    SENSITIVE_ENV_KEY_PATTERN as _SECRET_ENV_KEY_RE,
+)
+from .domain import (
+    is_sensitive_recording_env_key,
+)
+
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
-SENSITIVE_ENV_KEY_TOKENS: typ.Final[tuple[str, ...]] = (
-    "secret",
-    "token",
-    "api_key",
-    "password",
-)
-# Pre-normalize tokens once for case-insensitive checks
-_SENSITIVE_TOKENS: typ.Final[tuple[str, ...]] = tuple(
-    tok.casefold() for tok in SENSITIVE_ENV_KEY_TOKENS
-)
 _AUTHENTICATION_ARGUMENT_OPTIONS: typ.Final[frozenset[str]] = frozenset({
     "--user",
     "--proxy-user",
@@ -43,12 +40,6 @@ _SHORT_AUTHENTICATION_ARGUMENT_OPTIONS: typ.Final[frozenset[str]] = frozenset({
 })
 _CURL_PROXY_USER_SHORT_OPTION: typ.Final[str] = "-U"
 
-# Comprehensive regex for secret-bearing env key segments. Also recognizes the
-# compact ``APIKEY`` spelling used by some command-line options.
-_SECRET_ENV_KEY_RE: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?i)(^|[_-])(?:API)?(KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?"
-    r"|PASS(?:WORD)?|PWD)(?=[_-]|=|:|\d|$)"
-)
 _AUTHORIZATION_CREDENTIAL_RE: typ.Final[re.Pattern[str]] = re.compile(
     r"(?i)\bauthorization\s*[:=]\s*[^,;]+"
 )
@@ -112,33 +103,6 @@ def _redact_url_credentials(arg: str) -> str:
     """
     safe_arg = _URL_USERINFO_RE.sub(r"\g<prefix><redacted>@", arg)
     return _URL_QUERY_PARAMETER_RE.sub(_redact_url_query_parameter, safe_arg)
-
-
-def _is_sensitive_env_key(key: str) -> bool:
-    """Return True if key likely holds secret material (substring match).
-
-    Returns
-    -------
-    bool
-        ``True`` when *key* contains one of the sensitive substrings.
-    """
-    k = key.casefold()
-    return any(tkn in k for tkn in _SENSITIVE_TOKENS)
-
-
-def is_sensitive_recording_env_key(key: str) -> bool:
-    """Return True if *key* should be treated as secret-bearing for recordings.
-
-    Combines the substring-based check from :func:`_is_sensitive_env_key` with
-    a regex that catches word-segment patterns such as ``GITHUB_KEY`` or
-    ``DB_PWD``.
-
-    Returns
-    -------
-    bool
-        Whether recordings should redact the environment variable's value.
-    """
-    return _is_sensitive_env_key(key) or bool(_SECRET_ENV_KEY_RE.search(key))
 
 
 def _partition_option_argument(arg: str) -> tuple[str, str, str]:

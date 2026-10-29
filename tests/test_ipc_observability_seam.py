@@ -30,6 +30,7 @@ from cmd_mox.ipc.client import (
     _connect_unix_with_retries,
     _ConnectionContext,
 )
+from cmd_mox.ipc.wire import invocation_to_payload
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -411,7 +412,7 @@ def test_envelope_round_trip_reaches_the_model_unchanged() -> None:
     """The envelope fields must not leak into the validated model."""
     invocation = Invocation(command="git", args=["status"], stdin="", env={})
     payload, correlation_id = _build_request_envelope(
-        _server_core.KIND_INVOCATION, invocation.to_dict()
+        _server_core.KIND_INVOCATION, invocation_to_payload(invocation)
     )
 
     parsed = _server_core._parse_payload(payload)

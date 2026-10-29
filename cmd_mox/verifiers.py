@@ -7,7 +7,7 @@ import typing as typ
 from collections import defaultdict
 from textwrap import indent
 
-from ._argument_redaction import SENSITIVE_ENV_KEY_TOKENS
+from .domain import SENSITIVE_ENV_KEY_TOKENS
 from .errors import UnexpectedCommandError, UnfulfilledExpectationError
 from .test_doubles import DoubleKind
 

@@ -2205,7 +2205,7 @@ sequenceDiagram
 
 Fixtures use JSON format for several reasons: human-readability, native Python
 support without dependencies, Git-friendliness (mergeable, diffable), and
-compatibility with the existing `Invocation.to_dict()` serialization.
+compatibility with the established invocation-field schema.
 
 #### 9.3.1 Schema definition (Version 1.0.0)
 
@@ -2984,7 +2984,7 @@ when the review file is deleted after inspection) to provide an audit trail.
 
 **Rationale:**
 
-- `Invocation.to_dict()` already produces JSON-compatible output
+- `RecordedInvocation.to_dict()` already produces JSON-compatible output
 - No additional dependency (YAML requires `pyyaml`)
 - Better tooling support (JSON Schema validation, IDE formatters)
 - Slightly faster parsing than YAML

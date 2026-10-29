@@ -16,9 +16,10 @@ if typ.TYPE_CHECKING:
 
 import pytest
 
-from cmd_mox._argument_redaction import SENSITIVE_ENV_KEY_TOKENS
 from cmd_mox.controller import CmdMox
+from cmd_mox.domain import SENSITIVE_ENV_KEY_TOKENS
 from cmd_mox.ipc import Invocation
+from cmd_mox.ipc.wire import invocation_to_payload
 from tests.helpers.controller import (
     CommandExecution,
     JournalEntryExpectation,
@@ -260,8 +261,8 @@ def test_journal_pruning(
     assert [inv.args for inv in mox.journal] == expected
 
 
-def test_invocation_to_dict() -> None:
-    """Invocation.to_dict returns a serializable mapping."""
+def test_invocation_to_payload() -> None:
+    """Invocation wire encoding returns a serializable mapping."""
     inv = Invocation(
         command="cmd",
         args=["a"],
@@ -271,7 +272,7 @@ def test_invocation_to_dict() -> None:
         stderr="err",
         exit_code=2,
     )
-    assert inv.to_dict() == {
+    assert invocation_to_payload(inv) == {
         "command": "cmd",
         "args": ["a"],
         "stdin": "in",

@@ -1,5 +1,7 @@
 """Public interface for IPC server/client helpers."""
 
+from cmd_mox.domain import Invocation, PassthroughRequest, PassthroughResult, Response
+
 from ._server_core import IPCHandlers, TimeoutConfig
 from .client import (
     DEFAULT_CONNECT_BACKOFF,
@@ -19,7 +21,6 @@ from .constants import (
     KIND_PASSTHROUGH_RESULT,
     MESSAGE_KINDS,
 )
-from .models import Invocation, PassthroughRequest, PassthroughResult, Response
 from .named_pipe import CallbackNamedPipeServer, NamedPipeServer
 from .server import CallbackIPCServer, IPCServer
 
