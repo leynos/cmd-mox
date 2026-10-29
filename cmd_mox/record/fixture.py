@@ -1,6 +1,6 @@
 """Fixture file data models for Record Mode persistence.
 
-These models represent the v1.0 fixture JSON schema defined in the design
+These models represent the 1.0.0 fixture JSON schema defined in the design
 specification (Section 9.3).  The ``FixtureFile`` class handles serialization,
 deserialization, and file I/O.
 """
@@ -13,6 +13,7 @@ import dataclasses as dc
 import datetime as dt
 import importlib.metadata
 import json
+import re
 import sys
 import typing as typ
 
@@ -21,10 +22,14 @@ if typ.TYPE_CHECKING:
 
 from .scrubber import ScrubbingRule
 
-_SCHEMA_VERSION: typ.Final[str] = "1.0"
+_SCHEMA_VERSION: typ.Final[str] = "1.0.0"
 
-# A "major.minor" version string always has exactly two dot-separated parts.
-_VERSION_COMPONENT_COUNT: typ.Final[int] = 2
+# Two components remain accepted for fixtures written by the previous schema.
+_MIN_VERSION_COMPONENT_COUNT: typ.Final[int] = 2
+_MAX_VERSION_COMPONENT_COUNT: typ.Final[int] = 3
+_SEMVER_CORE_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
+    r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}"
+)
 
 # ---------------------------------------------------------------------------
 # Schema version parsing and migration
@@ -33,63 +38,95 @@ _VERSION_COMPONENT_COUNT: typ.Final[int] = 2
 type _MigrationFn = cabc.Callable[[dict[str, typ.Any]], dict[str, typ.Any]]
 
 
-def _parse_version(version_str: str) -> tuple[int, int]:
-    """Parse a ``"major.minor"`` version string into a comparable tuple.
-
-    Parameters
-    ----------
-    version_str : str
-        A version string in ``"major.minor"`` format (e.g. ``"1.0"``).
+def _split_version(version_str: str) -> list[str]:
+    """Split a version and validate its component syntax.
 
     Returns
     -------
-    tuple[int, int]
-        A ``(major, minor)`` tuple suitable for comparison.
+    list[str]
+        The stripped version's components.
 
     Raises
     ------
     ValueError
-        If the string cannot be parsed as two dot-separated integers.
+        If the component count or three-part syntax is invalid.
     """
-    parts = version_str.strip().split(".")
-    if len(parts) != _VERSION_COMPONENT_COUNT:
-        msg = f"Invalid schema version {version_str!r}; expected 'major.minor'"
+    stripped_version = version_str.strip()
+    parts = stripped_version.split(".")
+    if not _MIN_VERSION_COMPONENT_COUNT <= len(parts) <= _MAX_VERSION_COMPONENT_COUNT:
+        msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
         raise ValueError(msg)
+    if (
+        len(parts) == _MAX_VERSION_COMPONENT_COUNT
+        and _SEMVER_CORE_PATTERN.fullmatch(stripped_version) is None
+    ):
+        msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
+        raise ValueError(msg)
+    return parts
+
+
+def _parse_version(version_str: str) -> tuple[int, int, int]:
+    """Parse a schema version into a comparable major/minor/patch tuple.
+
+    Parameters
+    ----------
+    version_str : str
+        A version string in ``"major.minor.patch"`` format. Legacy
+        ``"major.minor"`` values retain their historical integer parsing and
+        are accepted with a zero patch component.
+
+    Returns
+    -------
+    tuple[int, int, int]
+        A ``(major, minor, patch)`` tuple suitable for comparison.
+
+    Raises
+    ------
+    ValueError
+        If the string is not a two- or three-component numeric version.
+    """
+    parts = _split_version(version_str)
     try:
-        major, minor = int(parts[0]), int(parts[1])
+        components = [int(part) for part in parts]
     except ValueError:
-        msg = f"Invalid schema version {version_str!r}; expected numeric 'major.minor'"
+        msg = (
+            f"Invalid schema version {version_str!r}; "
+            "expected numeric 'major.minor.patch'"
+        )
         raise ValueError(msg) from None
-    if major < 0 or minor < 0:
+    # Legacy versions omit PATCH; complete the tuple before comparison.
+    components.extend([0] * (_MAX_VERSION_COMPONENT_COUNT - len(components)))
+    major, minor, patch = components
+    if min(major, minor, patch) < 0:
         msg = f"Invalid schema version {version_str!r}; components must be non-negative"
         raise ValueError(msg)
-    return (major, minor)
+    return (major, minor, patch)
 
 
 def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-    """Migrate a v0.x fixture dict to v1.0 format.
+    """Migrate a major 0 fixture dict to schema 1.0.0.
 
     Returns
     -------
     dict[str, typ.Any]
-        *data* with its ``version`` field stamped as ``"1.0"``.
+        *data* with its ``version`` field stamped as ``"1.0.0"``.
     """
-    data["version"] = "1.0"
+    data["version"] = "1.0.0"
     return data
 
 
 # Maps source *major* version -> (target version tuple, migration function).
 # All files with a given major version are migrated using the registered
-# function.  Migrations chain: v0 -> v1 -> v2 etc.
-_MIGRATIONS: dict[int, tuple[tuple[int, int], _MigrationFn]] = {
-    0: ((1, 0), _migrate_v0_to_v1),
+# function.  Migrations chain: major 0 -> major 1 -> major 2 etc.
+_MIGRATIONS: dict[int, tuple[tuple[int, int, int], _MigrationFn]] = {
+    0: ((1, 0, 0), _migrate_v0_to_v1),
 }
 
 
 def _normalize_version_field(data: dict[str, typ.Any]) -> None:
     """Ensure *data* has a valid ``version`` field, mutating in-place.
 
-    A missing ``version`` key is treated as ``"0.0"`` (legacy fixture
+    A missing ``version`` key is treated as ``"0.0.0"`` (legacy fixture
     predating the version field).  An explicit ``None`` value is treated
     as an invalid type, not as a missing key.
 
@@ -97,7 +134,7 @@ def _normalize_version_field(data: dict[str, typ.Any]) -> None:
     ----------
     data : dict[str, typ.Any]
         The raw fixture dict whose ``version`` field will be validated
-        and, if absent, set to ``"0.0"``.
+        and, if absent, set to ``"0.0.0"``.
 
     Raises
     ------
@@ -106,7 +143,7 @@ def _normalize_version_field(data: dict[str, typ.Any]) -> None:
         (including ``None``).
     """
     if "version" not in data:
-        data["version"] = "0.0"
+        data["version"] = "0.0.0"
     elif not isinstance(data["version"], str):
         actual = type(data["version"]).__name__
         msg = f"Invalid fixture version field: expected str, got {actual}"
@@ -114,27 +151,27 @@ def _normalize_version_field(data: dict[str, typ.Any]) -> None:
 
 
 def _check_version_compatibility(
-    file_ver: tuple[int, int],
-    current: tuple[int, int],
+    file_ver: tuple[int, int, int],
+    current: tuple[int, int, int],
     file_version_str: str,
 ) -> None:
-    """Reject fixture versions newer than the running schema.
+    """Reject fixture versions with a higher major version.
 
     Parameters
     ----------
-    file_ver : tuple[int, int]
-        The parsed ``(major, minor)`` version from the fixture file.
-    current : tuple[int, int]
-        The parsed ``(major, minor)`` version of the current schema.
+    file_ver : tuple[int, int, int]
+        The parsed ``(major, minor, patch)`` version from the fixture file.
+    current : tuple[int, int, int]
+        The parsed ``(major, minor, patch)`` version of the current schema.
     file_version_str : str
         The raw version string from the fixture, used in error messages.
 
     Raises
     ------
     ValueError
-        If *file_ver* is higher than *current* (no downgrade path).
+        If *file_ver* has a higher major version with no downgrade path.
     """
-    if file_ver > current:
+    if file_ver[0] > current[0]:
         msg = (
             f"Unsupported fixture schema version {file_version_str!r}; "
             f"no migration path to {_SCHEMA_VERSION!r}"
@@ -144,8 +181,8 @@ def _check_version_compatibility(
 
 def _execute_migration_chain(
     data: dict[str, typ.Any],
-    file_ver: tuple[int, int],
-    current: tuple[int, int],
+    file_ver: tuple[int, int, int],
+    current: tuple[int, int, int],
 ) -> dict[str, typ.Any]:
     """Chain migrations until the major versions match.
 
@@ -154,10 +191,10 @@ def _execute_migration_chain(
     data : dict[str, typ.Any]
         The fixture dict to migrate.  Each migration function receives
         and returns a dict, so successive calls are chained.
-    file_ver : tuple[int, int]
-        The parsed ``(major, minor)`` version of the fixture.
-    current : tuple[int, int]
-        The parsed ``(major, minor)`` version of the current schema.
+    file_ver : tuple[int, int, int]
+        The parsed ``(major, minor, patch)`` version of the fixture.
+    current : tuple[int, int, int]
+        The parsed ``(major, minor, patch)`` version of the current schema.
 
     Returns
     -------
@@ -206,8 +243,9 @@ def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
 
     current = _parse_version(_SCHEMA_VERSION)
     file_ver = _parse_version(data["version"])
+    data["version"] = ".".join(str(component) for component in file_ver)
 
-    # Same major version: tolerate minor differences (semver contract).
+    # Same major version: tolerate minor and patch differences.
     if file_ver[0] == current[0]:
         return data
 
@@ -247,7 +285,7 @@ class RecordedInvocation:
     duration_ms: int
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping matching the v1.0 schema.
+        """Return a JSON-serializable mapping matching the 1.0.0 schema.
 
         Returns
         -------
@@ -394,7 +432,7 @@ class FixtureFile:
     scrubbing_rules: list[ScrubbingRule]
 
     def to_dict(self) -> dict[str, typ.Any]:
-        """Return a JSON-serializable mapping matching the v1.0 schema.
+        """Return a JSON-serializable mapping matching the 1.0.0 schema.
 
         Returns
         -------
@@ -412,9 +450,9 @@ class FixtureFile:
     def from_dict(cls, data: dict[str, typ.Any]) -> FixtureFile:
         """Construct from a JSON-compatible mapping.
 
-        Older schema versions are migrated forward automatically.  Minor
-        version differences within the same major version are tolerated
-        because unknown fields are ignored.
+        Older schema versions are migrated forward automatically. Minor and
+        patch differences within the same major version are tolerated because
+        unknown fields are ignored.
 
         Parameters
         ----------

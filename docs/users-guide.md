@@ -7,6 +7,24 @@ For installation from PyPI, its source distribution and wheel, and the
 provenance bundle included with GitHub Releases, see
 [Getting started](usage-guide.md#getting-started).
 
+## Recording fixture schema versions
+
+The fixture `version` uses `MAJOR.MINOR.PATCH`; legacy `1.0` values load as
+`1.0.0`. CmdMox tolerates minor and patch differences within the same major
+version, while a higher major version without a migration path raises
+`ValueError`. This compatibility is one-way: earlier releases that require
+two-component versions cannot read fixtures written with three components. See
+the
+[schema versioning and migration guide](usage-guide.md#schema-versioning-and-migration)
+for details.
+
+When upgrading to a release that writes three-component fixture versions,
+upgrade every CmdMox consumer before sharing newly written fixtures. Earlier
+releases that require two-component versions cannot read them. Existing `1.0`
+fixtures continue to load in the new release and normalize to `1.0.0`; see the
+[fixture schema migration note](fixture-schema-migration-note.md) before
+upgrading shared fixture workflows.
+
 ## Shim stdin and IPC timeouts
 
 `CMOX_IPC_TIMEOUT` defaults to five seconds when the IPC server starts inside

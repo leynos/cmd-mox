@@ -1,0 +1,95 @@
+# serializer version: 1
+# name: TestFixtureFile.test_serialized_fixture_schema_snapshot[0.9]
+  dict({
+    'metadata': dict({
+      'cmdmox_version': '0.2.0',
+      'created_at': '2025-01-15T10:30:00Z',
+      'platform': 'linux',
+      'python_version': '3.12.0',
+      'test_function': 'test_recording',
+      'test_module': 'tests/test_example.py',
+    }),
+    'recordings': list([
+      dict({
+        'args': list([
+          'status',
+          '--short',
+        ]),
+        'command': 'git',
+        'duration_ms': 42,
+        'env_subset': dict({
+          'GIT_AUTHOR_NAME': 'Test User',
+        }),
+        'exit_code': 0,
+        'sequence': 0,
+        'stderr': '',
+        'stdin': '',
+        'stdout': '''
+          M file.py
+  
+        ''',
+        'timestamp': '2025-01-15T10:30:01Z',
+      }),
+    ]),
+    'scrubbing_rules': list([
+      dict({
+        'applied_to': list([
+          'env',
+          'stdout',
+          'stderr',
+        ]),
+        'description': None,
+        'pattern': 'secret',
+        'replacement': '[redacted]',
+      }),
+    ]),
+    'version': '1.0.0',
+  })
+# ---
+# name: TestFixtureFile.test_serialized_fixture_schema_snapshot[1.0.0]
+  dict({
+    'metadata': dict({
+      'cmdmox_version': '0.2.0',
+      'created_at': '2025-01-15T10:30:00Z',
+      'platform': 'linux',
+      'python_version': '3.12.0',
+      'test_function': 'test_recording',
+      'test_module': 'tests/test_example.py',
+    }),
+    'recordings': list([
+      dict({
+        'args': list([
+          'status',
+          '--short',
+        ]),
+        'command': 'git',
+        'duration_ms': 42,
+        'env_subset': dict({
+          'GIT_AUTHOR_NAME': 'Test User',
+        }),
+        'exit_code': 0,
+        'sequence': 0,
+        'stderr': '',
+        'stdin': '',
+        'stdout': '''
+          M file.py
+  
+        ''',
+        'timestamp': '2025-01-15T10:30:01Z',
+      }),
+    ]),
+    'scrubbing_rules': list([
+      dict({
+        'applied_to': list([
+          'env',
+          'stdout',
+          'stderr',
+        ]),
+        'description': None,
+        'pattern': 'secret',
+        'replacement': '[redacted]',
+      }),
+    ]),
+    'version': '1.0.0',
+  })
+# ---

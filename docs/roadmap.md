@@ -236,7 +236,7 @@ supports deterministic replay without external dependencies. See
   session lifecycle management, fixture metadata generation, and environment
   subset filtering.
 - [x] 12.1.2. Implement `FixtureFile` with JSON serialization, versioned schema
-  (`1.0`), and migration support.
+  (`1.0.0`), and migration support.
 - [x] 12.1.3. Add `.record()` to `CommandDouble` with validation that
   passthrough mode is enabled and support for custom scrubber and allowlist
   parameters.

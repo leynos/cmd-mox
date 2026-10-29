@@ -2207,14 +2207,14 @@ Fixtures use JSON format for several reasons: human-readability, native Python
 support without dependencies, Git-friendliness (mergeable, diffable), and
 compatibility with the existing `Invocation.to_dict()` serialization.
 
-#### 9.3.1 Schema Definition (Version 1.0)
+#### 9.3.1 Schema definition (Version 1.0.0)
 
 <!-- markdownlint-disable MD013 -->
 
 ```json
 {
   "$schema": "https://cmdmox.dev/schemas/fixture-v1.json",
-  "version": "1.0",
+  "version": "1.0.0",
   "metadata": {
     "created_at": "2024-01-15T10:30:00Z",
     "cmdmox_version": "0.5.0",
@@ -3061,21 +3061,23 @@ method
 
 #### 9.10.8 Tuple-Based Version Comparison and Migration Registry
 
-**Decision:** Parse schema version strings into `(major, minor)` integer tuples
-for comparison. Maintain a migration registry keyed by source major version,
-with chainable migration functions (v0 -> v1 -> v2 etc.). Minor version
-differences within the same major version are tolerated without migration.
+**Decision:** Parse schema version strings into `(major, minor, patch)` integer
+tuples for comparison. Continue accepting legacy two-component strings as
+`(major, minor, 0)` and normalize them to three components. Maintain a
+migration registry keyed by source major version, with chainable migration
+functions (major 0 -> major 1 -> major 2, etc.). Minor and patch differences
+within the same major version are tolerated without migration.
 
 **Rationale:**
 
-- String comparison of version numbers is unreliable (e.g. `"9.0" < "10.0"` is
-  `False` with string comparison)
+- String comparison of version numbers is unreliable (e.g. `"9.0.0" < "10.0.0"`
+  is `False` with string comparison)
 - Keying migrations by major version avoids registering an entry for every
   possible minor version
 - Chainable migrations let each function know only about two adjacent major
   versions, following the Django/Alembic pattern
-- Same-major tolerance follows the semantic versioning contract: minor versions
-  add optional fields but do not break existing readers
+- Same-major tolerance follows the schema contract: minor and patch versions
+  add fields that existing readers can ignore
 
 #### 9.10.9 Coordinator-Based Recording Integration
 
@@ -3232,39 +3234,85 @@ misses fall back to the spy's configured behaviour.
   replay much less useful for tests that only fixture a subset of command
   variants
 
+#### 9.10.16 Three-component fixture schema versions (2026-10-26)
+
+**Decision:** Represent fixture schema versions with numeric
+`MAJOR.MINOR.PATCH` components. Continue accepting legacy two-component
+versions by treating the missing patch as zero and normalize them to three
+components when loaded.
+
+**Compatibility:** Tolerate minor and patch differences within the same major
+version. Reject a higher major version when no migration path is registered.
+Compatibility with older readers is one-way: this version loads legacy
+two-component fixture versions and writes three-component versions, while older
+releases that require exactly two components cannot read fixtures written by
+this version.
+
+**Rationale:** Three components match the semantic-version core used by the
+fixture schema while preserving compatibility with existing two-component
+fixtures.
+
 ### 9.11 Versioning and Forward Compatibility
 
 #### 9.11.1 Schema Versioning
 
-Fixtures include a `version` field following semantic versioning:
+Fixture schema versions use the numeric `MAJOR.MINOR.PATCH` semantic-version
+core, such as `1.0.0`. CmdMox parses the field into a three-integer tuple.
+Legacy two-component versions such as `1.0` are accepted with an implicit patch
+of zero and normalized to `1.0.0` when loaded. This compatibility is one-way:
+older CmdMox releases that require exactly two components cannot read fixtures
+written with a three-component version.
 
 - Breaking changes increment the major version
 - New optional fields increment the minor version
 - CmdMox maintains a migration table for old versions
+- Minor and patch differences within the same major version are tolerated
+- A higher major version with no migration path raises `ValueError`
 
 #### 9.11.2 Upgrade Path
 
 ```python
-def _parse_version(version_str: str) -> tuple[int, int]:
-    major, minor = version_str.split(".")
-    return (int(major), int(minor))
+import re
+
+def _parse_version(version_str: str) -> tuple[int, int, int]:
+    parts = version_str.strip().split(".")
+    if len(parts) not in (2, 3):
+        raise ValueError("expected 'major.minor.patch'")
+    if len(parts) == 3 and not re.fullmatch(
+        r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}", version_str.strip()
+    ):
+        raise ValueError("expected 'major.minor.patch'")
+    components = [int(part) for part in parts]
+    if any(component < 0 for component in components):
+        raise ValueError("version components must be non-negative")
+    if len(components) == 2:
+        components.append(0)
+    return (components[0], components[1], components[2])
 
 def _migrate_v0_to_v1(data: dict) -> dict:
-    data["version"] = "1.0"
+    data["version"] = "1.0.0"
     return data
 
 # Migration registry: source major version -> (target version, function)
-_MIGRATIONS = {0: ((1, 0), _migrate_v0_to_v1)}
+_MIGRATIONS = {0: ((1, 0, 0), _migrate_v0_to_v1)}
 
 def _apply_migrations(data: dict) -> dict:
     """Deep-copy data and chain migrations to the current schema."""
     data = copy.deepcopy(data)
     if "version" not in data:
-        data["version"] = "0.0"
+        data["version"] = "0.0.0"
     file_ver = _parse_version(data["version"])
+    data["version"] = ".".join(str(component) for component in file_ver)
     current = _parse_version(_SCHEMA_VERSION)
+    if file_ver[0] == current[0]:
+        return data
+    if file_ver[0] > current[0]:
+        raise ValueError("no migration path to the current schema")
     while file_ver[0] < current[0]:
-        target, migrate_fn = _MIGRATIONS[file_ver[0]]
+        migration = _MIGRATIONS.get(file_ver[0])
+        if migration is None:
+            raise ValueError("no migration path to the current schema")
+        target, migrate_fn = migration
         data = migrate_fn(data)
         file_ver = target
     return data
