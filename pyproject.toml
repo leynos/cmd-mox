@@ -407,7 +407,7 @@ exclude = ["unittests/*"]
 
 [[tool.duplication_gate.allow]]
 members = ["cmd_mox/ipc/client.py::invoke_server", "cmd_mox/ipc/client.py::report_passthrough_result"]
-reason = "nose matches the three-parameter signature and NumPy return-section boilerplate; each body is one delegating call to _send_request with a different request kind, and each docstring describes the Unix/Windows timeout split that applies to both. A shared wrapper would erase two distinct public entry points without sharing any logic."
+reason = "nose matches the parallel signatures and NumPy return-section boilerplate; each body delegates to _send_request with a different request kind and payload encoder, and each docstring describes the Unix/Windows timeout split. A shared wrapper would erase distinct public entry points without sharing their payload logic."
 [[tool.duplication_gate.allow]]
 members = ["cmd_mox/ipc/_server_core.py::_default_invocation_response", "cmd_mox/response_strategy.py::default_response"]
 reason = "Deliberate layer boundary, not a shared implementation: response_strategy imports Response from cmd_mox.ipc, so the ipc package cannot import response_strategy back without a cycle. _default_invocation_response is the transport base fallback when a server has no handler; default_response is the recording-mode strategy users select. nose is matching the two one-line bodies and their shared NumPy Returns boilerplate."
