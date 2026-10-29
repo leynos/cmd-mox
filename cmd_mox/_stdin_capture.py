@@ -472,7 +472,10 @@ def _await_worker[T](func: cabc.Callable[[], T], spec: _WorkerSpec) -> T:
     worker.start()
     # Deadlines arrive from a validated but arbitrary finite float. Slicing the
     # wait inside ``wait_for_finish`` keeps an over-large one from raising
-    # ``OverflowError`` past the shim's bounded diagnostic.
+    # ``OverflowError`` past the shim's bounded diagnostic. The helper also
+    # re-reads the clock, so a worker that only becomes observable at or after
+    # the deadline is reported as a timeout, exactly as the polled strategy
+    # treats readiness at or after the deadline.
     if _bounded_thread.wait_for_finish(finished, spec.deadline, clock=spec.clock):
         return _worker_value(outcome)
     spec.abandon(worker)

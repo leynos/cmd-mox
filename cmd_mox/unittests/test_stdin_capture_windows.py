@@ -14,6 +14,7 @@ from cmd_mox.errors import StdinTimeoutError
 from cmd_mox.unittests._stdin_capture_fakes import (
     _Clock,
     _DescriptorStream,
+    _install_completion_clock,
     _Stream,
 )
 
@@ -175,6 +176,84 @@ def test_windows_handle_timeout_cancels_and_closes_one_handle(
         "no native thread was targeted"
     )
     assert excinfo.value.worker_alive is True, "the blocked worker should live"
+
+
+def test_windows_cancel_lets_the_worker_exit_within_the_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful cancel ends the worker without a forced process exit.
+
+    ``tests/test_shim_stdin_timeout.py`` proves the shim shuts down while its
+    stdin writer stays open, but either the native cancellation or the
+    tracked-worker ``os._exit`` fallback can satisfy it. This test isolates the
+    native path: the cancellation releases the blocked read, the worker exits
+    inside the grace, and the timeout therefore reports ``worker_alive`` as
+    false.
+    """
+    started = threading.Event()
+    release = threading.Event()
+
+    def read_file(_handle: object, _size: int) -> tuple[int, bytes]:
+        started.set()
+        release.wait(5.0)
+        return 0, b""
+
+    harness = _Win32Harness(read_file)
+
+    def cancel(_handle: object) -> None:
+        harness.cancelled.append(_handle)
+        release.set()
+
+    harness.win32file.CancelSynchronousIo = cancel
+    _install_windows_harness(monkeypatch, harness)
+    monkeypatch.setattr(capture, "_CANCEL_GRACE", 5.0)
+
+    try:
+        with pytest.raises(StdinTimeoutError) as excinfo:
+            capture.read_stdin(_Stream(), 0.05, clock=_Clock())
+    finally:
+        release.set()
+
+    assert started.is_set(), "the handle read never began"
+    assert harness.cancelled, "the read was never cancelled"
+    assert excinfo.value.worker_alive is False, (
+        "the worker did not exit during the cancellation grace"
+    )
+
+
+@pytest.mark.parametrize(
+    ("advance", "is_late"),
+    [(0.5, False), (1.0, True), (2.0, True)],
+    ids=["before", "at", "after"],
+)
+def test_windows_worker_rejects_late_completion(
+    monkeypatch: pytest.MonkeyPatch, advance: float, *, is_late: bool
+) -> None:
+    """A handle read observed at or after the deadline is a timeout.
+
+    The Windows worker shares the bounded wait with the other worker
+    strategies, so a result that only becomes observable at or after the
+    deadline must not be returned as if it had arrived in time.
+    """
+    clock = _Clock()
+    harness = _Win32Harness(lambda _handle, _size: (0, b""))
+    _install_windows_harness(monkeypatch, harness)
+    _install_completion_clock(monkeypatch, clock, advance)
+    worker_capture = capture._Capture(
+        stream=_Stream(),
+        timeout=1.0,
+        deadline=1.0,
+        clock=clock,
+        plan=capture._Plan("win32", handle=_HANDLE),
+    )
+
+    if is_late:
+        with pytest.raises(StdinTimeoutError):
+            capture._read_win32(worker_capture)
+    else:
+        assert capture._read_win32(worker_capture) == "", (
+            "an in-budget handle read should return its text"
+        )
 
 
 def test_windows_handle_completes_without_cancellation(

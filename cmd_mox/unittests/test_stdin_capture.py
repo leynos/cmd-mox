@@ -23,6 +23,7 @@ from cmd_mox.unittests._stdin_capture_fakes import (
     _Clock,
     _DescriptorStream,
     _ErrorPoller,
+    _install_completion_clock,
     _NoFileno,
     _open_pipe_stream,
     _PollerOSError,
@@ -438,6 +439,91 @@ def test_regular_file_timeout_reports_expiry(
             _read(stream, 0.05, _Clock())
     finally:
         stall.set()
+
+
+# --- Worker completion boundary ---------------------------------------------
+
+
+def _fallback_capture(clock: _Clock) -> capture._Capture:
+    """Build a capture that reads a no-descriptor stream on a worker.
+
+    Returns
+    -------
+    capture._Capture
+        Capture whose plan selects the fallback worker.
+    """
+    return capture._Capture(
+        stream=_Stream("boundary"),
+        timeout=1.0,
+        deadline=1.0,
+        clock=clock,
+        plan=capture._Plan("fallback"),
+    )
+
+
+def _regular_file_capture(clock: _Clock) -> tuple[capture._Capture, int]:
+    """Build a capture over a pipe primed with data and already at EOF.
+
+    Returns
+    -------
+    tuple[capture._Capture, int]
+        The capture plus the read descriptor the test must close.
+    """
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"boundary")
+    os.close(write_fd)
+    return (
+        capture._Capture(
+            stream=_DescriptorStream(read_fd),
+            timeout=1.0,
+            deadline=1.0,
+            clock=clock,
+            plan=capture._Plan("regular", descriptor=read_fd),
+        ),
+        read_fd,
+    )
+
+
+@pytest.mark.parametrize("strategy", ["fallback", "regular"])
+@pytest.mark.parametrize(
+    ("advance", "is_late"),
+    [(0.5, False), (1.0, True), (2.0, True)],
+    ids=["before", "at", "after"],
+)
+def test_worker_strategies_reject_late_completion(
+    monkeypatch: pytest.MonkeyPatch,
+    strategy: str,
+    advance: float,
+    *,
+    is_late: bool,
+) -> None:
+    """A worker result observed at or after the deadline is a timeout.
+
+    The waiting thread can resume after the deadline even though the stream
+    finished in time, so each worker strategy must recheck the clock rather
+    than trust that a set event means an in-budget read. Completion exactly at
+    the deadline is late, matching the polled reader.
+    """
+    clock = _Clock()
+    _install_completion_clock(monkeypatch, clock, advance)
+    read_fd: int | None = None
+    if strategy == "fallback":
+        worker_capture = _fallback_capture(clock)
+        read_worker = capture._read_fallback
+    else:
+        worker_capture, read_fd = _regular_file_capture(clock)
+        read_worker = capture._read_regular_file
+    try:
+        if is_late:
+            with pytest.raises(StdinTimeoutError):
+                read_worker(worker_capture)
+        else:
+            assert read_worker(worker_capture) == "boundary", (
+                "an in-budget worker result should be returned"
+            )
+    finally:
+        if read_fd is not None:
+            os.close(read_fd)
 
 
 # --- Strategy planning ------------------------------------------------------

@@ -5,9 +5,13 @@ from __future__ import annotations
 import io
 import os
 import threading
+import types
 import typing as typ
 
 from cmd_mox import _stdin_capture as capture
+
+if typ.TYPE_CHECKING:
+    import pytest
 
 
 class _Clock:
@@ -137,6 +141,54 @@ class _ErrorPoller:
         """
         msg = "blocked poll failed"
         raise _PollerOSError(msg)
+
+
+class _ClockAdvancingEvent:
+    """Completion event that moves a fake clock when the waiter observes it.
+
+    ``Event.wait`` reports only that the worker finished, not when. *advance*
+    is how much fake time is charged to the waiting thread before it resumes
+    and checks the deadline, which models a waiter that was descheduled while
+    its worker completed.
+    """
+
+    def __init__(self, clock: _Clock, advance: float) -> None:
+        self._finished = threading.Event()
+        self._clock = clock
+        self._advance = advance
+
+    def set(self) -> None:
+        """Signal completion the way the real worker target does."""
+        self._finished.set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Wait for the worker, charging *advance* fake seconds on success.
+
+        Returns
+        -------
+        bool
+            Whether the worker finished within *timeout*.
+        """
+        finished = self._finished.wait(timeout)
+        if finished:
+            self._clock.now += self._advance
+        return finished
+
+
+def _install_completion_clock(
+    monkeypatch: pytest.MonkeyPatch, clock: _Clock, advance: float
+) -> None:
+    """Make the capture module build a clock-advancing completion event.
+
+    Both the real :class:`threading.Thread` and the double are installed
+    together so worker startup keeps its real scheduling behaviour.
+    """
+    event = _ClockAdvancingEvent(clock, advance)
+    monkeypatch.setattr(
+        capture,
+        "threading",
+        types.SimpleNamespace(Event=lambda: event, Thread=threading.Thread),
+    )
 
 
 class _StreamError(RuntimeError):
