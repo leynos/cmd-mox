@@ -700,16 +700,26 @@ features that are infeasible with file-based logging.
   shim reports a bounded diagnostic and exits `1` without contacting IPC. The
   strategy table is:
 
-  | Host and stream                          | Strategy                                              | Deadline enforcement                                                                       |
-  | ---------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-  | Any host, `isatty()`                     | None                                                  | Not read; the interactive prompt stays with the user.                                      |
-  | Any host, `io.StringIO`                  | Direct `read()`                                       | In-memory streams cannot block.                                                            |
-  | POSIX, pollable descriptor               | `select.poll`, with `select.select` as a second probe | Poll is retried with the remaining budget until the deadline.                              |
-  | POSIX, regular file                      | Daemon worker                                         | Worker abandoned at the deadline; the file is not a waitable object.                       |
-  | Windows, resolvable handle               | `ReadFile` on a daemon worker                         | `CancelSynchronousIo` aborts the blocked call; the worker is joined within a grace period. |
-  | Any host, no usable descriptor or handle | Tracked daemon worker running the stream's `read()`   | Abandoned at the deadline and registered as outstanding.                                   |
+  | Host and stream                          | Strategy                                              | Deadline enforcement                                                                                                                  |
+  | ---------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+  | Any host, `isatty()`                     | None                                                  | Not read; the interactive prompt stays with the user.                                                                                 |
+  | Any host, `io.StringIO`                  | Direct `read()`                                       | In-memory streams cannot block.                                                                                                       |
+  | POSIX, pollable descriptor               | `select.poll`, with `select.select` as a second probe | Poll is retried with the remaining budget until the deadline.                                                                         |
+  | POSIX, regular file                      | Daemon worker                                         | Worker abandoned at the deadline; the file is not a waitable object.                                                                  |
+  | Windows, resolvable handle               | `ReadFile` on a daemon worker                         | `CancelSynchronousIo` aborts the blocked call; the worker is joined within a grace period that is additional to the capture deadline. |
+  | Any host, no usable descriptor or handle | Tracked daemon worker running the stream's `read()`   | Abandoned at the deadline and registered as outstanding.                                                                              |
 
   _Table: Bounded stdin capture strategies by host and stream kind._
+
+  Every worker strategy accepts a result only when the monotonic clock is
+  strictly before the deadline at the moment the waiter observes completion.
+  `Event.wait` reports that a worker finished, not when, so a waiting thread
+  that resumes after the deadline must not mistake a late result for an
+  in-budget one; the polled reader already rejects readiness at or after the
+  deadline. On Windows the cancellation grace is additional to the capture
+  deadline: the diagnostic and process exit follow the cleanup of a cancelled
+  `ReadFile`, so "bounded by `CMOX_IPC_TIMEOUT`" describes the input wait, not
+  an exact exit time.
 
   A strategy that cannot be interrupted leaves a worker blocked in the stream's
   own read. Only the stream's owner can end it, by closing the stream or

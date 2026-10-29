@@ -102,6 +102,58 @@ class _RecordingEvent:
         return False
 
 
+class _CompletingEvent:
+    """Event double that completes and reports the fake time it happened at.
+
+    ``Event.wait`` reports only that the event is set, not when it was set. The
+    double models a worker that finished at *completes_at*, which the waiting
+    thread observes when it resumes; advancing the clock to that instant is
+    what makes the late-completion boundary deterministic.
+    """
+
+    def __init__(self, clock: _SteppingTestClock, completes_at: float) -> None:
+        self.clock = clock
+        self.completes_at = completes_at
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Advance to the completion instant and report the event as set.
+
+        Returns
+        -------
+        bool
+            Always ``True``: completion is observable, but not necessarily in
+            time.
+        """
+        assert timeout is not None, "the helper always waits with a timeout"
+        self.clock.now = max(self.clock.now, self.completes_at)
+        return True
+
+
+class _OversleepingEvent:
+    """Event double whose waiter resumes half a second after it asked to.
+
+    Models a descheduled waiting thread: the real elapsed time outruns the
+    slice the helper requested, so only a clock-based budget notices.
+    """
+
+    def __init__(self, clock: _SteppingTestClock) -> None:
+        self.clock = clock
+        self.waits: list[float] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Record *timeout* and advance the clock by half a second.
+
+        Returns
+        -------
+        bool
+            ``False``, because the simulated worker never finishes.
+        """
+        assert timeout is not None, "the helper always waits with a timeout"
+        self.waits.append(timeout)
+        self.clock.now += 0.5
+        return False
+
+
 def test_wait_for_finish_returns_true_when_the_event_is_set() -> None:
     """A worker that has already finished is reported as finished."""
     event = threading.Event()
@@ -123,6 +175,57 @@ def test_wait_for_finish_returns_false_at_an_expired_deadline() -> None:
         "an expired deadline should report failure"
     )
     assert event.waits == [], "an expired deadline must not wait"
+
+
+@pytest.mark.parametrize(
+    ("completes_at", "expected"),
+    [
+        (0.5, True),
+        (1.0, False),
+        (2.0, False),
+    ],
+    ids=["before", "at", "after"],
+)
+def test_wait_for_finish_only_accepts_completion_before_the_deadline(
+    completes_at: float, *, expected: bool
+) -> None:
+    """Late worker completion is a timeout, not a result.
+
+    ``Event.wait`` cannot report when the event was set, so a waiter that is
+    descheduled while its worker finishes could otherwise accept a result
+    produced after the deadline. Completion exactly at the deadline counts as
+    late, matching the polled reader.
+    """
+    clock = _SteppingTestClock()
+    event = _CompletingEvent(clock, completes_at)
+
+    assert _bounded_thread.wait_for_finish(event, 1.0, clock=clock) is expected, (
+        f"completion at {completes_at} was not classified correctly"
+    )
+
+
+def test_wait_for_finish_recomputes_the_budget_from_the_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A waiter that oversleeps stops once the clock passes the deadline.
+
+    The helper must bound each slice by the clock's remaining time, not only
+    by the slice it asked to wait for: a descheduled thread can consume far
+    more real time than it requested, and continuing would overshoot the
+    deadline it promised to enforce.
+    """
+    clock = _SteppingTestClock()
+    event = _OversleepingEvent(clock)
+    # Force several slices so the clock and the accumulated bookkeeping can
+    # diverge, which they cannot when one slice covers the whole budget.
+    monkeypatch.setattr(_bounded_thread, "_MAX_EVENT_WAIT", 0.1)
+
+    assert _bounded_thread.wait_for_finish(event, 1.0, clock=clock) is False, (
+        "a worker that never finishes must report failure"
+    )
+    assert len(event.waits) == 2, (
+        f"waits were not bounded by the clock; observed {event.waits}"
+    )
 
 
 def test_wait_for_finish_slices_waits_beyond_the_platform_maximum() -> None:

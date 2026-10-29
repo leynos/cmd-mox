@@ -333,6 +333,19 @@ launcher's exit-status forwarding can only be exercised there; the Unix
 capability marker is deliberately not applied, so the cross-platform cases run
 on both hosts.
 
+A green Windows run of that process test does not by itself prove that native
+cancellation worked. The shim can reach status `1` either because
+`CancelSynchronousIo` released the blocked `ReadFile` within the grace, or
+because the reader stayed alive and the script entry point used its tracked
+worker `os._exit()` fallback; both are valid shutdowns. The native path is
+covered separately: `test_windows_cancel_lets_the_worker_exit_within_the_grace`
+in `test_stdin_capture_windows.py` has the stand-in `CancelSynchronousIo`
+release the read and asserts that `StdinTimeoutError.worker_alive` is false,
+which can only happen when the worker exited during the grace without a forced
+process exit. The grace itself (currently one second) is additional to the
+capture deadline, so the deadline bounds how long input is awaited, while the
+diagnostic and exit follow the cancelled read's cleanup.
+
 The launcher needs no explicit `exit /b %ERRORLEVEL%`. `setlocal` ends
 implicitly when the batch file ends, and `endlocal` does not touch
 `ERRORLEVEL`, so the status the Python shim exits with is the status `cmd.exe`

@@ -17,11 +17,13 @@ deadline while named-pipe communication uses its existing cooperative timeout,
 so the POSIX IPC deadline does not apply there.
 
 Reaching the deadline ends the capture: the shim discards partial input, does
-not contact the IPC server, and exits with status `1`. A caller that never
-finishes sending input therefore loses what it had sent, so tests and callers
-should still send EOF or close the pipe before waiting for an invocation to
-complete. If stdin is not needed, redirect it from a source that is already
-complete, such as `subprocess.DEVNULL`.
+not contact the IPC server, and exits with status `1`. On Windows the cancelled
+handle read is given a short bounded grace (about one second) to unwind, so the
+diagnostic and exit follow that cleanup rather than occurring exactly at the
+deadline. A caller that never finishes sending input therefore loses what it
+had sent, so tests and callers should still send EOF or close the pipe before
+waiting for an invocation to complete. If stdin is not needed, redirect it from
+a source that is already complete, such as `subprocess.DEVNULL`.
 
 ## Understand failure diagnostics
 

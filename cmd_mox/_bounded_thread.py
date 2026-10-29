@@ -205,6 +205,13 @@ def wait_for_finish(
     positive timeout, so an unsliced wait is not safe. Slicing keeps every
     individual wait inside the range.
 
+    Completion is accepted only when the monotonic clock is still strictly
+    before *deadline* at the moment the waiter observes it, matching the
+    polled reader's rejection of readiness at or after the deadline. A waiting
+    thread can be descheduled after computing its budget, so an event set by a
+    worker that finished late would otherwise be mistaken for an in-budget
+    result: ``Event.wait`` reports "set" without saying when.
+
     Parameters
     ----------
     finished:
@@ -217,18 +224,24 @@ def wait_for_finish(
     Returns
     -------
     bool
-        Whether *finished* was set before the deadline.
+        Whether *finished* was set strictly before the deadline.
     """
-    budget = deadline - clock()
-    waited = 0.0
-    while waited < budget:
-        # The budget is consumed by what was actually waited for, not by what
-        # the clock reads afterwards, so a clock that never advances cannot
-        # make the loop spin on the same slice forever.
-        slice_ = min(budget - waited, _MAX_EVENT_WAIT)
+    remaining_budget = deadline - clock()
+    while remaining_budget > 0:
+        # Re-read the clock each slice: it, not the accumulated bookkeeping, is
+        # the authority on the deadline, and a descheduled waiter may have far
+        # less time left than it calculated on entry.
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return False
+        # The accumulated budget still bounds the wait when the clock does not
+        # advance, so a stationary clock cannot spin on the same slice forever.
+        slice_ = min(remaining, remaining_budget, _MAX_EVENT_WAIT)
         if finished.wait(slice_):
-            return True
-        waited += slice_
+            return clock() < deadline
+        # Subtracting the requested slice is exact when it equals the whole
+        # remaining budget, so the loop always makes progress.
+        remaining_budget -= slice_
     return False
 
 
