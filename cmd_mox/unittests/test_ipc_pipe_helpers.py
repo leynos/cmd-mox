@@ -259,6 +259,20 @@ def _scripted_read_chunk(
     read_count = 0
 
     def read_chunk(_requested_size: int) -> tuple[int, bytes]:
+        """Return the next scripted outcome.
+
+        Returns
+        -------
+        tuple[int, bytes]
+            The scripted status and chunk.
+
+        Raises
+        ------
+        _FakeWinError
+            At the configured broken-pipe position.
+        AssertionError
+            If the script ends before a terminal status.
+        """
         nonlocal read_count
         if broken_pipe_at == read_count:
             raise _FakeWinError(ERROR_BROKEN_PIPE)
