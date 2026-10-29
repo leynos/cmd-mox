@@ -692,10 +692,42 @@ features that are infeasible with file-based logging.
   value into a named pipe (``\\.\pipe\cmdmox-<hash>``). This keeps the PATH
   filtering logic working unchanged while the transport communicates through
   `win32pipe`/`win32file` provided by `pywin32`.
-- The shim captures non-terminal standard input before IPC. On POSIX, waitable
-  descriptors are read against the invocation deadline; terminal-bound streams
-  are skipped. Windows and descriptors that cannot be polled retain the direct
-  text read.
+- The shim captures non-terminal standard input before IPC and bounds that
+  capture by `CMOX_IPC_TIMEOUT` on every platform; terminal-bound streams are
+  skipped. One private component, `cmd_mox._stdin_capture`, owns the deadline
+  and the strategy choice, so `cmd_mox.shim` never reads stdin itself. On
+  expiry, it discards partial input and raises `StdinTimeoutError`, and the
+  shim reports a bounded diagnostic and exits `1` without contacting IPC. The
+  strategy table is:
+
+  | Host and stream                          | Strategy                                              | Deadline enforcement                                                                                                                  |
+  | ---------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+  | Any host, `isatty()`                     | None                                                  | Not read; the interactive prompt stays with the user.                                                                                 |
+  | Any host, `io.StringIO`                  | Direct `read()`                                       | In-memory streams cannot block.                                                                                                       |
+  | POSIX, pollable descriptor               | `select.poll`, with `select.select` as a second probe | Poll is retried with the remaining budget until the deadline.                                                                         |
+  | POSIX, regular file                      | Daemon worker                                         | Worker abandoned at the deadline; the file is not a waitable object.                                                                  |
+  | Windows, resolvable handle               | `ReadFile` on a daemon worker                         | `CancelSynchronousIo` aborts the blocked call; the worker is joined within a grace period that is additional to the capture deadline. |
+  | Any host, no usable descriptor or handle | Tracked daemon worker running the stream's `read()`   | Abandoned at the deadline and registered as outstanding.                                                                              |
+
+  _Table: Bounded stdin capture strategies by host and stream kind._
+
+  Every worker strategy accepts a result only when the monotonic clock is
+  strictly before the deadline at the moment the waiter observes completion.
+  `Event.wait` reports that a worker finished, not when, so a waiting thread
+  that resumes after the deadline must not mistake a late result for an
+  in-budget one; the polled reader already rejects readiness at or after the
+  deadline. On Windows the cancellation grace is additional to the capture
+  deadline: the diagnostic and process exit follow the cleanup of a cancelled
+  `ReadFile`, so "bounded by `CMOX_IPC_TIMEOUT`" describes the input wait, not
+  an exact exit time.
+
+  A strategy that cannot be interrupted leaves a worker blocked in the stream's
+  own read. Only the stream's owner can end it, by closing the stream or
+  reaching EOF, so the shim's script entry point is the final cancellation
+  boundary: when workers are still outstanding it flushes its streams and calls
+  `os._exit`, which does not wait for them. `main()` itself never calls
+  `os._exit`, so an in-process caller receives `SystemExit` and keeps
+  responsibility for the stream.
 - The shim sends a shallow copy of ``os.environ`` to the IPC server. This
   captures environment variables at call time without mutating the caller's
   process state.
@@ -908,17 +940,25 @@ and timeout environment variables automatically. This keeps tests and shim
 workflows from having to patch :mod:`os.environ` manually when they rely on the
 higher-level context manager.
 
-#### Shared POSIX deadline and request rejection (2026-10-09)
+#### POSIX IPC deadline and request rejection (2026-10-09)
 
-On POSIX, the shim creates one monotonic deadline from CMOX_IPC_TIMEOUT. It
-applies that deadline to waitable stdin capture, Unix socket connection
-attempts and retry backoff, request sending, response reads, and passthrough
-reporting. Each socket wait receives only the remaining budget, so partial
-response chunks and retries cannot restart the timeout. Regular-file stdin uses
-a worker because readiness polling does not bound a text read from a regular
-file. Windows keeps its named-pipe timeout behaviour. Windows,
-missing-file-descriptor, and unpollable stdin retain the existing direct text
-read; read failures still use the shim's controlled IPC diagnostic.
+CMOX_IPC_TIMEOUT yields two deadlines on POSIX, not one shared budget. Stdin
+capture starts its own deadline when :func:`cmd_mox._stdin_capture.read_stdin`
+is entered, because the shim hands that function only the configured timeout.
+The IPC deadline is anchored separately where `main()` starts, and applies to
+Unix socket connection attempts and retry backoff, request sending, response
+reads, and passthrough reporting. Each socket wait receives only the remaining
+budget, so partial response chunks and retries cannot restart the IPC timeout.
+A capture that uses its whole timeout therefore leaves the IPC exchange
+correspondingly less time, and a later expiry of the anchored deadline is
+reported without retrying. Windows keeps its named-pipe timeout behaviour. Read
+failures still use the shim's controlled IPC diagnostic.
+
+> **Superseded (2026-10-26):** the bounded stdin work that followed this
+> decision extended the capture deadline to every stream kind, and it is what
+> split stdin capture out of the single POSIX deadline described here. See
+> "Implementation Notes" above for the strategy table and the script entry
+> point that terminates the process when a reader cannot be interrupted.
 
 The Unix server applies a read deadline to each accepted connection. A
 non-empty malformed or invalid request receives a bounded error response that

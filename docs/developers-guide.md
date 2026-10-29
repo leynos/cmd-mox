@@ -287,20 +287,87 @@ fake clock directly without replacing the process-wide time function.
 
 ## IPC deadlines and stdin reads
 
-On POSIX, the shim carries one monotonic deadline through Unix socket
-connection retries, request sending, response reads, and passthrough reporting.
-Stdin capture uses that deadline when the stream can be waited on. The client
-stores the deadline in `_ConnectionContext` and applies only the remaining time
-before each blocking socket operation. The Unix server also keeps one read
-deadline per accepted connection and updates the socket timeout before each
-receive, so a client that slowly streams a request cannot renew its full wait
-budget with every byte.
+On POSIX, the shim anchors one monotonic deadline in `main()` and carries it
+through Unix socket connection retries, request sending, response reads, and
+passthrough reporting. Stdin capture is bounded by the same configured timeout
+but from its own capture start, so the two are separate bounds that can
+overlap; see the strategies below. The client stores the deadline in
+`_ConnectionContext` and applies only the remaining time before each blocking
+socket operation. The Unix server also keeps one read deadline per accepted
+connection and updates the socket timeout before each receive, so a client that
+slowly streams a request cannot renew its full wait budget with every byte.
 
-The shim polls pipe-like stdin descriptors when possible. It reads regular-file
-stdin on a daemon worker because regular files cannot provide a bounded poll
-wait. Windows streams and descriptors that cannot be polled retain direct
-reads; the Windows named-pipe IPC client keeps its existing cooperative timeout
-behaviour.
+Stdin capture is bounded by `CMOX_IPC_TIMEOUT` on every platform and for every
+stream kind, and all of that logic lives in `cmd_mox._stdin_capture`. Limiting
+the component to one deadline and one error type keeps strategy selection,
+decoding, and reader-resource ownership out of `cmd_mox.shim`, which only turns
+a failure into a diagnostic. The strategies are:
+
+- a zero-timeout readiness probe on a POSIX descriptor, using `select.poll`
+  first and `select.select` second, so an unpollable descriptor is detected
+  before any bytes are read;
+- chunked reads against the remaining budget for pollable descriptors, taken
+  through a buffered stream's `read1` when it has one and `os.read` when it
+  does not, and `os.read` on a daemon worker for regular files, which cannot be
+  waited on;
+- bounded `ReadFile` chunks on a daemon worker for a resolved Windows handle,
+  with `CancelSynchronousIo` followed by a bounded join when the deadline
+  expires;
+- the stream's own `read()` on a tracked daemon worker when there is no usable
+  descriptor or handle.
+
+The Windows arms of that list are covered on POSIX, for the same reason the
+named-pipe adapter is: code that only runs on Windows would otherwise sit
+uncovered and drag the line-coverage ratchet down, and no Windows runner is
+needed to reach it. `test_stdin_capture_windows.py` patches `IS_WINDOWS` on
+`path_utils` and supplies stand-in `win32file`, `win32api`, and `pywintypes`
+modules through the `_windows_modules` seam. Its `_Win32Harness` records
+`ReadFile`, `OpenThread`, `CancelSynchronousIo`, and `CloseHandle` calls, so
+the cancellation path — including `request_synchronous_io_cancel` and
+`HandleCloser` in `_bounded_thread` — is driven without a Windows host. Keep
+new Windows behaviour behind `_windows_modules` rather than importing `pywin32`
+at module scope, where those stand-ins could not replace it.
+
+A stream that never reaches EOF leaves its reader blocked inside the stream.
+That thread cannot be joined because only the stream's owner can end the read,
+so a finished worker is pruned from the registry and a live one stays in it.
+`os._exit()` must therefore stay out of `main()`: an in-process caller that can
+reach `main()` shares the process with other tests and code, and terminating it
+would be a hostile side effect. Instead, `main()` raises `SystemExit`, and the
+script entry point `_run_as_script()` inspects `outstanding_workers()` and calls
+`os._exit()` with the same status only when it finds one. Normal exits re-raise
+`SystemExit` and keep the ordinary interpreter shutdown, which flushes streams
+and runs `atexit` handlers. The wrapper maps a non-integer status, such as the
+message string `sys.exit("fatal")` carries, to `1` rather than reporting it as
+success.
+
+`tests/test_shim_stdin_timeout.py` starts the generated launcher as a child
+process with an open stdin writer, so it is the only test that observes the
+process-lifetime half of this contract. It is listed in `WINDOWS_SMOKE_ARGS`,
+because the Windows `.cmd` launcher path, the native handle strategy, and the
+launcher's exit-status forwarding can only be exercised there; the Unix
+capability marker is deliberately not applied, so the cross-platform cases run
+on both hosts.
+
+A green Windows run of that process test does not by itself prove that native
+cancellation worked. The shim can reach status `1` either because
+`CancelSynchronousIo` released the blocked `ReadFile` within the grace, or
+because the reader stayed alive and the script entry point used its tracked
+worker `os._exit()` fallback; both are valid shutdowns. The native path is
+covered separately: `test_windows_cancel_lets_the_worker_exit_within_the_grace`
+in `test_stdin_capture_windows.py` has the stand-in `CancelSynchronousIo`
+release the read and asserts that `StdinTimeoutError.worker_alive` is false,
+which can only happen when the worker exited during the grace without a forced
+process exit. The grace itself (currently one second) is additional to the
+capture deadline, so the deadline bounds how long input is awaited, while the
+diagnostic and exit follow the cancelled read's cleanup.
+
+The launcher needs no explicit `exit /b %ERRORLEVEL%`. `setlocal` ends
+implicitly when the batch file ends, and `endlocal` does not touch
+`ERRORLEVEL`, so the status the Python shim exits with is the status `cmd.exe`
+reports. The assertion on a forwarded exit code of `3` in
+`tests/test_shim_stdin_timeout.py` is what holds that behaviour in place: if a
+future launcher change ever scrubs the status, that test fails on Windows.
 
 The shim emits bounded IPC observability events when stdin reading or writing
 and flushing a response stream fails. These use the existing dependency-free
@@ -727,6 +794,16 @@ tier. It loads `df12_python_lints`, analyses the Python 3.12 source baseline,
 disables the general Pylint catalogue, and enables the complete DF12 checker
 list explicitly. This keeps the DF12 policy auditable and independent of the
 temporary PyPy Pylint baseline.
+
+The enforced module ceiling is the DF12 tier's 800 lines, not the 400 that
+`[tool.pylint.main]` sets: `Makefile` disables `too-many-lines` for the classic
+pass. Note also that `cmd_mox/unittests/` and `tests/` carry no `__init__.py`,
+so Pylint's recursive walk from a directory target never descends into them;
+`too-many-lines` and the other design rules apply to test modules only when a
+gate names the file directly. `make lint` therefore does not catch an oversized
+test module, which is why review remains the check for this limit. Keep test
+modules split by strategy so the ceiling is satisfied when a named-file run
+does happen.
 
 ### Skylos tables
 

@@ -876,10 +876,18 @@ preserve endpoint access. An absolute path alone is not sufficient when that
 environment is missing; the shim exits with `IPC socket not specified`.
 
 Shims read non-terminal standard input until EOF to populate
-`Invocation.stdin`; terminal input is skipped. If an intermediary process, such
-as Git invoking a merge driver, inherits non-terminal stdin and leaves it open,
-the shim waits and may hang until the caller's timeout. Because the shim reads
-stdin before opening IPC, that block cannot itself produce a server-side
+`Invocation.stdin`; terminal input is skipped. That capture is bounded by
+`CMOX_IPC_TIMEOUT`, measured from the moment capture starts, on every platform
+and for every kind of stream. A stream that has not reached EOF by the deadline
+is abandoned: the shim discards any partial input, does not contact the IPC
+server, writes `IPC error: stdin read timed out after <timeout> seconds` to
+stderr, and exits with status `1`. On Windows a blocked pipe read is
+interrupted with `CancelSynchronousIo`, and the shim allows a short bounded
+grace (about one second) for that read to unwind before it writes the
+diagnostic and exits. `CMOX_IPC_TIMEOUT` therefore bounds how long the capture
+waits for input; the diagnostic and process exit follow the cleanup, so the
+deadline is not an exact process-exit time. Because the shim reads stdin before
+opening IPC, a stalled stdin read cannot itself produce a server-side
 `IPC received malformed JSON` error. If that error appears, it does not
 identify stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise
 close or redirect stdin, unless the caller intends to supply input.
@@ -1095,14 +1103,20 @@ server.
   if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
-  exported automatically (default `5.0`). On POSIX, one deadline covers
-  pollable piped stdin, regular-file stdin, connecting to the Unix socket,
+  exported automatically (default `5.0`). The value bounds stdin capture on
+  every platform: capture starts its own deadline, and reaching it ends the
+  shim with the `IPC error: stdin read timed out ...` diagnostic and status `1`
+  whatever the stream's kind. On Windows the cancelled handle read is given a
+  short bounded grace (about one second) to unwind after the deadline, so the
+  diagnostic and exit follow that cleanup rather than happening exactly on the
+  deadline. On POSIX, the IPC exchange then runs against a separate deadline
+  anchored where the shim starts, covering connection to the Unix socket,
   sending the request, receiving the response, and reporting passthrough
-  results. Regular-file reads use a worker, so the shim can stop waiting at the
-  deadline. Streams that cannot be polled retain direct-read behaviour, so the
-  stdin read itself may wait beyond this timeout. On Windows, stdin retains
-  direct-read behaviour and named-pipe communication uses its existing
-  cooperative timeout; the POSIX shared-deadline guarantee does not apply.
+  results. Because capture can consume the full timeout, stdin and IPC are two
+  bounds rather than one shared budget; a slow capture leaves the IPC exchange
+  correspondingly less time. On Windows, stdin is bounded by its own capture
+  deadline and named-pipe communication keeps its existing cooperative timeout,
+  so the POSIX IPC deadline does not apply there.
 
   A non-empty request that cannot be parsed or fails validation receives a
   bounded error response on stderr and exit status 1. An empty read, including

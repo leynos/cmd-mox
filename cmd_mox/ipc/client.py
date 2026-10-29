@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses as dc
 import json
 import os
@@ -14,6 +13,7 @@ import typing as typ
 from functools import partial
 from pathlib import Path
 
+from cmd_mox import _bounded_thread
 from cmd_mox import _path_utils as path_utils
 from cmd_mox._validators import (
     validate_positive_finite_timeout,
@@ -53,8 +53,6 @@ MIN_RETRY_SLEEP: typ.Final[float] = 0.001
 # for a cancellation to complete, short enough that a wedged worker cannot hang
 # the caller indefinitely.
 IO_CANCEL_GRACE: typ.Final[float] = 1.0
-# ``CancelSynchronousIo`` requires THREAD_TERMINATE access to its target.
-_THREAD_TERMINATE: typ.Final[int] = 0x0001
 
 _SENTINEL: typ.Final[object] = object()
 
@@ -208,56 +206,34 @@ def retry_with_backoff[T](
     raise RuntimeError(msg)  # pragma: no cover
 
 
-class _HandleCloser:
-    """Best-effort guard that closes a Windows handle exactly once."""
+def _pipe_handle_closer(handle: object) -> _bounded_thread.HandleCloser:
+    """Return a close-once guard for a named-pipe *handle*.
 
-    __slots__ = ("_closed", "_handle")
+    ``win32file`` and ``pywintypes.error`` are both bound here, while building
+    the guard; only ``CloseHandle`` itself is looked up when the handle is
+    closed. Callers therefore reach this helper only on a host where pywin32
+    is importable, which the Windows transport already guarantees.
 
-    def __init__(self, handle: object) -> None:
-        self._handle = handle
-        self._closed = False
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        with contextlib.suppress(pywintypes.error):
-            # Double-close or already aborted handles may report INVALID_HANDLE;
-            # callers only care that resources are reclaimed.
-            win32file.CloseHandle(self._handle)
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
+    Returns
+    -------
+    HandleCloser
+        Guard that closes *handle* at most once.
+    """
+    return _bounded_thread.HandleCloser(
+        handle,
+        win32file=win32file,
+        suppress=(pywintypes.error,),
+    )
 
 
 def _request_synchronous_io_cancel(thread: threading.Thread) -> None:
     """Ask Windows to abort *thread*'s in-flight synchronous I/O."""
     # Closing the pipe handle does not reliably wake a thread already blocked
-    # inside ReadFile; CancelSynchronousIo does. Both it and the native thread
-    # id are resolved defensively: the API is missing from some pywin32 builds
-    # and from every non-Windows host. The modules are untyped stand-ins off
-    # Windows, so the resolved callables are deliberately dynamic.
-    cancel_io: typ.Any = getattr(win32file, "CancelSynchronousIo", None)
-    open_thread: typ.Any = getattr(win32api, "OpenThread", None)
-    if cancel_io is None or open_thread is None:
-        return
-    native_id = thread.native_id
-    if native_id is None:
-        return
-    # Best-effort: failing to cancel is never fatal, because the caller's
-    # handle close remains the fallback for waking the worker.
-    with contextlib.suppress(Exception):
-        # OpenThread(desired_access, inherit_handle, thread_id).
-        handle = open_thread(
-            _THREAD_TERMINATE,
-            False,  # ruff: ignore[boolean-positional-value-in-call] - pywin32 takes the inherit flag positionally
-            native_id,
-        )
-        # Reuse the shared guard rather than closing by hand, so the thread
-        # handle is reclaimed exactly once on both the success and error paths.
-        with contextlib.closing(_HandleCloser(handle)):
-            cancel_io(handle)
+    # inside ReadFile; CancelSynchronousIo does. The pywin32 modules are read
+    # from module globals here so the helper honours test and host stand-ins.
+    _bounded_thread.request_synchronous_io_cancel(
+        thread, win32file=win32file, win32api=win32api, pywintypes=pywintypes
+    )
 
 
 def _cancel_and_await_worker(
@@ -274,10 +250,12 @@ def _cancel_and_await_worker(
     bool
         Whether the worker exited before the grace period elapsed.
     """
-    _request_synchronous_io_cancel(thread)
-    cancel()
-    thread.join(IO_CANCEL_GRACE)
-    return not thread.is_alive()
+    return _bounded_thread.cancel_and_await_worker(
+        thread,
+        cancel,
+        grace=IO_CANCEL_GRACE,
+        request_cancel=_request_synchronous_io_cancel,
+    )
 
 
 def _validate_initial_deadline(
@@ -364,14 +342,8 @@ def _run_blocking_io[T](
     """
     outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
-    def _target() -> None:
-        try:
-            outcome["value"] = func()
-        except BaseException as exc:  # ruff: ignore[blind-except] - worker-thread boundary: any failure must be stashed and re-raised on the caller's thread
-            outcome["error"] = exc
-
     thread = threading.Thread(
-        target=_target,
+        target=_bounded_thread.stash_outcome(outcome, func),
         name="cmd-mox-ipc-io",
         daemon=True,
     )
@@ -600,7 +572,7 @@ def _send_pipe_request(
         context,
         deadline=connect_deadline,
     )
-    closer = _HandleCloser(handle)
+    closer = _pipe_handle_closer(handle)
     try:
         _run_blocking_io(
             lambda: write_pipe_payload(

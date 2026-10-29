@@ -28,17 +28,21 @@ upgrading shared fixture workflows.
 ## Shim stdin and IPC timeouts
 
 `CMOX_IPC_TIMEOUT` defaults to five seconds when the IPC server starts inside
-an active `EnvironmentManager`. On POSIX, one deadline covers pollable piped
-stdin, regular-file stdin, and the Unix IPC exchange through passthrough
-reporting. A stream that cannot be polled keeps direct-read behaviour, so
-reading stdin can outlast the timeout. On Windows, stdin also uses direct-read
-behaviour; named-pipe communication has its existing cooperative timeout, but
-the POSIX shared-deadline guarantee does not apply.
+an active `EnvironmentManager`. Capture of non-terminal stdin is bounded on
+every platform and for every kind of stream: once the deadline passes, the shim
+discards partial input, does not contact the IPC server, prints
+`IPC error: stdin read timed out after <timeout> seconds`, and exits with status
+`1`. On POSIX, the Unix IPC exchange through passthrough reporting then runs
+against a separate deadline anchored where the shim starts, so a slow capture
+leaves it correspondingly less time. On Windows, stdin has a separate capture
+deadline while named-pipe communication uses its existing cooperative timeout,
+so the POSIX IPC deadline does not apply there.
 
 If a shim may inherit stdin that stays open, send EOF, close the pipe, or
-redirect stdin from a source that is already complete. This lets the shim
-finish reading before it sends the IPC request. For the precise timeout scope
-and error behaviour, see the
+redirect stdin from a source that is already complete. The shim now stops
+waiting at the deadline, but a caller that never finishes an interactive
+exchange still loses its input. For the precise timeout scope and error
+behaviour, see the
 [canonical `CMOX_IPC_TIMEOUT` guidance](usage-guide.md#environment-variables).
 
 Invalid non-empty requests receive a bounded error on stderr and exit with

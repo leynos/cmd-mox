@@ -14,6 +14,7 @@ import typing as typ
 
 from cmd_mox import _path_utils
 from cmd_mox._correlation import bounded_correlation_id
+from cmd_mox.errors import StdinTimeoutError
 from cmd_mox.ipc import _observability
 
 _SHIM_RESPONSE_STREAM_OPERATION = "ipc.shim.response_stream"
@@ -53,6 +54,8 @@ _ERROR_DETAILS: dict[tuple[bool, _FailureOperation], str] = {
     (False, "ipc_request"): "IPC operation failed",
     (True, "ipc_request"): "IPC operation timed out",
     (False, "stdin_read"): "stdin read failed",
+    # ``StdinTimeoutError`` is printed verbatim; this entry covers only a bare
+    # ``TimeoutError`` raised by a stream's own text read.
     (True, "stdin_read"): "timed out reading stdin",
     (False, "passthrough_report"): "passthrough reporting failed",
     (True, "passthrough_report"): "timed out reporting passthrough",
@@ -95,6 +98,11 @@ def _safe_error_detail(exc: Exception, operation: _FailureOperation) -> str:
     str
         Safe message selected from the operation and timeout state.
     """
+    if isinstance(exc, StdinTimeoutError):
+        # This message is built by cmd-mox itself and carries only the
+        # configured deadline, so it can be printed verbatim. Every other
+        # exception is mapped to a fixed string so its text cannot leak.
+        return str(exc)
     return _ERROR_DETAILS[isinstance(exc, TimeoutError), operation]
 
 
