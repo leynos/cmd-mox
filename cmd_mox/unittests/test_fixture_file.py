@@ -57,6 +57,13 @@ def _sample_metadata() -> FixtureMetadata:
 def _sample_fixture(
     recordings: list[RecordedInvocation] | None = None,
 ) -> FixtureFile:
+    """Build a fixture with sample metadata and recordings.
+
+    Returns
+    -------
+    FixtureFile
+        A fixture containing the supplied or default recordings.
+    """
     return FixtureFile(
         version="1.0.0",
         metadata=_sample_metadata(),
