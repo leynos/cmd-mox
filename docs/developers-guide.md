@@ -23,6 +23,22 @@ when a body or call-stage failure already exists and controller cleanup
 succeeds, preserving the original failure. Cleanup errors remain visible as
 teardown failures.
 
+## Recording fixture schema versions
+
+`FixtureFile.load()` reads the JSON and delegates to `from_dict()`, which
+normalizes the version and applies registered migrations. Canonical versions
+use three dot-separated ASCII numeric components without leading zeroes; legacy
+two-component values are parsed as integers with `PATCH` set to zero. If the
+version is missing, normalization supplies `0.0.0`.
+
+Minor and patch differences within the same major version are tolerated.
+Migrations are registered in `_MIGRATIONS` by source major version and chain
+older major versions forward; an unsupported higher major version is rejected
+with `ValueError`. See the
+[schema versioning guide](usage-guide.md#schema-versioning-and-migration) and
+the
+[detailed versioning design](python-native-command-mocking-design.md#911-versioning-and-forward-compatibility).
+
 ## Coverage ownership
 
 Pull-request CI generates coverage with the ratchet (`with-ratchet: 'true'`)
