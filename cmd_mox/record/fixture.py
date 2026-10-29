@@ -13,6 +13,7 @@ import dataclasses as dc
 import datetime as dt
 import importlib.metadata
 import json
+import re
 import sys
 import typing as typ
 
@@ -26,12 +27,42 @@ _SCHEMA_VERSION: typ.Final[str] = "1.0.0"
 # Two components remain accepted for fixtures written by the previous schema.
 _MIN_VERSION_COMPONENT_COUNT: typ.Final[int] = 2
 _MAX_VERSION_COMPONENT_COUNT: typ.Final[int] = 3
+_SEMVER_CORE_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
+    r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}"
+)
 
 # ---------------------------------------------------------------------------
 # Schema version parsing and migration
 # ---------------------------------------------------------------------------
 
 type _MigrationFn = cabc.Callable[[dict[str, typ.Any]], dict[str, typ.Any]]
+
+
+def _split_version(version_str: str) -> list[str]:
+    """Split a version and validate its component syntax.
+
+    Returns
+    -------
+    list[str]
+        The stripped version's components.
+
+    Raises
+    ------
+    ValueError
+        If the component count or three-part syntax is invalid.
+    """
+    stripped_version = version_str.strip()
+    parts = stripped_version.split(".")
+    if not _MIN_VERSION_COMPONENT_COUNT <= len(parts) <= _MAX_VERSION_COMPONENT_COUNT:
+        msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
+        raise ValueError(msg)
+    if (
+        len(parts) == _MAX_VERSION_COMPONENT_COUNT
+        and _SEMVER_CORE_PATTERN.fullmatch(stripped_version) is None
+    ):
+        msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
+        raise ValueError(msg)
+    return parts
 
 
 def _parse_version(version_str: str) -> tuple[int, int, int]:
@@ -41,7 +72,8 @@ def _parse_version(version_str: str) -> tuple[int, int, int]:
     ----------
     version_str : str
         A version string in ``"major.minor.patch"`` format. Legacy
-        ``"major.minor"`` values are accepted with a zero patch component.
+        ``"major.minor"`` values retain their historical integer parsing and
+        are accepted with a zero patch component.
 
     Returns
     -------
@@ -53,10 +85,7 @@ def _parse_version(version_str: str) -> tuple[int, int, int]:
     ValueError
         If the string is not a two- or three-component numeric version.
     """
-    parts = version_str.strip().split(".")
-    if not _MIN_VERSION_COMPONENT_COUNT <= len(parts) <= _MAX_VERSION_COMPONENT_COUNT:
-        msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
-        raise ValueError(msg)
+    parts = _split_version(version_str)
     try:
         components = [int(part) for part in parts]
     except ValueError:

@@ -544,12 +544,15 @@ zero and are normalized to `1.0.0`. This compatibility is one-way: older CmdMox
 releases that require exactly two components cannot read fixtures written with
 a three-component version.
 
+Three-component versions use ASCII digits without leading zeroes in each
+component. Legacy two-component versions retain their historical integer
+parsing for compatibility.
+
 CmdMox automatically migrates older fixture files to the current schema when
 loading via `FixtureFile.load()` or `FixtureFile.from_dict()`. Minor and patch
-differences within the same major version are tolerated -- for example, a
-`1.1.0` fixture loads correctly into `1.0.0` code because unknown fields are
-ignored. A higher major version with no registered migration path raises
-`ValueError`.
+differences within the same major version are tolerated—for example, a `1.1.0`
+fixture loads correctly into `1.0.0` code because unknown fields are ignored. A
+higher major version with no registered migration path raises `ValueError`.
 
 ## Automatic recording with `.record()`
 

@@ -3272,9 +3272,15 @@ written with a three-component version.
 #### 9.11.2 Upgrade Path
 
 ```python
+import re
+
 def _parse_version(version_str: str) -> tuple[int, int, int]:
     parts = version_str.strip().split(".")
     if len(parts) not in (2, 3):
+        raise ValueError("expected 'major.minor.patch'")
+    if len(parts) == 3 and not re.fullmatch(
+        r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}", version_str.strip()
+    ):
         raise ValueError("expected 'major.minor.patch'")
     components = [int(part) for part in parts]
     if any(component < 0 for component in components):
