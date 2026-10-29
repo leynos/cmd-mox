@@ -2,16 +2,39 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import typing as typ
 
 import pytest
 
 from cmd_mox import shim
+from cmd_mox._shim_bootstrap import _should_remove_path_entry
 from cmd_mox.ipc import Invocation, Response
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.fixture
+def symlink_cycle(tmp_path: Path) -> Path:
+    """Provide a path whose symlinks point at each other.
+
+    Returns
+    -------
+    pathlib.Path
+        The first link of a two-link cycle, which no lookup can follow.
+    """
+    if not hasattr(os, "symlink"):
+        pytest.skip("Platform does not support symlinks")
+    first = tmp_path / "cycle-a"
+    second = tmp_path / "cycle-b"
+    try:
+        first.symlink_to(second)
+        second.symlink_to(first)
+    except OSError as exc:  # pragma: no cover - windows without admin rights
+        pytest.skip(f"Symlinks unavailable: {exc}")
+    return first
 
 
 def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,4 +180,54 @@ def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
     assert sys.path == original_path, "failed bootstrap did not restore sys.path"
     assert not _shim_bootstrap._BOOTSTRAP_DONE, (
         "failed bootstrap marked itself complete"
+    )
+
+
+def test_should_remove_path_entry_removes_package_dir_entry(tmp_path: Path) -> None:
+    """An entry resolving to the package directory should be removed."""
+    package_dir = tmp_path / "cmd_mox"
+    package_dir.mkdir()
+
+    assert _should_remove_path_entry(os.fspath(package_dir), package_dir), (
+        "bootstrap kept the package directory on sys.path"
+    )
+
+
+def test_should_remove_path_entry_skips_entry_when_cwd_is_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative entry cannot be resolved once the working directory is gone."""
+    package_dir = tmp_path / "cmd_mox"
+    package_dir.mkdir()
+    doomed_cwd = tmp_path / "doomed"
+    doomed_cwd.mkdir()
+    monkeypatch.chdir(doomed_cwd)
+    doomed_cwd.rmdir()
+
+    assert not _should_remove_path_entry(".", package_dir), (
+        "bootstrap removed an entry it could not resolve"
+    )
+
+
+def test_should_remove_path_entry_skips_symlink_cycle(
+    symlink_cycle: Path, tmp_path: Path
+) -> None:
+    """A malformed entry looping through symlinks must not abort bootstrap."""
+    package_dir = tmp_path / "cmd_mox"
+    package_dir.mkdir()
+
+    assert not _should_remove_path_entry(os.fspath(symlink_cycle), package_dir), (
+        "bootstrap removed an entry it could not resolve"
+    )
+
+
+def test_should_remove_path_entry_skips_entry_with_embedded_null(
+    tmp_path: Path,
+) -> None:
+    """An entry the filesystem cannot interpret must not abort bootstrap."""
+    package_dir = tmp_path / "cmd_mox"
+    package_dir.mkdir()
+
+    assert not _should_remove_path_entry("bad\x00entry", package_dir), (
+        "bootstrap removed an entry it could not resolve"
     )
