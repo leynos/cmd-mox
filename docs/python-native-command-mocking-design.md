@@ -575,6 +575,40 @@ sequenceDiagram
     end
 ```
 
+### Response strategy and domain boundaries
+
+`cmd_mox.domain` owns invocation, response, and passthrough values without
+transport serialization. `cmd_mox.ipc.wire` maps those values to and from
+JSON-ready payloads at the IPC boundary. `cmd_mox.response_policy` selects
+strategies and validates expectation environments; `cmd_mox.response_strategy`
+executes handlers and constructs responses with temporary environment overrides.
+
+The following diagram groups the response-strategy concepts. It is a conceptual
+overview, not the literal call order: environment validation occurs before
+handler execution; passthrough prepares a request rather than executing the
+handler here; and a missing double bypasses strategy selection.
+
+For screen readers: The diagram shows an invocation passing through strategy
+selection. A missing double leads to a default response; passthrough and
+regular strategies lead through handler execution, expectation environment
+validation, and response environment finalization. Each path leads to a domain
+response. The preceding paragraph explains how the actual call order differs.
+
+```mermaid
+flowchart TD
+    Invocation[Invocation received] --> Select["select_response_strategy(double)"]
+    Select --> Missing[MISSING_DOUBLE\ndefault_response]
+    Select --> Passthrough[PASSTHROUGH\nexecute_handler]
+    Select --> Regular[REGULAR\nexecute_handler]
+    Passthrough --> Env["apply_expectation_env(double, invocation)"]
+    Regular --> Env
+    Env --> Finalize["finalize_response_env(response, overrides)"]
+    Missing --> Response[Domain Response]
+    Finalize --> Response
+```
+
+_Figure: Conceptual response-strategy flow for one invocation._
+
 ### 3.2 State Management and Inter-Process Communication (IPC)
 
 The communication between the main test process (hosting the `CmdMox`
@@ -622,17 +656,17 @@ is as follows:
    invocation over the socket.
 
 6. **Server-Side Processing:** An IPC request-handler worker thread in the main
-   process receives the JSON payload and deserializes it into an `Invocation`
-   object. The controller resolves the invocation against its configured double
-   and expectations, then selects the response. A configured `.runs(handler)`
-   callback runs on an IPC request-handler worker thread in the main test
-   process.
+   process receives the JSON payload and uses `cmd_mox.ipc.wire` to decode it
+   into a domain `Invocation` object. The controller resolves the invocation
+   against its configured double and expectations, then selects the response. A
+   configured `.runs(handler)` callback runs on an IPC request-handler worker
+   thread in the main test process.
 
 7. **Response Delivery:** The controller applies the response to the invocation
    and appends it to the in-memory Invocation Journal only when it is
    non-passthrough. Passthrough invocations are appended after the shim reports
-   the command result. The server serializes the response and sends it back to
-   the shim.
+   the command result. The server maps the domain response to a wire payload
+   and sends it back to the shim.
 
 8. **Shim Action:** The shim receives the response payload from the server. It
    writes the `stdout` and `stderr` data to its own standard streams and then
@@ -981,18 +1015,25 @@ classDiagram
         + str stdout
         + str stderr
         + int exit_code
-        + dict[str, Any] to_dict()
     }
     class Response {
         + str stdout
         + str stderr
         + int exit_code
+        + dict[str, str] env
+        + PassthroughRequest | None passthrough
     }
     IPCServer --> InnerServerFactory : requests class when creating backend
     InnerServerFactory ..> UnixServerBaseResolver : resolves platform base
     InnerServerFactory ..> _InnerServer : creates and caches
     _InnerServer --> _IPCHandler : uses
-    _IPCHandler --> Invocation : parses
+    class WireMapping {
+        + request_from_payload() Invocation
+        + response_to_payload() dict
+    }
+    _IPCHandler --> WireMapping : maps payloads
+    WireMapping --> Invocation : decodes
+    WireMapping --> Response : encodes
     _IPCHandler --> Response : returns
     IPCServer --> Invocation : handles
     IPCServer --> Response : returns
@@ -2205,7 +2246,7 @@ sequenceDiagram
 
 Fixtures use JSON format for several reasons: human-readability, native Python
 support without dependencies, Git-friendliness (mergeable, diffable), and
-compatibility with the existing `Invocation.to_dict()` serialization.
+compatibility with the established invocation-field schema.
 
 #### 9.3.1 Schema definition (Version 1.0.0)
 
@@ -2984,7 +3025,7 @@ when the review file is deleted after inspection) to provide an audit trail.
 
 **Rationale:**
 
-- `Invocation.to_dict()` already produces JSON-compatible output
+- `RecordedInvocation.to_dict()` already produces JSON-compatible output
 - No additional dependency (YAML requires `pyyaml`)
 - Better tooling support (JSON Schema validation, IDE formatters)
 - Slightly faster parsing than YAML

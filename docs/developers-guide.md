@@ -324,6 +324,20 @@ external collector.
 matching and must not invoke expectation matching for a different command. This
 prevents a double from accepting an invocation owned by another command.
 
+### Domain values and IPC wire payloads
+
+`Invocation`, `Response`, `PassthroughRequest`, and `PassthroughResult` are
+transport-independent values in `cmd_mox.domain`. The IPC package re-exports
+them for compatibility, while `cmd_mox.ipc.wire` owns conversion between those
+values and JSON-ready payloads. Keep payload dictionaries at that transport
+boundary; domain code must not depend on IPC encoding.
+
+`cmd_mox.response_policy` selects the strategy and validates expectation
+environments without applying process environment changes. The controller then
+calls `cmd_mox.response_strategy` to execute the selected handler and build a
+domain response, applying temporary environment overrides at that execution
+boundary.
+
 ### Unix server-base selection
 
 `IPCServer` defers Unix server-class selection until backend creation. Its

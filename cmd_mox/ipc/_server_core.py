@@ -24,6 +24,7 @@ from cmd_mox._validators import (
     validate_optional_timeout,
     validate_positive_finite_timeout,
 )
+from cmd_mox.domain import Invocation, PassthroughResult, Response
 from cmd_mox.environment import EnvironmentManager
 
 from . import _observability
@@ -33,7 +34,7 @@ from .json_utils import (
     validate_invocation_payload,
     validate_passthrough_payload,
 )
-from .models import Invocation, PassthroughResult, Response
+from .wire import response_to_payload
 
 if typ.TYPE_CHECKING:
     from types import TracebackType
@@ -458,7 +459,7 @@ def _parse_payload(raw: bytes) -> ParsedRequest | None:
 
 
 def _encode_response(response: Response) -> bytes:
-    return json.dumps(response.to_dict()).encode("utf-8")
+    return json.dumps(response_to_payload(response)).encode("utf-8")
 
 
 @dc.dataclass(slots=True)

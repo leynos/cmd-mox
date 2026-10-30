@@ -14,13 +14,13 @@ import time
 
 import pytest
 
+from cmd_mox.domain import Invocation, PassthroughResult, Response
 from cmd_mox.ipc import TimeoutConfig
 from cmd_mox.ipc._named_pipe_limits import (
     join_threads_before,
     remaining_ms,
     remaining_seconds,
 )
-from cmd_mox.ipc.models import Invocation, PassthroughResult, Response
 from cmd_mox.ipc.named_pipe import (
     CallbackNamedPipeServer,
     NamedPipeServer,

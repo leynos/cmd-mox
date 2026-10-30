@@ -155,7 +155,16 @@ def test_invoke_server_uses_named_kind(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.stdout == "ok", "Assertion failed"
     assert captured["kind"] == KIND_INVOCATION, "Assertion failed"
-    assert captured["data"] == invocation.to_dict(), "Assertion failed"
+    expected_payload = {
+        "command": "cmd",
+        "args": [],
+        "stdin": "",
+        "env": {},
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+    }
+    assert captured["data"] == expected_payload, "Invocation payload changed"
 
 
 def test_invoke_server_forwards_absolute_deadline(
@@ -385,7 +394,13 @@ def test_report_passthrough_result_uses_named_kind(
     report_passthrough_result(result, timeout=1.0)
 
     assert captured["kind"] == KIND_PASSTHROUGH_RESULT, "Assertion failed"
-    assert captured["data"] == result.to_dict(), "Assertion failed"
+    expected_payload = {
+        "invocation_id": "1",
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+    }
+    assert captured["data"] == expected_payload, "Passthrough payload changed"
 
 
 def test_report_passthrough_result_forwards_absolute_deadline(

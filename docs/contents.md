@@ -6,6 +6,8 @@
 - [Developer Guide](./developers-guide.md): Local checks and linting policy.
 - [IPC Timeout Migration Note](./ipc-timeout-migration-note.md): Prepare for
   bounded shim stdin and IPC waits in the next minor release.
+- [IPC Payload Migration Note](./ipc-payload-migration-note.md): Replace
+  removed payload conversion methods before upgrading.
 - [Fixture Schema Migration Note](./fixture-schema-migration-note.md): Prepare
   for three-component recording fixture versions.
 - [Shellmock Migration Guide](./shellmock-migration-guide.md): Migrate from

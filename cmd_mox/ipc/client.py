@@ -36,14 +36,15 @@ from cmd_mox.ipc.windows import (
     write_pipe_payload,
 )
 
-from . import _client_events, _observability
+from . import _client_events, _observability, wire
 from ._deadline import _compute_deadline, _remaining_time
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
-from .models import Invocation, PassthroughResult, Response
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+    from cmd_mox.domain import Invocation, PassthroughResult, Response
 
 DEFAULT_CONNECT_RETRIES: typ.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: typ.Final[float] = 0.05
@@ -501,7 +502,7 @@ def _decode_response(raw: bytes) -> Response:
     if parsed is None:
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg)
-    return Response.from_payload(parsed)
+    return wire.response_from_payload(parsed)
 
 
 def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> bool:
@@ -743,7 +744,7 @@ def invoke_server(
     """
     return _send_request(
         KIND_INVOCATION,
-        invocation.to_dict(),
+        wire.invocation_to_payload(invocation),
         _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
     )
 
@@ -777,7 +778,7 @@ def report_passthrough_result(
     """
     return _send_request(
         KIND_PASSTHROUGH_RESULT,
-        result.to_dict(),
+        wire.passthrough_to_payload(result),
         _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
     )
 

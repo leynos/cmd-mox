@@ -20,6 +20,7 @@ from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.ipc._server_core import _encode_response
 from cmd_mox.ipc.models import Response
+from cmd_mox.ipc.wire import response_from_payload
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
 
 pytestmark = [pytest.mark.requires_unix_sockets]
@@ -270,7 +271,7 @@ def test_raw_malformed_request_gets_a_rejection_frame(
         while chunk := client.recv(1024):
             response_chunks.append(chunk)
 
-    response = Response.from_payload(json.loads(b"".join(response_chunks)))
+    response = response_from_payload(json.loads(b"".join(response_chunks)))
     assert response.stderr == "IPC request could not be parsed\n", (
         "Malformed request did not receive the bounded server diagnostic"
     )
