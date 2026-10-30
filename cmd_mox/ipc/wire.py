@@ -3,7 +3,9 @@
 Use these functions at the transport boundary when sending or receiving
 JSON-ready mappings; domain values do not encode themselves. Payload values
 use ``Any`` because decoded, untrusted JSON can contain arbitrary nested types;
-the decoding functions validate and normalize the fields at this boundary.
+request construction checks field names but not field types. Callers must
+validate types before relying on them; response decoding normalizes selected
+fields to preserve the wire contract.
 
 Examples
 --------
@@ -120,6 +122,8 @@ def request_from_payload[PayloadT](
 
     Malformed payloads are not logged here: the dispatch boundary emits a
     bounded ``invalid_request`` record without exposing payload contents.
+    Constructor argument names are checked, but field types are not; callers
+    must validate types before relying on them.
 
     Parameters
     ----------
