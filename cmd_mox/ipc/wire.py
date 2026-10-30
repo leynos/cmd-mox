@@ -1,7 +1,9 @@
 """Convert domain values to and from IPC wire payloads.
 
 Use these functions at the transport boundary when sending or receiving
-JSON-ready mappings; domain values do not encode themselves.
+JSON-ready mappings; domain values do not encode themselves. Payload values
+use ``Any`` because decoded, untrusted JSON can contain arbitrary nested types;
+the decoding functions validate and normalize the fields at this boundary.
 
 Examples
 --------

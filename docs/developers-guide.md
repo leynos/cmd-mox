@@ -338,32 +338,6 @@ calls `cmd_mox.response_strategy` to execute the selected handler and build a
 domain response, applying temporary environment overrides at that execution
 boundary.
 
-The following diagram groups the response-strategy concepts. It is a conceptual
-overview, not the literal call order: environment validation occurs before
-handler execution; passthrough prepares a request rather than executing the
-handler here; and a missing double bypasses strategy selection.
-
-For screen readers: The diagram shows an invocation passing through strategy
-selection. A missing double leads to a default response; passthrough and
-regular strategies lead through handler execution, expectation environment
-validation, and response environment finalization. Each path leads to a domain
-response. The preceding paragraph explains how the actual call order differs.
-
-```mermaid
-flowchart TD
-    Invocation[Invocation received] --> Select["select_response_strategy(double)"]
-    Select --> Missing[MISSING_DOUBLE\ndefault_response]
-    Select --> Passthrough[PASSTHROUGH\nexecute_handler]
-    Select --> Regular[REGULAR\nexecute_handler]
-    Passthrough --> Env["apply_expectation_env(double, invocation)"]
-    Regular --> Env
-    Env --> Finalize["finalize_response_env(response, overrides)"]
-    Missing --> Response[Domain Response]
-    Finalize --> Response
-```
-
-_Figure: Conceptual response-strategy flow for one invocation._
-
 ### Unix server-base selection
 
 `IPCServer` defers Unix server-class selection until backend creation. Its

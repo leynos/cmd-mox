@@ -25,6 +25,12 @@ fixtures continue to load in the new release and normalize to `1.0.0`; see the
 [fixture schema migration note](fixture-schema-migration-note.md) before
 upgrading shared fixture workflows.
 
+## IPC payload migration
+
+The domain classes no longer provide the previous IPC conversion methods.
+Callers that used them must migrate to the wire functions listed in the
+[IPC payload migration guide](usage-guide.md#ipc-payload-migration).
+
 ## Shim stdin and IPC timeouts
 
 `CMOX_IPC_TIMEOUT` defaults to five seconds when the IPC server starts inside
