@@ -5,9 +5,11 @@ from __future__ import annotations
 import dataclasses as dc
 import textwrap
 import typing as typ
+from pathlib import Path
 
 import pytest
 
+import cmd_mox as cmd_mox_package
 from cmd_mox.controller import Phase
 from cmd_mox.unittests import pytest_plugin_module_utils as plugin_utils
 from cmd_mox.unittests.test_invocation_journal import _shim_cmd_path
@@ -20,7 +22,8 @@ LifecyclePhase = plugin_utils.LifecyclePhase
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
     import subprocess
-    from pathlib import Path
+
+    from _pytest.pytester import RunResult
 
     from cmd_mox.controller import CmdMox
 
@@ -46,11 +49,47 @@ class BodyExceptionTestCase:
     expected_exit: pytest.ExitCode
 
 
+@dc.dataclass(slots=True, frozen=True)
+class WorkerPrefixTestCase:
+    """Test case data for worker-specific shim prefixes."""
+
+    worker_id: str | None
+    expected_fragment: str
+
+
+@dc.dataclass(slots=True, frozen=True)
+class VerificationTestCase:
+    """Test module and expected outcomes for verification behavior."""
+
+    test_definition: str
+    expected_outcomes: dict[str, int]
+    expected_output: str
+
+
 pytest_plugins = ("cmd_mox.pytest_plugin", "pytester")
 
 # Flags that disable CI-injected plugins (e.g. slipcover) which can fail
 # when re-loaded inside pytester subprocess runs.
 _DISABLE_CI_PLUGINS = ("-p", "no:slipcover")
+
+
+def _isolated_pytester_subprocess_args(pytester: pytest.Pytester) -> tuple[str, ...]:
+    """Keep subprocess runs from discovering configuration above pytester's root.
+
+    Returns
+    -------
+    tuple[str, ...]
+        CLI options that isolate pytest configuration in the temporary project.
+    """
+    inner_ini = pytester.makeini("[pytest]\n")
+    return (
+        "-c",
+        str(inner_ini),
+        "--rootdir",
+        str(pytester.path),
+        "--confcutdir",
+        str(pytester.path),
+    )
 
 
 def test_fixture_basic(
@@ -66,37 +105,33 @@ def test_fixture_basic(
 
 
 @pytest.mark.parametrize(
-    ("worker_id", "expected_fragment"),
-    [("gw99", "gw99"), (None, "main")],
-    ids=["xdist-worker", "main-process"],
+    "test_case",
+    [
+        pytest.param(WorkerPrefixTestCase("gw99", "gw99"), id="xdist-worker"),
+        pytest.param(WorkerPrefixTestCase(None, "main"), id="main-process"),
+    ],
 )
 def test_worker_prefixes(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
-    worker_id: str | None,
-    expected_fragment: str,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+    test_case: WorkerPrefixTestCase,
 ) -> None:
     """Worker ID is reflected in the environment prefix; falls back to 'main'."""
-    _run_prefix_scenario(
-        pytester,
-        monkeypatch,
-        worker_id=worker_id,
-        expected_fragment=expected_fragment,
-    )
+    _run_prefix_scenario(pytester, monkeypatch, run_nested_pytester, test_case)
 
 
 def _run_prefix_scenario(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
-    *,
-    worker_id: str | None,
-    expected_fragment: str,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+    test_case: WorkerPrefixTestCase,
 ) -> None:
     """Execute a minimal test module and assert the shim prefix fragment."""
-    if worker_id is None:
+    if test_case.worker_id is None:
         monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     else:
-        monkeypatch.setenv("PYTEST_XDIST_WORKER", worker_id)
+        monkeypatch.setenv("PYTEST_XDIST_WORKER", test_case.worker_id)
 
     test_module = textwrap.dedent(
         f"""
@@ -115,22 +150,25 @@ def _run_prefix_scenario(
             res = run_subprocess([str(_shim_cmd_path(cmd_mox, 'foo'))])
             assert res.stdout.strip() == 'bar'
             shim_base = Path(cmd_mox.environment.shim_dir).name
-            assert '{expected_fragment}' in shim_base
+            assert '{test_case.expected_fragment}' in shim_base
         """
     )
     pytester.makepyfile(test_module)
-    result = pytester.runpytest("-s", *_DISABLE_CI_PLUGINS)
+    result = run_nested_pytester("-s", *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(passed=1)
 
 
 def test_parallel_workers_use_isolated_directories(
-    pytester: pytest.Pytester, parallel_artifact_dir: Path
+    pytester: pytest.Pytester,
+    parallel_artifact_dir: Path,
+    request: pytest.FixtureRequest,
+    run_nested_pytester: cabc.Callable[..., RunResult],
 ) -> None:
     """Parallel workers should each receive isolated shim directories and sockets."""
     pytest.importorskip("xdist")
 
     pytester.makepyfile(load_parallel_suite())
-    result = pytester.runpytest("-n2", "-s", *_DISABLE_CI_PLUGINS)
+    result = run_nested_pytester("-n2", "-s", *_DISABLE_CI_PLUGINS)
     result.assert_outcomes(passed=2)
 
     records = read_parallel_records(parallel_artifact_dir)
@@ -146,48 +184,62 @@ def test_parallel_workers_use_isolated_directories(
     assert len(workers) == len(records)
 
     for record in records:
+        assert record.cwd == Path(request.config.invocation_params.dir).resolve(), (
+            "the worker's process cwd differs from the outer invocation directory"
+        )
+        assert record.package_origin == Path(cmd_mox_package.__file__).resolve(), (
+            "the worker imported cmd_mox from a different package origin"
+        )
         assert record.socket.parent == record.shim_dir
         assert not record.shim_dir.exists()
         assert not record.socket.exists()
 
 
-def test_missing_invocation_fails_during_teardown(pytester: pytest.Pytester) -> None:
-    """Verification failures should fail the test even without explicit calls."""
-    test_file = pytester.makepyfile(
-        """
-        import pytest
-
-        pytest_plugins = ("cmd_mox.pytest_plugin",)
-
-        def test_missing_invocation(cmd_mox):
-            cmd_mox.mock("hello").returns(stdout="hi")
-        """
-    )
-
-    result = pytester.runpytest(str(test_file), *_DISABLE_CI_PLUGINS)
-    result.assert_outcomes(passed=1, errors=1)
-    result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
-
-
-def test_verification_error_suppressed_on_test_failure(
+@pytest.mark.parametrize(
+    "test_case",
+    [
+        pytest.param(
+            VerificationTestCase(
+                test_definition="""
+def test_missing_invocation(cmd_mox):
+    cmd_mox.mock("hello").returns(stdout="hi")
+""",
+                expected_outcomes={"passed": 1, "errors": 1},
+                expected_output="*UnfulfilledExpectationError*",
+            ),
+            id="missing-invocation-fails-during-teardown",
+        ),
+        pytest.param(
+            VerificationTestCase(
+                test_definition="""
+def test_failure(cmd_mox):
+    cmd_mox.mock("late").returns(stdout="ok")
+    assert False
+""",
+                expected_outcomes={"failed": 1},
+                expected_output="*assert False*",
+            ),
+            id="verification-error-suppressed-on-test-failure",
+        ),
+    ],
+)
+def test_verification_outcomes(
     pytester: pytest.Pytester,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+    test_case: VerificationTestCase,
 ) -> None:
-    """Primary test failures should mask verification errors."""
+    """Check distinct verification outcomes through the same nested setup."""
     test_file = pytester.makepyfile(
-        """
-        import pytest
-
-        pytest_plugins = ("cmd_mox.pytest_plugin",)
-
-        def test_failure(cmd_mox):
-            cmd_mox.mock("late").returns(stdout="ok")
-            assert False
-        """
+        'pytest_plugins = ("cmd_mox.pytest_plugin",)\n\n'
+        + textwrap.dedent(test_case.test_definition)
     )
 
-    result = pytester.runpytest(str(test_file), *_DISABLE_CI_PLUGINS)
-    result.assert_outcomes(failed=1)
-    result.stdout.fnmatch_lines(["*assert False*"])
+    result = run_nested_pytester(
+        *_DISABLE_CI_PLUGINS,
+        test_path=test_file,
+    )
+    result.assert_outcomes(**test_case.expected_outcomes)
+    result.stdout.fnmatch_lines([test_case.expected_output])
 
 
 def test_call_hook_does_not_warn_on_ordinary_test_failure(
@@ -207,7 +259,13 @@ def test_call_hook_does_not_warn_on_ordinary_test_failure(
         )
     )
 
-    result = pytester.runpytest_subprocess("-q", "-s", *_DISABLE_CI_PLUGINS, timeout=30)
+    result = pytester.runpytest_subprocess(
+        *_isolated_pytester_subprocess_args(pytester),
+        "-q",
+        "-s",
+        *_DISABLE_CI_PLUGINS,
+        timeout=30,
+    )
     output = result.stdout.str() + result.stderr.str()
 
     assert result.ret == pytest.ExitCode.TESTS_FAILED, "Assertion failed"
@@ -268,7 +326,12 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
         )
     )
 
-    result = pytester.runpytest_subprocess("-q", "-s", timeout=30)
+    result = pytester.runpytest_subprocess(
+        *_isolated_pytester_subprocess_args(pytester),
+        "-q",
+        "-s",
+        timeout=30,
+    )
     output = result.stdout.str() + result.stderr.str()
 
     assert result.ret == test_case.expected_exit, "Assertion failed"
@@ -278,7 +341,10 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
     assert "PluggyTeardownRaisedWarning" not in output, "Assertion failed"
 
 
-def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
+def test_teardown_error_reports_failure(
+    pytester: pytest.Pytester,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+) -> None:
     """Cleanup errors should fail the test with a helpful message."""
     test_file = pytester.makepyfile(
         """
@@ -299,7 +365,10 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
         """
     )
 
-    result = pytester.runpytest(str(test_file), *_DISABLE_CI_PLUGINS)
+    result = run_nested_pytester(
+        *_DISABLE_CI_PLUGINS,
+        test_path=test_file,
+    )
     result.assert_outcomes(passed=1, errors=1)
     # pytester inherits an outer xdist worker's temporary-root prefix.
     expected = (
@@ -402,6 +471,7 @@ def test_teardown_error_reports_failure(pytester: pytest.Pytester) -> None:
 def test_auto_lifecycle_configuration(
     pytester: pytest.Pytester,
     test_case: AutoLifecycleTestCase,
+    run_nested_pytester: cabc.Callable[..., RunResult],
 ) -> None:
     """Exercise lifecycle precedence without duplicating module scaffolding."""
     if test_case.ini_setting:
@@ -423,8 +493,11 @@ def test_auto_lifecycle_configuration(
     test_file = pytester.makepyfile(**{f"test_{test_case.config_method}.py": module})
 
     plugins: tuple[str, ...] = ("cmd_mox.pytest_plugin",) if test_case.cli_args else ()
-    result = pytester.runpytest(
-        *test_case.cli_args, str(test_file), *_DISABLE_CI_PLUGINS, plugins=plugins
+    result = run_nested_pytester(
+        *test_case.cli_args,
+        *_DISABLE_CI_PLUGINS,
+        test_path=test_file,
+        plugins=plugins,
     )
 
     if test_case.expect_auto_fail:

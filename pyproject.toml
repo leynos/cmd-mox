@@ -364,9 +364,18 @@ do_not_mutate = [
     "cmd_mox/_shim_bootstrap.py",
 ]
 # mutmut runs pytest from mutants/; copy the assets tests resolve
-# relative to the repository root (shared fixtures, BDD feature files,
-# and the documentation exercised by the docs scenarios).
-also_copy = ["conftest.py", "features/", "docs/"]
+# relative to the repository root, including shared fixtures, lint contracts,
+# tooling, workflows, BDD feature files, and docs scenarios.
+also_copy = [
+    "conftest.py",
+    "Makefile",
+    ".gitignore",
+    "pylintrc-df12.toml",
+    ".github/",
+    "scripts/",
+    "features/",
+    "docs/",
+]
 
 [tool.uv]
 package = true

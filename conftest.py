@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 import tempfile
 import typing as typ
 from pathlib import Path
@@ -13,6 +14,8 @@ import cmd_mox.environment
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+    from _pytest.pytester import RunResult
 
 _UNIX_SOCKETS_SUPPORTED: bool | None = None
 
@@ -51,6 +54,42 @@ def _unix_sockets_supported() -> bool:
     return _UNIX_SOCKETS_SUPPORTED
 
 
+def _anchor_mutmut_source_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make cwd-relative mutmut paths absolute for the current scope."""
+    mutmut_configuration = sys.modules.get("mutmut.configuration")
+    if mutmut_configuration is None:
+        return
+
+    config_factory = typ.cast("typ.Any", getattr(mutmut_configuration, "Config", None))
+    if config_factory is None:
+        return
+
+    mutmut_config = config_factory.get()
+    package_root = Path(__file__).resolve().parent
+    monkeypatch.setattr(
+        mutmut_config,
+        "source_paths",
+        [
+            path if path.is_absolute() else package_root / path
+            for path in mutmut_config.source_paths
+        ],
+    )
+
+
+@pytest.fixture(autouse=True)
+def anchor_mutmut_source_paths_for_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep mutmut paths valid while tests can change cwd.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Restore the relative source paths after this test finishes.
+    """
+    _anchor_mutmut_source_paths(monkeypatch)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and cache platform capability checks."""
     config.addinivalue_line(
@@ -72,6 +111,62 @@ def pytest_collection_modifyitems(
     for item in items:
         if "requires_unix_sockets" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture
+def run_nested_pytester(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> cabc.Callable[..., RunResult]:
+    """Create a nested pytest runner anchored to the outer invocation.
+
+    Pytester changes the process cwd to its temporary project. Mutmut and
+    other cwd-relative tools then resolve package paths from that directory,
+    so the nested run restores the outer invocation cwd and pins its own
+    configuration to the pytester project.
+
+    Parameters
+    ----------
+    pytester : pytest.Pytester
+        Create the temporary project and its inner pytest configuration.
+    monkeypatch : pytest.MonkeyPatch
+        Restore the pytester cwd after the nested in-process run.
+    request : pytest.FixtureRequest
+        Provide the outer invocation directory used by the nested run.
+
+    Returns
+    -------
+    cabc.Callable[..., RunResult]
+        A runner accepting extra pytest arguments, an optional generated test
+        path, and ``plugins`` for ``runpytest_inprocess``.
+    """
+    inner_ini = pytester.path / "tox.ini"
+    if not inner_ini.is_file():
+        inner_ini = pytester.makeini("[pytest]\n")
+
+    def run_nested(
+        *args: str,
+        test_path: Path | None = None,
+        plugins: cabc.Sequence[object] = (),
+    ) -> RunResult:
+        generated_path = pytester.path if test_path is None else test_path
+        with monkeypatch.context() as scoped_monkeypatch:
+            scoped_monkeypatch.chdir(request.config.invocation_params.dir)
+            _anchor_mutmut_source_paths(scoped_monkeypatch)
+            return pytester.runpytest_inprocess(
+                *args,
+                "-c",
+                str(inner_ini),
+                "--rootdir",
+                str(pytester.path),
+                "--confcutdir",
+                str(pytester.path),
+                str(generated_path.resolve(strict=True)),
+                plugins=plugins,
+            )
+
+    return run_nested
 
 
 @pytest.fixture(autouse=True)

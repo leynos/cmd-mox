@@ -21,6 +21,8 @@ if typ.TYPE_CHECKING:
     import collections.abc as cabc
     from pathlib import Path
 
+    from _pytest.pytester import RunResult
+
     type _CmdMoxFixtureGenerator = cabc.Callable[
         [pytest.FixtureRequest],
         cabc.Generator[pytest_plugin.CmdMox, None, None],
@@ -329,7 +331,9 @@ def test_worker_prefix_generation(
 
 
 def test_cmd_mox_fixture_restores_path_on_replay_failure(
-    pytester: pytest.Pytester, tmp_path: Path
+    pytester: pytest.Pytester,
+    tmp_path: Path,
+    run_nested_pytester: cabc.Callable[..., RunResult],
 ) -> None:
     """Fixture teardown restores PATH after replay raises during setup."""
     original_path = os.environ.get("PATH", "")
@@ -361,7 +365,7 @@ def test_cmd_mox_fixture_restores_path_on_replay_failure(
     )
 
     pytester.makepyfile(test_module)
-    result = pytester.runpytest_inprocess()
+    result = run_nested_pytester(test_path=pytester.path)
     result.assert_outcomes(errors=1)
 
     assert dump_path.exists(), "Assertion failed"

@@ -825,6 +825,25 @@ blocking check. The mutation targets and test selection themselves are
 configured in `[tool.mutmut]` in `pyproject.toml` (`source_paths`,
 `pytest_add_cli_args_test_selection`, `runner`).
 
+Mutmut 3.6.0 resolves relative `source_paths` from the process working
+directory when recording trampoline hits. Pytester's in-process runner changes
+that directory to its temporary project, so tests that execute `cmd_mox` from
+another cwd can make the configured `cmd_mox/` path disappear from mutmut's
+view. The root `conftest.py` anchors mutmut's relative source paths for each
+test and restores them afterwards, before mutmut scans mutation targets. Its
+`run_nested_pytester` fixture also restores the outer invocation directory and
+pins the inner run's configuration and root to pytester's project. Use this
+fixture for every nested in-process pytester test that executes `cmd_mox` code.
+Tests that specifically exercise subprocess behaviour should pass `-c`,
+`--rootdir`, and `--confcutdir` tied to pytester's project so configuration
+discovery stays within its temporary root.
+
+Reproduce the clean baseline and mutation run with:
+
+```bash
+uv run --python 3.13 --with mutmut==3.6.0 mutmut run
+```
+
 The workflow runs in two modes. A **daily schedule** fires a change-scoped run
 that mutates only the source files touched within the detection window, so
 quiet days are cheap no-ops. A **manual dispatch** (the Actions "Run workflow"
@@ -850,8 +869,8 @@ Because the caller is configuration rather than code, a contract test in
 pull request when the caller drifts — repointing the pin at a branch, widening
 the token scope, or dropping a configuration input — rather than letting the
 breakage surface only in a scheduled run. The test module self-skips when the
-workflow file is absent (mutmut copies the sources into a sandbox that omits
-`.github/`, so the contract test does not run there). Run it locally with:
+workflow file is absent. The mutation sandbox copies `.github/`, so this
+contract remains part of its clean baseline. Run it locally with:
 
 ```bash
 uv run pytest tests/test_workflow_contract.py -v
