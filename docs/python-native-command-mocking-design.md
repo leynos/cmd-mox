@@ -1020,6 +1020,8 @@ classDiagram
         + str stdout
         + str stderr
         + int exit_code
+        + dict[str, str] env
+        + PassthroughRequest | None passthrough
     }
     IPCServer --> InnerServerFactory : requests class when creating backend
     InnerServerFactory ..> UnixServerBaseResolver : resolves platform base
