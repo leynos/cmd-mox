@@ -90,6 +90,11 @@ installs runs only when the shim entrypoint executes. When shim helpers are
 reused directly, ``cmd_mox._shim_bootstrap.bootstrap_shim_path()`` should be
 called during setup first.
 
+Shim bootstrap removes only entries that would shadow the package directory or
+that mark an editable install. It keeps every other entry, including one it
+cannot resolve. An unresolvable entry stays on ``sys.path`` and shim startup
+continues instead of aborting.
+
 Explicit decisions in a test module (for example, when using the context
 manager API) can use the helper re-exported from the package:
 
