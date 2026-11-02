@@ -228,6 +228,34 @@ Hypothesis complements the snapshot tests above rather than replacing them:
 snapshots pin exact serialized output, while properties assert relations that
 should hold for every generated input.
 
+## Shim path filtering
+
+`cmd_mox._shim_bootstrap._should_remove_path_entry` is the boolean query behind
+`bootstrap_shim_path()`. A `True` result means remove the entry, and `False`
+means keep it.
+
+The query removes an entry when it starts with the `__editable__` marker
+prefix, or when the entry resolves to the package directory. It keeps an entry
+that matches neither rule. It also keeps an entry whose resolution fails, so
+bootstrap does not abort:
+
+- a relative entry whose working directory was deleted raises `OSError`;
+- a symlink loop raises `RuntimeError` on Python 3.12 and is tolerated from
+  Python 3.13 onwards; and
+- an entry the operating system cannot represent, such as one containing an
+  embedded null byte, raises `ValueError`.
+
+`bootstrap_shim_path()` calls the query for each `sys.path` entry, clears
+`sys.path_importer_cache`, and loads the stdlib `platform` module. If that load
+fails, it restores the removed entries. `_BOOTSTRAP_DONE` makes the function
+idempotent, so later calls return without changing `sys.path`.
+
+Resolution failure therefore retains the entry rather than raising, so the
+unresolvable entry stays on `sys.path`. The covering tests in
+`cmd_mox/unittests/test_shim_bootstrap.py` exercise the package match, the
+deleted working directory, an injected `ELOOP`, a symlink cycle, an embedded
+null byte, and the bootstrap-level retention test.
+
 ## IPC request dispatch
 
 The shared IPC request pipeline keeps transport handling separate from request
