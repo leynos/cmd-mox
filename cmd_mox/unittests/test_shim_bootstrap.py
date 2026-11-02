@@ -184,6 +184,27 @@ def test_bootstrap_shim_path_restores_sys_path_when_platform_load_fails(
     )
 
 
+def test_bootstrap_shim_path_keeps_unresolvable_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bootstrap should complete and keep an entry it cannot resolve."""
+    from cmd_mox import _shim_bootstrap
+
+    # A null byte makes Path.resolve() raise ValueError on every supported
+    # interpreter, so this drives the guarded call through the bootstrap
+    # workflow rather than the private helper alone.
+    bad_entry = "bad\x00entry"
+    monkeypatch.setattr(_shim_bootstrap, "_BOOTSTRAP_DONE", False)
+    monkeypatch.setattr(sys, "path", [bad_entry, *sys.path])
+
+    _shim_bootstrap.bootstrap_shim_path()
+
+    assert bad_entry in sys.path, "bootstrap dropped an entry it could not resolve"
+    assert sys.modules["platform"].__name__ == "platform", (
+        "bootstrap did not finish loading the standard-library platform module"
+    )
+
+
 def test_should_remove_path_entry_removes_package_dir_entry(tmp_path: Path) -> None:
     """An entry resolving to the package directory should be removed."""
     package_dir = tmp_path / "cmd_mox"
