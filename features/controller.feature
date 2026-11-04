@@ -364,6 +364,38 @@ Feature: CmdMox basic functionality
     Then the verification error message should contain "env={'API_KEY': '***'}"
     And the verification error message should not contain "leaked-secret"
 
+  Scenario: verification redacts segment-sensitive PWD environment values
+    Given a CmdMox controller
+    And the command "deploy" is mocked with args "--expected" returning "ok"
+    And the command "deploy" requires env var "DB_PWD"="leaked-secret"
+    When I replay the controller
+    And I set environment variable "DB_PWD" to "leaked-secret"
+    And I run the command "deploy" with arguments "--actual"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "env={'DB_PWD': '***'}"
+    And the verification error message should not contain "leaked-secret"
+
+  Scenario: verification redacts segment-sensitive KEY environment values
+    Given a CmdMox controller
+    And the command "deploy" is mocked with args "--expected" returning "ok"
+    And the command "deploy" requires env var "GITHUB_KEY"="leaked-secret"
+    When I replay the controller
+    And I set environment variable "GITHUB_KEY" to "leaked-secret"
+    And I run the command "deploy" with arguments "--actual"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "env={'GITHUB_KEY': '***'}"
+    And the verification error message should not contain "leaked-secret"
+
+  Scenario: environment conflicts mask sensitive invocation values
+    Given a CmdMox controller
+    And the command "deploy" is stubbed to return "ok"
+    And the command "deploy" requires env var "DB_PWD"="expected-secret"
+    When I replay the controller
+    And I run the command "deploy" with env var "DB_PWD"="invocation-secret" expecting failure
+    Then the stderr should contain "conflicting environment values: DB_PWD='***'"
+    And the stderr should not contain "invocation-secret"
+    And the stderr should not contain "expected-secret"
+
   Scenario: verification reports missing invocations
     Given a CmdMox controller
     And the command "sync" is mocked to return "ok" times 2

@@ -93,6 +93,7 @@ def test_redaction_preserves_argument_count_and_is_idempotent(
             ("https://<redacted>@example.test/path",),
         ),
         (("PGPASSWORD=opaque",), ("PGPASSWORD=<redacted>",)),
+        (("--auth-config=opaque",), ("--auth-config=<redacted>",)),
         (
             ("--output", "json", "ordinary positional"),
             ("--output", "json", "ordinary positional"),
@@ -108,6 +109,7 @@ def test_redaction_preserves_argument_count_and_is_idempotent(
         "joined-cookie-header",
         "url-userinfo",
         "embedded-assignment",
+        "auth-config-option",
         "safe-near-miss",
         "safe-option-near-miss",
     ),

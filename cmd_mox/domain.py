@@ -3,12 +3,27 @@
 Create :class:`Invocation` and :class:`Response` values for handlers and
 recording. Existing imports from :mod:`cmd_mox.ipc` expose the same classes.
 
+This module also owns the shared sensitive-environment classifier,
+:func:`is_sensitive_recording_env_key`, and the masking helpers built on it:
+:func:`mask_env_value` and :func:`mask_env_mapping`. Recording subset
+filtering, argument redaction, and the diagnostic messages of the response
+policy, verifiers, and spy assertions all consult the same vocabulary, so a
+key is classified once and consistently everywhere.
+
+Masking is a formatting concern. The helpers return new values and never
+mutate the invocation or expectation data they are given; matching and
+recording continue to compare and store raw values. The classifier is
+deliberately coarse: a false positive hides one value from a diagnostic, while
+a false negative discloses a credential.
+
 Examples
 --------
 >>> invocation = Invocation("git", ["status"], "", {})
 >>> invocation.apply(Response(stdout="ok"))
 >>> invocation.stdout
 'ok'
+>>> mask_env_mapping({"DB_PWD": "hunter2", "PATH": "/bin"})
+{'DB_PWD': '***', 'PATH': '/bin'}
 """
 
 from __future__ import annotations
@@ -16,6 +31,9 @@ from __future__ import annotations
 import dataclasses as dc
 import re
 import typing as typ
+
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
 
 SENSITIVE_ENV_KEY_TOKENS: typ.Final[tuple[str, ...]] = (
     "secret",
@@ -27,11 +45,23 @@ _SENSITIVE_ENV_KEY_TOKENS_CASEFOLDED: typ.Final[tuple[str, ...]] = tuple(
     token.casefold() for token in SENSITIVE_ENV_KEY_TOKENS
 )
 SENSITIVE_ENV_KEY_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?i)(^|[_-])(?:API)?(KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?"
-    r"|PASS(?:WORD)?|PWD)(?=[_-]|=|:|\d|$)"
+    # ``AUTH_CONFIG`` covers registry credentials such as DOCKER_AUTH_CONFIG,
+    # whose value is a JSON document holding an ``auth`` field rather than a
+    # single credential. It is matched as a whole segment so that near-misses
+    # such as AUTH_CONFIGURATION stay readable.
+    r"(?i)(^|[_-])(?:"
+    r"(?:API)?(?:KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?|PASS(?:WORD)?|PWD)"
+    r"|AUTH(?:ENTICATION)?[-_]CONFIG"
+    r")(?=[_-]|=|:|\d|$)"
 )
 
 _REPR_FIELD_LIMIT: typ.Final[int] = 256
+
+# The mask token used by the conflict, verifier, and spy-assertion messages.
+# It matches what those messages have always printed, so adopting the shared
+# helper leaves non-sensitive messages byte-identical. It is not universal:
+# ``Invocation.__repr__`` keeps its own ``<redacted>`` token.
+REDACTED_VALUE: typ.Final[str] = "***"
 
 
 def is_sensitive_recording_env_key(key: str) -> bool:
@@ -47,6 +77,56 @@ def is_sensitive_recording_env_key(key: str) -> bool:
     return any(
         token in normalized_key for token in _SENSITIVE_ENV_KEY_TOKENS_CASEFOLDED
     ) or bool(SENSITIVE_ENV_KEY_PATTERN.search(key))
+
+
+def mask_env_value(key: str, value: str | None) -> str | None:
+    """Return *value* masked when *key* appears sensitive.
+
+    Parameters
+    ----------
+    key : str
+        Environment key used to identify sensitive values.
+    value : str or None
+        Value to mask. ``None`` stays ``None`` so a missing variable is
+        distinguishable from a hidden one.
+
+    Returns
+    -------
+    str or None
+        :data:`REDACTED_VALUE` for a sensitive key, otherwise *value*.
+
+    Examples
+    --------
+    >>> mask_env_value("DB_PWD", "hunter2")
+    '***'
+    >>> mask_env_value("LOG_LEVEL", "debug")
+    'debug'
+    """
+    if value is None:
+        return None
+    return REDACTED_VALUE if is_sensitive_recording_env_key(key) else value
+
+
+def mask_env_mapping(
+    mapping: cabc.Mapping[str, str | None],
+) -> dict[str, str | None]:
+    """Return a diagnostic-safe copy of *mapping*.
+
+    A new ``dict`` is built in the input's insertion order so callers can
+    ``repr()`` it without exposing secrets and without mutating raw invocation
+    or expectation data.
+
+    Parameters
+    ----------
+    mapping : collections.abc.Mapping
+        Environment values to mask.
+
+    Returns
+    -------
+    dict[str, str or None]
+        A new mapping with sensitive values replaced by :data:`REDACTED_VALUE`.
+    """
+    return {key: mask_env_value(key, value) for key, value in mapping.items()}
 
 
 def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:

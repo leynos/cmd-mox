@@ -66,6 +66,12 @@ def check_stderr(result: subprocess.CompletedProcess[str], text: str) -> None:
     assert text in result.stderr, "Assertion failed"
 
 
+@then(parsers.cfparse('the stderr should not contain "{text}"'))
+def check_stderr_excludes(result: subprocess.CompletedProcess[str], text: str) -> None:
+    """Ensure standard error output omits *text*."""
+    assert text not in result.stderr, "Assertion failed"
+
+
 @then(parsers.cfparse('the verification error message should contain "{text}"'))
 def verification_error_contains(
     verification_error: VerificationError, text: str

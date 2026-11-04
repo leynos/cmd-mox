@@ -1948,8 +1948,15 @@ unordered calls are handled.
 
 The verifiers now emit diff-style diagnostics that show the expected call, the
 actual invocation, and any mismatching context such as stdin or environment
-variables. Sensitive environment values are redacted automatically so failure
-messages remain safe to copy into bug reports. `UnexpectedCommandVerifier`
+variables. Environment values are passed through `mask_env_value` in
+:mod:`cmd_mox.domain`, the shared formatter for diff-style diagnostics, so
+failure messages remain safe to copy into bug reports. The helper builds on
+`is_sensitive_recording_env_key`, the classifier that recording redaction and
+expectation mismatch reasons already use, which masks segment-style keys such as
+`DB_PWD`, `GITHUB_KEY`, `*_PASSPHRASE`, and `*_CREDENTIALS` as well as the
+substring tokens `secret`, `token`, `api_key`, and `password`. A false positive
+such as `TOKENIZER` only hides one value from a diagnostic, so the shared
+vocabulary favours consistency over precision. `UnexpectedCommandVerifier`
 tracks call counts as it scans the journal, raising immediately when a mock is
 invoked more often than permitted. `OrderVerifier` prints both the expected and
 observed sequences with the first divergence highlighted, while `CountVerifier`
@@ -2998,6 +3005,10 @@ rather than relying on `.replay()`.
 - `PATH`, `HOME`, `USER`, `SHELL` (system-specific)
 - `SSH_AUTH_SOCK`, `GPG_AGENT_INFO` (session-specific)
 - Variables matching `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`
+- Variables matching `*_AUTH_CONFIG`, which hold credential documents rather
+  than a single secret. `DOCKER_AUTH_CONFIG` is the motivating case: its value
+  is JSON containing registry `auth` fields. The segment must stand alone, so
+  `AUTH_CONFIGURATION` and `XAUTH_CONFIG` stay readable.
 
 **Included by default**:
 
@@ -3014,7 +3025,67 @@ assignments, while preserving argument positions. Redaction affects diagnostic
 output only; registered expectations and invocation arguments retain their
 original values.
 
-#### 9.9.4 Review workflow
+#### 9.9.4 Environment values in error diagnostics
+
+The diagnostics below mask sensitive environment entries, using `***` as the
+mask token. They are the paths this design protects; the exposures in the
+closing list are not covered. Three of them share the `mask_env_value` helper in
+`cmd_mox.domain`:
+
+- `UnexpectedCommandError` raised by `apply_expectation_env` when an invocation
+  environment conflicts with an expectation. The key name stays visible, only
+  the conflicting invocation value is masked, and expected values are still
+  omitted from the message.
+- Verifier diagnostics, whose Expected and Actual sections render through the
+  masked formatter. Their Reason section carries the mismatch description from
+  `Expectation.explain_mismatch`, which masks independently as described below.
+- Spy assertion failures from `assert_not_called` and
+  `assert_called_with(env=...)`, which mask both the recorded and the expected
+  mappings.
+
+Other paths mask values themselves under the same classification policy rather
+than calling that helper. `Expectation._explain_env_mismatch` tests
+`is_sensitive_recording_env_key` inline and substitutes `***` for the
+mismatching values, and `Invocation.__repr__` substitutes its own `<redacted>`
+token for the same sensitive keys. The policy is shared, but the formatter and
+the mask token are not: expect `<redacted>` where an `Invocation` is
+interpolated directly and `***` in the messages listed above.
+
+Masking happens where each diagnostic string is built, so the IPC server's
+`str(exc)` forwarding to the shim's standard error needs no sanitizer of its
+own. A downstream sanitizer cannot detect secrets inside free-form text, which
+is why the boundary sits at the message rather than at the transport.
+
+Compatibility is deliberate: the exception types, the
+`Invocation for ... provided conflicting environment values:` wording, and the
+comma-separated list are unchanged. Non-sensitive messages stay byte-identical,
+so only diagnostics naming a sensitive key change. Conflict detection compares
+raw values, and invocation and expectation data are never mutated or masked in
+place; masking is a formatting concern applied to a copy.
+
+Because the vocabulary is shared, extending it is not confined to diagnostics.
+The classifier also backs recording subset filtering
+(`cmd_mox/record/env_filter.py`) and argument and query-parameter redaction in
+`cmd_mox/_argument_redaction.py`. Adding `*_AUTH_CONFIG` therefore also drops
+such variables from fixtures and masks them in argument diagnostics, which is
+the intended coarse-grained posture: a false positive hides one value, while a
+false negative discloses a credential. `DOCKER_AUTH_CONFIG` carried registry
+credentials that no earlier rule classified, and it is the case that prompted
+the addition. Variables named explicitly through `.with_env()` remain exempt
+from subset filtering by the existing precedence rule.
+
+Known exposures remain out of scope here and need their own design decisions:
+
+- The default dataclass representations of `Response.env`, `Expectation.env`,
+  and `PassthroughRequest.extra_env`, which print raw values if a caller
+  interpolates the object directly.
+- Raw arguments and streams in diagnostics, replay messages, and matcher
+  callback exception text. Argument redaction covers expectation configuration
+  errors only.
+- Pytest plugin log and report sections, which inherit whatever the exception
+  text contains.
+
+#### 9.9.5 Review workflow
 
 For sensitive fixtures, a review mode generates a companion file for manual
 verification:

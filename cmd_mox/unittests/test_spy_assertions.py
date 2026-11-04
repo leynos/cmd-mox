@@ -10,6 +10,7 @@ import typing as typ
 import pytest
 
 from cmd_mox.controller import CmdMox, CommandDouble
+from cmd_mox.domain import mask_env_mapping
 from cmd_mox.ipc import Invocation
 from cmd_mox.unittests._env_helpers import require_shim_dir
 
@@ -135,6 +136,8 @@ class TestSpyAssertions:
         spy.assert_called_with("foo", stdin="stdin", env=actual_env)
 
         bad_env = dict(actual_env, MYVAR="DIFFERENT")
+        # The recorded environment inherits the test runner's variables, some
+        # of which look sensitive, so the diagnostic renders masked copies.
         self._assert_raises_assertion_error(
             spy,
             AssertionTestConfig(
@@ -142,10 +145,54 @@ class TestSpyAssertions:
                 args=("foo",),
                 kwargs={"stdin": "stdin", "env": bad_env},
                 expected_message=(
-                    f"'hi' called with env {actual_env!r}, expected {bad_env!r}"
+                    f"'hi' called with env {mask_env_mapping(actual_env)!r}, "
+                    f"expected {mask_env_mapping(bad_env)!r}"
                 ),
             ),
         )
+
+    # ------------------------------------------------------------------
+    def test_spy_assert_not_called_masks_sensitive_env_values(self) -> None:
+        """assert_not_called masks secret values in the recorded environment."""
+        recorded_value = "leaked-secret"
+        spy = self._create_spy_with_invocation(
+            "hi", [], "", {"DB_PWD": recorded_value, "LOG_LEVEL": "debug"}
+        )
+
+        with pytest.raises(AssertionError) as exc:
+            spy.assert_not_called()
+
+        message = str(exc.value)
+        assert recorded_value not in message, "Value leaked into assert_not_called"
+        assert "DB_PWD': '***'" in message, "Sensitive key was not masked"
+        assert "LOG_LEVEL': 'debug'" in message, "Benign value disappeared"
+        assert spy.invocations[0].env == {
+            "DB_PWD": recorded_value,
+            "LOG_LEVEL": "debug",
+        }, "assert_not_called mutated the recorded invocation"
+
+    # ------------------------------------------------------------------
+    def test_spy_assert_called_with_masks_sensitive_env_values(self) -> None:
+        """assert_called_with masks secrets in both compared mappings."""
+        recorded_value = "actual-secret"
+        provided_value = "expected-secret"
+        spy = self._create_spy_with_invocation(
+            "hi", [], "", {"DB_PWD": recorded_value, "LOG_LEVEL": "debug"}
+        )
+
+        with pytest.raises(AssertionError) as exc:
+            spy.assert_called_with(env={"DB_PWD": provided_value, "LOG_LEVEL": "info"})
+
+        message = str(exc.value)
+        assert recorded_value not in message, "Recorded value leaked into the message"
+        assert provided_value not in message, "Expected value leaked into the message"
+        assert message.count("DB_PWD': '***'") == 2, "Both mappings should mask DB_PWD"
+        assert "LOG_LEVEL': 'debug'" in message, "Actual benign value disappeared"
+        assert "LOG_LEVEL': 'info'" in message, "Expected benign value disappeared"
+        assert spy.invocations[0].env == {
+            "DB_PWD": recorded_value,
+            "LOG_LEVEL": "debug",
+        }, "assert_called_with mutated the recorded invocation"
 
     # ------------------------------------------------------------------
     def test_spy_assert_called_raises_when_never_called(self) -> None:

@@ -194,6 +194,29 @@ class TestControllerReplayIntegration:
         assert spy.invocations == []
         assert len(mox.journal) == 0
 
+    def test_replay_match_masks_conflicting_secret_env(self, tmp_path: Path) -> None:
+        """The replay path propagates the masked conflict message."""
+        key = "API_TOKEN"
+        provided_value = "invocation-secret"
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        mox.spy("git").with_env({key: "expected-secret"}).replay(fixture_path)
+        invocation = Invocation(
+            command="git",
+            args=["status"],
+            stdin="",
+            env={key: provided_value},
+        )
+
+        with pytest.raises(
+            UnexpectedCommandError, match="conflicting environment"
+        ) as exc:
+            mox._handle_invocation(invocation)
+
+        message = str(exc.value)
+        assert f"{key}='***'" in message, "Sensitive conflict was not masked"
+        assert provided_value not in message, "Invocation value leaked into the message"
+
     def test_handle_invocation_records_replay_match_in_spy_and_journal(
         self, tmp_path: Path
     ) -> None:

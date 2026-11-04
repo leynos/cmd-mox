@@ -102,6 +102,65 @@ def test_expectation_environment_conflict_preserves_invocation(
     assert invocation.env == {"EXISTING": "other"}, "Conflict mutated the invocation"
 
 
+@pytest.mark.parametrize(
+    "key",
+    ["DB_PWD", "GITHUB_KEY", "API_TOKEN"],
+    ids=["pwd-segment", "key-segment", "token-substring"],
+)
+def test_expectation_environment_conflict_masks_sensitive_values(key: str) -> None:
+    """A sensitive conflict masks the invocation value and keeps the key visible."""
+    expected_value = "expected-secret"
+    provided_value = "invocation-secret"
+    double = CmdMox().stub("git").with_env({key: expected_value})
+    invocation = Invocation(command="git", args=[], stdin="", env={key: provided_value})
+
+    with pytest.raises(UnexpectedCommandError) as error:
+        apply_expectation_env(double, invocation)
+
+    message = str(error.value)
+    assert message == (
+        f"Invocation for 'git' provided conflicting environment values: {key}='***'"
+    ), "Sensitive conflict message shape changed"
+    assert expected_value not in message, "Expected value leaked into the message"
+    assert provided_value not in message, "Invocation value leaked into the message"
+    assert invocation.env == {key: provided_value}, "Conflict mutated the invocation"
+    assert double.expectation.env == {key: expected_value}, (
+        "Conflict mutated the expectation"
+    )
+
+
+def test_expectation_environment_conflict_masks_only_sensitive_values() -> None:
+    """A mixed conflict keeps benign values visible and masks sensitive ones."""
+    provided_value = "invocation-secret"
+    double = (
+        CmdMox()
+        .stub("git")
+        .with_env({"DB_PWD": "expected-secret", "LOG_LEVEL": "debug"})
+    )
+    invocation = Invocation(
+        command="git",
+        args=[],
+        stdin="",
+        env={"DB_PWD": provided_value, "LOG_LEVEL": "info"},
+    )
+
+    with pytest.raises(UnexpectedCommandError) as error:
+        apply_expectation_env(double, invocation)
+
+    message = str(error.value)
+    assert message.endswith("DB_PWD='***', LOG_LEVEL='info'"), (
+        f"Mixed conflict message changed: {message!r}"
+    )
+    assert provided_value not in message, "Invocation value leaked into the message"
+    assert invocation.env == {"DB_PWD": provided_value, "LOG_LEVEL": "info"}, (
+        "Conflict mutated the invocation"
+    )
+    assert double.expectation.env == {
+        "DB_PWD": "expected-secret",
+        "LOG_LEVEL": "debug",
+    }, "Conflict mutated the expectation"
+
+
 def test_empty_expectation_environment_leaves_invocation_unchanged() -> None:
     """An expectation without overrides leaves the invocation environment alone."""
     double = CmdMox().stub("git")

@@ -8,7 +8,9 @@ import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.errors import UnexpectedCommandError, UnfulfilledExpectationError
+from cmd_mox.ipc import Invocation
 from cmd_mox.unittests._env_helpers import require_shim_dir
+from cmd_mox.verifiers import UnexpectedCommandVerifier
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -55,6 +57,33 @@ def test_unexpected_invocation_message_includes_diff(
         "git('status')",
         "git('commit')",
     )
+
+
+def test_expectation_mismatch_masks_segment_sensitive_env_values() -> None:
+    """Environment mismatches never render secret values anywhere in the message.
+
+    ``DB_PWD`` is a segment-style key that the former substring-only verifier
+    vocabulary left in the clear. The Expected, Actual, and Reason sections must
+    all mask it so the whole diagnostic is safe to paste into a bug report.
+    """
+    expected_value = "expected-db-secret"
+    recorded_value = "actual-db-secret"
+    mox = CmdMox()
+    double = mox.mock("deploy").with_args("--flag").with_env({"DB_PWD": expected_value})
+    invocation = Invocation(
+        command="deploy",
+        args=["--flag"],
+        stdin="",
+        env={"DB_PWD": recorded_value},
+    )
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        UnexpectedCommandVerifier().verify([invocation], {"deploy": double})
+
+    message = str(excinfo.value)
+    _assert_message_contains(excinfo, "env={'DB_PWD': '***'}", "Reason")
+    assert expected_value not in message, "Expected value leaked into the message"
+    assert recorded_value not in message, "Recorded value leaked into the message"
 
 
 def test_unfulfilled_expectation_message_includes_counts(

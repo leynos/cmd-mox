@@ -62,6 +62,36 @@ with `ValueError`. See the
 the
 [detailed versioning design](python-native-command-mocking-design.md#911-versioning-and-forward-compatibility).
 
+## Diagnostic environment masking
+
+`cmd_mox.domain` owns both halves of diagnostic masking. The shared
+classification is `is_sensitive_recording_env_key`, and `mask_env_value` plus
+`mask_env_mapping` apply it to a single value or a whole mapping. Shared
+classification is not the same as shared formatting: the conflict message, the
+verifier's Expected and Actual sections, and the spy assertions call the
+helpers, while `Expectation._explain_env_mismatch` and `Invocation.__repr__`
+test the classifier inline under their own tokens (`***` and `<redacted>`
+respectively).
+
+`mask_env_value` returns `None` unchanged, so a missing variable stays
+distinguishable from a hidden one. `mask_env_mapping` builds a new `dict` in
+the input's insertion order, which lets a caller `repr()` it safely without
+mutating the invocation or expectation it came from. Masking happens while the
+message is formatted: matching still compares raw values, and recording still
+stores them. The IPC server forwards `str(exc)` verbatim to the shim's standard
+error, so a message is the correct boundary — a downstream sanitizer cannot
+pick secrets out of free-form text.
+
+Because the vocabulary is shared with recording subset filtering and argument
+redaction, extending it changes those paths too. Record that scope decision in
+the design document when the token list or pattern changes.
+
+Exposures outside this boundary are deliberate and documented in the
+[design document](python-native-command-mocking-design.md#994-environment-values-in-error-diagnostics):
+the default dataclass representations of `Response.env`, `Expectation.env`, and
+`PassthroughRequest.extra_env`, raw arguments and streams in replay and
+matcher diagnostics, and pytest plugin report sections.
+
 ## Coverage ownership
 
 Pull-request CI generates coverage with the ratchet (`with-ratchet: 'true'`)

@@ -7,7 +7,7 @@ import typing as typ
 from collections import defaultdict
 from textwrap import indent
 
-from .domain import SENSITIVE_ENV_KEY_TOKENS
+from .domain import mask_env_value
 from .errors import UnexpectedCommandError, UnfulfilledExpectationError
 from .test_doubles import DoubleKind
 
@@ -15,31 +15,6 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .controller import CommandDouble
     from .expectations import Expectation
     from .ipc import Invocation
-
-_SENSITIVE_TOKENS: tuple[str, ...] = tuple(
-    token.casefold() for token in SENSITIVE_ENV_KEY_TOKENS
-)
-
-
-def _mask_env_value(key: str, value: str | None) -> str | None:
-    """Redact *value* when *key* appears sensitive.
-
-    Parameters
-    ----------
-    key : str
-        Environment key used to identify sensitive values.
-    value : str or None
-        Value to redact.
-
-    Returns
-    -------
-    str or None
-        Masked value, original value, or ``None``.
-    """
-    if value is None:
-        return None
-    key_cf = key.casefold()
-    return "***" if any(token in key_cf for token in _SENSITIVE_TOKENS) else value
 
 
 def _format_env(mapping: cabc.Mapping[str, str | None]) -> str:
@@ -59,7 +34,7 @@ def _format_env(mapping: cabc.Mapping[str, str | None]) -> str:
         return "{}"
     parts = []
     for key in sorted(mapping):
-        masked = _mask_env_value(key, mapping[key])
+        masked = mask_env_value(key, mapping[key])
         parts.append(f"{key!r}: {masked!r}")
     return "{" + ", ".join(parts) + "}"
 

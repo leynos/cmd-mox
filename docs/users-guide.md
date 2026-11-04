@@ -7,6 +7,19 @@ For installation from PyPI, its source distribution and wheel, and the
 provenance bundle included with GitHub Releases, see
 [Getting started](usage-guide.md#getting-started).
 
+## Sensitive environment values in diagnostics
+
+Conflict errors from `UnexpectedCommandError`, verifier failures, and spy
+assertion messages mask sensitive environment values with `***` while leaving
+the key name visible. The classification is the same one recording redaction
+uses, so segment-style names such as `DB_PWD`, `GITHUB_KEY`, and
+`DOCKER_AUTH_CONFIG` are masked along with the `*_SECRET`, `*_TOKEN`,
+`*_PASSWORD`, and `*_API_KEY` families. Matching and recorded data stay raw,
+and an ordinary key's value is unchanged. The [usage guide](usage-guide.md)
+covers the exact vocabulary, and the
+[design document](python-native-command-mocking-design.md#994-environment-values-in-error-diagnostics)
+records which diagnostic paths the guarantee covers.
+
 ## Recording fixture schema versions
 
 The fixture `version` uses `MAJOR.MINOR.PATCH`; legacy `1.0` values load as
