@@ -92,6 +92,7 @@ DUPLICATION_TEST_HYPOTHESIS ?= 6.165.6
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	tests/test_named_pipe_server.py \
+	tests/test_shim_stdin_timeout.py \
 	--log-file=windows-ipc.log \
 	--log-file-level=DEBUG \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
