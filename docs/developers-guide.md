@@ -4,6 +4,29 @@ This guide documents the local development checks for CmdMox. It is the source
 of truth for running lint, understanding the current lint baseline, and knowing
 where lint policy is configured.
 
+## Proposed Act execution environment
+
+> [!NOTE]
+> This section describes a proposal, not current behaviour.
+> `ContainerEnvironment` and `ActBinding` are provisional names. No
+> implementation exists, the default local environment is unchanged, and
+> neither Act nor a container daemon is required to use CmdMox.
+
+[RFC 001](rfc-001-act-execution-environment.md) proposes an opt-in execution
+environment that runs command doubles inside an Act job while keeping
+expectations, Python callbacks, recording, and verification in the host pytest
+controller.
+[Roadmap phase 15](roadmap.md#15-container-execution-and-act-integration)
+tracks the staged work; it is post-MVP and adds no first-release prerequisite.
+
+The first proposed profile is a same-host Linux pytest process and a local
+Linux container daemon sharing the relevant filesystem and kernel. It requires
+a relocatable Python launcher bundle, a runner interpreter at or above the
+package minimum, and a qualified same-host container runtime. Remote or
+VM-backed daemons, Docker actions, nested containers, and multi-job scope
+routing are unsupported by that profile and need separate adoption decisions.
+PATH interception is not a sandbox.
+
 ## Pytest fixture lifecycle
 
 The pytest plugin records failures at both the test-call and fixture
