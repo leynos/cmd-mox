@@ -205,12 +205,14 @@ Diagnostics that print environment values mask sensitive ones while leaving the
 key name visible. That applies to conflict errors from
 `UnexpectedCommandError`, verifier failures, and spy assertion messages alike,
 which all use `***` as the mask token. Masking uses the same key vocabulary as
-recording redaction, so segment-style names such as `DB_PWD` and `GITHUB_KEY`
-are masked along with the `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, and `*_API_KEY`
-families. Matching and recorded data stay raw; only the rendered message
-changes. A message that names no sensitive key is unchanged. Interpolating an
-`Invocation` directly is the one exception to the token: its `repr` has always
-printed `<redacted>` for the same sensitive keys.
+recording redaction, so segment-style names such as `DB_PWD`, `GITHUB_KEY`, and
+`DOCKER_AUTH_CONFIG` are masked along with the `*_SECRET`, `*_TOKEN`,
+`*_PASSWORD`, and `*_API_KEY` families. Matching and recorded data stay raw;
+only the rendered message changes. A message that names no sensitive key is
+unchanged. Interpolating an `Invocation` directly is the one exception to the
+token: its `repr` has always printed `<redacted>` for the same sensitive keys.
+Other exposures, such as interpolating a `Response` or `Expectation` directly,
+are outside this guarantee.
 
 Argument comparators support flexible matching:
 

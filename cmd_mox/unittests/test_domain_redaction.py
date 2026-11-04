@@ -24,6 +24,10 @@ from cmd_mox.domain import (
         "API_TOKEN",
         "AWS_CREDENTIALS",
         "SSH_PASSPHRASE",
+        # Registry credentials travel in ``*_AUTH_CONFIG`` values.
+        "DOCKER_AUTH_CONFIG",
+        "AUTH_CONFIG",
+        "MY_AUTH_CONFIG",
         "db_pwd",
         "github_key",
         "MyPassword",

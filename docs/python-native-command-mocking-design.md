@@ -3005,6 +3005,10 @@ rather than relying on `.replay()`.
 - `PATH`, `HOME`, `USER`, `SHELL` (system-specific)
 - `SSH_AUTH_SOCK`, `GPG_AGENT_INFO` (session-specific)
 - Variables matching `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`
+- Variables matching `*_AUTH_CONFIG`, which hold credential documents rather
+  than a single secret. `DOCKER_AUTH_CONFIG` is the motivating case: its value
+  is JSON containing registry `auth` fields. The segment must stand alone, so
+  `AUTH_CONFIGURATION` and `XAUTH_CONFIG` stay readable.
 
 **Included by default**:
 
@@ -3023,9 +3027,10 @@ original values.
 
 #### 9.9.4 Environment values in error diagnostics
 
-Every diagnostic that renders an environment value masks sensitive entries,
-using `***` as the mask token. Three of those paths share the `mask_env_value`
-helper in `cmd_mox.domain`:
+The diagnostics below mask sensitive environment entries, using `***` as the
+mask token. They are the paths this design protects; the exposures in the
+closing list are not covered. Three of them share the `mask_env_value` helper in
+`cmd_mox.domain`:
 
 - `UnexpectedCommandError` raised by `apply_expectation_env` when an invocation
   environment conflicts with an expectation. The key name stays visible, only
@@ -3044,7 +3049,7 @@ than calling that helper. `Expectation._explain_env_mismatch` tests
 mismatching values, and `Invocation.__repr__` substitutes its own `<redacted>`
 token for the same sensitive keys. The policy is shared, but the formatter and
 the mask token are not: expect `<redacted>` where an `Invocation` is
-interpolated directly and `***` everywhere else.
+interpolated directly and `***` in the messages listed above.
 
 Masking happens where each diagnostic string is built, so the IPC server's
 `str(exc)` forwarding to the shim's standard error needs no sanitizer of its
@@ -3057,6 +3062,17 @@ comma-separated list are unchanged. Non-sensitive messages stay byte-identical,
 so only diagnostics naming a sensitive key change. Conflict detection compares
 raw values, and invocation and expectation data are never mutated or masked in
 place; masking is a formatting concern applied to a copy.
+
+Because the vocabulary is shared, extending it is not confined to diagnostics.
+The classifier also backs recording subset filtering
+(`cmd_mox/record/env_filter.py`) and argument and query-parameter redaction in
+`cmd_mox/_argument_redaction.py`. Adding `*_AUTH_CONFIG` therefore also drops
+such variables from fixtures and masks them in argument diagnostics, which is
+the intended coarse-grained posture: a false positive hides one value, while a
+false negative discloses a credential. `DOCKER_AUTH_CONFIG` carried registry
+credentials that no earlier rule classified, and it is the case that prompted
+the addition. Variables named explicitly through `.with_env()` remain exempt
+from subset filtering by the existing precedence rule.
 
 Known exposures remain out of scope here and need their own design decisions:
 

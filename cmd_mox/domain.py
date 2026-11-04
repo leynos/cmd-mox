@@ -30,8 +30,14 @@ _SENSITIVE_ENV_KEY_TOKENS_CASEFOLDED: typ.Final[tuple[str, ...]] = tuple(
     token.casefold() for token in SENSITIVE_ENV_KEY_TOKENS
 )
 SENSITIVE_ENV_KEY_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
-    r"(?i)(^|[_-])(?:API)?(KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?"
-    r"|PASS(?:WORD)?|PWD)(?=[_-]|=|:|\d|$)"
+    # ``AUTH_CONFIG`` covers registry credentials such as DOCKER_AUTH_CONFIG,
+    # whose value is a JSON document holding an ``auth`` field rather than a
+    # single credential. It is matched as a whole segment so that near-misses
+    # such as AUTH_CONFIGURATION stay readable.
+    r"(?i)(^|[_-])(?:"
+    r"(?:API)?(?:KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?|PASS(?:WORD)?|PWD)"
+    r"|AUTH(?:ENTICATION)?[-_]CONFIG"
+    r")(?=[_-]|=|:|\d|$)"
 )
 
 _REPR_FIELD_LIMIT: typ.Final[int] = 256

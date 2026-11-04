@@ -47,6 +47,21 @@ class TestFilterEnvSubset:
         assert "GITHUB_KEY" not in result
         assert "SAFE_VAR" in result
 
+    def test_excludes_credential_config_keys(self) -> None:
+        """Registry credentials in ``*_AUTH_CONFIG`` never reach fixtures."""
+        env = {
+            "DOCKER_AUTH_CONFIG": '{"auths": {"registry.test": {"auth": "opaque"}}}',
+            "AUTH_CONFIG": "opaque",
+            # Shares the command prefix, so only the sensitivity rule can drop
+            # this one. Without it the assertion would pass on the prefix rule.
+            "DOCKER_HOST": "unix:///run/docker.sock",
+        }
+        result = filter_env_subset(env, command="docker")
+
+        assert "DOCKER_AUTH_CONFIG" not in result
+        assert "AUTH_CONFIG" not in result
+        assert "DOCKER_HOST" in result
+
     def test_excludes_system_keys(self) -> None:
         """System-specific keys are excluded."""
         env = {
