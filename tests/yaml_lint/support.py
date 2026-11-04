@@ -27,6 +27,10 @@ HAND_ROLLED = re.compile(
     r"|releases/download[^\n]*actionlint"
 )
 PIPE = "git ls-files -z '*.yml' '*.yaml' | xargs -0 -r"
+GUARDED_COMMANDS = (
+    "git ls-files -z '*.yml' '*.yaml' >\"$$tmp\" &&",
+    'xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"',
+)
 GATE_COMMAND = re.compile(r"^(- )?run: (/usr/bin/)?make( \S+)* lint( \S+)*$")
 
 
@@ -186,6 +190,24 @@ def is_sound_yamllint(line: str) -> bool:
     ])
 
 
+def is_guarded_yamllint(lines: list[str]) -> bool:
+    """Say whether a recipe stages Git's list before linting it.
+
+    Parameters
+    ----------
+    lines : list[str]
+        The recipe lines reachable from ``lint``.
+
+    Returns
+    -------
+    bool
+        ``True`` when both guarded commands appear and neither is bypassed.
+    """
+    matching = [line for line in lines if any(c in line for c in GUARDED_COMMANDS)]
+    present = all(any(c in line for line in matching) for c in GUARDED_COMMANDS)
+    return present and all(not is_bypassed(line) for line in matching)
+
+
 def gate_is_wired(makefile: str) -> bool:
     """Say whether the lint closure runs strict yamllint over Git's list and actionlint.
 
@@ -204,19 +226,10 @@ def gate_is_wired(makefile: str) -> bool:
     actionlint = any(
         line.startswith("$(ACTIONLINT)") and not is_bypassed(line) for line in lines
     )
-    guarded_commands = (
-        "git ls-files -z '*.yml' '*.yaml' >\"$$tmp\" &&",
-        'xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"',
+    yamllint = is_guarded_yamllint(lines) or any(
+        is_sound_yamllint(line) for line in lines
     )
-    matching_lines = [
-        line for line in lines if any(c in line for c in guarded_commands)
-    ]
-    guarded_yamllint = all(
-        any(command in line for line in matching_lines) for command in guarded_commands
-    ) and all(not is_bypassed(line) for line in matching_lines)
-    return actionlint and (
-        guarded_yamllint or any(is_sound_yamllint(line) for line in lines)
-    )
+    return actionlint and yamllint
 
 
 def is_job_header(line: str) -> bool:
