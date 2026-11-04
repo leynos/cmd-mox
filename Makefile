@@ -97,7 +97,7 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	--log-file-level=DEBUG \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
-.PHONY: help all clean build prepare build-release lint fmt check-fmt
+.PHONY: help all clean build prepare build-release lint fmt check-fmt yamllint actionlint
 .PHONY: makeutil markdownlint markdownlint-run nixie spelling skylos-allow test test-workflow-contracts typecheck
 .PHONY: install-nose duplication duplication-test duplication-allow
 .PHONY: $(TOOLS) $(VENV_TOOLS)
@@ -171,7 +171,7 @@ check-fmt: build ## Verify formatting
 markdownlint-run: ## Run markdownlint-cli2 over the repository's Markdown
 	$(MDLINT) "**/*.md"
 
-lint: build install-nose ## Run linters
+lint: build install-nose yamllint actionlint ## Run linters
 	$(RUFF) check
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
@@ -283,6 +283,22 @@ test-workflow-contracts: $(UV) ## Run the shared CV-005 CodeScene contracts
 
 windows-smoke: build $(UV) $(VENV_TOOLS) ## Run Windows smoke workflow and capture IPC logs
 	$(UV_GATE) run --group dev -- pytest -v $(WINDOWS_SMOKE_ARGS)
+
+YAMLLINT ?= yamllint
+ACTIONLINT ?= actionlint
+
+# yamllint reads `.yamllint.yml`, which extends `.yamllint-estate.yml`, and
+# resolves that path against the working directory, so it runs from the root.
+# The file list is staged before the linter starts: if Git fails partway
+# through, `&&` stops the recipe instead of linting a partial list.
+yamllint: ## Lint every tracked YAML file strictly
+	@tmp=$$(mktemp) || exit 1; \
+	trap 'rm -f "$$tmp"' EXIT; \
+	git ls-files -z '*.yml' '*.yaml' >"$$tmp" && \
+	xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"
+
+actionlint: ## Lint the GitHub Actions workflows, including their shell scripts
+	$(ACTIONLINT)
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
