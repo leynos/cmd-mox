@@ -95,10 +95,21 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	--log-file=windows-ipc.log \
 	--log-file-level=DEBUG \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+# Representative pytest-bdd modules, executed rather than collected. A
+# dependency update can break step injection in every BDD module while
+# `--collect-only` still exits zero, so this gate runs the scenarios.
+# tests/test_bdd_gate_contract.py holds the target to this list and to the
+# locked dev group.
+BDD_MODULES = tests/test_command_double_record_bdd.py \
+	tests/test_command_double_replay_bdd.py \
+	tests/test_recording_session_bdd.py \
+	tests/test_replay_session_bdd.py \
+	tests/test_documentation_bdd.py \
+	tests/test_pytest_plugin_bdd.py
 
 .PHONY: help all clean build prepare build-release lint fmt check-fmt
 .PHONY: makeutil markdownlint markdownlint-run nixie spelling skylos-allow test test-workflow-contracts typecheck
-.PHONY: install-nose duplication duplication-test duplication-allow
+.PHONY: install-nose duplication duplication-test duplication-allow bdd
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
@@ -276,6 +287,9 @@ makeutil: ## Verify the Makefile parser used by contract tests
 
 test: build $(UV) $(VENV_TOOLS) makeutil test-workflow-contracts ## Run tests
 	$(UV_GATE) run --group dev -- pytest -v -n $(PYTEST_WORKERS)
+
+bdd: build ## Execute representative pytest-bdd scenarios
+	$(UV_GATE) run --group dev -- pytest -v $(BDD_MODULES)
 
 test-workflow-contracts: $(UV) ## Run the shared CV-005 CodeScene contracts
 	$(CV005_CONTRACTS) check --repository .

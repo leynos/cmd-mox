@@ -166,6 +166,13 @@ jobs:
         if: matrix.run-windows-smoke == false
         run: make duplication-test
 
+      # Executes representative pytest-bdd scenarios before coverage, so a
+      # plugin incompatibility that collection alone would not reveal is a
+      # focused failure rather than one entry among many.
+      - name: Run the BDD execution gate
+        if: matrix.run-windows-smoke == false
+        run: make bdd
+
       - name: Run typechecker
         if: matrix.run-windows-smoke == false
         run: make typecheck

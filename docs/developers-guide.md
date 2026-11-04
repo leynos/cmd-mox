@@ -88,6 +88,63 @@ Windows smoke leg of the `quality` matrix skips, measures what the publisher
 measures, and its `[selection]` pins the publisher's exact inputs, so a change
 made to the generators and the uploader together is still a reviewed change.
 
+## Behavioural test gate and pytest-bdd compatibility
+
+The behavioural suite is written with [pytest-bdd][pytest-bdd], which registers
+step definitions by reading pytest's fixture manager. That coupling makes an
+upgrade of either package a runtime-compatibility question rather than a
+resolution question: a lock file can resolve cleanly and still fail every
+scenario the first time a step is injected.
+
+That happened with pytest 9.2. pytest 9.2 replaced the fixture manager's
+`_arg2fixturedefs` mapping with a node-indexed registry
+(`_arg2node2fixturedefs`), and pytest-bdd 9.0.0 still read the removed
+attribute. Every BDD module failed at step injection with:
+
+```text
+AttributeError: 'FixtureManager' object has no attribute '_arg2fixturedefs'
+```
+
+The fix is upstream in [pytest-bdd 9.0.1][pytest-bdd-901], which was published
+specifically for pytest 9.2 support
+([pytest-dev/pytest-bdd#851][pytest-bdd-851]). CmdMox therefore pins the floor
+`pytest-bdd>=9.0.1` in the `dev` dependency group. Do not relax that floor
+without checking the same step-injection path.
+
+Two habits follow from this, and they apply to every pytest plugin that reaches
+into pytest internals:
+
+- Treat a green `--collect-only` as insufficient evidence. Collection imports
+  the module and calls `@scenario`; it does not inject fixtures or execute a
+  step, so a plugin incompatibility that breaks every scenario still collects.
+- Do not monkeypatch pytest's fixture internals, and do not change CmdMox
+  production behaviour, to work around a plugin incompatibility. Pin the fixed
+  plugin release instead; a local shim silently rots when the plugin catches up.
+
+### `make bdd`
+
+```bash
+make bdd
+```
+
+`make bdd` executes a representative set of whole BDD modules in the same locked
+`dev` group as the rest of the suite: the record and replay scenarios, the
+recording and replay session scenarios, the documentation scenarios, and the
+pytest-plugin scenarios. The module list lives in `BDD_MODULES` in the
+Makefile. CI runs the target before the coverage step, so an incompatibility
+surfaces as one focused failure rather than as one entry among many.
+
+`tests/test_bdd_gate_contract.py` holds the gate to that shape. It asserts the
+target names whole modules rather than a directory, carries no collection-only
+flag, runs through `uv_gate` in the `dev` group, is ordered before coverage in
+`ci.yml`, and that the lock selects a pytest-bdd version above the
+compatibility floor. The scenarios themselves are the behavioural evidence; the
+contract tests only keep the gate from degenerating into a no-op.
+
+[pytest-bdd]: https://github.com/pytest-dev/pytest-bdd
+[pytest-bdd-851]: https://github.com/pytest-dev/pytest-bdd/pull/851
+[pytest-bdd-901]: https://pypi.org/project/pytest-bdd/9.0.1/
+
 ## Linting
 
 CmdMox uses a five-tier linting pipeline. Run it with:
