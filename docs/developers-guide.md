@@ -164,6 +164,25 @@ flag, runs through `uv_gate` in the `dev` group, is ordered before coverage in
 compatibility floor. The scenarios themselves are the behavioural evidence; the
 contract tests only keep the gate from degenerating into a no-op.
 
+### Patching `os` in a test
+
+`cmd_mox._stdin_capture` imports `os` by name, so a test that patches it through
+`monkeypatch.setattr(capture.os, "fstat", ...)` is patching the `os` module
+itself, not a private copy. Such a patch is process-wide and stays active until
+the `monkeypatch` fixture tears down, which is _after_ pytest has torn down the
+test's capture.
+
+pytest 9.2 added an `os.fstat` call to that teardown:
+`_pytest.capture.FDCapture.snap()` now stats its own temporary file before
+reading it. A stub that rejects _every_ descriptor therefore fails pytest's
+capture rather than the code under test, and the failure points at the test's
+`raise` with no CmdMox frame in the traceback. This is why
+`test_plan_treats_an_unstattable_descriptor_as_pollable` rejects only the
+descriptor it created and delegates every other call to the real `os.fstat`.
+
+Apply the same shape to any new test that patches `os` globally: narrow the
+stub to the inputs the test owns, and pass everything else through.
+
 [pytest-bdd]: https://github.com/pytest-dev/pytest-bdd
 [pytest-bdd-851]: https://github.com/pytest-dev/pytest-bdd/pull/851
 [pytest-bdd-901]: https://pypi.org/project/pytest-bdd/9.0.1/

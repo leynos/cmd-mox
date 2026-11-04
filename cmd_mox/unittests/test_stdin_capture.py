@@ -600,12 +600,20 @@ def test_plan_treats_an_unstattable_descriptor_as_pollable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A descriptor whose status cannot be read is polled, not worked."""
-
-    def reject(_descriptor: int) -> os.stat_result:
-        msg = "stat failed"
-        raise OSError(msg)
-
     read_fd, write_fd = os.pipe()
+    real_fstat = os.fstat
+
+    def reject(descriptor: int) -> os.stat_result:
+        # Reject only the descriptor under test. `capture.os` is the global
+        # `os` module, so this patch is process-wide, and pytest 9.2 stats
+        # its own capture temporary file between the call and teardown while
+        # the patch is still active. Failing that call too would break the
+        # harness rather than exercise the fallback under test.
+        if descriptor == read_fd:
+            msg = "stat failed"
+            raise OSError(msg)
+        return real_fstat(descriptor)
+
     monkeypatch.setattr(capture.os, "fstat", reject)
     try:
         plan = capture._plan_stdin(_DescriptorStream(read_fd))
