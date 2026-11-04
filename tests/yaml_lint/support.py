@@ -7,8 +7,7 @@ first, because a rule exercised only over this repository's own compliant
 files would pass whether or not it detects anything, and then applied to the
 real files. Everything is read as text, so the contract needs no parser
 dependency. The Concordat ``yaml-lint-baseline`` rule audits the same wiring
-with a full Makefile parse, and ``test_yaml_lint_boundary.py`` runs the Make
-targets.
+with a full Makefile parse, and ``test_boundary.py`` runs the Make targets.
 """
 
 from __future__ import annotations
