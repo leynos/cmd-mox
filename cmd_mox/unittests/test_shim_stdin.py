@@ -81,6 +81,35 @@ def test_create_invocation_reads_stdin_when_not_tty(
     assert dummy_stdin.read_calls == 1, "non-TTY stdin was not read exactly once"
 
 
+def test_successful_stdin_capture_emits_bounded_completion(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A completed capture reports its strategy and duration, never its content."""
+    monkeypatch.setattr(sys, "stdin", _DummyStdin("secret payload", is_tty=False))
+    monkeypatch.setattr(sys, "argv", ["shim"])
+
+    with (
+        caplog.at_level("INFO", logger="cmd_mox.shim"),
+        _observability.capture_events() as events,
+    ):
+        invocation = _create_invocation("shim", timeout=1.0)
+
+    assert invocation.stdin == "secret payload", "non-TTY stdin was not captured"
+    [event] = events
+    assert event.operation == "ipc.shim.stdin_read", "Wrong stdin event operation"
+    assert event.outcome == "success", "capture completion was not recorded"
+    assert event.strategy == "fallback", "capture completion lost its strategy"
+    assert event.error_category is None, "a success carried an error category"
+    assert event.worker_alive is None, "a success reported a worker outcome"
+    assert event.duration_ms is not None, "capture completion lost its duration"
+    assert event.duration_ms >= 0, "capture duration is negative"
+    assert event.outstanding_workers is not None, (
+        "capture completion lost its worker count"
+    )
+    assert "secret payload" not in caplog.text, "stdin content reached the logs"
+
+
 def test_create_invocation_accepts_stdin_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -170,6 +199,9 @@ def test_create_invocation_observes_stdin_failure_without_error_text(
     assert event.operation == "ipc.shim.stdin_read", "Wrong stdin event operation"
     assert event.outcome == "read_failed", "Stdin failure outcome was not recorded"
     assert event.error_category == "OSError", "Wrong stdin error category"
+    assert event.strategy == "fallback", "Stdin failure lost its strategy"
+    assert event.worker_alive is None, "a read failure reported a worker outcome"
+    assert event.outstanding_workers is not None, "Stdin failure lost its worker count"
     assert event.correlation_id is not None, "Stdin failure lost its correlation id"
     assert len(event.correlation_id) == 32, "Stdin correlation id is not opaque"
     assert event.duration_ms is not None, "Stdin failure lost its duration"

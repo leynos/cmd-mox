@@ -115,7 +115,10 @@ def test_create_invocation_bounds_a_windows_direct_read(
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     try:
-        with pytest.raises(SystemExit) as exc:
+        with (
+            _observability.capture_events() as events,
+            pytest.raises(SystemExit) as exc,
+        ):
             _create_invocation("shim", timeout=0.05)
     finally:
         release.set()
@@ -125,6 +128,16 @@ def test_create_invocation_bounds_a_windows_direct_read(
     assert "IPC error: stdin read timed out after 0.05 seconds" in (
         capsys.readouterr().err
     ), "Windows stdin expiry did not produce the bounded diagnostic"
+    [event] = events
+    assert event.outcome == "deadline_expired", "Windows expiry was not recorded"
+    assert event.strategy == "fallback", "Windows expiry lost its strategy"
+    assert event.worker_alive is True, (
+        "an uncancellable direct read must report its live worker"
+    )
+    assert event.outstanding_workers is not None, "Windows expiry lost its worker count"
+    assert event.outstanding_workers >= 1, (
+        "an abandoned direct-read worker must be reported as outstanding"
+    )
 
 
 # --- Polled strategy --------------------------------------------------------
@@ -145,7 +158,10 @@ def test_create_invocation_reports_stdin_timeout(
     )
     monkeypatch.setattr(sys, "argv", ["shim"])
 
-    with pytest.raises(SystemExit) as exc:
+    with (
+        _observability.capture_events() as events,
+        pytest.raises(SystemExit) as exc,
+    ):
         _create_invocation("shim", timeout=0.01)
 
     _assert_exit_code(exc, 1)
@@ -153,6 +169,13 @@ def test_create_invocation_reports_stdin_timeout(
     assert "IPC error: stdin read timed out after 0.01 seconds" in (
         capsys.readouterr().err
     ), "stdin timeout must produce the bounded stdin diagnostic"
+    [event] = events
+    assert event.outcome == "deadline_expired", "stdin timeout was not recorded"
+    assert event.strategy == "poll", "a polled timeout lost its strategy"
+    assert event.worker_alive is False, (
+        "a polled timeout cannot leave a reader worker behind"
+    )
+    assert event.error_category == "TimeoutError", "Wrong timeout error category"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
@@ -217,6 +240,7 @@ def test_create_invocation_reports_stdin_poll_error(
     assert event.operation == "ipc.shim.stdin_read", "Wrong stdin event operation"
     assert event.outcome == "read_failed", "Polling failure was not reported once"
     assert event.error_category == "OSError", "Wrong polling error category"
+    assert event.strategy == "poll", "a polling failure lost its strategy"
     counts_after = _observability.counter_snapshot()
     assert (
         counts_after.get(event.key(), 0) == counters_before.get(event.key(), 0) + 1

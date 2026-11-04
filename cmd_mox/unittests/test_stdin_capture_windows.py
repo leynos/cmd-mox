@@ -336,6 +336,26 @@ def test_plan_selects_win32_for_a_resolved_handle(
     """Windows resolves a handle before considering descriptors."""
     monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
     monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: _HANDLE)
+    monkeypatch.setattr(
+        capture, "_windows_modules", lambda: (object(), object(), object())
+    )
     assert capture._plan_stdin(_Stream()).strategy == "win32", (
         "a resolved handle should select the Windows strategy"
+    )
+
+
+def test_plan_falls_back_when_the_win32_modules_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plan must name the strategy that will actually run.
+
+    ``_read_win32`` degrades to the tracked fallback when pywin32 is absent, so
+    the selected plan must not claim the Windows strategy for that stream.
+    """
+    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
+    monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: _HANDLE)
+    monkeypatch.setattr(capture, "_windows_modules", lambda: None)
+
+    assert capture._plan_stdin(_Stream()).strategy == "fallback", (
+        "a missing pywin32 must not be planned as the Windows strategy"
     )

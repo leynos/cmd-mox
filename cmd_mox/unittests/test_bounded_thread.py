@@ -276,8 +276,7 @@ def test_cancel_is_reissued_while_the_worker_survives(
     exited = _bounded_thread.cancel_and_await_worker(
         stalled.thread,
         cancel,
-        grace=5.0,
-        request_cancel=request_cancel,
+        _bounded_thread.CancelPolicy(grace=5.0, request_cancel=request_cancel),
     )
 
     assert exited is True, "the worker did not exit within the grace period"
@@ -300,11 +299,35 @@ def test_cancel_returns_false_when_the_worker_survives_the_grace(
     exited = _bounded_thread.cancel_and_await_worker(
         stalled.thread,
         lambda: None,
-        grace=0.05,
-        request_cancel=request_cancel,
+        _bounded_thread.CancelPolicy(grace=0.05, request_cancel=request_cancel),
     )
 
     assert exited is False, "a surviving worker must be reported as alive"
+
+
+def test_cancel_measures_the_grace_with_the_injected_clock(
+    stalled: _StalledWorker,
+) -> None:
+    """The grace deadline is measured with the caller's clock.
+
+    The stdin capture passes its own monotonic clock, so cancellation must not
+    read the process clock behind its back; otherwise the grace boundary is
+    only testable by waiting for real time to pass.
+    """
+    times = iter([0.0, 2.0])
+
+    exited = _bounded_thread.cancel_and_await_worker(
+        stalled.thread,
+        lambda: None,
+        _bounded_thread.CancelPolicy(
+            grace=1.0,
+            request_cancel=lambda _thread: None,
+            clock=lambda: next(times),
+        ),
+    )
+
+    assert exited is False, "a worker past the grace deadline must be reported alive"
+    assert stalled.thread.is_alive(), "the worker was released despite the deadline"
 
 
 def test_cancel_applies_the_fallback_cancel_once(
@@ -323,8 +346,7 @@ def test_cancel_applies_the_fallback_cancel_once(
     exited = _bounded_thread.cancel_and_await_worker(
         stalled.thread,
         cancel,
-        grace=5.0,
-        request_cancel=request_cancel,
+        _bounded_thread.CancelPolicy(grace=5.0, request_cancel=request_cancel),
     )
 
     assert exited is True, "the worker did not exit within the grace period"

@@ -73,6 +73,7 @@ _CANCEL_GRACE: typ.Final[float] = 1.0
 
 type _MonotonicClock = cabc.Callable[[], float]
 type _Strategy = typ.Literal["win32", "regular", "poll", "fallback"]
+type _StrategyObserver = cabc.Callable[[_Strategy], None]
 type _Abandon = cabc.Callable[[threading.Thread], None]
 
 _WORKER_LOCK = threading.Lock()
@@ -200,8 +201,10 @@ class _WorkerSpec:
 def outstanding_workers() -> tuple[threading.Thread, ...]:
     """Return the reader workers still blocked after their deadline.
 
-    Finished workers are pruned, so the result only ever names threads that
-    would still be running if the interpreter shut down.
+    The registry is pruned only when a worker registers, so a finished entry
+    can remain in it. Filtering the snapshot here keeps this query free of
+    observable side effects: asking who is still running must not change what
+    a later reader sees.
 
     Returns
     -------
@@ -209,8 +212,7 @@ def outstanding_workers() -> tuple[threading.Thread, ...]:
         Live daemon workers abandoned by earlier captures.
     """
     with _WORKER_LOCK:
-        _WORKERS[:] = [worker for worker in _WORKERS if worker.is_alive()]
-        return tuple(_WORKERS)
+        return tuple(worker for worker in _WORKERS if worker.is_alive())
 
 
 def _register_worker(worker: threading.Thread) -> None:
@@ -230,6 +232,7 @@ def read_stdin(
     timeout: float,
     *,
     clock: _MonotonicClock = time.monotonic,
+    on_selected: _StrategyObserver | None = None,
 ) -> str:
     """Read *stream* through EOF, giving up after *timeout* seconds.
 
@@ -243,6 +246,10 @@ def read_stdin(
         passes the validated ``CMOX_IPC_TIMEOUT`` value.
     clock:
         Monotonic clock used to measure the deadline.
+    on_selected:
+        Called with the chosen strategy before the first read, so a failure
+        still reports which strategy was bounding it. Not called when the
+        stream is a terminal or in-memory, where no strategy is needed.
 
     Returns
     -------
@@ -265,7 +272,10 @@ def read_stdin(
     if isinstance(stream, io.StringIO):
         # In-memory streams cannot block, so no worker or deadline is needed.
         return stream.read()
-    capture = _Capture(stream, timeout, deadline, clock, _plan_stdin(stream))
+    plan = _plan_stdin(stream)
+    if on_selected is not None:
+        on_selected(plan.strategy)
+    capture = _Capture(stream, timeout, deadline, clock, plan)
     match capture.plan.strategy:
         case "win32":
             return _read_win32(capture)
@@ -287,7 +297,11 @@ def _plan_stdin(stream: _StdinStream) -> _Plan:
     """
     if path_utils.IS_WINDOWS:
         handle = _stdin_handle(stream)
-        return _Plan("win32", handle=handle) if handle else _Plan("fallback")
+        # Require the pywin32 modules too: without them the read degrades to
+        # the fallback worker, and the plan must name the strategy that runs.
+        if handle and _windows_modules() is not None:
+            return _Plan("win32", handle=handle)
+        return _Plan("fallback")
     try:
         descriptor = _stream_descriptor(stream)
     except (AttributeError, OSError, ValueError):
@@ -571,7 +585,11 @@ def _read_win32(capture: _Capture) -> str:
         ),
         _worker_spec(
             capture,
-            partial(_abandon_win32_reader, request_cancel=request_cancel),
+            partial(
+                _abandon_win32_reader,
+                request_cancel=request_cancel,
+                clock=capture.clock,
+            ),
         ),
     )
 
@@ -640,13 +658,21 @@ def _abandon_win32_reader(
     worker: threading.Thread,
     *,
     request_cancel: cabc.Callable[[threading.Thread], None],
+    clock: _MonotonicClock,
 ) -> None:
-    """Cancel a blocked ``ReadFile`` and wait, bounded, for *worker*."""
+    """Cancel a blocked ``ReadFile`` and wait, bounded, for *worker*.
+
+    The capture clock also measures the cancellation grace, so the reader's
+    deadline and its unwind policy share one time source.
+    """
     _bounded_thread.cancel_and_await_worker(
         worker,
         _do_not_cancel_for_stdin,
-        grace=_CANCEL_GRACE,
-        request_cancel=request_cancel,
+        _bounded_thread.CancelPolicy(
+            grace=_CANCEL_GRACE,
+            request_cancel=request_cancel,
+            clock=clock,
+        ),
     )
 
 

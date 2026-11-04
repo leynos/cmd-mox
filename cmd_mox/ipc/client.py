@@ -254,8 +254,10 @@ def _cancel_and_await_worker(
     return _bounded_thread.cancel_and_await_worker(
         thread,
         cancel,
-        grace=IO_CANCEL_GRACE,
-        request_cancel=_request_synchronous_io_cancel,
+        _bounded_thread.CancelPolicy(
+            grace=IO_CANCEL_GRACE,
+            request_cancel=_request_synchronous_io_cancel,
+        ),
     )
 
 

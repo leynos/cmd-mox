@@ -64,6 +64,40 @@ def test_missing_descriptor_reads_through_a_worker() -> None:
     assert stream.read_calls == 1, "the fallback should read exactly once"
 
 
+def test_selected_strategy_is_reported_before_the_read() -> None:
+    """A failed capture still reports the strategy that was bounding it.
+
+    Telemetry is emitted by the shim after the capture returns or raises, so
+    the strategy must be observed at selection time rather than reconstructed
+    from a successful result.
+    """
+
+    class _FailingStream(_Stream):
+        def read(self) -> str:
+            """Fail the direct read after strategy selection.
+
+            Raises
+            ------
+            _StreamError
+                Always, to model a capture that fails after selection.
+            """
+            raise _StreamError("boom")
+
+    selected: list[str] = []
+
+    with pytest.raises(_StreamError):
+        capture.read_stdin(
+            typ.cast("capture._StdinStream", _FailingStream()),
+            1.0,
+            clock=_Clock(),
+            on_selected=selected.append,
+        )
+
+    assert selected == ["fallback"], (
+        f"a failed capture did not report its strategy: {selected}"
+    )
+
+
 def test_unpollable_descriptor_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     """A descriptor both pollers reject is read through the fallback worker."""
     monkeypatch.setattr(capture, "_create_stdin_poller", lambda _descriptor: None)
@@ -256,22 +290,31 @@ def test_fallback_timeout_discards_partial_input() -> None:
     assert stream.finished.is_set(), "releasing the stream did not end the worker"
 
 
-def test_fallback_worker_registry_prunes_finished_workers() -> None:
-    """A finished worker leaves the registry once it is observed."""
+def test_outstanding_workers_reports_live_workers_without_pruning() -> None:
+    """The query reports live workers and leaves the registry untouched.
+
+    Pruning while answering would make a read mutate process state, so the
+    shim's shutdown check would change what a later reader observes. Finished
+    entries are removed when the next worker registers instead.
+    """
     stream = _BlockingStream("eventual")
     try:
         with pytest.raises(StdinTimeoutError) as excinfo:
             _read(stream, 0.05, _Clock())
         assert excinfo.value.worker_alive is True, "the blocked worker should live"
-        assert capture.outstanding_workers(), "the live worker was not registered"
+        live = capture.outstanding_workers()
+        assert live, "the live worker was not registered"
     finally:
         stream.release.set()
         stream.finished.wait(5.0)
 
-    for worker in capture.outstanding_workers():
+    for worker in live:
         worker.join(5.0)
     assert capture.outstanding_workers() == (), (
-        "the finished worker was not pruned from the registry"
+        "a finished worker was still reported as outstanding"
+    )
+    assert set(capture._WORKERS) >= set(live), (
+        "the query pruned the registry instead of filtering its snapshot"
     )
 
 

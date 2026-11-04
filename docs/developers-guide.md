@@ -397,12 +397,19 @@ reports. The assertion on a forwarded exit code of `3` in
 `tests/test_shim_stdin_timeout.py` is what holds that behaviour in place: if a
 future launcher change ever scrubs the status, that test fails on Windows.
 
-The shim emits bounded IPC observability events when stdin reading or writing
-and flushing a response stream fails. These use the existing dependency-free
-observability seam and record fixed operation, outcome, and error-category
-values, elapsed duration, and a correlation identifier when one is available.
-They do not include exception messages or stream contents. If the deadline
-expires after stdin capture but before initial dispatch, the shim emits one
+The shim emits bounded IPC observability events when stdin capture completes,
+times out, or fails, and when writing or flushing a response stream fails.
+These use the existing dependency-free observability seam and record fixed
+operation, outcome, and error-category values, elapsed duration, and a
+correlation identifier when one is available. The `ipc.shim.stdin_read` event
+also records the closed-set capture strategy (`poll`, `regular`, `win32`, or
+`fallback`), whether a reader worker was still alive when the capture ended,
+and how many abandoned workers remained registered. The strategy is reported at
+selection time, so a timed-out or failed capture still says which strategy was
+bounding it. Only the strategy joins the counter key; worker state stays in the
+structured record because its cardinality is not bounded. These events do not
+include exception messages or stream contents. If the deadline expires after
+stdin capture but before initial dispatch, the shim emits one
 `ipc.shim.ipc_request` event with outcome `deadline_expired` and does not
 dispatch the invocation. Its elapsed duration measures the dispatch budget
 check. If the original deadline expires while the real command runs, the shim

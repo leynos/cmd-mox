@@ -33,7 +33,7 @@ type _ShimEventOperation = typ.Literal[
     "ipc.shim.ipc_request",
 ]
 type _ShimEventOutcome = typ.Literal[
-    "read_failed", "write_failed", "flush_failed", "deadline_expired"
+    "success", "read_failed", "write_failed", "flush_failed", "deadline_expired"
 ]
 type _ResponseFailure = tuple[
     typ.Literal["response_write", "response_flush"], Exception
@@ -41,13 +41,21 @@ type _ResponseFailure = tuple[
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class _ShimFailureContext:
-    """Capture bounded metadata shared by one shim failure event."""
+class _ShimEventContext:
+    """Capture bounded metadata shared by one shim observability event.
+
+    ``strategy``, ``worker_alive`` and ``outstanding_workers`` describe the
+    stdin capture boundary. Every value is from a closed set or a small
+    integer, and no field carries stream content or exception text.
+    """
 
     operation: _ShimEventOperation
     outcome: _ShimEventOutcome
     started: float
     correlation_id: str | None
+    strategy: str | None = None
+    worker_alive: bool | None = None
+    outstanding_workers: int | None = None
 
 
 _ERROR_DETAILS: dict[tuple[bool, _FailureOperation], str] = {
@@ -124,22 +132,32 @@ def _bounded_error_category(exc: Exception) -> str:
     )
 
 
-def _emit_shim_failure(failure: _ShimFailureContext, exc: Exception) -> None:
-    """Emit bounded shim failure metadata without exception details."""
+def _emit_shim_event(
+    context: _ShimEventContext, *, error_category: str | None = None
+) -> None:
+    """Emit bounded shim metadata without exception or stream content."""
     transport: _observability.Transport = (
         "named_pipe" if _path_utils.IS_WINDOWS else "unix"
     )
     _observability.emit(
         _observability.IPCEvent(
-            operation=failure.operation,
+            operation=context.operation,
             transport=transport,
-            outcome=failure.outcome,
-            error_category=_bounded_error_category(exc),
-            duration_ms=_observability.elapsed_ms(failure.started),
-            correlation_id=bounded_correlation_id(failure.correlation_id),
+            outcome=context.outcome,
+            error_category=error_category,
+            duration_ms=_observability.elapsed_ms(context.started),
+            correlation_id=bounded_correlation_id(context.correlation_id),
+            strategy=context.strategy,
+            worker_alive=context.worker_alive,
+            outstanding_workers=context.outstanding_workers,
         ),
         logger=logging.getLogger("cmd_mox.shim"),
     )
+
+
+def _emit_shim_failure(context: _ShimEventContext, exc: Exception) -> None:
+    """Emit bounded shim failure metadata without exception details."""
+    _emit_shim_event(context, error_category=_bounded_error_category(exc))
 
 
 def _write_response_stream(
@@ -170,7 +188,7 @@ def _write_response_stream(
         else:
             failure_operation = "response_flush"
         _emit_shim_failure(
-            _ShimFailureContext(
+            _ShimEventContext(
                 _SHIM_RESPONSE_STREAM_OPERATION,
                 outcome,
                 failure_started,

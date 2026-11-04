@@ -65,7 +65,8 @@ else:
 
 from cmd_mox import _path_utils as path_utils, _stdin_capture  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
 from cmd_mox._shim_failures import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
-    _ShimFailureContext,
+    _ShimEventContext,
+    _emit_shim_event,
     _emit_shim_failure,
     _exit_ipc_error,
     _write_response_stream,
@@ -210,16 +211,38 @@ def _capture_stdin(
     """
     stream = dependencies.stdin_stream
     stdin_started = dependencies.duration_clock()
+    selected: list[str | None] = []
 
-    def report_stdin_failure(exc: Exception, outcome: _StdinOutcome) -> typ.NoReturn:
+    def stdin_event(
+        outcome: _StdinOutcome, *, worker_alive: bool | None = None
+    ) -> _ShimEventContext:
+        """Build the bounded event describing one capture boundary.
+
+        Returns
+        -------
+        _ShimEventContext
+            Event carrying the selected strategy, worker state, and the
+            outstanding-worker count at this boundary.
+        """
+        return _ShimEventContext(
+            _SHIM_STDIN_READ_OPERATION,
+            outcome,
+            stdin_started,
+            invocation_id,
+            strategy=selected[0] if selected else None,
+            worker_alive=worker_alive,
+            outstanding_workers=len(_stdin_capture.outstanding_workers()),
+        )
+
+    def report_stdin_failure(
+        exc: Exception,
+        outcome: _StdinOutcome,
+        *,
+        worker_alive: bool | None = None,
+    ) -> typ.NoReturn:
         """Record a bounded stdin failure and terminate the shim."""
         _emit_shim_failure(
-            _ShimFailureContext(
-                _SHIM_STDIN_READ_OPERATION,
-                outcome,
-                stdin_started,
-                invocation_id,
-            ),
+            stdin_event(outcome, worker_alive=worker_alive),
             exc,
         )
         _exit_ipc_error(exc, operation="stdin_read")
@@ -228,18 +251,22 @@ def _capture_stdin(
         # The probe belongs inside the handler: a closed text stream raises
         # ValueError from ``isatty()`` itself, before any read is attempted.
         if stream.isatty():
+            _emit_shim_event(stdin_event("success"))
             return ""
-        return _stdin_capture.read_stdin(
+        text = _stdin_capture.read_stdin(
             typ.cast("_stdin_capture._StdinStream", stream),
             timeout,
             clock=dependencies.monotonic_clock,
+            on_selected=selected.append,
         )
     except StdinTimeoutError as exc:
         # A timed-out capture never contacts IPC: the command would otherwise
         # run with a truncated body the caller never finished sending.
-        report_stdin_failure(exc, "deadline_expired")
+        report_stdin_failure(exc, "deadline_expired", worker_alive=exc.worker_alive)
     except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
         report_stdin_failure(exc, "read_failed")
+    _emit_shim_event(stdin_event("success"))
+    return text
 
 
 def _create_invocation(
@@ -322,7 +349,7 @@ def _execute_invocation(
     Response
         Response returned by the server or passthrough command.
     """
-    failure = _ShimFailureContext(
+    failure = _ShimEventContext(
         _SHIM_IPC_REQUEST_OPERATION,
         "deadline_expired",
         time.perf_counter(),
@@ -430,7 +457,7 @@ def _exit_without_joining_workers(status: int) -> typ.NoReturn:
 def _dispatch_timeout(
     timeout: float,
     deadline: float | None,
-    failure: _ShimFailureContext,
+    failure: _ShimEventContext,
 ) -> float:
     """Check the shared budget and record expiry before client dispatch.
 
@@ -481,7 +508,7 @@ def _handle_passthrough(
     if directive is None:  # pragma: no cover - defensive guard
         return response
 
-    failure = _ShimFailureContext(
+    failure = _ShimEventContext(
         _SHIM_PASSTHROUGH_REPORT_OPERATION,
         "deadline_expired",
         time.perf_counter(),

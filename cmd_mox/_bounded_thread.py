@@ -16,6 +16,7 @@ pywin32 builds and from every non-Windows host, where the module stand-ins are
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import threading
 import time
 import typing as typ
@@ -34,6 +35,23 @@ _MAX_EVENT_WAIT: typ.Final[float] = threading.TIMEOUT_MAX
 # request landing between two blocking calls is retried promptly, long enough
 # that a cancel which does take effect is not immediately duplicated.
 _CANCEL_JOIN_SLICE: typ.Final[float] = 0.05
+
+type _MonotonicClock = cabc.Callable[[], float]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CancelPolicy:
+    """Bounded policy for unwinding a worker that owns a blocking call.
+
+    ``grace`` and ``clock`` belong together: the grace is measured with the
+    caller's clock, so a capture's deadline and its unwind policy share one
+    time source. ``request_cancel`` is re-issued across the wait rather than
+    spent once.
+    """
+
+    grace: float
+    request_cancel: cabc.Callable[[threading.Thread], None]
+    clock: _MonotonicClock = time.monotonic
 
 
 def stash_outcome[T](
@@ -248,15 +266,13 @@ def wait_for_finish(
 def cancel_and_await_worker(
     thread: threading.Thread,
     cancel: cabc.Callable[[], None],
-    *,
-    grace: float,
-    request_cancel: cabc.Callable[[threading.Thread], None],
+    policy: CancelPolicy,
 ) -> bool:
     """Abort the worker's I/O and wait, bounded, for the worker to exit.
 
     Returning before the worker has exited would leave a daemon thread owning
     a handle the caller believes it has released, so the wait is not optional;
-    it is merely bounded by *grace*.
+    it is merely bounded by ``policy.grace``.
 
     Parameters
     ----------
@@ -265,11 +281,11 @@ def cancel_and_await_worker(
     cancel:
         Fallback cancellation for the blocking resource, such as closing a
         pipe handle.
-    grace:
-        Maximum number of seconds to wait for the worker to unwind.
-    request_cancel:
-        Best-effort native cancellation, such as
-        :func:`request_synchronous_io_cancel`.
+    policy:
+        Grace, native cancellation request, and the clock that measures the
+        grace. Callers that already bound a capture with their own clock pass
+        it here so the cancellation policy and the capture deadline share one
+        time source.
 
     Returns
     -------
@@ -278,20 +294,33 @@ def cancel_and_await_worker(
 
     Notes
     -----
-    *request_cancel* is re-issued across the wait rather than spent once.
-    ``CancelSynchronousIo`` reports ``ERROR_NOT_FOUND`` when its target is
-    between blocking calls, and a chunked reader decodes between reads, so a
-    single attempt can land in that gap and be swallowed. Retrying costs one
+    ``policy.request_cancel`` is re-issued across the wait rather than spent
+    once. ``CancelSynchronousIo`` reports ``ERROR_NOT_FOUND`` when its target
+    is between blocking calls, and a chunked reader decodes between reads, so
+    a single attempt can land in that gap and be swallowed. Retrying costs one
     cheap native call per slice and keeps the graceful path reachable.
+
+    Each wait also draws down an accumulated budget, so a clock that does not
+    advance still bounds the loop instead of spinning on the same slice
+    forever; that keeps a capture's injected clock usable here without making
+    an unwinding worker wait indefinitely.
     """
-    deadline = time.monotonic() + grace
-    request_cancel(thread)
+    deadline = policy.clock() + policy.grace
+    remaining_budget = policy.grace
+    policy.request_cancel(thread)
     cancel()
     while thread.is_alive():
-        remaining = deadline - time.monotonic()
+        remaining = deadline - policy.clock()
         if remaining <= 0:
             break
-        thread.join(min(remaining, _CANCEL_JOIN_SLICE))
+        # As in ``wait_for_finish``, the accumulated budget bounds the wait
+        # when the supplied clock does not advance, so a stationary clock
+        # cannot spin on the same slice forever.
+        slice_ = min(remaining, remaining_budget, _CANCEL_JOIN_SLICE)
+        if slice_ <= 0:
+            break
+        thread.join(slice_)
+        remaining_budget -= slice_
         if thread.is_alive():
-            request_cancel(thread)
+            policy.request_cancel(thread)
     return not thread.is_alive()
