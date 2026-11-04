@@ -39,6 +39,26 @@ def test_prepare_passthrough_rejects_conflicting_env() -> None:
             mox._prepare_passthrough(spy, invocation)
 
 
+def test_prepare_passthrough_masks_conflicting_secret_env() -> None:
+    """The passthrough path propagates the masked conflict message."""
+    key = "GITHUB_KEY"
+    provided_value = "invocation-secret"
+    with CmdMox() as mox:
+        spy = mox.spy("echo").with_env({key: "expected-secret"}).passthrough()
+        invocation = Invocation(
+            command="echo", args=[], stdin="", env={key: provided_value}
+        )
+
+        with pytest.raises(
+            UnexpectedCommandError, match="conflicting environment"
+        ) as exc:
+            mox._prepare_passthrough(spy, invocation)
+
+        message = str(exc.value)
+        assert f"{key}='***'" in message, "Sensitive conflict was not masked"
+        assert provided_value not in message, "Invocation value leaked into the message"
+
+
 def test_handle_passthrough_result_rejects_unknown_invocation() -> None:
     """Unexpected passthrough results should raise a clear RuntimeError."""
     with CmdMox() as mox:

@@ -201,6 +201,15 @@ methods, raises `ExpectationConfigurationError` with the existing and attempted
 expectation configurations, with sensitive option values redacted. The error
 points to the `runs()` handler pattern for commands with several distinct calls.
 
+Diagnostics that print environment values mask sensitive ones with `***` while
+leaving the key name visible. That applies to conflict errors from
+`UnexpectedCommandError`, verifier failures, and spy assertion messages alike.
+Masking uses the same key vocabulary as recording redaction, so segment-style
+names such as `DB_PWD` and `GITHUB_KEY` are masked along with the `*_SECRET`,
+`*_TOKEN`, `*_PASSWORD`, and `*_API_KEY` families. Matching and recorded data
+stay raw; only the rendered message changes. A message that names no sensitive
+key is unchanged.
+
 Argument comparators support flexible matching:
 
 ```python

@@ -73,6 +73,25 @@ def test_response_for_regular_rejects_conflicting_env() -> None:
         mox._response_for_regular(double, invocation)
 
 
+def test_response_for_regular_masks_conflicting_secret_env() -> None:
+    """The regular path propagates the masked conflict message."""
+    key = "DB_PWD"
+    provided_value = "invocation-secret"
+    mox = CmdMox()
+    double = mox.mock("envcmd").with_env({key: "expected-secret"}).returns(stdout="ok")
+    invocation = Invocation(
+        command="envcmd", args=[], stdin="", env={key: provided_value}
+    )
+
+    with pytest.raises(UnexpectedCommandError, match="conflicting environment") as exc:
+        mox._response_for_regular(double, invocation)
+
+    message = str(exc.value)
+    assert f"{key}='***'" in message, "Sensitive conflict was not masked"
+    assert provided_value not in message, "Invocation value leaked into the message"
+    assert invocation.env == {key: provided_value}, "Conflict mutated the invocation"
+
+
 def test_response_for_regular_applies_env() -> None:
     """_response_for_regular uses temporary_env and propagates env in Response."""
     key = "SOME_VAR"

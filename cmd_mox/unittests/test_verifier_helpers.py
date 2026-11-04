@@ -31,17 +31,32 @@ def _double(kind: DoubleKind) -> CommandDouble:
         ("token", "value", "***"),
         ("PATH", "value", "value"),
         ("PATH", None, None),
+        # The narrower substring vocabulary missed these segment-style keys.
+        ("DB_PWD", "secret", "***"),
+        ("GITHUB_KEY", "secret", "***"),
+        ("SSH_PASSPHRASE", "secret", "***"),
+        ("AWS_CREDENTIALS", "secret", "***"),
+        ("MONKEY", "value", "value"),
+        ("HOME", "/home/test", "/home/test"),
     ],
     ids=[
         "sensitive-uppercase-key",
         "sensitive-lowercase-key",
         "safe-key",
         "safe-key-missing-value",
+        "sensitive-pwd-segment",
+        "sensitive-key-segment",
+        "sensitive-passphrase-segment",
+        "sensitive-credentials-segment",
+        "benign-near-miss",
+        "benign-home",
     ],
 )
-def test_mask_env_value(key: str, value: str | None, expected: str | None) -> None:
-    """Sensitive keys are obscured; safe keys and missing values pass through."""
-    assert v._mask_env_value(key, value) == expected
+def test_format_env_masks_with_the_shared_vocabulary(
+    key: str, value: str | None, expected: str | None
+) -> None:
+    """Verifier formatting agrees with the shared classifier for *key*."""
+    assert v._format_env({key: value}) == "{" + f"{key!r}: {expected!r}" + "}"
 
 
 def test_format_env_masks_and_sorts_entries() -> None:

@@ -17,6 +17,9 @@ import dataclasses as dc
 import re
 import typing as typ
 
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
+
 SENSITIVE_ENV_KEY_TOKENS: typ.Final[tuple[str, ...]] = (
     "secret",
     "token",
@@ -33,6 +36,11 @@ SENSITIVE_ENV_KEY_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
 
 _REPR_FIELD_LIMIT: typ.Final[int] = 256
 
+# One mask token for every diagnostic. It matches what the verifier and
+# spy-assertion messages have always printed, so adopting the shared helper
+# leaves non-sensitive messages byte-identical.
+REDACTED_VALUE: typ.Final[str] = "***"
+
 
 def is_sensitive_recording_env_key(key: str) -> bool:
     """Return whether *key* should be treated as secret-bearing in diagnostics.
@@ -47,6 +55,56 @@ def is_sensitive_recording_env_key(key: str) -> bool:
     return any(
         token in normalized_key for token in _SENSITIVE_ENV_KEY_TOKENS_CASEFOLDED
     ) or bool(SENSITIVE_ENV_KEY_PATTERN.search(key))
+
+
+def mask_env_value(key: str, value: str | None) -> str | None:
+    """Return *value* masked when *key* appears sensitive.
+
+    Parameters
+    ----------
+    key : str
+        Environment key used to identify sensitive values.
+    value : str or None
+        Value to mask. ``None`` stays ``None`` so a missing variable is
+        distinguishable from a hidden one.
+
+    Returns
+    -------
+    str or None
+        :data:`REDACTED_VALUE` for a sensitive key, otherwise *value*.
+
+    Examples
+    --------
+    >>> mask_env_value("DB_PWD", "hunter2")
+    '***'
+    >>> mask_env_value("LOG_LEVEL", "debug")
+    'debug'
+    """
+    if value is None:
+        return None
+    return REDACTED_VALUE if is_sensitive_recording_env_key(key) else value
+
+
+def mask_env_mapping(
+    mapping: cabc.Mapping[str, str | None],
+) -> dict[str, str | None]:
+    """Return a diagnostic-safe copy of *mapping*.
+
+    A new ``dict`` is built in the input's insertion order so callers can
+    ``repr()`` it without exposing secrets and without mutating raw invocation
+    or expectation data.
+
+    Parameters
+    ----------
+    mapping : collections.abc.Mapping
+        Environment values to mask.
+
+    Returns
+    -------
+    dict[str, str or None]
+        A new mapping with sensitive values replaced by :data:`REDACTED_VALUE`.
+    """
+    return {key: mask_env_value(key, value) for key, value in mapping.items()}
 
 
 def _shorten(text: str, limit: int = _REPR_FIELD_LIMIT) -> str:

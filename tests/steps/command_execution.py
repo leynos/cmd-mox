@@ -59,7 +59,12 @@ def _resolve_command(cmd: str) -> str:
     return cmd
 
 
-def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+def _run(
+    argv: list[str],
+    *,
+    check: bool,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Execute *argv* with consistent subprocess settings.
 
     Parameters
@@ -68,6 +73,9 @@ def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
         Command invocation, including arguments.
     check : bool
         When True, raise :class:`CalledProcessError` for non-zero exits.
+    env : dict[str, str] or None
+        Environment for the child process, inheriting ``os.environ`` when
+        omitted.
 
     Returns
     -------
@@ -81,6 +89,7 @@ def _run(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
         text=True,
         check=check,
         shell=False,
+        env=env,
     )
 
 
@@ -124,6 +133,26 @@ def run_command_failure(cmd: str) -> subprocess.CompletedProcess[str]:
         The completed command process and its captured output.
     """
     return _run([_resolve_command(cmd)], check=False)
+
+
+@when(
+    parsers.cfparse(
+        'I run the command "{cmd}" with env var "{var}"="{val}" expecting failure'
+    ),
+    target_fixture="result",
+)
+def run_command_env_failure(
+    cmd: str, var: str, val: str
+) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* with one environment override, expecting a non-zero status.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
+    env = os.environ | {var: val}
+    return _run([_resolve_command(cmd)], check=False, env=env)
 
 
 @when(

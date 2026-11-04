@@ -308,6 +308,33 @@ def test_verification_redacts_sensitive_environment_values() -> None:
 
 @scenario(
     str(FEATURES_DIR / "controller.feature"),
+    "verification redacts segment-sensitive PWD environment values",
+)
+def test_verification_redacts_pwd_segment_environment_values() -> None:
+    """Verification errors mask PWD-segment keys the substring pass missed."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "verification redacts segment-sensitive KEY environment values",
+)
+def test_verification_redacts_key_segment_environment_values() -> None:
+    """Verification errors mask KEY-segment keys the substring pass missed."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "environment conflicts mask sensitive invocation values",
+)
+def test_environment_conflicts_mask_sensitive_invocation_values() -> None:
+    """Conflict errors mask secrets while keeping the key and wording visible."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
     "verification reports missing invocations",
 )
 def test_verification_reports_missing_invocations() -> None:

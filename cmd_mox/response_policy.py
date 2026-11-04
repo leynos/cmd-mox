@@ -14,6 +14,7 @@ from __future__ import annotations
 import enum
 import typing as typ
 
+from .domain import mask_env_value
 from .errors import UnexpectedCommandError
 
 if typ.TYPE_CHECKING:
@@ -74,7 +75,9 @@ def apply_expectation_env(
     }
 
     if conflicts:
-        conflict_list = ", ".join(f"{k}={v!r}" for k, v in conflicts.items())
+        conflict_list = ", ".join(
+            f"{key}={mask_env_value(key, value)!r}" for key, value in conflicts.items()
+        )
         msg = (
             f"Invocation for {invocation.command!r} provided conflicting "
             f"environment values: {conflict_list}"

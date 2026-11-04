@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 import typing as typ
 
+from .domain import mask_env_mapping
 from .expectations import Expectation
 from .ipc import Invocation, Response
 
@@ -573,7 +574,8 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             msg = (
                 f"Expected {self.name!r} to be uncalled but it was called"
                 f" {len(self.invocations)} time(s); "
-                f"last args={last.args!r}, stdin={last.stdin!r}, env={last.env!r}"
+                f"last args={last.args!r}, stdin={last.stdin!r}, "
+                f"env={mask_env_mapping(last.env)!r}"
             )
             raise AssertionError(msg)
 
@@ -622,11 +624,19 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             raise AssertionError(msg)
         return self.invocations[-1]
 
-    def _assert_equal[T](self, label: str, actual: T, expected: T) -> None:
+    def _assert_equal[T](
+        self,
+        label: str,
+        actual: T,
+        expected: T,
+        *,
+        render: cabc.Callable[[T], str] = repr,
+    ) -> None:
         """Raise ``AssertionError`` if *actual* != *expected*.
 
         The *label* provides contextual information for the error message,
-        yielding a consistent formatting across different validations.
+        yielding a consistent formatting across different validations. Change
+        *render* only for diagnostics that must not print the raw values.
 
         Raises
         ------
@@ -634,7 +644,10 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
             If ``actual`` and ``expected`` differ.
         """
         if actual != expected:
-            msg = f"{self.name!r} called with {label} {actual!r}, expected {expected!r}"
+            msg = (
+                f"{self.name!r} called with {label} {render(actual)}, "
+                f"expected {render(expected)}"
+            )
             raise AssertionError(msg)
 
     def _validate_arguments(
@@ -661,7 +674,16 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def _validate_environment(
         self, invocation: Invocation, expected_env: dict[str, str] | None
     ) -> None:
-        self._validate_optional_attr("env", invocation.env, expected_env)
+        # ``None`` still means "unconstrained", but the comparison must stay on
+        # the raw mappings; only the failure message is rendered from masked
+        # copies so recorded and expected data are never mutated.
+        if expected_env is not None:
+            self._assert_equal(
+                "env",
+                invocation.env,
+                expected_env,
+                render=lambda mapping: repr(mask_env_mapping(mapping)),
+            )
 
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response.
