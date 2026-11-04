@@ -41,11 +41,13 @@ def run(program: str, *arguments: str, cwd: Path) -> subprocess.CompletedProcess
     assert executable is not None, f"{program} is not on PATH"
     # An outer `make test` exports MAKEFLAGS and MAKELEVEL, which change what a
     # nested `make` prints and which jobserver it joins; the targets under test
-    # run in a clean Make environment.
+    # run in a clean Make environment. An inherited GIT_DIR or GIT_WORK_TREE
+    # would point Git at another repository, so those are dropped too.
     environment = {
         name: value
         for name, value in os.environ.items()
         if name not in {"MAKEFLAGS", "MAKELEVEL", "MFLAGS", "MAKEOVERRIDES"}
+        and not name.startswith("GIT_")
     }
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
         [executable, *arguments],
@@ -169,8 +171,8 @@ def test_the_real_yamllint_fails_strictly_on_a_tracked_warning_only(
     """A tracked finding fails the gate and an untracked one does not."""
     repo = git_repo(
         tmp_path / "repo",
-        {"good.yml": "key: value\n", "bad.yml": "key: value \n"},
-        {"untracked-bad.yml": "key: value \n"},
+        {"good.yml": "key: value\n", "bad.yml": "enabled: yes\n"},
+        {"untracked-bad.yml": "enabled: yes\n"},
     )
     for name in (".yamllint-estate.yml", ".yamllint.yml"):
         shutil.copy(REPO_ROOT / name, repo / name)
@@ -184,3 +186,47 @@ def test_the_real_yamllint_fails_strictly_on_a_tracked_warning_only(
     assert "bad.yml" in failing.stdout, failing.stdout
     assert "untracked-bad.yml" not in failing.stdout, failing.stdout
     assert passing.returncode == 0, passing.stdout
+
+
+def test_yamllint_fails_when_git_cannot_read_index(tmp_path: Path) -> None:
+    """A broken index must fail before the linter is invoked."""
+    repo = git_repo(tmp_path / "repo", {"a.yml": "a: 1\n"}, {})
+    (repo / ".git" / "index").write_bytes(b"broken")
+    tool = fake_tool(tmp_path / "yamllint", 0)
+    result = run_make("yamllint", repo, YAMLLINT=str(tool))
+    assert result.returncode != 0, "a broken index did not fail the target"
+    assert not Path(f"{tool}.log").exists(), "the linter ran despite the failed list"
+
+
+def test_git_repository_environment_is_not_inherited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Temporary repositories cannot modify an inherited repository index."""
+    outer = git_repo(tmp_path / "outer", {"outer.yml": "a: 1\n"}, {})
+    monkeypatch.setenv("GIT_DIR", str(outer / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(outer))
+    inner = git_repo(tmp_path / "inner", {"inner.yml": "b: 2\n"}, {})
+    result = run("git", "ls-files", cwd=inner)
+    assert result.stdout.splitlines() == ["inner.yml"], result.stdout
+    assert run("git", "ls-files", cwd=outer).stdout.splitlines() == ["outer.yml"], (
+        "the inherited repository environment leaked into the temporary one"
+    )
+
+
+def test_yamllint_does_not_run_after_partial_git_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed enumeration must not send even partial output to the linter."""
+    repo = git_repo(tmp_path / "repo", {"a.yml": "a: 1\n"}, {})
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    git = bindir / "git"
+    git.write_text("#!/bin/sh\nprintf 'a.yml\\0'\nexit 1\n", encoding="utf-8")
+    git.chmod(git.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    tool = fake_tool(tmp_path / "yamllint", 0)
+    result = run_make("yamllint", repo, YAMLLINT=str(tool))
+    assert result.returncode != 0, "a failed enumeration did not fail the target"
+    assert not Path(f"{tool}.log").exists(), (
+        "the linter ran on partial output from the failed enumeration"
+    )

@@ -23,11 +23,57 @@ from .support import (
     jobs,
 )
 
+GUARDED = (
+    "lint: yamllint actionlint\n"
+    "yamllint:\n"
+    "\tgit ls-files -z '*.yml' '*.yaml' >\"$$tmp\" && \\\n"
+    '\txargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"\n'
+    "actionlint:\n\t$(ACTIONLINT)\n"
+)
+
 
 @pytest.mark.parametrize(
     ("makefile", "wired"),
     [
-        pytest.param(GOOD, True, id="wired"),
+        pytest.param(GOOD, True, id="wired with pipefail"),
+        pytest.param(
+            GOOD.replace("set -o pipefail && ", ""), False, id="unguarded pipeline"
+        ),
+        pytest.param(
+            GOOD.replace("set -o pipefail && ", "set -o pipefail\n\t"),
+            False,
+            id="pipefail in separate shell",
+        ),
+        pytest.param(
+            GUARDED.replace('<"$$tmp"\n', '<"$$tmp" || exit 0\n'),
+            False,
+            id="guarded lint exit zero",
+        ),
+        pytest.param(
+            GUARDED.replace("$(ACTIONLINT)\n", "$(ACTIONLINT) || exit 0\n"),
+            False,
+            id="actionlint exit zero",
+        ),
+        pytest.param(GUARDED, True, id="guarded"),
+        pytest.param(
+            GUARDED.replace("\tgit ls-files", "\t-git ls-files") + GUARDED,
+            False,
+            id="guarded bypass alongside sound command",
+        ),
+        *[
+            pytest.param(
+                GUARDED.replace(f"\t{command}", f"\t{prefix}{command}"),
+                False,
+                id=f"guarded {command} prefixed {prefix}",
+            )
+            for command in ("git ls-files", "xargs")
+            for prefix in ("-", "@-", "! ")
+        ],
+        pytest.param(
+            GOOD.replace("--strict --\n", "--strict -- || :\n"),
+            False,
+            id="yamllint failure ignored by colon",
+        ),
         pytest.param(GOOD.replace(" --strict", ""), False, id="not strict"),
         pytest.param(GOOD.replace(" '*.yaml'", ""), False, id="one pathspec"),
         pytest.param(
@@ -56,12 +102,12 @@ from .support import (
             id="yamllint failure ignored",
         ),
         pytest.param(
-            GOOD.replace("\tgit ls-files", "\t-git ls-files"),
+            GOOD.replace("\tset -o pipefail", "\t-set -o pipefail"),
             False,
             id="yamllint prefixed with a dash",
         ),
         pytest.param(
-            GOOD.replace("\tgit ls-files", "\t! git ls-files"),
+            GOOD.replace("\tset -o pipefail", "\t! set -o pipefail"),
             False,
             id="yamllint negated",
         ),
@@ -123,6 +169,16 @@ def test_the_gate_judgement_detects_each_defect(makefile: str, *, wired: bool) -
         ),
         pytest.param(
             gate(f"- uses: {PINNED}", "- run: make lint || true"), False, id="ignored"
+        ),
+        pytest.param(
+            gate(f"- uses: {PINNED}", "- run: make lint || exit 0"),
+            False,
+            id="ignored by exit zero",
+        ),
+        pytest.param(
+            gate(f"- uses: {PINNED}", "- run: make lint || :"),
+            False,
+            id="ignored by colon",
         ),
         pytest.param(
             gate(

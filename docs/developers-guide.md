@@ -493,4 +493,5 @@ working directory. `.github/actionlint.yaml` declares the `ubicloud-*` runner
 labels. `tests/yaml_lint/` judges the Makefile and workflow wiring against
 fixtures and then the real files, pins the estate base, and runs the Make
 targets with stand-in tools (and the real yamllint when installed) to prove the
-tracked-files list and that a tool failure fails its target.
+tracked-files list, that a tool failure fails its target, and that a failed
+file enumeration stops the gate before the linter runs.

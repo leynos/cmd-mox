@@ -179,8 +179,13 @@ ACTIONLINT ?= actionlint
 
 # yamllint reads `.yamllint.yml`, which extends `.yamllint-estate.yml`, and
 # resolves that path against the working directory, so it runs from the root.
+# The file list is staged before the linter starts: if Git fails partway
+# through, `&&` stops the recipe instead of linting a partial list.
 yamllint: ## Lint every tracked YAML file strictly
-	git ls-files -z '*.yml' '*.yaml' | xargs -0 -r $(YAMLLINT) --strict --
+	@tmp=$$(mktemp) || exit 1; \
+	trap 'rm -f "$$tmp"' EXIT; \
+	git ls-files -z '*.yml' '*.yaml' >"$$tmp" && \
+	xargs -0 -r $(YAMLLINT) --strict -- <"$$tmp"
 
 actionlint: ## Lint the GitHub Actions workflows, including their shell scripts
 	$(ACTIONLINT)

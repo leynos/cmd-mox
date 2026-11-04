@@ -25,7 +25,7 @@ def code_lines(text: str) -> list[str]:
 GOOD = (
     "lint: yamllint actionlint\n"
     "yamllint:\n"
-    f"\t{PIPE} $(YAMLLINT) --strict --\n"
+    f"\tset -o pipefail && {PIPE} $(YAMLLINT) --strict --\n"
     "actionlint:\n"
     "\t$(ACTIONLINT)\n"
 )
