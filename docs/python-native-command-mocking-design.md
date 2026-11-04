@@ -3031,8 +3031,9 @@ helper in `cmd_mox.domain`:
   environment conflicts with an expectation. The key name stays visible, only
   the conflicting invocation value is masked, and expected values are still
   omitted from the message.
-- Verifier diagnostics, whose Expected, Actual, and Reason sections all render
-  through the masked formatter.
+- Verifier diagnostics, whose Expected and Actual sections render through the
+  masked formatter. Their Reason section carries the mismatch description from
+  `Expectation.explain_mismatch`, which masks independently as described below.
 - Spy assertion failures from `assert_not_called` and
   `assert_called_with(env=...)`, which mask both the recorded and the expected
   mappings.
