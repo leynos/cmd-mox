@@ -3,12 +3,27 @@
 Create :class:`Invocation` and :class:`Response` values for handlers and
 recording. Existing imports from :mod:`cmd_mox.ipc` expose the same classes.
 
+This module also owns the shared sensitive-environment classifier,
+:func:`is_sensitive_recording_env_key`, and the masking helpers built on it:
+:func:`mask_env_value` and :func:`mask_env_mapping`. Recording subset
+filtering, argument redaction, and the diagnostic messages of the response
+policy, verifiers, and spy assertions all consult the same vocabulary, so a
+key is classified once and consistently everywhere.
+
+Masking is a formatting concern. The helpers return new values and never
+mutate the invocation or expectation data they are given; matching and
+recording continue to compare and store raw values. The classifier is
+deliberately coarse: a false positive hides one value from a diagnostic, while
+a false negative discloses a credential.
+
 Examples
 --------
 >>> invocation = Invocation("git", ["status"], "", {})
 >>> invocation.apply(Response(stdout="ok"))
 >>> invocation.stdout
 'ok'
+>>> mask_env_mapping({"DB_PWD": "hunter2", "PATH": "/bin"})
+{'DB_PWD': '***', 'PATH': '/bin'}
 """
 
 from __future__ import annotations
@@ -42,9 +57,10 @@ SENSITIVE_ENV_KEY_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
 
 _REPR_FIELD_LIMIT: typ.Final[int] = 256
 
-# One mask token for every diagnostic. It matches what the verifier and
-# spy-assertion messages have always printed, so adopting the shared helper
-# leaves non-sensitive messages byte-identical.
+# The mask token used by the conflict, verifier, and spy-assertion messages.
+# It matches what those messages have always printed, so adopting the shared
+# helper leaves non-sensitive messages byte-identical. It is not universal:
+# ``Invocation.__repr__`` keeps its own ``<redacted>`` token.
 REDACTED_VALUE: typ.Final[str] = "***"
 
 

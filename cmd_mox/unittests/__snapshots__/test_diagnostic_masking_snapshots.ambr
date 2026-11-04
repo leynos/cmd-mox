@@ -1,0 +1,23 @@
+# serializer version: 1
+# name: test_conflict_message_snapshot
+  "Invocation for 'deploy' provided conflicting environment values: DB_PWD='***', LOG_LEVEL='debug'"
+# ---
+# name: test_spy_message_snapshot
+  "'deploy' called with env {'DB_PWD': '***', 'LOG_LEVEL': 'debug'}, expected {'DB_PWD': '***', 'LOG_LEVEL': 'debug'}"
+# ---
+# name: test_verifier_message_snapshot
+  '''
+  Unexpected command invocation.
+  
+  Expected:
+    deploy('--flag')
+    env={'DOCKER_AUTH_CONFIG': '***'}
+  
+  Actual:
+    deploy('--flag')
+    env={'DOCKER_AUTH_CONFIG': '***'}
+  
+  Reason:
+    env['DOCKER_AUTH_CONFIG']='***' != '***'
+  '''
+# ---
