@@ -21,7 +21,9 @@ dev = [
     "pytest-xdist",
     "pytest-timeout",
     "syrupy",
-    "pytest-bdd",
+    # 9.0.1 is the first release that reads pytest 9.2's node-indexed fixture
+    # registry; 9.0.0 crashes every step lookup with AttributeError.
+    "pytest-bdd>=9.0.1",
     "parse_type",
     "pyyaml>=6.0.3",
 ]
