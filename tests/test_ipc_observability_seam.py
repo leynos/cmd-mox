@@ -108,6 +108,36 @@ def test_event_as_extra_omits_inapplicable_fields() -> None:
     }, "Inapplicable fields must be omitted"
 
 
+def test_stdin_capture_dimensions_are_logged_but_only_strategy_is_counted() -> None:
+    """Capture telemetry records worker state without expanding counter keys."""
+    event = _observability.IPCEvent(
+        operation="ipc.shim.stdin_read",
+        outcome="deadline_expired",
+        strategy="fallback",
+        worker_alive=False,
+        outstanding_workers=1,
+    )
+
+    fields = event.as_extra()
+    assert fields["strategy"] == "fallback", "The strategy was not logged"
+    assert fields["worker_alive"] is False, (
+        "An explicit False worker outcome was dropped from the log fields"
+    )
+    assert fields["outstanding_workers"] == 1, "The worker count was not logged"
+
+    key = event.key()
+    assert key == _observability.EventKey(
+        "ipc.shim.stdin_read",
+        None,
+        None,
+        "deadline_expired",
+        None,
+        None,
+        None,
+        "fallback",
+    ), "Only the strategy may join the counter key; worker state must stay out"
+
+
 def test_emit_counts_events_by_bounded_key() -> None:
     """Counter keys retain selection/cache dimensions and ignore correlation."""
     _observability.reset_counters()

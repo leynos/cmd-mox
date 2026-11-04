@@ -77,7 +77,12 @@ _COUNTER_ERROR_CATEGORIES: typ.Final[frozenset[str]] = _BACKEND_ERROR_CATEGORIES
 
 
 class EventKey(typ.NamedTuple):
-    """Bounded dimensions identifying one class of emitted event."""
+    """Bounded dimensions identifying one class of emitted event.
+
+    ``strategy`` is the bounded stdin capture strategy. ``worker_alive`` and
+    ``outstanding_workers`` stay out of the key: the first adds no diagnostic
+    dimension beyond the outcome, and the second has unbounded cardinality.
+    """
 
     operation: str
     transport: str | None
@@ -86,6 +91,7 @@ class EventKey(typ.NamedTuple):
     cache_name: str | None
     cache_outcome: str | None
     error_category: str | None
+    strategy: str | None = None
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -121,6 +127,12 @@ class IPCEvent:
     correlation_id:
         Opaque identifier shared by the client and server records for one
         request. Never derived from request content.
+    strategy:
+        Closed-set stdin capture strategy, e.g. ``"poll"`` or ``"fallback"``.
+    worker_alive:
+        Whether a reader worker was still blocked when the capture ended.
+    outstanding_workers:
+        Number of abandoned reader workers still registered at that moment.
     """
 
     operation: str
@@ -135,6 +147,9 @@ class IPCEvent:
     duration_ms: float | None = None
     message_size: int | None = None
     correlation_id: str | None = None
+    strategy: str | None = None
+    worker_alive: bool | None = None
+    outstanding_workers: int | None = None
 
     def as_extra(self) -> dict[str, EventField]:
         """Render the event as structured logging fields.
@@ -160,6 +175,9 @@ class IPCEvent:
             "duration_ms": self.duration_ms,
             "message_size": self.message_size,
             "correlation_id": self.correlation_id,
+            "strategy": self.strategy,
+            "worker_alive": self.worker_alive,
+            "outstanding_workers": self.outstanding_workers,
         }
         return {name: value for name, value in fields.items() if value is not None}
 
@@ -184,6 +202,7 @@ class IPCEvent:
             self.cache_name,
             self.cache_outcome,
             counter_error_category,
+            self.strategy,
         )
 
 
