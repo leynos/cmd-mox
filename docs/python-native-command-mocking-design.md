@@ -762,6 +762,16 @@ features that are infeasible with file-based logging.
   `os._exit`, which does not wait for them. `main()` itself never calls
   `os._exit`, so an in-process caller receives `SystemExit` and keeps
   responsibility for the stream.
+
+  Capture reads at the descriptor or handle layer, because that is the only
+  layer whose read can be bounded and, on Windows, cancelled. It therefore
+  cannot see data Python has already buffered above that layer: after a partial
+  `sys.stdin.read()`, the remaining text can live in the `TextIOWrapper` while
+  the descriptor is already at EOF, and no public, non-blocking API reports
+  that state. The shim captures stdin before anything else reads it, so the
+  supported entry point never starts in that state. An in-process caller that
+  has already read from `sys.stdin` is outside the contract, and the same
+  limitation applies to the POSIX polled and regular-file strategies.
 - The shim sends a shallow copy of ``os.environ`` to the IPC server. This
   captures environment variables at call time without mutating the caller's
   process state.

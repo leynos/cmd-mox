@@ -483,6 +483,23 @@ def _await_worker[T](func: cabc.Callable[[], T], spec: _WorkerSpec) -> T:
     raise StdinTimeoutError(spec.timeout, worker_alive=worker.is_alive())
 
 
+def _worker_spec(capture: _Capture, abandon: _Abandon) -> _WorkerSpec:
+    """Build the reader-worker spec shared by every capture strategy.
+
+    Returns
+    -------
+    _WorkerSpec
+        The shared worker configuration, using *abandon* for cancellation.
+    """
+    return _WorkerSpec(
+        name="cmd-mox-stdin-reader",
+        timeout=capture.timeout,
+        deadline=capture.deadline,
+        clock=capture.clock,
+        abandon=abandon,
+    )
+
+
 def _do_not_cancel(_worker: threading.Thread) -> None:
     """Leave *worker* blocked; the fallback read cannot be interrupted."""
 
@@ -495,16 +512,7 @@ def _read_fallback(capture: _Capture) -> str:
     str
         The stream's text, read through EOF.
     """
-    return _await_worker(
-        capture.stream.read,
-        _WorkerSpec(
-            name="cmd-mox-stdin-reader",
-            timeout=capture.timeout,
-            deadline=capture.deadline,
-            clock=capture.clock,
-            abandon=_do_not_cancel,
-        ),
-    )
+    return _await_worker(capture.stream.read, _worker_spec(capture, _do_not_cancel))
 
 
 def _read_regular_file(capture: _Capture) -> str:
@@ -529,16 +537,7 @@ def _read_regular_file(capture: _Capture) -> str:
         chunks.append(_decode(decoder, b""))
         return "".join(chunks)
 
-    return _await_worker(
-        read_all,
-        _WorkerSpec(
-            name="cmd-mox-stdin-reader",
-            timeout=capture.timeout,
-            deadline=capture.deadline,
-            clock=capture.clock,
-            abandon=_do_not_cancel,
-        ),
-    )
+    return _await_worker(read_all, _worker_spec(capture, _do_not_cancel))
 
 
 def _read_win32(capture: _Capture) -> str:
@@ -570,12 +569,9 @@ def _read_win32(capture: _Capture) -> str:
             handle,
             _stdin_decoder(capture.stream),
         ),
-        _WorkerSpec(
-            name="cmd-mox-stdin-reader",
-            timeout=capture.timeout,
-            deadline=capture.deadline,
-            clock=capture.clock,
-            abandon=partial(_abandon_win32_reader, request_cancel=request_cancel),
+        _worker_spec(
+            capture,
+            partial(_abandon_win32_reader, request_cancel=request_cancel),
         ),
     )
 

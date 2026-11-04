@@ -8,6 +8,8 @@ diagnostic rather than an escaping traceback.
 from __future__ import annotations
 
 import sys
+import threading
+import types
 import typing as typ
 
 import pytest
@@ -285,7 +287,13 @@ def test_worker_start_failure_uses_controlled_exit(
             """
             return "unreachable"
 
-    monkeypatch.setattr(capture.threading, "Thread", _FailingThread)
+    # Patch the module's ``threading`` reference rather than the stdlib module
+    # itself, so the failing thread cannot leak into unrelated tests.
+    monkeypatch.setattr(
+        capture,
+        "threading",
+        types.SimpleNamespace(Event=threading.Event, Thread=_FailingThread),
+    )
     monkeypatch.setattr(sys, "stdin", _StreamWithoutDescriptor())
     monkeypatch.setattr(sys, "argv", ["shim"])
 

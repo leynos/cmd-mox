@@ -839,13 +839,13 @@ temporary PyPy Pylint baseline.
 
 The enforced module ceiling is the DF12 tier's 800 lines, not the 400 that
 `[tool.pylint.main]` sets: `Makefile` disables `too-many-lines` for the classic
-pass. Note also that `cmd_mox/unittests/` and `tests/` carry no `__init__.py`,
-so Pylint's recursive walk from a directory target never descends into them;
-`too-many-lines` and the other design rules apply to test modules only when a
-gate names the file directly. `make lint` therefore does not catch an oversized
-test module, which is why review remains the check for this limit. Keep test
-modules split by strategy so the ceiling is satisfied when a named-file run
-does happen.
+pass. Coverage of the two test trees differs. `tests/` is an explicit
+`PYLINT_TARGETS` entry and carries no `__init__.py`, so Pylint's recursive walk
+treats it as a plain directory and checks every module in it; the ceiling does
+apply there. `cmd_mox/unittests/` is not covered: `cmd_mox` is a package, so
+the walk stops at that package boundary and never descends into the
+subdirectory. Keep test modules split by strategy so the ceiling is satisfied
+where it is enforced, and treat review as the check for the uncovered tree.
 
 ### Skylos tables
 

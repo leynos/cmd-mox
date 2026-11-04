@@ -15,6 +15,7 @@ import contextlib
 import os
 import subprocess
 import threading
+import time
 import typing as typ
 
 from cmd_mox import create_shim_symlinks
@@ -29,9 +30,14 @@ if typ.TYPE_CHECKING:
 
 _COMMAND = "bounded-shim"
 _SHIM_TIMEOUT = 0.25
-# Deliberately far above ``_SHIM_TIMEOUT``. The assertion is that the shim exits
-# at all while its stdin writer is still open, not that it exits exactly on the
-# deadline, so only a genuinely hung process should trip this bound.
+# The shim must give up on stdin shortly after ``_SHIM_TIMEOUT``. The bound
+# allows for interpreter start-up and, on Windows, the cancellation grace that
+# is additional to the capture deadline, while still failing a shim that waits
+# for EOF instead of its deadline.
+_EXIT_BOUND = 4.0
+# A backstop for the wait itself, so a shim that never exits cannot hang the
+# suite. It is deliberately looser than ``_EXIT_BOUND`` so that the elapsed-time
+# assertion, not this timeout, reports the failure.
 _REAP_TIMEOUT = 10.0
 # Reached as soon as the shim's write ends close. The join is only a guard for a
 # child that leaked an inherited handle, which ``_REAP_TIMEOUT`` also catches;
@@ -112,6 +118,7 @@ def test_stalled_stdin_exits_while_the_writer_stays_open(tmp_path: Path) -> None
     """A stdin pipe held open past the deadline ends the shim with status 1."""
     stdout: list[bytes] = []
     stderr: list[bytes] = []
+    started = time.monotonic()
     with subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] - argv names a test-created shim
         _shim_arguments(_install_shim(tmp_path)),
         stdin=subprocess.PIPE,
@@ -130,6 +137,7 @@ def test_stalled_stdin_exits_while_the_writer_stays_open(tmp_path: Path) -> None
             # by giving up on its read. ``communicate`` would close that end
             # for us and quietly turn this into an ordinary EOF test.
             process.wait(timeout=_REAP_TIMEOUT)
+            elapsed = time.monotonic() - started
             for reader in readers:
                 reader.join(timeout=_DRAIN_TIMEOUT)
             assert not any(reader.is_alive() for reader in readers), (
@@ -146,6 +154,11 @@ def test_stalled_stdin_exits_while_the_writer_stays_open(tmp_path: Path) -> None
 
     assert process.returncode == 1, (
         f"a stalled stdin read must exit 1, got {process.returncode}"
+    )
+    assert elapsed < _EXIT_BOUND, (
+        f"the shim took {elapsed:.2f}s to give up on stdin, which exceeds the "
+        f"{_EXIT_BOUND:g}s bound; it may be waiting for EOF instead of its "
+        "deadline"
     )
     assert b"".join(stdout) == b"", "stdin expiry must not write response stdout"
     assert b"".join(stderr) == _as_written(
