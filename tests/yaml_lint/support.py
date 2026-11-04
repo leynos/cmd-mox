@@ -248,6 +248,14 @@ def is_job_header(line: str) -> bool:
     return line.startswith("  ") and not line.startswith("   ")
 
 
+def record_job_line(line: str, found: list[list[str]]) -> None:
+    """Start a new job for a header, else append the line to the current job."""
+    if is_job_header(line):
+        found.append([])
+    elif found:
+        found[-1].append(line.strip())
+
+
 def jobs(workflow: str) -> list[list[str]]:
     """Split a workflow into its jobs, each as its code lines.
 
@@ -270,10 +278,8 @@ def jobs(workflow: str) -> list[list[str]]:
             continue
         if not code.startswith(" "):
             in_jobs = code.rstrip() == "jobs:"
-        elif in_jobs and is_job_header(code):
-            found.append([])
-        elif in_jobs and found:
-            found[-1].append(code.strip())
+        elif in_jobs:
+            record_job_line(code, found)
     return found
 
 
