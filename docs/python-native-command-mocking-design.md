@@ -1949,8 +1949,8 @@ unordered calls are handled.
 The verifiers now emit diff-style diagnostics that show the expected call, the
 actual invocation, and any mismatching context such as stdin or environment
 variables. Environment values are passed through `mask_env_value` in
-:mod:`cmd_mox.domain`, the single diagnostic masking helper, so failure
-messages remain safe to copy into bug reports. The helper builds on
+:mod:`cmd_mox.domain`, the shared formatter for diff-style diagnostics, so
+failure messages remain safe to copy into bug reports. The helper builds on
 `is_sensitive_recording_env_key`, the classifier that recording redaction and
 expectation mismatch reasons already use, which masks segment-style keys such as
 `DB_PWD`, `GITHUB_KEY`, `*_PASSPHRASE`, and `*_CREDENTIALS` as well as the
@@ -3023,9 +3023,9 @@ original values.
 
 #### 9.9.4 Environment values in error diagnostics
 
-Every diagnostic that renders an environment value masks sensitive entries with
-`***` through the same domain helper. That covers the three error sources an
-invocation can reach:
+Every diagnostic that renders an environment value masks sensitive entries,
+using `***` as the mask token. Three of those paths share the `mask_env_value`
+helper in `cmd_mox.domain`:
 
 - `UnexpectedCommandError` raised by `apply_expectation_env` when an invocation
   environment conflicts with an expectation. The key name stays visible, only
@@ -3036,6 +3036,14 @@ invocation can reach:
 - Spy assertion failures from `assert_not_called` and
   `assert_called_with(env=...)`, which mask both the recorded and the expected
   mappings.
+
+Other paths mask values themselves under the same classification policy rather
+than calling that helper. `Expectation._explain_env_mismatch` tests
+`is_sensitive_recording_env_key` inline and substitutes `***` for the
+mismatching values, and `Invocation.__repr__` substitutes its own `<redacted>`
+token for the same sensitive keys. The policy is shared, but the formatter and
+the mask token are not: expect `<redacted>` where an `Invocation` is
+interpolated directly and `***` everywhere else.
 
 Masking happens where each diagnostic string is built, so the IPC server's
 `str(exc)` forwarding to the shim's standard error needs no sanitizer of its
