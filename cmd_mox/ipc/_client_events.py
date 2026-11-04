@@ -1,12 +1,10 @@
 """Client-side observability vocabulary for the IPC transports.
 
 This module owns the operation names, correlation-identifier derivation, and
-event shapes used by :mod:`cmd_mox.ipc.client`. It depends only on the
-transport-neutral seam in :mod:`cmd_mox.ipc._observability` and on the
-transport-neutral request core in :mod:`cmd_mox.ipc._server_core`, neither of
-which imports a transport, so it introduces no import cycle. Every field
-emitted here is a bounded dimension; see the observability module's never-log
-list.
+event shapes used by :mod:`cmd_mox.ipc.client`. It depends only on the shared
+observability seam and the transport-neutral correlation validator, so it
+introduces no import cycle. Every field emitted here is a bounded dimension;
+see the observability module's never-log list.
 """
 
 from __future__ import annotations
@@ -17,9 +15,9 @@ import typing as typ
 import uuid
 
 from cmd_mox import _path_utils as path_utils
+from cmd_mox._correlation import bounded_correlation_id
 
 from . import _observability
-from ._server_core import bounded_correlation_id
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -51,9 +49,9 @@ def resolve_correlation_id(data: cabc.Mapping[str, typ.Any]) -> str:
     absent, empty, over-long, or non-conforming value is treated as no
     identifier at all and a fresh opaque UUID is minted instead; identifiers are
     never derived from request content, never exceed
-    :data:`~cmd_mox.ipc._server_core.MAX_CORRELATION_ID_LENGTH` characters, and
+    :data:`~cmd_mox._correlation.MAX_CORRELATION_ID_LENGTH` characters, and
     are always drawn from the log-safe alphabet
-    :func:`~cmd_mox.ipc._server_core.bounded_correlation_id` accepts.
+    :func:`~cmd_mox._correlation.bounded_correlation_id` accepts.
 
     Parameters
     ----------

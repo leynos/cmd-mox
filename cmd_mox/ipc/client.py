@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses as dc
-import importlib
 import json
 import os
 import random
@@ -12,6 +11,7 @@ import socket
 import threading
 import time
 import typing as typ
+from functools import partial
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
@@ -28,32 +28,23 @@ from cmd_mox.ipc.windows import (
     PIPE_CHUNK_SIZE,
     PipeReadOptions,
     derive_pipe_name,
+    pywintypes,
     read_pipe_message,
+    win32api,
+    win32file,
+    win32pipe,
     write_pipe_payload,
 )
 
-from . import _client_events, _observability
+from . import _client_events, _observability, wire
+from ._deadline import _compute_deadline, _remaining_time
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
-from .models import Invocation, PassthroughResult, Response
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
-if path_utils.IS_WINDOWS:  # pragma: win32-only
-    try:
-        pywintypes = importlib.import_module("pywintypes")
-        win32api = importlib.import_module("win32api")
-        win32file = importlib.import_module("win32file")
-        win32pipe = importlib.import_module("win32pipe")
-    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
-        msg = "pywin32 is required for Windows named pipe support"
-        raise RuntimeError(msg) from exc
-else:  # pragma: no cover - satisfies type-checkers on non-Windows hosts
-    pywintypes = typ.cast("typ.Any", None)
-    win32api = typ.cast("typ.Any", None)
-    win32file = typ.cast("typ.Any", None)
-    win32pipe = typ.cast("typ.Any", None)
+    from cmd_mox.domain import Invocation, PassthroughResult, Response
 
 DEFAULT_CONNECT_RETRIES: typ.Final[int] = 3
 DEFAULT_CONNECT_BACKOFF: typ.Final[float] = 0.05
@@ -100,16 +91,12 @@ class RetryStrategy:
 
 @dc.dataclass(frozen=True, slots=True)
 class _ConnectionContext:
-    """Per-request connection parameters shared by both client transports.
-
-    Bundling the timeout, retry configuration, and correlation identifier keeps
-    the transport helpers within the project's argument-count limit and lets the
-    identifier reach the retry seam without widening any public signature.
-    """
+    """Transport settings and metadata shared throughout one client request."""
 
     timeout: float
     retry_config: RetryConfig
     correlation_id: str | None = None
+    deadline: float | None = None
 
     def validate(self) -> None:
         """Re-validate the retry configuration against the timeout."""
@@ -220,37 +207,6 @@ def retry_with_backoff[T](
         "without returning a value."
     )
     raise RuntimeError(msg)  # pragma: no cover
-
-
-def _compute_deadline(timeout: float) -> float:
-    """Return the absolute deadline for *timeout* seconds from now.
-
-    Returns
-    -------
-    float
-        The monotonic clock value at which *timeout* expires.
-    """
-    return time.monotonic() + timeout
-
-
-def _remaining_time(deadline: float) -> float:
-    """Return the seconds remaining before *deadline* expires.
-
-    Returns
-    -------
-    float
-        The strictly positive seconds left before *deadline*.
-
-    Raises
-    ------
-    TimeoutError
-        If *deadline* has already passed.
-    """
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        msg = "IPC client operation timed out"
-        raise TimeoutError(msg)
-    return remaining
 
 
 class _HandleCloser:
@@ -427,9 +383,25 @@ def _run_blocking_io[T](
     return typ.cast("T", _extract_outcome(outcome))
 
 
+def _log_connect_retry(
+    transport: _observability.Transport,
+    attempt: int,
+    exc: Exception,
+    context: _ConnectionContext,
+) -> None:
+    """Emit the bounded connect-retry event for *transport*.
+
+    The bounded event is the only report: the endpoint and the exception
+    message are both on the observability never-log list.
+    """
+    _client_events.emit_connect_retry(transport, attempt, exc, context.correlation_id)
+
+
 def _connect_unix_with_retries(
     sock_path: Path,
     context: _ConnectionContext,
+    *,
+    deadline: float | None = None,
 ) -> socket.socket:
     """Connect to *sock_path* retrying on :class:`OSError`.
 
@@ -438,28 +410,34 @@ def _connect_unix_with_retries(
     socket.socket
         The connected Unix domain socket.
     """
-    context.validate()
     address = str(sock_path)
+    request_deadline = deadline if deadline is not None else context.deadline
+    if request_deadline is None:
+        request_deadline = _compute_deadline(context.timeout)
+    _remaining_time(request_deadline)
 
     def attempt_connect(_attempt: int) -> socket.socket:
+        _remaining_time(request_deadline)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(context.timeout)
         try:
+            sock.settimeout(_remaining_time(request_deadline))
             sock.connect(address)
         except OSError:
             sock.close()
             raise
         return sock
 
-    def log_failure(attempt: int, exc: Exception) -> None:
-        # The bounded event is the only report: the socket path and the
-        # exception message are both on the observability never-log list.
-        _client_events.emit_connect_retry("unix", attempt, exc, context.correlation_id)
+    def bounded_sleep(delay: float) -> None:
+        """Limit retry backoff to the remaining request deadline."""
+        time.sleep(min(delay, _remaining_time(request_deadline)))
 
     return retry_with_backoff(
         attempt_connect,
         retry_config=context.retry_config,
-        strategy=RetryStrategy(on_failure=log_failure),
+        strategy=RetryStrategy(
+            on_failure=partial(_log_connect_retry, "unix", context=context),
+            sleep=bounded_sleep,
+        ),
     )
 
 
@@ -483,7 +461,7 @@ def _get_validated_socket_path() -> Path:
     return Path(sock)
 
 
-def _read_all(sock: socket.socket) -> bytes:
+def _read_all(sock: socket.socket, deadline: float) -> bytes:
     """Read all data from *sock* until EOF.
 
     Returns
@@ -492,7 +470,11 @@ def _read_all(sock: socket.socket) -> bytes:
         Every byte received before the peer closed the connection.
     """
     chunks = []
-    while chunk := sock.recv(1024):
+    while True:
+        sock.settimeout(_remaining_time(deadline))
+        chunk = sock.recv(1024)
+        if not chunk:
+            break
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -502,10 +484,17 @@ def _send_unix_request(
     payload: bytes,
     context: _ConnectionContext,
 ) -> bytes:
-    with _connect_unix_with_retries(sock_path, context) as client:
+    context.validate()
+    deadline = context.deadline
+    if deadline is None:
+        deadline = _compute_deadline(context.timeout)
+    _remaining_time(deadline)
+    with _connect_unix_with_retries(sock_path, context, deadline=deadline) as client:
+        client.settimeout(_remaining_time(deadline))
         client.sendall(payload)
+        client.settimeout(_remaining_time(deadline))
         client.shutdown(socket.SHUT_WR)
-        return _read_all(client)
+        return _read_all(client, deadline)
 
 
 def _decode_response(raw: bytes) -> Response:
@@ -513,7 +502,7 @@ def _decode_response(raw: bytes) -> Response:
     if parsed is None:
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg)
-    return Response.from_payload(parsed)
+    return wire.response_from_payload(parsed)
 
 
 def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> bool:
@@ -578,16 +567,8 @@ def _connect_pipe_with_retries(
     *,
     deadline: float | None = None,
 ) -> object:
-    context.validate()
     pipe_name_str = os.fspath(pipe_name)
     connect_deadline = deadline or _compute_deadline(context.timeout)
-
-    def log_failure(attempt: int, exc: Exception) -> None:
-        # The bounded event is the only report: the pipe name and the
-        # exception message are both on the observability never-log list.
-        _client_events.emit_connect_retry(
-            "named_pipe", attempt, exc, context.correlation_id
-        )
 
     def sleep(delay: float) -> None:
         _wait_for_pipe_availability(
@@ -600,7 +581,7 @@ def _connect_pipe_with_retries(
         lambda _attempt: _create_pipe_handle(pipe_name_str),
         retry_config=context.retry_config,
         strategy=RetryStrategy(
-            on_failure=log_failure,
+            on_failure=partial(_log_connect_retry, "named_pipe", context=context),
             should_retry=_should_retry_pipe_error,
             sleep=sleep,
         ),
@@ -672,6 +653,9 @@ def _dispatch_request(payload: bytes, context: _ConnectionContext) -> bytes:
     bytes
         The raw response bytes returned by the server.
     """
+    # Validate once at the transport boundary rather than in each transport
+    # helper, so a request cannot reach either retry loop unvalidated.
+    context.validate()
     sock_path = _get_validated_socket_path()
     if path_utils.IS_WINDOWS:
         return _send_pipe_request(sock_path, payload, context)
@@ -718,22 +702,16 @@ def _perform_request(
 def _send_request(
     kind: str,
     data: dict[str, typ.Any],
-    timeout: float,
-    retry_config: RetryConfig | None,
+    context: _ConnectionContext,
 ) -> Response:
     """Send a JSON request of *kind* to the IPC server.
 
     Returns
     -------
     Response
-        The decoded server response.
     """
     payload_bytes, correlation_id = _build_request_envelope(kind, data)
-    context = _ConnectionContext(
-        timeout=timeout,
-        retry_config=retry_config or RetryConfig(),
-        correlation_id=correlation_id,
-    )
+    context = dc.replace(context, correlation_id=correlation_id)
     return _perform_request(payload_bytes, kind, context)
 
 
@@ -741,32 +719,57 @@ def invoke_server(
     invocation: Invocation,
     timeout: float,
     retry_config: RetryConfig | None = None,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
-    The *timeout* applies to each blocking connect/send/receive operation.
-    Unix clients rely on ``socket.settimeout`` so the kernel enforces the
-    limit, while Windows clients cooperatively track the deadline and close
-    the named pipe if any step exceeds *timeout*, raising ``TimeoutError``.
+    Unix shares one deadline across I/O; Windows uses per-step pipe timeouts.
+
+    Parameters
+    ----------
+    invocation : Invocation
+        Request to send.
+    timeout : float
+        Request limit in seconds.
+    retry_config : RetryConfig or None, optional
+        Connection retry policy.
+    deadline : float or None, optional
+        Absolute Unix deadline shared with preceding shim work.
 
     Returns
     -------
     Response
         The IPC server's response to the invocation.
     """
-    return _send_request(KIND_INVOCATION, invocation.to_dict(), timeout, retry_config)
+    return _send_request(
+        KIND_INVOCATION,
+        wire.invocation_to_payload(invocation),
+        _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
+    )
 
 
 def report_passthrough_result(
     result: PassthroughResult,
     timeout: float,
     retry_config: RetryConfig | None = None,
+    *,
+    deadline: float | None = None,
 ) -> Response:
     """Send passthrough execution results back to the IPC server.
 
-    Timeout handling mirrors :func:`invoke_server`: Unix sockets enforce the
-    limit per system call, and Windows callers rely on cooperative deadlines
-    that cancel the named pipe when *timeout* expires.
+    Unix shares the shim deadline; Windows retains per-step pipe timeouts.
+
+    Parameters
+    ----------
+    result : PassthroughResult
+        Command result to report.
+    timeout : float
+        Request limit in seconds.
+    retry_config : RetryConfig or None, optional
+        Connection retry policy.
+    deadline : float or None, optional
+        Absolute Unix deadline shared with preceding shim work.
 
     Returns
     -------
@@ -775,9 +778,8 @@ def report_passthrough_result(
     """
     return _send_request(
         KIND_PASSTHROUGH_RESULT,
-        result.to_dict(),
-        timeout,
-        retry_config,
+        wire.passthrough_to_payload(result),
+        _ConnectionContext(timeout, retry_config or RetryConfig(), deadline=deadline),
     )
 
 

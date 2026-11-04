@@ -1,7 +1,7 @@
-# CmdMox Usage Guide
+# CmdMox usage guide
 
 CmdMox provides a fluent API for mocking, stubbing and spying on external
-commands in your tests. This guide shows common patterns for everyday use.
+commands in test suites. This guide shows common patterns for everyday use.
 
 ## Getting started
 
@@ -11,25 +11,44 @@ Install the package and enable the pytest plugin:
 pip install cmd-mox
 ```
 
+This installs CmdMox from PyPI. PyPI provides both a wheel and a source
+distribution. Releases produced by the current workflow attach the same
+distribution bytes and their provenance bundle to the GitHub Release. The
+`0.2.0` GitHub Release predates that process and carries only a separately
+built wheel. See [ADR 003](./adr-003-release-pipeline.md) for the release
+details.
+
 On Windows the wheel also pulls in `pywin32`, which provides the `win32pipe` and
 `win32file` modules that power CmdMox's named-pipe IPC transport.
 
-In your `conftest.py`:
+In the test suite's `conftest.py`:
 
 ```python
 pytest_plugins = ("cmd_mox.pytest_plugin",)
 ```
 
 Each test receives a `cmd_mox` fixture that provides access to the controller
-object. The plugin enters replay mode before the test body executes and
-performs verification during teardown, so most tests only need to declare
-expectations and exercise the code under test. If both the test body and
-verification fail, the verification error is suppressed so the original test
-failure surfaces. Automatic replay/verify can be disabled globally via the
-``cmd_mox_auto_lifecycle`` pytest.ini option or per test with
-``@pytest.mark.cmd_mox(auto_lifecycle=False)``. Command-line flags
-``--cmd-mox-auto-lifecycle`` and ``--no-cmd-mox-auto-lifecycle`` override both
-settings for a single pytest run.
+object. By default, the plugin enters replay mode before the test body executes
+and performs verification during teardown, so most tests only need to declare
+expectations and exercise the code under test. A repeated `replay()` call while
+the controller remains in replay mode is a no-op; calling `replay()` after
+`verify()` raises `LifecycleError`. Tests using the automatic lifecycle should
+omit explicit lifecycle calls. If both the test body and verification fail, the
+verification error is suppressed so the original test failure surfaces. A
+`BaseException` during fixture setup or while the test uses the fixture,
+including `KeyboardInterrupt` or an xdist worker's `SystemExit`, is recorded as
+a body failure before the original exception is re-raised. Interrupts raised by
+the test body are recorded by the pytest call hook before fixture finalization.
+If verification also fails but cleanup succeeds, teardown suppresses that
+exception and preserves the original interrupt; cleanup failures remain
+reportable. Automatic replay/verify can be disabled with the
+`cmd_mox_auto_lifecycle` pytest.ini option set to `false`,
+`@pytest.mark.cmd_mox(auto_lifecycle=False)`, an indirect `cmd_mox` fixture
+parameter of `False` or `{"auto_lifecycle": False}`, or the command-line flag
+`--no-cmd-mox-auto-lifecycle`. The `--cmd-mox-auto-lifecycle` flag explicitly
+enables automatic replay and verification. Fixture parameters take precedence
+over markers, which take precedence over command-line flags and then the ini
+option.
 
 The repository includes runnable examples under `examples/` covering stubs,
 mocks, spies, pipelines, and passthrough mode. These examples can be run
@@ -71,8 +90,13 @@ installs runs only when the shim entrypoint executes. When shim helpers are
 reused directly, ``cmd_mox._shim_bootstrap.bootstrap_shim_path()`` should be
 called during setup first.
 
-When you need to make an explicit decision in a test module (for instance when
-using the context manager API), import the helper re-exported from the package:
+Shim bootstrap removes only entries that would shadow the package directory or
+that mark an editable install. It keeps every other entry, including one it
+cannot resolve. An unresolvable entry stays on ``sys.path`` and shim startup
+continues instead of aborting.
+
+Explicit decisions in a test module (for example, when using the context
+manager API) can use the helper re-exported from the package:
 
 ```python
 from cmd_mox import skip_if_unsupported
@@ -80,9 +104,9 @@ from cmd_mox import skip_if_unsupported
 skip_if_unsupported()
 ```
 
-`skip_if_unsupported` defers to `pytest.skip` on unsupported platforms. If you
-only need to gate a code path, `cmd_mox.is_supported()` returns a boolean
-instead. Advanced tests can override the detected platform by setting the
+`skip_if_unsupported` defers to `pytest.skip` on unsupported platforms.
+`cmd_mox.is_supported()` returns a boolean for a gated code path. Advanced
+tests can override the detected platform by setting the
 `CMD_MOX_PLATFORM_OVERRIDE` environment variable (also exported as
 `PLATFORM_OVERRIDE_ENV`), which is primarily useful for simulating alternative
 environments inside CI pipelines (for example to exercise Windows-specific
@@ -95,8 +119,8 @@ them green on platforms (or CI sandboxes) that disallow Unix sockets entirely.
 ## Basic workflow
 
 CmdMox follows a strict record → replay → verify lifecycle. First declare
-expectations, then run your code with the shims active, finally verify that
-interactions matched what was recorded.
+expectations, then run the code under test with the shims active, and finally
+verify that interactions matched what was recorded.
 
 The three phases are defined in the design document:
 
@@ -107,17 +131,41 @@ The three phases are defined in the design document:
 3. **Verify** – ensure every expectation was met and nothing unexpected
    happened.
 
-These phases form a strict sequence for reliable command-line tests. Calling
-`replay()` more than once during the replay phase is explicitly idempotent:
-subsequent calls are no-ops.
-
-A typical test brings the three phases together:
+With pytest's default `cmd_mox` fixture, replay begins before the test body and
+verification runs during teardown (see [Getting started](#getting-started)).
+Declare expectations and exercise the code without calling `replay()` or
+`verify()` manually:
 
 ```python
-cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
+def test_clone_repo(cmd_mox):
+    cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
+    my_tool.clone_repo("repo")
+```
 
-my_tool.clone_repo("repo")
-# Replay begins automatically before the test function executes; verification runs during teardown.
+Calling `replay()` while the controller context is active and in the replay
+phase is an idempotent no-op. A manually managed controller with the default
+`verify_on_exit=True` verifies when its context exits and enters the verify
+phase; a later `replay()` raises `LifecycleError`. With `verify_on_exit=False`,
+the context exits while the controller is still in replay, so a later call
+raises `LifecycleError` with the current phase reported as `replay`.
+
+For manual lifecycle control, disable automatic replay and verification with
+one of these settings:
+
+- Run pytest with `--no-cmd-mox-auto-lifecycle`.
+- Set `cmd_mox_auto_lifecycle = false` in the pytest configuration.
+- Mark a test with `@pytest.mark.cmd_mox(auto_lifecycle=False)`.
+- Pass `False` or `{"auto_lifecycle": False}` as an indirect `cmd_mox` fixture
+  parameter.
+
+With automatic lifecycle disabled, the phases can be called explicitly:
+
+```python
+def test_manual_lifecycle(cmd_mox):
+    cmd_mox.mock("git").with_args("clone", "repo").returns(exit_code=0)
+    cmd_mox.replay()
+    my_tool.clone_repo("repo")
+    cmd_mox.verify()
 ```
 
 ## Stubs, mocks and spies
@@ -147,7 +195,13 @@ cmd_mox.mock("git") \
     .returns(exit_code=0)
 ```
 
-You can match arguments more flexibly using comparators:
+Each command name maps to one double, and each double accepts one argument
+expectation. Repeating `with_args()` or `with_matching_args()`, or mixing both
+methods, raises `ExpectationConfigurationError` with the existing and attempted
+expectation configurations, with sensitive option values redacted. The error
+points to the `runs()` handler pattern for commands with several distinct calls.
+
+Argument comparators support flexible matching:
 
 ```python
 from cmd_mox import Regex, Contains
@@ -166,8 +220,8 @@ The design document lists the available comparators:
 - `Predicate`
 
 Each comparator is a callable that returns `True` on match.
-`with_matching_args` expects one comparator per argv element (excluding the
-program name, i.e., `argv[1:]`), and `with_stdin` accepts either an exact
+`with_matching_args` expects one comparator per element of `argv[1:]`; the
+program name at `argv[0]` is excluded. `with_stdin` accepts either an exact
 string or a predicate `Callable[[str], bool]` for flexible input checks.
 
 ### Argument matchers (comparators)
@@ -245,11 +299,11 @@ with CmdMox() as mox:
     subprocess.run(["ls"], check=True)
 ```
 
-If replay aborts—whether because your code raised an exception or you hit
-Ctrl+C—`CmdMox` still tears down the environment before surfacing the original
-error. The controller catches interruptions during replay startup, stops the
-IPC server, removes the shim directory (and its socket), and restores `PATH`
-before re-raising so you never leak temporary artefacts between tests.
+If replay aborts—whether because the code under test raised an exception or an
+interrupt arrived—`CmdMox` tears down the environment before surfacing the
+original error. The controller catches interruptions during replay startup,
+stops the IPC server, removes the shim directory (and its socket), and restores
+`PATH` before re-raising, so temporary artefacts do not leak between tests.
 
 ## Parallel execution and isolation
 
@@ -302,6 +356,60 @@ def test_spy(cmd_mox):
 A spy expectation can also use `times_called(count)`—an alias of `times(count)`
 —to require a specific call count during verification.
 
+For multiple distinct calls to one command, use a handler that selects a
+response from `invocation.args`. The `spy.invocations` list preserves the call
+sequence for assertions. Handler exceptions become command failures rather than
+pytest exceptions, so record unmatched arguments for an explicit assertion:
+
+```python
+unexpected_calls: list[list[str]] = []
+
+def handle_cargo(invocation):
+    match invocation.args:
+        case ["nextest", "--version"]:
+            return "", "", 0
+        case ["metadata", *_]:
+            return '{"packages": []}', "", 0
+        case ["nextest", "run", *_]:
+            return "", "", 100
+        case unexpected:
+            unexpected_calls.append(unexpected)
+            raise AssertionError(f"Unexpected cargo arguments: {unexpected}")
+
+
+cargo = cmd_mox.spy("cargo").runs(handle_cargo)
+run_gate_script()
+assert not unexpected_calls, f"Unexpected cargo arguments: {unexpected_calls}"
+# These example invocations have no extra metadata or run arguments.
+assert [invocation.args for invocation in cargo.invocations] == [
+    ["nextest", "--version"],
+    ["metadata"],
+    ["nextest", "run"],
+]
+```
+
+Plumbum snapshots `os.environ` when imported, so commands launched through
+Plumbum can miss the shim on `PATH` and the IPC address installed by replay.
+This can appear as `0 invocations recorded` or malformed JSON on the server.
+With the pytest plugin's default automatic lifecycle, declare expectations
+before the test body; the plugin replays before the body begins. Overlay the
+live environment around the Plumbum call:
+
+```python
+import os
+
+from plumbum import local
+
+def test_with_plumbum(cmd_mox):
+    spy = cmd_mox.spy("tool").returns(stdout="ok")
+    with local.env(**os.environ):
+        run_with_plumbum()
+    assert spy.invocations
+```
+
+Tests that disable automatic lifecycle must call `replay()` before entering
+`local.env(**os.environ)` and call `verify()` after exercising the code.
+
 A spy can also forward to the real command while recording everything:
 
 ```python
@@ -335,6 +443,27 @@ spy.assert_not_called()
 
 These methods raise `AssertionError` when expectations are not met and are
 restricted to spy doubles.
+
+## IPC payload migration
+
+`Invocation`, `Response`, `PassthroughRequest`, and `PassthroughResult` remain
+available from `cmd_mox.ipc`. Their JSON conversion methods have moved to
+functions in `cmd_mox.ipc.wire`. Callers using those methods must update their
+code as follows:
+
+| Previous call                    | Replacement function                |
+| -------------------------------- | ----------------------------------- |
+| `invocation.to_dict()`           | `invocation_to_payload(invocation)` |
+| `response.to_dict()`             | `response_to_payload(response)`     |
+| `Response.from_payload(payload)` | `response_from_payload(payload)`    |
+| `request.to_dict()`              | `passthrough_to_payload(request)`   |
+| `result.to_dict()`               | `passthrough_to_payload(result)`    |
+
+_Table: Replacements for removed IPC payload conversion methods._
+
+Import the replacement functions from `cmd_mox.ipc.wire` when mapping these
+values to or from IPC payloads. The domain classes no longer perform JSON
+conversion themselves.
 
 ## Recording sessions (fixture capture)
 
@@ -397,7 +526,7 @@ Fixtures are stored as JSON with a versioned schema:
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.0.0",
   "metadata": {
     "created_at": "2025-01-15T10:30:00+00:00",
     "cmdmox_version": "0.2.0",
@@ -428,19 +557,28 @@ Fixture files can be loaded and round-tripped:
 from cmd_mox.record import FixtureFile
 
 fixture = FixtureFile.load(Path("fixtures/git_clone.json"))
-assert fixture.version == "1.0"
+assert fixture.version == "1.0.0"
 assert len(fixture.recordings) == 1
 ```
 
 ### Schema versioning and migration
 
-Fixture files include a `version` field following semantic versioning. CmdMox
-automatically migrates older fixture files to the current schema when loading
-via `FixtureFile.load()` or `FixtureFile.from_dict()`. Minor version
-differences within the same major version are tolerated -- for example, a v1.1
-fixture loads correctly into v1.0 code because unknown fields are ignored.
-Incompatible major versions with no registered migration path raise
-`ValueError`.
+Fixture files use the numeric semantic-version core `MAJOR.MINOR.PATCH` in the
+`version` field. CmdMox parses it into a `(major, minor, patch)` tuple. Legacy
+two-component values such as `1.0` remain accepted with an implicit patch of
+zero and are normalized to `1.0.0`. This compatibility is one-way: older CmdMox
+releases that require exactly two components cannot read fixtures written with
+a three-component version.
+
+Three-component versions use ASCII digits without leading zeroes in each
+component. Legacy two-component versions retain their historical integer
+parsing for compatibility.
+
+CmdMox automatically migrates older fixture files to the current schema when
+loading via `FixtureFile.load()` or `FixtureFile.from_dict()`. Minor and patch
+differences within the same major version are tolerated—for example, a `1.1.0`
+fixture loads correctly into `1.0.0` code because unknown fields are ignored. A
+higher major version with no registered migration path raises `ValueError`.
 
 ## Automatic recording with `.record()`
 
@@ -457,9 +595,12 @@ def test_git_clone(cmd_mox):
 
 Each passthrough invocation is captured by the `PassthroughCoordinator` and
 persisted to the fixture file when `verify()` is called. When
-`verify_on_exit=True` (the default), the context manager calls `verify()`
-automatically on exit. If `verify_on_exit=False`, fixtures are **not** written
-unless you call `verify()` explicitly.
+`verify_on_exit=True` (the default for manually managed controllers), the
+context manager calls `verify()` automatically on exit. A manually managed
+controller with `verify_on_exit=False` requires an explicit `verify()` call to
+write fixtures. The pytest plugin calls `verify()` during teardown when its
+automatic lifecycle is enabled, so fixture-backed recordings need no explicit
+verification call.
 
 ### Record parameters
 
@@ -682,10 +823,10 @@ partial-consumption verification is the intended behaviour.
 ## Pipelines and shell syntax
 
 CmdMox intercepts individual executables by prepending shims to `PATH`. It does
-not interpret shell syntax itself, so constructs like pipelines (`|`) and I/O
-redirection (`>`, `<`) are handled by your shell. To test pipeline behaviour,
-mock each command in the pipeline separately and execute the full command line
-with `shell=True` so the shell wires stdout to stdin:
+not interpret shell syntax itself, so constructs like pipelines (`|`) and
+input/output redirection (`>`, `<`) are handled by the shell. Pipeline tests
+mock each command separately and execute the full command line with
+`shell=True` so the shell wires stdout to stdin:
 
 ```python
 def test_pipeline(cmd_mox):
@@ -703,19 +844,87 @@ def test_pipeline(cmd_mox):
     assert result.stdout.strip() == "c b a"
 ```
 
+### Wiring a tool to a shim by absolute path
+
+Some tools accept a configured executable path instead of resolving a command
+name through `PATH`. Examples include Git merge and diff drivers, `sudoers`
+command rules, systemd unit settings, and continuous integration (CI)
+configuration. Pass an `EnvironmentManager` to `CmdMox`, then use the launcher
+under `env_mgr.shim_dir` as the absolute shim path in the tool's configuration.
+`__enter__` creates the directory; `mox.replay()` creates launchers for
+registered commands. The filename has a `.cmd` suffix on Windows and no suffix
+on POSIX:
+
+```python
+import os
+import subprocess
+
+from cmd_mox import CmdMox, EnvironmentManager, Invocation
+
+
+def handler(inv: Invocation) -> tuple[str, str, int]:
+    return "", "", 0
+
+
+env_mgr = EnvironmentManager()
+with CmdMox(environment=env_mgr) as mox:
+    spy = mox.spy("stub-merge-driver").runs(handler)
+    mox.replay()
+
+    assert env_mgr.shim_dir is not None
+    shim = env_mgr.shim_dir / "stub-merge-driver"
+    if os.name == "nt":
+        shim = shim.with_suffix(".cmd")
+    path_without_shims = os.pathsep.join(
+        path
+        for path in os.environ["PATH"].split(os.pathsep)
+        if path != str(env_mgr.shim_dir)
+    )
+    subprocess.run(
+        [str(shim), "O", "A", "B", "7", "p.py"],
+        env=os.environ | {"PATH": path_without_shims},
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    assert spy.call_count == 1
+```
+
+The shim finds the IPC server through `CMOX_IPC_SOCKET`, so it records the
+invocation even when called by absolute path and the shim directory is absent
+from `PATH`. Setting the tool's executable to this path removes `PATH` order
+from the result: a failed interception cannot silently fall through to a real
+binary with the same name.
+
+The process that starts the shim must receive `CMOX_IPC_SOCKET` and be able to
+access the IPC endpoint. A launcher such as `sudo` or systemd may filter or
+replace the environment, so configure it to pass this variable through and
+preserve endpoint access. An absolute path alone is not sufficient when that
+environment is missing; the shim exits with `IPC socket not specified`.
+
+Shims read non-terminal standard input until EOF to populate
+`Invocation.stdin`; terminal input is skipped. If an intermediary process, such
+as Git invoking a merge driver, inherits non-terminal stdin and leaves it open,
+the shim waits and may hang until the caller's timeout. Because the shim reads
+stdin before opening IPC, that block cannot itself produce a server-side
+`IPC received malformed JSON` error. If that error appears, it does not
+identify stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise
+close or redirect stdin, unless the caller intends to supply input.
+
 ## Controller configuration and journals
 
 `CmdMox` offers configuration hooks that surface through both the fixture and
 the context-manager API:
 
 - `verify_on_exit` (default `True`) automatically calls `verify()` when a replay
-  phase ends inside a `with CmdMox()` block. Disable it when you need to manage
-  verification manually. Verification still runs if the body raises; when both
+  phase ends inside a `with CmdMox()` block. Disable it for manual verification
+  control. When enabled, verification still runs if the body raises; when both
   verification and the body fail, the verification error is suppressed so the
   original exception surfaces.
 - `max_journal_entries` bounds the number of stored invocations (oldest entries
   are evicted FIFO when the bound is reached). The journal is exposed via
   `cmd_mox.journal`, a `collections.deque[Invocation]` recorded during replay.
+- `lifecycle_hint` (default `None`) appends caller-provided guidance to
+  `LifecycleError` messages for invalid phase transitions.
 
 The journal is especially handy when debugging:
 
@@ -747,7 +956,10 @@ few common ones are:
 - `with_args(*args)` – require exact arguments.
 - `with_matching_args(*matchers)` – match arguments using comparators.
 - `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
-  validate it with a predicate `Callable[[str], bool]`.
+  validate it with a predicate `Callable[[str], bool]`. Shims read non-terminal
+  standard input until EOF; terminal input is skipped. Close or redirect
+  standard input when no input is intended. See the
+  [shim path guidance](#wiring-a-tool-to-a-shim-by-absolute-path).
 - `with_env(mapping)` – inject additional environment variables into the
   invocation. The mapping is merged into the recorded `Invocation.env`, applied
   when custom handlers or canned responses run, and does not mutate the test
@@ -758,18 +970,34 @@ few common ones are:
   Note: For binary payloads, prefer `passthrough()` or encode/decode at the
   boundary (e.g., base64) so handlers exchange `str`.
 - `runs(handler)` – call a function to produce dynamic output. The handler
-  receives an `Invocation` and should return either a
-  `(stdout, stderr, exit_code)` tuple or a `Response` instance.
+  receives an `Invocation`; `invocation.args` is a `list[str]`. The handler
+  returns either a `(stdout, stderr, exit_code)` tuple or a `Response`
+  instance. It runs in the test process on an IPC request-handler worker
+  thread, not in the shim subprocess. Path arguments may be relative to the
+  invoked command's working directory, but `Invocation` does not carry that
+  directory. Opening a relative argument directly in the handler resolves it
+  against the test process's working directory. Provide the invoking working
+  directory separately or use absolute paths. For a Git merge handler, capture
+  the invoking repository path as `repository` and compute the merged text as
+  `result`; then write the target with
+  `(repository / invocation.args[1]).write_text(result)`.
 
   Example:
 
-  ```python
-  def handler(inv: Invocation) -> tuple[str, str, int]:
-      if "--fail" in inv.argv:
-          return ("", "boom", 2)  # non-zero exit
-      return ("ok", "", 0)
+  Without a `with_args` constraint, this double accepts any argument list, so
+  both `tool run` and `tool run --fail` reach the handler.
 
-  cmd_mox.mock("tool").with_args("run").runs(handler)
+  ```python
+  def handler(invocation):
+      match invocation.args:
+          case ["run", "--fail"]:
+              return "", "boom", 2
+          case ["run", *_]:
+              return "ok", "", 0
+          case _:
+              return "", "unexpected tool arguments", 1
+
+  cmd_mox.spy("tool").runs(handler)
   ```
 
 - `times(count)` – expect the command exactly `count` times.
@@ -806,6 +1034,13 @@ with IPCServer(socket_path, handlers=handlers):
 Providing `passthrough_handler=` to `IPCHandlers` intercepts passthrough
 completions in the same fashion. When no callbacks are supplied the server
 keeps its default echo behaviour, so existing code continues to work unchanged.
+On Unix, the server selects its threaded socket base when the backend first
+starts and caches a successful selection for the process lifetime. It prefers
+`socketserver.ThreadingUnixStreamServer` and falls back to combining
+`socketserver.UnixStreamServer` with `socketserver.ThreadingMixIn`. If neither
+class is available, starting the Unix server raises `RuntimeError`; the failed
+selection is retried on a later start. Direct Unix-server use on Windows also
+raises `RuntimeError`, while `CmdMox` selects the Windows named-pipe transport.
 Request dispatch invokes the public `handle_invocation()` and
 `handle_passthrough_result()` hooks. Subclass `IPCServer` when server behaviour
 requires overriding those hooks:
@@ -828,6 +1063,11 @@ The same dispatch contract applies to both the Unix-domain-socket transport and
 the Windows named-pipe transport. Use callbacks for simple composition and
 subclassing for behaviour that requires overridden hooks.
 
+Zero-byte reads, including Unix readiness-probe connections, are logged at
+DEBUG and receive no reply; non-empty malformed JSON retains its error log. On
+Unix, if a client disconnects while the server writes or flushes its reply, the
+server logs the disconnect at DEBUG and returns without a traceback.
+
 On Windows the transport can be forced explicitly by swapping `IPCServer` for
 :class:`NamedPipeServer`; `CmdMox` selects it automatically based on
 ``os.name``.
@@ -836,7 +1076,9 @@ Both transports emit bounded, structured observability events with correlation
 identifiers, and the Windows named-pipe transport bounds concurrent clients,
 message size, and per-client read time. See the
 [design document](./python-native-command-mocking-design.md) for the event
-vocabulary and the specific limits.
+vocabulary and the specific limits. Unix backend selection also emits bounded
+startup events before a request exists, so those records do not carry a
+correlation identifier.
 
 Projects that rely on :class:`CallbackIPCServer` can still customize startup
 and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
@@ -879,9 +1121,22 @@ server.
   if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
-  exported automatically (default `5.0`). Override this to tune how long
-  clients wait for each connect/send/receive attempt before raising a
-  `TimeoutError`.
+  exported automatically (default `5.0`). On POSIX, one deadline covers
+  pollable piped stdin, regular-file stdin, connecting to the Unix socket,
+  sending the request, receiving the response, and reporting passthrough
+  results. Regular-file reads use a worker, so the shim can stop waiting at the
+  deadline. Streams that cannot be polled retain direct-read behaviour, so the
+  stdin read itself may wait beyond this timeout. On Windows, stdin retains
+  direct-read behaviour and named-pipe communication uses its existing
+  cooperative timeout; the POSIX shared-deadline guarantee does not apply.
+
+  A non-empty request that cannot be parsed or fails validation receives a
+  bounded error response on stderr and exit status 1. An empty read, including
+  a readiness probe that closes without sending a request, is treated as a
+  closed connection and receives no response frame. Connection failures and
+  timeout expiry produce a controlled `IPC error: ...` diagnostic on stderr and
+  a non-zero exit. If passthrough reporting fails, the shim preserves the real
+  command's non-zero exit status.
 
 Most tests should rely on the fixture to manage these variables.
 
@@ -916,7 +1171,7 @@ supported surface area without navigating modules.
 
 ### IPC servers
 
-- `IPCServer` – IPC server (Unix socket on POSIX, named pipe on Windows).
+- `IPCServer` – Unix-domain-socket IPC server; use `NamedPipeServer` on Windows.
 - `NamedPipeServer` – explicit Windows named-pipe transport implementation.
 
 ### Shims and environment helpers
@@ -938,6 +1193,8 @@ supported surface area without navigating modules.
 ### Exceptions
 
 - `CmdMoxError` – base exception for cmd-mox errors.
+- `ExpectationConfigurationError` – raised when an argument expectation is set
+  more than once on a command double.
 - `LifecycleError` – raised on invalid record/replay/verify transitions.
 - `MissingEnvironmentError` – raised when replay cannot start due to missing
   env.

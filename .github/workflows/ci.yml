@@ -8,6 +8,21 @@ on:
 permissions: {}
 
 jobs:
+  build-dist:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build Python distributions
+        uses: ./.github/actions/pure-python-wheel
+        with:
+          python-version: '3.13'
+          artifact-name: wheels-pure
+
   quality:
     permissions:
       contents: read
@@ -29,17 +44,20 @@ jobs:
       MBAKE_VERSION: '1.4.6'
       MAKEUTIL_REVISION: '29fc5a1634ffbaa18a773eed9dff1b2838a45d9c'
       MAKEUTIL_TOOLCHAIN: 'nightly-2026-05-28'
+      # Keep in sync with NOSE_VERSION in the Makefile and [tool.nose].version
+      # in pyproject.toml; tests/test_toolchain_contract.py enforces the match.
+      NOSE_VERSION: '0.20.0'
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: '3.13'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
 
       - name: Install CLI tools
         if: matrix.run-windows-smoke == false
@@ -49,6 +67,49 @@ jobs:
           # Makefile; tests/test_toolchain_contract.py enforces the match.
           uv tool install 'ruff==0.16.4'
           uv tool install 'ty==0.0.74'
+
+      # Restore the pinned detector. The key carries the version and the
+      # runner's OS, so a pin bump or a different platform can never serve a
+      # binary built for another target. `make install-nose` re-verifies the
+      # reported version below. The uv cache itself is not cached here: every
+      # uv call now goes through `uv_gate`, which uses the global cache that
+      # the `setup-uv` step above already caches.
+      - name: Restore the pinned detector
+        if: matrix.run-windows-smoke == false
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools/nose
+          key: nose-${{ runner.os }}-${{ env.NOSE_VERSION }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            nose-${{ runner.os }}-${{ env.NOSE_VERSION }}-
+
+      - name: Download cargo-binstall
+        # A pinned release binary with a verified platform-specific checksum,
+        # rather than the floating installer or a compile from source. The
+        # install step below then forbids cargo-binstall's own compile and
+        # quick-install strategies, so an unavailable prebuilt for a platform
+        # is an explicit failure instead of a silent costly build.
+        if: matrix.run-windows-smoke == false
+        run: |
+          curl -sSfL -o /tmp/cargo-binstall.tgz \
+            "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.2/cargo-binstall-x86_64-unknown-linux-gnu.tgz"
+          echo "ca1217094690d15606c050e3d085bc03ce6fe12486de9a815d85dae345bb6803  /tmp/cargo-binstall.tgz" \
+            | sha256sum --check --strict
+          tar -xzf /tmp/cargo-binstall.tgz -C /tmp cargo-binstall
+          install -m 0755 /tmp/cargo-binstall "$HOME/.local/bin/cargo-binstall"
+
+      - name: Install the pinned detector
+        if: matrix.run-windows-smoke == false
+        run: make install-nose
+
+      - name: Verify the detector version
+        if: matrix.run-windows-smoke == false
+        run: |
+          reported="$(.tools/nose/nose --version)"
+          test "${reported}" = "nose ${NOSE_VERSION}" || {
+            echo "Expected 'nose ${NOSE_VERSION}', got '${reported}'" >&2
+            exit 1
+          }
 
       - name: Install Makefile parser
         if: matrix.run-windows-smoke == false
@@ -78,7 +139,7 @@ jobs:
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@b59d7d13d29636cc9f0c33a81ba17a9a2bde9bb8
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@872f59f53717b5bebe8e24b2f4a7496b089a939a
         with:
           version: "0.6.1"
 
@@ -93,7 +154,7 @@ jobs:
         # pin alongside the other actions. It reads .markdownlint-cli2.jsonc
         # from the workspace, so the rules and ignores match `make markdownlint`.
         if: matrix.run-windows-smoke == false
-        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff  # v24.2.0
+        uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34  # v25.0.0
         with:
           globs: '**/*.md'
 
@@ -103,6 +164,10 @@ jobs:
       - name: Run lint and dead-code detection
         if: matrix.run-windows-smoke == false
         run: make lint
+
+      - name: Run the duplication-gate helper tests
+        if: matrix.run-windows-smoke == false
+        run: make duplication-test
 
       - name: Run typechecker
         if: matrix.run-windows-smoke == false
@@ -118,10 +183,12 @@ jobs:
       # publishes the report.
       - name: Generate coverage
         if: matrix.run-windows-smoke == false && github.event_name == 'pull_request'
-        uses: leynos/shared-actions/.github/actions/generate-coverage@b59d7d13d29636cc9f0c33a81ba17a9a2bde9bb8
+        uses: leynos/shared-actions/.github/actions/generate-coverage@872f59f53717b5bebe8e24b2f4a7496b089a939a
         with:
           output-path: coverage.xml
           format: cobertura
+          # Track the installed package, not test harness or release tooling.
+          python-source: cmd_mox
           # The suite currently runs serially (the previous slipcover step
           # used pytest-forked without xdist); keep it serial to stay
           # behaviour-preserving. Follow-up 4 removes this pin to adopt
@@ -137,7 +204,7 @@ jobs:
 
       - name: Upload IPC logs
         if: matrix.run-windows-smoke && always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v4.0.0
         with:
           name: windows-ipc-logs
           path: windows-ipc.log

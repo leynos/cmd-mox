@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import logging
 import typing as typ
 
-from .models import Invocation, PassthroughResult
+from cmd_mox.domain import Invocation, PassthroughResult
 
-logger = logging.getLogger(__name__)
+from .wire import request_from_payload
 
 
 def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
@@ -36,11 +35,7 @@ def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | Non
     Invocation or None
         The validated invocation, or ``None`` for malformed payloads.
     """
-    try:
-        return Invocation(**payload)
-    except TypeError:
-        logger.exception("IPC payload missing required fields: %r", payload)
-        return None
+    return request_from_payload(payload, Invocation)
 
 
 def validate_passthrough_payload(
@@ -53,11 +48,7 @@ def validate_passthrough_payload(
     PassthroughResult or None
         The validated result, or ``None`` for malformed payloads.
     """
-    try:
-        return PassthroughResult(**payload)
-    except TypeError:
-        logger.exception("IPC passthrough payload missing required fields: %r", payload)
-        return None
+    return request_from_payload(payload, PassthroughResult)
 
 
 __all__ = [

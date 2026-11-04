@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
+from cmd_mox.domain import Invocation, PassthroughResult
 from cmd_mox.ipc.json_utils import (
     parse_json_safely,
     validate_invocation_payload,
     validate_passthrough_payload,
 )
-from cmd_mox.ipc.models import Invocation, PassthroughResult
 
 
 def test_parse_json_safely_accepts_valid_object() -> None:
@@ -49,13 +47,16 @@ def test_validate_invocation_payload_returns_model() -> None:
     assert result.command == "cmd", "Assertion failed"
 
 
-def test_validate_invocation_payload_handles_missing_fields(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Missing invocation fields should be logged and return None."""
-    assert isinstance(caplog, pytest.LogCaptureFixture), "Assertion failed"
-    with caplog.at_level("ERROR", logger="cmd_mox.ipc.json_utils"):
-        assert validate_invocation_payload({}) is None, "Assertion failed"
+def test_validate_invocation_payload_handles_missing_fields() -> None:
+    """Missing invocation fields should return None."""
+    assert validate_invocation_payload({}) is None, "Assertion failed"
+
+
+def test_validate_invocation_payload_rejects_unexpected_fields() -> None:
+    """Unexpected invocation fields should return None."""
+    payload = {"command": "cmd", "args": [], "stdin": "", "env": {}, "extra": 1}
+
+    assert validate_invocation_payload(payload) is None, "Unexpected field accepted"
 
 
 def test_validate_passthrough_payload_returns_model() -> None:
@@ -73,10 +74,19 @@ def test_validate_passthrough_payload_returns_model() -> None:
     assert result.invocation_id == "123", "Assertion failed"
 
 
-def test_validate_passthrough_payload_handles_missing_fields(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Missing passthrough fields should be logged and return None."""
-    assert isinstance(caplog, pytest.LogCaptureFixture), "Assertion failed"
-    with caplog.at_level("ERROR", logger="cmd_mox.ipc.json_utils"):
-        assert validate_passthrough_payload({}) is None, "Assertion failed"
+def test_validate_passthrough_payload_handles_missing_fields() -> None:
+    """Missing passthrough fields should return None."""
+    assert validate_passthrough_payload({}) is None, "Assertion failed"
+
+
+def test_validate_passthrough_payload_rejects_unexpected_fields() -> None:
+    """Unexpected passthrough fields should return None."""
+    payload = {
+        "invocation_id": "1",
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+        "extra": 1,
+    }
+
+    assert validate_passthrough_payload(payload) is None, "Unexpected field accepted"

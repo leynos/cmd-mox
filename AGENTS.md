@@ -92,7 +92,8 @@ When implementing changes, adhere to the following testing procedures:
     - **Testing:** Passes all relevant unit and behavioural tests according to
       the guidelines above (`make test`).
     - **Linting:** Passes the complete `make lint` pipeline, including the
-      fourth Python lint tier: the blocking Skylos production dead-code scan.
+      fourth Python lint tier, the blocking Skylos production dead-code scan,
+      and the fifth, the blocking nose code-duplication gate.
       Investigate every Skylos finding and remove genuine dead code. For a
       verified false positive, first model an implicit runtime caller with a
       precise, typed entry-point rule in
@@ -107,6 +108,15 @@ When implementing changes, adhere to the following testing procedures:
       caller-specific reason in `[tool.skylos.whitelist.documented]` in
       `pyproject.toml`; override the lock path only when isolating helper
       tests from the checkout.
+    - **Duplication:** Passes the nose gate (`make duplication`). Fix genuine
+      duplication at its source. Where duplication is intentional, record a
+      reasoned exception with
+      `make duplication-allow FIRST='path[::name]' [SECOND='path[::name]'] REASON='...'`,
+      covering every location in the family and never keying on line numbers or
+      detector identifiers. The gate adjudicates only the highest-ranked
+      families, so absence from a report is not proof that duplication has
+      gone; confirm stale exceptions against the source before removing them.
+      The gate is POSIX-only and runs as isolated CPython 3.14 tooling.
     - **Formatting:** Adheres to formatting standards (`make check-fmt`,
       formatting can be applied by running `make fmt`).
     - **Typechecking:** Passes type checking (`make typecheck`).

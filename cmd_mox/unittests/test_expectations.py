@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import typing as typ
 
 # These tests invoke shim binaries with `shell=False` so the command
@@ -13,12 +12,13 @@ import pytest
 
 from cmd_mox import (
     CmdMox,
+    ExpectationConfigurationError,
     Regex,
     UnexpectedCommandError,
     UnfulfilledExpectationError,
 )
 from cmd_mox.expectations import Expectation
-from cmd_mox.ipc import Invocation, Response
+from cmd_mox.ipc import Invocation
 from cmd_mox.unittests._env_helpers import require_shim_dir
 
 pytestmark = pytest.mark.requires_unix_sockets
@@ -27,6 +27,133 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
     import subprocess
     from pathlib import Path
+
+
+def _with_metadata(expectation: Expectation) -> Expectation:
+    """Register an exact metadata argument expectation.
+
+    Returns
+    -------
+    Expectation
+        The configured expectation.
+    """
+    return expectation.with_args("metadata")
+
+
+def _with_nextest_run(expectation: Expectation) -> Expectation:
+    """Register an exact nextest run argument expectation.
+
+    Returns
+    -------
+    Expectation
+        The configured expectation.
+    """
+    return expectation.with_args("nextest", "run")
+
+
+def _with_alphabetic_args(expectation: Expectation) -> Expectation:
+    """Register an alphabetic argument matcher expectation.
+
+    Returns
+    -------
+    Expectation
+        The configured expectation.
+    """
+    return expectation.with_matching_args(str.isalpha)
+
+
+@pytest.mark.parametrize(
+    ("register_existing", "register_attempted", "existing", "attempted"),
+    [
+        pytest.param(
+            _with_metadata,
+            _with_nextest_run,
+            "args=['metadata']",
+            "args=['nextest', 'run']",
+            id="exact-then-exact",
+        ),
+        pytest.param(
+            _with_metadata,
+            _with_alphabetic_args,
+            "args=['metadata']",
+            "match_args=",
+            id="exact-then-matcher",
+        ),
+        pytest.param(
+            _with_alphabetic_args,
+            _with_metadata,
+            "match_args=",
+            "args=['metadata']",
+            id="matcher-then-exact",
+        ),
+    ],
+)
+def test_argument_expectation_rejects_reconfiguration(
+    register_existing: cabc.Callable[[Expectation], Expectation],
+    register_attempted: cabc.Callable[[Expectation], Expectation],
+    existing: str,
+    attempted: str,
+) -> None:
+    """Repeated and mixed argument expectations fail without mutation."""
+    expectation = Expectation("cargo")
+    register_existing(expectation)
+    existing_args = expectation.args.copy() if expectation.args is not None else None
+    existing_matchers = (
+        expectation.match_args.copy() if expectation.match_args is not None else None
+    )
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        register_attempted(expectation)
+
+    message = str(exc_info.value)
+    assert "Command 'cargo'" in message, "the error should name the command"
+    assert existing in message, "the error should show the existing set"
+    assert attempted in message, "the error should show the attempted set"
+    assert "runs(handler)" in message, "the error should direct users to handlers"
+    assert expectation.args == existing_args, "the failed call must preserve exact args"
+    assert expectation.match_args == existing_matchers, (
+        "the failed call must preserve matchers"
+    )
+
+
+def test_with_matching_args_rejects_a_second_argument_expectation() -> None:
+    """A second matcher set must fail at registration."""
+
+    class SensitiveMatcher:
+        """Matcher whose representation contains a retained value."""
+
+        def __init__(self, value: str) -> None:
+            self.value = value
+
+        def __call__(self, argument: str) -> bool:
+            return argument == self.value
+
+        def __repr__(self) -> str:
+            return f"SensitiveMatcher({self.value!r})"
+
+    existing_matcher = SensitiveMatcher("existing-matcher-secret")
+    attempted_matcher = SensitiveMatcher("attempted-matcher-secret")
+    expectation = Expectation("cargo").with_matching_args(existing_matcher)
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_matching_args(attempted_matcher)
+
+    message = str(exc_info.value)
+    assert "Command 'cargo'" in message, "the error should name the command"
+    assert "match_args=" in message, "the error should show matcher sets"
+    assert message.count("match_args=") == 2, "both matcher sets should be shown"
+    assert message.count("'SensitiveMatcher'") == 2, (
+        "safe matcher types should be shown"
+    )
+    assert "existing-matcher-secret" not in message, (
+        "existing matcher data must be hidden"
+    )
+    assert "attempted-matcher-secret" not in message, (
+        "attempted matcher data must be hidden"
+    )
+    assert "runs(handler)" in message, "the error should direct users to handlers"
+    assert expectation.match_args == [existing_matcher], "the prior matcher must remain"
+    assert expectation.args is None, "the failed call should not add exact arguments"
 
 
 def test_mock_with_args_and_order(
@@ -83,64 +210,6 @@ def test_with_matching_args_and_stdin(
     )
 
     mox.verify()
-
-
-def test_with_env_injection(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
-    """Environment variables provided via with_env() are applied."""
-    mox = CmdMox()
-
-    def handler(inv: Invocation) -> Response:
-        return Response(stdout=os.environ.get("HELLO", ""))
-
-    mox.stub("env").with_env({"HELLO": "WORLD"}).runs(handler)
-    mox.__enter__()
-    mox.replay()
-
-    path = require_shim_dir(mox.environment) / "env"
-    result = run([str(path)], shell=False)
-    mox.verify()
-
-    assert result.stdout.strip() == "WORLD"
-
-
-@pytest.mark.parametrize(
-    ("payload", "exc_type", "match"),
-    [
-        pytest.param(
-            {42: "value"},
-            TypeError,
-            "name must be str",
-            id="non-string-key",
-        ),
-        pytest.param(
-            {"": "value"},
-            ValueError,
-            "cannot be empty",
-            id="empty-key",
-        ),
-        pytest.param(
-            {"VAR": 7},
-            TypeError,
-            "value must be str",
-            id="non-string-value",
-        ),
-    ],
-)
-def test_with_env_rejects_invalid_entries(
-    payload: dict[typ.Any, typ.Any],
-    exc_type: type[Exception],
-    match: str,
-) -> None:
-    """with_env() should reject malformed environment entries.
-
-    The parametrized payloads deliberately violate the ``dict[str, str]``
-    contract to exercise the defensive validation inside ``with_env()``.
-    """
-    expectation = Expectation("cmd")
-    with pytest.raises(exc_type, match=match):
-        expectation.with_env(payload)
 
 
 def test_any_order_expectations_allow_flexible_sequence(

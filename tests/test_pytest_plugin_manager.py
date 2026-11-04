@@ -6,6 +6,7 @@ import dataclasses as dc
 import os
 import textwrap
 import typing as typ
+from unittest import mock
 
 import pytest
 
@@ -14,9 +15,16 @@ from cmd_mox.controller import Phase
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.pytest_plugin import STASH_CALL_FAILED, _CmdMoxManager
 
+pytest_plugins = ("pytester",)
+
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
     from pathlib import Path
+
+    type _CmdMoxFixtureGenerator = cabc.Callable[
+        [pytest.FixtureRequest],
+        cabc.Generator[pytest_plugin.CmdMox, None, None],
+    ]
 
 _VERIFY_ERROR_MESSAGE = "verify boom"
 _EXIT_ERROR_MESSAGE = "exit boom"
@@ -83,6 +91,12 @@ class _RequestKwargs(typ.TypedDict, total=False):
     param: dict[str, bool]
 
 
+class _FixtureWithWrapped(typ.Protocol):
+    """Describe pytest's runtime wrapper around a fixture function."""
+
+    __wrapped__: _CmdMoxFixtureGenerator
+
+
 class _StubRequest:
     """Minimal fixture request exposing ``config``/``node``/``param``."""
 
@@ -119,6 +133,7 @@ class _StubMox:
         phase: Phase = Phase.REPLAY,
         behavior: StubMoxBehaviorConfig | None = None,
         environment: EnvironmentManager | None = None,
+        lifecycle_hint: str | None = None,
     ) -> None:
         self.phase = phase
         config = behavior or StubMoxBehaviorConfig()
@@ -130,6 +145,7 @@ class _StubMox:
         self.verify_calls = 0
         self.exit_calls: list[tuple[object | None, object | None, object | None]] = []
         self.environment: object | None = environment
+        self._lifecycle_hint = lifecycle_hint
 
     def __enter__(self) -> _StubMox:
         self.enter_calls += 1
@@ -155,6 +171,39 @@ class _StubMox:
         if self.raise_on_exit:
             raise OSError(_EXIT_ERROR_MESSAGE)
         self.phase = Phase.VERIFY
+
+
+class _ExitSpyCmdMoxManager(_CmdMoxManager):
+    """Record the fixture's body-failure decision before teardown."""
+
+    last_instance: _ExitSpyCmdMoxManager | None = None
+
+    @typ.override
+    def __init__(self, request: pytest.FixtureRequest) -> None:
+        """Initialize the manager spy for one fixture instance."""
+        super().__init__(request)
+        self.body_failed_values: list[bool] = []
+        type(self).last_instance = self
+
+    @typ.override
+    def exit(self, *, body_failed: bool) -> None:
+        """Record the fixture decision before delegating to manager teardown."""
+        self.body_failed_values.append(body_failed)
+        super().exit(body_failed=body_failed)
+
+
+@pytest.fixture
+def reset_exit_spy_manager_state() -> cabc.Iterator[None]:
+    """Clear the spy's shared instance reference before and after each test.
+
+    Yields
+    ------
+    None
+        Test execution between the initial reset and the teardown reset.
+    """
+    _ExitSpyCmdMoxManager.last_instance = None
+    yield
+    _ExitSpyCmdMoxManager.last_instance = None
 
 
 def _assert_teardown_sections(node: _StubNode, *expected: tuple[str, str, str]) -> None:
@@ -186,6 +235,7 @@ def make_manager(
             *,
             verify_on_exit: bool = False,
             environment: EnvironmentManager | None = None,
+            lifecycle_hint: str | None = None,
         ) -> _StubMox:
             # Keep signature compatible with real CmdMox; forward kwargs to stub.
             behavior_config = StubMoxBehaviorConfig(
@@ -200,6 +250,7 @@ def make_manager(
                 phase=phase,
                 behavior=behavior_config,
                 environment=environment,
+                lifecycle_hint=lifecycle_hint,
             )
 
         monkeypatch.setattr(pytest_plugin, "CmdMox", _factory)
@@ -320,6 +371,72 @@ def test_cmd_mox_fixture_restores_path_on_replay_failure(
     assert os.environ.get("PATH", "") == original_path, "Assertion failed"
 
 
+@pytest.mark.usefixtures("reset_exit_spy_manager_state")
+def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """An injected generator interruption is recorded before propagation."""
+    node = _StubNode()
+    request = _StubRequest(config=_StubConfig(), node=node)
+    # Install the _StubMox factory used when the fixture creates the spy manager.
+    make_manager(request, raise_on_verify=True)
+
+    with (
+        mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
+        mock.patch.object(pytest_plugin, "_CmdMoxManager", _ExitSpyCmdMoxManager),
+    ):
+        fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
+        generator = fixture(typ.cast("pytest.FixtureRequest", request))
+        next(generator)
+        interruption = KeyboardInterrupt()
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            generator.throw(interruption)
+
+    manager = _ExitSpyCmdMoxManager.last_instance
+    assert manager is not None, "Assertion failed"
+    assert manager.body_failed_values == [True], "Assertion failed"
+    assert raised.value is interruption, "Assertion failed"
+    _assert_teardown_sections(
+        node,
+        ("teardown", "cmd_mox verification", "RuntimeError: verify boom"),
+    )
+
+
+@pytest.mark.usefixtures("reset_exit_spy_manager_state")
+@pytest.mark.parametrize(
+    "interruption_type",
+    [
+        pytest.param(KeyboardInterrupt, id="keyboard-interrupt"),
+        pytest.param(SystemExit, id="system-exit"),
+    ],
+)
+def test_cmd_mox_fixture_marks_setup_baseexception_as_body_failure(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+    interruption_type: type[BaseException],
+) -> None:
+    """Setup interrupts are recorded before the fixture re-raises them."""
+    request = _StubRequest(config=_StubConfig())
+    make_manager(request)
+    interruption = interruption_type()
+
+    with (
+        mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
+        mock.patch.object(pytest_plugin, "_CmdMoxManager", _ExitSpyCmdMoxManager),
+        mock.patch.object(_ExitSpyCmdMoxManager, "enter", side_effect=interruption),
+    ):
+        fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
+        generator = fixture(typ.cast("pytest.FixtureRequest", request))
+
+        with pytest.raises(interruption_type) as raised:
+            next(generator)
+
+    manager = _ExitSpyCmdMoxManager.last_instance
+    assert manager is not None, "Assertion failed"
+    assert manager.body_failed_values == [True], "Assertion failed"
+    assert raised.value is interruption, "Assertion failed"
+
+
 def test_enter_cmd_mox_replays_when_enabled(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
@@ -354,6 +471,7 @@ def test_enter_cmd_mox_auto_lifecycle_overrides(
     manager = make_manager(request)
 
     assert not manager.auto_lifecycle, "Assertion failed"
+    assert manager.mox._lifecycle_hint is None, "hint must be omitted in manual mode"
 
     manager.enter()
 
@@ -452,6 +570,31 @@ def test_enter_cmd_mox_param_override_precedes_marker(
 
     stub = typ.cast("_StubMox", manager.mox)
     _assert_lifecycle_calls(stub, enter=1, replay=0)
+
+
+def test_auto_lifecycle_hint_explains_override_precedence(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """The lifecycle hint makes higher-precedence opt-outs clear."""
+    request = _StubRequest(
+        config=_StubConfig(cli=False, ini=False),
+        node=_StubNode(marker=_StubMarker(auto_lifecycle=True)),
+        param={"auto_lifecycle": True},
+    )
+    manager = make_manager(request)
+
+    assert manager.auto_lifecycle, "Assertion failed"
+    hint = manager.mox._lifecycle_hint
+    expected_hint = (
+        "Disable the most specific active setting: pass False (or "
+        "{'auto_lifecycle': False}) as the cmd_mox fixture parameter, use "
+        "@pytest.mark.cmd_mox(auto_lifecycle=False), pass "
+        "--no-cmd-mox-auto-lifecycle, or set the "
+        "cmd_mox_auto_lifecycle ini option to false. Fixture parameters "
+        "override markers, markers override the CLI, and the CLI overrides "
+        "the ini option."
+    )
+    assert hint == expected_hint, "auto lifecycle hint must explain precedence"
 
 
 @pytest.mark.parametrize("mode", ["explicit-node", "request-node"])

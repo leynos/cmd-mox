@@ -48,7 +48,9 @@ inter-process communication (IPC).
 - [x] 2.3.2. Start and stop the IPC server in sync with lifecycle transitions.
 - [x] 2.3.3. Use structured JSON communication for invocation and response
   payloads.
-- [x] 2.3.4. Implement timeout handling and robust IPC cleanup.
+- [x] 2.3.4. Bound pollable POSIX shim stdin, Unix IPC waits, and per-connection
+  server reads by `CMOX_IPC_TIMEOUT`; return diagnostic frames for rejected
+  requests and clean up IPC resources after failures.
 
 ## 3. CmdMox controller and public API
 
@@ -234,7 +236,7 @@ supports deterministic replay without external dependencies. See
   session lifecycle management, fixture metadata generation, and environment
   subset filtering.
 - [x] 12.1.2. Implement `FixtureFile` with JSON serialization, versioned schema
-  (`1.0`), and migration support.
+  (`1.0.0`), and migration support.
 - [x] 12.1.3. Add `.record()` to `CommandDouble` with validation that
   passthrough mode is enabled and support for custom scrubber and allowlist
   parameters.

@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 
+from cmd_mox._correlation import MAX_CORRELATION_ID_LENGTH, bounded_correlation_id
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc import (
     Invocation,
@@ -29,11 +30,32 @@ from cmd_mox.ipc.client import (
     _connect_unix_with_retries,
     _ConnectionContext,
 )
+from cmd_mox.ipc.wire import invocation_to_payload
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = [pytest.mark.requires_unix_sockets]
+
+_EXPECTED_BACKEND_ERROR_CATEGORIES = frozenset({
+    "unsupported_platform",
+    "windows_unsupported",
+    "os_error",
+    "runtime_error",
+    "type_error",
+    "value_error",
+})
+_EXPECTED_NAMED_PIPE_ERROR_CATEGORIES = frozenset({
+    "ClientLimitReached",
+    "ThreadStartFailed",
+    "ServerStopping",
+    "PipeMessageTooLargeError",
+    "BrokenPipe",
+    "NoData",
+    "PipeError",
+    "ReadTimeout",
+    "ServerStopped",
+})
 
 
 class _AlwaysRefusedSocket:
@@ -87,22 +109,152 @@ def test_event_as_extra_omits_inapplicable_fields() -> None:
 
 
 def test_emit_counts_events_by_bounded_key() -> None:
-    """The registry should count events by operation, transport, and outcome."""
+    """Counter keys retain selection/cache dimensions and ignore correlation."""
     _observability.reset_counters()
     event = _observability.IPCEvent(
         operation="ipc.test",
         transport="unix",
+        selection_mode="native",
         outcome="success",
+        cache_name="unix_server_base",
+        cache_outcome="miss",
         correlation_id="corr-1",
     )
+    events = (
+        event,
+        dc.replace(event, correlation_id="corr-2"),
+        dc.replace(event, cache_outcome="hit", correlation_id="corr-3"),
+        dc.replace(event, selection_mode="compatibility", correlation_id="corr-4"),
+        dc.replace(event, cache_name="inner_server_class", correlation_id="corr-5"),
+    )
+    expected_counters = {
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "unix_server_base",
+            "miss",
+            None,
+        ): 2,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "unix_server_base",
+            "hit",
+            None,
+        ): 1,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "compatibility",
+            "success",
+            "unix_server_base",
+            "miss",
+            None,
+        ): 1,
+        _observability.EventKey(
+            "ipc.test",
+            "unix",
+            "native",
+            "success",
+            "inner_server_class",
+            "miss",
+            None,
+        ): 1,
+    }
+    try:
+        for event in events:
+            _observability.emit(event)
 
-    _observability.emit(event)
-    _observability.emit(dc.replace(event, correlation_id="corr-2"))
+        assert _observability.counter_snapshot() == expected_counters, (
+            "Counters must distinguish bounded selection/cache dimensions and "
+            "aggregate equivalent events"
+        )
+    finally:
+        _observability.reset_counters()
 
-    key = _observability.EventKey("ipc.test", "unix", "success")
-    assert _observability.counter_snapshot()[key] == 2, "Counter must aggregate"
+
+def test_counter_key_omits_unbounded_message_kinds_and_error_categories() -> None:
+    """Dynamic exception classes and message kinds must not expand counters."""
     _observability.reset_counters()
-    assert not _observability.counter_snapshot(), "Reset must clear counters"
+    try:
+        for index in range(4):
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.dispatch",
+                    transport="unix",
+                    kind=f"plugin_kind_{index}",
+                    outcome="handler_error",
+                    error_category=f"PluginException{index}",
+                )
+            )
+
+        counters = _observability.counter_snapshot()
+
+        assert len(counters) == 1, "Unbounded values must collapse to one counter key"
+        [key] = counters
+        assert key.error_category is None, (
+            "Dynamic exception names must not label counters"
+        )
+        assert counters[key] == 4, "All equivalent dispatch errors must aggregate"
+    finally:
+        _observability.reset_counters()
+
+
+def test_counter_key_preserves_fixed_backend_error_categories() -> None:
+    """Keep bounded backend error labels available for diagnosis."""
+    categories = _EXPECTED_BACKEND_ERROR_CATEGORIES
+    _observability.reset_counters()
+    try:
+        for error_category in categories:
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.backend_selection",
+                    transport="unix",
+                    selection_mode="native",
+                    outcome="backend_construction_failed",
+                    cache_name="inner_server_class",
+                    cache_outcome="miss",
+                    error_category=error_category,
+                )
+            )
+
+        counters = _observability.counter_snapshot()
+
+        assert {key.error_category for key in counters} == categories, (
+            "Fixed backend categories must remain separate counter dimensions"
+        )
+    finally:
+        _observability.reset_counters()
+
+
+def test_counter_key_preserves_fixed_named_pipe_error_categories() -> None:
+    """Keep closed named-pipe failure labels available for diagnosis."""
+    categories = _EXPECTED_NAMED_PIPE_ERROR_CATEGORIES
+    _observability.reset_counters()
+    try:
+        for error_category in categories:
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.named_pipe.worker",
+                    transport="named_pipe",
+                    outcome="rejected",
+                    error_category=error_category,
+                )
+            )
+
+        counter_categories = {
+            key.error_category for key in _observability.counter_snapshot()
+        }
+
+        assert counter_categories == categories, (
+            "Fixed named-pipe categories must remain separate counter dimensions"
+        )
+    finally:
+        _observability.reset_counters()
 
 
 def test_capture_events_collects_emissions() -> None:
@@ -187,6 +339,45 @@ def test_client_failure_event_records_error_category(
     assert failed.correlation_id is not None, "Failures must stay correlated"
 
 
+def test_passthrough_report_failure_emits_correlated_client_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed passthrough report remains visible through the client seam."""
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(tmp_path / "missing.sock"))
+    result = PassthroughResult(
+        invocation_id="passthrough-123",
+        stdout="secret-stdout",
+        stderr="secret-stderr",
+        exit_code=2,
+    )
+    retry_config = RetryConfig(retries=1, backoff=0.0, jitter=0.0)
+    counters_before = _observability.counter_snapshot()
+
+    with (
+        _observability.capture_events() as events,
+        pytest.raises(FileNotFoundError),
+    ):
+        report_passthrough_result(result, timeout=0.5, retry_config=retry_config)
+
+    started, failed = _events_for(events, _client_events.REQUEST_OPERATION)
+    assert started.kind == "passthrough-result", "Wrong passthrough event kind"
+    assert started.outcome == "started", "Missing passthrough start event"
+    assert failed.kind == "passthrough-result", "Wrong failed event kind"
+    assert failed.outcome == "error", "Failed report event has wrong outcome"
+    assert failed.error_category == "FileNotFoundError", "Wrong report error category"
+    assert failed.correlation_id == result.invocation_id, (
+        "Passthrough report lost its validated correlation id"
+    )
+    assert failed.duration_ms is not None, (
+        "Passthrough report failure lost its duration"
+    )
+    assert failed.duration_ms >= 0, "Passthrough report failure duration is negative"
+    counts_after = _observability.counter_snapshot()
+    assert (
+        counts_after.get(failed.key(), 0) == counters_before.get(failed.key(), 0) + 1
+    ), "Passthrough report failure did not increment its bounded event counter"
+
+
 def test_passthrough_result_preserves_its_invocation_identifier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -221,7 +412,7 @@ def test_envelope_round_trip_reaches_the_model_unchanged() -> None:
     """The envelope fields must not leak into the validated model."""
     invocation = Invocation(command="git", args=["status"], stdin="", env={})
     payload, correlation_id = _build_request_envelope(
-        _server_core.KIND_INVOCATION, invocation.to_dict()
+        _server_core.KIND_INVOCATION, invocation_to_payload(invocation)
     )
 
     parsed = _server_core._parse_payload(payload)
@@ -238,9 +429,9 @@ def _assert_minted_identifier(value: str, rejected: object) -> None:
     """Assert *value* is a fresh, bounded, log-safe minted identifier."""
     assert value, "Minted identifier is empty"
     assert value != rejected, "Rejected identifier was reused"
-    assert len(value) <= _server_core.MAX_CORRELATION_ID_LENGTH, "Not bounded"
+    assert len(value) <= MAX_CORRELATION_ID_LENGTH, "Not bounded"
     assert uuid.UUID(value), "Minted identifier is not a UUID"
-    assert _server_core.bounded_correlation_id(value) == value, "Not log-safe"
+    assert bounded_correlation_id(value) == value, "Not log-safe"
 
 
 @pytest.mark.parametrize(
@@ -249,8 +440,8 @@ def _assert_minted_identifier(value: str, rejected: object) -> None:
         pytest.param({}, None, id="absent"),
         pytest.param({"invocation_id": ""}, "", id="empty"),
         pytest.param(
-            {"invocation_id": "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1)},
-            "x" * (_server_core.MAX_CORRELATION_ID_LENGTH + 1),
+            {"invocation_id": "x" * (MAX_CORRELATION_ID_LENGTH + 1)},
+            "x" * (MAX_CORRELATION_ID_LENGTH + 1),
             id="over-long",
         ),
         pytest.param(

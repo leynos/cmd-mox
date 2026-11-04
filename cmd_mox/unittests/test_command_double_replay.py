@@ -104,7 +104,7 @@ class TestReplayFluentAPI:
         bad_fixture = tmp_path / "fixture.json"
         bad_fixture.write_text(
             json.dumps({
-                "version": "99.0",
+                "version": "99.0.0",
                 "metadata": {
                     "created_at": "2026-01-15T10:30:00Z",
                     "cmdmox_version": "0.1.0",
@@ -117,7 +117,7 @@ class TestReplayFluentAPI:
         )
         mox = CmdMox()
 
-        with pytest.raises(ValueError, match=r"99\.0"):
+        with pytest.raises(ValueError, match=r"99\.0\.0"):
             mox.spy("git").replay(bad_fixture)
 
     def test_replay_rejects_passthrough_combination(self, tmp_path: Path) -> None:

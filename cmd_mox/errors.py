@@ -11,6 +11,18 @@ class LifecycleError(CmdMoxError):
     """Operation performed in an invalid lifecycle phase."""
 
 
+class ExpectationConfigurationError(CmdMoxError):
+    """Raised when a command double receives a second argument expectation.
+
+    Notes
+    -----
+    This occurs when ``with_args()`` or ``with_matching_args()`` is called
+    after an argument expectation has already been configured. Use
+    ``cmd_mox.spy(name).runs(handler)`` to handle several calls to one command.
+    Sensitive option values are redacted from the error message.
+    """
+
+
 class MissingEnvironmentError(CmdMoxError):
     """Required environment attribute is missing."""
 

@@ -12,6 +12,10 @@ max-module-lines = 800
 [tool.pylint."messages control"]
 disable = ["all"]
 enable = [
+    # Validate every inline pragma name. This pass registers both the core and
+    # df12 messages, so it is the one that can tell a genuine typo from a df12
+    # name; the classic PyPy pass disables W0012 for exactly that reason.
+    "unknown-option-value",
     "assert-missing-message",
     "lint-suppression-without-explanation",
     "prefer-match-over-constant-chain",

@@ -50,16 +50,15 @@ def test_format_env_masks_and_sorts_entries() -> None:
     assert formatted == "{'API_KEY': '***', 'PATH': '/bin'}"
 
 
-def test_format_args_handles_empty_and_content() -> None:
-    """Argument formatting should collapse empty sequences to an empty string."""
-    assert v._format_args([]) == ""
-    assert v._format_args(["alpha", "beta"]) == "'alpha', 'beta'"
+def test_format_items_handles_empty_and_content() -> None:
+    """Item formatting should collapse empty sequences to an empty string."""
+    assert v._format_items([]) == ""
+    assert v._format_items(["alpha", "beta"]) == "'alpha', 'beta'"
 
 
-def test_format_matchers_handles_empty_and_content() -> None:
-    """Matcher formatting should mirror argument formatting semantics."""
-    assert v._format_matchers([]) == ""
-    assert v._format_matchers([str.isdigit]) == "<method 'isdigit' of 'str' objects>"
+def test_format_items_formats_matcher_callables() -> None:
+    """Matcher callables should be formatted with their repr."""
+    assert v._format_items([str.isdigit]) == "<method 'isdigit' of 'str' objects>"
 
 
 def test_describe_expectation_renders_all_fields() -> None:

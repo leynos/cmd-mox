@@ -285,6 +285,12 @@ inspiration from PyMox's method-chaining style.
   method accepts a sequence of `CmdMox` comparator objects (see Section V).
   This allows for matching based on type, regular expressions, or custom logic.
 
+  Each `CommandDouble` accepts one argument expectation. A second call to
+  `with_args()` or `with_matching_args()`, including a call that mixes both
+  methods, raises `ExpectationConfigurationError` rather than replacing or
+  combining the existing expectation. Use `cmd_mox.spy(name).runs(handler)` for
+  multiple invocations of one command with different arguments.
+
 - `.with_stdin(data: Union[str, bytes, Comparator])`**:** Defines an expectation
   for the data that is piped to the command's standard input. This can be a
   literal string or bytes, or a comparator for flexible matching.
@@ -352,6 +358,11 @@ automatically (replay before the test body executes, verification during
 teardown) so most tests only declare expectations and exercise the system under
 test.
 
+Phase checks can append optional, generic hint text supplied by an integration.
+The pytest fixture manager supplies auto-lifecycle opt-out guidance when it has
+already replayed the fixture. Pytest-specific policy remains in the plugin,
+while the controller treats the hint as opaque text.
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -401,10 +412,25 @@ sequenceDiagram
   end
 
   PyTest->>PyTest: run test body
-  note over PyTest: pytest_runtest_makereport records call failure flag
+  alt call raises KeyboardInterrupt
+    PyTest->>Plugin: pytest_runtest_call wrapper sees KeyboardInterrupt
+    Plugin->>Plugin: store STASH_CALL_FAILED = True
+    Plugin-->>PyTest: return without changing the call outcome
+    Note over PyTest: propagate the original interrupt after wrappers finish
+  else call returns or raises SystemExit
+    opt call raises SystemExit
+      PyTest->>Plugin: pytest_runtest_call wrapper sees SystemExit
+      Plugin->>Plugin: store STASH_CALL_FAILED = True
+      Plugin-->>PyTest: return without changing the call outcome
+      Note over PyTest: capture SystemExit in CallInfo and create a failed call report
+    end
+    PyTest->>Plugin: pytest_runtest_makereport
+    Plugin->>Plugin: store report failure state
+  end
 
   rect rgb(245,255,245)
     PyTest->>Plugin: fixture teardown (exit, body_failed?)
+    Note over Plugin: effective failure combines body_failed and call-stage state
     alt auto_lifecycle and in REPLAY
       Plugin->>Mox: verify()
       note over Plugin: record verification section if error
@@ -417,6 +443,35 @@ sequenceDiagram
     end
   end
 ```
+
+```mermaid
+sequenceDiagram
+    participant Test as Test execution
+    participant Fixture as cmd_mox fixture
+    participant Manager as CmdMox manager
+    participant Teardown as Fixture teardown
+
+    Fixture->>Manager: enter()
+    alt BaseException during setup or yield
+        Manager-->>Fixture: KeyboardInterrupt or SystemExit
+        Fixture->>Fixture: body_failed = True
+        Teardown->>Fixture: verify or close handling
+        Teardown-->>Test: preserve propagating interrupt
+        Fixture-->>Test: re-raise original exception
+    else Normal execution
+        Fixture-->>Test: yield manager.mox
+    end
+```
+
+For screen readers: The diagram follows fixture setup into two exception paths.
+If setup fails or an exception is delivered into the fixture generator, the
+fixture sets `body_failed` before re-raising it. During a test call,
+`KeyboardInterrupt` is re-raised after the hook wrappers finish; `SystemExit`
+is captured in `CallInfo` and produces a failed call report. Teardown combines
+the call and fixture failure state and preserves a propagating interrupt when
+cleanup succeeds.
+
+_Figure 1: Fixture setup, exception propagation, and teardown behaviour._
 
 - `mox.replay()`: This method must be called after all expectations have been
   recorded. It signals the end of the record phase and the beginning of the
@@ -520,6 +575,40 @@ sequenceDiagram
     end
 ```
 
+### Response strategy and domain boundaries
+
+`cmd_mox.domain` owns invocation, response, and passthrough values without
+transport serialization. `cmd_mox.ipc.wire` maps those values to and from
+JSON-ready payloads at the IPC boundary. `cmd_mox.response_policy` selects
+strategies and validates expectation environments; `cmd_mox.response_strategy`
+executes handlers and constructs responses with temporary environment overrides.
+
+The following diagram groups the response-strategy concepts. It is a conceptual
+overview, not the literal call order: environment validation occurs before
+handler execution; passthrough prepares a request rather than executing the
+handler here; and a missing double bypasses strategy selection.
+
+For screen readers: The diagram shows an invocation passing through strategy
+selection. A missing double leads to a default response; passthrough and
+regular strategies lead through handler execution, expectation environment
+validation, and response environment finalization. Each path leads to a domain
+response. The preceding paragraph explains how the actual call order differs.
+
+```mermaid
+flowchart TD
+    Invocation[Invocation received] --> Select["select_response_strategy(double)"]
+    Select --> Missing[MISSING_DOUBLE\ndefault_response]
+    Select --> Passthrough[PASSTHROUGH\nexecute_handler]
+    Select --> Regular[REGULAR\nexecute_handler]
+    Passthrough --> Env["apply_expectation_env(double, invocation)"]
+    Regular --> Env
+    Env --> Finalize["finalize_response_env(response, overrides)"]
+    Missing --> Response[Domain Response]
+    Finalize --> Response
+```
+
+_Figure: Conceptual response-strategy flow for one invocation._
+
 ### 3.2 State Management and Inter-Process Communication (IPC)
 
 The communication between the main test process (hosting the `CmdMox`
@@ -537,7 +626,9 @@ pipe (`\\.\pipe\cmdmox-<hash>`) via ``derive_pipe_name``. Shims therefore keep
 working with socket semantics (PATH filtering, env setup, etc.) while the IPC
 layer transparently maps that logical path to a Windows named pipe using
 ``win32pipe``/``win32file`` (provided by the ``pywin32`` dependency). The
-workflow is as follows:
+server transport reaches those modules through an injected backend port
+(``NamedPipeBackend``) rather than through direct module globals. The workflow
+is as follows:
 
 1. **Server Initialization:** When the `CmdMox` controller enters the replay
    phase, it starts a lightweight server thread. This thread creates a
@@ -549,34 +640,66 @@ workflow is as follows:
    by any child processes, including the code under test and, consequently, the
    shims it invokes.
 
-3. **Shim Connection:** When a shim is executed by the OS, its first action is
-   to read the `CMOX_IPC_SOCKET` environment variable and connect to the
-   listening server thread in the main test process.
+3. **Shim Setup:** The shim bootstraps its launcher, resolves the command name,
+   checks that `CMOX_IPC_SOCKET` is set, and validates the IPC timeout. If the
+   socket variable is unset or the timeout is invalid, the shim exits before
+   reading standard input.
 
-4. **Invocation Reporting:** The shim gathers all relevant invocation data: the
-   command name, the list of arguments (`sys.argv[1:]`), the complete content
-   of its standard input, and a copy of its current environment variables.
-   Large payloads may require future streaming or truncation. It serializes
-   this data into a structured format like JSON and sends it over the socket to
-   the server.
+4. **Invocation Reporting:** Before opening IPC, the shim gathers the command
+   name, the list of arguments (`sys.argv[1:]`), the complete content of its
+   standard input, and a copy of its current environment variables. Reading
+   non-terminal standard input continues until end-of-file. Large payloads may
+   require future streaming or truncation.
 
-5. **Server-Side Processing:** The server thread in the main process receives
-   the JSON payload. It deserializes it into an `Invocation` object and records
-   it in the in-memory Invocation Journal after the handler runs. At that point
-   the invocation also captures the resulting `stdout`, `stderr`, and
-   `exit_code`. The server then searches its list of `Expectation` objects to
-   find a match for this invocation.
+5. **Shim Connection:** After creating the invocation, the shim connects to the
+   listening server thread in the main test process and sends the serialized
+   invocation over the socket.
 
-6. **Response Delivery:** Once a matching expectation is found, the server
-   determines the prescribed response. If it's a static `.returns()` value, it
-   serializes this data and sends it back to the shim. If it's a dynamic
-   `.runs(handler)`, the server thread executes the handler function (which is
-   in the same process and has access to all test state) and sends its result
-   back.
+6. **Server-Side Processing:** An IPC request-handler worker thread in the main
+   process receives the JSON payload and uses `cmd_mox.ipc.wire` to decode it
+   into a domain `Invocation` object. The controller resolves the invocation
+   against its configured double and expectations, then selects the response. A
+   configured `.runs(handler)` callback runs on an IPC request-handler worker
+   thread in the main test process.
 
-7. **Shim Action:** The shim receives the response payload from the server. It
+7. **Response Delivery:** The controller applies the response to the invocation
+   and appends it to the in-memory Invocation Journal only when it is
+   non-passthrough. Passthrough invocations are appended after the shim reports
+   the command result. The server maps the domain response to a wire payload
+   and sends it back to the shim.
+
+8. **Shim Action:** The shim receives the response payload from the server. It
    writes the `stdout` and `stderr` data to its own standard streams and then
    terminates with the specified `exit_code`.
+
+#### Absolute-path shim invocation
+
+Diagram description: The configured tool starts the shim by its absolute path
+and passes the exported `CMOX_IPC_SOCKET` environment variable to it. When
+standard input is not a terminal, the shim reads it until end-of-file; terminal
+input is skipped. It sends the invocation to the IPC server through
+`CMOX_IPC_SOCKET`. The server invokes the handler configured with
+`runs(handler)` and returns its response to the shim, which applies standard
+output, standard error, and the exit code to the configured tool.
+
+```mermaid
+sequenceDiagram
+    participant Tool as Configured tool
+    participant Shim as Absolute shim path
+    participant Server as IPC server
+    participant Handler as runs(handler)
+
+    Tool->>Shim: Execute launcher by absolute path
+    Shim->>Shim: Read stdin until EOF
+    Shim->>Server: Send invocation via CMOX_IPC_SOCKET
+    Server->>Handler: runs(invocation)
+    Handler-->>Server: Return response
+    Server-->>Shim: Return response
+    Shim-->>Tool: Apply stdout, stderr, and exit_code
+```
+
+_Figure: Absolute-path invocation from the configured tool through the IPC
+server and handler._
 
 This socket-based IPC architecture is the key technical differentiator for
 `CmdMox`. It is transactional, inherently process-safe, and allows for the
@@ -603,10 +726,10 @@ features that are infeasible with file-based logging.
   value into a named pipe (``\\.\pipe\cmdmox-<hash>``). This keeps the PATH
   filtering logic working unchanged while the transport communicates through
   `win32pipe`/`win32file` provided by `pywin32`.
-- Standard input is eagerly read when the shim detects it is connected to a
-  pipe. Guarding the read with ``sys.stdin.isatty()`` avoids blocking when a
-  user invokes an interactive command during a test run, and the implementation
-  explicitly skips calling ``read()`` on terminal-bound streams.
+- The shim captures non-terminal standard input before IPC. On POSIX, waitable
+  descriptors are read against the invocation deadline; terminal-bound streams
+  are skipped. Windows and descriptors that cannot be polled retain the direct
+  text read.
 - The shim sends a shallow copy of ``os.environ`` to the IPC server. This
   captures environment variables at call time without mutating the caller's
   process state.
@@ -636,15 +759,23 @@ flowchart TD
     H --> Z["Resulting PATH is cross-platform, deduplicated, shim-filtered, and normalized"]
 ```
 
-The initial implementation ships with a lightweight `IPCServer` class. It uses
-Python's `socketserver.ThreadingUnixStreamServer` to listen on a Unix domain
-socket path provided by the `EnvironmentManager`. Incoming JSON messages are
-parsed into `Invocation` objects and processed in background threads with
-reasonable timeouts (default: 5.0s). Callers can pass an `IPCHandlers`
-dataclass to provide invocation and passthrough callbacks when constructing the
-server for simple composition. Subclassing remains supported when custom
-behaviour requires overriding the public handler hooks. The `CallbackIPCServer`
-compatibility wrapper forwards a `TimeoutConfig` dataclass so callers can
+The Unix transport ships with a lightweight `IPCServer` class. It resolves its
+`socketserver` base class lazily, when backend creation first needs it, and
+retains both that class selection and the generated inner-server class for the
+process lifetime when resolution succeeds. The resolver prefers Python's
+`socketserver.ThreadingUnixStreamServer`; when that class is unavailable but
+`socketserver.UnixStreamServer` exists, it composes the latter with
+`socketserver.ThreadingMixIn`. If neither class exists, resolution raises
+`RuntimeError`, and that failure is not cached, so a later backend start
+retries resolution. Starting the Unix server directly on Windows also raises
+`RuntimeError`; the controller selects the named-pipe transport there. Incoming
+JSON messages are dispatched by their `kind` field to `Invocation` or
+`PassthroughResult` objects and processed in background threads with reasonable
+timeouts (default: 5.0s). Callers can pass an `IPCHandlers` dataclass to
+provide invocation and passthrough callbacks when constructing the server for
+simple composition. Subclassing remains supported when custom behaviour
+requires overriding the public handler hooks. The `CallbackIPCServer`
+compatibility wrapper forwards a `TimeoutConfig` dataclass, so callers can
 continue to customize startup and accept timeouts without exceeding the
 four-argument limit. On Windows hosts the controller constructs a
 `NamedPipeServer`, which shares the same handler plumbing but uses `win32pipe`/
@@ -658,6 +789,20 @@ prevent stale sockets from interfering with subsequent tests, while the Windows
 transport simply closes the pipe handles. The timeout is configurable via :data:
 `cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 
+The named-pipe server transport is split along a port and adapter boundary.
+`NamedPipeServer._create_backend` builds a `Win32NamedPipeBackend` and injects
+it into `_NamedPipeState`. The state performs every Win32 operation through the
+`NamedPipeBackend` protocol declared in `cmd_mox/ipc/windows.py`; it never
+imports a `pywin32` module itself. `cmd_mox/ipc/_win32_named_pipe_backend.py`
+forwards each port operation to the guarded bindings it imports from
+`cmd_mox/ipc/windows.py`. The port also exposes `win32file` and `pywintypes`
+views, which the shared `read_pipe_message` and `write_pipe_payload` helpers in
+`windows.py` use for synchronous I/O and for matching `pywintypes.error`. The
+import guard itself lives in `windows.py` and exists once for the package.
+Tests inject `FakeNamedPipeBackend` from
+`cmd_mox/unittests/_named_pipe_fakes.py` in its place, which lets the transport
+logic run on any platform without replacing `pywin32` module globals.
+
 #### Dispatch and observability decision (2026-08-21)
 
 The IPC dispatch metadata stores public hook names, and both the Unix-domain-
@@ -666,18 +811,56 @@ remains virtual, so subclasses can override the server hooks. The payload
 parser and validator run before any hook invocation. Observability records only
 bounded request metadata and never payload data.
 
+##### Empty reads and disconnected clients
+
+An empty read means the peer closed the connection without sending a request,
+which includes readiness probes. The server logs it at INFO level, emits an
+`ipc.server.connection` event with outcome `receive_closed`, and sends no
+reply. Malformed or unsupported content retains its error log and receives a
+bounded error response with exit status 1. Requests that fail validation
+receive the same form of response. Only valid requests reach a handler.
+
+For screen readers: The client sends a request to IPCHandler. The handler
+passes the raw bytes to request_pipeline, which returns response bytes. The
+handler writes and flushes the reply. If the client disconnects before the
+reply is written, the handler logs a debug message and returns without a
+traceback.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Handler as IPCHandler
+    participant Pipeline as request_pipeline
+    participant Logger
+
+    Client->>Handler: send request
+    Handler->>Pipeline: _request_pipeline(raw, unix)
+    Pipeline-->>Handler: response_bytes
+    Handler->>Client: wfile.write(response_bytes)
+    Handler->>Client: wfile.flush()
+    alt client disconnected before reply
+        Client--xHandler: OSError
+        Handler->>Logger: debug("IPC client disconnected before reply was written")
+    end
+```
+
+_Figure: IPC reply writes and client-disconnect handling._
+
 #### Observability seam and correlation identifiers (2026-08-28)
 
 `cmd_mox.ipc._observability` is a dependency-free seam shared by the client and
 both server transports. It defines a frozen `IPCEvent` carrying only bounded
-dimensions — `operation`, `transport`, `kind`, `outcome`, `error_category`,
-`attempt`, `duration_ms`, `message_size`, and `correlation_id` — renders them
-as structured logging fields, logs them at INFO, and counts them in an
-in-process registry keyed by `(operation, transport, outcome)`. Tests assert on
-emissions through `capture_events()` and `counter_snapshot()` rather than an
-external metrics collector. The module documents a never-log list: command
-names, arguments, standard streams, environments, socket paths, exception
-messages, and raw payloads must never become fields.
+dimensions — `operation`, `transport`, `kind`, `selection_mode`, `outcome`,
+`cache_name`, `cache_outcome`, `error_category`, `attempt`, `duration_ms`,
+`message_size`, and `correlation_id` — renders applicable values as structured
+logging fields and logs them at INFO. The in-process registry uses a narrower
+counter key: message kinds and caller-defined exception class names remain
+available in logs but do not label counters; closed backend and named-pipe
+error categories do. Tests assert on emissions through `capture_events()` and
+`counter_snapshot()` rather than an external metrics collector. The module
+documents a never-log list: command names, arguments, standard streams,
+environments, socket paths, exception messages, and raw payloads must never
+become fields.
 
 Requests carry an opaque `correlation_id` as a top-level envelope field beside
 `kind`. The client reuses the model's `invocation_id` when the request already
@@ -694,6 +877,26 @@ Client events use the operations `ipc.client.request` (outcomes `started`,
 with a 1-based `attempt`). Server dispatch keeps the existing
 `IPC dispatch outcome` record under the `ipc.dispatch` operation, now also
 carrying `transport` and `correlation_id`.
+
+Unix backend creation emits `ipc.backend_selection` events at the cached
+inner-class lookup and backend construction boundaries. The `selection_mode`
+dimension is one of `native`, `compatibility`, `windows_unsupported`, or
+`unsupported_platform`; cache observations name either `unix_server_base` or
+`inner_server_class` and report `hit` or `miss`. Outcomes distinguish selected
+bases, cache accesses, failed resolution, Windows rejection, and
+backend-construction failure. Error categories are fixed values such as
+`unsupported_platform`, `windows_unsupported`, and `os_error`; exception
+messages and socket paths never enter logs or counters. The cached resolver
+itself remains free of logging side effects.
+
+Shim failures while reading stdin or writing and flushing response streams use
+the same seam with fixed operation, outcome, and error-category values, a
+duration, and a correlation identifier when available. Passthrough reporting
+already emits `ipc.client.request` events, while Unix server response-write
+failures emit `ipc.server.connection` events. These additions retain the
+never-log rules: event fields contain no exception messages or stream content.
+Events are sent to structured logging and counted in process; the seam has no
+external metrics or tracing collector.
 
 #### Named-pipe resource bounds (2026-08-28)
 
@@ -739,6 +942,29 @@ and timeout environment variables automatically. This keeps tests and shim
 workflows from having to patch :mod:`os.environ` manually when they rely on the
 higher-level context manager.
 
+#### Shared POSIX deadline and request rejection (2026-10-09)
+
+On POSIX, the shim creates one monotonic deadline from CMOX_IPC_TIMEOUT. It
+applies that deadline to waitable stdin capture, Unix socket connection
+attempts and retry backoff, request sending, response reads, and passthrough
+reporting. Each socket wait receives only the remaining budget, so partial
+response chunks and retries cannot restart the timeout. Regular-file stdin uses
+a worker because readiness polling does not bound a text read from a regular
+file. Windows keeps its named-pipe timeout behaviour. Windows,
+missing-file-descriptor, and unpollable stdin retain the existing direct text
+read; read failures still use the shim's controlled IPC diagnostic.
+
+The Unix server applies a read deadline to each accepted connection. A
+non-empty malformed or invalid request receives a bounded error response that
+the shim can decode and report. An empty read means the peer closed without a
+request, which includes the server's readiness probes; it is logged as a closed
+connection and receives no response frame. If the peer closes while a response
+is being written, the server logs the same connection-drop class. Shim-side IPC
+failures, including response writes and passthrough reporting, produce a
+controlled diagnostic and exit status rather than an unhandled traceback. If
+passthrough reporting fails, the shim still writes the captured command output
+before exiting.
+
 To avoid races and corrupted state, `IPCServer.start()` first checks if an
 existing socket is in use before unlinking it. After launching the background
 thread, the server polls for the socket path using an exponential backoff to
@@ -758,13 +984,21 @@ classDiagram
     class IPCServer {
         - Path socket_path
         - float timeout
-        - _InnerServer _server
+        - BaseServer _server
         - Thread _thread
         + __enter__() IPCServer
         + __exit__(exc_type, exc, tb) None
         + start() None
         + stop() None
         + handle_invocation(invocation: Invocation) Response
+    }
+    class InnerServerFactory {
+        <<cached function>>
+        + _inner_server_cls()
+    }
+    class UnixServerBaseResolver {
+        <<cached function>>
+        + resolve_unix_server_base()
     }
     class _InnerServer {
         - IPCServer outer
@@ -781,16 +1015,25 @@ classDiagram
         + str stdout
         + str stderr
         + int exit_code
-        + dict[str, Any] to_dict()
     }
     class Response {
         + str stdout
         + str stderr
         + int exit_code
+        + dict[str, str] env
+        + PassthroughRequest | None passthrough
     }
-    IPCServer --> _InnerServer : manages
+    IPCServer --> InnerServerFactory : requests class when creating backend
+    InnerServerFactory ..> UnixServerBaseResolver : resolves platform base
+    InnerServerFactory ..> _InnerServer : creates and caches
     _InnerServer --> _IPCHandler : uses
-    _IPCHandler --> Invocation : parses
+    class WireMapping {
+        + request_from_payload() Invocation
+        + response_to_payload() dict
+    }
+    _IPCHandler --> WireMapping : maps payloads
+    WireMapping --> Invocation : decodes
+    WireMapping --> Response : encodes
     _IPCHandler --> Response : returns
     IPCServer --> Invocation : handles
     IPCServer --> Response : returns
@@ -824,12 +1067,22 @@ sequenceDiagram
     participant UnixSocket as "Unix Domain Socket (POSIX only)"
     Controller->>Server: Start IPC server
     alt Windows
+        Controller->>Server: Select NamedPipeServer
         Server->>WindowsPipe: Create named pipe (derive name from socket path)
         WindowsPipe-->>Server: Ready event set
         Client->>WindowsPipe: Connect to named pipe
         WindowsPipe->>Server: Forward request
         Server->>Client: Send response
     else POSIX
+        Server->>Server: Call cached inner-server factory
+        Server->>Server: Resolve and cache Unix server base
+        alt ThreadingUnixStreamServer available
+            Server-->>Server: Use native threaded server class
+        else Only UnixStreamServer available
+            Server-->>Server: Compose UnixStreamServer with ThreadingMixIn
+        else No Unix server class available
+            Server-->>Controller: Raise RuntimeError
+        end
         Server->>UnixSocket: Create Unix domain socket
         UnixSocket-->>Server: Socket ready
         Client->>UnixSocket: Connect to socket
@@ -844,6 +1097,8 @@ The relationships between the Windows transport helpers are summarized below.
 erDiagram
     Path ||--o| NamedPipeServer : derives
     NamedPipeServer ||--|{ _NamedPipeState : manages
+    NamedPipeServer ||--|| Win32NamedPipeBackend : "injects into state"
+    _NamedPipeState }o--|| NamedPipeBackend : uses
     Path ||--|{ derive_pipe_name : input
     derive_pipe_name }|--|| WINDOWS_PIPE_PREFIX : uses
     NamedPipeServer ||--|| derive_pipe_name : uses
@@ -905,12 +1160,14 @@ each `CmdMox` controller instance. A `collections.deque` backs the journal,
 preserving call order and enabling efficient pruning when bounded. It stores a
 chronological record of command calls during replay.
 
-Each time the IPC server thread receives an invocation report from a shim, it
+Each time the IPC server receives an invocation report from a shim, it
 constructs an `Invocation` object containing the command name, arguments,
-`stdin`, and environment. After the handler runs, the controller attaches the
-resulting `stdout`, `stderr`, and `exit_code` to the `Invocation` and appends
-it to the journal. `verify()` uses this enriched journal as the definitive
-record, comparing it against predefined expectations to detect discrepancies.
+`stdin`, and environment. The controller selects and applies a response before
+appending non-passthrough invocations to the journal, so those entries also
+contain the resulting `stdout`, `stderr`, and `exit_code`. Passthrough
+invocations are appended after the shim reports their command results.
+`verify()` uses this enriched journal as the definitive record, comparing it
+against predefined expectations to detect discrepancies.
 
 ## IV. Feature Deep Dive: Stubbing
 
@@ -967,11 +1224,11 @@ The implementation of this feature leverages the IPC architecture:
    server identifies that the corresponding stub is configured with a `.runs()`
    handler.
 
-3. The IPC server thread—which runs within the main test process and therefore
-   has direct access to `my_date_handler`—executes the handler. It passes the
-   structured `Invocation` object as an argument to the handler and, after the
-   handler returns, records the resulting output streams and exit code on that
-   invocation.
+3. An IPC request-handler worker thread—which runs within the main test process
+   and therefore has direct access to `my_date_handler`—executes the handler.
+   It passes the structured `Invocation` object as an argument to the handler;
+   after the handler returns, the controller applies the resulting output
+   streams and exit code to that invocation.
 
 4. The handler performs its logic (which can involve accessing or modifying
    state within the test function's scope) and returns a result tuple:
@@ -1423,6 +1680,22 @@ API ensures that tests are not only effective but also readable and
 maintainable. The inclusion of stubs, strict mocks, and observational spies
 (including a passthrough mode) provides a complete toolkit for tackling a wide
 range of testing scenarios.
+
+#### Packaging and release
+
+CmdMox is currently distributed as a pure-Python wheel and source distribution.
+The shared build action runs plain `uv build`, which creates the source
+distribution first and builds the wheel from that archive. Pull-request CI
+checks that each build contains exactly one source distribution.
+
+Tagged releases check the tag against `project.version`, attest every
+distribution, and pass the attested files and Sigstore bundle together as the
+`release-dist` artefact. Trusted Publishing sends only files PyPI does not
+already list. The workflow then reconciles the draft GitHub Release with PyPI
+using SHA-256 digests, preserving existing assets and attaching the bytes PyPI
+holds. The published GitHub Release carries the same distribution bytes and
+their provenance bundle. See [ADR 003](./adr-003-release-pipeline.md) for the
+decision and operating constraints.
 
 ### 8.2 Future Roadmap
 
@@ -1973,16 +2246,16 @@ sequenceDiagram
 
 Fixtures use JSON format for several reasons: human-readability, native Python
 support without dependencies, Git-friendliness (mergeable, diffable), and
-compatibility with the existing `Invocation.to_dict()` serialization.
+compatibility with the established invocation-field schema.
 
-#### 9.3.1 Schema Definition (Version 1.0)
+#### 9.3.1 Schema definition (Version 1.0.0)
 
 <!-- markdownlint-disable MD013 -->
 
 ```json
 {
   "$schema": "https://cmdmox.dev/schemas/fixture-v1.json",
-  "version": "1.0",
+  "version": "1.0.0",
   "metadata": {
     "created_at": "2024-01-15T10:30:00Z",
     "cmdmox_version": "0.5.0",
@@ -2682,7 +2955,16 @@ rather than relying on `.replay()`.
 - Variables on the user-defined allowlist
 - Variables matching command-specific prefixes (e.g., `GIT_*` for git)
 
-#### 9.9.3 Review Workflow
+#### 9.9.3 Command argument diagnostics
+
+Expectation configuration errors pass displayed argument sets through a shared
+pure redactor. It masks values for credential-bearing options and headers,
+along with URL userinfo, sensitive query parameters, and credential
+assignments, while preserving argument positions. Redaction affects diagnostic
+output only; registered expectations and invocation arguments retain their
+original values.
+
+#### 9.9.4 Review workflow
 
 For sensitive fixtures, a review mode generates a companion file for manual
 verification:
@@ -2743,7 +3025,7 @@ when the review file is deleted after inspection) to provide an audit trail.
 
 **Rationale:**
 
-- `Invocation.to_dict()` already produces JSON-compatible output
+- `RecordedInvocation.to_dict()` already produces JSON-compatible output
 - No additional dependency (YAML requires `pyyaml`)
 - Better tooling support (JSON Schema validation, IDE formatters)
 - Slightly faster parsing than YAML
@@ -2820,21 +3102,23 @@ method
 
 #### 9.10.8 Tuple-Based Version Comparison and Migration Registry
 
-**Decision:** Parse schema version strings into `(major, minor)` integer tuples
-for comparison. Maintain a migration registry keyed by source major version,
-with chainable migration functions (v0 -> v1 -> v2 etc.). Minor version
-differences within the same major version are tolerated without migration.
+**Decision:** Parse schema version strings into `(major, minor, patch)` integer
+tuples for comparison. Continue accepting legacy two-component strings as
+`(major, minor, 0)` and normalize them to three components. Maintain a
+migration registry keyed by source major version, with chainable migration
+functions (major 0 -> major 1 -> major 2, etc.). Minor and patch differences
+within the same major version are tolerated without migration.
 
 **Rationale:**
 
-- String comparison of version numbers is unreliable (e.g. `"9.0" < "10.0"` is
-  `False` with string comparison)
+- String comparison of version numbers is unreliable (e.g. `"9.0.0" < "10.0.0"`
+  is `False` with string comparison)
 - Keying migrations by major version avoids registering an entry for every
   possible minor version
 - Chainable migrations let each function know only about two adjacent major
   versions, following the Django/Alembic pattern
-- Same-major tolerance follows the semantic versioning contract: minor versions
-  add optional fields but do not break existing readers
+- Same-major tolerance follows the schema contract: minor and patch versions
+  add fields that existing readers can ignore
 
 #### 9.10.9 Coordinator-Based Recording Integration
 
@@ -2991,39 +3275,85 @@ misses fall back to the spy's configured behaviour.
   replay much less useful for tests that only fixture a subset of command
   variants
 
+#### 9.10.16 Three-component fixture schema versions (2026-10-26)
+
+**Decision:** Represent fixture schema versions with numeric
+`MAJOR.MINOR.PATCH` components. Continue accepting legacy two-component
+versions by treating the missing patch as zero and normalize them to three
+components when loaded.
+
+**Compatibility:** Tolerate minor and patch differences within the same major
+version. Reject a higher major version when no migration path is registered.
+Compatibility with older readers is one-way: this version loads legacy
+two-component fixture versions and writes three-component versions, while older
+releases that require exactly two components cannot read fixtures written by
+this version.
+
+**Rationale:** Three components match the semantic-version core used by the
+fixture schema while preserving compatibility with existing two-component
+fixtures.
+
 ### 9.11 Versioning and Forward Compatibility
 
 #### 9.11.1 Schema Versioning
 
-Fixtures include a `version` field following semantic versioning:
+Fixture schema versions use the numeric `MAJOR.MINOR.PATCH` semantic-version
+core, such as `1.0.0`. CmdMox parses the field into a three-integer tuple.
+Legacy two-component versions such as `1.0` are accepted with an implicit patch
+of zero and normalized to `1.0.0` when loaded. This compatibility is one-way:
+older CmdMox releases that require exactly two components cannot read fixtures
+written with a three-component version.
 
 - Breaking changes increment the major version
 - New optional fields increment the minor version
 - CmdMox maintains a migration table for old versions
+- Minor and patch differences within the same major version are tolerated
+- A higher major version with no migration path raises `ValueError`
 
 #### 9.11.2 Upgrade Path
 
 ```python
-def _parse_version(version_str: str) -> tuple[int, int]:
-    major, minor = version_str.split(".")
-    return (int(major), int(minor))
+import re
+
+def _parse_version(version_str: str) -> tuple[int, int, int]:
+    parts = version_str.strip().split(".")
+    if len(parts) not in (2, 3):
+        raise ValueError("expected 'major.minor.patch'")
+    if len(parts) == 3 and not re.fullmatch(
+        r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}", version_str.strip()
+    ):
+        raise ValueError("expected 'major.minor.patch'")
+    components = [int(part) for part in parts]
+    if any(component < 0 for component in components):
+        raise ValueError("version components must be non-negative")
+    if len(components) == 2:
+        components.append(0)
+    return (components[0], components[1], components[2])
 
 def _migrate_v0_to_v1(data: dict) -> dict:
-    data["version"] = "1.0"
+    data["version"] = "1.0.0"
     return data
 
 # Migration registry: source major version -> (target version, function)
-_MIGRATIONS = {0: ((1, 0), _migrate_v0_to_v1)}
+_MIGRATIONS = {0: ((1, 0, 0), _migrate_v0_to_v1)}
 
 def _apply_migrations(data: dict) -> dict:
     """Deep-copy data and chain migrations to the current schema."""
     data = copy.deepcopy(data)
     if "version" not in data:
-        data["version"] = "0.0"
+        data["version"] = "0.0.0"
     file_ver = _parse_version(data["version"])
+    data["version"] = ".".join(str(component) for component in file_ver)
     current = _parse_version(_SCHEMA_VERSION)
+    if file_ver[0] == current[0]:
+        return data
+    if file_ver[0] > current[0]:
+        raise ValueError("no migration path to the current schema")
     while file_ver[0] < current[0]:
-        target, migrate_fn = _MIGRATIONS[file_ver[0]]
+        migration = _MIGRATIONS.get(file_ver[0])
+        if migration is None:
+            raise ValueError("no migration path to the current schema")
+        target, migrate_fn = migration
         data = migrate_fn(data)
         file_ver = target
     return data

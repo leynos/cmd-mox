@@ -4,6 +4,41 @@ This guide documents the local development checks for CmdMox. It is the source
 of truth for running lint, understanding the current lint baseline, and knowing
 where lint policy is configured.
 
+## Pytest fixture lifecycle
+
+The pytest plugin records failures at both the test-call and fixture
+boundaries. Its `pytest_runtest_call` hook wrapper stores call-stage
+`KeyboardInterrupt` and `SystemExit` on the test item before pytest finalizes
+yield fixtures. This hook is needed because pytest can resume a fixture
+generator normally while propagating those interruptions from the test body.
+
+The `cmd_mox` fixture also marks `body_failed` when a `BaseException` escapes
+`manager.enter()` or is thrown back through the fixture's `yield`, then
+immediately re-raises the same exception. This records setup and fixture
+failures without consuming interrupts or worker exits.
+
+During teardown, `_CmdMoxManager.exit()` combines `body_failed` with the
+call-stage state recorded by the hook. It suppresses a verification error only
+when a body or call-stage failure already exists and controller cleanup
+succeeds, preserving the original failure. Cleanup errors remain visible as
+teardown failures.
+
+## Recording fixture schema versions
+
+`FixtureFile.load()` reads the JSON and delegates to `from_dict()`, which
+normalizes the version and applies registered migrations. Canonical versions
+use three dot-separated ASCII numeric components without leading zeroes; legacy
+two-component values are parsed as integers with `PATCH` set to zero. If the
+version is missing, normalization supplies `0.0.0`.
+
+Minor and patch differences within the same major version are tolerated.
+Migrations are registered in `_MIGRATIONS` by source major version and chain
+older major versions forward; an unsupported higher major version is rejected
+with `ValueError`. See the
+[schema versioning guide](usage-guide.md#schema-versioning-and-migration) and
+the
+[detailed versioning design](python-native-command-mocking-design.md#911-versioning-and-forward-compatibility).
+
 ## Coverage ownership
 
 Pull-request CI generates coverage with the ratchet (`with-ratchet: 'true'`)
@@ -55,19 +90,23 @@ made to the generators and the uploader together is still a reviewed change.
 
 ## Linting
 
-CmdMox uses a four-tier linting pipeline. Run it with:
+CmdMox uses a five-tier linting pipeline. Run it with:
 
 ```bash
 make lint
 ```
 
 The `lint` target first builds the development environment through
-`make build`. It then runs the four lint tiers in order:
+`make build`, provisions the pinned duplication detector through
+`make install-nose`, and runs the YAML lint gate through `make yamllint` and
+`make actionlint` (see [YAML lint](#yaml-lint)). It then runs the five lint
+tiers in order:
 
 1. `ruff check`
 2. Pylint on uv-managed PyPy 3.12
 3. CPython 3.14 Pylint with `df12_python_lints`, followed by `ambrleaks`
 4. a blocking Skylos dead-code scan of the production package
+5. the blocking nose code-duplication gate
 
 Ruff is the fast first tier. It enforces import order, pycodestyle and Pyflakes
 rules, pathlib usage, docstring rules, pytest rules, selected Ruff preview
@@ -85,11 +124,32 @@ CPython 3.14. Its separate `pylintrc-df12.toml` enables every DF12 checker
 against CmdMox's supported Python 3.12 source baseline. `ambrleaks` then scans
 the test snapshot area for unredacted values.
 
-Skylos is the final production-liveness check. It is separately provisioned at
-an exact release, scans `cmd_mox` without treating test references as live
-callers, and fails the local gate and Linux CI when it reports unexplained dead
-code. The scan uses only local static analysis: uploads, provenance collection,
-and grep verification are disabled.
+Skylos is the fourth tier. It is separately provisioned at an exact release,
+scans `cmd_mox` without treating test references as live callers, and fails the
+local gate and Linux CI when it reports unexplained dead code. The scan uses
+only local static analysis: uploads, provenance collection, and grep
+verification are disabled.
+
+The nose duplication gate is the final tier. It runs the pinned `nose-cli`
+detector over the production package and fails when it finds a clone family no
+reasoned exception covers. See [Code-duplication gate](#code-duplication-gate)
+below.
+
+## YAML lint
+
+`make lint` runs `yamllint --strict` over every Git-tracked `*.yml` and
+`*.yaml` file, then `actionlint` over the workflows, which also runs
+`shellcheck` over their `run:` scripts. Install yamllint 1.38.0, actionlint
+1.7.12 and shellcheck 0.11.0 locally, as CI does through the shared
+`install-yaml-lint` action, so results agree. Run the targets from the
+repository root: yamllint resolves `.yamllint.yml`, which extends the estate
+base `.yamllint-estate.yml` (copied verbatim, never edited here), against the
+working directory. `.github/actionlint.yaml` declares the `ubicloud-*` runner
+labels. `tests/yaml_lint/` judges the Makefile and workflow wiring against
+fixtures and then the real files, pins the estate base, and runs the Make
+targets with stand-in tools (and the real yamllint when installed) to prove the
+tracked-files list, that a tool failure fails its target, and that a failed
+file enumeration stops the gate before the linter runs.
 
 ## Makefile lint variables
 
@@ -97,36 +157,51 @@ The `Makefile` exposes the lint runner through variables so developers and
 Continuous Integration (CI) jobs can override the runtime without editing
 project files.
 
-| Variable                    | Default                                                                                                                                              | Purpose                                                                           |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `RUFF_VERSION`              | `0.16.4`                                                                                                                                             | Pins the Ruff release used by lint and format targets.                            |
-| `RUFF`                      | `$(UV_ENV) $(UV) tool run ruff@$(RUFF_VERSION)`                                                                                                      | Runs the pinned Ruff command via `uv tool run`.                                   |
-| `TY_VERSION`                | `0.0.74`                                                                                                                                             | Pins the `ty` release used by the typecheck target.                               |
-| `TY`                        | `$(UV_ENV) $(UV) run --with ty==$(TY_VERSION) ty`                                                                                                    | Overlays the pinned `ty` onto the project virtualenv so it sees dependencies.     |
-| `TYPOS_VERSION`             | `1.48.0`                                                                                                                                             | Pins the `typos` release used by the spelling target.                             |
-| `PYLINT_PYTHON`             | `pypy@3.12`                                                                                                                                          | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
-| `PYLINT_TARGETS`            | `cmd_mox conftest.py examples tests`                                                                                                                 | Lists the directories and files linted by Pylint.                                 |
-| `PYLINT_VERSION`            | `4.0.9`                                                                                                                                              | Pins the Pylint release run by the second tier.                                   |
-| `PYLINT_BASELINE_DISABLE`   | Existing cmd-mox baseline                                                                                                                            | Temporarily disables legacy Pylint findings while keeping the second tier active. |
-| `PYLINT`                    | `$(UV_ENV) $(UV) tool run --managed-python --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' pylint --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy Pylint command.                                              |
-| `DF12_PYTHON`               | `3.14`                                                                                                                                               | Selects CPython for the isolated DF12 tooling tier.                               |
-| `DF12_PYTHON_LINTS_REF`     | `4cf41736cce2f7ba2778882a5c629c044568a0e5`                                                                                                           | Pins the immutable DF12 lint and `ambrleaks` revision (the `v0.3.0` tag commit).  |
-| `DF12_PYTHON_LINTS`         | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                                       | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
-| `DF12_PYLINT`               | uv-isolated Pylint under CPython 3.14                                                                                                                | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
-| `AMBRLEAKS`                 | uv-isolated `ambrleaks` under CPython 3.14                                                                                                           | Scans tracked test snapshot files for unredacted values.                          |
-| `SKYLOS_VERSION`            | `4.33.2`                                                                                                                                             | Pins the separately provisioned dead-code analyser.                               |
-| `SKYLOS_CLI`                | `$(UV_ENV) $(UV) tool run --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' skylos`                                                                   | Command-only CLI; Python 3.14 supplies Skylos's source AST runtime.               |
-| `SKYLOS`                    | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                                         | Adds scan-only global options for the blocking lint target.                       |
-| `SKYLOS_PRODUCTION_TARGETS` | `cmd_mox`                                                                                                                                            | Limits dead-code liveness analysis to production sources.                         |
-| `SKYLOS_EXCLUDE_FOLDERS`    | `tests cmd_mox/unittests`                                                                                                                            | Excludes both test paths from the production liveness graph.                      |
-| `SKYLOS_EXCLUDE_ARGS`       | `$(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))`                                                                                    | Expands each excluded folder to its own repeatable `--exclude` flag.              |
-| `SKYLOS_WHITELIST_LOCK`     | `.skylos-whitelist.lock`                                                                                                                             | Repository-local lock serializing documented whitelist updates.                   |
+| Variable                      | Default                                                                                                                                        | Purpose                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `RUFF_VERSION`                | `0.16.4`                                                                                                                                       | Pins the Ruff release used by lint and format targets.                            |
+| `RUFF`                        | `$(UV_GATE) tool --from ruff@$(RUFF_VERSION) -- ruff`                                                                                          | Runs the pinned Ruff command via the vendored helper's tool channel.              |
+| `TY_VERSION`                  | `0.0.74`                                                                                                                                       | Pins the `ty` release used by the typecheck target.                               |
+| `TY`                          | `$(UV_GATE) tool --from ty@$(TY_VERSION) -- ty`                                                                                                | Runs the pinned `ty`; `--python .venv` points it at the project environment.      |
+| `TYPOS_VERSION`               | `1.48.0`                                                                                                                                       | Pins the `typos` release used by the spelling target.                             |
+| `PYLINT_PYTHON`               | `pypy@3.12`                                                                                                                                    | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
+| `PYLINT_TARGETS`              | `cmd_mox conftest.py examples tests`                                                                                                           | Lists the directories and files linted by Pylint.                                 |
+| `PYLINT_VERSION`              | `4.0.9`                                                                                                                                        | Pins the Pylint release run by the second tier.                                   |
+| `PYLINT_BASELINE_DISABLE`     | Existing cmd-mox baseline                                                                                                                      | Temporarily disables legacy Pylint findings while keeping the second tier active. |
+| `PYLINT`                      | `$(UV_GATE) tool --managed-python --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' -- pylint --disable=$(PYLINT_BASELINE_DISABLE)` | Builds the full PyPy Pylint command.                                              |
+| `DF12_PYTHON`                 | `3.14`                                                                                                                                         | Selects CPython for the isolated DF12 tooling tier.                               |
+| `DF12_PYTHON_LINTS_REF`       | `4cf41736cce2f7ba2778882a5c629c044568a0e5`                                                                                                     | Pins the immutable DF12 lint and `ambrleaks` revision (the `v0.3.0` tag commit).  |
+| `DF12_PYTHON_LINTS`           | `git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)`                                                                 | Identifies the common source for the DF12 Pylint plugin and `ambrleaks`.          |
+| `DF12_PYLINT`                 | uv-isolated Pylint under CPython 3.14                                                                                                          | Runs the enabled DF12 checker set with `pylintrc-df12.toml`.                      |
+| `AMBRLEAKS`                   | uv-isolated `ambrleaks` under CPython 3.14                                                                                                     | Scans tracked test snapshot files for unredacted values.                          |
+| `SKYLOS_VERSION`              | `4.33.2`                                                                                                                                       | Pins the separately provisioned dead-code analyser.                               |
+| `SKYLOS_CLI`                  | `$(UV_GATE) tool --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' -- skylos`                                                                   | Command-only CLI; Python 3.14 supplies Skylos's source AST runtime.               |
+| `SKYLOS`                      | `$(SKYLOS_CLI) --config-file pyproject.toml`                                                                                                   | Adds scan-only global options for the blocking lint target.                       |
+| `SKYLOS_PRODUCTION_TARGETS`   | `cmd_mox`                                                                                                                                      | Limits dead-code liveness analysis to production sources.                         |
+| `SKYLOS_EXCLUDE_FOLDERS`      | `tests cmd_mox/unittests`                                                                                                                      | Excludes both test paths from the production liveness graph.                      |
+| `SKYLOS_EXCLUDE_ARGS`         | `$(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))`                                                                              | Expands each excluded folder to its own repeatable `--exclude` flag.              |
+| `SKYLOS_WHITELIST_LOCK`       | `.skylos-whitelist.lock`                                                                                                                       | Repository-local lock serializing documented whitelist updates.                   |
+| `NOSE_VERSION`                | `0.20.0`                                                                                                                                       | Pins the duplication detector installed and run by the duplication targets.       |
+| `NOSE_TOOLS_DIR`              | `.tools/nose`                                                                                                                                  | Repository-local install directory for the detector binary.                       |
+| `NOSE_BIN`                    | `$(NOSE_TOOLS_DIR)/nose`                                                                                                                       | Detector binary path; a relative value resolves against the repository root.      |
+| `CARGO_BINSTALL`              | `cargo-binstall`                                                                                                                               | Installer used to fetch the pinned prebuilt detector release.                     |
+| `DUPLICATION_PYTHON`          | `3.14`                                                                                                                                         | Selects the gate tool environment interpreter; matches the script's Python floor. |
+| `CYCLOPTS_VERSION`            | `4.25.2`                                                                                                                                       | Pins cyclopts for the gate environment; matches the script's PEP 723 block.       |
+| `TOMLKIT_VERSION`             | `0.15.1`                                                                                                                                       | Pins tomlkit for the gate environment; matches the script's PEP 723 block.        |
+| `DUPLICATION_GATE`            | `NOSE_BIN=$(NOSE_BIN) $(UV_GATE) tool --from 'python@$(DUPLICATION_PYTHON)' --with ... -- python scripts/duplication_gate.py`                  | Builds the gate command through the vendored helper's pinned-tool channel.        |
+| `DUPLICATION_TEST_PYTHON`     | `$(DUPLICATION_PYTHON)`                                                                                                                        | Selects the interpreter for the focused duplication-gate helper tests.            |
+| `DUPLICATION_TEST_PYTEST`     | `9.0.2`                                                                                                                                        | Pins pytest for the isolated helper-test environment.                             |
+| `DUPLICATION_TEST_HYPOTHESIS` | `6.165.6`                                                                                                                                      | Pins hypothesis for the isolated helper-test environment.                         |
 
 _Table 1: Makefile variables for the lint pipeline._
 
 `tests/test_toolchain_contract.py` enforces that the Makefile's pinned
 `RUFF_VERSION` and `TY_VERSION` match the versions used in Continuous
-Integration (CI), so the two never drift apart silently.
+Integration (CI), so the two never drift apart silently. It also enforces that
+`NOSE_VERSION`, the CI job's `NOSE_VERSION` environment variable and
+`[tool.nose].version` in `pyproject.toml` all agree, since a drift there
+produces a cache key that can never hit or a detector the gate rejects at run
+time.
 
 Override variables on the command line when a local investigation needs a
 different target set or interpreter:
@@ -136,8 +211,9 @@ make lint PYLINT_TARGETS=cmd_mox/ipc PYLINT_PYTHON=pypy@3.12
 ```
 
 Do not bypass `make lint` for normal validation. Running the target keeps the
-Ruff, PyPy Pylint, DF12 Pylint, snapshot-leak, Skylos, and spelling gates
-ordered consistently with CI and preserves the shared `uv` cache configuration.
+Ruff, PyPy Pylint, DF12 Pylint, snapshot-leak, Skylos, duplication and spelling
+gates ordered consistently with CI and preserves the shared `uv` cache
+configuration.
 
 ## Snapshot testing
 
@@ -186,6 +262,34 @@ Hypothesis complements the snapshot tests above rather than replacing them:
 snapshots pin exact serialized output, while properties assert relations that
 should hold for every generated input.
 
+## Shim path filtering
+
+`cmd_mox._shim_bootstrap._should_remove_path_entry` is the boolean query behind
+`bootstrap_shim_path()`. A `True` result means remove the entry, and `False`
+means keep it.
+
+The query removes an entry when it starts with the `__editable__` marker
+prefix, or when the entry resolves to the package directory. It keeps an entry
+that matches neither rule. It also keeps an entry whose resolution fails, so
+bootstrap does not abort:
+
+- a relative entry whose working directory was deleted raises `OSError`;
+- a symlink loop raises `RuntimeError` on Python 3.12 and is tolerated from
+  Python 3.13 onwards; and
+- an entry the operating system cannot represent, such as one containing an
+  embedded null byte, raises `ValueError`.
+
+`bootstrap_shim_path()` calls the query for each `sys.path` entry, clears
+`sys.path_importer_cache`, and loads the stdlib `platform` module. If that load
+fails, it restores the removed entries. `_BOOTSTRAP_DONE` makes the function
+idempotent, so later calls return without changing `sys.path`.
+
+Resolution failure therefore retains the entry rather than raising, so the
+unresolvable entry stays on `sys.path`. The covering tests in
+`cmd_mox/unittests/test_shim_bootstrap.py` exercise the package match, the
+deleted working directory, an injected `ELOOP`, a symlink cycle, an embedded
+null byte, and the bootstrap-level retention test.
+
 ## IPC request dispatch
 
 The shared IPC request pipeline keeps transport handling separate from request
@@ -206,11 +310,186 @@ dispatch:
   results, and an `error_category` only on failure. Payloads, arguments,
   standard streams, environments, socket paths, and exception messages must
   never be logged.
+- Outcomes are `success`, `invalid_request` for validation failures,
+  `rejection_frame` for parse failures, and `handler_error`. Parse failures
+  return a bounded error response and use `RequestParseError` as their error
+  category; validation failures keep the `invalid_request` outcome and use
+  `ValidationError`. An empty read is treated as a closed connection, so
+  readiness probes emit neither a dispatch record nor a response frame.
+- Unix connection failures emit a bounded `ipc.server.connection` event with
+  one of three outcomes: `receive_timeout`, `receive_closed`, or
+  `response_dropped`. Its `error_category` is one of `ConnectionClosed`,
+  `ConnectionError`, `OSError`, or `TimeoutError`; exception messages are not
+  included. The event carries a nonnegative `duration_ms` and includes
+  `correlation_id` only when a validated request identifier is available.
+  Connection counters use only the fixed `operation`, `transport`, and
+  `outcome` dimensions, so correlation identifiers and payload data never
+  increase the number of counter keys.
+
+The private deadline helpers accept an optional monotonic clock callable and use
+`time.monotonic` when runtime callers omit it. The Unix request handler binds
+its clock once and reuses it for each receive-budget check. Tests can pass a
+fake clock directly without replacing the process-wide time function.
+
+## IPC deadlines and stdin reads
+
+On POSIX, the shim carries one monotonic deadline through Unix socket
+connection retries, request sending, response reads, and passthrough reporting.
+Stdin capture uses that deadline when the stream can be waited on. The client
+stores the deadline in `_ConnectionContext` and applies only the remaining time
+before each blocking socket operation. The Unix server also keeps one read
+deadline per accepted connection and updates the socket timeout before each
+receive, so a client that slowly streams a request cannot renew its full wait
+budget with every byte.
+
+The shim polls pipe-like stdin descriptors when possible. It reads regular-file
+stdin on a daemon worker because regular files cannot provide a bounded poll
+wait. Windows streams and descriptors that cannot be polled retain direct
+reads; the Windows named-pipe IPC client keeps its existing cooperative timeout
+behaviour.
+
+The shim emits bounded IPC observability events when stdin reading or writing
+and flushing a response stream fails. These use the existing dependency-free
+observability seam and record fixed operation, outcome, and error-category
+values, elapsed duration, and a correlation identifier when one is available.
+They do not include exception messages or stream contents. If the deadline
+expires after stdin capture but before initial dispatch, the shim emits one
+`ipc.shim.ipc_request` event with outcome `deadline_expired` and does not
+dispatch the invocation. Its elapsed duration measures the dispatch budget
+check. If the original deadline expires while the real command runs, the shim
+emits an `ipc.shim.passthrough_report` event with outcome `deadline_expired`
+and does not dispatch a report. Its elapsed duration includes the real
+command's runtime. Failures after either dispatch are covered by
+`ipc.client.request` events, without a duplicate shim event. Unix server
+response writes use `ipc.server.connection` events. The seam writes structured
+logging records and keeps in-process counters; it does not export to an
+external collector.
 
 `CommandDouble.matches` must reject an `Invocation` whose `command` differs from
 `CommandDouble.name`. It performs that command-name check before expectation
 matching and must not invoke expectation matching for a different command. This
 prevents a double from accepting an invocation owned by another command.
+
+### Domain values and IPC wire payloads
+
+`Invocation`, `Response`, `PassthroughRequest`, and `PassthroughResult` are
+transport-independent values in `cmd_mox.domain`. The IPC package re-exports
+them for compatibility, while `cmd_mox.ipc.wire` owns conversion between those
+values and JSON-ready payloads. Keep payload dictionaries at that transport
+boundary; domain code must not depend on IPC encoding.
+
+`cmd_mox.response_policy` selects the strategy and validates expectation
+environments without applying process environment changes. The controller then
+calls `cmd_mox.response_strategy` to execute the selected handler and build a
+domain response, applying temporary environment overrides at that execution
+boundary.
+
+### Unix server-base selection
+
+`IPCServer` defers Unix server-class selection until backend creation. Its
+cached `_inner_server_cls()` factory asks the cached
+`resolve_unix_server_base()` accessor for the platform base class, then creates
+the inner server class. The resolver prefers
+`socketserver.ThreadingUnixStreamServer`; when only `UnixStreamServer` exists,
+it composes that class with `ThreadingMixIn`. On Windows the resolver returns a
+placeholder whose construction raises `RuntimeError`, while a platform with
+neither Unix server class raises `RuntimeError` during resolution. Both caches
+retain a successful result for the process lifetime. A resolution failure is
+not cached, so a later backend start retries resolution. Direct resolver calls
+have no observability side effects. The server's backend-creation boundary
+emits bounded `ipc.backend_selection` events for native or compatibility
+selection, cache hits and misses, unsupported platforms, Windows rejection, and
+backend-construction failures. Events use fixed selection and error categories;
+they never include socket paths or exception messages.
+
+### Callback server construction
+
+`_CallbackServerBase` in `cmd_mox/ipc/_server_core.py` owns the constructor
+signature shared by the two callback-driven transports: positional
+`socket_path`, `handler` and `passthrough_handler`, plus a keyword-only
+`timeouts`. `CallbackIPCServer` (`cmd_mox/ipc/server.py`) and
+`CallbackNamedPipeServer` (`cmd_mox/ipc/named_pipe.py`) each inherit from it
+and add nothing of their own; neither class defines `__init__`, so both resolve
+to `_CallbackServerBase.__init__`.
+
+`_callback_wiring`, in the same module, pairs the two callbacks into an
+`IPCHandlers` and flattens a `TimeoutConfig` into the `timeout` and
+`accept_timeout` arguments, defaulting to `TimeoutConfig()` when no
+configuration is supplied.
+
+The inherited constructor calls `super().__init__(...)`, so the next class in
+each transport's method resolution order receives the base-server arguments. For
+`CallbackIPCServer` that is `_BaseIPCServer.__init__`, because `IPCServer`
+defines no `__init__` of its own. For `CallbackNamedPipeServer` it is
+`NamedPipeServer.__init__`, which enforces its Windows-only guard and derives
+the pipe name before delegating. This is observable: constructing
+`CallbackNamedPipeServer` on Linux raises
+`NamedPipeServer is only available on Windows` from the `super()` call inside
+`_CallbackServerBase.__init__`.
+
+The `_stop_backend` hook takes a non-optional backend.
+`_ServerLifecycle.stop()` calls the hook only when a backend instance exists,
+so a server that never started never passes `None`. Implementations may
+therefore dereference the argument unconditionally: `CallbackIPCServer` calls
+`server.shutdown()` and `server.server_close()`, while
+`CallbackNamedPipeServer` calls `server.stop()` and
+`server.join_clients(self.timeout)`.
+
+A further callback-driven transport should subclass `_CallbackServerBase` with
+its backend type rather than restating the constructor signature.
+
+### Named-pipe backend selection
+
+The Windows transport reaches `pywin32` through an injected backend rather than
+through module globals of its own. `NamedPipeBackend`, in
+`cmd_mox/ipc/windows.py`, is the port: a `typing.Protocol` covering the pipe
+lifecycle, the event handles, the overlapped read path, synchronous file I/O,
+and handle closure. Handles, buffers, and overlapped structures stay opaque
+`object` values because they are created by the port and only ever passed back
+to it.
+
+The port also carries the Win32 constants the transport builds its calls from,
+and two module views: `win32file` and `pywintypes`. Those views exist because
+the shared `read_pipe_message` and `write_pipe_payload` helpers in `windows.py`
+perform synchronous I/O and match `pywintypes.error` themselves. The helpers
+take the views as `win32file=` and `pywintypes=` arguments and receive them from
+`.win32file` and `.pywintypes` on the active backend.
+
+Two frozen dataclasses keep long Win32 argument lists legible:
+`NamedPipeCreateSpec` for `CreateNamedPipe` and `PipeFileOpenSpec` for
+`CreateFile`. A port method takes the spec and unpacks it at the call, so
+adding a parameter does not lengthen a signature the transport has to thread
+through.
+
+`NamedPipeServer._create_backend` constructs `Win32NamedPipeBackend` and passes
+it as the keyword-only `backend` argument of `_NamedPipeState`. That is the
+injection point: the state never imports a `pywin32` module. The adapter, in
+`cmd_mox/ipc/_win32_named_pipe_backend.py`, binds the guarded module bindings
+onto the instance in `__init__` and forwards each port method to exactly one
+pywin32 call. Construction reads the bindings rather than the class body
+because they are `None` off Windows, where the module must still import.
+
+The import guard lives once for the package, in `cmd_mox/ipc/windows.py`. The
+adapter does not add a second one; it imports what that guard already produced.
+
+Tests inject `FakeNamedPipeBackend` from
+`cmd_mox/unittests/_named_pipe_fakes.py`, which lets the transport run on any
+platform without replacing `pywin32` module globals. The `fake_backend` fixture
+creates one and publishes it for `build_state`; `patch_win32` mutates that
+instance and still returns its `(file_fake, pipe_fake)` pair; and
+`windows_platform` redirects the construction site to the fake so
+platform-gated code can run off Windows. Add a new Win32 operation to the port,
+both adapters, and the fake together — a transport call that bypasses the
+backend reintroduces the module-global dependency the seam exists to remove.
+
+The real adapter is tested too. `Win32NamedPipeBackend` would otherwise be
+uncovered on POSIX, because every transport test injects the fake, and an
+unexercised adapter drags the repository's line-coverage ratchet down for code
+that only runs on Windows. `test_win32_named_pipe_backend.py` patches recording
+stand-ins for the four modules onto the adapter's namespace and asserts that
+each port method forwards to the one pywin32 call it names, with the arguments
+in call order. That keeps the adapter honest on any platform and costs no
+Windows runner.
 
 ## Skylos dead-code policy
 
@@ -242,6 +521,12 @@ directory. Treat the helper as a reviewed write: retain the matching
 `[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
 caller-specific reason, and never use it to avoid removing genuine dead code.
 
+When a runtime entry point is reached through a cached factory, declare the
+precise function and generated class types in
+`[[tool.skylos.dead_code.entrypoints]]`, and name the factory or lifecycle that
+reaches them in each reason. Keep a contract test for these dynamic boundaries
+so a renamed symbol cannot silently make the rule stale.
+
 Skylos parses source with the AST implementation of its own runtime. The
 command-only `SKYLOS_CLI` therefore pins Python 3.14 to prevent newer syntax
 from producing phantom findings. Scan-only global options such as
@@ -268,6 +553,133 @@ RUSTFLAGS="-Zpolonius=next" cargo +nightly-2026-05-28 install \
 make test
 ```
 
+## Code-duplication gate
+
+The final lint tier runs [nose](https://github.com/corca-ai/nose), the Rust
+`nose-cli` clone detector, behind `scripts/duplication_gate.py`. Nose is not
+the Python test framework of the same name on PyPI. The gate, its exception
+format and the decision to adopt it are recorded in
+[ADR 002](./adr-002-code-duplication-gate.md).
+
+Run it on its own with:
+
+```bash
+make duplication
+```
+
+The scan, its channels and its size floor are configured in `[tool.nose]` in
+`pyproject.toml`. `roots` names the production Python surface, `exclude` skips
+the packaged unit tests, and all three detection channels are pinned explicitly
+so a change to nose's defaults cannot widen or narrow the gate unnoticed. The
+`min-size` floor counts nose intermediate-language (IL) tokens, not Python
+lines or abstract syntax tree nodes.
+
+Exclusions are matched relative to each configured root, not to the repository
+root. `unittests/*` therefore names `cmd_mox/unittests/`; the repository-root
+form `cmd_mox/unittests/*` would match nothing and silently scan the test tree
+instead.
+
+`scripts/tests/test_nose_config_contract.py` pins that surface. It reads the
+production table through `nose_detector.load_settings` and checks four things:
+the settings match the intended scan, every root exists inside the repository,
+the roots still select production modules, and every exclusion still hides
+files. Changing the scan therefore fails a test rather than quietly shrinking
+what the gate enforces. The module imports only the standard library, so it
+also runs in the application suite, not just under `make duplication-test`.
+
+The gate adjudicates a ranked budget of families rather than the whole report.
+`top` bounds how many of the highest-ranked families are checked; duplication
+below that ranking is reported nowhere and enforced nowhere. Do not raise
+thresholds or lower the budget to reach a green build, and do not describe
+lower-ranked duplication as enforced. Re-check saturation rather than assuming
+it, since the control scan recorded in ADR 002 only shows the budget was not
+saturated when it was taken.
+
+### Recording an exception
+
+When duplication is intentional, record it with a written reason:
+
+```bash
+make duplication-allow FIRST='cmd_mox/a.py::run' SECOND='cmd_mox/b.py::run' \
+  REASON="Two independent transport implementations must not share a base."
+```
+
+An entry is a TOML `[[tool.duplication_gate.allow]]` block with either one
+`unit` key or several `members` keys, never both, plus a non-blank `reason`. A
+key is a repository-relative POSIX path matched as a full glob, optionally
+suffixed `::name` to require the exact unit name nose reported. A `::name` key
+never matches an unnamed fragment. `FIRST`, `SECOND` and `REASON` are read only
+from the make command line, so an ambient environment variable of the same name
+cannot create an exception. The underlying CLI accepts repeated `--second` for
+families with more than two members.
+
+An entry silences a family only when every location in that family matches one
+of its keys. Partial coverage from several entries does not combine, and a new
+copy in an unlisted file blocks the build. Keys name locations, not line
+numbers or detector identifiers, so moving code does not invalidate an
+exception and regenerating the report does not renumber one.
+
+Prefer explicit paths and names. A path-only key is a glob that also covers
+future locations in its scope; justify that scope in the reason and do not
+describe the entry as protection against every new clone. Never use a
+repository-wide wildcard, mass-generated reasons, or an automatic allowlisting
+of the initial scan. No exceptions were copied from the reference repository;
+each one here was adjudicated against this tree.
+
+The gate prints allow entries that matched no finding. Absence from a capped
+ranked report means "unmatched in this scan"; it is not proof the duplication
+disappeared, and an entry whose family fell below the ranking budget is still
+stale by that definition. Confirm with source inspection, or with an adequately
+widened scan, before removing an entry.
+
+### Provisioning
+
+`make install-nose` installs the pinned release binary into `$(NOSE_TOOLS_DIR)`
+through `cargo-binstall`'s Git mode, and is a no-op when the correct version is
+already there. The install explicitly forbids cargo-binstall's `compile` and
+`quick-install` strategies, so a platform with no prebuilt binary fails
+provisioning rather than silently starting a costly source build or fetching
+from an unapproved source. The installed binary must report the pinned version,
+both when discovered and after installation.
+
+The gate itself runs as isolated CPython 3.14 tooling. It neither installs nor
+imports the application and needs no application service, and the application
+keeps its own Python floor.
+
+The Makefile builds that environment through the vendored `uv_gate` helper's
+tool channel, naming the interpreter and both dependencies explicitly:
+
+```make
+DUPLICATION_GATE = NOSE_BIN=$(NOSE_BIN) $(UV_GATE) tool \
+	--from 'python@$(DUPLICATION_PYTHON)' \
+	--with cyclopts==$(CYCLOPTS_VERSION) --with tomlkit==$(TOMLKIT_VERSION) \
+	-- python scripts/duplication_gate.py
+```
+
+The gate script keeps its own PEP 723 block, so
+`uv run scripts/duplication_gate.py` still works when invoked directly, and
+`test_duplication_gate_pins_match_the_script_metadata` fails if the Makefile
+pins and that block disagree. The tool channel is used rather than
+`uv_gate run` for two reasons: `run` always adds `--frozen`, which a PEP 723
+script cannot satisfy without a committed script lockfile, and `run` never goes
+online, so a cold cache could never provision the environment at all. The tool
+channel warms once on a proven cache miss and refuses an unpinned spec, which
+is why the interpreter is requested as `python@<version>` rather than through a
+bare `--python`.
+
+Because the helper uses POSIX file locking and directory operations, the
+supported developer workflow is POSIX, including WSL, and native Windows
+operation is not claimed; the Windows CI job does not run the gate.
+
+Run the focused helper tests with:
+
+```bash
+make duplication-test
+```
+
+They run on the tooling interpreter with injected command runners and stub
+executables, so they never download the detector.
+
 ## Spelling policy
 
 The lint and Markdown gates run a pinned `typos` release with British English
@@ -277,8 +689,11 @@ only when the authority is newer and merges `typos.local.toml`. The generated
 `typos.toml` is reviewed and committed so a clean network-restricted checkout
 can still enforce the last known-good policy.
 
-Add repository-only proper names or quoted upstream terms to
-`typos.local.toml`; never edit generated entries in `typos.toml` by hand.
+`make spelling` checks existing `*.md` files that are tracked by Git or
+untracked and not ignored. Standard Git ignore rules exclude generated caches
+and other ignored files, while new Markdown is checked before it is staged. Add
+repository-only proper names or quoted upstream terms to `typos.local.toml`;
+never edit generated entries in `typos.toml` by hand.
 
 ## Episodic lint policy
 
@@ -352,6 +767,16 @@ a method count would fragment it. `tests/test_pylint_tier_contract.py` holds
 the tier's interpreter pin, its Pylint release pin, and the rule that
 `syntax-error` stays enabled.
 
+Inline pragmas may name df12 messages that the classic PyPy pass never
+registers. For example, the `trivial-attribute-wrapper` pragma in
+`cmd_mox/expectations.py` is unknown to that pass, and Pylint reports
+`unknown-option-value` (W0012) for the name even under `disable = ["all"]`.
+`pyproject.toml` therefore disables W0012 by name for the classic pass, while
+`pylintrc-df12.toml` enables it, because that pass registers both the core and
+the df12 messages. Every pragma name is still validated exactly once, by the
+one pass whose vocabulary is complete, and `tests/test_pylint_tier_contract.py`
+pins that split.
+
 The `Makefile` currently supplies `PYLINT_BASELINE_DISABLE` in addition to the
 `pyproject.toml` tables. That split is intentional: `pyproject.toml` documents
 the desired selected Pylint policy, while the `Makefile` carries the temporary
@@ -370,6 +795,15 @@ temporary PyPy Pylint baseline.
 - `[tool.skylos.whitelist.documented]` stores only reasoned false positives;
   each entry must identify the verified runtime caller.
 
+### Nose and duplication-gate tables
+
+- `[tool.nose]` pins the detector version, the scanned roots, the detection
+  channels, the size floor, the reported surface and the ranked budget. Its
+  `version` must agree with the Makefile and CI pins.
+- `[tool.duplication_gate]` is otherwise empty; each
+  `[[tool.duplication_gate.allow]]` entry below it records one reviewed
+  exception with its `unit` or `members` keys and a non-blank `reason`.
+
 ## Updating lint policy
 
 When changing lint policy:
@@ -379,6 +813,8 @@ When changing lint policy:
 3. Run `make lint`.
 4. If Markdown or ADR files changed, run `make markdownlint` and `make nixie`.
 5. Remove baseline suppressions when the underlying code has been cleaned up.
+6. When bumping `NOSE_VERSION`, update all three pins together and let
+   `tests/test_toolchain_contract.py` confirm they agree.
 
 Changes that add broad new rule families should explain whether failures are
 fixed immediately or recorded as a visible baseline.
@@ -480,18 +916,176 @@ The test validates:
 - the triggers keep the daily schedule and a plain `workflow_dispatch` with
   no inputs.
 
-## YAML lint
+## Publishing a release
 
-`make lint` runs `yamllint --strict` over every Git-tracked `*.yml` and
-`*.yaml` file, then `actionlint` over the workflows, which also runs
-`shellcheck` over their `run:` scripts. Install yamllint 1.38.0, actionlint
-1.7.12 and shellcheck 0.11.0 locally, as CI does through the shared
-`install-yaml-lint` action, so results agree. Run the targets from the
-repository root: yamllint resolves `.yamllint.yml`, which extends the estate
-base `.yamllint-estate.yml` (copied verbatim, never edited here), against the
-working directory. `.github/actionlint.yaml` declares the `ubicloud-*` runner
-labels. `tests/yaml_lint/` judges the Makefile and workflow wiring against
-fixtures and then the real files, pins the estate base, and runs the Make
-targets with stand-in tools (and the real yamllint when installed) to prove the
-tracked-files list, that a tool failure fails its target, and that a failed
-file enumeration stops the gate before the linter runs.
+The release workflow publishes pure-Python source distributions and wheels to
+PyPI, then reconciles the GitHub Release with PyPI. The decision and its
+trade-offs are recorded in [ADR 003](./adr-003-release-pipeline.md).
+
+To publish a release:
+
+1. Set `project.version` in `pyproject.toml` to the release version and commit
+   that change.
+2. Create and push the matching version tag, for example `vX.Y.Z`. The version
+   check compares the tag and project version as exact strings after removing
+   the leading `v`.
+3. Watch the workflow graph. `check-version` and `build-dist` run first;
+   attestation, the draft GitHub Release and PyPI publication follow before the
+   GitHub Release is published.
+4. Before PyPI publication, the draft retains the complete canonical sdist,
+   wheels and the provenance bundle that covers them. Source priority remains
+   PyPI, GitHub Release, then the local build, and existing GitHub assets are
+   never overwritten. If a run needs retrying, re-run only its failed jobs so
+   they reuse the attested `release-dist` from the original run. A full rerun
+   builds new distributions but reuses the pair retained on the draft. This
+   keeps a wheel from a retry from being paired with an sdist already accepted
+   by PyPI. One provenance bundle must cover the complete canonical set; if the
+   original pair or its matching bundle is unavailable, the workflow fails
+   before another PyPI upload. The final job waits for PyPI to list every
+   distribution before publishing the GitHub Release. If final digest
+   verification detects a conflict, the GitHub Release remains an unpublished
+   draft; assets uploaded during that attempt can remain attached to the draft.
+   If only part of the seed reached the draft and PyPI accepted no
+   distribution, re-run the failed jobs to reuse the original `release-dist`.
+   If the retained pair is defective and PyPI accepted no distribution, remove
+   the draft's distributions and matching bundle, then run the whole workflow
+   again. After PyPI accepts any distribution, advance `project.version` and
+   cut a new tag for corrected bytes because PyPI reserves uploaded filenames
+   permanently.
+5. Verify the provenance attestations for the sdist and each wheel against the
+   `leynos/cmd-mox` repository. The release includes the Sigstore bundle from
+   the build run that attested those bytes.
+
+For screen readers: For each distribution filename, the workflow uses PyPI's
+bytes when the filename is already there. Otherwise, it uses matching bytes
+from the GitHub Release and carries them to PyPI when needed, or selects the
+local attested bytes when neither destination has the filename. Before PyPI
+publication, the draft retains the complete canonical distribution set and the
+single provenance bundle that attests those bytes. PyPI skips existing
+filenames and uploads only the rest. The workflow waits for new files to appear
+in the index, then compares SHA-256 digests. A mismatch fails safely. A match
+allows the workflow to upload any missing GitHub Release assets and publish the
+GitHub Release.
+
+```mermaid
+flowchart TD
+    accTitle: Idempotent release asset reconciliation
+    accDescr {
+      Retain the canonical distributions and their single provenance bundle
+      on the draft before PyPI publication. For each filename, prefer PyPI
+      bytes, then existing GitHub Release bytes, then local attested bytes.
+      Skip PyPI uploads for existing filenames; carry GitHub bytes to PyPI when
+      needed or publish local bytes, then wait for the PyPI index. Compare
+      PyPI and GitHub SHA-256 digests and fail safely on a mismatch. On a match,
+      verify the matching provenance bundle, upload missing GitHub assets,
+      retain or attach the bundle, and publish the GitHub Release.
+    }
+    A[Attested sdist and wheel] --> A2[Retain pair and bundle on draft]
+    A2 --> B{Filename already on PyPI?}
+    B -- Yes --> C[Use PyPI bytes]
+    B -- No --> D{Filename already on GitHub Release?}
+    D -- Yes --> E[Use existing GitHub bytes]
+    D -- No --> F[Use local attested bytes]
+    C --> G[Skip PyPI upload]
+    E --> H[Carry bytes to PyPI if needed]
+    F --> I[Publish to PyPI]
+    G --> J{PyPI and GitHub SHA-256 match?}
+    H --> J
+    I --> K[Wait for PyPI index]
+    K --> J
+    J -- No --> L[Fail safely]
+    J -- Yes --> V[Verify matching provenance bundle]
+    V --> M[Upload only missing GitHub assets]
+    M --> N[Retain or attach provenance bundle]
+    N --> O[Publish GitHub Release]
+```
+
+_Figure: Draft retention, PyPI-first source selection, digest and provenance
+verification, and GitHub Release publication._
+
+### Release tooling
+
+[`scripts/release_assets.py`](../scripts/release_assets.py) contains the pure
+reconciliation decisions. Its immutable `State` records local, PyPI, GitHub,
+and provenance inventories. Its `Plan` selects each filename's canonical source
+in PyPI, GitHub Release, then local-build order, and lists only missing
+uploads. Existing assets are never overwritten. The CLI adapter in
+[`scripts/release_assets_cli.py`](../scripts/release_assets_cli.py) loads those
+inventories from files, executes the selected copy or removal steps, and
+reports workflow outputs. The `draft-release` seed and `publish-release` stage
+steps use [`scripts/stage_github_assets.sh`](../scripts/stage_github_assets.sh)
+to carry forward existing bytes, stage only missing assets and verify
+provenance before either upload.
+
+Every CLI command requires `--publish` and `--assets`. The remaining options
+are required by the commands that read them:
+
+| Command              | Additional inputs                                                                      | Result                                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `carryover`          | `--bundles`                                                                            | Prints existing distribution and provenance filenames to carry forward.                                              |
+| `attestation-checks` | `--index`, `--bundles`, `--github-files`, `--purpose`; for GitHub, `--output`          | Prints digest-matched artefact and bundle pairs for the workflow's signature checks.                                 |
+| `stage-pypi`         | `--index`; with publication work, `--bundles`, `--github-files`, `--verified-subjects` | Removes names already on PyPI, stages GitHub bytes where needed, and writes the `remaining` flag to `GITHUB_OUTPUT`. |
+| `fetch-github`       | `--index`                                                                              | Prints PyPI download rows for missing GitHub Release assets before provenance checks.                                |
+| `stage-github`       | `--index`, `--bundles`, `--github-files`, `--output`, `--verified-subjects`            | Stages verified local or PyPI bytes and writes the `pending` flag to `GITHUB_OUTPUT`.                                |
+| `check-fetched`      | `--index`, `--output`                                                                  | Checks downloaded files against the PyPI index digests.                                                              |
+| `missing-pypi`       | `--index`                                                                              | Prints distribution names still absent from the latest PyPI index.                                                   |
+| `verify`             | `--index`, `--bundles`, `--github-files`, `--output`, `--verified-subjects`            | Confirms matching PyPI and GitHub digests and verified provenance coverage.                                          |
+
+_Table 2: Inputs and results for the release asset commands._
+
+The release workflow invokes the adapter as
+`python3 -m scripts.release_assets_cli`. Before trusting a current or retained
+bundle's subjects, its Bash steps run `gh attestation verify` against each
+matching distribution and require the cmd-mox release workflow as signer. The
+steps pass only successful bundle/name/digest rows to the adapter through
+`--verified-subjects`. Its separate
+[`scripts/release_version.py`](../scripts/release_version.py) compares
+`TAG_VERSION` with `project.version` from `pyproject.toml` exactly, then reports
+`prerelease=true|false` through `GITHUB_OUTPUT`. Each staging run takes a
+fresh inventory snapshot, so retries can skip filenames already published.
+
+[`scripts/fetch_pypi_index.sh`](../scripts/fetch_pypi_index.sh) fetches the PEP
+691 index. Its initial lookup makes up to six attempts, retrying transport
+failures, HTTP 429, and 5xx responses; HTTP 404 represents an empty project
+index. After publication, the script makes up to ten attempts and waits for the
+index to list every expected filename before GitHub publication can continue.
+It writes the final attempt count and HTTP status to `GITHUB_OUTPUT`.
+
+The
+[`pure-python-wheel` composite action](../.github/actions/pure-python-wheel/action.yml)
+accepts `python-version`, `out-dir`, and `artifact-name`, and exposes
+`build-dir` for the isolated build output. It runs plain `uv build`, fails
+unless it finds exactly one `.tar.gz` sdist and at least one `py3-none-any`
+wheel, and uploads both formats with `if-no-files-found: error`. The
+[`release workflow`](../.github/workflows/release.yml) uses this action before
+attesting the distributions and handing them to later jobs as `release-dist`.
+The design rationale and operating decision are recorded in
+[ADR 003](./adr-003-release-pipeline.md).
+
+The first automated release must use a numeric release segment later than
+`0.2.0`. The version check rejects older versions and `0.2.0` pre-release,
+post-release and local variants before attestation or publication. PyPI already
+contains the manually uploaded `0.2.0` wheel and source distribution, so
+another publication of those filenames is a no-op there. The existing GitHub
+Release does not contain the sdist or provenance bundle from this workflow.
+
+### Release publishing settings
+
+The GitHub repository needs an environment named `pypi`. Its deployment branch
+policy must be a tag policy restricted to `v*.*.*`.
+
+The PyPI project `cmd-mox` needs a Trusted Publisher configured with these
+values:
+
+| Setting           | Value         |
+| ----------------- | ------------- |
+| Owner             | `leynos`      |
+| Repository        | `cmd-mox`     |
+| Workflow filename | `release.yml` |
+| Environment name  | `pypi`        |
+
+_Table 3: GitHub Trusted Publishing settings for the `cmd-mox` project._
+
+For a local release build, run `make build-release`. The target uses `uv build`
+to create the source distribution first and then build the wheel from it in
+`dist/`.

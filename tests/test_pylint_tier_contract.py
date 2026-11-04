@@ -1,12 +1,14 @@
 """Contract tests for the PyPy Pylint lint tier.
 
 The second lint tier runs a pinned Pylint as a uv tool on managed PyPy 3.12.
-Two properties of that tier are easy to lose without any test noticing: the
-interpreter pin, which decides the grammar Pylint parses with, and the
+Three properties of that tier are easy to lose without any test noticing: the
+interpreter pin, which decides the grammar Pylint parses with; the
 `syntax-error` message, which decides whether a module that grammar cannot
-parse fails the lint or is skipped without a word. Both regressed silently
-before: a bare `pypy` moved to a newer PyPy with no commit here, and a
-disabled `syntax-error` let eleven modules go unlinted.
+parse fails the lint or is skipped without a word; and the
+`unknown-option-value` split, which decides whether inline suppression
+pragmas are validated at all. The first two regressed silently before: a bare
+`pypy` moved to a newer PyPy with no commit here, and a disabled
+`syntax-error` let eleven modules go unlinted.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE_PATH = _REPO_ROOT / "Makefile"
 PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
+DF12_RCFILE_PATH = _REPO_ROOT / "pylintrc-df12.toml"
 
 pytestmark = pytest.mark.skipif(
     not (MAKEFILE_PATH.exists() and PYPROJECT_PATH.exists()),
@@ -77,4 +80,35 @@ def test_pylint_reports_unparseable_modules() -> None:
     assert "syntax-error" not in disabled, (
         "pyproject.toml must not disable syntax-error: a module PyPy cannot "
         f"parse would then be skipped silently; disable={disabled!r}"
+    )
+
+
+def test_classic_pylint_defers_pragma_validation_to_the_df12_tier() -> None:
+    """The two Pylint passes must validate inline pragma names exactly once.
+
+    Inline pragmas may name df12 messages (``trivial-attribute-wrapper``, for
+    example), which the classic pass never registers. Pylint reports W0012 for
+    such a name even under ``disable = ["all"]``, so the classic pass must
+    disable it by name; the df12 pass registers both vocabularies and must
+    enable it. If both disables were dropped a df12 pragma would fail lint; if
+    both enables were dropped a misspelled pragma would silence nothing and no
+    test would notice.
+    """
+    classic = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    classic_disabled = classic["tool"]["pylint"]["messages control"]["disable"]
+    assert "unknown-option-value" in classic_disabled, (
+        "pyproject.toml must disable unknown-option-value for the classic "
+        "pass: this pass cannot register df12 pragma names; "
+        f"disable={classic_disabled!r}"
+    )
+
+    df12 = tomllib.loads(DF12_RCFILE_PATH.read_text(encoding="utf-8"))
+    df12_control = df12["tool"]["pylint"]["messages control"]
+    assert "unknown-option-value" in df12_control["enable"], (
+        "pylintrc-df12.toml must enable unknown-option-value: it is the only "
+        "pass that can validate a df12 pragma name against the complete "
+        f"vocabulary; enable={df12_control['enable']!r}"
+    )
+    assert "unknown-option-value" not in df12_control.get("disable", []), (
+        "pylintrc-df12.toml must not disable unknown-option-value"
     )

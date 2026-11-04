@@ -142,6 +142,14 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     ) -> typ.Self:
         """Use *handler* to generate responses dynamically.
 
+        The handler runs in the test process on an IPC request-handler worker
+        thread, not in the shim subprocess. Path arguments may be relative to
+        the invoked command's working directory, but ``Invocation`` does not
+        include that directory. Opening a relative argument directly in the
+        handler resolves it against the test process's working directory.
+        Provide the invoking working directory separately (for example, through
+        a closure) or use absolute paths.
+
         Parameters
         ----------
         handler : collections.abc.Callable
@@ -634,17 +642,26 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     ) -> None:
         self._assert_equal("args", tuple(invocation.args), expected_args)
 
+    def _validate_optional_attr[T](
+        self, label: str, actual: T | None, expected: T | None
+    ) -> None:
+        """Compare one optional invocation attribute against its expectation.
+
+        ``None`` means the caller did not constrain the attribute, so it is
+        left unchecked rather than compared against a recorded ``None``.
+        """
+        if expected is not None:
+            self._assert_equal(label, actual, expected)
+
     def _validate_stdin(
         self, invocation: Invocation, expected_stdin: str | None
     ) -> None:
-        if expected_stdin is not None:
-            self._assert_equal("stdin", invocation.stdin, expected_stdin)
+        self._validate_optional_attr("stdin", invocation.stdin, expected_stdin)
 
     def _validate_environment(
         self, invocation: Invocation, expected_env: dict[str, str] | None
     ) -> None:
-        if expected_env is not None:
-            self._assert_equal("env", invocation.env, expected_env)
+        self._validate_optional_attr("env", invocation.env, expected_env)
 
     def __repr__(self) -> str:
         """Return debugging representation with name, kind, and response.

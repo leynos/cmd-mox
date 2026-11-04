@@ -19,6 +19,17 @@ if typ.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Kept in the plugin so the generic controller remains pytest-independent.
+_AUTO_LIFECYCLE_HINT: typ.Final[str] = (
+    "Disable the most specific active setting: pass False (or "
+    "{'auto_lifecycle': False}) as the cmd_mox fixture parameter, "
+    "use @pytest.mark.cmd_mox(auto_lifecycle=False), pass "
+    "--no-cmd-mox-auto-lifecycle, or set the "
+    "cmd_mox_auto_lifecycle ini option to false. Fixture parameters "
+    "override markers, markers override the CLI, and the CLI "
+    "overrides the ini option."
+)
+
 # Stash key to record per-item call-stage failure state.
 STASH_CALL_FAILED: pytest.StashKey[bool] = pytest.StashKey()
 
@@ -251,6 +262,29 @@ def pytest_runtest_makereport(
         item.stash[STASH_CALL_FAILED] = rep.failed
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> cabc.Generator[None, None, None]:
+    """Record call-stage interrupts before pytest finalizes yield fixtures.
+
+    Parameters
+    ----------
+    item : pytest.Item
+        Test item whose call-stage interruption is being recorded.
+
+    Yields
+    ------
+    None
+        Control until pytest supplies the test call outcome.
+    """
+    outcome = yield
+    excinfo = typ.cast("typ.Any", outcome).excinfo
+    if excinfo is not None:
+        match excinfo[1]:
+            case KeyboardInterrupt() | SystemExit():
+                # Ordinary call failures stay under Pluggy's control.
+                item.stash[STASH_CALL_FAILED] = True
+
+
 class _CmdMoxManager:
     """Encapsulate cmd_mox lifecycle decisions for the pytest fixture."""
 
@@ -263,6 +297,7 @@ class _CmdMoxManager:
         self.mox = CmdMox(
             verify_on_exit=False,
             environment=EnvironmentManager(prefix=_build_worker_prefix(self.config)),
+            lifecycle_hint=(_AUTO_LIFECYCLE_HINT if self._auto_lifecycle else None),
         )
         # CmdMox wires its command runner to the provided environment during
         # initialisation, so injecting the worker-scoped manager here ensures the
@@ -555,14 +590,18 @@ def cmd_mox(request: pytest.FixtureRequest) -> cabc.Generator[CmdMox, None, None
     try:
         try:
             manager.enter()
-        except Exception:
+        except BaseException:
+            # KeyboardInterrupt and xdist worker SystemExit must set body_failed
+            # before they propagate; this observer immediately re-raises.
             body_failed = True
             logger.exception("Error during cmd_mox fixture setup or test execution")
             raise
 
         try:
             yield manager.mox
-        except Exception:
+        except BaseException:
+            # KeyboardInterrupt and xdist worker SystemExit must set body_failed
+            # before they propagate; this observer immediately re-raises.
             body_failed = True
             logger.debug(
                 "Error during cmd_mox fixture setup or test execution",

@@ -26,6 +26,7 @@ from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import]
     ScriptedRead,
     build_state,
     closed_pipe_handles,
+    fake_backend_fixture,
     patch_win32_fixture,
 )
 from cmd_mox.unittests._named_pipe_test_helpers import (
@@ -99,9 +100,19 @@ def test_oversized_read_is_rejected_without_dispatch(
         raise PipeMessageTooLargeError(received=12, limit=8)
 
     monkeypatch.setattr(state, "_read_request", reject_read)
-    monkeypatch.setattr(
-        named_pipe, "_request_pipeline", lambda _outer, raw, _t: dispatched.append(raw)
-    )
+
+    def record_dispatch(_outer: object, raw: bytes, _transport: str) -> bytes:
+        """Record any request that incorrectly reaches the dispatcher.
+
+        Returns
+        -------
+        bytes
+            A sentinel response if the oversized request is dispatched.
+        """
+        dispatched.append(raw)
+        return b"response"
+
+    monkeypatch.setattr(named_pipe, "_request_pipeline", record_dispatch)
     handle = object()
 
     with _observability.capture_events() as events:

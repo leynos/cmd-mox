@@ -14,17 +14,16 @@ import time
 
 import pytest
 
+from cmd_mox.domain import Invocation, PassthroughResult, Response
 from cmd_mox.ipc import TimeoutConfig
 from cmd_mox.ipc._named_pipe_limits import (
     join_threads_before,
     remaining_ms,
     remaining_seconds,
 )
-from cmd_mox.ipc.models import Invocation, PassthroughResult, Response
 from cmd_mox.ipc.named_pipe import (
     CallbackNamedPipeServer,
     NamedPipeServer,
-    _NamedPipeState,
 )
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
@@ -46,6 +45,7 @@ from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import]
     PatchWin32,
     build_state,
     closed_pipe_handles,
+    fake_backend_fixture,
     patch_win32_fixture,
     windows_platform_fixture,
 )
@@ -168,14 +168,6 @@ def test_accept_failure_at_startup_is_reported_to_the_waiting_starter(
     state = server._server
     assert state is not None, "state was discarded"
     assert state.startup_failed, "failure was not recorded"
-
-
-@pytest.mark.usefixtures("windows_platform")
-def test_stop_backend_tolerates_missing_server(tmp_path: pathlib.Path) -> None:
-    """Stopping a server that never started is a no-op."""
-    server = NamedPipeServer(tmp_path / "ipc.sock", timeout=1.0)
-
-    assert server._stop_backend(None) is None, "missing backend should be tolerated"
 
 
 @pytest.mark.usefixtures("windows_platform")
@@ -304,12 +296,14 @@ def test_try_connect_pipe_maps_a_failed_overlapped_connect(
     assert closed_pipe_handles(file_fake) == [handle], "handle was not closed"
 
 
-def test_close_handle_delegates_to_win32file(patch_win32: PatchWin32) -> None:
-    """Closing a handle calls straight through to ``win32file``."""
+def test_dispose_handle_closes_through_the_injected_backend(
+    patch_win32: PatchWin32,
+) -> None:
+    """Disposing of a client handle calls straight through to its backend."""
     file_fake, _pipe_fake = patch_win32()
     handle = object()
 
-    _NamedPipeState._close_handle(handle)
+    build_state()._dispose_handle(handle)
 
     assert file_fake.closed == [handle], "handle was not closed"
 

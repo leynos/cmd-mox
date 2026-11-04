@@ -190,7 +190,7 @@ class TestReplaySessionLoad:
     def test_load_rejects_unsupported_version(self, tmp_path: Path) -> None:
         """load() raises ValueError for an unsupported future schema version."""
         data = {
-            "version": "99.0",
+            "version": "99.0.0",
             "metadata": {
                 "created_at": "2026-01-15T10:30:00Z",
                 "cmdmox_version": "0.1.0",
@@ -204,13 +204,13 @@ class TestReplaySessionLoad:
         path.write_text(json.dumps(data, indent=2) + "\n")
 
         session = ReplaySession(path)
-        with pytest.raises(ValueError, match=r"99\.0"):
+        with pytest.raises(ValueError, match=r"99\.0\.0"):
             session.load()
 
     def test_load_validates_schema(self, tmp_path: Path) -> None:
         """load() handles schema migration for older versions."""
         data = {
-            "version": "0.9",
+            "version": "0.9.0",
             "metadata": {
                 "created_at": "2026-01-15T10:30:00Z",
                 "cmdmox_version": "0.1.0",
@@ -239,7 +239,7 @@ class TestReplaySessionLoad:
         session = ReplaySession(path)
         session.load()
         assert session._fixture is not None
-        assert session._fixture.version == "1.0"
+        assert session._fixture.version == "1.0.0"
 
     def test_load_file_not_found_raises(self, tmp_path: Path) -> None:
         """load() with a non-existent path raises FileNotFoundError."""

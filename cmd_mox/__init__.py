@@ -14,6 +14,7 @@ from .controller import CmdMox
 from .environment import EnvironmentManager, temporary_env
 from .errors import (
     CmdMoxError,
+    ExpectationConfigurationError,
     LifecycleError,
     MissingEnvironmentError,
     UnexpectedCommandError,
@@ -105,6 +106,7 @@ __all__ = [
     "Contains",
     "EnvironmentManager",
     "Expectation",
+    "ExpectationConfigurationError",
     "IPCServer",
     "Invocation",
     "IsA",

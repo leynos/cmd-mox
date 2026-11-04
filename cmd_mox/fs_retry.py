@@ -135,6 +135,83 @@ def _path_is_missing(path: Path, exc: OSError) -> bool:
     return isinstance(exc, FileNotFoundError) or not path.exists()
 
 
+def _is_file_not_found(exc: OSError) -> bool:
+    """Report that *exc* means the file was already removed."""  # ruff: ignore[docstring-missing-returns] - private predicate has an obvious boolean return
+    return isinstance(exc, FileNotFoundError)
+
+
+@dc.dataclass(frozen=True, slots=True)
+class _RemovalAttempt:
+    """Everything one removal retry loop needs beyond the operation itself.
+
+    Attributes
+    ----------
+    path : Path
+        Path being removed, used for retry and failure logging.
+    config : RetryConfig
+        Retry policy: maximum attempts and delay between them.
+    log : logging.Logger
+        Logger for retry attempts.
+    handle_final_failure : collections.abc.Callable[[OSError], typing.NoReturn]
+        Invoked with the last ``OSError``; it must raise, and the retry loop
+        is predicated on that, so it never returns after calling this.
+    is_missing : collections.abc.Callable[[OSError], bool]
+        Reports that a failed attempt means the path is already gone.
+    """
+
+    path: Path
+    config: RetryConfig
+    log: logging.Logger
+    handle_final_failure: cabc.Callable[[OSError], typ.NoReturn]
+    is_missing: cabc.Callable[[OSError], bool]
+
+
+def _removal_retry(
+    operation: cabc.Callable[[], None], *, attempt: _RemovalAttempt
+) -> bool:
+    """Retry *operation* until it succeeds or the attempts run out.
+
+    A path that has already vanished is not a failure, so *is_missing*
+    short-circuits the loop. The backoff shape lives here rather than in each
+    caller because unlink and rmtree differ only in the operation, how a
+    vanished target is recognised, and how the final failure is reported.
+
+    Parameters
+    ----------
+    operation : collections.abc.Callable[[], None]
+        Filesystem operation to attempt.
+    attempt : _RemovalAttempt
+        Path, retry policy, logger, and the two failure predicates.
+
+    Returns
+    -------
+    bool
+        ``True`` when *operation* completed, ``False`` when the path was
+        already absent, so the caller can skip success reporting.
+    """
+    path = attempt.path
+    if not path.exists():
+        return False
+
+    for try_index in range(attempt.config.max_attempts):
+        try:
+            operation()
+        except OSError as exc:
+            if attempt.is_missing(exc):
+                return False
+            if try_index == attempt.config.max_attempts - 1:
+                attempt.handle_final_failure(exc)
+
+            _log_retry_attempt(attempt.log, try_index, path, attempt.config.retry_delay)
+            time.sleep(attempt.config.retry_delay)
+        else:
+            return True
+
+    # Unreachable: ``RetryConfig`` guarantees at least one attempt and
+    # ``handle_final_failure`` raises on the last one.
+    return False
+
+
 def _handle_rmtree_final_failure(
     path: Path, attempts: int, exc: OSError, logger: logging.Logger
 ) -> typ.NoReturn:
@@ -203,26 +280,18 @@ def retry_unlink(
         Custom exception from ``exc_factory`` (if provided).
 
     """  # ruff: ignore[docstring-extraneous-exception] - _handle_unlink_failure propagates the documented terminal failures.
-    if not path.exists():
-        return
-
-    log = logger or _logger
-    for attempt in range(config.max_attempts):
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            return
-        # ``PermissionError`` is an ``OSError``; the earlier ``FileNotFoundError``
-        # clause already claims the "already gone" case.
-        except OSError as exc:
-            is_last = attempt == config.max_attempts - 1
-            if is_last:
-                _handle_unlink_failure(path, exc, exc_factory)
-
-            _log_retry_attempt(log, attempt, path, config.retry_delay)
-            time.sleep(config.retry_delay)
-        else:
-            return
+    _removal_retry(
+        path.unlink,
+        attempt=_RemovalAttempt(
+            path=path,
+            config=config,
+            log=logger or _logger,
+            handle_final_failure=lambda exc: _handle_unlink_failure(
+                path, exc, exc_factory
+            ),
+            is_missing=_is_file_not_found,
+        ),
+    )
 
 
 def robust_rmtree(
@@ -254,23 +323,26 @@ def robust_rmtree(
         encountered.
 
     """  # ruff: ignore[docstring-extraneous-exception] - _handle_rmtree_final_failure propagates the documented terminal failure.
-    if not path.exists():
-        return
-
     log = logger or _logger
-    for attempt in range(config.max_attempts):
-        try:
-            _fix_windows_permissions(path)
-            shutil.rmtree(path)
-        except OSError as exc:
-            if _path_is_missing(path, exc):
-                return
-            is_last = attempt == config.max_attempts - 1
-            if is_last:
-                _handle_rmtree_final_failure(path, config.max_attempts, exc, log)
 
-            _log_retry_attempt(log, attempt, path, config.retry_delay)
-            time.sleep(config.retry_delay)
-        else:
-            _log_rmtree_success(path, log)
-            return
+    def remove_tree() -> None:
+        # Windows refuses to remove read-only files, so permissions are
+        # repaired on every attempt: a partially removed tree can leave new
+        # read-only entries behind for the next one to clear.
+        _fix_windows_permissions(path)
+        shutil.rmtree(path)
+
+    removed = _removal_retry(
+        remove_tree,
+        attempt=_RemovalAttempt(
+            path=path,
+            config=config,
+            log=log,
+            handle_final_failure=lambda exc: _handle_rmtree_final_failure(
+                path, config.max_attempts, exc, log
+            ),
+            is_missing=lambda exc: _path_is_missing(path, exc),
+        ),
+    )
+    if removed:
+        _log_rmtree_success(path, log)

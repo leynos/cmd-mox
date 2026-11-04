@@ -110,9 +110,23 @@ def _load_stdlib_platform() -> ModuleType:
 
 
 def _should_remove_path_entry(entry: str, package_dir: Path) -> bool:
+    """Return whether *entry* shadows the package on the import path.
+
+    Returns
+    -------
+    bool
+        ``True`` when *entry* is an editable-install marker or resolves to
+        *package_dir*, otherwise ``False``, including when resolution fails.
+    """
     if entry.startswith("__editable__"):
         return True
-    with contextlib.suppress(FileNotFoundError):
+    # Resolution stats the entry, so a malformed ``sys.path`` member can fail:
+    # a symlink loop raises ``RuntimeError`` on Python 3.12 (where pathlib
+    # converts ``ELOOP``) and is tolerated from 3.13 onwards, a relative entry
+    # whose working directory was deleted raises ``OSError``, and an entry the
+    # OS cannot represent raises ``ValueError``. Skipping such an entry keeps
+    # it on ``sys.path`` instead of aborting bootstrap.
+    with contextlib.suppress(OSError, RuntimeError, ValueError):
         if Path(entry).resolve() == package_dir:
             return True
     return False
