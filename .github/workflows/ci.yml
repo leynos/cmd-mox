@@ -160,7 +160,7 @@ jobs:
 
       - name: Install the YAML lint tools
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/install-yaml-lint@26c918632c5413039a84358fafe012a4399a9ec7
+        uses: leynos/shared-actions/.github/actions/install-yaml-lint@872f59f53717b5bebe8e24b2f4a7496b089a939a
       - name: Run lint and dead-code detection
         if: matrix.run-windows-smoke == false
         run: make lint
