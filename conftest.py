@@ -117,10 +117,45 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture
+def isolated_pytester_config_args(
+    pytester: pytest.Pytester,
+) -> cabc.Callable[[], tuple[str, ...]]:
+    """Build CLI arguments that isolate pytest configuration to pytester.
+
+    Parameters
+    ----------
+    pytester : pytest.Pytester
+        Create the temporary project and any test-authored inner configuration.
+
+    Returns
+    -------
+    cabc.Callable[[], tuple[str, ...]]
+        A builder returning the config, rootdir and confcutdir arguments for
+        one nested pytest invocation. It preserves an existing ``tox.ini``.
+    """
+
+    def build_args() -> tuple[str, ...]:
+        inner_ini = pytester.path / "tox.ini"
+        if not inner_ini.is_file():
+            inner_ini = pytester.makeini("[pytest]\n")
+        return (
+            "-c",
+            str(inner_ini),
+            "--rootdir",
+            str(pytester.path),
+            "--confcutdir",
+            str(pytester.path),
+        )
+
+    return build_args
+
+
+@pytest.fixture
 def run_nested_pytester(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
+    isolated_pytester_config_args: cabc.Callable[[], tuple[str, ...]],
 ) -> cabc.Callable[..., RunResult]:
     """Create a nested pytest runner anchored to the outer invocation.
 
@@ -144,9 +179,6 @@ def run_nested_pytester(
         A runner accepting extra pytest arguments, an optional generated test
         path, and ``plugins`` for ``runpytest_inprocess``.
     """
-    inner_ini = pytester.path / "tox.ini"
-    if not inner_ini.is_file():
-        inner_ini = pytester.makeini("[pytest]\n")
 
     def run_nested(
         *args: str,
@@ -159,12 +191,7 @@ def run_nested_pytester(
             _anchor_mutmut_source_paths(scoped_monkeypatch)
             return pytester.runpytest_inprocess(
                 *args,
-                "-c",
-                str(inner_ini),
-                "--rootdir",
-                str(pytester.path),
-                "--confcutdir",
-                str(pytester.path),
+                *isolated_pytester_config_args(),
                 str(generated_path.resolve(strict=True)),
                 plugins=plugins,
             )
