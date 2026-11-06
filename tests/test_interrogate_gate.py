@@ -10,9 +10,9 @@ guard that stops failing breaks a test rather than silently restoring the gap.
 
 The overloaded module `__getattr__` is excluded by name in `pyproject.toml`,
 because interrogate does not recognize this repository's `typ.overload` alias.
-The exclusion also hides the implementation and everything nested inside it, so
-the exclusion is held to that name and the implementation, with its nested
-definitions, is held to a docstring here.
+The exclusion also hides each implementation and everything nested inside it,
+so the exclusion is held to that name, and every definition of the name that is
+not an overload stub, with its nested definitions, is held to a docstring here.
 
 Run via ``make test``.
 """
@@ -33,8 +33,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "Makefile"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
-OVERLOADED_SOURCE = ROOT / "cmd_mox" / "__init__.py"
 OVERLOADED = "__getattr__"
+_DEFINITIONS = (ast.AsyncFunctionDef, ast.FunctionDef, ast.ClassDef)
 
 
 def _makefile_text() -> str:
@@ -102,7 +102,7 @@ def test_the_tool_is_pinned_and_run_through_the_vendored_helper() -> None:
 
 
 def test_the_flags_demand_a_full_exact_report() -> None:
-    """Exactly: every definition printed and a threshold of 100.
+    """Exactly: every non-excluded definition printed, and a threshold of 100.
 
     Equality, not a deny-list: any other flag (an ignore or exclude option, or
     `-q` and `-o`, which suppress or redirect the report the guard reads) could
@@ -125,7 +125,7 @@ def test_every_python_file_is_under_a_target() -> None:
 
 
 def test_the_configuration_excludes_only_the_overloaded_name() -> None:
-    """The pyproject exclusion names exactly one function, anchored."""
+    """The pyproject exclusion is one anchored name, matched wherever it occurs."""
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     settings = config["tool"]["interrogate"]
     assert settings.get("ignore-regex") == [f"^{OVERLOADED}$"], (
@@ -135,32 +135,34 @@ def test_the_configuration_excludes_only_the_overloaded_name() -> None:
     assert not forbidden & set(settings), "no other exclusion may relax the gate"
 
 
-def test_the_excluded_function_keeps_a_documented_implementation() -> None:
-    """The exclusion hides the overload stubs, so it must not hide the body.
+def test_every_non_overload_definition_of_the_excluded_name_is_documented() -> None:
+    """The exclusion hides the overload stubs, so it must not hide a body.
 
-    interrogate skips every definition of the excluded name, the implementation
-    and anything nested in it included, so the docstrings are checked here.
+    interrogate skips every class or function of the excluded name in every
+    file, each implementation and anything nested in it included, so those
+    definitions that are not overload stubs are checked for docstrings here.
     """
-    tree = ast.parse(OVERLOADED_SOURCE.read_text(encoding="utf-8"))
-    implementations = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef)
-        and node.name == OVERLOADED
-        and not any("overload" in ast.unparse(d) for d in node.decorator_list)
-    ]
-    assert len(implementations) == 1, "expected one implementation and its overloads"
-    undocumented = [
-        node.lineno
-        for node in ast.walk(implementations[0])
-        if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef | ast.ClassDef)
-        and not ast.get_docstring(node)
-    ]
+    stubs: list[str] = []
+    undocumented: list[str] = []
+    for name in _tracked("*.py"):
+        tree = ast.parse((ROOT / name).read_text(encoding="utf-8"))
+        for found in ast.walk(tree):
+            if not (isinstance(found, _DEFINITIONS) and found.name == OVERLOADED):
+                continue
+            if any("overload" in ast.unparse(d) for d in found.decorator_list):
+                stubs.append(f"{name}:{found.lineno}")
+                continue
+            undocumented.extend(
+                f"{name}:{node.lineno}"
+                for node in ast.walk(found)
+                if isinstance(node, _DEFINITIONS) and not ast.get_docstring(node)
+            )
+    assert stubs, f"expected overload stubs of {OVERLOADED}; is the exclusion stale?"
     assert not undocumented, f"{OVERLOADED} needs docstrings at {undocumented}"
 
 
 def test_ci_installs_uv_before_it_runs_make_lint() -> None:
-    """Every job that runs `make lint` needs uv set up first, and one must run it."""
+    """Each job with an exact `make lint` step sets up uv first; one such job exists."""
     workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
     checked = 0
     for name, job in workflow["jobs"].items():
