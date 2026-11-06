@@ -112,6 +112,9 @@ def _run_shim_against_socket_peer(
 ) -> tuple[subprocess.CompletedProcess[str], float]:
     """Run a generated shim against a peer that replies or stalls.
 
+    Elapsed time starts when the peer receives the request so interpreter
+    startup does not affect the IPC timeout assertion.
+
     Returns
     -------
     tuple[subprocess.CompletedProcess[str], float]
@@ -127,6 +130,7 @@ def _run_shim_against_socket_peer(
     listener.listen(1)
     accepted = threading.Event()
     release = threading.Event()
+    request_received_at: list[float] = []
 
     def serve() -> None:
         """Receive the shim request and send its reply or hold the peer open."""
@@ -135,6 +139,7 @@ def _run_shim_against_socket_peer(
             with connection:
                 while connection.recv(64 * 1024):
                     pass
+                request_received_at.append(time.monotonic())
                 accepted.set()
                 if response_bytes is None:
                     release.wait(2.0)
@@ -146,15 +151,15 @@ def _run_shim_against_socket_peer(
 
     server_thread = threading.Thread(target=serve, daemon=True)
     server_thread.start()
-    started = time.monotonic()
     try:
+        # Keep a bounded watchdog for instrumented shim startup.
         result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a generated shim path
             [str(_shim_cmd_path(env, command))],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,
-            timeout=2.0,
+            timeout=10.0,
         )
     finally:
         release.set()
@@ -163,7 +168,8 @@ def _run_shim_against_socket_peer(
 
     assert accepted.is_set(), "Unix peer did not receive a complete shim request"
     assert not server_thread.is_alive(), "Unix peer did not stop"
-    return result, time.monotonic() - started
+    assert request_received_at, "Unix peer did not record request receipt"
+    return result, time.monotonic() - request_received_at[0]
 
 
 def test_shim_invokes_via_ipc() -> None:
