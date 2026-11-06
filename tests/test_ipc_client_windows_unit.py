@@ -18,6 +18,7 @@ if typ.TYPE_CHECKING:
 
 @pytest.fixture(autouse=True)
 def _patch_windows_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub Windows-only modules so the named-pipe client runs on any platform."""
     from cmd_mox.ipc import client
 
     monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", True)
@@ -43,7 +44,10 @@ def _patch_windows_modules(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _DummyPipeError(Exception):
+    """Stand-in for ``pywintypes.error`` carrying a Windows error code."""
+
     def __init__(self, winerror: int) -> None:
+        """Store the Windows error code alongside the exception message."""
         super().__init__(winerror)
         self.winerror = winerror
 
@@ -57,6 +61,7 @@ def test_connect_pipe_with_retries_eventually_succeeds(
     attempts = {"count": 0}
 
     def fake_create(_pipe_name: pathlib.Path, *_args: object) -> str:
+        """Report a busy pipe on the first attempt, then return a handle."""
         attempts["count"] += 1
         if attempts["count"] < 2:
             raise _DummyPipeError(windows.ERROR_PIPE_BUSY)
@@ -88,6 +93,7 @@ def test_connect_pipe_with_retries_raises_after_non_retryable_error(
     from cmd_mox.ipc import client
 
     def fake_create(_pipe_name: pathlib.Path, *_args: object) -> str:
+        """Raise a non-retryable pipe error on every call."""
         raise _DummyPipeError(windows.ERROR_NO_DATA)
 
     monkeypatch.setattr(client, "_create_pipe_handle", fake_create)
@@ -109,7 +115,10 @@ def test_send_pipe_request_writes_and_reads(monkeypatch: pytest.MonkeyPatch) -> 
     handle_log: list[str] = []
 
     class _FakeHandle:
+        """Record whether the fake pipe handle has been closed."""
+
         def __init__(self) -> None:
+            """Start with the handle open."""
             self.closed = False
 
     fake_handle = _FakeHandle()
@@ -150,12 +159,16 @@ def test_send_pipe_request_closes_handle_on_timeout(
     from cmd_mox.ipc import client
 
     class _FakeHandle:
+        """Record whether the fake pipe handle has been closed."""
+
         def __init__(self) -> None:
+            """Start with the handle open."""
             self.closed = False
 
     fake_handle = _FakeHandle()
 
     def fake_close(handle: _FakeHandle) -> None:
+        """Mark the fake handle as closed."""
         handle.closed = True
 
     monkeypatch.setattr(
@@ -177,6 +190,7 @@ def test_send_pipe_request_closes_handle_on_timeout(
         deadline: float,
         cancel: cabc.Callable[[], None],
     ) -> object:
+        """Invoke the cancel callback, then simulate a timeout."""
         del func, deadline
         call_count["value"] += 1
         cancel()
@@ -204,11 +218,13 @@ def test_run_blocking_io_times_out_and_invokes_cancel(
     stop_event = threading.Event()
 
     def long_running() -> None:
+        """Block until the cancel callback releases the stop event."""
         stop_event.wait()
 
     cancel_calls: list[str] = []
 
     def cancel() -> None:
+        """Record the cancel call and release the blocked worker."""
         cancel_calls.append("called")
         stop_event.set()
 

@@ -18,6 +18,7 @@ class _ReprMixin:
     """
 
     def __repr__(self) -> str:
+        """Render the class name with its public attributes, sorted by name."""
         attrs = ", ".join(
             f"{k}={v!r}" for k, v in sorted(vars(self).items()) if not k.startswith("_")
         )
@@ -49,6 +50,7 @@ class IsA(_ReprMixin):
     """Match values convertible to ``typ``."""
 
     def __init__(self, typ: type) -> None:
+        """Store the type that candidate values must convert to."""
         self.typ = typ
 
     def __call__(self, value: str) -> bool:
@@ -70,6 +72,7 @@ class Regex(_ReprMixin):
     """Match if *value* matches ``pattern``."""
 
     def __init__(self, pattern: str) -> None:
+        """Compile the pattern once so repeated matches reuse it."""
         self.pattern = pattern
         self._pattern = re.compile(pattern)
 
@@ -88,6 +91,7 @@ class Contains(_ReprMixin):
     """Match if ``substring`` is found in *value*."""
 
     def __init__(self, substring: str) -> None:
+        """Store the substring that matched values must contain."""
         self.substring = substring
 
     def __call__(self, value: str) -> bool:
@@ -105,6 +109,7 @@ class StartsWith(_ReprMixin):
     """Match if *value* begins with ``prefix``."""
 
     def __init__(self, prefix: str) -> None:
+        """Store the prefix that matched values must begin with."""
         self.prefix = prefix
 
     def __call__(self, value: str) -> bool:

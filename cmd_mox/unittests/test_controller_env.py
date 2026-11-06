@@ -48,6 +48,7 @@ def test_response_for_regular_preserves_handler_env_override() -> None:
     """Handler-provided env entries should not be clobbered by expectation env."""
 
     def handler(inv: Invocation) -> Response:
+        """Return a response that sets its own value for the expectation's key."""
         response = Response(stdout="ok")
         response.env["EXPECT_ENV"] = "handler"
         return response
@@ -98,6 +99,7 @@ def test_response_for_regular_applies_env() -> None:
     mox = CmdMox()
 
     def handler(invocation: Invocation) -> Response:
+        """Return stdout echoing the variable as the handler sees it."""
         return Response(stdout=os.environ.get(key, ""))
 
     dbl = mox.stub("demo").with_env({key: "VAL"}).runs(handler)
@@ -143,6 +145,7 @@ def test_cmdmox_environment_cleanup_on_exception(
     assert os.environ["PATH"] != original_path
 
     def _boom() -> None:
+        """Raise RuntimeError to simulate a failure inside the active environment."""
         raise RuntimeError
 
     try:
@@ -167,6 +170,7 @@ def test_context_manager_restores_env_on_exception(
         """Exception used to trigger cleanup."""
 
     def run_with_error() -> None:
+        """Run the stubbed command inside the context manager, then raise."""
         with mox:
             mox.stub("boom").returns(stdout="oops")
             mox.replay()

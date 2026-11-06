@@ -29,6 +29,7 @@ def test_retry_with_backoff_retries_then_succeeds() -> None:
     sleeps: list[float] = []
 
     def attempt(attempt_idx: int) -> str:
+        """Fail the first attempt with OSError, then succeed on later attempts."""
         if attempt_idx == 0:
             raise OSError("temporary")
         return "ok"
@@ -56,6 +57,7 @@ def test_retry_with_backoff_respects_should_retry() -> None:
     failures: list[int] = []
 
     def attempt(_attempt: int) -> str:
+        """Raise RuntimeError on every call so the retry policy decides what happens."""
         raise RuntimeError("boom")
 
     strategy = RetryStrategy(

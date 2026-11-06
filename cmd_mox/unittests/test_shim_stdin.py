@@ -117,6 +117,8 @@ def test_create_invocation_accepts_stdin_dependencies(
     stdin = _DummyStdin("injected payload", is_tty=False)
 
     class _UnexpectedSystemStdin:
+        """Stand-in for ``sys.stdin`` that fails the test if it is queried."""
+
         def isatty(self) -> typ.NoReturn:
             """Fail if invocation construction bypasses the injected stream."""
             pytest.fail("system stdin was queried despite injected dependencies")
@@ -157,6 +159,8 @@ def test_create_invocation_observes_stdin_failure_without_error_text(
     """A failed stdin read emits bounded, correlated telemetry and diagnostics."""
 
     class _FailingStdin:
+        """Non-tty stdin stand-in whose read raises an OSError with a leak sentinel."""
+
         def isatty(self) -> bool:
             """Report the non-interactive status that triggers a read.
 
@@ -231,6 +235,8 @@ def test_direct_stdin_fallback_routes_read_errors(
     """Every direct-read fallback reports supported failures as IPC errors."""
 
     class _FailingStdin:
+        """Stdin stand-in whose direct text read raises the parametrized error."""
+
         encoding = "utf-8"
         errors = "strict"
 
@@ -249,6 +255,8 @@ def test_direct_stdin_fallback_routes_read_errors(
             raise error
 
     class _UnpollableStdin(_FailingStdin):
+        """Failing stdin stand-in whose descriptor the poller cannot watch."""
+
         def fileno(self) -> int:
             """Provide the descriptor used by the unpollable fallback case.
 
@@ -285,6 +293,8 @@ def test_worker_start_failure_uses_controlled_exit(
     """Failure to start the bounded reader does not escape as a traceback."""
 
     class _FailingThread:
+        """Thread double whose start raises to simulate worker startup failure."""
+
         def __init__(self, **_kwargs: object) -> None:
             """Accept thread construction so the injected start failure is reached."""
 
@@ -299,6 +309,8 @@ def test_worker_start_failure_uses_controlled_exit(
             raise _InjectedRuntimeError
 
     class _StreamWithoutDescriptor:
+        """Non-tty stdin stand-in that exposes no file descriptor."""
+
         def isatty(self) -> bool:
             """Report the non-interactive status that selects a bounded read.
 

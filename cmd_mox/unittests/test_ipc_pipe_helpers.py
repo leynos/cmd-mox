@@ -41,13 +41,17 @@ class _UnusedError(Exception):
 
 
 class _FakeWin32File(Win32FileProtocol):
+    """Scripted pywin32 file double that records writes, flushes, and closes."""
+
     def __init__(self, responses: list[object]) -> None:
+        """Store the scripted ``ReadFile`` responses and empty recordings."""
         self.responses = list(responses)
         self.writes: list[tuple[object, bytes]] = []
         self.flushes: list[object] = []
         self.closes: list[object] = []
 
     def ReadFile(self, handle: object, chunk_size: int) -> tuple[int, bytes]:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
+        """Return the next scripted ReadFile response, raising it if it is an error."""
         if not self.responses:
             msg = "No response configured"
             raise AssertionError(msg)
@@ -57,12 +61,15 @@ class _FakeWin32File(Win32FileProtocol):
         return response  # type: ignore[return-value, ty:invalid-return-type]
 
     def WriteFile(self, handle: object, payload: bytes) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
+        """Record the handle and payload of each write."""
         self.writes.append((handle, payload))
 
     def FlushFileBuffers(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
+        """Record the handle of each flush."""
         self.flushes.append(handle)
 
     def CloseHandle(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
+        """Record the handle of each close."""
         self.closes.append(handle)
 
 
@@ -91,11 +98,13 @@ def test_send_pipe_request_uses_shared_helpers(
     handle = object()
 
     def fake_write(h: object, payload: bytes, *, win32file: object) -> None:
+        """Record each write made by the client request path."""
         writes.append((h, payload, win32file))
 
     def fake_read(
         h: object, *, win32file: object, pywintypes: object, options: object
     ) -> bytes:
+        """Return a canned response in place of the shared pipe read."""
         return b"response"
 
     monkeypatch.setattr("cmd_mox.ipc.client.write_pipe_payload", fake_write)
@@ -129,10 +138,12 @@ def test_named_pipe_handler_uses_shared_helpers(
     handle = object()
 
     def fake_read(handle_obj: object, **_kwargs: object) -> bytes:
+        """Record the handle read from and return a raw request payload."""
         read_calls.append(handle_obj)
         return b"raw-request"
 
     def fake_write(handle_obj: object, payload: bytes, *, win32file: object) -> None:
+        """Record the payload written in place of the shared pipe write."""
         writes.append(payload)
 
     def fake_process(_outer: object, raw: bytes, transport: str) -> _RequestResult:
@@ -173,6 +184,7 @@ def test_named_pipe_server_signals_ready_when_accept_creation_fails(
     """Pipe creation failures should signal readiness and stop accepting clients."""
 
     def fail_pipe_creation() -> object:
+        """Simulate pipe creation failing with a broken-pipe error."""
         raise FakeWinError(ERROR_BROKEN_PIPE)
 
     backend = FakeNamedPipeBackend()
@@ -247,6 +259,7 @@ class _FakeWinError(Exception):
     """Minimal ``pywintypes.error`` double carrying a Windows error code."""
 
     def __init__(self, winerror: int) -> None:
+        """Store the Windows error code on the exception."""
         super().__init__(winerror)
         self.winerror = winerror
 
@@ -254,7 +267,7 @@ class _FakeWinError(Exception):
 def _scripted_read_chunk(
     steps: list[tuple[bytes, int]], *, broken_pipe_at: int | None = None
 ) -> cabc.Callable[[int], tuple[int, bytes]]:
-    """Build a reader that consumes scripted outcomes in order."""  # ruff: ignore[docstring-missing-returns] - private test reader has an obvious callable return
+    """Build a reader that consumes scripted outcomes in order."""
     pending_steps = list(steps)
     read_count = 0
 
@@ -287,7 +300,7 @@ def _scripted_read_chunk(
 
 
 def _scripted_message_payload(steps: list[tuple[bytes, int]]) -> bytes:
-    """Return scripted bytes through the first status that ends the read."""  # ruff: ignore[docstring-missing-returns] - private test oracle has an obvious bytes return
+    """Return scripted bytes through the first status that ends the read."""
     terminal_index = next(
         index
         for index, (_data, status) in enumerate(steps)
@@ -303,7 +316,7 @@ def _read_scripted_message(
     max_bytes: int,
     broken_pipe_at: int | None = None,
 ) -> bytes:
-    """Read a scripted message through the injected reader."""  # ruff: ignore[docstring-missing-returns] - private wrapper has an obvious bytes return
+    """Read a scripted message through the injected reader."""
     return read_pipe_message(
         object(),
         # The injected reader means this value is never dereferenced.
@@ -392,6 +405,7 @@ def test_read_pipe_chunk_reports_peer_disconnection() -> None:
     """A broken pipe ends the read rather than propagating."""
 
     def reader(_size: int) -> tuple[int, bytes]:
+        """Raise a broken-pipe error to simulate the peer disconnecting."""
         raise _FakeWinError(ERROR_BROKEN_PIPE)
 
     result = _read_pipe_chunk(
@@ -406,6 +420,7 @@ def test_read_pipe_chunk_propagates_unexpected_errors() -> None:
     unexpected = 1234
 
     def reader(_size: int) -> tuple[int, bytes]:
+        """Raise an unexpected Windows error that must reach the caller."""
         raise _FakeWinError(unexpected)
 
     with pytest.raises(_FakeWinError) as excinfo:
@@ -421,6 +436,7 @@ def test_read_pipe_message_uses_the_injected_reader() -> None:
     seen: list[int] = []
 
     def reader(size: int) -> tuple[int, bytes]:
+        """Record the requested chunk size and return a fixed payload."""
         seen.append(size)
         return 0, b"payload"
 

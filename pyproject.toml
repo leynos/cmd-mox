@@ -189,6 +189,11 @@ typing = "typ"
 # Enforce NumPy docstring style
 convention = "numpy"
 
+[tool.ruff.lint.pydoclint]
+# Concise one-line helpers and tests do not require structured sections;
+# multi-line docstrings must still document what they return and raise.
+ignore-one-line-docstrings = true
+
 [tool.pylint.main]
 # Activate rules whose behaviour depends on the project's Python baseline.
 py-version = "3.12"
@@ -549,3 +554,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 exclude = ["features"]
+
+[tool.interrogate]
+# interrogate recognises `@overload` and `@typing.overload`, not this repository's
+# `@typ.overload` alias, and Ruff (D418) forbids a docstring on a stub; the one
+# overloaded name is ignored here and its implementation is documented.
+ignore-overloaded-functions = true
+ignore-regex = ["^__getattr__$"]

@@ -34,21 +34,27 @@ class _FakeSocket:
     succeed_after: int = 1
 
     def __init__(self, *_: object, **__: object) -> None:
+        """Start the fake socket in the open state."""
         self.closed = False
 
     def settimeout(self, _timeout: float) -> None:
+        """Accept the socket timeout without applying it."""
         pass
 
     def connect(self, _address: str) -> None:
+        """Count the attempt and refuse it until the success attempt."""
         type(self).attempts += 1
         if type(self).attempts < type(self).succeed_after:
             raise ConnectionRefusedError
 
     def close(self) -> None:
+        """Mark the fake socket as closed."""
         self.closed = True
 
 
 class _AlwaysFailSocket(_FakeSocket):
+    """Socket double whose connects keep failing until the tenth attempt."""
+
     succeed_after = 10
 
 
@@ -313,6 +319,8 @@ def test_unix_connect_retry_sleep_is_capped_by_the_deadline(
     sleeps: list[float] = []
 
     class _ClockedSocket:
+        """Socket double that records each retry attempt on the fake clock."""
+
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             """Record when each retry attempt creates its socket."""
             created.append(clock["value"])
@@ -437,6 +445,7 @@ class _DeadlineClock:
     """Fake monotonic clock for generated IPC operation schedules."""
 
     def __init__(self, deadline: float) -> None:
+        """Store the request deadline and start the clock at zero."""
         self.deadline = deadline
         self.now = 0.0
         self.operation_starts: list[tuple[str, float, float]] = []
@@ -533,6 +542,7 @@ class _ScriptedUnixSocket:
         attempt: int,
         scenario: _DeadlineScenario,
     ) -> None:
+        """Bind the socket to the shared clock, attempt number and scenario."""
         self.clock = clock
         self.attempt = attempt
         self.scenario = scenario
@@ -540,9 +550,11 @@ class _ScriptedUnixSocket:
         self.received = 0
 
     def settimeout(self, timeout: float) -> None:
+        """Record the timeout the client assigned to this socket."""
         self.timeout = timeout
 
     def connect(self, _address: str) -> None:
+        """Advance the clock by the scripted connect time, refusing early attempts."""
         self.clock.consume(
             "connect", self.scenario.connect_elapsed[self.attempt], self.timeout
         )
@@ -550,12 +562,15 @@ class _ScriptedUnixSocket:
             raise ConnectionRefusedError
 
     def sendall(self, _payload: bytes) -> None:
+        """Advance the clock by the scripted send duration."""
         self.clock.consume("send", self.scenario.send_elapsed, self.timeout)
 
     def shutdown(self, _how: int) -> None:
+        """Advance the clock by the scripted shutdown duration."""
         self.clock.consume("shutdown", self.scenario.shutdown_elapsed, self.timeout)
 
     def recv(self, _size: int) -> bytes:
+        """Advance the clock by the next receive and return the next chunk."""
         self.clock.consume(
             "recv", self.scenario.recv_elapsed[self.received], self.timeout
         )
@@ -566,12 +581,15 @@ class _ScriptedUnixSocket:
         return chunk
 
     def close(self) -> None:
+        """Release the socket, which holds no real resources."""
         pass
 
     def __enter__(self) -> _ScriptedUnixSocket:
+        """Return this socket for use as a context manager."""
         return self
 
     def __exit__(self, *_args: object) -> None:
+        """Close the socket when the context manager exits."""
         self.close()
 
 
@@ -583,6 +601,7 @@ class _ScriptedUnixSocketFactory:
         clock: _DeadlineClock,
         scenario: _DeadlineScenario,
     ) -> None:
+        """Store the shared clock and scenario, with no sockets created yet."""
         self.clock = clock
         self.scenario = scenario
         self.attempts = 0

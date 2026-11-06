@@ -64,7 +64,7 @@ def write_pyproject(tmp_path: Path) -> cabc.Callable[[str], Path]:
     """
 
     def _write(body: str) -> Path:
-        """Write ``body`` to ``pyproject.toml`` and return the path."""  # ruff: ignore[docstring-missing-returns] - private test writer has an obvious path return
+        """Write ``body`` to ``pyproject.toml`` and return the path."""
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(textwrap.dedent(body), encoding="utf-8")
         return pyproject

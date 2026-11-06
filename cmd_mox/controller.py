@@ -310,6 +310,7 @@ class CmdMox:
         return Path(env.shim_dir) / name
 
     def _get_double(self, command_name: str, kind: DoubleKind) -> CommandDouble:
+        """Return or create the double for *command_name*, rejecting kind changes."""
         dbl = self._doubles.get(command_name)
         if dbl is None:
             dbl = CommandDouble(command_name, self, kind)

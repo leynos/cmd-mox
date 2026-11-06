@@ -26,6 +26,7 @@ def test_execute_and_verify_helpers() -> None:
     """Ensure helper functions execute and verify invocations."""
 
     def handler(inv: Invocation) -> tuple[str, str, int]:
+        """Assert the arguments, stdin and environment, then return a canned reply."""
         assert inv.args == ["--flag"], "Assertion failed"
         assert inv.stdin == "stdin", "Assertion failed"
         assert inv.env.get("ENV_VAR") == "VALUE", "Assertion failed"
@@ -62,6 +63,7 @@ def test_find_matching_journal_entry_returns_most_recent() -> None:
     """Prefer the most recent journal entry when multiple match."""
 
     def handler(inv: Invocation) -> tuple[str, str, int]:
+        """Echo the invocation's stdin back as stdout."""
         return (inv.stdin, "", 0)
 
     with CmdMox() as mox:
@@ -92,6 +94,7 @@ def test_helpers_raise_on_mismatch() -> None:
     """Helpers raise when expectations are not met."""
 
     def handler(inv: Invocation) -> tuple[str, str, int]:
+        """Return a successful reply that mismatches the expected exit code."""
         return ("out", "", 0)
 
     with CmdMox() as mox:

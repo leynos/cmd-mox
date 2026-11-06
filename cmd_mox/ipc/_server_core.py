@@ -55,6 +55,7 @@ class _ServerLifecycle[BackendT](abc.ABC):
         timeout: float,
         accept_timeout: float | None,
     ) -> None:
+        """Store the socket path and timeouts, deriving the accept timeout if unset."""
         self.socket_path = Path(socket_path)
         self.timeout = timeout
         self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
@@ -63,6 +64,7 @@ class _ServerLifecycle[BackendT](abc.ABC):
         self._lock = threading.Lock()
 
     def __enter__(self) -> typ.Self:
+        """Start the backend and return this server for use in a with block."""
         self.start()
         return self
 
@@ -72,6 +74,7 @@ class _ServerLifecycle[BackendT](abc.ABC):
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        """Stop the backend on exit, leaving any exception to propagate."""
         self.stop()
 
     def start(self) -> None:
@@ -115,7 +118,8 @@ class _ServerLifecycle[BackendT](abc.ABC):
         self._post_stop_cleanup()
 
     @abc.abstractmethod
-    def _create_backend(self) -> tuple[BackendT, threading.Thread]: ...
+    def _create_backend(self) -> tuple[BackendT, threading.Thread]:
+        """Create the backend server and the thread that will serve it."""
 
     def _prepare_backend_start(self) -> None:  # ruff: ignore[empty-method-without-abstract-decorator] - base lifecycle hook intentionally has no default implementation
         """Perform any setup required before starting the backend server."""
@@ -192,6 +196,7 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         *,
         handlers: IPCHandlers | None = None,
     ) -> None:
+        """Validate the timeouts and store the optional request handlers."""
         validate_positive_finite_timeout(timeout)
         validate_optional_timeout(accept_timeout, name="accept_timeout")
         super().__init__(Path(socket_path), timeout, accept_timeout)
@@ -275,6 +280,7 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         return RuntimeError(msg)
 
     def _export_environment(self) -> None:
+        """Export the IPC socket and timeout to the active environment, if any."""
         env_mgr = EnvironmentManager.get_active_manager()
         if env_mgr is not None:
             env_mgr.export_ipc_environment(timeout=self.timeout)
@@ -459,6 +465,7 @@ def _parse_payload(raw: bytes) -> ParsedRequest | None:
 
 
 def _encode_response(response: Response) -> bytes:
+    """Serialize a response to UTF-8 JSON bytes for the wire."""
     return json.dumps(response_to_payload(response)).encode("utf-8")
 
 
@@ -673,6 +680,7 @@ def _execute_request(
     processor: _RequestProcessor,
     obj: Invocation | PassthroughResult,
 ) -> tuple[Response, str | None]:
+    """Run the processor for a validated request, turning failures into responses."""
     try:
         match processor, obj:
             case "handle_invocation", Invocation() as invocation:

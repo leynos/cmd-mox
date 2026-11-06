@@ -27,6 +27,7 @@ class DummyResult:
     """Simplified ``CompletedProcess`` replacement for assertions."""
 
     def __init__(self, env: dict[str, str]) -> None:
+        """Store the environment and default the process output fields."""
         self.stdout = ""
         self.stderr = ""
         self.returncode = 0
@@ -80,6 +81,7 @@ def test_extra_env_overrides_invocation_env(
     def fake_run(
         argv: list[str], *, env: dict[str, str], **_kwargs: object
     ) -> DummyResult:
+        """Capture the environment passed to the fake subprocess run."""
         nonlocal captured
         captured = env
         return DummyResult(env)
@@ -105,6 +107,7 @@ def test_fallback_to_system_path(
     captured_path: str | None = None
 
     def fake_which(cmd: str, path: str | None = None) -> str | None:
+        """Record the PATH searched and resolve only the ``dummy`` command."""
         nonlocal captured_path
         captured_path = path
         return str(dummy) if cmd == "dummy" else None
@@ -112,6 +115,7 @@ def test_fallback_to_system_path(
     def fake_run(
         argv: list[str], *, env: dict[str, str], **_kwargs: object
     ) -> DummyResult:
+        """Return a successful fake result carrying the environment."""
         return DummyResult(env)
 
     monkeypatch.setattr("cmd_mox.command_runner.shutil.which", fake_which)
@@ -317,6 +321,7 @@ def test_execute_command_handles_exceptions(
     invocation = Invocation(command=scenario.command, args=[], stdin="", env={})
 
     def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        """Raise the scenario's exception in place of running the command."""
         raise scenario.factory()
 
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
@@ -345,6 +350,7 @@ def test_execute_command_formats_timeout_duration(
     invocation = Invocation(command="sleepy", args=[], stdin="", env={})
 
     def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        """Raise a timeout expiry for the configured duration."""
         raise subprocess.TimeoutExpired(cmd=["sleepy"], timeout=timeout)
 
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)
@@ -374,6 +380,7 @@ def test_command_runner_honours_override_environment(
     def fake_run(
         argv: list[str], *, env: dict[str, str], **kwargs: object
     ) -> DummyResult:
+        """Record the argv that the runner executes."""
         captured.extend(argv)
         return DummyResult(env)
 
@@ -396,6 +403,7 @@ def test_run_response_includes_applied_environment(
     def fake_run(
         argv: list[str], *, env: dict[str, str], **_kwargs: object
     ) -> DummyResult:
+        """Return a successful fake result carrying the environment it received."""
         return DummyResult(env)
 
     monkeypatch.setattr(
@@ -421,6 +429,7 @@ def test_execute_command_error_response_includes_env(
     """execute_command surfaces the applied environment on error responses."""
 
     def fake_run(*args: object, **kwargs: object) -> DummyResult:
+        """Raise ``FileNotFoundError`` to simulate a missing executable."""
         raise FileNotFoundError
 
     monkeypatch.setattr("cmd_mox.command_runner.subprocess.run", fake_run)

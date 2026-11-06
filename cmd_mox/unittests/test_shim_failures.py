@@ -25,15 +25,18 @@ def test_redirect_descriptor_to_null_closes_temporary_descriptor(
     close_calls: list[int] = []
 
     def fake_open(path: str, flags: int) -> int:
+        """Record the open call and return the preset descriptor."""
         open_calls.append((path, flags))
         return opened_descriptor
 
     def fake_dup2(source: int, destination: int) -> None:
+        """Record the duplication and raise the configured error, if any."""
         duplicate_calls.append((source, destination))
         if duplicate_error is not None:
             raise duplicate_error
 
     def fake_close(descriptor: int) -> None:
+        """Record each descriptor that is closed."""
         close_calls.append(descriptor)
 
     with monkeypatch.context() as scoped:

@@ -161,12 +161,12 @@ def require_string_tuple(value: object, *, context: str) -> tuple[str, ...]:
 
 
 def _is_non_empty_string(value: object) -> typ.TypeIs[str]:
-    """Report whether ``value`` is a non-empty string."""  # ruff: ignore[docstring-missing-returns] - private type guard has an obvious boolean return
+    """Report whether ``value`` is a non-empty string."""
     return isinstance(value, str) and bool(value)
 
 
 def _is_integer(value: object) -> typ.TypeIs[int]:
-    """Report whether ``value`` is an integer rather than a boolean."""  # ruff: ignore[docstring-missing-returns] - private type guard has an obvious boolean return
+    """Report whether ``value`` is an integer rather than a boolean."""
     return isinstance(value, int) and not isinstance(value, bool)
 
 
@@ -230,7 +230,7 @@ def normalize_findings(report: object) -> list[Finding]:
 
 
 def _finding_value(value: object, *, context: str) -> float:
-    """Validate a family's refactoring value as a non-boolean number."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private validator returns the float or raises the shared GateConfigError
+    """Validate a family's refactoring value as a non-boolean number."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         msg = f"{context}.value must be a number"
         raise GateConfigError(msg)
@@ -238,7 +238,7 @@ def _finding_value(value: object, *, context: str) -> float:
 
 
 def _finding_locations(value: object, *, context: str) -> tuple[Location, ...]:
-    """Validate a family's member locations, preserving their report order."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private validator returns the locations or raises the shared GateConfigError
+    """Validate a family's member locations, preserving their report order."""
     if not isinstance(value, cabc.Sequence) or isinstance(value, (str, bytes)):
         msg = f"{context}.locations must be an array"
         raise GateConfigError(msg)
@@ -252,7 +252,7 @@ def _finding_locations(value: object, *, context: str) -> tuple[Location, ...]:
 
 
 def _finding(raw: object, *, context: str) -> Finding:
-    """Validate one nose family payload."""  # ruff: ignore[docstring-missing-returns] - private validator has an obvious Finding return
+    """Validate one nose family payload."""
     family = require_table(raw, context=context)
     return Finding(
         witness=require_string(family.get("witness"), context=f"{context}.witness"),
@@ -262,7 +262,7 @@ def _finding(raw: object, *, context: str) -> Finding:
 
 
 def _location(raw: object, *, context: str) -> Location:
-    """Validate one nose location payload."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private validator returns the location or raises the shared GateConfigError
+    """Validate one nose location payload."""
     location = require_table(raw, context=context)
     start = require_positive_int(location.get("start"), context=f"{context}.start")
     end = location.get("end")

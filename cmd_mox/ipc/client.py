@@ -122,6 +122,8 @@ def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
 
 @dc.dataclass(slots=True)
 class _RetryContext:
+    """Carry the attempt state and retry policy through one retry decision."""
+
     attempt: int
     max_attempts: int
     retry_config: RetryConfig
@@ -391,6 +393,7 @@ def _connect_unix_with_retries(
     _remaining_time(request_deadline)
 
     def attempt_connect(_attempt: int) -> socket.socket:
+        """Open a fresh Unix socket and connect it, closing it if connect fails."""
         _remaining_time(request_deadline)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
@@ -458,6 +461,7 @@ def _send_unix_request(
     payload: bytes,
     context: _ConnectionContext,
 ) -> bytes:
+    """Send one payload over a retried Unix connection and return the full reply."""
     context.validate()
     deadline = context.deadline
     if deadline is None:
@@ -472,6 +476,7 @@ def _send_unix_request(
 
 
 def _decode_response(raw: bytes) -> Response:
+    """Parse raw reply bytes into a Response, rejecting invalid JSON."""
     parsed = parse_json_safely(raw)
     if parsed is None:
         msg = "Invalid JSON from IPC server"
@@ -541,10 +546,12 @@ def _connect_pipe_with_retries(
     *,
     deadline: float | None = None,
 ) -> object:
+    """Open a handle to the named pipe, retrying while it is busy or missing."""
     pipe_name_str = os.fspath(pipe_name)
     connect_deadline = deadline or _compute_deadline(context.timeout)
 
     def sleep(delay: float) -> None:
+        """Wait for the pipe to become available, bounded by the connect deadline."""
         _wait_for_pipe_availability(
             pipe_name_str,
             delay,
@@ -567,6 +574,7 @@ def _send_pipe_request(
     payload: bytes,
     context: _ConnectionContext,
 ) -> bytes:
+    """Send one payload over a named pipe and return the full reply."""
     pipe_name = derive_pipe_name(sock_path)
     timeout = context.timeout
     connect_deadline = _compute_deadline(timeout)

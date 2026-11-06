@@ -19,6 +19,7 @@ class CommandRunner:
     """Run commands using the original system environment."""
 
     def __init__(self, env_mgr: EnvironmentManager, *, timeout: float = 30.0) -> None:
+        """Store the environment manager and the subprocess timeout."""
         self._env_mgr = env_mgr
         self._timeout = timeout
 

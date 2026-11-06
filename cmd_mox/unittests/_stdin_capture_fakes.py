@@ -18,6 +18,7 @@ class _Clock:
     """Mutable monotonic clock advanced explicitly by each test."""
 
     def __init__(self, now: float = 0.0) -> None:
+        """Start the fake clock at *now* seconds."""
         self.now = now
 
     def __call__(self) -> float:
@@ -38,6 +39,7 @@ class _Stream:
     errors = "strict"
 
     def __init__(self, data: str = "", *, is_tty: bool = False) -> None:
+        """Store the text payload and tty flag, with the read counter at zero."""
         self.data = data
         self.read_calls = 0
         self._is_tty = is_tty
@@ -84,6 +86,7 @@ class _BlockingStream(_Stream):
     """Stream whose read blocks until *release* is set."""
 
     def __init__(self, data: str) -> None:
+        """Create a stream whose read blocks until its release event is set."""
         super().__init__(data)
         self.started = threading.Event()
         self.release = threading.Event()
@@ -109,6 +112,7 @@ class _DescriptorStream(_Stream):
     """Stream exposing an explicit descriptor and optional buffer."""
 
     def __init__(self, descriptor: int, *, data: str = "") -> None:
+        """Store the descriptor reported by ``fileno`` and the buffered text."""
         super().__init__(data)
         self._descriptor = descriptor
 
@@ -153,6 +157,7 @@ class _ClockAdvancingEvent:
     """
 
     def __init__(self, clock: _Clock, advance: float) -> None:
+        """Store the fake clock and the time charged to each successful wait."""
         self._finished = threading.Event()
         self._clock = clock
         self._advance = advance

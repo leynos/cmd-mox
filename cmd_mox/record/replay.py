@@ -50,6 +50,7 @@ class ReplaySession:
         strict_matching: bool = True,
         allow_unmatched: bool = False,
     ) -> None:
+        """Store the fixture path and matching options, loading the fixture lazily."""
         from pathlib import Path as _Path
 
         self._fixture_path = _Path(fixture_path)

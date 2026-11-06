@@ -124,6 +124,7 @@ def test_admit_client_releases_the_permit_when_the_thread_cannot_start(
     state._client_slots = threading.BoundedSemaphore(1)
 
     def refuse_thread(_handle: object, _slot: object = None) -> None:
+        """Simulate a handler thread that cannot start."""
         msg = "can't start new thread"
         raise RuntimeError(msg)
 
@@ -179,6 +180,7 @@ def _admit_on_thread(
     """
 
     def admit() -> None:
+        """Pass the gate, then admit one client on the calling thread."""
         gate()
         state._admit_client(object())
 
@@ -244,6 +246,7 @@ def test_a_worker_admitted_before_stop_is_joined(
     release = threading.Event()
 
     def block_read(_handle: object) -> bytes | None:
+        """Signal that serving has begun, then block until released."""
         serving.set()
         assert release.wait(5.0), "the blocked worker was never released"
         return None
@@ -302,6 +305,7 @@ def test_read_failure_releases_capacity(
     state._client_slots = threading.BoundedSemaphore(1)
 
     def fail_read(_handle: object) -> bytes:
+        """Raise a pipe error in place of reading the request."""
         raise FakeWinError(UNEXPECTED_WINERROR)
 
     monkeypatch.setattr(state, "_read_request", fail_read)
@@ -333,6 +337,7 @@ def test_failing_handle_disposal_still_releases_capacity(
     state._client_slots = threading.BoundedSemaphore(1)
 
     def fail_close(_handle: object) -> None:
+        """Raise a pipe error when the handle is closed."""
         raise FakeWinError(UNEXPECTED_WINERROR)
 
     monkeypatch.setattr(file_fake, "CloseHandle", fail_close)

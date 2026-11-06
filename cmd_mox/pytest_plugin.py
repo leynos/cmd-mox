@@ -289,6 +289,7 @@ class _CmdMoxManager:
     """Encapsulate cmd_mox lifecycle decisions for the pytest fixture."""
 
     def __init__(self, request: pytest.FixtureRequest) -> None:
+        """Build the fixture manager with its own CmdMox and worker environment."""
         self.request = request
         self.config = request.config
         node = getattr(request, "node", None)

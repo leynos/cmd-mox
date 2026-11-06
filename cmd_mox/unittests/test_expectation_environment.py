@@ -25,6 +25,7 @@ def test_with_env_injection(
     mox = CmdMox()
 
     def handler(inv: Invocation) -> Response:
+        """Echo the ``HELLO`` environment variable back as stdout."""
         return Response(stdout=os.environ.get("HELLO", ""))
 
     mox.stub("env").with_env({"HELLO": "WORLD"}).runs(handler)

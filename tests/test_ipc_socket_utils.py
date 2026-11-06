@@ -82,6 +82,7 @@ def test_wait_for_socket_succeeds_when_server_accepts(tmp_path: pathlib.Path) ->
     accepted: list[bool] = []
 
     def _serve() -> None:
+        """Accept one client on the socket path after a short delay."""
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
             # Delay binding slightly so wait_for_socket exercises retry logic.
             time.sleep(0.05)
@@ -116,25 +117,33 @@ def test_wait_for_socket_retries_until_success(
     attempts: list[int] = [0]
 
     class _FakeSocket:
+        """Socket double whose first two connects fail with a missing file."""
+
         def __init__(self, *_args: object, **_kwargs: object) -> None:
+            """Accept and ignore any socket constructor arguments."""
             pass
 
         def settimeout(self, _timeout: float) -> None:
+            """Ignore the requested socket timeout."""
             pass
 
         def connect(self, _address: str) -> None:
+            """Raise ``FileNotFoundError`` twice, then succeed on the third try."""
             if attempts[0] < 2:
                 attempts[0] += 1
                 raise FileNotFoundError("missing")
             attempts[0] += 1
 
         def close(self) -> None:  # pragma: no cover - closing is a no-op
+            """Do nothing when the fake socket is closed."""
             pass
 
         def __enter__(self) -> _FakeSocket:
+            """Return this fake socket as the context manager value."""
             return self
 
         def __exit__(self, *_exc: object) -> None:
+            """Close the fake socket on context exit."""
             self.close()
 
     monkeypatch.setattr("cmd_mox.ipc.socket_utils.socket.socket", _FakeSocket)
@@ -154,6 +163,7 @@ def test_cleanup_stale_socket_keeps_an_unreachable_socket(
     server.close()
 
     def _refuse(_self: object, _address: str) -> None:
+        """Simulate a connect attempt denied by filesystem permissions."""
         raise PermissionError("denied")
 
     monkeypatch.setattr(socket.socket, "connect", _refuse)

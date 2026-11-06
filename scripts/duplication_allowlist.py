@@ -97,7 +97,7 @@ def key_matches(key: str, location: Location) -> bool:
 def _validate_key_shape(
     path_glob: str, separator: str, name: str, *, context: str
 ) -> None:
-    """Reject a key with an empty path or a ``::`` suffix naming no unit."""  # ruff: ignore[docstring-missing-exception] - private guard raises the shared GateConfigError
+    """Reject a key with an empty path or a ``::`` suffix naming no unit."""
     msg = f"{context} must be a 'path' or 'path::name' key"
     if not path_glob:
         raise GateConfigError(msg)
@@ -106,7 +106,7 @@ def _validate_key_shape(
 
 
 def _validate_repository_relative_path(path_glob: str, *, context: str) -> None:
-    """Reject a path glob that is absolute or escapes the repository root."""  # ruff: ignore[docstring-missing-exception] - private guard raises the shared GateConfigError
+    """Reject a path glob that is absolute or escapes the repository root."""
     if path_glob.startswith("/") or ".." in PurePosixPath(path_glob).parts:
         msg = f"{context} must be a repository-relative path key"
         raise GateConfigError(msg)
@@ -176,7 +176,7 @@ def load_allowlist(pyproject_path: Path) -> tuple[AllowEntry, ...]:
 
 
 def _config_mapping(value: object, *, context: str) -> cabc.Mapping[str, object]:
-    """Validate one TOML table before configuration logic consumes it."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private reader returns the table or raises the shared GateConfigError
+    """Validate one TOML table before configuration logic consumes it."""
     if not isinstance(value, cabc.Mapping) or not all(
         isinstance(key, str) for key in value
     ):
@@ -186,7 +186,7 @@ def _config_mapping(value: object, *, context: str) -> cabc.Mapping[str, object]
 
 
 def _allow_entry(raw: object, *, index: int) -> AllowEntry:
-    """Validate and normalize one reasoned TOML allow entry."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private reader returns the entry or raises the shared GateConfigError
+    """Validate and normalize one reasoned TOML allow entry."""
     table = _config_mapping(raw, context=f"duplication_gate.allow[{index}]")
     reason = table.get("reason", "")
     if not isinstance(reason, str) or not reason.strip():
@@ -196,7 +196,7 @@ def _allow_entry(raw: object, *, index: int) -> AllowEntry:
 
 
 def _unit_entry_keys(unit: object, *, context: str) -> tuple[str, ...]:
-    """Validate a single-location ``unit`` field as a one-key tuple."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private reader returns the keys or raises the shared GateConfigError
+    """Validate a single-location ``unit`` field as a one-key tuple."""
     if not isinstance(unit, str):
         msg = f"{context} unit must be a 'path[::name]' string"
         raise GateConfigError(msg)
@@ -204,7 +204,7 @@ def _unit_entry_keys(unit: object, *, context: str) -> tuple[str, ...]:
 
 
 def _members_entry_keys(members: object, *, context: str) -> tuple[str, ...]:
-    """Validate a multi-location ``members`` field, preserving its order."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private reader returns the keys or raises the shared GateConfigError
+    """Validate a multi-location ``members`` field, preserving its order."""
     if not _is_key_list(members):
         msg = f"{context} members must be two or more 'path[::name]' strings"
         raise GateConfigError(msg)
@@ -214,7 +214,7 @@ def _members_entry_keys(members: object, *, context: str) -> tuple[str, ...]:
 
 
 def _entry_keys(raw: cabc.Mapping[str, object], index: int) -> tuple[str, ...]:
-    """Extract and validate the location keys named by one allow entry."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private reader returns the keys or raises the shared GateConfigError
+    """Extract and validate the location keys named by one allow entry."""
     unit = raw.get("unit")
     members = raw.get("members")
     context = f"duplication_gate.allow[{index}]"
@@ -227,7 +227,7 @@ def _entry_keys(raw: cabc.Mapping[str, object], index: int) -> tuple[str, ...]:
 
 
 def _is_key_list(value: object) -> typ.TypeIs[cabc.Sequence[str]]:
-    """Report whether ``value`` is an array of at least two key strings."""  # ruff: ignore[docstring-missing-returns] - private type guard has an obvious boolean return
+    """Report whether ``value`` is an array of at least two key strings."""
     if not isinstance(value, cabc.Sequence) or isinstance(value, (str, bytes)):
         return False
     return len(value) >= _MINIMUM_MEMBER_COUNT and all(
@@ -282,7 +282,7 @@ def append_allow_entry(
 
 
 def _new_entry(keys: tuple[str, ...], reason: str) -> tomlkit.items.Table:
-    """Build the TOML table recording one reasoned allow entry."""  # ruff: ignore[docstring-missing-returns] - private builder has an obvious table return
+    """Build the TOML table recording one reasoned allow entry."""
     entry = tomlkit.table()
     if len(keys) == 1:
         entry["unit"] = keys[0]
@@ -306,7 +306,7 @@ def _write_document(pyproject_path: Path, document: tomlkit.TOMLDocument) -> Non
 
 
 def _same_allow_target(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
-    """Report whether two entries name the same unordered set of keys."""  # ruff: ignore[docstring-missing-returns] - private predicate has an obvious boolean return
+    """Report whether two entries name the same unordered set of keys."""
     return left == right or (len(left) == len(right) and set(left) == set(right))
 
 

@@ -61,7 +61,10 @@ class TestRecordFluentAPI:
         from cmd_mox.ipc import Invocation, Response
 
         class _TestScrubber:
+            """Scrubber double that replaces recorded stdout with a marker."""
+
             def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+                """Return a copy of *recording* with its stdout replaced."""
                 return dc.replace(recording, stdout="<scrubbed>")
 
         mox = CmdMox()

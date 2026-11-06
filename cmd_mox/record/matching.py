@@ -32,6 +32,7 @@ class InvocationMatcher:
     """
 
     def __init__(self, *, strict: bool) -> None:
+        """Store whether every matching criterion must be satisfied."""
         self._strict = strict
 
     def matches(

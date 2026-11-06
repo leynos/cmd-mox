@@ -187,7 +187,7 @@ def resolve_binary(
 
 
 def _discover_binary() -> str | None:
-    """Return the repository-local nose binary, else one found on PATH."""  # ruff: ignore[docstring-missing-returns] - private discovery has an obvious optional-path return
+    """Return the repository-local nose binary, else one found on PATH."""
     if DEFAULT_NOSE_BIN.is_file():
         return str(DEFAULT_NOSE_BIN)
     return shutil.which("nose")
@@ -262,7 +262,7 @@ def run_detector(
 
 
 def _run_command(command: cabc.Sequence[str]) -> str:
-    """Run one detector command from the repository root and return stdout."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private runner returns stdout or raises the shared GateExecutionError
+    """Run one detector command from the repository root and return stdout."""
     try:
         result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed, repository-owned binary.
             list(command),

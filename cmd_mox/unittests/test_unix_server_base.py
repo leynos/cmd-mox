@@ -33,6 +33,7 @@ class _TrackedLock:
     """Signal when every test worker has attempted a guarded cache access."""
 
     def __init__(self, expected_attempts: int) -> None:
+        """Expect *expected_attempts* workers before signalling contention."""
         self._lock = threading.Lock()
         self._attempt_lock = threading.Lock()
         self._expected_attempts = expected_attempts
@@ -40,6 +41,7 @@ class _TrackedLock:
         self.all_workers_waiting = threading.Event()
 
     def __enter__(self) -> _TrackedLock:
+        """Count this attempt, signal once all workers arrive, then acquire."""
         with self._attempt_lock:
             self._attempt_count += 1
             if self._attempt_count == self._expected_attempts:
@@ -48,6 +50,7 @@ class _TrackedLock:
         return self
 
     def __exit__(self, *_: object) -> None:
+        """Release the wrapped lock."""
         self._lock.release()
 
 
@@ -74,6 +77,7 @@ def _run_concurrent_first_access[T](
     monkeypatch.setattr(cache_lock_owner, cache_lock_name, tracked_lock)
 
     def resolve_base() -> type[socketserver.BaseServer]:
+        """Block until released, then return the stub base server class."""
         nonlocal resolver_calls
         resolver_calls += 1
         resolver_started.set()
@@ -86,6 +90,7 @@ def _run_concurrent_first_access[T](
     monkeypatch.setattr(_unix_server_base, "_resolve_unix_server_base", resolve_base)
 
     def access_cache() -> T:
+        """Wait at the start barrier, then perform the guarded cache access."""
         start_access.wait(timeout=5)
         return access()
 
@@ -155,6 +160,7 @@ def test_inner_server_class_is_cached(
     resolver_calls = 0
 
     def resolve_base() -> type[socketserver.BaseServer]:
+        """Count resolver calls and return the stub base server class."""
         nonlocal resolver_calls
         resolver_calls += 1
         return stub_unix_stream_server

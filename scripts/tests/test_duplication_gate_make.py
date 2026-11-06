@@ -35,7 +35,7 @@ def _make_allow(
     request: _MakeAllowRequest,
     environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run the real Make target against a copied, writable gate workspace."""  # ruff: ignore[docstring-missing-returns] - private test runner has an obvious completed-process return
+    """Run the real Make target against a copied, writable gate workspace."""
     make = shutil.which("make")
     assert make is not None, "Expected make to be available for contract tests."
     command = [
@@ -134,7 +134,7 @@ class TestMakeDuplicationAllow:
 
 
 def _make_dry_run(target: str) -> subprocess.CompletedProcess[str]:
-    """Expand a Make target's recipe without running it."""  # ruff: ignore[docstring-missing-returns] - private test runner has an obvious completed-process return
+    """Expand a Make target's recipe without running it."""
     make = shutil.which("make")
     assert make is not None, "Expected make to be available for contract tests."
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed Make target in the repository root.

@@ -64,6 +64,7 @@ class _AlwaysRefusedSocket:
     attempts: int = 0
 
     def __init__(self, *_: object, **__: object) -> None:
+        """Accept any constructor arguments and start the socket open."""
         self.closed = False
 
     def settimeout(self, _timeout: float) -> None:
@@ -423,6 +424,7 @@ def test_passthrough_result_preserves_its_invocation_identifier(
     captured: list[PassthroughResult] = []
 
     def handler(passthrough: PassthroughResult) -> Response:
+        """Capture the passthrough result and acknowledge it."""
         captured.append(passthrough)
         return Response(stdout="ok")
 

@@ -24,12 +24,12 @@ def _location(
     end: int = 20,
     name: str | None = None,
 ) -> detector.Location:
-    """Build one reported location."""  # ruff: ignore[docstring-missing-returns] - private test builder has an obvious location return
+    """Build one reported location."""
     return detector.Location(file=file, start=start, end=end, name=name)
 
 
 def _finding(*locations: detector.Location, value: float = 22.1) -> detector.Finding:
-    """Build a finding over the supplied locations."""  # ruff: ignore[docstring-missing-returns] - private test builder has an obvious finding return
+    """Build a finding over the supplied locations."""
     members = locations or (_location(), _location(file="cmd_mox/b.py"))
     return detector.Finding(witness="copy-paste", value=value, locations=members)
 

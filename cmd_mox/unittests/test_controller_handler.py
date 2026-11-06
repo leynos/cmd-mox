@@ -18,11 +18,13 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 def _tuple_handler(invocation: Invocation) -> tuple[str, str, int]:
+    """Return a tuple result for a handler stub, asserting no arguments arrived."""
     assert invocation.args == []
     return ("handled", "", 0)
 
 
 def _response_handler(invocation: Invocation) -> Response:
+    """Return a Response for a handler stub, asserting no arguments arrived."""
     assert invocation.args == []
     return Response(stdout="r", stderr="", exit_code=0)
 

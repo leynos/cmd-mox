@@ -93,8 +93,11 @@ BACKEND_SELECTION_OPERATION: typ.Final[str] = "ipc.backend_selection"
 
 
 class _CacheInfo(typ.Protocol):
+    """Structural view of the statistics reported by a ``functools`` cache."""
+
     @property
-    def hits(self) -> int: ...
+    def hits(self) -> int:
+        """Cumulative number of cache hits recorded so far."""
 
 
 type _CacheName = typ.Literal["unix_server_base", "inner_server_class"]
@@ -109,6 +112,8 @@ type _BackendOutcome = typ.Literal[
 
 
 class _CacheObservation(typ.NamedTuple):
+    """Bounded cache name and hit-or-miss outcome for one backend event."""
+
     name: _CacheName
     outcome: _CacheOutcome
 
@@ -234,6 +239,7 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
     """Run a Unix domain socket server for shims."""
 
     def _prepare_backend_start(self) -> None:
+        """Remove any stale socket file so the backend can bind the path."""
         cleanup_stale_socket(self.socket_path)
 
     def _create_backend(self) -> tuple[socketserver.BaseServer, threading.Thread]:
@@ -301,14 +307,17 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
         return server, thread
 
     def _wait_until_ready(self) -> None:
+        """Wait until the socket file is ready or the timeout elapses."""
         wait_for_socket(self.socket_path, self.timeout)
 
     @staticmethod
     def _stop_backend(server: socketserver.BaseServer) -> None:
+        """Shut down the socket server and close its listening socket."""
         server.shutdown()
         server.server_close()
 
     def _post_stop_cleanup(self) -> None:
+        """Remove the socket file after stopping, ignoring removal errors."""
         if self.socket_path.exists():
             with contextlib.suppress(OSError):
                 self.socket_path.unlink()

@@ -147,6 +147,7 @@ def test_replay_cleans_up_on_keyboard_interrupt(
     assert shim_dir.exists()
 
     def raise_interrupt() -> None:
+        """Raise KeyboardInterrupt to simulate Ctrl-C during replay startup."""
         raise KeyboardInterrupt
 
     monkeypatch.setattr(mox, "_start_ipc_server", raise_interrupt)
@@ -176,6 +177,7 @@ def test_verify_cleans_up_when_recording_finalize_raises(
     mox.replay()
 
     def _boom() -> None:
+        """Raise OSError to simulate a failed recording finalization."""
         raise OSError("boom")
 
     monkeypatch.setattr(mox, "_finalize_recording_sessions", _boom)

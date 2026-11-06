@@ -166,7 +166,7 @@ def _write_response_stream(
     *,
     correlation_id: str | None = None,
 ) -> _ResponseFailure | None:
-    """Write one response stream and return its failure, if any."""  # ruff: ignore[docstring-missing-returns] - the annotation makes the optional failure explicit
+    """Write one response stream and return its failure, if any."""
     stream = getattr(sys, stream_name)
     started = time.perf_counter()
 

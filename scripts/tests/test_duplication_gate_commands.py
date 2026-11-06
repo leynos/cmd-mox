@@ -22,7 +22,7 @@ from duplication_gate_test_support import (
 
 
 def _finding() -> detector.Finding:
-    """Build a representative blocking finding."""  # ruff: ignore[docstring-missing-returns] - private test builder has an obvious finding return
+    """Build a representative blocking finding."""
     return detector.Finding(
         witness="copy-paste",
         value=22.1,
@@ -89,17 +89,21 @@ class TestGateCommands:
         if str(error).startswith("unreadable"):
 
             def reader(_path: object) -> tuple[allowlist.AllowEntry, ...]:
+                """Raise the injected allowlist I/O failure."""
                 raise error
 
             def detect() -> list[detector.Finding]:
+                """Return no findings so only the allowlist failure surfaces."""
                 return []
 
         else:
 
             def reader(_path: object) -> tuple[allowlist.AllowEntry, ...]:
+                """Return an empty allowlist so only the detector failure surfaces."""
                 return ()
 
             def detect() -> list[detector.Finding]:
+                """Raise the injected detector I/O failure."""
                 raise error
 
         with pytest.raises(gate.GateExecutionError, match=str(error)):
@@ -110,6 +114,7 @@ class TestGateCommands:
         entry = allowlist.AllowEntry(keys=("cmd_mox/a.py",), reason="reviewed")
 
         def reader(_path: object) -> tuple[allowlist.AllowEntry, ...]:
+            """Return the single allowlist entry under test."""
             return (entry,)
 
         assert gate._read_allowlist(reader) == (entry,), (
@@ -128,6 +133,7 @@ class TestGateCommands:
         )
 
         def detect() -> list[detector.Finding]:
+            """Return the single finding under test."""
             return [finding]
 
         assert gate._detect_findings(detect) == [finding], (
@@ -160,6 +166,7 @@ class TestGateCommands:
         """Unreadable configuration becomes an explicit execution error."""
 
         def reader(_path: object) -> tuple[allowlist.AllowEntry, ...]:
+            """Raise the injected allowlist reader failure."""
             raise error
 
         with pytest.raises(expected_type) as raised:
@@ -200,6 +207,7 @@ class TestGateCommands:
         """Execution failures and schema violations use distinct gate errors."""
 
         def detect() -> list[detector.Finding]:
+            """Raise the injected detector failure."""
             raise error
 
         with pytest.raises(expected_type) as raised:
@@ -213,6 +221,7 @@ class TestGateCommands:
         error = RuntimeError("detector runtime failed")
 
         def detect() -> list[detector.Finding]:
+            """Raise the injected detector runtime error."""
             raise error
 
         with pytest.raises(RuntimeError) as raised:
@@ -225,6 +234,7 @@ class TestGateCommands:
         error = gate.GateConfigError("duplication_gate.allow[0] requires a reason")
 
         def reader(_path: object) -> tuple[allowlist.AllowEntry, ...]:
+            """Raise the injected allowlist configuration error."""
             raise error
 
         with pytest.raises(gate.GateConfigError) as raised:
@@ -237,6 +247,7 @@ class TestGateCommands:
         error = gate.GateConfigError("nose 0.19.0 is installed but 0.20.0 is pinned")
 
         def detect() -> list[detector.Finding]:
+            """Raise the injected detector configuration error."""
             raise error
 
         with pytest.raises(gate.GateConfigError) as raised:
@@ -255,6 +266,7 @@ class TestGateCommands:
         monkeypatch.setattr(gate, "load_allowlist", lambda _path: ())
 
         def raise_schema_error() -> list[detector.Finding]:
+            """Simulate a detector report whose families field is malformed."""
             msg = "nose report families must be an array"
             raise TypeError(msg)
 
@@ -321,6 +333,7 @@ class TestGateCommands:
         write_error = OSError("read-only filesystem")
 
         def fail_write(*_args: object, **_kwargs: object) -> None:
+            """Raise the injected filesystem write failure."""
             raise write_error
 
         monkeypatch.setattr(gate, "append_allow_entry", fail_write)
@@ -516,7 +529,7 @@ class TestEndToEndBlocking:
     )
 
     def _planted_workspace(self, tmp_path: Path, *, allow: str = "") -> Path:
-        """Build a gate workspace whose package holds one verbatim duplicate."""  # ruff: ignore[docstring-missing-returns] - private test builder has an obvious workspace return
+        """Build a gate workspace whose package holds one verbatim duplicate."""
         workspace, _script = copied_gate_workspace(tmp_path)
         package = workspace / "planted"
         package.mkdir()
@@ -549,7 +562,7 @@ class TestEndToEndBlocking:
         return workspace
 
     def _run_check(self, workspace: Path) -> subprocess.CompletedProcess[str]:
-        """Run the copied gate's real `check` against the pinned detector."""  # ruff: ignore[docstring-missing-returns] - private test runner has an obvious completed-process return
+        """Run the copied gate's real `check` against the pinned detector."""
         settings = detector.load_settings(REPOSITORY_ROOT / "pyproject.toml")
         try:
             binary = detector.resolve_binary(settings)

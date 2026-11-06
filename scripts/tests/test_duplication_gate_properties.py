@@ -15,7 +15,7 @@ _NAMES = st.sampled_from(("alpha", "beta", None))
 
 @st.composite
 def _locations(draw: st.DrawFn) -> detector.Location:
-    """Build one reported location with a stable span."""  # ruff: ignore[docstring-missing-returns] - private strategy has an obvious location return
+    """Build one reported location with a stable span."""
     start = draw(st.integers(min_value=1, max_value=200))
     return detector.Location(
         file=draw(_PATHS),
@@ -27,7 +27,7 @@ def _locations(draw: st.DrawFn) -> detector.Location:
 
 @st.composite
 def _findings(draw: st.DrawFn) -> detector.Finding:
-    """Build one duplication family over two or more locations."""  # ruff: ignore[docstring-missing-returns] - private strategy has an obvious finding return
+    """Build one duplication family over two or more locations."""
     return detector.Finding(
         witness=draw(st.sampled_from(("exact", "copy-paste", "similar"))),
         value=float(draw(st.integers(min_value=0, max_value=100))),
@@ -37,7 +37,7 @@ def _findings(draw: st.DrawFn) -> detector.Finding:
 
 @st.composite
 def _allow_entries(draw: st.DrawFn) -> allowlist.AllowEntry:
-    """Build one valid unit or members allow entry."""  # ruff: ignore[docstring-missing-returns] - private strategy has an obvious entry return
+    """Build one valid unit or members allow entry."""
     keys = draw(
         st.one_of(
             st.tuples(_PATHS),

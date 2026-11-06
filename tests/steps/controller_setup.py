@@ -88,6 +88,7 @@ def interrupt_replay_startup(monkeypatch: pytest.MonkeyPatch, mox: CmdMox) -> No
     """Simulate Ctrl+C during replay startup by raising ``KeyboardInterrupt``."""
 
     def raise_interrupt() -> None:
+        """Raise KeyboardInterrupt to simulate Ctrl+C during replay startup."""
         raise KeyboardInterrupt
 
     monkeypatch.setattr(mox, "_start_ipc_server", raise_interrupt)
@@ -99,6 +100,7 @@ def invalidate_environment(monkeypatch: pytest.MonkeyPatch, mox: CmdMox) -> None
     original = mox._check_replay_preconditions
 
     def tampered() -> None:
+        """Run the real preflight checks, then clear the shim and socket paths."""
         original()
         env = mox.environment
         assert env is not None, "Environment manager should exist"

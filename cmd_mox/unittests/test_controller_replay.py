@@ -104,6 +104,7 @@ def _create_dynamic_replay_spy(
     handler_calls: list[Invocation] = []
 
     def handler(invocation: Invocation) -> Response:
+        """Record each invocation and return a fixed replay response."""
         handler_calls.append(invocation)
         return Response(stdout="handler", stderr="", exit_code=0)
 
@@ -117,7 +118,7 @@ def _handle_fuzzy_replay_mismatch(
     *,
     expected_stdout: str,
 ) -> ReplayRecordedExpectation:
-    """Dispatch an unmatched fuzzy replay invocation through *mox*."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious expectation return
+    """Dispatch an unmatched fuzzy replay invocation through *mox*."""
     invocation = Invocation(command="git", args=["commit"], stdin="", env={})
     response = mox._handle_invocation(invocation)
     return ReplayRecordedExpectation(

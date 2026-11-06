@@ -73,6 +73,8 @@ def test_selected_strategy_is_reported_before_the_read() -> None:
     """
 
     class _FailingStream(_Stream):
+        """Stream whose direct read fails after the strategy is selected."""
+
         def read(self) -> str:
             """Fail the direct read after strategy selection.
 
@@ -122,6 +124,8 @@ def test_pollnval_probe_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     """A ``POLLNVAL`` probe result marks the descriptor as unpollable."""
 
     class _InvalidPoller:
+        """Poller double that reports every registered descriptor as invalid."""
+
         def register(self, _descriptor: int, _mask: int) -> None:
             """Accept registration."""
 
@@ -136,6 +140,7 @@ def test_pollnval_probe_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
             return [(0, capture.select.POLLNVAL)]
 
     def reject(_descriptor: int) -> capture._Poller:
+        """Simulate a select-based poller that refuses the descriptor."""
         msg = "closed"
         raise ValueError(msg)
 
@@ -185,6 +190,7 @@ def test_unselectable_descriptor_plan_falls_back(
     def reject_select(
         _readables: object, _writables: object, _exceptables: object, _timeout: object
     ) -> tuple[list[int], list[int], list[int]]:
+        """Simulate ``select()`` rejecting a descriptor outside its range."""
         msg = "filedescriptor out of range in select()"
         raise ValueError(msg)
 
@@ -209,6 +215,7 @@ class _OverflowingEvent:
     """
 
     def __init__(self, clock: _Clock) -> None:
+        """Share *clock* with the test and start with no recorded waits."""
         self.clock = clock
         self.waits: list[float] = []
 
@@ -322,6 +329,8 @@ def test_fallback_rereaises_worker_errors() -> None:
     """A stream error captured by the worker surfaces on the caller's thread."""
 
     class _FailingStream(_Stream):
+        """Stream whose read always fails with a stream error."""
+
         def read(self) -> str:
             """Fail the read as a broken stream would.
 
@@ -609,6 +618,7 @@ def test_plan_treats_an_unstattable_descriptor_as_pollable(
         # its own capture temporary file between the call and teardown while
         # the patch is still active. Failing that call too would break the
         # harness rather than exercise the fallback under test.
+        """Fail ``fstat`` for the descriptor under test to force polling."""
         if descriptor == read_fd:
             msg = "stat failed"
             raise OSError(msg)

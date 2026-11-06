@@ -72,6 +72,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         *,
         handlers: IPCHandlers | None = None,
     ) -> None:
+        """Create a server on the named pipe derived from the socket path."""
         if not path_utils.IS_WINDOWS:
             msg = "NamedPipeServer is only available on Windows"
             raise RuntimeError(msg)
@@ -84,6 +85,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         self._pipe_name = derive_pipe_name(self.socket_path)
 
     def _create_backend(self) -> tuple[_NamedPipeState, threading.Thread]:
+        """Build the named-pipe state and its daemon thread that serves it."""
         state = _NamedPipeState(
             pipe_name=self._pipe_name,
             outer=self,
@@ -94,6 +96,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         return state, thread
 
     def _wait_until_ready(self) -> None:
+        """Wait for the pipe to accept connections, raising if startup failed."""
         state = self._server
         if state is None:
             return
@@ -113,6 +116,7 @@ class NamedPipeServer(_BaseIPCServer["_NamedPipeState"]):
         raise RuntimeError(msg)
 
     def _stop_backend(self, server: _NamedPipeState) -> None:
+        """Stop the pipe server and wait a bounded time for its clients to exit."""
         server.stop()
         server.join_clients(self.timeout)
 
@@ -157,6 +161,7 @@ class _NamedPipeState:
         accept_timeout: float,
         backend: NamedPipeBackend,
     ) -> None:
+        """Create the stop and ready events, client bookkeeping, and backend."""
         self.pipe_name, self.outer = pipe_name, outer
         self.accept_timeout = accept_timeout
         self._backend = backend
@@ -388,6 +393,7 @@ class _NamedPipeState:
             return list(self._client_threads)
 
     def serve_forever(self) -> None:
+        """Accept pipe clients until stopped, recording a failed first pipe."""
         if not path_utils.IS_WINDOWS:  # pragma: no cover - defensive guard
             return
 
@@ -416,6 +422,7 @@ class _NamedPipeState:
     def stop(self) -> None:
         # ``stop_event`` is set under ``_client_lock`` so that admission and
         # shutdown are mutually exclusive: see ``_spawn_handler_thread``.
+        """Signal the accept loop and active clients to stop, idempotently."""
         with self._client_lock:
             if self.stop_event.is_set():
                 return
@@ -439,6 +446,7 @@ class _NamedPipeState:
             self._backend.set_event(handle)
 
     def join_clients(self, timeout: float) -> None:
+        """Wait up to *timeout* seconds for tracked client threads to finish."""
         deadline = time.monotonic() + timeout
         while True:
             threads = self._get_active_threads()
@@ -448,6 +456,7 @@ class _NamedPipeState:
                 return
 
     def _create_pipe_instance(self) -> object:
+        """Create an overlapped, message-mode pipe instance for the next client."""
         backend = self._backend
         timeout_ms = max(1, int(self.accept_timeout * 1000))
         return backend.create_named_pipe(
@@ -678,6 +687,7 @@ class _NamedPipeState:
         return 0, bytes(memoryview(buffer)[:transferred])
 
     def _poke_pipe(self) -> None:
+        """Briefly connect to the pipe so a blocked accept call wakes up."""
         backend = self._backend
         try:
             handle = backend.create_file(

@@ -182,8 +182,14 @@ check-fmt: build ## Verify formatting
 markdownlint-run: ## Run markdownlint-cli2 over the repository's Markdown
 	$(MDLINT) "**/*.md"
 
+# Docstring presence for every Python file the repository owns; Ruff keeps style.
+INTERROGATE_VERSION ?= 1.7.0
+INTERROGATE = $(UV_GATE) tool --from interrogate@$(INTERROGATE_VERSION) -- interrogate --fail-under 100
+INTERROGATE_TARGETS ?= cmd_mox tests scripts examples conftest.py
+
 lint: build install-nose yamllint actionlint ## Run linters
 	$(RUFF) check
+	$(INTERROGATE) $(INTERROGATE_TARGETS)
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
 	$(AMBRLEAKS) tests

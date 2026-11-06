@@ -136,7 +136,7 @@ def _ci_env_pin(name: str) -> str:
 
 
 def _pyproject_nose_pin() -> str:
-    """Extract ``[tool.nose].version`` from pyproject.toml."""  # ruff: ignore[docstring-missing-returns] - private reader has an obvious version-string return
+    """Extract ``[tool.nose].version`` from pyproject.toml."""
     text = (CI_WORKFLOW_PATH.parents[2] / "pyproject.toml").read_text(encoding="utf-8")
     nose_table = re.search(
         r"^\[tool\.nose\]\n(.*?)(?=^\[)", text, re.MULTILINE | re.DOTALL

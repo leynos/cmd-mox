@@ -51,7 +51,7 @@ def _run_build_step(
     wheel_name: str = _PURE_WHEEL_NAME,
     out_dir: str = "dist",
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
-    """Run the build script with a recording uv stub."""  # ruff: ignore[docstring-missing-returns] - the private helper's tuple is explicit in its annotation.
+    """Run the build script with a recording uv stub."""
     script, _ = load_action_build_step()
     output_dir = tmp_path / "dist"
     output_dir.mkdir()

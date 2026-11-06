@@ -21,6 +21,7 @@ def _make_invocation(
     args: list[str] | None = None,
     env: dict[str, str] | None = None,
 ) -> Invocation:
+    """Build an ``Invocation`` defaulting to ``git status`` with a sample env."""
     return Invocation(
         command=command,
         args=args or ["status"],
@@ -34,6 +35,7 @@ def _make_response(
     stderr: str = "",
     exit_code: int = 0,
 ) -> Response:
+    """Build a ``Response`` with the given output streams and exit code."""
     return Response(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
 
@@ -241,7 +243,10 @@ class TestRecordingSessionScrubber:
         """A scrubber rewrites the recording before it is stored."""
 
         class _RedactStdout:
+            """Scrubber double that replaces stdout with a redaction marker."""
+
             def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+                """Return a copy of the recording with stdout redacted."""
                 return dc.replace(recording, stdout="<redacted>")
 
         session = RecordingSession(tmp_path / "out.json", scrubber=_RedactStdout())
@@ -258,7 +263,10 @@ class TestRecordingSessionScrubber:
         """Scrubbed data is what ends up in the persisted fixture file."""
 
         class _RedactStdout:
+            """Scrubber double that replaces stdout with a redaction marker."""
+
             def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+                """Return a copy of the recording with stdout redacted."""
                 return dc.replace(recording, stdout="<redacted>")
 
         path = tmp_path / "fixture.json"
@@ -295,6 +303,7 @@ class TestRecordingSessionThreadSafety:
         barrier = threading.Barrier(10)
 
         def _record() -> None:
+            """Record one invocation once every thread has reached the barrier."""
             barrier.wait()
             session.record(_make_invocation(), _make_response())
 

@@ -84,16 +84,19 @@ def _expectation_args_repr(exp: Expectation) -> str:
 def _append_count_line(
     lines: list[str], exp: Expectation, *, include_count: bool
 ) -> None:
+    """Append the expected call count line when *include_count* is set."""
     if include_count:
         lines.append(f"expected calls={exp.count}")
 
 
 def _append_stdin_line(lines: list[str], exp: Expectation) -> None:
+    """Append the expected stdin line when the expectation sets stdin."""
     if exp.stdin is not None:
         lines.append(f"stdin={exp.stdin!r}")
 
 
 def _append_env_line(lines: list[str], exp: Expectation) -> None:
+    """Append the expected environment line when the expectation sets env."""
     if exp.env:
         lines.append(f"env={_format_env(exp.env)}")
 
@@ -246,6 +249,7 @@ class UnexpectedCommandVerifier:
         doubles: cabc.Mapping[str, CommandDouble],
         mock_counts: dict[str, int],
     ) -> None:
+        """Check one invocation against its double, skipping stubs."""
         dbl = doubles.get(inv.command)
         if dbl is None:
             self._raise_unregistered_command_error(inv, doubles)
@@ -262,6 +266,7 @@ class UnexpectedCommandVerifier:
         dbl: CommandDouble,
         mock_counts: dict[str, int],
     ) -> None:
+        """Check that an invocation matches its expectation and mock limits."""
         exp = dbl.expectation
         if not exp.matches(inv):
             self._raise_expectation_mismatch_error(exp, inv)
@@ -277,6 +282,7 @@ class UnexpectedCommandVerifier:
         inv: Invocation,
         mock_counts: dict[str, int],
     ) -> None:
+        """Count a mock call and raise when it exceeds the expected count."""
         mock_counts[dbl.name] += 1
         observed = mock_counts[dbl.name]
         if observed <= exp.count:
@@ -289,6 +295,7 @@ class UnexpectedCommandVerifier:
         inv: Invocation,
         doubles: cabc.Mapping[str, CommandDouble],
     ) -> None:
+        """Raise for an invocation of a command that has no registered double."""
         msg = _format_sections(
             "Unexpected command invocation.",
             [
@@ -306,6 +313,7 @@ class UnexpectedCommandVerifier:
         exp: Expectation,
         inv: Invocation,
     ) -> None:
+        """Raise for an invocation that does not match its expectation."""
         reason = exp.explain_mismatch(inv)
         msg = _format_sections(
             "Unexpected command invocation.",
@@ -330,6 +338,7 @@ class UnexpectedCommandVerifier:
         inv: Invocation,
         observed: int,
     ) -> None:
+        """Raise for a mock invoked more times than its expected count."""
         msg = _format_sections(
             "Unexpected additional invocation.",
             [
@@ -352,6 +361,7 @@ class OrderVerifier:
     """Validate ordering of expectations marked with ``in_order``."""
 
     def __init__(self, ordered: list[Expectation]) -> None:
+        """Store the expectations that must appear in the given order."""
         self._ordered = ordered
         self._current_expected_descriptions: list[str] = []
         self._current_actual_descriptions: list[str] = []
@@ -366,6 +376,7 @@ class OrderVerifier:
         self._validate_expectations_order(ordered_seq, relevant_invocations)
 
     def _build_ordered_sequence(self) -> list[Expectation]:
+        """Expand ordered expectations into one entry per expected call."""
         ordered_seq: list[Expectation] = []
         for exp in self._ordered:
             ordered_seq.extend([exp] * exp.count)
@@ -379,6 +390,7 @@ class OrderVerifier:
         # Ignore invocations that do not satisfy any ordered expectation so
         # unordered calls of the same command name do not trigger spurious
         # ordering failures.
+        """Return invocations that satisfy at least one ordered expectation."""
         return [inv for inv in journal if any(exp.matches(inv) for exp in ordered_seq)]
 
     def _validate_expectations_order(
@@ -386,6 +398,7 @@ class OrderVerifier:
         ordered_seq: list[Expectation],
         relevant_invocations: list[Invocation],
     ) -> None:
+        """Check the relevant journal against the expanded ordered sequence."""
         expected_descriptions = [_describe_expectation(exp) for exp in ordered_seq]
         actual_descriptions = [
             _describe_invocation(inv) for inv in relevant_invocations
@@ -414,6 +427,7 @@ class OrderVerifier:
         expected_descriptions: list[str],
         actual_descriptions: list[str],
     ) -> None:
+        """Raise when fewer invocations were observed than ordered expectations."""
         if len(relevant_invocations) >= len(ordered_seq):
             return
 
@@ -434,6 +448,7 @@ class OrderVerifier:
         ordered_seq: list[Expectation],
         relevant_invocations: list[Invocation],
     ) -> None:
+        """Raise on the first invocation that breaks the expected order."""
         for index, (exp, actual_inv) in enumerate(
             zip(ordered_seq, relevant_invocations, strict=False)
         ):
@@ -456,6 +471,7 @@ class OrderVerifier:
         expected_descriptions: list[str],
         actual_descriptions: list[str],
     ) -> None:
+        """Raise when more invocations were observed than ordered expectations."""
         if len(relevant_invocations) <= len(ordered_seq):
             return
 
@@ -480,6 +496,7 @@ class OrderVerifier:
         actual_inv: Invocation,
         reason: str,
     ) -> None:
+        """Raise a detailed error for the first out-of-order invocation."""
         mismatch = "\n".join([
             f"position {index + 1}",
             "expected:\n"

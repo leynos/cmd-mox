@@ -41,6 +41,7 @@ class FakeWinError(Exception):
     """Stand-in for ``pywintypes.error`` carrying a Windows error code."""
 
     def __init__(self, winerror: int | None = None) -> None:
+        """Build the fake error, optionally carrying a Windows error code."""
         super().__init__(f"fake win32 failure {winerror}")
         if winerror is not None:
             # Omitting the attribute models pywin32 errors lacking a code.
@@ -51,6 +52,7 @@ class FakeOverlapped:
     """Stand-in for ``pywintypes.OVERLAPPED``."""
 
     def __init__(self) -> None:
+        """Create an overlapped structure with no event attached."""
         self.hEvent: object | None = None
 
 
@@ -123,6 +125,7 @@ class FakeWin32File:
         create_file_result: Scripted = None,
         reads: list[ScriptedRead] | None = None,
     ) -> None:
+        """Script the handle result and the overlapped reads for one test."""
         self._create_file_result = create_file_result
         self._reads = list(reads or [])
         self._current: ScriptedRead | None = None
@@ -132,13 +135,16 @@ class FakeWin32File:
         self.writes: list[tuple[object, bytes]] = []
 
     def CloseHandle(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        """Record that *handle* was closed."""
         self.closed.append(handle)
 
     def CreateFile(self, *args: object) -> object:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        """Record the call arguments and return the scripted handle result."""
         self.create_file_calls.append(args)
         return resolve_scripted(self._create_file_result)
 
     def WriteFile(self, handle: object, payload: bytes) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        """Record the *payload* written to *handle*."""
         self.writes.append((handle, payload))
 
     def FlushFileBuffers(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
@@ -214,6 +220,7 @@ class FakeWin32File:
         return len(current.data)
 
     def CancelIoEx(self, handle: object, overlapped: object) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        """Record that pending I/O on *handle* was cancelled."""
         self.cancelled.append(handle)
 
 
@@ -233,6 +240,7 @@ class FakeWin32Pipe:
         connect_results: list[Scripted] | None = None,
         disconnect_error: BaseException | None = None,
     ) -> None:
+        """Script pipe handles, connection results, and any disconnect error."""
         self._handles = list(handles or [])
         self._connect_results = list(connect_results or [])
         self._disconnect_error = disconnect_error
@@ -241,6 +249,7 @@ class FakeWin32Pipe:
         self.disconnected: list[object] = []
 
     def CreateNamedPipe(self, *args: object) -> object:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        """Record the creation arguments and return the next scripted handle."""
         self.create_calls.append(args)
         return resolve_scripted(self._handles.pop(0))
 
@@ -258,6 +267,7 @@ class FakeWin32Pipe:
         return 0
 
     def DisconnectNamedPipe(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        """Record the disconnect and raise any scripted disconnect error."""
         self.disconnected.append(handle)
         if self._disconnect_error is not None:
             raise self._disconnect_error
@@ -271,6 +281,7 @@ class FakeWin32Event:
     WAIT_TIMEOUT = 258
 
     def __init__(self, wait_results: list[int] | None = None) -> None:
+        """Script the results returned by successive multi-object waits."""
         self._wait_results = list(wait_results or [])
         self.events: list[FakeEventHandle] = []
         self.signalled: list[object] = []
@@ -295,6 +306,7 @@ class FakeWin32Event:
         return handle
 
     def SetEvent(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        """Record that *handle* was signalled."""
         self.signalled.append(handle)
 
     def WaitForMultipleObjects(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
@@ -341,6 +353,7 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         win32event: FakeWin32Event | None = None,
         pywintypes: FakePyWinTypes | None = None,
     ) -> None:
+        """Wire the scriptable fakes into the named-pipe backend port."""
         self._file_fake = win32file or FakeWin32File()
         self.pipe = win32pipe or FakeWin32Pipe()
         self.event = win32event or FakeWin32Event()
@@ -662,6 +675,7 @@ def patch_win32_fixture(
         win32pipe: FakeWin32Pipe | None = None,
         win32event: FakeWin32Event | None = None,
     ) -> tuple[FakeWin32File, FakeWin32Pipe]:
+        """Swap in the fake win32 modules and return the file and pipe fakes."""
         file_fake = win32file or FakeWin32File()
         pipe_fake = win32pipe or FakeWin32Pipe()
         # Mutate in place: the state under test already holds this backend.

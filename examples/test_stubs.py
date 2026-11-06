@@ -33,6 +33,7 @@ def test_stub_runs_dynamic_handler(cmd_mox: CmdMox) -> None:
     """Stubs can run a dynamic handler to compute output."""
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
+        """Return a greeting for the first argument, or fail when none is given."""
         if not invocation.args:
             return ("", "missing argument", 1)
         return (f"hi {invocation.args[0]}", "", 0)

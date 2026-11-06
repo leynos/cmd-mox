@@ -72,9 +72,12 @@ def test_ipc_handler_uses_remaining_time_for_each_receive() -> None:
     now = {"value": 5.0}
 
     def clock() -> float:
+        """Return the fake clock's current time."""
         return now["value"]
 
     class SlowRequest:
+        """Fake request socket that advances the clock on each receive."""
+
         def __init__(self) -> None:
             """Queue fragments and collect the handler's timeout updates."""
             self.chunks = iter([b"first", b"second", b""])
