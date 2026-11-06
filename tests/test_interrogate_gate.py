@@ -100,14 +100,16 @@ def _git_tracked(git: str, root: Path, patterns: tuple[str, ...]) -> list[str]:
 
 def _copied_sources(root: Path, patterns: tuple[str, ...]) -> list[str]:
     """Return the source files in a copied tree, skipping generated output."""
-    return sorted(
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file()
-        and not path.is_symlink()
-        and any(path.match(pattern) for pattern in patterns)
-        and not _GENERATED_DIRECTORIES.intersection(path.relative_to(root).parts)
-    )
+    names: list[str] = []
+    for path in root.rglob("*"):
+        relative = path.relative_to(root)
+        if not path.is_file() or path.is_symlink():
+            continue
+        if _GENERATED_DIRECTORIES.intersection(relative.parts):
+            continue
+        if any(path.match(pattern) for pattern in patterns):
+            names.append(relative.as_posix())
+    return sorted(names)
 
 
 def _tracked(*patterns: str, root: Path = ROOT) -> list[str]:
