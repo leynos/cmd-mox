@@ -264,6 +264,22 @@ detector over the production package and fails when it finds a clone family no
 reasoned exception covers. See [Code-duplication gate](#code-duplication-gate)
 below.
 
+## Docstring coverage
+
+`make lint` depends on `make interrogate`, which requires a docstring on every
+module, class and function under `cmd_mox`, `tests`, `scripts`, `examples` and
+the root `conftest.py`. The target runs interrogate 1.7.0 through the vendored
+`uv` helper with `-vv --fail-under 100`, and also fails on any `MISSED` row,
+because interrogate rounds its percentage to one decimal and a single gap among
+thousands of definitions would otherwise pass. The module `__getattr__`, an
+overloaded function, is ignored by name in `[tool.interrogate]` because
+interrogate does not recognize the `typ.overload` alias and Ruff (D418) forbids
+a docstring on a stub; since that name also hides the implementation and its
+nested definitions, `tests/test_interrogate_gate.py` asserts that the exclusion
+names only that function and that the implementation is documented. The same
+test holds the pin, the flags, the targets, CI's uv setup and the failing paths
+of the target.
+
 ## YAML lint
 
 `make lint` runs `yamllint --strict` over every Git-tracked `*.yml` and

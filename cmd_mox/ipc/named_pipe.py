@@ -161,7 +161,7 @@ class _NamedPipeState:
         accept_timeout: float,
         backend: NamedPipeBackend,
     ) -> None:
-        """Create the stop and ready events, client bookkeeping, and backend."""
+        """Create the stop and ready events and client slots; store the backend."""
         self.pipe_name, self.outer = pipe_name, outer
         self.accept_timeout = accept_timeout
         self._backend = backend

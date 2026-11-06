@@ -17,14 +17,14 @@ class _StalledWorker:
     """A real daemon thread whose body the test releases explicitly."""
 
     def __init__(self) -> None:
-        """Start the daemon thread that blocks until the test releases it."""
+        """Start the daemon thread that blocks until released or five seconds pass."""
         self.release = threading.Event()
         self.exited = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def _run(self) -> None:
-        """Wait for release, then mark the worker as exited."""
+        """Wait up to five seconds for release, then mark the worker as exited."""
         try:
             self.release.wait(5.0)
         finally:
@@ -270,7 +270,7 @@ def test_cancel_is_reissued_while_the_worker_survives(
     attempts: list[threading.Thread] = []
 
     def cancel() -> None:
-        """Release the worker so the re-issued cancel can observe its exit."""
+        """Do nothing; ``request_cancel`` releases the worker on its second call."""
 
     def request_cancel(thread: threading.Thread) -> None:
         """Record the attempt and release the worker on the second request."""
