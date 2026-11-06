@@ -16,6 +16,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _collect_pathext(value: str) -> set[str]:
+    """Return the upper-cased, non-empty PATHEXT entries in *value* as a set."""
     return {item.strip().upper() for item in value.split(os.pathsep) if item.strip()}
 
 

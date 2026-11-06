@@ -40,6 +40,7 @@ def test_retry_unlink_retries_then_succeeds(
     original_unlink = Path.unlink
 
     def flaky_unlink(self: Path) -> None:
+        """Fail the first two unlinks with PermissionError, then remove the file."""
         if self == target and attempts["count"] < 2:
             attempts["count"] += 1
             raise PermissionError("locked")
@@ -67,12 +68,14 @@ def test_retry_unlink_raises_after_attempts(
     target.write_text("locked")
 
     def locked_unlink(self: Path) -> None:
+        """Fail every unlink with PermissionError."""
         raise PermissionError("locked")
 
     monkeypatch.setattr(Path, "unlink", locked_unlink)
     monkeypatch.setattr(fs_retry.time, "sleep", lambda _duration: None)
 
     def build_error(path: Path, exc: Exception) -> FileExistsError:
+        """Wrap the last failure in a FileExistsError that names the path."""
         return FileExistsError(f"Could not remove {path}: {exc}")
 
     with pytest.raises(FileExistsError, match="Could not remove"):
@@ -91,6 +94,7 @@ def test_retry_unlink_propagates_original_exception(
     target.write_text("locked")
 
     def locked_unlink(self: Path) -> None:
+        """Fail every unlink with PermissionError."""
         raise PermissionError("locked")
 
     monkeypatch.setattr(Path, "unlink", locked_unlink)
@@ -114,6 +118,7 @@ def test_retry_unlink_missing_between_checks(
     attempts: dict[str, int] = {"count": 0}
 
     def remove_then_raise(self: Path) -> None:
+        """Remove the file, then raise FileNotFoundError to mimic a race."""
         attempts["count"] += 1
         original_unlink(self)
         raise FileNotFoundError("gone")
@@ -154,6 +159,7 @@ def test_robust_rmtree_treats_missing_path_as_success(
     real_rmtree = shutil.rmtree
 
     def remove_then_complain(path: Path) -> None:
+        """Remove the tree, then raise FileNotFoundError as if it had vanished."""
         real_rmtree(path)
         raise FileNotFoundError
 

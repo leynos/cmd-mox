@@ -77,6 +77,7 @@ def stub_runs(mox: CmdMox, cmd: str) -> None:
     """Configure a stub with a dynamic handler."""
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
+        """Assert the invocation targets *cmd* and return a canned success."""
         assert invocation.command == cmd, "Assertion failed"
         return ("handled", "", 0)
 
@@ -115,6 +116,7 @@ def matcher_list_disappears(
     original_validate = Expectation._validate_matchers
 
     def tampered(self: Expectation, args: list[str]) -> bool:
+        """Clear the expectation's matchers before delegating to the validator."""
         if self is expectation:
             self.match_args = None
         return original_validate(self, args)
@@ -213,6 +215,7 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     """Stub command that outputs an injected env variable."""
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
+        """Return the injected environment variable's value as stdout."""
         return (os.environ.get(var, ""), "", 0)
 
     mox.stub(cmd).with_env({var: val}).runs(handler)
@@ -234,6 +237,7 @@ def stub_seeds_shim_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
     """Stub command that injects an environment override for future shims."""
 
     def handler(_: Invocation) -> Response:
+        """Return a response that seeds the shim environment variable."""
         return Response(env={var: val})
 
     mox.stub(cmd).runs(handler)
@@ -248,6 +252,7 @@ def _stub_expect_and_seed_env_impl(
     """Stub that validates one env var before seeding another."""
 
     def handler(invocation: Invocation) -> Response:
+        """Require the expected env var, then seed the other variable."""
         _require_env_value(invocation, expected)
         return Response(env={seed.name: seed.value})
 
@@ -278,6 +283,7 @@ def _stub_records_merged_env_impl(
     """Stub that asserts merged shim environment values."""
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
+        """Return both merged env values joined by a plus sign."""
         actual_first = _require_env_value(invocation, first)
         actual_second = _require_env_value(invocation, second)
         return (f"{actual_first}+{actual_second}", "", 0)

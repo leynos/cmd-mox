@@ -119,13 +119,13 @@ def _report(
 
 
 def _fail_configuration(error: Exception) -> typ.NoReturn:
-    """Report one configuration failure and exit with the gate's status 2."""  # ruff: ignore[docstring-missing-exception] - exiting with the gate's configuration status is the helper's whole purpose
+    """Report one configuration failure and exit with the gate's status 2."""
     print(f"configuration error: {error}", file=sys.stderr)
     raise SystemExit(2) from error
 
 
 def _read_allowlist(allowlist_reader: AllowlistReader) -> tuple[AllowEntry, ...]:
-    """Read the reasoned allowlist, naming unreadable configuration."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private reader forwards the allow entries or re-raises
+    """Read the reasoned allowlist, naming unreadable configuration."""
     # GateConfigError is a ValueError, so it can never reach the handler below;
     # letting it propagate untouched is the whole of the pass-through rule.
     try:
@@ -136,7 +136,7 @@ def _read_allowlist(allowlist_reader: AllowlistReader) -> tuple[AllowEntry, ...]
 
 
 def _detect_findings(detector: FindingDetector) -> list[Finding]:
-    """Run the detector, separating execution failures from bad configuration."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private wrapper returns the findings or translates the failure
+    """Run the detector, separating execution failures from bad configuration."""
     try:
         return detector()
     except GateConfigError:
@@ -153,7 +153,7 @@ def _check_inputs(
     allowlist_reader: AllowlistReader,
     detector: FindingDetector,
 ) -> tuple[tuple[AllowEntry, ...], list[Finding]]:
-    """Load the gate inputs with explicit local-environment failures."""  # ruff: ignore[docstring-missing-returns] - private loader returns the pair of gate inputs
+    """Load the gate inputs with explicit local-environment failures."""
     return (_read_allowlist(allowlist_reader), _detect_findings(detector))
 
 

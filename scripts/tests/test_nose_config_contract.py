@@ -41,7 +41,7 @@ _INTENDED_SCAN: typ.Final[dict[str, object]] = {
 
 
 def _leading_literal(glob: str) -> str:
-    """Return *glob*'s text before its first wildcard character."""  # ruff: ignore[docstring-missing-returns] - private helper has an obvious string return
+    """Return *glob*'s text before its first wildcard character."""
     for index, character in enumerate(glob):
         if character in _WILDCARD_CHARACTERS:
             return glob[:index]
@@ -49,12 +49,12 @@ def _leading_literal(glob: str) -> str:
 
 
 def _is_hidden(relative: str, exclude: tuple[str, ...]) -> bool:
-    """Report whether *relative* falls inside one of *exclude*'s subtrees."""  # ruff: ignore[docstring-missing-returns] - private predicate has an obvious boolean return
+    """Report whether *relative* falls inside one of *exclude*'s subtrees."""
     return any(relative.startswith(_leading_literal(glob)) for glob in exclude)
 
 
 def _selected_production_files(settings: detector.NoseSettings) -> tuple[Path, ...]:
-    """Return the repository files the configured scan would consider."""  # ruff: ignore[docstring-missing-returns] - private selector has an obvious path-tuple return
+    """Return the repository files the configured scan would consider."""
     selected: list[Path] = []
     for root in settings.roots:
         root_directory = detector.REPO_ROOT / root

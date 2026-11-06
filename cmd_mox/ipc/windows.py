@@ -84,6 +84,7 @@ class PipeMessageTooLargeError(RuntimeError):
     """
 
     def __init__(self, *, received: int, limit: int) -> None:
+        """Store the received byte count and the configured limit."""
         msg = f"named pipe message exceeded the {limit}-byte limit"
         super().__init__(msg)
         self.received = received
@@ -107,34 +108,41 @@ class _Win32File(typ.Protocol):
 
     def ReadFile(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object, chunk_size: int
-    ) -> tuple[int, bytes]: ...
+    ) -> tuple[int, bytes]:
+        """Read up to *chunk_size* bytes, returning the status and data read."""
 
     def WriteFile(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object, payload: bytes
-    ) -> None: ...
+    ) -> None:
+        """Write *payload* to the pipe handle."""
 
     def FlushFileBuffers(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object
-    ) -> None: ...
+    ) -> None:
+        """Flush buffered writes on the pipe handle through to the peer."""
 
     def CloseHandle(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object
-    ) -> None: ...
+    ) -> None:
+        """Close the Win32 handle."""
 
     def AllocateReadBuffer(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, size: int
-    ) -> object: ...
+    ) -> object:
+        """Allocate a writable buffer of *size* bytes for an overlapped read."""
 
     def GetOverlappedResult(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self,
         handle: object,
         overlapped: object,
         wait: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - pywin32 takes the wait flag positionally
-    ) -> int: ...
+    ) -> int:
+        """Return the bytes transferred by an overlapped operation."""
 
     def CancelIoEx(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object, overlapped: object
-    ) -> None: ...
+    ) -> None:
+        """Cancel the pending overlapped operation on the handle."""
 
 
 Win32FileProtocol = _Win32File

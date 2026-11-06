@@ -33,6 +33,7 @@ class _FakeWinError(Exception):
     ACCESS_DENIED_MESSAGE: typ.ClassVar[str] = "access denied"
 
     def __init__(self, message: str, winerror: int = 0) -> None:
+        """Store the Windows error code alongside the message."""
         super().__init__(message)
         self.winerror = winerror
 
@@ -41,6 +42,7 @@ class _Win32Harness:
     """Fake pywin32 modules recording every cancellation-related call."""
 
     def __init__(self, read_file: cabc.Callable[..., tuple[int, bytes]]) -> None:
+        """Build fake pywin32 modules that record cancellation and close calls."""
         self.cancelled: list[object] = []
         self.closed: list[object] = []
         self.opened: list[tuple[object, ...]] = []
@@ -91,6 +93,7 @@ def test_windows_handle_reads_until_broken_pipe(
     read_handles: list[object] = []
 
     def read_file(handle: object, _size: int) -> tuple[int, bytes]:
+        """Return the next chunk, then raise a broken-pipe error at end of data."""
         read_handles.append(handle)
         try:
             return 0, next(chunks)
@@ -119,6 +122,7 @@ def test_windows_handle_reports_unexpected_errors_as_oserror(
     """
 
     def read_file(_handle: object, _size: int) -> tuple[int, bytes]:
+        """Raise an access-denied error from the native read."""
         raise _FakeWinError(
             _FakeWinError.ACCESS_DENIED_MESSAGE, _FakeWinError.ACCESS_DENIED
         )
@@ -153,6 +157,7 @@ def test_windows_handle_timeout_cancels_and_closes_one_handle(
     started = threading.Event()
 
     def read_file(_handle: object, _size: int) -> tuple[int, bytes]:
+        """Signal that the read started, then block until released."""
         started.set()
         release.wait(5.0)
         return 0, b""
@@ -194,6 +199,7 @@ def test_windows_cancel_lets_the_worker_exit_within_the_grace(
     release = threading.Event()
 
     def read_file(_handle: object, _size: int) -> tuple[int, bytes]:
+        """Signal that the read started, then block until released."""
         started.set()
         release.wait(5.0)
         return 0, b""
@@ -201,6 +207,7 @@ def test_windows_cancel_lets_the_worker_exit_within_the_grace(
     harness = _Win32Harness(read_file)
 
     def cancel(_handle: object) -> None:
+        """Record the cancelled handle and release the blocked read."""
         harness.cancelled.append(_handle)
         release.set()
 
@@ -290,6 +297,7 @@ def test_windows_handle_resolution_falls_back_when_msvcrt_rejects(
     """A ``get_osfhandle`` failure is reported as a missing handle."""
 
     def reject(_descriptor: int) -> object:
+        """Simulate msvcrt rejecting the descriptor with an OSError."""
         msg = "no console"
         raise OSError(msg)
 

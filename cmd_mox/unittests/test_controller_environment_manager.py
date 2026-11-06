@@ -99,6 +99,7 @@ def test_replay_detects_environment_loss(monkeypatch: pytest.MonkeyPatch) -> Non
     original_check = mox._check_replay_preconditions
 
     def tampered() -> None:
+        """Run the real precondition check, then drop the shim directory and socket."""
         original_check()
         env.shim_dir = None
         env.socket_path = None
@@ -207,5 +208,6 @@ def test_replay_fails_when_shim_dir_is_invalid(
 
 
 def _create_file(path: Path) -> Path:
+    """Write placeholder content to path and return it."""
     path.write_text("content")
     return path

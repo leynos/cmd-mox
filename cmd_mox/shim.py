@@ -185,7 +185,7 @@ def _parse_positive_finite(raw: str) -> float | None:
 
 
 def _validate_environment() -> float:
-    """Validate required environment variables and return the timeout."""  # ruff: ignore[docstring-missing-returns] - private validator has an obvious timeout return
+    """Validate required environment variables and return the timeout."""
     if os.environ.get(CMOX_IPC_SOCKET_ENV) is None:
         print("IPC socket not specified", file=sys.stderr)
         sys.exit(1)

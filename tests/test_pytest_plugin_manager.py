@@ -42,15 +42,18 @@ class _StubConfig:
         cli: bool | None = None,
         ini: bool = True,
     ) -> None:
+        """Store the worker input and the CLI and ini lifecycle settings."""
         self.workerinput = workerinput
         self._cli = cli
         self._ini = ini
 
     def getoption(self, name: str) -> bool | None:
+        """Return the command-line value of the lifecycle option."""
         assert name == "cmd_mox_auto_lifecycle", "Assertion failed"
         return self._cli
 
     def getini(self, name: str) -> bool:
+        """Return the ini-file value of the lifecycle option."""
         assert name == "cmd_mox_auto_lifecycle", "Assertion failed"
         return self._ini
 
@@ -61,6 +64,7 @@ class _StubMarker:
     __slots__ = ("kwargs",)
 
     def __init__(self, **kwargs: object) -> None:
+        """Store the marker keyword arguments."""
         self.kwargs = kwargs
 
 
@@ -72,15 +76,18 @@ class _StubNode:
     def __init__(
         self, marker: _StubMarker | None = None, nodeid: str = "test::stub"
     ) -> None:
+        """Create a node with an optional ``cmd_mox`` marker and node identifier."""
         self._marker = marker
         self.sections: list[tuple[str, str, str]] = []
         self.stash = pytest.Stash()
         self.nodeid = nodeid
 
     def get_closest_marker(self, name: str) -> _StubMarker | None:
+        """Return the ``cmd_mox`` marker for that name, or ``None`` for others."""
         return self._marker if name == "cmd_mox" else None
 
     def add_report_section(self, when: str, key: str, content: str) -> None:
+        """Record a report section for the given phase, key, and content."""
         self.sections.append((when, key, content))
 
 
@@ -109,6 +116,7 @@ class _StubRequest:
         node: _StubNode | None = None,
         param: object | None = None,
     ) -> None:
+        """Store the config, node, and optional fixture parameter."""
         self.config = config
         self.node = node or _StubNode()
         if param is not None:
@@ -135,6 +143,7 @@ class _StubMox:
         environment: EnvironmentManager | None = None,
         lifecycle_hint: str | None = None,
     ) -> None:
+        """Create a stub CmdMox in the given phase with its behaviour flags."""
         self.phase = phase
         config = behavior or StubMoxBehaviorConfig()
         self.raise_on_exit = config.raise_on_exit
@@ -148,14 +157,17 @@ class _StubMox:
         self._lifecycle_hint = lifecycle_hint
 
     def __enter__(self) -> _StubMox:
+        """Count the context entry and return the stub itself."""
         self.enter_calls += 1
         return self
 
     def replay(self) -> None:
+        """Count the replay call and move the stub into the replay phase."""
         self.replay_calls += 1
         self.phase = Phase.REPLAY
 
     def verify(self) -> None:
+        """Count the verify call, raising if configured, then enter verify phase."""
         self.verify_calls += 1
         if self.raise_on_verify:
             raise RuntimeError(_VERIFY_ERROR_MESSAGE)
@@ -167,6 +179,7 @@ class _StubMox:
         exc: BaseException | None,
         tb: object | None,
     ) -> None:
+        """Record the exit arguments, raise if configured, then enter verify phase."""
         self.exit_calls.append((exc_type, exc, tb))
         if self.raise_on_exit:
             raise OSError(_EXIT_ERROR_MESSAGE)
@@ -231,6 +244,8 @@ def make_manager(
     """
 
     def _make(request: _StubRequest, **stub_kwargs: object) -> _CmdMoxManager:
+        """Build a manager whose CmdMox is a stub configured by ``stub_kwargs``."""
+
         def _factory(
             *,
             verify_on_exit: bool = False,
@@ -238,6 +253,7 @@ def make_manager(
             lifecycle_hint: str | None = None,
         ) -> _StubMox:
             # Keep signature compatible with real CmdMox; forward kwargs to stub.
+            """Build a stub CmdMox that accepts the real constructor keywords."""
             behavior_config = StubMoxBehaviorConfig(
                 verify_on_exit=verify_on_exit,
                 raise_on_exit=typ.cast("bool", stub_kwargs.get("raise_on_exit", False)),

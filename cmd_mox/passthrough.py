@@ -43,6 +43,7 @@ class PassthroughCoordinator:
     """
 
     def __init__(self, *, cleanup_ttl: float = 300.0) -> None:
+        """Create an empty pending map guarded by a lock, with the cleanup TTL."""
         self._pending: dict[str, tuple[CommandDouble, Invocation, float]] = {}
         self._lock = threading.Lock()
         self._cleanup_ttl = cleanup_ttl

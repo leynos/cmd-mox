@@ -16,29 +16,30 @@ FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
 @pytest.fixture
 def ordered_expectations() -> list[Expectation]:
-    """Collect expectations that must appear in order."""  # ruff: ignore[docstring-missing-returns] - pytest fixture seeding an empty accumulator; a Returns section would only restate this
+    """Collect expectations that must appear in order."""
     return []
 
 
 @pytest.fixture
 def unordered_expectations() -> list[Expectation]:
-    """Collect expectations that are not part of the ordered sequence."""  # ruff: ignore[docstring-missing-returns] - pytest fixture seeding an empty accumulator; a Returns section would only restate this
+    """Collect expectations that are not part of the ordered sequence."""
     return []
 
 
 @pytest.fixture
 def journal() -> list[Invocation]:
-    """Accumulate recorded invocations for verification."""  # ruff: ignore[docstring-missing-returns] - pytest fixture seeding an empty accumulator; a Returns section would only restate this
+    """Accumulate recorded invocations for verification."""
     return []
 
 
 @pytest.fixture
 def verification_context() -> dict[str, Exception | None]:
-    """Store verification outcomes for assertions."""  # ruff: ignore[docstring-missing-returns] - pytest fixture seeding an empty accumulator; a Returns section would only restate this
+    """Store verification outcomes for assertions."""
     return {}
 
 
 def _create_expectation_with_args(command: str, args: str) -> Expectation:
+    """Build an expectation for command, with args decoded and shell-split."""
     expectation = Expectation(command)
     if args:
         decoded = decode_placeholders(args)

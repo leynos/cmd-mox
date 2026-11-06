@@ -24,6 +24,7 @@ class _FakeInput(io.StringIO):
     """StringIO that reports itself as a non-tty stream."""
 
     def isatty(self) -> bool:  # pragma: no cover - trivial
+        """Report that this in-memory input is not a terminal."""
         return False
 
 
@@ -31,12 +32,15 @@ class _InteractiveInput:
     """Stub stdin that behaves like an interactive terminal."""
 
     def __init__(self) -> None:
+        """Start with no read recorded."""
         self.read_called = False
 
     def isatty(self) -> bool:  # pragma: no cover - trivial
+        """Report that this stub is an interactive terminal."""
         return True
 
     def read(self) -> str:  # pragma: no cover - defensive guard
+        """Record the read attempt and fail, since terminals must not be read."""
         self.read_called = True
         msg = "stdin.read() should not be called for ttys"
         raise AssertionError(msg)

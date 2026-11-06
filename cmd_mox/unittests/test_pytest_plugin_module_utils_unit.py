@@ -58,6 +58,7 @@ def test_generate_module_includes_expected_snippets(case: CaseType) -> None:
 def _assert_auto_fail_module_properties(
     expected_phase: plugin_utils.LifecyclePhase | str, *, expect_auto_fail: bool
 ) -> None:
+    """Assert the generated module uses the auto-fail body without helpers."""
     module_text = plugin_utils.generate_lifecycle_test_module(
         decorator="",
         expected_phase=expected_phase,

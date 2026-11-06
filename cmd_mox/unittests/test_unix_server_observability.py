@@ -281,6 +281,7 @@ def test_backend_construction_failure_is_observable_without_socket_io(
             server_address: object,
             _request_handler_class: object,
         ) -> None:
+            """Raise the parametrized construction error before any socket opens."""
             del server_address
             raise exception_type(test_marker)
 

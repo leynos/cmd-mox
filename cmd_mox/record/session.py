@@ -48,6 +48,7 @@ class RecordingSession:
         env_allowlist: list[str] | None = None,
         command_filter: str | list[str] | None = None,
     ) -> None:
+        """Configure the fixture destination, scrubber, env allowlist, and filter."""
         self._fixture_path = Path(fixture_path)
         self._scrubber = scrubber
         self._env_allowlist: list[str] = list(env_allowlist or [])

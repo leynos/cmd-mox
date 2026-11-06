@@ -196,6 +196,7 @@ def test_environment_manager_restores_on_exception() -> None:
     holder: dict[str, Path | None] = {"path": None}
 
     def trigger_error() -> None:
+        """Enter the manager and raise so the restore path runs."""
         with EnvironmentManager() as env:
             holder["path"] = env.shim_dir
             assert env.shim_dir is not None
@@ -253,6 +254,7 @@ def test_temporary_env_restores_on_exception() -> None:
     original_env = os.environ.copy()
 
     def trigger() -> None:
+        """Mutate the environment and raise inside ``temporary_env``."""
         with temporary_env({"ERR": "1"}):
             os.environ["EXTRA"] = "bar"
             raise RuntimeError("boom")
@@ -617,6 +619,7 @@ def test_active_manager_is_thread_local() -> None:
     results: list[EnvironmentManager | None] = []
 
     def check_manager() -> None:
+        """Record the active manager as seen from a fresh thread."""
         results.append(EnvironmentManager.get_active_manager())
 
     with EnvironmentManager():
@@ -636,6 +639,7 @@ def test_maybe_shorten_windows_path_prefers_short_variant(
     captured: list[Path] = []
 
     def fake_get_short_path(path: Path) -> Path:
+        """Record the requested path and return a fixed short alias."""
         captured.append(path)
         return Path("C:/SHORT~1")
 
@@ -667,6 +671,7 @@ def test_maybe_shorten_windows_path_skips_short_paths(
     called = False
 
     def fake_get_short_path(path: Path) -> Path:
+        """Record that the Windows API was called and echo the path back."""
         nonlocal called
         called = True
         return path

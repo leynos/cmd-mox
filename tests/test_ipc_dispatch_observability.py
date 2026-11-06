@@ -52,6 +52,7 @@ def echo_handler() -> cabc.Callable[[Invocation], Response]:
     """
 
     def handler(invocation: Invocation) -> Response:
+        """Return a response whose stdout is the invoked command name."""
         return Response(stdout=invocation.command)
 
     return handler
@@ -68,6 +69,7 @@ def passthrough_handler() -> cabc.Callable[[PassthroughResult], Response]:
     """
 
     def handler(_result: PassthroughResult) -> Response:
+        """Return a fixed passthrough response regardless of the result."""
         return Response(stdout="passthrough")
 
     return handler
@@ -388,6 +390,7 @@ def test_request_pipeline_logs_handler_failure(
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
 
     def failing_handler(_invocation: Invocation) -> Response:
+        """Raise a RuntimeError to simulate a handler failure."""
         msg = "handler failure"
         raise RuntimeError(msg)
 

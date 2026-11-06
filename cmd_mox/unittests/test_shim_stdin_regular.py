@@ -117,6 +117,8 @@ def test_regular_stdin_reads_descriptor_without_buffered_stream(
     read_calls = 0
 
     class _RegularStdin(_DescriptorTextStream):
+        """Stdin double that counts buffered reads, which this path must avoid."""
+
         def read(self) -> str:
             """Count buffered reads that must not occur on this path.
 

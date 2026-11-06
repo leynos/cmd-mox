@@ -71,6 +71,7 @@ def test_format_windows_launcher_escapes_carets_and_percents(
     content = shimgen._format_windows_launcher(str(python_exe), shim_script)
 
     def expected(path: pathlib.Path) -> str:
+        """Build the quoted path literal with carets and percents doubled."""
         escaped = str(path).replace("^", "^^").replace("%", "%%").replace('"', '""')
         return f'"{escaped}"'
 
@@ -170,6 +171,7 @@ def test_create_windows_shim_retries_locked_file(
     attempts: list[int] = [0]
 
     def flaky_unlink(self: pathlib.Path) -> None:
+        """Fail with a lock twice, then unlink the launcher normally."""
         if self == launcher and attempts[0] < 2:
             attempts[0] += 1
             raise PermissionError("locked")
@@ -195,6 +197,7 @@ def test_create_windows_shim_raises_after_retries(
     launcher.write_text("old")
 
     def locked_unlink(self: pathlib.Path) -> None:
+        """Raise a PermissionError on every call to simulate a locked launcher."""
         raise PermissionError("locked")
 
     monkeypatch.setattr(pathlib.Path, "unlink", locked_unlink)
@@ -221,6 +224,7 @@ def test_create_windows_shim_uses_shared_retry_config(
         logger: object | None = None,
         exc_factory: object | None = None,
     ) -> None:
+        """Record the path and retry config, then unlink the launcher directly."""
         calls.append((path, config))
         launcher.unlink()  # succeed immediately
 
@@ -240,6 +244,7 @@ def test_create_windows_shim_retry_failure_message(
     launcher.write_text("old")
 
     def locked_unlink(self: pathlib.Path) -> None:
+        """Raise a PermissionError on every call to simulate a locked launcher."""
         raise PermissionError("locked")
 
     monkeypatch.setattr(pathlib.Path, "unlink", locked_unlink)

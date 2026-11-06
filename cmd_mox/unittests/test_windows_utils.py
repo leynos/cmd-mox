@@ -45,15 +45,21 @@ def test_windows_error_constants_are_positive() -> None:
 
 
 class _FakeWinError(PyWinErrorProtocol):
+    """Stand-in for ``pywintypes.error`` carrying a Windows error code."""
+
     def __init__(self, winerror: int) -> None:
+        """Build the fake error carrying *winerror*."""
         super().__init__(f"fake winerror {winerror}")
         self.winerror = winerror
 
 
 class _FakeWin32File(Win32FileProtocol):
+    """Fake ``win32file`` that replays scripted reads and records I/O calls."""
+
     def __init__(self, responses: list[_FakeReadResponse]) -> None:
         # Fake reads accept raw payloads, decoded text, explicit pywin32-style
         # tuples, or exceptions to exercise error paths.
+        """Script the read responses that ``ReadFile`` replays in order."""
         self._responses = list(responses)
         self.read_sizes: list[int] = []
         self.writes: list[tuple[object, bytes]] = []
@@ -62,6 +68,7 @@ class _FakeWin32File(Win32FileProtocol):
     def ReadFile(  # ruff: ignore[invalid-function-name] - mirror pywin32 API casing for realism
         self, handle: object, chunk_size: int
     ) -> tuple[int, bytes]:
+        """Replay the next scripted response, raising it when it is an error."""
         self.read_sizes.append(chunk_size)
         if not self._responses:
             msg = "No response configured for ReadFile call"
@@ -80,15 +87,19 @@ class _FakeWin32File(Win32FileProtocol):
     def WriteFile(  # ruff: ignore[invalid-function-name] - mirror pywin32 API casing for realism
         self, handle: object, payload: bytes
     ) -> None:
+        """Record the *payload* written to *handle*."""
         self.writes.append((handle, payload))
 
     def FlushFileBuffers(  # ruff: ignore[invalid-function-name] - mirror pywin32 API casing for realism
         self, handle: object
     ) -> None:
+        """Count one flush of *handle*."""
         self.flush_calls += 1
 
 
 class _FakePyWinTypes(PyWinTypesProtocol):
+    """Fake ``pywintypes`` module exposing the fake error type."""
+
     error = _FakeWinError
 
 

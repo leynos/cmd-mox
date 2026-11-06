@@ -97,6 +97,7 @@ def test_oversized_read_is_rejected_without_dispatch(
     dispatched: list[bytes] = []
 
     def reject_read(_handle: object) -> bytes:
+        """Simulate a read that exceeds the message size limit."""
         raise PipeMessageTooLargeError(received=12, limit=8)
 
     monkeypatch.setattr(state, "_read_request", reject_read)

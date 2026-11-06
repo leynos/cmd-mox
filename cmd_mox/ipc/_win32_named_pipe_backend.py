@@ -48,6 +48,7 @@ class Win32NamedPipeBackend(NamedPipeBackend):
         # Hold the modules on the instance: every operation below reads them
         # through ``self``, which makes the adapter's whole Win32 dependency
         # visible in one place instead of hidden behind module-global lookups.
+        """Bind the pywin32 modules and constants that each port operation uses."""
         self._pywintypes = pywintypes
         self._win32event = win32event
         self._win32file = win32file

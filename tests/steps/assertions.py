@@ -22,18 +22,18 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 def _require_double(
     doubles: cabc.Mapping[str, CommandDouble], cmd: str, kind: str
 ) -> CommandDouble:
-    """Return the required command double, failing clearly when absent."""  # ruff: ignore[docstring-missing-returns] - private assertion helper has an obvious CommandDouble return
+    """Return the required command double, failing clearly when absent."""
     assert cmd in doubles, f"{kind} for command '{cmd}' not found"
     return doubles[cmd]
 
 
 def _require_spy(mox: CmdMox, cmd: str) -> CommandDouble:
-    """Return the registered spy for *cmd*, failing clearly when absent."""  # ruff: ignore[docstring-missing-returns] - private wrapper has an obvious CommandDouble return
+    """Return the registered spy for *cmd*, failing clearly when absent."""
     return _require_double(mox.spies, cmd, "Spy")
 
 
 def _require_mock(mox: CmdMox, cmd: str) -> CommandDouble:
-    """Return the registered mock for *cmd*, failing clearly when absent."""  # ruff: ignore[docstring-missing-returns] - private wrapper has an obvious CommandDouble return
+    """Return the registered mock for *cmd*, failing clearly when absent."""
     return _require_double(mox.mocks, cmd, "Mock")
 
 

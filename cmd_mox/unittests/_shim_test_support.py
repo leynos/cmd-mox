@@ -50,6 +50,8 @@ class _InjectedRuntimeError(RuntimeError):
 
 
 class _BufferedInput:
+    """Buffered stdin double that yields queued chunks and counts read attempts."""
+
     def __init__(
         self,
         chunks: cabc.Iterable[bytes],
@@ -75,6 +77,8 @@ class _BufferedInput:
 
 
 class _DescriptorStdin(_DummyStdin):
+    """Stdin double bound to a real file descriptor and an optional buffer."""
+
     encoding = "utf-8"
     errors = "strict"
 

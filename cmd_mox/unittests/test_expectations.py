@@ -123,12 +123,15 @@ def test_with_matching_args_rejects_a_second_argument_expectation() -> None:
         """Matcher whose representation contains a retained value."""
 
         def __init__(self, value: str) -> None:
+            """Store the secret value this matcher compares against."""
             self.value = value
 
         def __call__(self, argument: str) -> bool:
+            """Return whether the argument equals the retained value."""
             return argument == self.value
 
         def __repr__(self) -> str:
+            """Return a repr that embeds the secret, which errors must not show."""
             return f"SensitiveMatcher({self.value!r})"
 
     existing_matcher = SensitiveMatcher("existing-matcher-secret")

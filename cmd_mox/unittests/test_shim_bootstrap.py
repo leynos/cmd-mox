@@ -247,9 +247,11 @@ def test_should_remove_path_entry_skips_entry_raising_eloop(
         """Stand-in for ``Path`` whose resolution reports a symlink loop."""
 
         def __init__(self, entry: str) -> None:
+            """Remember the entry name reported in the loop error."""
             self._entry = entry
 
         def resolve(self) -> Path:
+            """Raise ``ELOOP`` as a symlink cycle would."""
             raise OSError(errno.ELOOP, "Too many levels of symbolic links", self._entry)
 
     # Patching only this module's ``Path`` keeps the stand-in off every other

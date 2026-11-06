@@ -17,12 +17,14 @@ class _StalledWorker:
     """A real daemon thread whose body the test releases explicitly."""
 
     def __init__(self) -> None:
+        """Start the daemon thread that blocks until released or five seconds pass."""
         self.release = threading.Event()
         self.exited = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def _run(self) -> None:
+        """Wait up to five seconds for release, then mark the worker as exited."""
         try:
             self.release.wait(5.0)
         finally:
@@ -54,6 +56,7 @@ class _SteppingTestClock:
     """Mutable clock advanced explicitly by the doubles in this module."""
 
     def __init__(self) -> None:
+        """Start the fake clock at time zero."""
         self.now = 0.0
 
     def __call__(self) -> float:
@@ -77,6 +80,7 @@ class _RecordingEvent:
     """
 
     def __init__(self, clock: _SteppingTestClock) -> None:
+        """Bind the double to the shared clock with an empty wait log."""
         self.clock = clock
         self.waits: list[float] = []
 
@@ -112,6 +116,7 @@ class _CompletingEvent:
     """
 
     def __init__(self, clock: _SteppingTestClock, completes_at: float) -> None:
+        """Bind the double to the shared clock and its completion instant."""
         self.clock = clock
         self.completes_at = completes_at
 
@@ -137,6 +142,7 @@ class _OversleepingEvent:
     """
 
     def __init__(self, clock: _SteppingTestClock) -> None:
+        """Bind the double to the shared clock with an empty wait log."""
         self.clock = clock
         self.waits: list[float] = []
 
@@ -264,9 +270,10 @@ def test_cancel_is_reissued_while_the_worker_survives(
     attempts: list[threading.Thread] = []
 
     def cancel() -> None:
-        """Release the worker so the re-issued cancel can observe its exit."""
+        """Do nothing; ``request_cancel`` releases the worker on its second call."""
 
     def request_cancel(thread: threading.Thread) -> None:
+        """Record the attempt and release the worker on the second request."""
         attempts.append(thread)
         # Emulate the first call landing in the gap between reads, and the
         # worker then reaching its blocking call and being cancelled.
@@ -337,10 +344,12 @@ def test_cancel_applies_the_fallback_cancel_once(
     calls: list[str] = []
 
     def cancel() -> None:
+        """Record the fallback cancel and release the worker."""
         calls.append("cancel")
         stalled.release.set()
 
     def request_cancel(_thread: threading.Thread) -> None:
+        """Record the native cancel request."""
         calls.append("request")
 
     exited = _bounded_thread.cancel_and_await_worker(

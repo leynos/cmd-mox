@@ -38,6 +38,8 @@ Examples
 ``stdin_text = read_stdin(sys.stdin, timeout)``
 """
 
+# pylint: disable=too-many-lines  # the platform strategies share one capture module
+
 from __future__ import annotations
 
 import codecs
@@ -477,6 +479,7 @@ def _await_worker[T](func: cabc.Callable[[], T], spec: _WorkerSpec) -> T:
     finished = threading.Event()
 
     def run() -> None:
+        """Run *func* on the worker thread and signal completion when done."""
         try:
             _bounded_thread.stash_outcome(outcome, func)()
         finally:
@@ -543,6 +546,7 @@ def _read_regular_file(capture: _Capture) -> str:
     decoder = _stdin_decoder(capture.stream)
 
     def read_all() -> str:
+        """Read raw bytes from the descriptor until EOF and return the text."""
         chunks: list[str] = []
         # Raw reads avoid holding TextIOWrapper's buffer lock if this worker
         # outlives the deadline and the interpreter starts shutting down.

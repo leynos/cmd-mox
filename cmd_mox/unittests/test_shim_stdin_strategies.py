@@ -31,6 +31,8 @@ def test_create_invocation_falls_back_to_direct_read_when_unpollable(
     """Unsupported descriptors retain a direct read instead of failing."""
 
     class _UnpollableStdin(_DummyStdin):
+        """Stdin double whose descriptor the poller probes cannot use."""
+
         encoding = "utf-8"
         errors = "strict"
 
@@ -84,6 +86,8 @@ def test_create_invocation_bounds_a_windows_direct_read(
     started = threading.Event()
 
     class _StalledWindowsStdin:
+        """Piped Windows stdin double whose read blocks until released."""
+
         encoding = "utf-8"
         errors = "strict"
 
@@ -189,6 +193,8 @@ def test_create_invocation_reports_stdin_poll_error(
     buffer = _BufferedInput([b"must not be read"])
 
     class _FailingPoll:
+        """Poller double that succeeds during setup and then fails the wait."""
+
         def __init__(self) -> None:
             """Distinguish the setup probe from the active readiness wait."""
             self.calls = 0
@@ -256,6 +262,8 @@ def test_create_invocation_caps_large_poll_timeout(
     """A large valid timeout stays within the poll API's millisecond range."""
 
     class _NeverReadablePoll:
+        """Poller double that never reports stdin readable and logs timeouts."""
+
         def __init__(self) -> None:
             """Prepare to record the millisecond waits requested by the shim."""
             self.timeouts: list[int] = []
@@ -339,6 +347,8 @@ def test_create_invocation_preserves_piped_newlines(
     """Piped text preserves POSIX TextIO newline sequences across byte chunks."""
 
     class _ReadablePoll:
+        """Poller double that reports stdin readable on every poll."""
+
         def register(self, _fd: int, _events: int) -> None:
             """Accept registration for the synthetic readable descriptor."""
 

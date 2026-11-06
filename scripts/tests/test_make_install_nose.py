@@ -54,7 +54,7 @@ def _write_executable(path: Path, body: str) -> Path:
 
 
 def _stub_nose(directory: Path, version: str) -> Path:
-    """Write a stub detector reporting ``version`` for ``--version``."""  # ruff: ignore[docstring-missing-returns] - private test writer has an obvious path return
+    """Write a stub detector reporting ``version`` for ``--version``."""
     return _write_executable(
         directory / "nose",
         f"#!/bin/sh\nprintf 'nose %s\\n' '{version}'\n",

@@ -107,7 +107,7 @@ class _OsSpy:
         os.fsync(descriptor)
 
     def open(self, path: Path, flags: int) -> int:
-        """Delegate descriptor opening."""  # ruff: ignore[docstring-missing-returns] - the fake restates the protocol method it replaces
+        """Delegate descriptor opening."""
         return os.open(path, flags)
 
     def close(self, descriptor: int) -> None:
@@ -135,7 +135,7 @@ class _FailingDirectorySync:
     closed: list[int] = dc.field(default_factory=list)
 
     def fsync(self, descriptor: int) -> None:
-        """Sync the temporary file, then fail on the directory."""  # ruff: ignore[docstring-missing-exception] - the injected OSError is the point of the test
+        """Sync the temporary file, then fail on the directory."""
         self.syncs += 1
         if self.syncs > 1:
             message = "directory sync failed"
@@ -143,7 +143,7 @@ class _FailingDirectorySync:
         os.fsync(descriptor)
 
     def open(self, path: Path, flags: int) -> int:
-        """Delegate descriptor opening, recording the descriptor."""  # ruff: ignore[docstring-missing-returns] - the fake restates the protocol method it replaces
+        """Delegate descriptor opening, recording the descriptor."""
         descriptor = os.open(path, flags)
         self.opened.append(descriptor)
         return descriptor
@@ -169,12 +169,12 @@ class _FailingFileSync:
     O_RDONLY: typ.ClassVar[int] = os.O_RDONLY
 
     def fsync(self, descriptor: int) -> None:
-        """Fail the file sync."""  # ruff: ignore[docstring-missing-exception] - the injected OSError is the point of the test
+        """Fail the file sync."""
         message = "file sync failed"
         raise OSError(message)
 
     def open(self, path: Path, flags: int) -> int:
-        """Delegate descriptor opening."""  # ruff: ignore[docstring-missing-returns] - the fake restates the protocol method it replaces
+        """Delegate descriptor opening."""
         return os.open(path, flags)
 
     def close(self, descriptor: int) -> None:

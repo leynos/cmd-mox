@@ -99,6 +99,7 @@ class PipeReadCancelled(Exception):  # ruff: ignore[error-suffix-on-exception-na
     """
 
     def __init__(self, *, timed_out: bool) -> None:
+        """Record whether the read deadline rather than shutdown cancelled it."""
         super().__init__("named pipe read cancelled")
         self.timed_out = timed_out
 
@@ -116,6 +117,7 @@ class ClientSlot:
     __slots__ = ("_lock", "_released", "_semaphore")
 
     def __init__(self, semaphore: threading.BoundedSemaphore) -> None:
+        """Bind the slot to the shared semaphore, starting unreleased."""
         self._semaphore = semaphore
         self._released = False
         self._lock = threading.Lock()

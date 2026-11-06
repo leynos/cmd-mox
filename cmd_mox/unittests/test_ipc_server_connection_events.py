@@ -225,6 +225,8 @@ def test_ipc_handler_correlates_response_drop_with_validated_envelope(
     }).encode()
 
     class BrokenWriter:
+        """Reply writer whose write always fails with a broken pipe."""
+
         flush_called = False
 
         def write(self, _payload: bytes) -> int:

@@ -17,15 +17,21 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
 @dc.dataclass(frozen=True)
 class _FakeExpectation:
+    """Carry the environment mapping of a fake double's expectation."""
+
     env: dict[str, str]
 
 
 class _FakeDouble:
+    """Minimal double exposing an expectation with a fixed environment."""
+
     def __init__(self, env: dict[str, str]) -> None:
+        """Attach an expectation built from *env*."""
         self.expectation = _FakeExpectation(env)
 
 
 def _make_invocation(command: str = "echo") -> Invocation:
+    """Build an invocation for *command* with fixed arguments and empty stdin."""
     return Invocation(command=command, args=["hi"], stdin="", env={})
 
 
@@ -133,6 +139,7 @@ def test_expired_requests_are_pruned(monkeypatch: pytest.MonkeyPatch) -> None:
     now = 100.0
 
     def fake_monotonic() -> float:
+        """Return the test's current monotonic time."""
         return now
 
     monkeypatch.setattr("cmd_mox.passthrough.time.monotonic", fake_monotonic)

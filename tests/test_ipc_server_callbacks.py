@@ -82,6 +82,7 @@ def echo_handler() -> cabc.Callable[[Invocation], Response]:
     """
 
     def handler(invocation: Invocation) -> Response:
+        """Return the invoked command name as stdout."""
         return Response(stdout=invocation.command)
 
     return handler
@@ -98,6 +99,7 @@ def passthrough_handler() -> cabc.Callable[[PassthroughResult], Response]:
     """
 
     def handler(_result: PassthroughResult) -> Response:
+        """Return a fixed passthrough response."""
         return Response(stdout="passthrough")
 
     return handler
@@ -160,6 +162,7 @@ def test_ipcserver_handler_exception(
     socket_path = tmp_path / "ipc.sock"
 
     def handler(_invocation: Invocation) -> Response:
+        """Raise a RuntimeError to exercise the error response path."""
         msg = "handler failed"
         raise RuntimeError(msg)
 
@@ -258,6 +261,7 @@ def test_handle_invocation_custom_handler(tmp_path: Path) -> None:
     seen: list[Invocation] = []
 
     def handler(invocation: Invocation) -> Response:
+        """Record the invocation and return a custom response."""
         seen.append(invocation)
         return Response(stdout="handled", stderr="err", exit_code=3)
 
@@ -343,6 +347,7 @@ def test_request_pipeline_validates_and_dispatches(tmp_path: Path) -> None:
     handled: list[str] = []
 
     def handler(invocation: Invocation) -> Response:
+        """Record the dispatched command and return a fixed response."""
         handled.append(invocation.command)
         return Response(stdout="ok", stderr="", exit_code=0)
 
@@ -600,6 +605,7 @@ def test_ipcserver_stop_is_thread_safe(tmp_path: Path) -> None:
     failures: list[BaseException] = []
 
     def stop_and_capture() -> None:
+        """Call ``stop`` and capture any exception for the assertions."""
         try:
             server.stop()
         except BaseException as exc:  # ruff: ignore[blind-except] - thread targets must not propagate; the failure is surfaced by the assertion below
@@ -632,6 +638,7 @@ def test_stop_without_a_started_backend_skips_transport_hooks(
     calls: list[str] = []
 
     def record_stop(backend: object) -> None:
+        """Record that the stop hook ran for the given backend."""
         calls.append(f"stop:{backend!r}")
 
     server._stop_backend = record_stop  # type: ignore[method-assign, ty:invalid-assignment]
@@ -652,6 +659,7 @@ def test_stop_joins_the_live_backend_thread(tmp_path: Path) -> None:
     stopped: list[object] = []
 
     def record_stop(instance: object) -> None:
+        """Record the backend passed to the stop hook."""
         stopped.append(instance)
 
     server._stop_backend = record_stop  # type: ignore[method-assign, ty:invalid-assignment]
@@ -680,6 +688,7 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
     """Passthrough handler exceptions should be wrapped for callers."""
 
     def failing_handler(_result: PassthroughResult) -> Response:
+        """Raise ValueError to simulate a failing passthrough handler."""
         raise ValueError("boom")
 
     server = IPCServer(

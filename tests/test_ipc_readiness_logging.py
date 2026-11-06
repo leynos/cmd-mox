@@ -21,10 +21,12 @@ class _ConnectionClosedObserver(logging.Handler):
     """Signal when the IPC server logs a readiness-probe connection close."""
 
     def __init__(self) -> None:
+        """Create the handler with an event that is set when the close is logged."""
         super().__init__()
         self.connection_closed_logged = threading.Event()
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Set the event when the readiness-probe close is logged at INFO."""
         if record.name != "cmd_mox.ipc._server_core" or record.levelno != logging.INFO:
             return
         if record.getMessage() == _CONNECTION_CLOSED_MESSAGE:

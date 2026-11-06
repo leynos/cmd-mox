@@ -85,6 +85,7 @@ class RobustRmtreeError(OSError):
     def __init__(
         self, path: Path, attempts: int, last_exception: Exception | None
     ) -> None:
+        """Build the message from the path and attempt count, then store details."""
         msg = f"Failed to remove {path} after {attempts} attempts"
         super().__init__(msg)
         self.path = path
@@ -136,7 +137,7 @@ def _path_is_missing(path: Path, exc: OSError) -> bool:
 
 
 def _is_file_not_found(exc: OSError) -> bool:
-    """Report that *exc* means the file was already removed."""  # ruff: ignore[docstring-missing-returns] - private predicate has an obvious boolean return
+    """Report that *exc* means the file was already removed."""
     return isinstance(exc, FileNotFoundError)
 
 
@@ -329,6 +330,7 @@ def robust_rmtree(
         # Windows refuses to remove read-only files, so permissions are
         # repaired on every attempt: a partially removed tree can leave new
         # read-only entries behind for the next one to clear.
+        """Repair Windows permissions, then make one removal attempt."""
         _fix_windows_permissions(path)
         shutil.rmtree(path)
 

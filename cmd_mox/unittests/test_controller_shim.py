@@ -32,17 +32,20 @@ class _ShimSymlinkSpy:
     """Capture shim creation attempts for assertions."""
 
     def __init__(self) -> None:
+        """Start with no recorded shim creation calls."""
         self.calls: list[tuple[Path, tuple[str, ...]]] = []
 
     def __call__(
         self, directory: Path, commands: cabc.Iterable[str]
     ) -> dict[str, Path]:
+        """Record the call and return the shim path for each command."""
         recorded = tuple(commands)
         self.calls.append((directory, recorded))
         return {name: directory / name for name in recorded}
 
     @property
     def called(self) -> bool:
+        """Whether any shim creation call has been recorded."""
         return bool(self.calls)
 
 
@@ -121,6 +124,7 @@ def test_ensure_shim_during_replay_propagates_symlink_failure(
     mox.replay()
 
     def _boom(directory: Path, commands: cabc.Iterable[str]) -> dict[str, Path]:
+        """Raise a RuntimeError to simulate a failed symlink creation."""
         raise RuntimeError(_SYMLINK_FAILURE_MESSAGE)
 
     monkeypatch.setattr(controller, "create_shim_symlinks", _boom)
@@ -268,6 +272,7 @@ def test_register_command_propagates_shim_creation_failure(
     mox.replay()
 
     def _boom(directory: Path, commands: cabc.Iterable[str]) -> dict[str, Path]:
+        """Raise PermissionError to simulate an unwritable shim directory."""
         raise PermissionError
 
     monkeypatch.setattr(controller, "create_shim_symlinks", _boom)
@@ -291,6 +296,7 @@ def test_register_command_skips_existing_shim(
     called = False
 
     def _fail(directory: Path, commands: cabc.Iterable[str]) -> dict[str, Path]:
+        """Flag any shim recreation so the test can assert it never happens."""
         nonlocal called
         called = True
         return {name: directory / name for name in commands}

@@ -22,28 +22,38 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .record.session import RecordingSession
 
     class _ExpectationProtocol(typ.Protocol):
-        def with_args(self, *args: str) -> typ.Self: ...
+        """Typing-only view of the fluent expectation API on ``CommandDouble``."""
 
-        def with_matching_args(
-            self, *matchers: cabc.Callable[[str], bool]
-        ) -> typ.Self: ...
+        def with_args(self, *args: str) -> typ.Self:
+            """Require the command to be invoked with exactly *args*."""
 
-        def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> typ.Self: ...
+        def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> typ.Self:
+            """Validate each positional argument with a matcher predicate."""
 
-        def with_env(self, mapping: dict[str, str]) -> typ.Self: ...
+        def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> typ.Self:
+            """Expect stdin to equal *data* or satisfy a predicate."""
 
-        def times(self, count: int) -> typ.Self: ...
+        def with_env(self, mapping: dict[str, str]) -> typ.Self:
+            """Expect the environment to contain the provided mapping."""
 
-        def times_called(self, count: int) -> typ.Self: ...
+        def times(self, count: int) -> typ.Self:
+            """Require the command to be invoked exactly *count* times."""
 
-        def in_order(self) -> typ.Self: ...
+        def times_called(self, count: int) -> typ.Self:
+            """Verify the spy was called *count* times."""
 
-        def any_order(self) -> typ.Self: ...
+        def in_order(self) -> typ.Self:
+            """Mark this expectation as ordered relative to others."""
+
+        def any_order(self) -> typ.Self:
+            """Allow this expectation to occur in any order."""
 
     _ExpectationType = _ExpectationProtocol
 else:
 
     class _ExpectationType:  # pragma: no cover - runtime placeholder
+        """Runtime stand-in for the expectation protocol, rejecting direct use."""
+
         def __getattr__(self, name: str) -> cabc.Callable[..., typ.NoReturn]:
             """Return a callable that rejects typing-only method access.
 
@@ -54,6 +64,7 @@ else:
             """
 
             def _method(*args: object, **kwargs: object) -> typ.NoReturn:
+                """Raise ``NotImplementedError`` naming the typing-only method."""
                 raise NotImplementedError(f"{name} is typing-only")
 
             return _method
@@ -105,6 +116,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     )
 
     def __init__(self, name: str, controller: CmdMox, kind: DoubleKind) -> None:
+        """Create a double named *name* of *kind* that reports to *controller*."""
         self.name = name
         self.kind: DoubleKind = kind
         self.controller = controller  # CmdMox instance
@@ -165,6 +177,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         """
 
         def _wrap(invocation: Invocation) -> Response:
+            """Convert the handler result into a ``Response``."""
             result = handler(invocation)
             if isinstance(result, Response):
                 return result
@@ -614,11 +627,13 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     # Spy assertion helpers
     # ------------------------------------------------------------------
     def _validate_spy_usage(self, method_name: str) -> None:
+        """Reject assertion helpers called on a double that is not a spy."""
         if self.kind is not DoubleKind.SPY:  # pragma: no cover - defensive guard
             msg = f"{method_name}() is only valid for spies"
             raise AssertionError(msg)
 
     def _get_last_invocation(self) -> Invocation:
+        """Return the most recent invocation, failing if none was recorded."""
         if not self.invocations:
             msg = f"Expected {self.name!r} to be called but it was never called"
             raise AssertionError(msg)
@@ -653,6 +668,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def _validate_arguments(
         self, invocation: Invocation, expected_args: tuple[str, ...]
     ) -> None:
+        """Assert that the invocation's arguments equal *expected_args*."""
         self._assert_equal("args", tuple(invocation.args), expected_args)
 
     def _validate_optional_attr[T](
@@ -669,6 +685,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def _validate_stdin(
         self, invocation: Invocation, expected_stdin: str | None
     ) -> None:
+        """Assert that stdin matches *expected_stdin* when one is supplied."""
         self._validate_optional_attr("stdin", invocation.stdin, expected_stdin)
 
     def _validate_environment(
@@ -677,6 +694,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         # ``None`` still means "unconstrained", but the comparison must stay on
         # the raw mappings; only the failure message is rendered from masked
         # copies so recorded and expected data are never mutated.
+        """Assert that the environment matches *expected_env* when supplied."""
         if expected_env is not None:
             self._assert_equal(
                 "env",

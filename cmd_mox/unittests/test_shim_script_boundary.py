@@ -26,6 +26,7 @@ class _StalledStdin:
     errors = "strict"
 
     def __init__(self) -> None:
+        """Create the events that track the read's start, release, and finish."""
         self.started = threading.Event()
         self.release = threading.Event()
         self.finished = threading.Event()
@@ -141,6 +142,8 @@ def test_main_reports_stdin_read_failure_without_contacting_ipc(
     """A stdin I/O failure exits with the bounded diagnostic, not a traceback."""
 
     class _FailingStdin:
+        """Piped stdin double whose read raises ``OSError``."""
+
         def isatty(self) -> bool:
             """Report piped stdin so the shim attempts a read.
 
@@ -194,6 +197,8 @@ def test_main_reports_a_failing_isatty_without_contacting_ipc(
     """
 
     class _UnprobeableStdin:
+        """Stdin double whose ``isatty`` probe fails, as a closed stream does."""
+
         def isatty(self) -> bool:
             """Fail the way a closed text stream does.
 
@@ -317,6 +322,8 @@ def test_exit_without_joining_workers_tolerates_closed_streams(
     exited: list[int] = []
 
     class _ClosedStream:
+        """Stream double that raises ``ValueError`` on use, as a closed stream does."""
+
         def flush(self) -> typ.NoReturn:
             """Behave like a stream closed by the caller.
 

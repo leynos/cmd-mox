@@ -134,6 +134,7 @@ def test_predicate_raises_exception() -> None:
     """Predicate propagates exceptions from the wrapped function."""
 
     def raises_exc(_: str) -> bool:
+        """Raise ``ValueError`` so the predicate's exception propagates."""
         msg = "Test exception"
         raise ValueError(msg)
 
@@ -201,6 +202,7 @@ def test_expectation_matcher_exception_returns_false() -> None:
     """Expectation treats comparator exceptions as mismatches."""
 
     def boom(_: str) -> bool:
+        """Raise ``ValueError`` to simulate a failing comparator."""
         raise ValueError("boom")
 
     exp = Expectation("cmd").with_matching_args(Predicate(boom))
@@ -212,6 +214,7 @@ def test_expectation_matcher_exception_message() -> None:
     """Failure reason reports matcher exceptions with context."""
 
     def boom(_: str) -> bool:
+        """Raise ``ValueError`` to simulate a failing matcher."""
         raise ValueError("boom")
 
     exp = Expectation("cmd").with_matching_args(Predicate(boom))

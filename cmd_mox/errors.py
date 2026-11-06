@@ -61,6 +61,7 @@ class StdinTimeoutError(TimeoutError):
     """
 
     def __init__(self, timeout: float, *, worker_alive: bool) -> None:
+        """Record the timeout and whether the reader worker is still alive."""
         self.timeout = timeout
         self.worker_alive = worker_alive
         # The diagnostic is shown to command callers, so it must stay stable

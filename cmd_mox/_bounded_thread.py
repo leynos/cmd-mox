@@ -71,6 +71,7 @@ def stash_outcome[T](
     """
 
     def run() -> None:
+        """Call func, storing its value or stashing any exception it raises."""
         try:
             outcome["value"] = func()
         except BaseException as exc:  # ruff: ignore[blind-except] - worker-thread boundary: any failure must be stashed and re-raised on the caller's thread
@@ -84,7 +85,8 @@ class _Win32File(typ.Protocol):
 
     def CloseHandle(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         self, handle: object
-    ) -> None: ...
+    ) -> None:
+        """Release the Win32 handle."""
 
 
 class _Win32Api(typ.Protocol):
@@ -95,7 +97,8 @@ class _Win32Api(typ.Protocol):
         access: int,
         inherit: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - mirrors pywin32's positional signature
         native_id: int,
-    ) -> object: ...
+    ) -> object:
+        """Open a handle to the thread with the given native identifier."""
 
 
 class _PyWinTypes(typ.Protocol):
@@ -127,6 +130,7 @@ class HandleCloser:
         win32file: _Win32File,
         suppress: tuple[type[BaseException], ...] = (),
     ) -> None:
+        """Store the handle, its Win32 close function and the errors to suppress."""
         self._handle = handle
         self._win32file = win32file
         self._suppress = suppress

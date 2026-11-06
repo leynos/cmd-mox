@@ -36,6 +36,7 @@ _RECORDED_INVOCATIONS = st.builds(
 
 
 def _sample_invocation(*, sequence: int = 0) -> RecordedInvocation:
+    """Build a sample ``git status`` recording with the given sequence number."""
     return RecordedInvocation(
         sequence=sequence,
         command="git",
@@ -51,6 +52,7 @@ def _sample_invocation(*, sequence: int = 0) -> RecordedInvocation:
 
 
 def _sample_metadata() -> FixtureMetadata:
+    """Return fixture metadata created with the default factory."""
     return FixtureMetadata.create()
 
 

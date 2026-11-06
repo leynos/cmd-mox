@@ -43,7 +43,8 @@ class _Win32Function(typ.Protocol):
     argtypes: tuple[object, ...]
     restype: object
 
-    def __call__(self, path: str, buffer: _UnicodeBuffer, size: int) -> int: ...
+    def __call__(self, path: str, buffer: _UnicodeBuffer, size: int) -> int:
+        """Invoke the Win32 function on *path*, filling *buffer* up to *size*."""
 
 
 class _Kernel32(typ.Protocol):
@@ -55,13 +56,17 @@ class _Kernel32(typ.Protocol):
 class _CtypesModule(typ.Protocol):
     """Typed subset of ``ctypes`` used by the Windows path-shortening helper."""
 
-    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32: ...  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
+    def WinDLL(self, name: str, *, use_last_error: bool) -> _Kernel32:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
+        """Load the named Windows DLL, optionally tracking its last error."""
 
-    def get_last_error(self) -> int: ...
+    def get_last_error(self) -> int:
+        """Return the calling thread's last Win32 error code."""
 
-    def FormatError(self, code: int) -> str: ...  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
+    def FormatError(self, code: int) -> str:  # ruff: ignore[invalid-function-name] - the protocol mirrors the external Windows API casing
+        """Return the system message text for a Win32 error code."""
 
-    def create_unicode_buffer(self, init_or_size: int) -> _UnicodeBuffer: ...
+    def create_unicode_buffer(self, init_or_size: int) -> _UnicodeBuffer:
+        """Allocate a mutable wide-character buffer of the given size."""
 
 
 def _path_identity(path: Path | None) -> str | None:
@@ -278,7 +283,7 @@ def _collect_os_error(
     ],
     cabc.Callable[typ.Concatenate[EnvironmentManager, list[CleanupError], P], None],
 ]:
-    """Return a decorator that records ``OSError`` cleanup failures."""  # ruff: ignore[docstring-missing-returns] - private decorator factory has an obvious decorator return
+    """Return a decorator that records ``OSError`` cleanup failures."""
 
     def decorator(
         func: cabc.Callable[
@@ -287,6 +292,8 @@ def _collect_os_error(
     ) -> cabc.Callable[
         typ.Concatenate[EnvironmentManager, list[CleanupError], P], None
     ]:
+        """Wrap a cleanup method so its OSError failures are recorded."""
+
         @functools.wraps(func)
         def wrapper(
             self: EnvironmentManager,
@@ -294,6 +301,7 @@ def _collect_os_error(
             *args: P.args,
             **kwargs: P.kwargs,
         ) -> None:
+            """Run the cleanup step, appending any OSError to *cleanup_errors*."""
             try:
                 func(self, cleanup_errors, *args, **kwargs)
             except OSError as e:  # pragma: no cover - exercised via tests
@@ -360,6 +368,7 @@ class EnvironmentManager:
         cls._state.active_manager = mgr
 
     def __init__(self, *, prefix: str = "cmdmox-") -> None:
+        """Create an inactive manager whose temporary directory uses *prefix*."""
         self._orig_env: dict[str, str] | None = None
         self.shim_dir: Path | None = None
         self.socket_path: Path | None = None
@@ -531,7 +540,7 @@ class EnvironmentManager:
         validate_positive_finite_timeout(timeout)
 
     def _resolve_effective_timeout(self, timeout: float | object) -> float | None:
-        """Return the effective IPC timeout for export."""  # ruff: ignore[docstring-missing-returns, docstring-missing-exception] - private timeout resolver keeps a concise summary while its contract is documented by the public exporter
+        """Return the effective IPC timeout for export."""
         if timeout is _UNSET_TIMEOUT:
             return self.ipc_timeout
 

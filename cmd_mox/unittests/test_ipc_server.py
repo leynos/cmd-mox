@@ -92,6 +92,7 @@ def test_ipc_server_resolves_unix_base_on_first_backend_start(
     resolver_calls = 0
 
     def count_resolution() -> type[socketserver.BaseServer]:
+        """Count each base resolution before delegating to the original resolver."""
         nonlocal resolver_calls
         resolver_calls += 1
         return original_resolver()
@@ -152,6 +153,7 @@ def test_invoke_server_retries_connection_parametrized(
         exception: Exception,
         correlation_id: str | None,
     ) -> None:
+        """Forward each retry event and start the server after the first failure."""
         nonlocal server_started
         emit_connect_retry(transport, attempt, exception, correlation_id)
         if not server_started:
@@ -241,6 +243,7 @@ def test_invoke_server_invalid_json(
     srv_sock.listen(1)
 
     def serve() -> None:
+        """Accept one client, reply with malformed JSON, then close the sockets."""
         conn, _ = srv_sock.accept()
         conn.recv(1024)
         conn.sendall(b"not-json")
@@ -263,10 +266,12 @@ class _DisconnectObserver(logging.Handler):
     """Signal when the reply-write failure is logged."""
 
     def __init__(self, disconnect_logged: threading.Event) -> None:
+        """Store the event to set when the disconnect is logged."""
         super().__init__()
         self._disconnect_logged = disconnect_logged
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Set the event when the server logs the reply-write disconnect at DEBUG."""
         if record.name != "cmd_mox.ipc.server" or record.levelno != logging.DEBUG:
             return
         if record.getMessage() == _DISCONNECT_MESSAGE:
@@ -298,18 +303,21 @@ class _FailingReplyWriter:
         failure_point: typ.Literal["write", "flush"],
         error: OSError,
     ) -> None:
+        """Store the stage to fail at and the OSError to raise there."""
         self.failure_point = failure_point
         self.error = error
         self.write_called = False
         self.flush_called = False
 
     def write(self, response_bytes: bytes) -> int:
+        """Record the write call, raising the error if writes are set to fail."""
         self.write_called = True
         if self.failure_point == "write":
             raise self.error
         return len(response_bytes)
 
     def flush(self) -> None:
+        """Record the flush call, raising the error if flushes are set to fail."""
         self.flush_called = True
         if self.failure_point == "flush":
             raise self.error
@@ -331,6 +339,7 @@ def test_handler_logs_reply_write_oserror_at_debug(
     def response_pipeline(
         _server: object, _raw: bytes, _transport: str
     ) -> SimpleNamespace:
+        """Return a canned reply so the handler reaches the reply write."""
         return SimpleNamespace(response_bytes=b"response", correlation_id=None)
 
     monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
@@ -363,6 +372,7 @@ def test_handler_reports_non_disconnect_reply_write_oserror(
     def response_pipeline(
         _server: object, _raw: bytes, _transport: str
     ) -> SimpleNamespace:
+        """Return a canned reply so the handler reaches the reply write."""
         return SimpleNamespace(response_bytes=b"response", correlation_id=None)
 
     monkeypatch.setattr(_ipc_server, "_request_pipeline", response_pipeline)
@@ -405,6 +415,7 @@ def test_server_logs_client_disconnect_during_reply_write(
     reply_allowed = threading.Event()
 
     def slow_handler(_invocation: Invocation) -> Response:
+        """Signal that handling started, wait for release, then return a reply."""
         handler_started.set()
         reply_allowed.wait(timeout=3.0)
         return Response(stdout="complete")
@@ -427,6 +438,7 @@ def test_server_logs_client_disconnect_during_reply_write(
             shutdown_request = backend.shutdown_request
 
             def observe_request_shutdown(request: socket.socket) -> None:
+                """Shut the request down, then signal that its cleanup finished."""
                 shutdown_request(request)
                 request_finished.set()
 

@@ -45,6 +45,7 @@ def _can_bind_unix_socket() -> bool:
 
 
 def _unix_sockets_supported() -> bool:
+    """Return whether Unix domain sockets can be bound, probing only once."""
     global _UNIX_SOCKETS_SUPPORTED
     if _UNIX_SOCKETS_SUPPORTED is None:
         _UNIX_SOCKETS_SUPPORTED = _can_bind_unix_socket()

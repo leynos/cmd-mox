@@ -40,7 +40,7 @@ STUB_REPORT: dict[str, object] = {
 
 
 def copied_gate_workspace(tmp_path: Path) -> tuple[Path, Path]:
-    """Create a mutable workspace containing the gate and its helper modules."""  # ruff: ignore[docstring-missing-returns] - private test fixture has an obvious workspace return
+    """Create a mutable workspace containing the gate and its helper modules."""
     workspace = tmp_path / "gate-workspace"
     scripts = workspace / "scripts"
     scripts.mkdir(parents=True)
@@ -91,12 +91,12 @@ def write_stub_nose(
 
 
 def gate_command(script: Path, *arguments: str) -> list[str]:
-    """Build an isolated Python command for a copied gate script."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious command return
+    """Build an isolated Python command for a copied gate script."""
     return [sys.executable, str(script), *arguments]
 
 
 def gate_environment(**overrides: str) -> dict[str, str]:
-    """Build a deterministic environment for gate subprocesses."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious environment return
+    """Build a deterministic environment for gate subprocesses."""
     return {**os.environ, **overrides}
 
 
@@ -105,7 +105,7 @@ def run_gate_command(
     *arguments: str,
     environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a copied gate command and capture its completed result."""  # ruff: ignore[docstring-missing-returns] - private test helper has an obvious completed-process return
+    """Run a copied gate command and capture its completed result."""
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed test interpreter and copied script.
         gate_command(script, *arguments),
         cwd=script.parent.parent,
@@ -142,10 +142,11 @@ def stub_settings() -> detector.NoseSettings:
 def stub_runner(
     *, version: str = "nose 0.20.0", report: object = None
 ) -> detector.CommandRunner:
-    """Build a command runner double answering version and query commands."""  # ruff: ignore[docstring-missing-returns] - private test double has an obvious runner return
+    """Build a command runner double answering version and query commands."""
     payload = STUB_REPORT if report is None else report
 
     def run(command: cabc.Sequence[str]) -> str:
+        """Answer the version query or return the stub report as JSON."""
         if "--version" in command:
             return f"{version}\n"
         return json.dumps(payload)

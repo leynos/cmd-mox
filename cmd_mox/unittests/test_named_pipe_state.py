@@ -288,6 +288,7 @@ def test_try_connect_pipe_maps_a_failed_overlapped_connect(
     handle = object()
 
     def fail_result(*_args: object) -> int:
+        """Raise a fake Win32 error as the overlapped result of the connect."""
         raise FakeWinError(UNEXPECTED_WINERROR)
 
     file_fake.GetOverlappedResult = fail_result  # type: ignore[method-assign, ty:invalid-assignment]
@@ -315,6 +316,7 @@ def test_spawn_handler_thread_tracks_client(monkeypatch: pytest.MonkeyPatch) -> 
     started = threading.Event()
 
     def handler(handle: object, _slot: object = None) -> None:
+        """Record the handle and signal that the handler thread has run."""
         seen.append(handle)
         started.set()
 
@@ -419,6 +421,7 @@ def test_join_clients_waits_for_threads_to_finish(
     state = build_state()
 
     def handler(_handle: object, _slot: object = None) -> None:
+        """Deregister the current thread so join_clients sees it finish."""
         with state._client_lock:
             state._client_threads.discard(threading.current_thread())
 
@@ -441,6 +444,7 @@ def test_serve_forever_spawns_handler_until_stopped(
     spawned: list[object] = []
 
     def fake_spawn(client_handle: object, _slot: object = None) -> None:
+        """Record the dispatched client and request shutdown."""
         spawned.append(client_handle)
         state.stop_event.set()
 
@@ -628,6 +632,7 @@ def test_handle_client_reports_unexpected_failures(
     state = build_state()
 
     def fail_read(_handle: object) -> bytes:
+        """Raise a fake Win32 read error carrying the case's error code."""
         raise FakeWinError(case.winerror)
 
     monkeypatch.setattr(state, "_read_request", fail_read)

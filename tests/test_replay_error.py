@@ -32,10 +32,12 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        """Record the exit arguments, then delegate to the real __exit__."""
         called.append((exc_type, exc, tb))
         orig_exit(self, exc_type, exc, tb)
 
     def boom(*_args: object, **_kwargs: object) -> typ.NoReturn:
+        """Raise RuntimeError to simulate a shim creation failure during replay."""
         raise RuntimeError("boom")
 
     # The stack guarantees the controller is exited even if an assertion below
@@ -74,6 +76,7 @@ def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        """Record the exit arguments, then delegate to the real __exit__."""
         called.append((exc_type, exc, tb))
         orig_exit(self, exc_type, exc, tb)
 
@@ -83,6 +86,7 @@ def test_exit_receives_exception(monkeypatch: pytest.MonkeyPatch) -> None:
         """Sentinel error used to trigger exceptional exit."""
 
     def trigger() -> None:
+        """Enter the controller, replay, then raise BoomError inside the block."""
         with mox:
             mox.replay()
             raise BoomError("boom")

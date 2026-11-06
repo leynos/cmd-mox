@@ -547,6 +547,7 @@ class TestReplaySessionThreadSafety:
         results: list[Response | None] = [None] * n_threads
 
         def _match(idx: int) -> None:
+            """Match one invocation once every worker thread reaches the barrier."""
             barrier.wait()
             results[idx] = session.match(_make_invocation())
 

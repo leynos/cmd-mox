@@ -417,6 +417,8 @@ def test_passthrough_report_failure_survives_stdout_write_failure(
         raise TimeoutError("timeout")
 
     class _ClosedWriter:
+        """Stdout double whose writes fail as if the stream were closed."""
+
         def write(self, _text: str) -> typ.NoReturn:
             """Simulate stdout closing while the response is written.
 
@@ -469,6 +471,8 @@ def test_write_response_handles_closed_stdout(
     """A closed output stream produces a controlled IPC failure."""
 
     class _ClosedWriter:
+        """Stdout double whose writes fail as if the stream were closed."""
+
         def write(self, _text: str) -> typ.NoReturn:
             """Simulate stdout closing while the response is written.
 
@@ -524,6 +528,8 @@ def test_write_response_handles_stdout_flush_failure(
     """A deferred output failure keeps the response exit code."""
 
     class _FlushFailure:
+        """Stdout double that accepts writes but fails when flushed."""
+
         def write(self, text: str) -> int:
             """Accept response text before the flush failure is exercised.
 

@@ -28,7 +28,7 @@ def _settings_body(
     min_size: str = "24",
     surface: str | None = None,
 ) -> str:
-    """Build a `[tool.nose]` table body from the supplied literal values."""  # ruff: ignore[docstring-missing-returns] - private test builder has an obvious string return
+    """Build a `[tool.nose]` table body from the supplied literal values."""
     lines = ["[tool.nose]"]
     if version is not None:
         lines.append(f"version = {version}")
@@ -452,6 +452,7 @@ class TestRunDetector:
         monkeypatch.setenv("NOSE_BIN", "/stub/nose")
 
         def runner(command: cabc.Sequence[str]) -> str:
+            """Answer the version query and return non-JSON for other commands."""
             return "nose 0.20.0\n" if "--version" in command else "not json"
 
         with pytest.raises(detector.GateExecutionError, match="not valid JSON"):
@@ -461,6 +462,7 @@ class TestRunDetector:
         """A slow detector becomes an actionable execution error."""
 
         def timeout(*_args: object, **_kwargs: object) -> typ.NoReturn:
+            """Raise a subprocess timeout for the detector command."""
             raise detector.subprocess.TimeoutExpired(["nose", "query"], 120)
 
         monkeypatch.setattr(detector.subprocess, "run", timeout)
@@ -478,6 +480,7 @@ class TestRunDetector:
         def failing(
             *_args: object, **_kwargs: object
         ) -> detector.subprocess.CompletedProcess[str]:
+            """Return a completed process that exits with status 2."""
             return detector.subprocess.CompletedProcess(
                 args=["nose", "query"], returncode=2, stdout="", stderr="bad query\n"
             )
@@ -496,6 +499,7 @@ class TestRunDetector:
         """An unrunnable detector points at the install remediation."""
 
         def unrunnable(*_args: object, **_kwargs: object) -> typ.NoReturn:
+            """Raise a permission error as if the detector cannot be started."""
             raise OSError(13, "Permission denied")
 
         monkeypatch.setattr(detector.subprocess, "run", unrunnable)
