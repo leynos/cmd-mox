@@ -1125,6 +1125,20 @@ quiet days are cheap no-ops. A **manual dispatch** (the Actions "Run workflow"
 control) mutates the whole package; select a branch in that control to exercise
 a feature branch.
 
+When mutation execution fails, the shared workflow uploads a
+`mutation-failure-diagnostics-mutmut` artefact containing `stdout.log`,
+`stderr.log`, and `metadata.json`. The capture wraps mutmut startup and the
+clean baseline, so a failure before `mutation-mutmut-results.txt` or
+`mutants/mutmut-stats.json` exist still leaves actionable evidence. Each stream
+retains its first 512 KiB; later bytes are drained and discarded, and
+`metadata.json` records the bytes seen, saved, and truncated together with the
+command's exit status. The diagnostic upload is independent of the result and
+statistics upload, and a missing or incomplete capture fails the verification
+step rather than being ignored. A no-change run remains an intentional skip and
+produces no failure diagnostics. A hard job cancellation can stop the job
+before the upload step runs, so diagnostics after hard cancellation are
+best-effort.
+
 The caller passes two configuration inputs:
 
 - `paths` — set to `cmd_mox/`, the change-detection glob that decides whether
