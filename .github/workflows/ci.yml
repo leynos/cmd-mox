@@ -139,7 +139,7 @@ jobs:
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@872f59f53717b5bebe8e24b2f4a7496b089a939a
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@3086643fbcea5bc01ed65cf5aec5a3accf081ab4
         with:
           version: "0.6.1"
 
@@ -160,7 +160,7 @@ jobs:
 
       - name: Install the YAML lint tools
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/install-yaml-lint@872f59f53717b5bebe8e24b2f4a7496b089a939a
+        uses: leynos/shared-actions/.github/actions/install-yaml-lint@3086643fbcea5bc01ed65cf5aec5a3accf081ab4
       - name: Run lint and dead-code detection
         if: matrix.run-windows-smoke == false
         run: make lint
