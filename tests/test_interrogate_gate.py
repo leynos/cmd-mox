@@ -58,27 +58,80 @@ def _prerequisites(target: str) -> list[str]:
     return match.group(1).split("##")[0].split()
 
 
-def _tracked(*patterns: str) -> list[str]:
-    """Return the Git-tracked files matching *patterns*.
+_GENERATED_DIRECTORIES = frozenset({
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "mutants",
+    "node_modules",
+    "venv",
+})
 
-    Git is the authority on what the repository owns: a walk would also see
-    the virtual environments CI creates beside the sources. Names are read from
-    NUL-separated output, so a path containing whitespace stays whole.
 
-    Returns
-    -------
-    list[str]
-        The matching paths, relative to the repository root.
-    """
-    git = shutil.which("git")
-    assert git, "git must be on the path"
+def _git_toplevel(git: str, root: Path) -> Path | None:
+    """Return the repository root git resolves for *root*, if any."""
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+        [git, "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return Path(result.stdout.strip()).resolve()
+
+
+def _git_tracked(git: str, root: Path, patterns: tuple[str, ...]) -> list[str]:
+    """Return the tracked files matching *patterns*, relative to *root*."""
     output = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
-        [git, "-C", str(ROOT), "ls-files", "-z", *patterns],
+        [git, "-C", str(root), "ls-files", "-z", *patterns],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
     return [name for name in output.split("\0") if name]
+
+
+def _copied_sources(root: Path, patterns: tuple[str, ...]) -> list[str]:
+    """Return the source files in a copied tree, skipping generated output."""
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file()
+        and not path.is_symlink()
+        and any(path.match(pattern) for pattern in patterns)
+        and not _GENERATED_DIRECTORIES.intersection(path.relative_to(root).parts)
+    )
+
+
+def _tracked(*patterns: str, root: Path = ROOT) -> list[str]:
+    """Return the source files the repository owns, matching *patterns*.
+
+    Git is the authority in a checkout: a walk would also see the virtual
+    environments CI creates beside the sources. Names are read from
+    NUL-separated output, so a path containing whitespace stays whole.
+
+    Mutmut's sandbox is a copy inside the checkout, where `git ls-files`
+    resolves the outer repository and matches nothing. A copied tree therefore
+    falls back to a walk that skips generated directories, so the contract
+    still inspects the sources instead of passing vacuously.
+
+    Returns
+    -------
+    list[str]
+        The matching paths, relative to *root*.
+    """
+    git = shutil.which("git")
+    assert git, "git must be on the path"
+    if _git_toplevel(git, root) == root.resolve():
+        return _git_tracked(git, root, patterns)
+    return _copied_sources(root, patterns)
 
 
 def test_lint_depends_on_interrogate() -> None:
@@ -124,6 +177,29 @@ def test_every_python_file_is_under_a_target() -> None:
         if not any(Path(name).is_relative_to(target) for target in targets)
     ]
     assert not uncovered, f"add these to INTERROGATE_TARGETS: {uncovered}"
+
+
+def test_tracked_files_fall_back_to_a_copied_tree(tmp_path: Path) -> None:
+    """A mutation sandbox copy is untracked, so git reports no owned files.
+
+    Mutmut copies the tree into `mutants/` inside the checkout, where
+    `git ls-files` resolves the outer repository and matches nothing. The
+    contract must still see the copied sources, and must not see caches or
+    build outputs.
+    """
+    sandbox = tmp_path / "mutants"
+    (sandbox / "pkg").mkdir(parents=True)
+    (sandbox / "pkg" / "mod.py").write_text("", encoding="utf-8")
+    (sandbox / "pkg" / "__pycache__").mkdir()
+    (sandbox / "pkg" / "__pycache__" / "cached.py").write_text("", encoding="utf-8")
+    (sandbox / ".venv" / "lib").mkdir(parents=True)
+    (sandbox / ".venv" / "lib" / "site.py").write_text("", encoding="utf-8")
+    (sandbox / "linked.py").symlink_to(sandbox / "pkg" / "mod.py")
+    (sandbox / "notes.txt").write_text("", encoding="utf-8")
+
+    assert _tracked("*.py", root=sandbox) == ["pkg/mod.py"], (
+        "the copied tree must supply the sources without generated output"
+    )
 
 
 def test_the_configuration_excludes_only_the_overloaded_name() -> None:
