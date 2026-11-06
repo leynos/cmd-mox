@@ -244,6 +244,7 @@ def test_nested_pytester_temporarily_anchors_mutmut_source_paths(
         original_source_paths = list(mutmut_config.source_paths)
 
         def assert_anchored_source_paths(session: pytest.Session) -> None:
+            """Assert mutmut source paths are absolute for the nested session."""
             del session
             assert mutmut_config.source_paths == [package_root / "cmd_mox"], (
                 "mutmut source paths should be absolute during the nested run"

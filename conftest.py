@@ -135,6 +135,7 @@ def isolated_pytester_config_args(
     """
 
     def build_args() -> tuple[str, ...]:
+        """Return the isolation arguments for one nested pytest invocation."""
         inner_ini = pytester.path / "tox.ini"
         if not inner_ini.is_file():
             inner_ini = pytester.makeini("[pytest]\n")
@@ -185,6 +186,7 @@ def run_nested_pytester(
         test_path: Path | None = None,
         plugins: cabc.Sequence[object] = (),
     ) -> RunResult:
+        """Run pytest in the pytester project from the outer invocation dir."""
         generated_path = pytester.path if test_path is None else test_path
         with monkeypatch.context() as scoped_monkeypatch:
             scoped_monkeypatch.chdir(request.config.invocation_params.dir)
