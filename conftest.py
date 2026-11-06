@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import cmd_mox.environment
+from tests._mutmut_pytest_compat import _install_mutmut_pytest_item_compatibility
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -93,6 +94,7 @@ def anchor_mutmut_source_paths_for_test(
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and cache platform capability checks."""
+    _install_mutmut_pytest_item_compatibility()
     config.addinivalue_line(
         "markers",
         "requires_unix_sockets: mark test as requiring Unix domain socket support",
