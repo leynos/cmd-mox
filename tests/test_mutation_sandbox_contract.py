@@ -125,25 +125,72 @@ def test_contracts_without_the_parser_still_run_without_makeutil(
     assert "3 passed" in result.stdout, result.stdout
 
 
-def _path_without_makeutil() -> str:
-    """Return a PATH that keeps the build tools but not ``makeutil``."""
-    make = shutil.which("make")
-    assert make, "make must be on the path"
-    directories = [str(Path(make).parent), "/usr/bin", "/bin"]
-    makeutil = shutil.which("makeutil")
-    if makeutil is not None:
-        directories = [
-            directory
-            for directory in directories
-            if Path(makeutil).parent != Path(directory)
-        ]
-    return os.pathsep.join(dict.fromkeys(directories))
+#: Tools the whitelist target invokes; the recorder it runs uses an absolute
+#: interpreter path, and make supplies its own ``/bin/sh``.
+_REQUIRED_TOOLS = ("env", "flock", "make", "sh")
 
 
-def test_behavioural_contracts_run_without_the_parser() -> None:
+def _isolated_tool_path(directory: Path) -> str:
+    """Return a PATH holding only the tools the behavioural contracts need.
+
+    Symlinking each required tool into one otherwise empty directory keeps
+    ``makeutil`` unreachable whatever the host's layout: dropping "the
+    directory that contains makeutil" fails when another PATH entry is an
+    alias of that directory, such as ``/bin`` pointing at ``/usr/bin``.
+
+    Returns
+    -------
+    str
+        The ``PATH`` value naming only *directory*.
+    """
+    directory.mkdir()
+    for name in _REQUIRED_TOOLS:
+        source = shutil.which(name)
+        assert source, f"{name} must be on the path"
+        (directory / name).symlink_to(source)
+    return str(directory)
+
+
+def test_the_isolated_path_never_inherits_a_neighbouring_makeutil(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``make`` and ``makeutil`` may share a directory, and ``/bin`` may alias it."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in (*_REQUIRED_TOOLS, "makeutil"):
+        executable = tools / name
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        executable.chmod(0o755)
+    alias = tmp_path / "bin"
+    alias.symlink_to(tools, target_is_directory=True)
+
+    real_which = shutil.which
+
+    def fake_which(name: str, path: str | None = None) -> str | None:
+        """Resolve ambient lookups through the aliased tools directory."""
+        if path is not None:
+            return real_which(name, path=path)
+        return real_which(name, path=os.pathsep.join((str(tools), str(alias))))
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    isolated = _isolated_tool_path(tmp_path / "isolated")
+
+    assert {entry.name for entry in Path(isolated).iterdir()} == set(_REQUIRED_TOOLS), (
+        "the isolated PATH must hold only the required tools"
+    )
+    assert real_which("makeutil", path=isolated) is None, (
+        "makeutil must stay unreachable through the isolated PATH"
+    )
+    for name in _REQUIRED_TOOLS:
+        assert real_which(name, path=isolated) is not None, (
+            f"{name} must stay reachable through the isolated PATH"
+        )
+
+
+def test_behavioural_contracts_run_without_the_parser(tmp_path: Path) -> None:
     """The sandbox must keep running the whitelist behaviour checks."""
     environment = _inherited_environment()
-    environment["PATH"] = _path_without_makeutil()
+    environment["PATH"] = _isolated_tool_path(tmp_path / "bin")
 
     assert shutil.which("makeutil", path=environment["PATH"]) is None, (
         "the behavioural selection must run with no parser on PATH"
