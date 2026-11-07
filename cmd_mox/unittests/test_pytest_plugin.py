@@ -225,11 +225,10 @@ def test_verification_outcomes(
 
 def test_subprocess_runner_preserves_custom_pytester_ini(
     pytester: pytest.Pytester,
-    ensure_pytester_ini: cabc.Callable[[], Path],
     isolated_pytester_config_args: cabc.Callable[[Path], tuple[str, ...]],
 ) -> None:
     """Subprocess configuration must keep test-authored marker settings."""
-    pytester.makeini(
+    inner_ini = pytester.makeini(
         "[pytest]\nmarkers = inner_config: marker from test-authored ini\n"
     )
     pytester.makepyfile(
@@ -245,7 +244,7 @@ def test_subprocess_runner_preserves_custom_pytester_ini(
     )
 
     result = pytester.runpytest_subprocess(
-        *isolated_pytester_config_args(ensure_pytester_ini()),
+        *isolated_pytester_config_args(inner_ini),
         "-q",
         "--strict-markers",
         *_DISABLE_CI_PLUGINS,
@@ -258,12 +257,12 @@ def test_subprocess_runner_preserves_custom_pytester_ini(
 def test_call_hook_does_not_warn_on_ordinary_test_failure(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
-    ensure_pytester_ini: cabc.Callable[[], Path],
     isolated_pytester_config_args: cabc.Callable[[Path], tuple[str, ...]],
 ) -> None:
     """Ordinary assertion failures must not escape hook-wrapper teardown."""
     monkeypatch.delenv("PYTEST_PLUGINS", raising=False)
     monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    inner_ini = pytester.makeini("[pytest]\n")
     pytester.makeconftest('pytest_plugins = ("cmd_mox.pytest_plugin",)')
     pytester.makepyfile(
         test_failure=textwrap.dedent(
@@ -275,7 +274,7 @@ def test_call_hook_does_not_warn_on_ordinary_test_failure(
     )
 
     result = pytester.runpytest_subprocess(
-        *isolated_pytester_config_args(ensure_pytester_ini()),
+        *isolated_pytester_config_args(inner_ini),
         "-q",
         "-s",
         *_DISABLE_CI_PLUGINS,
@@ -309,12 +308,12 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
     test_case: BodyExceptionTestCase,
-    ensure_pytester_ini: cabc.Callable[[], Path],
     isolated_pytester_config_args: cabc.Callable[[Path], tuple[str, ...]],
 ) -> None:
     """Test-body interrupts and worker exits remain primary at teardown."""
     monkeypatch.delenv("PYTEST_PLUGINS", raising=False)
     monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    inner_ini = pytester.makeini("[pytest]\n")
     exception_name = test_case.exception_type.__name__
     pytester.makeconftest(
         textwrap.dedent(
@@ -344,7 +343,7 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
     )
 
     result = pytester.runpytest_subprocess(
-        *isolated_pytester_config_args(ensure_pytester_ini()),
+        *isolated_pytester_config_args(inner_ini),
         "-q",
         "-s",
         timeout=30,
