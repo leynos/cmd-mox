@@ -59,6 +59,22 @@ def test_mutmut_legacy_nodeid_is_not_added_without_mutmut(
         )
 
 
+def test_an_existing_legacy_nodeid_is_left_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pytest that still provides ``_nodeid`` must keep its own descriptor."""
+    sentinel = property(lambda item: "sentinel")
+    with monkeypatch.context() as scoped_monkeypatch:
+        scoped_monkeypatch.setitem(sys.modules, "mutmut", ModuleType("mutmut"))
+        scoped_monkeypatch.setattr(pytest.Item, "_nodeid", sentinel, raising=False)
+
+        _install_mutmut_pytest_item_compatibility()
+
+        assert vars(pytest.Item)["_nodeid"] is sentinel, (
+            "an existing legacy alias must not be replaced"
+        )
+
+
 def test_pytest_configure_installs_the_alias_for_a_real_item(
     tmp_path: Path,
 ) -> None:

@@ -29,8 +29,9 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 #: Only the tests that read Makeutil's structured report need the parser.
-#: `make test` installs it, but the mutmut sandbox only copies files and runs
-#: `uv run`, so it has no parser; the remaining checks must still run there.
+#: `make test` requires it on `PATH` and fails rather than installing it, while
+#: the mutmut sandbox only copies files and runs `uv run`, so it has no parser;
+#: the remaining checks must still run there.
 requires_makeutil = pytest.mark.skipif(
     shutil.which("makeutil") is None,
     reason=(

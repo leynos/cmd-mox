@@ -286,13 +286,14 @@ patterns, so untracked build output and virtual environments are never
 inspected. Mutmut's sandbox is a copy inside the checkout, where Git resolves
 the outer repository rather than the copy, so a successful lookup that names a
 different root selects a walk of the copied tree that skips generated
-directories and symlinks. When the Git query fails, only its line-anchored
-`fatal: not a git repository` diagnostic selects that walk; any other failure
-propagates, so a permission or configuration error cannot silently pass the
-gate. Every Git child also runs with the repository-location variables
-(`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
-`GIT_ALTERNATE_OBJECT_DIRECTORIES` and `GIT_COMMON_DIR`) removed, so a hook
-environment cannot re-point the lookup away from the repository `-C` names.
+directories and symlinks and propagates any directory it cannot read. When the
+Git query fails, only its line-anchored `fatal: not a git repository`
+diagnostic selects that walk; any other failure propagates, so a permission or
+configuration error cannot silently pass the gate. Every Git child also runs
+with the repository-location variables (`GIT_DIR`, `GIT_WORK_TREE`,
+`GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES` and
+`GIT_COMMON_DIR`) removed, so a hook environment cannot re-point the lookup
+away from the repository `-C` names.
 
 ## YAML lint
 
@@ -1149,9 +1150,10 @@ The sandbox is a copy, not a checkout. Mutmut copies `source_paths`,
 `also_copy`, and a fixed set of test directories into `mutants/`, then runs the
 suite there through `uv run`. A repository file a test reads must therefore be
 listed in `also_copy`; the committed spelling policy (`typos.local.toml`) is
-copied for that reason. A tool the sandbox does not install must be guarded
-instead: `make test` installs `makeutil`, but `uv run` does not, so the Skylos
-Makefile contract skips when the parser is absent.
+copied for that reason. A tool the sandbox does not provide must be guarded
+instead: `make test` requires `makeutil` on `PATH` and fails rather than
+installing it, while the sandbox only copies files and runs `uv run`, so the
+Skylos Makefile contract skips when the parser is absent.
 `tests/test_mutation_sandbox_contract.py` pins both properties.
 
 The workflow runs in two modes. A **daily schedule** fires a change-scoped run

@@ -167,17 +167,36 @@ def _git_tracked(git: str, root: Path, patterns: tuple[str, ...]) -> list[str]:
     return [name for name in output.split("\0") if name]
 
 
+def _raise_walk_error(error: OSError) -> None:
+    """Re-raise a directory access failure instead of skipping the subtree."""
+    raise error
+
+
 def _copied_sources(root: Path, patterns: tuple[str, ...]) -> list[str]:
-    """Return the source files in a copied tree, skipping generated output."""
+    """Return the source files in a copied tree, skipping generated output.
+
+    ``os.walk`` reports a directory it cannot read through ``onerror``, and
+    the callback re-raises it. A permission or I/O failure therefore fails the
+    lookup instead of shrinking the inspected set, which would let the gate
+    pass on a partial tree.
+
+    Returns
+    -------
+    list[str]
+        The matching paths, relative to *root*, in sorted order.
+    """
     names: list[str] = []
-    for path in root.rglob("*"):
-        relative = path.relative_to(root)
-        if not path.is_file() or path.is_symlink():
-            continue
-        if _GENERATED_DIRECTORIES.intersection(relative.parts):
-            continue
-        if any(path.match(pattern) for pattern in patterns):
-            names.append(relative.as_posix())
+    for directory, subdirectories, files in os.walk(root, onerror=_raise_walk_error):
+        subdirectories[:] = [
+            name for name in subdirectories if name not in _GENERATED_DIRECTORIES
+        ]
+        for name in files:
+            path = Path(directory) / name
+            relative = path.relative_to(root)
+            if path.is_symlink() or not path.is_file():
+                continue
+            if any(path.match(pattern) for pattern in patterns):
+                names.append(relative.as_posix())
     return sorted(names)
 
 
@@ -511,6 +530,26 @@ def test_copied_sources_match_an_independent_filter(
             assert _copied_sources(root, patterns) == expected, (
                 f"the walk must return {expected} for {patterns} over {entries}"
             )
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="directory mode bits are ignored on Windows and by root",
+)
+def test_an_unreadable_copied_directory_fails_the_lookup(tmp_path: Path) -> None:
+    """A directory the walk cannot read must raise, not shrink the file set."""
+    copied = tmp_path / "copied"
+    (copied / "pkg").mkdir(parents=True)
+    (copied / "pkg" / "mod.py").write_text("", encoding="utf-8")
+    unreadable = copied / "private"
+    unreadable.mkdir()
+    unreadable.chmod(0o000)
+
+    try:
+        with pytest.raises(PermissionError):
+            _copied_sources(copied, ("*.py",))
+    finally:
+        unreadable.chmod(0o755)
 
 
 def test_the_configuration_excludes_only_the_overloaded_name() -> None:
