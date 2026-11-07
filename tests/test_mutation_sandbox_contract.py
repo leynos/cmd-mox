@@ -7,7 +7,8 @@ not install, fails the mutation baseline even though the source is healthy.
 
 These tests pin the remedies for the two gaps found by running the suite in
 a faithful sandbox: the committed spelling policy must be copied, and the
-Makefile-parser contract must skip when its tool is unavailable.
+Makefile-parser contract must skip when its tool is unavailable without
+hiding the contracts that do not need it.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SKYLOS_CONTRACT = ROOT / "tests" / "test_skylos_lint_contract.py"
@@ -39,29 +42,28 @@ def test_the_spelling_policy_is_copied_into_the_sandbox() -> None:
     )
 
 
-def test_the_makefile_parser_contract_skips_without_makeutil(
-    tmp_path: Path,
-) -> None:
-    """The sandbox does not install makeutil, so the contract must skip.
-
-    Reproduces the baseline failure from the mutation workflow: the contract
-    called ``makeutil`` and raised ``FileNotFoundError`` instead of reporting
-    that the tool was unavailable.
-    """
+@pytest.fixture(name="without_makeutil")
+def without_makeutil_fixture(tmp_path: Path) -> dict[str, str]:
+    """Return an environment whose ``PATH`` contains no ``makeutil``."""
     empty_bin = tmp_path / "bin"
     empty_bin.mkdir()
     environment = os.environ.copy()
     environment["PATH"] = str(empty_bin)
     environment.pop("PYTEST_ADDOPTS", None)
+    return environment
 
-    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+
+def _run_contract(
+    environment: dict[str, str], *selection: str
+) -> subprocess.CompletedProcess[str]:
+    """Run the Skylos contract module with *selection* and return the result."""
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
         [
             sys.executable,
             "-m",
             "pytest",
             str(SKYLOS_CONTRACT),
-            "-k",
-            "test_lint_recipe_runs_the_production_dead_code_gate",
+            *selection,
             "-q",
             "-p",
             "no:cacheprovider",
@@ -73,5 +75,35 @@ def test_the_makefile_parser_contract_skips_without_makeutil(
         env=environment,
     )
 
+
+def test_the_makefile_parser_contract_skips_without_makeutil(
+    without_makeutil: dict[str, str],
+) -> None:
+    """The sandbox does not install makeutil, so the parser test must skip.
+
+    Reproduces the baseline failure from the mutation workflow: the contract
+    called ``makeutil`` and raised ``FileNotFoundError`` instead of reporting
+    that the tool was unavailable.
+    """
+    result = _run_contract(
+        without_makeutil,
+        "-k",
+        "test_lint_recipe_runs_the_production_dead_code_gate",
+    )
+
     assert result.returncode == 0, result.stdout + result.stderr
     assert "1 skipped" in result.stdout, result.stdout
+
+
+def test_contracts_without_the_parser_still_run_without_makeutil(
+    without_makeutil: dict[str, str],
+) -> None:
+    """The skip must not hide contracts that never read the Makefile."""
+    result = _run_contract(
+        without_makeutil,
+        "-k",
+        "test_ci_runs_the_lint_target_and_installs_makeutil",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout, result.stdout

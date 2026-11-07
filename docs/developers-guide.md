@@ -1113,6 +1113,16 @@ Tests that specifically exercise subprocess behaviour should pass `-c`,
 `--rootdir`, and `--confcutdir` tied to pytester's project so configuration
 discovery stays within its temporary root.
 
+Use the `isolated_pytester_config_args` fixture when a nested run must ignore
+the outer checkout's configuration but does not need the full nested runner. It
+returns a builder for the `-c`, `--rootdir`, and `--confcutdir` arguments, and
+it preserves a `tox.ini` the test has already written, creating an empty one
+only when the test has not. The root `conftest.py` also installs a mutmut-only
+compatibility alias: mutmut 3.6 reads `pytest.Item._nodeid`, which pytest 9
+removed. `tests/_mutmut_pytest_compat.py` restores it as a read-only property
+over `nodeid`, but only while `mutmut` is imported and the alias is absent, so
+an ordinary test run keeps pytest's public interface.
+
 Reproduce the clean baseline and mutation run with:
 
 ```bash

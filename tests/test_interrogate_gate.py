@@ -20,13 +20,17 @@ Run via ``make test``.
 from __future__ import annotations
 
 import ast
+import operator
 import re
 import shutil
 import subprocess
+import tempfile
 import textwrap
 import tomllib
 from pathlib import Path
 
+import hypothesis as hyp
+import hypothesis.strategies as st
 import pytest
 import yaml
 
@@ -75,16 +79,33 @@ _GENERATED_DIRECTORIES = frozenset({
 
 
 def _git_toplevel(git: str, root: Path) -> Path | None:
-    """Return the repository root git resolves for *root*, if any."""
-    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
-        [git, "-C", str(root), "rev-parse", "--show-toplevel"],
+    """Return the repository root git resolves for *root*, if any.
+
+    A directory outside a work tree is reported as ``None`` so the caller can
+    fall back to a walk. Once git confirms a work tree, a failing root lookup
+    is unexpected and propagates instead of being mistaken for a copied tree.
+
+    Returns
+    -------
+    Path | None
+        The repository root when *root* is inside a work tree, otherwise
+        ``None``.
+    """
+    inside = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+        [git, "-C", str(root), "rev-parse", "--is-inside-work-tree"],
         capture_output=True,
         text=True,
         check=False,
     )
-    if result.returncode != 0 or not result.stdout.strip():
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
         return None
-    return Path(result.stdout.strip()).resolve()
+    toplevel = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+        [git, "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return Path(toplevel.stdout.strip()).resolve()
 
 
 def _git_tracked(git: str, root: Path, patterns: tuple[str, ...]) -> list[str]:
@@ -202,6 +223,102 @@ def test_tracked_files_fall_back_to_a_copied_tree(tmp_path: Path) -> None:
     assert _tracked("*.py", root=sandbox) == ["pkg/mod.py"], (
         "the copied tree must supply the sources without generated output"
     )
+
+
+def _git(root: Path, *arguments: str) -> None:
+    """Run git in *root*, failing the test on error."""
+    git = shutil.which("git")
+    assert git, "git must be on the path"
+    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+        [git, "-C", str(root), *arguments],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+def test_tracked_files_come_only_from_the_git_index(tmp_path: Path) -> None:
+    """A checkout reports tracked sources, never untracked build output."""
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "mod.py").write_text("", encoding="utf-8")
+    (repo / "untracked.py").write_text("", encoding="utf-8")
+    _git(repo, "init")
+    _git(repo, "add", "pkg/mod.py")
+
+    assert _tracked("*.py", root=repo) == ["pkg/mod.py"], (
+        "an untracked source must not be reported as owned"
+    )
+
+
+def test_tracked_files_ignore_the_outer_repository_for_a_copied_tree(
+    tmp_path: Path,
+) -> None:
+    """Mutmut's sandbox sits inside the checkout but is not the checkout.
+
+    `git ls-files` resolves the outer repository and reports nothing for the
+    copy, so the fallback must supply the copied sources instead.
+    """
+    repo = tmp_path / "repo"
+    (repo / "cmd_mox").mkdir(parents=True)
+    (repo / "cmd_mox" / "outer.py").write_text("", encoding="utf-8")
+    _git(repo, "init")
+    _git(repo, "add", "cmd_mox/outer.py")
+    sandbox = repo / "mutants"
+    (sandbox / "cmd_mox").mkdir(parents=True)
+    (sandbox / "cmd_mox" / "copy.py").write_text("", encoding="utf-8")
+
+    assert _tracked("*.py", root=sandbox) == ["cmd_mox/copy.py"], (
+        "the sandbox must read its own copy, not the outer repository"
+    )
+
+
+_GENERATED_PARTS = frozenset({"__pycache__", ".venv", "mutants"})
+_COPIED_DIRECTORIES = st.sampled_from([
+    "pkg",
+    "pkg/inner",
+    "docs",
+    "__pycache__",
+    ".venv/lib",
+    "mutants",
+])
+_COPIED_FILENAMES = st.sampled_from(["mod.py", "stub.pyi", "notes.txt"])
+
+
+@hyp.given(
+    entries=st.lists(
+        st.tuples(_COPIED_DIRECTORIES, _COPIED_FILENAMES, st.booleans()),
+        max_size=10,
+        unique_by=operator.itemgetter(0, 1),
+    )
+)
+def test_copied_sources_match_an_independent_filter(
+    entries: list[tuple[str, str, bool]],
+) -> None:
+    """The walk keeps sources outside generated dirs and skips symlinks.
+
+    Hypothesis covers the combinations hand-picked cases miss: nested
+    generated directories, non-source files, and links to real sources.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        target = root / "target.txt"
+        target.write_text("", encoding="utf-8")
+        expected: set[str] = set()
+        for parent, name, is_symlink in entries:
+            path = root / parent / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+            if is_symlink:
+                path.unlink()
+                path.symlink_to(target)
+            elif not _GENERATED_PARTS.intersection(Path(parent).parts):
+                if path.match("*.py"):
+                    expected.add(path.relative_to(root).as_posix())
+
+        assert _copied_sources(root, ("*.py",)) == sorted(expected), (
+            f"the walk must return {sorted(expected)} for {entries}"
+        )
 
 
 def test_the_configuration_excludes_only_the_overloaded_name() -> None:

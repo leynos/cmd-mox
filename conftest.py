@@ -116,11 +116,39 @@ def pytest_collection_modifyitems(
             item.add_marker(skip)
 
 
+def _ensure_inner_pytest_config(pytester: pytest.Pytester) -> Path:
+    """Return the pytester project's pytest config, writing one if absent."""
+    inner_ini = pytester.path / "tox.ini"
+    if inner_ini.is_file():
+        return inner_ini
+    return pytester.makeini("[pytest]\n")
+
+
+def _pytest_isolation_args(
+    pytester: pytest.Pytester, config_path: Path
+) -> tuple[str, ...]:
+    """Return arguments pinning a nested run to *config_path* and pytester."""
+    return (
+        "-c",
+        str(config_path),
+        "--rootdir",
+        str(pytester.path),
+        "--confcutdir",
+        str(pytester.path),
+    )
+
+
 @pytest.fixture
 def isolated_pytester_config_args(
     pytester: pytest.Pytester,
 ) -> cabc.Callable[[], tuple[str, ...]]:
     """Build CLI arguments that isolate pytest configuration to pytester.
+
+    Use this instead of bare ``pytester.runpytest_inprocess`` when a nested
+    run must ignore the outer checkout's configuration. The builder creates
+    ``tox.ini`` only when the test has not authored one, so a case that
+    depends on its own inner configuration keeps it, and returns the
+    ``-c``/``--rootdir``/``--confcutdir`` arguments in one call.
 
     Parameters
     ----------
@@ -131,22 +159,12 @@ def isolated_pytester_config_args(
     -------
     cabc.Callable[[], tuple[str, ...]]
         A builder returning the config, rootdir and confcutdir arguments for
-        one nested pytest invocation. It preserves an existing ``tox.ini``.
+        one nested pytest invocation.
     """
 
     def build_args() -> tuple[str, ...]:
         """Return the isolation arguments for one nested pytest invocation."""
-        inner_ini = pytester.path / "tox.ini"
-        if not inner_ini.is_file():
-            inner_ini = pytester.makeini("[pytest]\n")
-        return (
-            "-c",
-            str(inner_ini),
-            "--rootdir",
-            str(pytester.path),
-            "--confcutdir",
-            str(pytester.path),
-        )
+        return _pytest_isolation_args(pytester, _ensure_inner_pytest_config(pytester))
 
     return build_args
 

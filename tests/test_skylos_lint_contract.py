@@ -28,10 +28,10 @@ import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
-#: Every assertion here reads Makeutil's structured report, so the module
-#: cannot run where the parser is absent. `make test` installs it, but the
-#: mutmut sandbox only copies files and runs `uv run`, so it has no parser.
-pytestmark = pytest.mark.skipif(
+#: Only the tests that read Makeutil's structured report need the parser.
+#: `make test` installs it, but the mutmut sandbox only copies files and runs
+#: `uv run`, so it has no parser; the remaining checks must still run there.
+requires_makeutil = pytest.mark.skipif(
     shutil.which("makeutil") is None,
     reason=(
         "makeutil is not installed in this working copy (for example inside "
@@ -484,6 +484,7 @@ def _skylos_entrypoints() -> list[dict[str, object]]:
 class TestSkylosLintContract:
     """Contract tests for Skylos's production dead-code lint gate."""
 
+    @requires_makeutil
     def test_lint_recipe_runs_the_production_dead_code_gate(self) -> None:
         """``make lint`` must scan only production code with Skylos's strict gate."""
         config = _pyproject()
@@ -516,6 +517,7 @@ class TestSkylosLintContract:
             "Skylos lint command contract must scan production dead code strictly."
         )
 
+    @requires_makeutil
     def test_whitelist_target_uses_skylos_subcommand_contract(self) -> None:
         """``skylos whitelist`` must precede its arguments and scan options."""
         assert _variable_tokens("SKYLOS_CLI") == _SKYLOS_CLI_TOKENS, (
