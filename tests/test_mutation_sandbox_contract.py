@@ -130,25 +130,21 @@ def test_contracts_without_the_parser_still_run_without_makeutil(
 _REQUIRED_TOOLS = ("env", "flock", "make", "sh")
 
 
-def _isolated_tool_path(directory: Path) -> str:
-    """Return a PATH holding only the tools the behavioural contracts need.
+def _install_isolated_tools(directory: Path) -> None:
+    """Create *directory* holding only the tools the behavioural contracts need.
 
     Symlinking each required tool into one otherwise empty directory keeps
     ``makeutil`` unreachable whatever the host's layout: dropping "the
     directory that contains makeutil" fails when another PATH entry is an
     alias of that directory, such as ``/bin`` pointing at ``/usr/bin``.
-
-    Returns
-    -------
-    str
-        The ``PATH`` value naming only *directory*.
+    Callers build the ``PATH`` value from *directory* themselves, so the write
+    stays visible at the call site.
     """
     directory.mkdir()
     for name in _REQUIRED_TOOLS:
         source = shutil.which(name)
         assert source, f"{name} must be on the path"
         (directory / name).symlink_to(source)
-    return str(directory)
 
 
 def test_the_isolated_path_never_inherits_a_neighbouring_makeutil(
@@ -173,7 +169,9 @@ def test_the_isolated_path_never_inherits_a_neighbouring_makeutil(
         return real_which(name, path=os.pathsep.join((str(tools), str(alias))))
 
     monkeypatch.setattr(shutil, "which", fake_which)
-    isolated = _isolated_tool_path(tmp_path / "isolated")
+    isolated_directory = tmp_path / "isolated"
+    _install_isolated_tools(isolated_directory)
+    isolated = str(isolated_directory)
 
     assert {entry.name for entry in Path(isolated).iterdir()} == set(_REQUIRED_TOOLS), (
         "the isolated PATH must hold only the required tools"
@@ -193,8 +191,10 @@ def test_the_isolated_path_never_inherits_a_neighbouring_makeutil(
 )
 def test_behavioural_contracts_run_without_the_parser(tmp_path: Path) -> None:
     """The sandbox must keep running the whitelist behaviour checks."""
+    tools = tmp_path / "bin"
+    _install_isolated_tools(tools)
     environment = _inherited_environment()
-    environment["PATH"] = _isolated_tool_path(tmp_path / "bin")
+    environment["PATH"] = str(tools)
 
     assert shutil.which("makeutil", path=environment["PATH"]) is None, (
         "the behavioural selection must run with no parser on PATH"

@@ -280,6 +280,19 @@ names only that function and that the implementation is documented. The same
 test holds the pin, the flags, the targets, CI's uv setup and the failing paths
 of the target.
 
+`tests/test_interrogate_gate.py` chooses the files the gate must cover through
+`_tracked`. In a checkout it asks Git for the tracked files matching the
+patterns, so untracked build output and virtual environments are never
+inspected. Mutmut's sandbox is a copy inside the checkout: Git resolves the
+outer repository there and matches nothing, so `_tracked` falls back to a walk
+of the copied tree that skips generated directories and symlinks. Only Git's
+line-anchored `fatal: not a git repository` diagnostic selects the walk; any
+other Git failure propagates, so a permission or configuration error cannot
+silently pass the gate. Every Git child also runs with the repository-location
+variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
+`GIT_ALTERNATE_OBJECT_DIRECTORIES` and `GIT_COMMON_DIR`) removed, so a hook
+environment cannot re-point the lookup away from the repository `-C` names.
+
 ## YAML lint
 
 `make lint` runs `yamllint --strict` over every Git-tracked `*.yml` and
