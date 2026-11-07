@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import operator
+import os
 import re
 import shutil
 import subprocess
@@ -78,7 +79,10 @@ _GENERATED_DIRECTORIES = frozenset({
 })
 
 
-_NOT_A_WORK_TREE = "not a git repository"
+#: Git's own diagnostic, anchored at a line start. A path or another error
+#: that merely contains these words must not select the copied-tree walk.
+_NOT_A_WORK_TREE = re.compile(r"^fatal: not a git repository\b", re.MULTILINE)
+_C_LOCALE = {"LC_ALL": "C", "LANG": "C", "LANGUAGE": "C"}
 
 
 def _git_toplevel(git: str, root: Path) -> Path | None:
@@ -106,9 +110,10 @@ def _git_toplevel(git: str, root: Path) -> Path | None:
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, **_C_LOCALE},
     )
     if inside.returncode != 0:
-        if _NOT_A_WORK_TREE in inside.stderr:
+        if _NOT_A_WORK_TREE.search(inside.stderr):
             return None
         raise subprocess.CalledProcessError(
             inside.returncode, inside.args, inside.stdout, inside.stderr
@@ -313,6 +318,20 @@ def test_a_directory_outside_a_work_tree_reports_no_root(tmp_path: Path) -> None
 def test_an_unexpected_work_tree_query_failure_propagates(tmp_path: Path) -> None:
     """A permission or configuration error must not look like a copied tree."""
     git = _stub_git(tmp_path, "echo 'fatal: unable to read config' >&2\nexit 128\n")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _git_toplevel(git, tmp_path)
+
+
+def test_a_path_mentioning_a_repository_does_not_select_the_walk(
+    tmp_path: Path,
+) -> None:
+    """Only a line-anchored diagnostic counts; a path containing it does not."""
+    git = _stub_git(
+        tmp_path,
+        "echo \"fatal: cannot change to '/tmp/not a git repository/missing': "
+        'No such file or directory" >&2\nexit 128\n',
+    )
 
     with pytest.raises(subprocess.CalledProcessError):
         _git_toplevel(git, tmp_path)

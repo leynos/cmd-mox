@@ -33,6 +33,10 @@ INDEPENDENT_CONTRACTS = (
     " or test_skylos_gate_is_strict"
     " or test_ci_runs_the_lint_target_and_installs_makeutil"
 )
+BEHAVIOURAL_CONTRACTS = (
+    "test_skylos_allow_rejects_missing_or_whitespace_values"
+    " or test_skylos_allow_forwards_generated_argument_boundaries"
+)
 
 
 def _also_copy() -> list[str]:
@@ -119,6 +123,35 @@ def test_contracts_without_the_parser_still_run_without_makeutil(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "3 passed" in result.stdout, result.stdout
+
+
+def _path_without_makeutil() -> str:
+    """Return a PATH that keeps the build tools but not ``makeutil``."""
+    make = shutil.which("make")
+    assert make, "make must be on the path"
+    directories = [str(Path(make).parent), "/usr/bin", "/bin"]
+    makeutil = shutil.which("makeutil")
+    if makeutil is not None:
+        directories = [
+            directory
+            for directory in directories
+            if Path(makeutil).parent != Path(directory)
+        ]
+    return os.pathsep.join(dict.fromkeys(directories))
+
+
+def test_behavioural_contracts_run_without_the_parser() -> None:
+    """The sandbox must keep running the whitelist behaviour checks."""
+    environment = _inherited_environment()
+    environment["PATH"] = _path_without_makeutil()
+
+    assert shutil.which("makeutil", path=environment["PATH"]) is None, (
+        "the behavioural selection must run with no parser on PATH"
+    )
+    result = _run_contract(environment, "-k", BEHAVIOURAL_CONTRACTS)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 passed" in result.stdout, result.stdout
 
 
 @pytest.mark.skipif(
