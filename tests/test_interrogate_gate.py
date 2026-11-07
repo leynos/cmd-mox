@@ -376,8 +376,17 @@ def test_tracked_lookup_ignores_a_hook_index_override(
     )
 
 
-def _stub_git(tmp_path: Path, script: str) -> str:
-    """Return a fake ``git`` executable that runs *script*."""
+def _create_stub_git(tmp_path: Path, script: str) -> str:
+    """Create a fake ``git`` executable that runs *script* and return its path.
+
+    The helper writes the script and marks it executable, so its name states
+    the command it performs rather than presenting a query.
+
+    Returns
+    -------
+    str
+        The path to the executable just created.
+    """
     stub = tmp_path / "git"
     stub.write_text(f"#!/bin/sh\n{script}", encoding="utf-8")
     stub.chmod(0o755)
@@ -386,7 +395,7 @@ def _stub_git(tmp_path: Path, script: str) -> str:
 
 def test_a_directory_outside_a_work_tree_reports_no_root(tmp_path: Path) -> None:
     """Git's own "not a git repository" message means a copied tree."""
-    git = _stub_git(
+    git = _create_stub_git(
         tmp_path,
         "echo 'fatal: not a git repository (or any of the parent "
         "directories): .git' >&2\nexit 128\n",
@@ -399,7 +408,9 @@ def test_a_directory_outside_a_work_tree_reports_no_root(tmp_path: Path) -> None
 
 def test_an_unexpected_work_tree_query_failure_propagates(tmp_path: Path) -> None:
     """A permission or configuration error must not look like a copied tree."""
-    git = _stub_git(tmp_path, "echo 'fatal: unable to read config' >&2\nexit 128\n")
+    git = _create_stub_git(
+        tmp_path, "echo 'fatal: unable to read config' >&2\nexit 128\n"
+    )
 
     with pytest.raises(subprocess.CalledProcessError):
         _git_toplevel(git, tmp_path)
@@ -409,7 +420,7 @@ def test_a_path_mentioning_a_repository_does_not_select_the_walk(
     tmp_path: Path,
 ) -> None:
     """Only a line-anchored diagnostic counts; a path containing it does not."""
-    git = _stub_git(
+    git = _create_stub_git(
         tmp_path,
         "echo \"fatal: cannot change to '/tmp/not a git repository/missing': "
         'No such file or directory" >&2\nexit 128\n',
@@ -421,7 +432,7 @@ def test_a_path_mentioning_a_repository_does_not_select_the_walk(
 
 def test_a_failing_root_lookup_propagates(tmp_path: Path) -> None:
     """Once git confirms a work tree, a failing root lookup is an error."""
-    git = _stub_git(
+    git = _create_stub_git(
         tmp_path,
         'case "$*" in\n'
         "  *--is-inside-work-tree*) echo true ;;\n"

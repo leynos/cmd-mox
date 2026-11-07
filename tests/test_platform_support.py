@@ -259,6 +259,42 @@ def test_nested_pytester_temporarily_anchors_mutmut_source_paths(
         )
 
 
+def test_nested_pytester_anchors_each_mutmut_source_path(
+    pytester: Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+) -> None:
+    """Anchor every relative path and leave an absolute path unchanged."""
+    package_root = Path(__file__).resolve().parent.parent
+    absolute_path = package_root / "examples"
+    configured_paths = [Path("cmd_mox"), Path("tests"), absolute_path]
+    with monkeypatch.context() as test_scope:
+        mutmut_config = types.SimpleNamespace(source_paths=list(configured_paths))
+        configuration_module = types.ModuleType("mutmut.configuration")
+        configuration_module.__dict__["Config"] = types.SimpleNamespace(
+            get=lambda: mutmut_config
+        )
+        test_scope.setitem(sys.modules, "mutmut.configuration", configuration_module)
+        original_source_paths = list(mutmut_config.source_paths)
+
+        def assert_each_path_is_anchored(session: pytest.Session) -> None:
+            """Assert relative paths are anchored and the absolute one is kept."""
+            del session
+            assert mutmut_config.source_paths == [
+                package_root / "cmd_mox",
+                package_root / "tests",
+                absolute_path,
+            ], "each relative path should be anchored and absolute paths kept"
+
+        probe = types.SimpleNamespace(pytest_sessionstart=assert_each_path_is_anchored)
+        test_file = pytester.makepyfile("def test_nested():\n    assert True\n")
+        result = run_nested_pytester(test_path=test_file, plugins=(probe,))
+        result.assert_outcomes(passed=1, errors=0)
+        assert mutmut_config.source_paths == original_source_paths, (
+            "the original source paths should be restored after the nested run"
+        )
+
+
 @pytest.fixture(scope="module")
 def relative_mutmut_source_paths() -> cabc.Iterator[MutmutConfig]:
     """Expose relative mutmut paths before a test's autouse fixtures run.
