@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import string
 import subprocess
 import sys
@@ -22,9 +23,22 @@ from tempfile import TemporaryDirectory
 
 import hypothesis as hyp
 import hypothesis.strategies as st
+import pytest
 import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+#: Every assertion here reads Makeutil's structured report, so the module
+#: cannot run where the parser is absent. `make test` installs it, but the
+#: mutmut sandbox only copies files and runs `uv run`, so it has no parser.
+pytestmark = pytest.mark.skipif(
+    shutil.which("makeutil") is None,
+    reason=(
+        "makeutil is not installed in this working copy (for example inside "
+        "mutmut's mutants/ sandbox, which does not install the Makefile parser)"
+    ),
+)
+
 _MAKEUTIL_COMMAND: typ.Final = ("makeutil", "parse", "Makefile")
 _MAKEUTIL_REVISION: typ.Final = "29fc5a1634ffbaa18a773eed9dff1b2838a45d9c"
 _MAKEUTIL_TOOLCHAIN: typ.Final = "nightly-2026-05-28"

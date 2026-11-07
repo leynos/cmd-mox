@@ -372,7 +372,8 @@ do_not_mutate = [
 ]
 # mutmut runs pytest from mutants/; copy the assets tests resolve
 # relative to the repository root, including shared fixtures, lint contracts,
-# tooling, workflows, BDD feature files, and docs scenarios.
+# tooling, workflows, BDD feature files, docs scenarios, and the spelling
+# policy the typos rollout test reads.
 also_copy = [
     "conftest.py",
     "Makefile",
@@ -380,6 +381,8 @@ also_copy = [
     ".yamllint.yml",
     ".yamllint-estate.yml",
     "pylintrc-df12.toml",
+    "typos.toml",
+    "typos.local.toml",
     "uv.lock",
     ".github/",
     "scripts/",

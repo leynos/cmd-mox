@@ -1119,6 +1119,15 @@ Reproduce the clean baseline and mutation run with:
 uv run --python 3.13 --with mutmut==3.6.0 mutmut run
 ```
 
+The sandbox is a copy, not a checkout. Mutmut copies `source_paths`,
+`also_copy`, and a fixed set of test directories into `mutants/`, then runs the
+suite there through `uv run`. A repository file a test reads must therefore be
+listed in `also_copy`; the committed spelling policy (`typos.local.toml`) is
+copied for that reason. A tool the sandbox does not install must be guarded
+instead: `make test` installs `makeutil`, but `uv run` does not, so the Skylos
+Makefile contract skips when the parser is absent.
+`tests/test_mutation_sandbox_contract.py` pins both properties.
+
 The workflow runs in two modes. A **daily schedule** fires a change-scoped run
 that mutates only the source files touched within the detection window, so
 quiet days are cheap no-ops. A **manual dispatch** (the Actions "Run workflow"
