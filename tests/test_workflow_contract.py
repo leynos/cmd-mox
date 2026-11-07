@@ -43,10 +43,13 @@ USES_RE = re.compile(
 )
 
 #: The caller inputs this repository relies on; anything else must use
-#: the reusable workflow's defaults.
+#: the reusable workflow's defaults. A manual dispatch mutates the whole
+#: package, so the step budget is sized to the suite rather than the
+#: shared 90-minute default.
 EXPECTED_WITH = {
     "paths": "cmd_mox/",
     "module-prefix-strip": "",
+    "timeout-minutes": 240,
 }
 
 
@@ -151,7 +154,7 @@ def test_triggers_keep_schedule_and_plain_dispatch() -> None:
 
 
 def test_with_block_carries_exactly_the_caller_configuration() -> None:
-    """The caller sets only the flat-layout inputs; defaults cover the rest."""
+    """The caller sets the flat-layout inputs and a suite-sized step budget."""
     with_block = _mutation_job(_load()).get("with")
     assert with_block == EXPECTED_WITH, (
         f"jobs.mutation.with must be exactly {EXPECTED_WITH!r}, got {with_block!r}"

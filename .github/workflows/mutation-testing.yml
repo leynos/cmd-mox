@@ -18,9 +18,13 @@ jobs:
     permissions:
       contents: read
       id-token: write # OIDC workflow-source resolution
-    uses: leynos/shared-actions/.github/workflows/mutation-mutmut.yml@3086643fbcea5bc01ed65cf5aec5a3accf081ab4
+    uses: leynos/shared-actions/.github/workflows/mutation-mutmut.yml@a49fcb1b9183fdfccc5b1f87b55e01e05086875b
     with:
       # Flat layout: mutable source lives under cmd_mox/, not src/.
       paths: "cmd_mox/"
       # No prefix to strip for a flat layout.
       module-prefix-strip: ""
+      # A workflow_dispatch run mutates the whole package (about 6,000
+      # mutants). The shared default of 90 minutes ends mid-run, so size the
+      # step budget to the suite; the job ceiling remains 360 minutes.
+      timeout-minutes: 240
