@@ -225,7 +225,8 @@ def test_verification_outcomes(
 
 def test_subprocess_runner_preserves_custom_pytester_ini(
     pytester: pytest.Pytester,
-    isolated_pytester_config_args: cabc.Callable[[], tuple[str, ...]],
+    ensure_pytester_ini: cabc.Callable[[], Path],
+    isolated_pytester_config_args: cabc.Callable[[Path], tuple[str, ...]],
 ) -> None:
     """Subprocess configuration must keep test-authored marker settings."""
     pytester.makeini(
@@ -244,7 +245,7 @@ def test_subprocess_runner_preserves_custom_pytester_ini(
     )
 
     result = pytester.runpytest_subprocess(
-        *isolated_pytester_config_args(),
+        *isolated_pytester_config_args(ensure_pytester_ini()),
         "-q",
         "--strict-markers",
         *_DISABLE_CI_PLUGINS,
@@ -257,7 +258,8 @@ def test_subprocess_runner_preserves_custom_pytester_ini(
 def test_call_hook_does_not_warn_on_ordinary_test_failure(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
-    isolated_pytester_config_args: cabc.Callable[[], tuple[str, ...]],
+    ensure_pytester_ini: cabc.Callable[[], Path],
+    isolated_pytester_config_args: cabc.Callable[[Path], tuple[str, ...]],
 ) -> None:
     """Ordinary assertion failures must not escape hook-wrapper teardown."""
     monkeypatch.delenv("PYTEST_PLUGINS", raising=False)
@@ -273,7 +275,7 @@ def test_call_hook_does_not_warn_on_ordinary_test_failure(
     )
 
     result = pytester.runpytest_subprocess(
-        *isolated_pytester_config_args(),
+        *isolated_pytester_config_args(ensure_pytester_ini()),
         "-q",
         "-s",
         *_DISABLE_CI_PLUGINS,
@@ -307,7 +309,8 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
     test_case: BodyExceptionTestCase,
-    isolated_pytester_config_args: cabc.Callable[[], tuple[str, ...]],
+    ensure_pytester_ini: cabc.Callable[[], Path],
+    isolated_pytester_config_args: cabc.Callable[[Path], tuple[str, ...]],
 ) -> None:
     """Test-body interrupts and worker exits remain primary at teardown."""
     monkeypatch.delenv("PYTEST_PLUGINS", raising=False)
@@ -341,7 +344,7 @@ def test_call_hook_preserves_body_exception_during_verification_failure(
     )
 
     result = pytester.runpytest_subprocess(
-        *isolated_pytester_config_args(),
+        *isolated_pytester_config_args(ensure_pytester_ini()),
         "-q",
         "-s",
         timeout=30,

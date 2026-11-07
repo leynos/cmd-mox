@@ -14,6 +14,7 @@ hiding the contracts that do not need it.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -23,6 +24,15 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SKYLOS_CONTRACT = ROOT / "tests" / "test_skylos_lint_contract.py"
+PARSER_CONTRACTS = (
+    "test_lint_recipe_runs_the_production_dead_code_gate"
+    " or test_whitelist_target_uses_skylos_subcommand_contract"
+)
+INDEPENDENT_CONTRACTS = (
+    "test_skylos_whitelist_is_reviewed_and_reasoned"
+    " or test_skylos_gate_is_strict"
+    " or test_ci_runs_the_lint_target_and_installs_makeutil"
+)
 
 
 def _also_copy() -> list[str]:
@@ -42,14 +52,20 @@ def test_the_spelling_policy_is_copied_into_the_sandbox() -> None:
     )
 
 
+def _inherited_environment() -> dict[str, str]:
+    """Return the current environment without pytest add-ons."""
+    environment = os.environ.copy()
+    environment.pop("PYTEST_ADDOPTS", None)
+    return environment
+
+
 @pytest.fixture(name="without_makeutil")
 def without_makeutil_fixture(tmp_path: Path) -> dict[str, str]:
     """Return an environment whose ``PATH`` contains no ``makeutil``."""
     empty_bin = tmp_path / "bin"
     empty_bin.mkdir()
-    environment = os.environ.copy()
+    environment = _inherited_environment()
     environment["PATH"] = str(empty_bin)
-    environment.pop("PYTEST_ADDOPTS", None)
     return environment
 
 
@@ -99,11 +115,19 @@ def test_contracts_without_the_parser_still_run_without_makeutil(
     without_makeutil: dict[str, str],
 ) -> None:
     """The skip must not hide contracts that never read the Makefile."""
-    result = _run_contract(
-        without_makeutil,
-        "-k",
-        "test_ci_runs_the_lint_target_and_installs_makeutil",
-    )
+    result = _run_contract(without_makeutil, "-k", INDEPENDENT_CONTRACTS)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "1 passed" in result.stdout, result.stdout
+    assert "3 passed" in result.stdout, result.stdout
+
+
+@pytest.mark.skipif(
+    shutil.which("makeutil") is None,
+    reason="makeutil is not installed in this working copy",
+)
+def test_the_parser_contracts_run_when_makeutil_is_available() -> None:
+    """An unconditional skip would pass the missing-parser test vacuously."""
+    result = _run_contract(_inherited_environment(), "-k", PARSER_CONTRACTS)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 passed" in result.stdout, result.stdout

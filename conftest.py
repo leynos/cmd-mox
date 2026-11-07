@@ -116,14 +116,6 @@ def pytest_collection_modifyitems(
             item.add_marker(skip)
 
 
-def _ensure_inner_pytest_config(pytester: pytest.Pytester) -> Path:
-    """Return the pytester project's pytest config, writing one if absent."""
-    inner_ini = pytester.path / "tox.ini"
-    if inner_ini.is_file():
-        return inner_ini
-    return pytester.makeini("[pytest]\n")
-
-
 def _pytest_isolation_args(
     pytester: pytest.Pytester, config_path: Path
 ) -> tuple[str, ...]:
@@ -139,32 +131,60 @@ def _pytest_isolation_args(
 
 
 @pytest.fixture
-def isolated_pytester_config_args(
-    pytester: pytest.Pytester,
-) -> cabc.Callable[[], tuple[str, ...]]:
-    """Build CLI arguments that isolate pytest configuration to pytester.
+def ensure_pytester_ini(pytester: pytest.Pytester) -> cabc.Callable[[], Path]:
+    """Return the pytester project's pytest config, writing one if absent.
 
-    Use this instead of bare ``pytester.runpytest_inprocess`` when a nested
-    run must ignore the outer checkout's configuration. The builder creates
-    ``tox.ini`` only when the test has not authored one, so a case that
-    depends on its own inner configuration keeps it, and returns the
-    ``-c``/``--rootdir``/``--confcutdir`` arguments in one call.
+    This is the only fixture that creates the inner configuration, so a test
+    that depends on its own ``tox.ini`` keeps it: the existing file is
+    returned untouched and a new one is written only when none exists.
 
     Parameters
     ----------
     pytester : pytest.Pytester
-        Create the temporary project and any test-authored inner configuration.
+        Provide the temporary project directory.
 
     Returns
     -------
-    cabc.Callable[[], tuple[str, ...]]
+    cabc.Callable[[], Path]
+        A command returning the existing or newly written config path.
+    """
+
+    def ensure() -> Path:
+        """Return the inner config, creating it only when absent."""
+        inner_ini = pytester.path / "tox.ini"
+        if inner_ini.is_file():
+            return inner_ini
+        return pytester.makeini("[pytest]\n")
+
+    return ensure
+
+
+@pytest.fixture
+def isolated_pytester_config_args(
+    pytester: pytest.Pytester,
+) -> cabc.Callable[[Path], tuple[str, ...]]:
+    """Build CLI arguments that isolate pytest configuration to pytester.
+
+    Use this instead of bare ``pytester.runpytest_inprocess`` when a nested
+    run must ignore the outer checkout's configuration. The builder is a pure
+    query: it never writes a file, so pass the path from
+    :func:`ensure_pytester_ini`, or one the test authored, explicitly.
+
+    Parameters
+    ----------
+    pytester : pytest.Pytester
+        Provide the temporary project directory used as the root.
+
+    Returns
+    -------
+    cabc.Callable[[Path], tuple[str, ...]]
         A builder returning the config, rootdir and confcutdir arguments for
         one nested pytest invocation.
     """
 
-    def build_args() -> tuple[str, ...]:
+    def build_args(config_path: Path) -> tuple[str, ...]:
         """Return the isolation arguments for one nested pytest invocation."""
-        return _pytest_isolation_args(pytester, _ensure_inner_pytest_config(pytester))
+        return _pytest_isolation_args(pytester, config_path)
 
     return build_args
 
@@ -174,7 +194,7 @@ def run_nested_pytester(
     pytester: pytest.Pytester,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
-    isolated_pytester_config_args: cabc.Callable[[], tuple[str, ...]],
+    ensure_pytester_ini: cabc.Callable[[], Path],
 ) -> cabc.Callable[..., RunResult]:
     """Create a nested pytest runner anchored to the outer invocation.
 
@@ -191,6 +211,8 @@ def run_nested_pytester(
         Restore the pytester cwd after the nested in-process run.
     request : pytest.FixtureRequest
         Provide the outer invocation directory used by the nested run.
+    ensure_pytester_ini : cabc.Callable[[], Path]
+        Return the inner config, creating one only when the test has not.
 
     Returns
     -------
@@ -211,7 +233,7 @@ def run_nested_pytester(
             _anchor_mutmut_source_paths(scoped_monkeypatch)
             return pytester.runpytest_inprocess(
                 *args,
-                *isolated_pytester_config_args(),
+                *_pytest_isolation_args(pytester, ensure_pytester_ini()),
                 str(generated_path.resolve(strict=True)),
                 plugins=plugins,
             )

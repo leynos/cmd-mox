@@ -78,18 +78,28 @@ _GENERATED_DIRECTORIES = frozenset({
 })
 
 
+_NOT_A_WORK_TREE = "not a git repository"
+
+
 def _git_toplevel(git: str, root: Path) -> Path | None:
     """Return the repository root git resolves for *root*, if any.
 
     A directory outside a work tree is reported as ``None`` so the caller can
-    fall back to a walk. Once git confirms a work tree, a failing root lookup
-    is unexpected and propagates instead of being mistaken for a copied tree.
+    fall back to a walk. Any other failure, including one from the initial
+    work-tree query, is unexpected and propagates instead of being mistaken
+    for a copied tree.
 
     Returns
     -------
     Path | None
         The repository root when *root* is inside a work tree, otherwise
         ``None``.
+
+    Raises
+    ------
+    subprocess.CalledProcessError
+        If git fails for a reason other than the directory not being inside a
+        work tree.
     """
     inside = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
         [git, "-C", str(root), "rev-parse", "--is-inside-work-tree"],
@@ -97,7 +107,13 @@ def _git_toplevel(git: str, root: Path) -> Path | None:
         text=True,
         check=False,
     )
-    if inside.returncode != 0 or inside.stdout.strip() != "true":
+    if inside.returncode != 0:
+        if _NOT_A_WORK_TREE in inside.stderr:
+            return None
+        raise subprocess.CalledProcessError(
+            inside.returncode, inside.args, inside.stdout, inside.stderr
+        )
+    if inside.stdout.strip() != "true":
         return None
     toplevel = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
         [git, "-C", str(root), "rev-parse", "--show-toplevel"],
@@ -273,6 +289,49 @@ def test_tracked_files_ignore_the_outer_repository_for_a_copied_tree(
     )
 
 
+def _stub_git(tmp_path: Path, script: str) -> str:
+    """Return a fake ``git`` executable that runs *script*."""
+    stub = tmp_path / "git"
+    stub.write_text(f"#!/bin/sh\n{script}", encoding="utf-8")
+    stub.chmod(0o755)
+    return str(stub)
+
+
+def test_a_directory_outside_a_work_tree_reports_no_root(tmp_path: Path) -> None:
+    """Git's own "not a git repository" message means a copied tree."""
+    git = _stub_git(
+        tmp_path,
+        "echo 'fatal: not a git repository (or any of the parent "
+        "directories): .git' >&2\nexit 128\n",
+    )
+
+    assert _git_toplevel(git, tmp_path) is None, (
+        "a directory outside a work tree must fall back to the walk"
+    )
+
+
+def test_an_unexpected_work_tree_query_failure_propagates(tmp_path: Path) -> None:
+    """A permission or configuration error must not look like a copied tree."""
+    git = _stub_git(tmp_path, "echo 'fatal: unable to read config' >&2\nexit 128\n")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _git_toplevel(git, tmp_path)
+
+
+def test_a_failing_root_lookup_propagates(tmp_path: Path) -> None:
+    """Once git confirms a work tree, a failing root lookup is an error."""
+    git = _stub_git(
+        tmp_path,
+        'case "$*" in\n'
+        "  *--is-inside-work-tree*) echo true ;;\n"
+        "  *) echo 'fatal: bad revision' >&2; exit 128 ;;\n"
+        "esac\n",
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _git_toplevel(git, tmp_path)
+
+
 _GENERATED_PARTS = frozenset({"__pycache__", ".venv", "mutants"})
 _COPIED_DIRECTORIES = st.sampled_from([
     "pkg",
@@ -288,7 +347,7 @@ _COPIED_FILENAMES = st.sampled_from(["mod.py", "stub.pyi", "notes.txt"])
 def _materialise_entry(
     root: Path, target: Path, entry: tuple[str, str, bool]
 ) -> str | None:
-    """Create one generated entry and return its expected source name."""
+    """Create one generated entry and return its relative name, if visible."""
     parent, name, is_symlink = entry
     path = root / parent / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -299,9 +358,10 @@ def _materialise_entry(
         return None
     if _GENERATED_PARTS.intersection(Path(parent).parts):
         return None
-    if not path.match("*.py"):
-        return None
     return path.relative_to(root).as_posix()
+
+
+_PATTERN_SETS = (("*.py",), ("*.py", "*.pyi"))
 
 
 @hyp.given(
@@ -317,21 +377,28 @@ def test_copied_sources_match_an_independent_filter(
     """The walk keeps sources outside generated dirs and skips symlinks.
 
     Hypothesis covers the combinations hand-picked cases miss: nested
-    generated directories, non-source files, and links to real sources.
+    generated directories, non-source files, and links to real sources. Both
+    caller pattern sets are checked, so a dropped ``*.pyi`` branch fails.
     """
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         target = root / "target.txt"
         target.write_text("", encoding="utf-8")
-        expected = {
+        names = {
             name
             for entry in entries
             if (name := _materialise_entry(root, target, entry)) is not None
         }
 
-        assert _copied_sources(root, ("*.py",)) == sorted(expected), (
-            f"the walk must return {sorted(expected)} for {entries}"
-        )
+        for patterns in _PATTERN_SETS:
+            expected = sorted(
+                name
+                for name in names
+                if any(Path(name).match(pattern) for pattern in patterns)
+            )
+            assert _copied_sources(root, patterns) == expected, (
+                f"the walk must return {expected} for {patterns} over {entries}"
+            )
 
 
 def test_the_configuration_excludes_only_the_overloaded_name() -> None:
