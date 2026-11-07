@@ -24,3 +24,7 @@ jobs:
       paths: "cmd_mox/"
       # No prefix to strip for a flat layout.
       module-prefix-strip: ""
+      # A workflow_dispatch run mutates the whole package (about 6,000
+      # mutants). The shared default of 90 minutes ends mid-run, so size the
+      # step budget to the suite; the job ceiling remains 360 minutes.
+      timeout-minutes: 240

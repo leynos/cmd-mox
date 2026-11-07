@@ -1160,13 +1160,16 @@ produces no failure diagnostics. A hard job cancellation can stop the job
 before the upload step runs, so diagnostics after hard cancellation are
 best-effort.
 
-The caller passes two configuration inputs:
+The caller passes three configuration inputs:
 
 - `paths` — set to `cmd_mox/`, the change-detection glob that decides whether
   a scheduled run has anything to mutate. CmdMox uses a flat layout, so the
   mutable source lives directly under `cmd_mox/` rather than under `src/`.
 - `module-prefix-strip` — set to an empty string, because the flat layout has
   no package prefix to strip when mapping mutated files back to import paths.
+- `timeout-minutes` — set to `240`, because a manual dispatch mutates the whole
+  package (about 6,000 mutants) and the shared 90-minute default ends the step
+  mid-run. The job ceiling remains 360 minutes.
 
 The `uses:` reference pins the shared workflow to a full 40-character commit
 SHA rather than a branch or tag, so a force-push upstream cannot silently
@@ -1190,8 +1193,9 @@ The test validates:
 
 - the `uses:` reference targets `mutation-mutmut.yml` pinned to a full commit
   SHA;
-- the `with:` block carries exactly `paths: cmd_mox/` and
-  `module-prefix-strip: ""`, nothing more and nothing less;
+- the `with:` block carries exactly `paths: cmd_mox/`,
+  `module-prefix-strip: ""`, and a suite-sized `timeout-minutes`, nothing more
+  and nothing less;
 - job permissions are least-privilege (`contents: read`, `id-token: write`)
   and the workflow-level default token scope is empty;
 - `concurrency` serializes runs per ref without cancelling one in progress;
