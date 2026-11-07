@@ -285,6 +285,25 @@ _COPIED_DIRECTORIES = st.sampled_from([
 _COPIED_FILENAMES = st.sampled_from(["mod.py", "stub.pyi", "notes.txt"])
 
 
+def _materialise_entry(
+    root: Path, target: Path, entry: tuple[str, str, bool]
+) -> str | None:
+    """Create one generated entry and return its expected source name."""
+    parent, name, is_symlink = entry
+    path = root / parent / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+    if is_symlink:
+        path.unlink()
+        path.symlink_to(target)
+        return None
+    if _GENERATED_PARTS.intersection(Path(parent).parts):
+        return None
+    if not path.match("*.py"):
+        return None
+    return path.relative_to(root).as_posix()
+
+
 @hyp.given(
     entries=st.lists(
         st.tuples(_COPIED_DIRECTORIES, _COPIED_FILENAMES, st.booleans()),
@@ -304,17 +323,11 @@ def test_copied_sources_match_an_independent_filter(
         root = Path(directory)
         target = root / "target.txt"
         target.write_text("", encoding="utf-8")
-        expected: set[str] = set()
-        for parent, name, is_symlink in entries:
-            path = root / parent / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("", encoding="utf-8")
-            if is_symlink:
-                path.unlink()
-                path.symlink_to(target)
-            elif not _GENERATED_PARTS.intersection(Path(parent).parts):
-                if path.match("*.py"):
-                    expected.add(path.relative_to(root).as_posix())
+        expected = {
+            name
+            for entry in entries
+            if (name := _materialise_entry(root, target, entry)) is not None
+        }
 
         assert _copied_sources(root, ("*.py",)) == sorted(expected), (
             f"the walk must return {sorted(expected)} for {entries}"
