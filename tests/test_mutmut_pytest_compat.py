@@ -85,6 +85,11 @@ def test_pytest_configure_installs_the_alias_for_a_real_item(
     its ``pytest_configure`` runs. Removing that call makes the probe fail with
     ``AttributeError``, which is the baseline failure this compatibility layer
     exists to prevent.
+
+    A synthetic module stands in for mutmut only when it is not installed. The
+    mutation sandbox does install it, and substituting a plain module there
+    makes mutmut's own pytest plugin unimportable, which would fail the
+    baseline for a reason unrelated to the alias.
     """
     probe = tmp_path / "test_probe.py"
     probe.write_text(
@@ -94,7 +99,10 @@ def test_pytest_configure_installs_the_alias_for_a_real_item(
     )
     script = (
         "import sys, types\n"
-        "sys.modules['mutmut'] = types.ModuleType('mutmut')\n"
+        "try:\n"
+        "    import mutmut\n"
+        "except ModuleNotFoundError:\n"
+        "    sys.modules['mutmut'] = types.ModuleType('mutmut')\n"
         "import pytest\n"
         "raise SystemExit(pytest.main([\n"
         "    '-p', 'conftest',\n"
