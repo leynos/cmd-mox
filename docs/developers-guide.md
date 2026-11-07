@@ -280,6 +280,21 @@ names only that function and that the implementation is documented. The same
 test holds the pin, the flags, the targets, CI's uv setup and the failing paths
 of the target.
 
+`tests/test_interrogate_gate.py` chooses the files the gate must cover through
+`_tracked`. In a checkout it asks Git for the tracked files matching the
+patterns, so untracked build output and virtual environments are never
+inspected. Mutmut's sandbox is a copy inside the checkout, where Git resolves
+the outer repository rather than the copy, so a successful lookup that names a
+different root selects a walk of the copied tree that skips generated
+directories and symlinks and propagates any directory it cannot read. When the
+Git query fails, only its line-anchored `fatal: not a git repository`
+diagnostic selects that walk; any other failure propagates, so a permission or
+configuration error cannot silently pass the gate. Every Git child also runs
+with the repository-location variables (`GIT_DIR`, `GIT_WORK_TREE`,
+`GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES` and
+`GIT_COMMON_DIR`) removed, so a hook environment cannot re-point the lookup
+away from the repository `-C` names.
+
 ## YAML lint
 
 `make lint` runs `yamllint --strict` over every Git-tracked `*.yml` and
@@ -1100,19 +1115,77 @@ blocking check. The mutation targets and test selection themselves are
 configured in `[tool.mutmut]` in `pyproject.toml` (`source_paths`,
 `pytest_add_cli_args_test_selection`, `runner`).
 
+Mutmut 3.6.0 resolves relative `source_paths` from the process working
+directory when recording trampoline hits. Pytester's in-process runner changes
+that directory to its temporary project, so tests that execute `cmd_mox` from
+another cwd can make the configured `cmd_mox/` path disappear from mutmut's
+view. The root `conftest.py` anchors mutmut's relative source paths for each
+test and restores them afterwards, before mutmut scans mutation targets. Its
+`run_nested_pytester` fixture also restores the outer invocation directory and
+pins the inner run's configuration and root to pytester's project. Use this
+fixture for every nested in-process pytester test that executes `cmd_mox` code.
+Tests that specifically exercise subprocess behaviour should pass `-c`,
+`--rootdir`, and `--confcutdir` tied to pytester's project so configuration
+discovery stays within its temporary root.
+
+Use the `isolated_pytester_config_args` fixture when a nested run must ignore
+the outer checkout's configuration but does not need the full nested runner.
+Its builder takes the config path and returns the `-c`, `--rootdir`, and
+`--confcutdir` arguments; it never writes a file. Ask `ensure_pytester_ini` for
+the path first: it returns the `tox.ini` the test authored, creating an empty
+one only when none exists, so the write happens at a visible call site. The root
+`conftest.py` also installs a mutmut-only compatibility alias: mutmut 3.6 reads
+`pytest.Item._nodeid`, which pytest 9 removed.
+`tests/_mutmut_pytest_compat.py` restores it as a read-only property over
+`nodeid`, but only while `mutmut` is imported and the alias is absent, so an
+ordinary test run keeps pytest's public interface.
+
+Reproduce the clean baseline and mutation run with:
+
+```bash
+uv run --python 3.13 --with mutmut==3.6.0 mutmut run
+```
+
+The sandbox is a copy, not a checkout. Mutmut copies `source_paths`,
+`also_copy`, and a fixed set of test directories into `mutants/`, then runs the
+suite there through `uv run`. A repository file a test reads must therefore be
+listed in `also_copy`; the committed spelling policy (`typos.local.toml`) is
+copied for that reason. A tool the sandbox does not provide must be guarded
+instead: `make test` requires `makeutil` on `PATH` and fails rather than
+installing it, while the sandbox only copies files and runs `uv run`, so the
+Skylos Makefile contract skips when the parser is absent.
+`tests/test_mutation_sandbox_contract.py` pins both properties.
+
 The workflow runs in two modes. A **daily schedule** fires a change-scoped run
 that mutates only the source files touched within the detection window, so
 quiet days are cheap no-ops. A **manual dispatch** (the Actions "Run workflow"
 control) mutates the whole package; select a branch in that control to exercise
 a feature branch.
 
-The caller passes two configuration inputs:
+When mutation execution fails, the shared workflow uploads a
+`mutation-failure-diagnostics-mutmut` artefact containing `stdout.log`,
+`stderr.log`, and `metadata.json`. The capture wraps mutmut startup and the
+clean baseline, so a failure before `mutation-mutmut-results.txt` or
+`mutants/mutmut-stats.json` exist still leaves actionable evidence. Each stream
+retains its first 512 KiB; later bytes are drained and discarded, and
+`metadata.json` records the bytes seen, saved, and truncated together with the
+command's exit status. The diagnostic upload is independent of the result and
+statistics upload, and a missing or incomplete capture fails the verification
+step rather than being ignored. A no-change run remains an intentional skip and
+produces no failure diagnostics. A hard job cancellation can stop the job
+before the upload step runs, so diagnostics after hard cancellation are
+best-effort.
+
+The caller passes three configuration inputs:
 
 - `paths` — set to `cmd_mox/`, the change-detection glob that decides whether
   a scheduled run has anything to mutate. CmdMox uses a flat layout, so the
   mutable source lives directly under `cmd_mox/` rather than under `src/`.
 - `module-prefix-strip` — set to an empty string, because the flat layout has
   no package prefix to strip when mapping mutated files back to import paths.
+- `timeout-minutes` — set to `240`, because a manual dispatch mutates the whole
+  package (about 6,000 mutants) and the shared 90-minute default ends the step
+  mid-run. The job ceiling remains 360 minutes.
 
 The `uses:` reference pins the shared workflow to a full 40-character commit
 SHA rather than a branch or tag, so a force-push upstream cannot silently
@@ -1125,8 +1198,8 @@ Because the caller is configuration rather than code, a contract test in
 pull request when the caller drifts — repointing the pin at a branch, widening
 the token scope, or dropping a configuration input — rather than letting the
 breakage surface only in a scheduled run. The test module self-skips when the
-workflow file is absent (mutmut copies the sources into a sandbox that omits
-`.github/`, so the contract test does not run there). Run it locally with:
+workflow file is absent. The mutation sandbox copies `.github/`, so this
+contract remains part of its clean baseline. Run it locally with:
 
 ```bash
 uv run pytest tests/test_workflow_contract.py -v
@@ -1136,8 +1209,9 @@ The test validates:
 
 - the `uses:` reference targets `mutation-mutmut.yml` pinned to a full commit
   SHA;
-- the `with:` block carries exactly `paths: cmd_mox/` and
-  `module-prefix-strip: ""`, nothing more and nothing less;
+- the `with:` block carries exactly `paths: cmd_mox/`,
+  `module-prefix-strip: ""`, and a suite-sized `timeout-minutes`, nothing more
+  and nothing less;
 - job permissions are least-privilege (`contents: read`, `id-token: write`)
   and the workflow-level default token scope is empty;
 - `concurrency` serializes runs per ref without cancelling one in progress;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 import tempfile
 import typing as typ
 from pathlib import Path
@@ -10,9 +11,12 @@ from pathlib import Path
 import pytest
 
 import cmd_mox.environment
+from tests._mutmut_pytest_compat import _install_mutmut_pytest_item_compatibility
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+    from _pytest.pytester import RunResult
 
 _UNIX_SOCKETS_SUPPORTED: bool | None = None
 
@@ -52,8 +56,45 @@ def _unix_sockets_supported() -> bool:
     return _UNIX_SOCKETS_SUPPORTED
 
 
+def _anchor_mutmut_source_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make cwd-relative mutmut paths absolute for the current scope."""
+    mutmut_configuration = sys.modules.get("mutmut.configuration")
+    if mutmut_configuration is None:
+        return
+
+    config_factory = typ.cast("typ.Any", getattr(mutmut_configuration, "Config", None))
+    if config_factory is None:
+        return
+
+    mutmut_config = config_factory.get()
+    package_root = Path(__file__).resolve().parent
+    monkeypatch.setattr(
+        mutmut_config,
+        "source_paths",
+        [
+            path if path.is_absolute() else package_root / path
+            for path in mutmut_config.source_paths
+        ],
+    )
+
+
+@pytest.fixture(autouse=True)
+def anchor_mutmut_source_paths_for_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep mutmut paths valid while tests can change cwd.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Restore the relative source paths after this test finishes.
+    """
+    _anchor_mutmut_source_paths(monkeypatch)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and cache platform capability checks."""
+    _install_mutmut_pytest_item_compatibility()
     config.addinivalue_line(
         "markers",
         "requires_unix_sockets: mark test as requiring Unix domain socket support",
@@ -73,6 +114,131 @@ def pytest_collection_modifyitems(
     for item in items:
         if "requires_unix_sockets" in item.keywords:
             item.add_marker(skip)
+
+
+def _pytest_isolation_args(
+    pytester: pytest.Pytester, config_path: Path
+) -> tuple[str, ...]:
+    """Return arguments pinning a nested run to *config_path* and pytester."""
+    return (
+        "-c",
+        str(config_path),
+        "--rootdir",
+        str(pytester.path),
+        "--confcutdir",
+        str(pytester.path),
+    )
+
+
+@pytest.fixture
+def ensure_pytester_ini(pytester: pytest.Pytester) -> cabc.Callable[[], Path]:
+    """Return the pytester project's pytest config, writing one if absent.
+
+    This is the only fixture that creates the inner configuration, so a test
+    that depends on its own ``tox.ini`` keeps it: the existing file is
+    returned untouched and a new one is written only when none exists.
+
+    Parameters
+    ----------
+    pytester : pytest.Pytester
+        Provide the temporary project directory.
+
+    Returns
+    -------
+    cabc.Callable[[], Path]
+        A command returning the existing or newly written config path.
+    """
+
+    def ensure() -> Path:
+        """Return the inner config, creating it only when absent."""
+        inner_ini = pytester.path / "tox.ini"
+        if inner_ini.is_file():
+            return inner_ini
+        return pytester.makeini("[pytest]\n")
+
+    return ensure
+
+
+@pytest.fixture
+def isolated_pytester_config_args(
+    pytester: pytest.Pytester,
+) -> cabc.Callable[[Path], tuple[str, ...]]:
+    """Build CLI arguments that isolate pytest configuration to pytester.
+
+    Use this instead of bare ``pytester.runpytest_inprocess`` when a nested
+    run must ignore the outer checkout's configuration. The builder is a pure
+    query: it never writes a file, so pass the path from
+    :func:`ensure_pytester_ini`, or one the test authored, explicitly.
+
+    Parameters
+    ----------
+    pytester : pytest.Pytester
+        Provide the temporary project directory used as the root.
+
+    Returns
+    -------
+    cabc.Callable[[Path], tuple[str, ...]]
+        A builder returning the config, rootdir and confcutdir arguments for
+        one nested pytest invocation.
+    """
+
+    def build_args(config_path: Path) -> tuple[str, ...]:
+        """Return the isolation arguments for one nested pytest invocation."""
+        return _pytest_isolation_args(pytester, config_path)
+
+    return build_args
+
+
+@pytest.fixture
+def run_nested_pytester(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    ensure_pytester_ini: cabc.Callable[[], Path],
+) -> cabc.Callable[..., RunResult]:
+    """Create a nested pytest runner anchored to the outer invocation.
+
+    Pytester changes the process cwd to its temporary project. Mutmut and
+    other cwd-relative tools then resolve package paths from that directory,
+    so the nested run restores the outer invocation cwd and pins its own
+    configuration to the pytester project.
+
+    Parameters
+    ----------
+    pytester : pytest.Pytester
+        Create the temporary project and its inner pytest configuration.
+    monkeypatch : pytest.MonkeyPatch
+        Restore the pytester cwd after the nested in-process run.
+    request : pytest.FixtureRequest
+        Provide the outer invocation directory used by the nested run.
+    ensure_pytester_ini : cabc.Callable[[], Path]
+        Return the inner config, creating one only when the test has not.
+
+    Returns
+    -------
+    cabc.Callable[..., RunResult]
+        A runner accepting extra pytest arguments, an optional generated test
+        path, and ``plugins`` for ``runpytest_inprocess``.
+    """
+
+    def run_nested(
+        *args: str,
+        test_path: Path | None = None,
+        plugins: cabc.Sequence[object] = (),
+    ) -> RunResult:
+        """Run pytest in the pytester project from the outer invocation dir."""
+        generated_path = pytester.path if test_path is None else test_path
+        with monkeypatch.context() as scoped_monkeypatch:
+            scoped_monkeypatch.chdir(request.config.invocation_params.dir)
+            _anchor_mutmut_source_paths(scoped_monkeypatch)
+            return pytester.runpytest_inprocess(
+                *args,
+                *_pytest_isolation_args(pytester, ensure_pytester_ini()),
+                str(generated_path.resolve(strict=True)),
+                plugins=plugins,
+            )
+
+    return run_nested
 
 
 @pytest.fixture(autouse=True)

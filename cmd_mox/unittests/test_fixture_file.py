@@ -459,37 +459,38 @@ class TestVersionParsing:
         with pytest.raises(ValueError, match="Invalid"):
             _parse_version(bad_version)
 
-    @given(
-        major=st.integers(min_value=0, max_value=10**12),
-        minor=st.integers(min_value=0, max_value=10**12),
-        patch=st.integers(min_value=0, max_value=10**12),
-    )
-    def test_canonical_and_legacy_versions_round_trip(
-        self, major: int, minor: int, patch: int
-    ) -> None:
-        """Canonical and legacy numeric components retain their values."""
-        from cmd_mox.record.fixture import _parse_version
 
-        assert _parse_version(f"{major}.{minor}.{patch}") == (major, minor, patch)
-        assert _parse_version(f"{major}.{minor}") == (major, minor, 0)
+@given(
+    major=st.integers(min_value=0, max_value=10**12),
+    minor=st.integers(min_value=0, max_value=10**12),
+    patch=st.integers(min_value=0, max_value=10**12),
+)
+def test_canonical_and_legacy_versions_round_trip(
+    major: int, minor: int, patch: int
+) -> None:
+    """Canonical and legacy numeric components retain their values."""
+    from cmd_mox.record.fixture import _parse_version
 
-    @given(component=st.integers(min_value=0, max_value=10**12))
-    def test_canonical_version_rejects_leading_zero(self, component: int) -> None:
-        """A numeric component with a leading zero is not canonical SemVer."""
-        from cmd_mox.record.fixture import _parse_version
+    assert _parse_version(f"{major}.{minor}.{patch}") == (major, minor, patch)
+    assert _parse_version(f"{major}.{minor}") == (major, minor, 0)
 
-        with pytest.raises(ValueError, match="Invalid"):
-            _parse_version(f"1.0.0{component}")
 
-    @given(
-        minor=st.integers(min_value=0, max_value=10**12),
-        patch=st.integers(min_value=0, max_value=10**12),
-    )
-    def test_same_major_migration_preserves_mapping(
-        self, minor: int, patch: int
-    ) -> None:
-        """Same-major versions pass migration without discarding fields."""
-        from cmd_mox.record.fixture import _apply_migrations
+@given(component=st.integers(min_value=0, max_value=10**12))
+def test_canonical_version_rejects_leading_zero(component: int) -> None:
+    """A numeric component with a leading zero is not canonical SemVer."""
+    from cmd_mox.record.fixture import _parse_version
 
-        data = {"version": f"1.{minor}.{patch}", "future_field": {"value": "kept"}}
-        assert _apply_migrations(data) == data
+    with pytest.raises(ValueError, match="Invalid"):
+        _parse_version(f"1.0.0{component}")
+
+
+@given(
+    minor=st.integers(min_value=0, max_value=10**12),
+    patch=st.integers(min_value=0, max_value=10**12),
+)
+def test_same_major_migration_preserves_mapping(minor: int, patch: int) -> None:
+    """Same-major versions pass migration without discarding fields."""
+    from cmd_mox.record.fixture import _apply_migrations
+
+    data = {"version": f"1.{minor}.{patch}", "future_field": {"value": "kept"}}
+    assert _apply_migrations(data) == data

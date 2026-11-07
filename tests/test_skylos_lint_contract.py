@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import string
 import subprocess
 import sys
@@ -22,9 +23,23 @@ from tempfile import TemporaryDirectory
 
 import hypothesis as hyp
 import hypothesis.strategies as st
+import pytest
 import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+#: Only the tests that read Makeutil's structured report need the parser.
+#: `make test` requires it on `PATH` and fails rather than installing it, while
+#: the mutmut sandbox only copies files and runs `uv run`, so it has no parser;
+#: the remaining checks must still run there.
+requires_makeutil = pytest.mark.skipif(
+    shutil.which("makeutil") is None,
+    reason=(
+        "makeutil is not installed in this working copy (for example inside "
+        "mutmut's mutants/ sandbox, which does not install the Makefile parser)"
+    ),
+)
+
 _MAKEUTIL_COMMAND: typ.Final = ("makeutil", "parse", "Makefile")
 _MAKEUTIL_REVISION: typ.Final = "29fc5a1634ffbaa18a773eed9dff1b2838a45d9c"
 _MAKEUTIL_TOOLCHAIN: typ.Final = "nightly-2026-05-28"
@@ -470,6 +485,7 @@ def _skylos_entrypoints() -> list[dict[str, object]]:
 class TestSkylosLintContract:
     """Contract tests for Skylos's production dead-code lint gate."""
 
+    @requires_makeutil
     def test_lint_recipe_runs_the_production_dead_code_gate(self) -> None:
         """``make lint`` must scan only production code with Skylos's strict gate."""
         config = _pyproject()
@@ -502,6 +518,7 @@ class TestSkylosLintContract:
             "Skylos lint command contract must scan production dead code strictly."
         )
 
+    @requires_makeutil
     def test_whitelist_target_uses_skylos_subcommand_contract(self) -> None:
         """``skylos whitelist`` must precede its arguments and scan options."""
         assert _variable_tokens("SKYLOS_CLI") == _SKYLOS_CLI_TOKENS, (
@@ -526,10 +543,13 @@ class TestSkylosLintContract:
             "whitelist update."
         )
 
+    # mutmut 3.6 reuses test modules across two pytest.main() calls; keeping
+    # these Hypothesis cases unbound avoids retaining one TestCase executor.
+    @staticmethod
     @hyp.settings(max_examples=25, deadline=None)
     @hyp.given(value=st.text(alphabet=" \t", max_size=8))
     def test_skylos_allow_rejects_missing_or_whitespace_values(
-        self, value: str
+        value: str,
     ) -> None:
         """The whitelist target must reject absent and whitespace-only inputs."""
         for arguments, missing_name in (
@@ -548,11 +568,12 @@ class TestSkylosLintContract:
                 in completed.stderr
             ), f"Skylos whitelist boundary must name the missing {missing_name}."
 
+    @staticmethod
     @hyp.settings(max_examples=25, deadline=None)
     @hyp.example(symbol="$(handler);*", reason='Loaded "$plugin" | registry')
     @hyp.given(symbol=_SHELL_ARGUMENT_TEXT, reason=_SHELL_ARGUMENT_TEXT)
     def test_skylos_allow_forwards_generated_argument_boundaries(
-        self, symbol: str, reason: str
+        symbol: str, reason: str
     ) -> None:
         """Every non-empty generated value must reach Skylos as one argument."""
         with TemporaryDirectory() as temporary_directory:

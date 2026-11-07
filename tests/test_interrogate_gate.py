@@ -20,13 +20,18 @@ Run via ``make test``.
 from __future__ import annotations
 
 import ast
+import operator
+import os
 import re
 import shutil
 import subprocess
+import tempfile
 import textwrap
 import tomllib
 from pathlib import Path
 
+import hypothesis as hyp
+import hypothesis.strategies as st
 import pytest
 import yaml
 
@@ -58,27 +63,165 @@ def _prerequisites(target: str) -> list[str]:
     return match.group(1).split("##")[0].split()
 
 
-def _tracked(*patterns: str) -> list[str]:
-    """Return the Git-tracked files matching *patterns*.
+_GENERATED_DIRECTORIES = frozenset({
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "mutants",
+    "node_modules",
+    "venv",
+})
 
-    Git is the authority on what the repository owns: a walk would also see
-    the virtual environments CI creates beside the sources. Names are read from
-    NUL-separated output, so a path containing whitespace stays whole.
+
+#: Git's own diagnostic, anchored at a line start. A path or another error
+#: that merely contains these words must not select the copied-tree walk.
+_NOT_A_WORK_TREE = re.compile(r"^fatal: not a git repository\b", re.MULTILINE)
+_C_LOCALE = {"LC_ALL": "C", "LANG": "C", "LANGUAGE": "C"}
+
+#: Variables that point git at another repository and override ``-C``. A hook
+#: or an outer test can export them, so every child git process drops them.
+_GIT_LOCATION_VARIABLES = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+)
+
+
+def _git_environment() -> dict[str, str]:
+    """Return the environment for a git child pinned to the C locale.
+
+    Returns
+    -------
+    dict[str, str]
+        The inherited environment with repository-location variables removed.
+    """
+    environment: dict[str, str] = {**os.environ, **_C_LOCALE}
+    for name in _GIT_LOCATION_VARIABLES:
+        environment.pop(name, None)
+    return environment
+
+
+def _git_toplevel(git: str, root: Path) -> Path | None:
+    """Return the repository root git resolves for *root*, if any.
+
+    A directory outside a work tree is reported as ``None`` so the caller can
+    fall back to a walk. Any other failure, including one from the initial
+    work-tree query, is unexpected and propagates instead of being mistaken
+    for a copied tree.
+
+    Returns
+    -------
+    Path | None
+        The repository root when *root* is inside a work tree, otherwise
+        ``None``.
+
+    Raises
+    ------
+    subprocess.CalledProcessError
+        If git fails for a reason other than the directory not being inside a
+        work tree.
+    """
+    inside = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+        [git, "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_git_environment(),
+    )
+    if inside.returncode != 0:
+        if _NOT_A_WORK_TREE.search(inside.stderr):
+            return None
+        raise subprocess.CalledProcessError(
+            inside.returncode, inside.args, inside.stdout, inside.stderr
+        )
+    if inside.stdout.strip() != "true":
+        return None
+    toplevel = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+        [git, "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_git_environment(),
+    )
+    return Path(toplevel.stdout.strip()).resolve()
+
+
+def _git_tracked(git: str, root: Path, patterns: tuple[str, ...]) -> list[str]:
+    """Return the tracked files matching *patterns*, relative to *root*."""
+    output = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+        [git, "-C", str(root), "ls-files", "-z", *patterns],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_git_environment(),
+    ).stdout
+    return [name for name in output.split("\0") if name]
+
+
+def _raise_walk_error(error: OSError) -> None:
+    """Re-raise a directory access failure instead of skipping the subtree."""
+    raise error
+
+
+def _copied_sources(root: Path, patterns: tuple[str, ...]) -> list[str]:
+    """Return the source files in a copied tree, skipping generated output.
+
+    ``os.walk`` reports a directory it cannot read through ``onerror``, and
+    the callback re-raises it. A permission or I/O failure therefore fails the
+    lookup instead of shrinking the inspected set, which would let the gate
+    pass on a partial tree.
 
     Returns
     -------
     list[str]
-        The matching paths, relative to the repository root.
+        The matching paths, relative to *root*, in sorted order.
+    """
+    names: list[str] = []
+    for directory, subdirectories, files in os.walk(root, onerror=_raise_walk_error):
+        subdirectories[:] = [
+            name for name in subdirectories if name not in _GENERATED_DIRECTORIES
+        ]
+        for name in files:
+            path = Path(directory) / name
+            relative = path.relative_to(root)
+            if path.is_symlink() or not path.is_file():
+                continue
+            if any(path.match(pattern) for pattern in patterns):
+                names.append(relative.as_posix())
+    return sorted(names)
+
+
+def _tracked(*patterns: str, root: Path = ROOT) -> list[str]:
+    """Return the source files the repository owns, matching *patterns*.
+
+    Git is the authority in a checkout: a walk would also see the virtual
+    environments CI creates beside the sources. Names are read from
+    NUL-separated output, so a path containing whitespace stays whole.
+
+    Mutmut's sandbox is a copy inside the checkout, where `git ls-files`
+    resolves the outer repository and matches nothing. A copied tree therefore
+    falls back to a walk that skips generated directories, so the contract
+    still inspects the sources instead of passing vacuously.
+
+    Returns
+    -------
+    list[str]
+        The matching paths, relative to *root*.
     """
     git = shutil.which("git")
     assert git, "git must be on the path"
-    output = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
-        [git, "-C", str(ROOT), "ls-files", "-z", *patterns],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return [name for name in output.split("\0") if name]
+    if _git_toplevel(git, root) == root.resolve():
+        return _git_tracked(git, root, patterns)
+    return _copied_sources(root, patterns)
 
 
 def test_lint_depends_on_interrogate() -> None:
@@ -124,6 +267,289 @@ def test_every_python_file_is_under_a_target() -> None:
         if not any(Path(name).is_relative_to(target) for target in targets)
     ]
     assert not uncovered, f"add these to INTERROGATE_TARGETS: {uncovered}"
+
+
+def test_tracked_files_fall_back_to_a_copied_tree(tmp_path: Path) -> None:
+    """A mutation sandbox copy is untracked, so git reports no owned files.
+
+    Mutmut copies the tree into `mutants/` inside the checkout, where
+    `git ls-files` resolves the outer repository and matches nothing. The
+    contract must still see the copied sources, and must not see caches or
+    build outputs.
+    """
+    sandbox = tmp_path / "mutants"
+    (sandbox / "pkg").mkdir(parents=True)
+    (sandbox / "pkg" / "mod.py").write_text("", encoding="utf-8")
+    (sandbox / "pkg" / "__pycache__").mkdir()
+    (sandbox / "pkg" / "__pycache__" / "cached.py").write_text("", encoding="utf-8")
+    (sandbox / ".venv" / "lib").mkdir(parents=True)
+    (sandbox / ".venv" / "lib" / "site.py").write_text("", encoding="utf-8")
+    (sandbox / "linked.py").symlink_to(sandbox / "pkg" / "mod.py")
+    (sandbox / "notes.txt").write_text("", encoding="utf-8")
+
+    assert _tracked("*.py", root=sandbox) == ["pkg/mod.py"], (
+        "the copied tree must supply the sources without generated output"
+    )
+
+
+def _git(root: Path, *arguments: str) -> None:
+    """Run git in *root*, failing the test on error."""
+    git = shutil.which("git")
+    assert git, "git must be on the path"
+    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv
+        [git, "-C", str(root), *arguments],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_git_environment(),
+    )
+
+
+def test_tracked_files_come_only_from_the_git_index(tmp_path: Path) -> None:
+    """A checkout reports tracked sources, never untracked build output."""
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "mod.py").write_text("", encoding="utf-8")
+    (repo / "untracked.py").write_text("", encoding="utf-8")
+    _git(repo, "init")
+    _git(repo, "add", "pkg/mod.py")
+
+    assert _tracked("*.py", root=repo) == ["pkg/mod.py"], (
+        "an untracked source must not be reported as owned"
+    )
+
+
+def test_tracked_files_ignore_the_outer_repository_for_a_copied_tree(
+    tmp_path: Path,
+) -> None:
+    """Mutmut's sandbox sits inside the checkout but is not the checkout.
+
+    `git ls-files` resolves the outer repository and reports nothing for the
+    copy, so the fallback must supply the copied sources instead.
+    """
+    repo = tmp_path / "repo"
+    (repo / "cmd_mox").mkdir(parents=True)
+    (repo / "cmd_mox" / "outer.py").write_text("", encoding="utf-8")
+    _git(repo, "init")
+    _git(repo, "add", "cmd_mox/outer.py")
+    sandbox = repo / "mutants"
+    (sandbox / "cmd_mox").mkdir(parents=True)
+    (sandbox / "cmd_mox" / "copy.py").write_text("", encoding="utf-8")
+
+    assert _tracked("*.py", root=sandbox) == ["cmd_mox/copy.py"], (
+        "the sandbox must read its own copy, not the outer repository"
+    )
+
+
+def test_the_git_environment_drops_repository_location_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hook's location variables override ``-C``, so every call drops them."""
+    for name in _GIT_LOCATION_VARIABLES:
+        monkeypatch.setenv(name, f"/elsewhere/{name.lower()}")
+
+    environment = _git_environment()
+
+    assert not set(_GIT_LOCATION_VARIABLES) & environment.keys(), (
+        "repository-location variables must not reach the git child"
+    )
+    assert environment["LC_ALL"] == "C", "git diagnostics must stay in the C locale"
+    assert "PATH" in environment, "git must still resolve from the inherited PATH"
+
+
+def test_work_tree_lookup_ignores_a_hook_repository_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hook's exported ``GIT_DIR`` must not replace the repository ``-C`` names."""
+    git = shutil.which("git")
+    assert git, "git must be on the path"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+    assert _git_toplevel(git, repo) == repo.resolve(), (
+        "the lookup must report the tree -C selects, not the hook's repository"
+    )
+
+
+def test_tracked_lookup_ignores_a_hook_index_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exported ``GIT_INDEX_FILE`` must not hide the real index's files."""
+    git = shutil.which("git")
+    assert git, "git must be on the path"
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "mod.py").write_text("", encoding="utf-8")
+    _git(repo, "init")
+    _git(repo, "add", "pkg/mod.py")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "empty-index"))
+
+    assert _git_tracked(git, repo, ("*.py",)) == ["pkg/mod.py"], (
+        "an exported index must not replace the index -C selects"
+    )
+
+
+def _create_stub_git(tmp_path: Path, script: str) -> str:
+    """Create a fake ``git`` executable that runs *script* and return its path.
+
+    The helper writes the script and marks it executable, so its name states
+    the command it performs rather than presenting a query.
+
+    Returns
+    -------
+    str
+        The path to the executable just created.
+    """
+    stub = tmp_path / "git"
+    stub.write_text(f"#!/bin/sh\n{script}", encoding="utf-8")
+    stub.chmod(0o755)
+    return str(stub)
+
+
+def test_a_directory_outside_a_work_tree_reports_no_root(tmp_path: Path) -> None:
+    """Git's own "not a git repository" message means a copied tree."""
+    git = _create_stub_git(
+        tmp_path,
+        "echo 'fatal: not a git repository (or any of the parent "
+        "directories): .git' >&2\nexit 128\n",
+    )
+
+    assert _git_toplevel(git, tmp_path) is None, (
+        "a directory outside a work tree must fall back to the walk"
+    )
+
+
+def test_an_unexpected_work_tree_query_failure_propagates(tmp_path: Path) -> None:
+    """A permission or configuration error must not look like a copied tree."""
+    git = _create_stub_git(
+        tmp_path, "echo 'fatal: unable to read config' >&2\nexit 128\n"
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _git_toplevel(git, tmp_path)
+
+
+def test_a_path_mentioning_a_repository_does_not_select_the_walk(
+    tmp_path: Path,
+) -> None:
+    """Only a line-anchored diagnostic counts; a path containing it does not."""
+    git = _create_stub_git(
+        tmp_path,
+        "echo \"fatal: cannot change to '/tmp/not a git repository/missing': "
+        'No such file or directory" >&2\nexit 128\n',
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _git_toplevel(git, tmp_path)
+
+
+def test_a_failing_root_lookup_propagates(tmp_path: Path) -> None:
+    """Once git confirms a work tree, a failing root lookup is an error."""
+    git = _create_stub_git(
+        tmp_path,
+        'case "$*" in\n'
+        "  *--is-inside-work-tree*) echo true ;;\n"
+        "  *) echo 'fatal: bad revision' >&2; exit 128 ;;\n"
+        "esac\n",
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _git_toplevel(git, tmp_path)
+
+
+_GENERATED_PARTS = frozenset({"__pycache__", ".venv", "mutants"})
+_COPIED_DIRECTORIES = st.sampled_from([
+    "pkg",
+    "pkg/inner",
+    "docs",
+    "__pycache__",
+    ".venv/lib",
+    "mutants",
+])
+_COPIED_FILENAMES = st.sampled_from(["mod.py", "stub.pyi", "notes.txt"])
+
+
+def _materialise_entry(
+    root: Path, target: Path, entry: tuple[str, str, bool]
+) -> str | None:
+    """Create one generated entry and return its relative name, if visible."""
+    parent, name, is_symlink = entry
+    path = root / parent / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+    if is_symlink:
+        path.unlink()
+        path.symlink_to(target)
+        return None
+    if _GENERATED_PARTS.intersection(Path(parent).parts):
+        return None
+    return path.relative_to(root).as_posix()
+
+
+_PATTERN_SETS = (("*.py",), ("*.py", "*.pyi"))
+
+
+@hyp.given(
+    entries=st.lists(
+        st.tuples(_COPIED_DIRECTORIES, _COPIED_FILENAMES, st.booleans()),
+        max_size=10,
+        unique_by=operator.itemgetter(0, 1),
+    )
+)
+def test_copied_sources_match_an_independent_filter(
+    entries: list[tuple[str, str, bool]],
+) -> None:
+    """The walk keeps sources outside generated dirs and skips symlinks.
+
+    Hypothesis covers the combinations hand-picked cases miss: nested
+    generated directories, non-source files, and links to real sources. Both
+    caller pattern sets are checked, so a dropped ``*.pyi`` branch fails.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        target = root / "target.txt"
+        target.write_text("", encoding="utf-8")
+        names = {
+            name
+            for entry in entries
+            if (name := _materialise_entry(root, target, entry)) is not None
+        }
+
+        for patterns in _PATTERN_SETS:
+            expected = sorted(
+                name
+                for name in names
+                if any(Path(name).match(pattern) for pattern in patterns)
+            )
+            assert _copied_sources(root, patterns) == expected, (
+                f"the walk must return {expected} for {patterns} over {entries}"
+            )
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="directory mode bits are ignored on Windows and by root",
+)
+def test_an_unreadable_copied_directory_fails_the_lookup(tmp_path: Path) -> None:
+    """A directory the walk cannot read must raise, not shrink the file set."""
+    copied = tmp_path / "copied"
+    (copied / "pkg").mkdir(parents=True)
+    (copied / "pkg" / "mod.py").write_text("", encoding="utf-8")
+    unreadable = copied / "private"
+    unreadable.mkdir()
+    unreadable.chmod(0o000)
+
+    try:
+        with pytest.raises(PermissionError):
+            _copied_sources(copied, ("*.py",))
+    finally:
+        unreadable.chmod(0o755)
 
 
 def test_the_configuration_excludes_only_the_overloaded_name() -> None:

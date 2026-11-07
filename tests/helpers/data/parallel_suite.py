@@ -8,6 +8,7 @@ import subprocess
 import typing as typ
 from pathlib import Path
 
+import cmd_mox as cmd_mox_package
 from cmd_mox.unittests._env_helpers import (
     require_shim_dir,
     require_socket_path,
@@ -55,6 +56,8 @@ def _record(cmd_mox: CmdMox, label: str) -> None:
         "shim_dir": str(shim_dir),
         "socket": str(socket_path),
         "worker": os.getenv("PYTEST_XDIST_WORKER", "main"),
+        "cwd": str(Path.cwd()),
+        "package_origin": str(Path(cmd_mox_package.__file__).resolve()),
     }
     artifact = artifact_dir / f"{label}-{os.getpid()}-{payload['worker']}.json"
     artifact.write_text(json.dumps(payload))
