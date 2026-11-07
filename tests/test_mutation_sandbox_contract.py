@@ -187,6 +187,10 @@ def test_the_isolated_path_never_inherits_a_neighbouring_makeutil(
         )
 
 
+@pytest.mark.skipif(
+    shutil.which("flock") is None,
+    reason="flock(1) is not installed on this host",
+)
 def test_behavioural_contracts_run_without_the_parser(tmp_path: Path) -> None:
     """The sandbox must keep running the whitelist behaviour checks."""
     environment = _inherited_environment()

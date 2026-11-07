@@ -84,6 +84,31 @@ _GENERATED_DIRECTORIES = frozenset({
 _NOT_A_WORK_TREE = re.compile(r"^fatal: not a git repository\b", re.MULTILINE)
 _C_LOCALE = {"LC_ALL": "C", "LANG": "C", "LANGUAGE": "C"}
 
+#: Variables that point git at another repository and override ``-C``. A hook
+#: or an outer test can export them, so every child git process drops them.
+_GIT_LOCATION_VARIABLES = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+)
+
+
+def _git_environment() -> dict[str, str]:
+    """Return the environment for a git child pinned to the C locale.
+
+    Returns
+    -------
+    dict[str, str]
+        The inherited environment with repository-location variables removed.
+    """
+    environment: dict[str, str] = {**os.environ, **_C_LOCALE}
+    for name in _GIT_LOCATION_VARIABLES:
+        environment.pop(name, None)
+    return environment
+
 
 def _git_toplevel(git: str, root: Path) -> Path | None:
     """Return the repository root git resolves for *root*, if any.
@@ -110,7 +135,7 @@ def _git_toplevel(git: str, root: Path) -> Path | None:
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, **_C_LOCALE},
+        env=_git_environment(),
     )
     if inside.returncode != 0:
         if _NOT_A_WORK_TREE.search(inside.stderr):
@@ -125,6 +150,7 @@ def _git_toplevel(git: str, root: Path) -> Path | None:
         capture_output=True,
         text=True,
         check=True,
+        env=_git_environment(),
     )
     return Path(toplevel.stdout.strip()).resolve()
 
@@ -136,6 +162,7 @@ def _git_tracked(git: str, root: Path, patterns: tuple[str, ...]) -> list[str]:
         capture_output=True,
         text=True,
         check=True,
+        env=_git_environment(),
     ).stdout
     return [name for name in output.split("\0") if name]
 
@@ -255,6 +282,7 @@ def _git(root: Path, *arguments: str) -> None:
         capture_output=True,
         text=True,
         check=True,
+        env=_git_environment(),
     )
 
 
@@ -291,6 +319,60 @@ def test_tracked_files_ignore_the_outer_repository_for_a_copied_tree(
 
     assert _tracked("*.py", root=sandbox) == ["cmd_mox/copy.py"], (
         "the sandbox must read its own copy, not the outer repository"
+    )
+
+
+def test_the_git_environment_drops_repository_location_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hook's location variables override ``-C``, so every call drops them."""
+    for name in _GIT_LOCATION_VARIABLES:
+        monkeypatch.setenv(name, f"/elsewhere/{name.lower()}")
+
+    environment = _git_environment()
+
+    assert not set(_GIT_LOCATION_VARIABLES) & environment.keys(), (
+        "repository-location variables must not reach the git child"
+    )
+    assert environment["LC_ALL"] == "C", "git diagnostics must stay in the C locale"
+    assert "PATH" in environment, "git must still resolve from the inherited PATH"
+
+
+def test_work_tree_lookup_ignores_a_hook_repository_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hook's exported ``GIT_DIR`` must not replace the repository ``-C`` names."""
+    git = shutil.which("git")
+    assert git, "git must be on the path"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+    assert _git_toplevel(git, repo) == repo.resolve(), (
+        "the lookup must report the tree -C selects, not the hook's repository"
+    )
+
+
+def test_tracked_lookup_ignores_a_hook_index_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exported ``GIT_INDEX_FILE`` must not hide the real index's files."""
+    git = shutil.which("git")
+    assert git, "git must be on the path"
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "mod.py").write_text("", encoding="utf-8")
+    _git(repo, "init")
+    _git(repo, "add", "pkg/mod.py")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "empty-index"))
+
+    assert _git_tracked(git, repo, ("*.py",)) == ["pkg/mod.py"], (
+        "an exported index must not replace the index -C selects"
     )
 
 
