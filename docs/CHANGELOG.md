@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0] - 2026-11-12
+## [0.3.0] - 2026-11-18
 
 _If you are upgrading: please see the
 [0.3.0 migration guide](v0-3-0-migration-guide.md)._

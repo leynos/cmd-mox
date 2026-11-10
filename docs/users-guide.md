@@ -153,7 +153,7 @@ def run(*argv: str) -> str:
 
 
 def test_three_doubles(cmd_mox):
-    cmd_mox.stub("date").returns(stdout="2026-11-12\n")
+    cmd_mox.stub("date").returns(stdout="2026-11-18\n")
     cmd_mox.mock("git").with_args("tag", "v0.3.0").returns()
     notify = cmd_mox.spy("notify-send").returns()
 
@@ -162,7 +162,7 @@ def test_three_doubles(cmd_mox):
     run("notify-send", f"Tagged on {today}")
 
     assert notify.call_count == 1
-    notify.assert_called_with("Tagged on 2026-11-12")
+    notify.assert_called_with("Tagged on 2026-11-18")
 ```
 
 Each factory returns a `CommandDouble`. `StubCommand`, `MockCommand`, and
@@ -898,7 +898,7 @@ Fixtures are versioned JSON. This is a complete, minimal fixture:
 {
   "version": "1.0.0",
   "metadata": {
-    "created_at": "2026-11-12T10:30:00+00:00",
+    "created_at": "2026-11-18T10:30:00+00:00",
     "cmdmox_version": "0.3.0",
     "platform": "linux",
     "python_version": "3.12.7 (main, Oct  1 2026, 08:00:00) [GCC 14.2.0]"
@@ -913,7 +913,7 @@ Fixtures are versioned JSON. This is a complete, minimal fixture:
       "stdout": " M file.py\n",
       "stderr": "",
       "exit_code": 0,
-      "timestamp": "2026-11-12T10:30:01+00:00",
+      "timestamp": "2026-11-18T10:30:01+00:00",
       "duration_ms": 0
     }
   ],
@@ -950,11 +950,11 @@ RECORDING = {
     "stdout": " M file.py\n",
     "stderr": "",
     "exit_code": 0,
-    "timestamp": "2026-11-12T10:30:01+00:00",
+    "timestamp": "2026-11-18T10:30:01+00:00",
     "duration_ms": 0,
 }
 METADATA = {
-    "created_at": "2026-11-12T10:30:00+00:00",
+    "created_at": "2026-11-18T10:30:00+00:00",
     "cmdmox_version": "0.3.0",
     "platform": "linux",
     "python_version": "3.12.7",
