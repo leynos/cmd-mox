@@ -31,6 +31,13 @@ CMOX_REAL_COMMAND_ENV_PREFIX = "CMOX_REAL_COMMAND_"
 _UNSET_TIMEOUT = object()
 
 
+class _AbsentKey:
+    """Sentinel marking an environment key that was absent on entry."""
+
+
+_ABSENT_KEY = _AbsentKey()
+
+
 class _UnicodeBuffer(typ.Protocol):
     """Small surface used from ``ctypes.create_unicode_buffer``."""
 
@@ -583,10 +590,30 @@ class EnvironmentManager:
 
 @contextlib.contextmanager
 def temporary_env(mapping: dict[str, str]) -> cabc.Iterator[None]:
-    """Temporarily apply environment variables from *mapping*."""
-    orig_env = os.environ.copy()
-    os.environ.update(mapping)
+    """Temporarily apply environment variables from *mapping*.
+
+    Only the keys named in *mapping* are restored when the context exits; any
+    unrelated additions or deletions made inside the context survive. An empty
+    mapping therefore leaves the environment unchanged.
+
+    The context manager provides no thread isolation. Same-key contexts that
+    overlap and exit out of order restore an undefined value for that key.
+
+    Notes
+    -----
+    If applying an entry fails, entries already applied are rolled back before
+    the error leaves the context.
+    """
+    saved: dict[str, str | _AbsentKey] = {
+        key: os.environ.get(key, _ABSENT_KEY) for key in mapping
+    }
     try:
+        os.environ.update(mapping)
         yield
     finally:
-        _restore_env(orig_env)
+        for key in reversed(list(saved)):
+            value = saved[key]
+            if isinstance(value, _AbsentKey):
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
