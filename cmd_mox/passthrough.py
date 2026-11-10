@@ -23,6 +23,21 @@ class PassthroughConfig:
     extra_env: dict[str, str] | None = None
 
 
+@dc.dataclass(slots=True, frozen=True)
+class _PendingPassthrough:
+    """State retained for one in-flight passthrough request.
+
+    ``explicit_keys`` is a snapshot of the double's ``.with_env()`` keys taken
+    when the request was prepared.  Keeping it per request means a later
+    mutation of the expectation cannot change what an earlier recording keeps.
+    """
+
+    double: CommandDouble
+    invocation: Invocation
+    deadline: float
+    explicit_keys: frozenset[str]
+
+
 class PassthroughCoordinator:
     """Manages pending passthrough requests and result finalization.
 
@@ -49,7 +64,7 @@ class PassthroughCoordinator:
 
     def __init__(self, *, cleanup_ttl: float = 300.0) -> None:
         """Create an empty pending map guarded by a lock, with the cleanup TTL."""
-        self._pending: dict[str, tuple[CommandDouble, Invocation, float]] = {}
+        self._pending: dict[str, _PendingPassthrough] = {}
         # Every invocation registered since the last reset whose result the
         # controller has not yet recorded. Verification reads this registry so
         # a call cannot slip between the pending map and the completed-call
@@ -78,9 +93,7 @@ class PassthroughCoordinator:
         """Remove stale passthrough requests while holding ``self._lock``."""
         current = time.monotonic() if now is None else now
         expired = [
-            key
-            for key, (_, _, deadline) in self._pending.items()
-            if deadline <= current
+            key for key, entry in self._pending.items() if entry.deadline <= current
         ]
         for key in expired:
             self._pending.pop(key, None)
@@ -121,16 +134,22 @@ class PassthroughCoordinator:
             invocation_id=invocation_id,
         )
 
+        # Snapshot the expectation environment once.  The same copy feeds the
+        # directive merge and the explicit-key provenance, so a later mutation
+        # of the expectation cannot change this request's recording.
+        expectation_env = dict(double.expectation.env)
+
         with self._lock:
             self._prune_expired_locked()
-            self._pending[invocation_id] = (
-                double,
-                stored_invocation,
-                self._expiry_deadline(config.timeout),
+            self._pending[invocation_id] = _PendingPassthrough(
+                double=double,
+                invocation=stored_invocation,
+                deadline=self._expiry_deadline(config.timeout),
+                explicit_keys=frozenset(expectation_env),
             )
             self._unrecorded[invocation_id] = (double, stored_invocation)
 
-        env = dict(double.expectation.env)
+        env = dict(expectation_env)
         if config.extra_env:
             env.update(config.extra_env)
         passthrough = PassthroughRequest(
@@ -217,7 +236,8 @@ class PassthroughCoordinator:
             msg = f"Unexpected passthrough result for {result.invocation_id}"
             raise RuntimeError(msg)
 
-        double, invocation, _ = entry
+        double = entry.double
+        invocation = entry.invocation
         resp = Response(
             stdout=result.stdout,
             stderr=result.stderr,
@@ -228,6 +248,10 @@ class PassthroughCoordinator:
 
         recording_session = getattr(double, "_recording_session", None)
         if recording_session is not None:
-            recording_session.record(invocation, resp)
+            recording_session.record(
+                invocation,
+                resp,
+                explicit_keys=entry.explicit_keys,
+            )
 
         return double, invocation, resp

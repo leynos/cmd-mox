@@ -25,9 +25,32 @@ class _FakeExpectation:
 class _FakeDouble:
     """Minimal double exposing an expectation with a fixed environment."""
 
-    def __init__(self, env: dict[str, str]) -> None:
-        """Attach an expectation built from *env*."""
+    def __init__(
+        self,
+        env: dict[str, str],
+        recording_session: _RecordingSessionStub | None = None,
+    ) -> None:
+        """Attach an expectation built from *env* and an optional session."""
         self.expectation = _FakeExpectation(env)
+        self._recording_session = recording_session
+
+
+class _RecordingSessionStub:
+    """Capture what ``finalize_result`` forwards to ``RecordingSession.record``."""
+
+    def __init__(self) -> None:
+        """Start with no recorded calls."""
+        self.recordings: list[tuple[Invocation, object, frozenset[str] | None]] = []
+
+    def record(
+        self,
+        invocation: Invocation,
+        response: object,
+        *,
+        explicit_keys: frozenset[str] | None = None,
+    ) -> None:
+        """Store one forwarded call for later assertion."""
+        self.recordings.append((invocation, response, explicit_keys))
 
 
 def _make_invocation(command: str = "echo") -> Invocation:
@@ -261,3 +284,58 @@ def test_expired_requests_are_pruned(monkeypatch: pytest.MonkeyPatch) -> None:
                 exit_code=0,
             )
         )
+
+
+def test_finalize_records_expectation_keys_not_extra_env() -> None:
+    """Only ``.with_env()`` keys are explicit; ``extra_env`` additions are not."""
+    session = _RecordingSessionStub()
+    double = typ.cast("CommandDouble", _FakeDouble({"EXPECTED": "1"}, session))
+    coordinator = PassthroughCoordinator()
+    invocation = _make_invocation("git")
+    invocation.env.update({"EXPECTED": "1", "EXTRA": "2", "CALLER": "3"})
+    config = PassthroughConfig(
+        lookup_path="/bin",
+        timeout=1.0,
+        extra_env={"EXTRA": "2"},
+    )
+
+    response = coordinator.prepare_request(double, invocation, config)
+    directive = response.passthrough
+    assert directive is not None
+    coordinator.finalize_result(
+        PassthroughResult(
+            invocation_id=directive.invocation_id,
+            stdout="",
+            stderr="",
+            exit_code=0,
+        )
+    )
+
+    _, _, explicit_keys = session.recordings[0]
+    assert explicit_keys == frozenset({"EXPECTED"})
+
+
+def test_finalize_records_caller_invocation_without_injected_values() -> None:
+    """The stored invocation is a copy of the caller's environment."""
+    session = _RecordingSessionStub()
+    double = typ.cast("CommandDouble", _FakeDouble({"EXPECTED": "2"}, session))
+    coordinator = PassthroughCoordinator()
+    invocation = _make_invocation("git")
+    invocation.env.update({"CALLER": "1"})
+    config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
+
+    response = coordinator.prepare_request(double, invocation, config)
+    directive = response.passthrough
+    assert directive is not None
+    coordinator.finalize_result(
+        PassthroughResult(
+            invocation_id=directive.invocation_id,
+            stdout="",
+            stderr="",
+            exit_code=0,
+        )
+    )
+
+    stored_invocation, _, explicit_keys = session.recordings[0]
+    assert stored_invocation.env == {"CALLER": "1"}
+    assert explicit_keys == frozenset({"EXPECTED"})
