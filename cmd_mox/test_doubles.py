@@ -274,6 +274,11 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def times(self, count: int) -> typ.Self:
         """Require the command to be invoked exactly ``count`` times.
 
+        Verification enforces the count for mocks and spies. Stubs do not
+        record invocations, so a count configured on a stub is not verified.
+        Calling this method marks the count as explicit; an uncounted spy stays
+        observational.
+
         Parameters
         ----------
         count : int
@@ -289,6 +294,11 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
 
     def times_called(self, count: int) -> typ.Self:
         """Verify the spy was called ``count`` times.
+
+        This is the spy-flavoured alias of :meth:`times` and shares its
+        enforcement rules: mocks and spies are checked during verification,
+        while stubs do not record invocations. Calling this method marks the
+        count as explicit; an uncounted spy stays observational.
 
         Parameters
         ----------

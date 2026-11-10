@@ -472,3 +472,62 @@ def test_validate_matchers_rejects_length_mismatch() -> None:
     """_validate_matchers enforces one-to-one matcher/argument counts."""
     expectation = Expectation("cmd").with_matching_args(lambda _: True)
     assert not expectation._validate_matchers(["one", "two"])
+
+
+@pytest.mark.parametrize("count_method", ["times", "times_called"])
+def test_expectation_count_setter_marks_count_explicit(count_method: str) -> None:
+    """Both fluent count aliases record that the count was explicit."""
+    expectation = Expectation("foo")
+    assert expectation.count_explicit is False
+
+    result = getattr(expectation, count_method)(3)
+
+    assert result is expectation
+    assert expectation.count == 3
+    assert expectation.count_explicit is True
+
+
+@pytest.mark.parametrize("count_method", ["times", "times_called"])
+def test_command_double_count_setter_marks_count_explicit(count_method: str) -> None:
+    """The double's fluent count aliases mark the expectation explicit."""
+    mox = CmdMox()
+    double = mox.mock("foo")
+    assert double.expectation.count_explicit is False
+
+    result = getattr(double, count_method)(2)
+
+    assert result is double
+    assert double.expectation.count == 2
+    assert double.expectation.count_explicit is True
+
+
+def test_repeated_count_setters_keep_count_explicit() -> None:
+    """Repeated count configuration preserves the explicit flag."""
+    expectation = Expectation("foo").times(2).times_called(3)
+    assert expectation.count == 3
+    assert expectation.count_explicit is True
+
+
+def test_count_explicit_is_excluded_from_equality_and_repr() -> None:
+    """The explicitness flag does not change equality or the repr."""
+    implicit = Expectation("foo")
+    explicit = Expectation("foo").times(1)
+
+    assert explicit == implicit
+    assert "count_explicit" not in repr(explicit)
+
+
+def test_count_explicit_supports_positional_construction() -> None:
+    """The flag follows the existing positional field order."""
+    expectation = Expectation(
+        "foo",
+        None,
+        None,
+        None,
+        {},
+        2,
+        False,  # ruff: ignore[boolean-positional-value-in-call] - positional construction is the behaviour under test
+        True,  # ruff: ignore[boolean-positional-value-in-call] - positional construction is the behaviour under test
+    )
+    assert expectation.count == 2
+    assert expectation.count_explicit is True

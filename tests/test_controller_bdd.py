@@ -137,6 +137,33 @@ def test_spy_assertion_helpers() -> None:
 
 
 @scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "spy explicit call count is verified",
+)
+def test_spy_explicit_call_count_is_verified() -> None:
+    """A spy honours an explicit times() count during verification."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "spy explicit call count under-count fails verification",
+)
+def test_spy_explicit_call_count_under_count_fails_verification() -> None:
+    """A spy with too few calls fails verification."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "spy explicit call count over-count fails verification",
+)
+def test_spy_explicit_call_count_over_count_fails_verification() -> None:
+    """A spy with too many calls fails verification."""
+    pass
+
+
+@scenario(
     str(FEATURES_DIR / "controller.feature"), "journal preserves invocation order"
 )
 def test_journal_preserves_order() -> None:

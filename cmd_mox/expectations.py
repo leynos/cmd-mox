@@ -30,6 +30,12 @@ class Expectation:
     env: dict[str, str] = dc.field(default_factory=dict)
     count: int = 1
     ordered: bool = False
+    # Only the fluent count setters set this flag. Verification distinguishes an
+    # explicit ``times(1)`` from the implicit default so that spies stay
+    # observational unless the caller asks for a count. It is excluded from
+    # equality because ordering membership compares expectations, and from the
+    # repr because it is an implementation detail.
+    count_explicit: bool = dc.field(default=False, compare=False, repr=False)
 
     def with_args(self, *args: str) -> Expectation:
         """Require ``args`` to match exactly.
@@ -151,12 +157,17 @@ class Expectation:
     def times_called(self, count: int) -> Expectation:
         """Set the required invocation count to ``count``.
 
+        Only this fluent setter (and :meth:`times`, which delegates to it) marks
+        the count as explicit. Verification enforces explicit counts on mocks
+        and spies, while an unconfigured spy remains observational.
+
         Returns
         -------
         Expectation
             This expectation, allowing further fluent configuration.
         """
         self.count = count
+        self.count_explicit = True
         return self
 
     # Deliberate public API: `times` is the documented fluent DSL verb. Its
@@ -166,6 +177,11 @@ class Expectation:
     # pylint: disable-next=trivial-attribute-wrapper
     def times(self, count: int) -> Expectation:
         """Alias for :meth:`times_called` matching the fluent DSL.
+
+        Like :meth:`times_called`, this marks the count as explicit so that
+        verification enforces it for mocks and spies. Assigning ``count``
+        directly does not set the flag, which keeps an unconfigured spy
+        observational.
 
         Returns
         -------

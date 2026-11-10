@@ -15,6 +15,8 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
 
 def test_spy_records_invocations_for_assertions(cmd_mox: CmdMox) -> None:
     """Spies record calls for later inspection and assertions."""
+    # The fixture's teardown verification enforces this explicit count, so the
+    # command below must run exactly once.
     spy = cmd_mox.spy("whoami").returns(stdout="tester").times_called(1)
 
     result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - command path derives from the shim setup

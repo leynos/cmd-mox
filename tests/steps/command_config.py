@@ -154,6 +154,24 @@ def spy_command(mox: CmdMox, cmd: str, text: str) -> None:
     mox.spy(cmd).returns(stdout=text)
 
 
+@given(
+    parsers.cfparse('the command "{cmd}" is spied to return "{text}" times {count:d}')
+)
+def spy_command_times(mox: CmdMox, cmd: str, text: str, count: int) -> None:
+    """Configure a spied command with an explicit count using times()."""
+    mox.spy(cmd).returns(stdout=text).times(count)
+
+
+@given(
+    parsers.cfparse(
+        'the command "{cmd}" is spied to return "{text}" times called {count:d}'
+    )
+)
+def spy_command_times_called(mox: CmdMox, cmd: str, text: str, count: int) -> None:
+    """Configure a spied command with an explicit count using times_called()."""
+    mox.spy(cmd).returns(stdout=text).times_called(count)
+
+
 @given(parsers.cfparse('the command "{cmd}" is spied to passthrough'))
 def spy_passthrough(mox: CmdMox, cmd: str) -> None:
     """Configure a command spy that forwards to the real executable."""

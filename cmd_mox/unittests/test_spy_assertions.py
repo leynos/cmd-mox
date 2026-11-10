@@ -6,13 +6,20 @@ import operator
 import os
 import subprocess
 import typing as typ
+from pathlib import Path
 
 import pytest
 
 from cmd_mox.controller import CmdMox, CommandDouble
 from cmd_mox.domain import mask_env_mapping
+from cmd_mox.errors import (
+    UnexpectedCommandError,
+    UnfulfilledExpectationError,
+    VerificationError,
+)
 from cmd_mox.ipc import Invocation
 from cmd_mox.unittests._env_helpers import require_shim_dir
+from tests.helpers.fixtures import write_minimal_replay_fixture
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -284,6 +291,184 @@ class TestSpyAssertions:
         invocation = Invocation("hi", ["foo"], "", {})
         spy.invocations.append(invocation)
         assert spy._get_last_invocation() is invocation
+
+    # ------------------------------------------------------------------
+    def _run_spy_with_explicit_count(
+        self,
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+        count_method: str,
+        expected_count: int,
+        actual_calls: int,
+    ) -> tuple[CmdMox, CommandDouble]:
+        """Configure a spy count and invoke the shim *actual_calls* times.
+
+        Returns
+        -------
+        tuple[CmdMox, CommandDouble]
+            The controller awaiting verification and its spy.
+        """
+        mox = CmdMox()
+        spy = mox.spy("hi").returns(stdout="hello")
+        getattr(spy, count_method)(expected_count)
+        mox.__enter__()
+        mox.replay()
+        path = require_shim_dir(mox.environment) / "hi"
+        for _ in range(actual_calls):
+            run([str(path)], shell=False)
+        return mox, spy
+
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize("count_method", ["times", "times_called"])
+    def test_spy_explicit_count_matches(
+        self,
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+        count_method: str,
+    ) -> None:
+        """An explicit spy count is satisfied by the matching call count."""
+        mox, spy = self._run_spy_with_explicit_count(run, count_method, 2, 2)
+        mox.verify()
+        assert spy.call_count == 2
+
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize("count_method", ["times", "times_called"])
+    def test_spy_explicit_count_under_count_fails(
+        self,
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+        count_method: str,
+    ) -> None:
+        """Fewer spy calls than the explicit count fail verification."""
+        mox, _ = self._run_spy_with_explicit_count(run, count_method, 2, 1)
+        with pytest.raises(UnfulfilledExpectationError) as exc:
+            mox.verify()
+        message = str(exc.value)
+        assert "Unfulfilled expectation." in message
+        assert "expected calls=2" in message
+
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize("count_method", ["times", "times_called"])
+    def test_spy_explicit_count_over_count_fails(
+        self,
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+        count_method: str,
+    ) -> None:
+        """More spy calls than the explicit count fail verification."""
+        mox, _ = self._run_spy_with_explicit_count(run, count_method, 1, 2)
+        with pytest.raises(UnexpectedCommandError) as exc:
+            mox.verify()
+        message = str(exc.value)
+        assert "Unexpected additional invocation." in message
+        assert "expected calls=1" in message
+
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize(
+        ("expected_count", "actual_calls", "error_type"),
+        [
+            pytest.param(1, 0, UnfulfilledExpectationError, id="one-zero-calls"),
+            pytest.param(0, 1, UnexpectedCommandError, id="zero-one-call"),
+        ],
+    )
+    def test_spy_explicit_boundary_counts(
+        self,
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+        expected_count: int,
+        actual_calls: int,
+        error_type: type[VerificationError],
+    ) -> None:
+        """Explicit ``times(1)`` and ``times(0)`` are enforced at the boundary."""
+        mox, _ = self._run_spy_with_explicit_count(
+            run, "times", expected_count, actual_calls
+        )
+        with pytest.raises(error_type):
+            mox.verify()
+
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize("actual_calls", [0, 3])
+    def test_unconfigured_spy_count_is_observational(
+        self,
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+        actual_calls: int,
+    ) -> None:
+        """A spy without an explicit count never fails verification."""
+        mox = CmdMox()
+        spy = mox.spy("hi").returns(stdout="hello")
+        mox.__enter__()
+        mox.replay()
+        path = require_shim_dir(mox.environment) / "hi"
+        for _ in range(actual_calls):
+            run([str(path)], shell=False)
+        mox.verify()
+        assert spy.call_count == actual_calls
+
+    # ------------------------------------------------------------------
+    def test_spy_handler_pattern_remains_observational(
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
+    ) -> None:
+        """The usage-guide handler pattern records calls without a count."""
+        mox = CmdMox()
+        seen: list[list[str]] = []
+
+        def handler(invocation: Invocation) -> tuple[str, str, int]:
+            """Record the arguments and return a canned success."""
+            seen.append(invocation.args)
+            return "", "", 0
+
+        spy = mox.spy("tool").runs(handler)
+        mox.__enter__()
+        mox.replay()
+        path = require_shim_dir(mox.environment) / "tool"
+        run([str(path), "run"], shell=False)
+        run([str(path), "run", "--fail"], shell=False)
+        mox.verify()
+        assert seen == [["run"], ["run", "--fail"]]
+        assert spy.call_count == 2
+
+    # ------------------------------------------------------------------
+    def _run_counted_spy_in_with_block(
+        self,
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+    ) -> None:
+        """Run one explicitly counted spy inside a ``with`` block."""
+        with CmdMox() as mox:
+            mox.spy("hi").returns(stdout="hello").times_called(2)
+            mox.replay()
+            path = require_shim_dir(mox.environment) / "hi"
+            run([str(path)], shell=False)
+
+    # ------------------------------------------------------------------
+    def test_context_manager_enforces_explicit_spy_count(
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
+    ) -> None:
+        """Leaving a ``with`` block verifies an explicit spy count."""
+        with pytest.raises(UnfulfilledExpectationError):
+            self._run_counted_spy_in_with_block(run)
+
+    # ------------------------------------------------------------------
+    def test_ordered_spy_mismatch_fails_verification(
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
+    ) -> None:
+        """An ordered spy sequence that is violated fails verification."""
+        mox = CmdMox()
+        mox.spy("first").returns(stdout="1").in_order().times_called(2)
+        mox.spy("second").returns(stdout="2").in_order().times_called(1)
+        mox.__enter__()
+        mox.replay()
+        path_first = require_shim_dir(mox.environment) / "first"
+        path_second = require_shim_dir(mox.environment) / "second"
+        run([str(path_second)], shell=False)
+        run([str(path_first)], shell=False)
+        with pytest.raises(VerificationError):
+            mox.verify()
+
+    # ------------------------------------------------------------------
+    def test_replay_backed_spy_explicit_count_is_verified(self, tmp_path: Path) -> None:
+        """A replay-backed spy honours an explicit count."""
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        mox = CmdMox()
+        mox.spy("git").replay(fixture_path).times_called(1)
+        mox.__enter__()
+        mox.replay()
+        mox._handle_invocation(Invocation("git", ["status"], "", {}))
+        mox.verify()
 
     # ------------------------------------------------------------------
     ASSERTION_FAILURE_SCENARIOS: typ.ClassVar[list[dict[str, typ.Any]]] = [

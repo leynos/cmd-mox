@@ -743,8 +743,17 @@ class CmdMox:
 
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""
-        expectations = {n: d.expectation for n, d in self.mocks.items()}
-        inv_map = {n: d.invocations for n, d in self.mocks.items()}
+        # Mocks always participate so their implicit default count of one keeps
+        # its existing meaning. Spies join only when a fluent count setter marked
+        # the count explicit; otherwise they stay purely observational.
+        counted = {
+            name: double
+            for name, double in self._doubles.items()
+            if double.kind is DoubleKind.MOCK
+            or (double.kind is DoubleKind.SPY and double.expectation.count_explicit)
+        }
+        expectations = {name: double.expectation for name, double in counted.items()}
+        inv_map = {name: double.invocations for name, double in counted.items()}
 
         UnexpectedCommandVerifier().verify(self.journal, self._doubles)
         OrderVerifier(self._ordered).verify(self.journal)
