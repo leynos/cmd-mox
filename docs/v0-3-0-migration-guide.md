@@ -6,6 +6,11 @@ two. New features follow, for readers who want to know what the upgrade offers.
 The [changelog](CHANGELOG.md) lists every change with links to the pull
 requests behind it.
 
+CmdMox 0.3.0 is currently in beta. Installers skip pre-releases unless asked,
+so request it explicitly with `python -m pip install "cmd-mox>=0.3.0b1"` or
+`uv add --dev "cmd-mox>=0.3.0b1"`; the same requirement keeps working once
+0.3.0 itself is released.
+
 | Change                                                                      | Who is affected                                    |
 | --------------------------------------------------------------------------- | -------------------------------------------------- |
 | [Python 3.12 or newer](#python-312-or-newer-is-required)                    | Suites still running on Python 3.11                |

@@ -5,9 +5,10 @@ CmdMox replaces the external commands that code under test runs (`git`, `curl`,
 reports its call back to the test process, where a mock, stub, or spy decides
 the answer and remembers what was asked.
 
-This guide describes CmdMox 0.3.0. It starts with a first test and adds one
-idea per section, so reading from the top is the gentlest route. Each section
-also stands alone for readers who arrive with a specific question.
+This guide describes CmdMox 0.3.0, currently in beta. It starts with a first
+test and adds one idea per section, so reading from the top is the gentlest
+route. Each section also stands alone for readers who arrive with a specific
+question.
 
 | Reader                             | Start here                                                                                                   |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -29,12 +30,13 @@ each one can be copied into a project as it stands.
 ### Install CmdMox
 
 CmdMox needs Python 3.12 or newer and runs on Linux, macOS, and Windows. It is
-a pytest plugin, so install it alongside pytest:
+a pytest plugin, so install it alongside pytest. While 0.3.0 is in beta,
+installers skip it unless asked, so request it explicitly:
 
 <!-- shell-example: guide-install-pip -->
 
 ```shell
-python -m pip install cmd-mox pytest
+python -m pip install "cmd-mox>=0.3.0b1" pytest
 ```
 
 In a [uv](https://docs.astral.sh/uv/) project, add both as development
@@ -43,8 +45,10 @@ dependencies:
 <!-- shell-example: guide-install-uv -->
 
 ```shell
-uv add --dev cmd-mox pytest
+uv add --dev "cmd-mox>=0.3.0b1" pytest
 ```
+
+The same requirement keeps working once 0.3.0 itself is released.
 
 PyPI carries both a wheel and a source distribution. GitHub Releases attach the
 same files together with their provenance bundle; see
@@ -899,7 +903,7 @@ Fixtures are versioned JSON. This is a complete, minimal fixture:
   "version": "1.0.0",
   "metadata": {
     "created_at": "2026-11-18T10:30:00+00:00",
-    "cmdmox_version": "0.3.0",
+    "cmdmox_version": "0.3.0b1",
     "platform": "linux",
     "python_version": "3.12.7 (main, Oct  1 2026, 08:00:00) [GCC 14.2.0]"
   },
@@ -955,7 +959,7 @@ RECORDING = {
 }
 METADATA = {
     "created_at": "2026-11-18T10:30:00+00:00",
-    "cmdmox_version": "0.3.0",
+    "cmdmox_version": "0.3.0b1",
     "platform": "linux",
     "python_version": "3.12.7",
 }
@@ -1071,7 +1075,7 @@ legacy = {
     "version": "1.0",
     "metadata": {
         "created_at": "2026-02-01T00:00:00+00:00",
-        "cmdmox_version": "0.3.0",
+        "cmdmox_version": "0.3.0b1",
         "platform": "linux",
         "python_version": "3.12.7",
     },

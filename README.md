@@ -42,10 +42,14 @@ ______________________________________________________________________
 
 CmdMox needs Python 3.12 or newer.
 
+This README and the guides describe CmdMox 0.3.0, which is currently in beta.
+Installers skip pre-releases unless asked, so a bare `pip install cmd-mox`
+would fetch the older 0.2.0 release instead. Ask for the beta explicitly:
+
 <!-- shell-example: readme-install-pip -->
 
 ```shell
-python -m pip install cmd-mox
+python -m pip install "cmd-mox>=0.3.0b1"
 ```
 
 Or add it to the development dependencies of a [uv](https://docs.astral.sh/uv/)
@@ -54,8 +58,10 @@ project:
 <!-- shell-example: readme-install-uv -->
 
 ```shell
-uv add --dev cmd-mox
+uv add --dev "cmd-mox>=0.3.0b1"
 ```
+
+The same requirement keeps working once 0.3.0 itself is released.
 
 Then enable the pytest plugin in your `conftest.py`:
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0] - 2026-11-18
+## [0.3.0-beta1] - 2026-11-18
 
 _If you are upgrading: please see the
 [0.3.0 migration guide](v0-3-0-migration-guide.md)._
@@ -84,7 +84,7 @@ _If you are upgrading: please see the
 
 _Initial release._
 
-[0.3.0]: https://github.com/leynos/cmd-mox/compare/v0.2.0...v0.3.0
+[0.3.0-beta1]: https://github.com/leynos/cmd-mox/compare/v0.2.0...v0.3.0-beta1
 [0.2.0]: https://github.com/leynos/cmd-mox/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/leynos/cmd-mox/releases/tag/v0.1.0
 
