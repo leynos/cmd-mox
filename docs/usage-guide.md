@@ -961,9 +961,11 @@ assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 The internal verification record retains every mock, spy, unregistered-command
 and ordered-stub call for the whole replay, regardless of
 `max_journal_entries`. Memory savings therefore apply mainly to stub calls;
-mock and spy histories are unbounded in all cases. Mutating `cmd_mox.journal`
-does not affect verification. A bounded controller still reports an unexpected
-call that has already been evicted from the journal:
+mock and spy histories are unbounded in all cases. If `in_order()` is applied
+after a stub call has completed, that call is still recovered from the
+surviving journal during verification. Mutating `cmd_mox.journal` does not
+affect verification. A bounded controller still reports an unexpected call that
+has already been evicted from the journal:
 
 ```python
 import shutil

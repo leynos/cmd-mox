@@ -2035,9 +2035,12 @@ unregistered-command calls, plus calls to ordered stubs. Unordered stub calls
 are omitted, so the memory saving from `max_journal_entries` applies mainly to
 stub traffic. Both records are appended under one lock at the same completion
 point, which keeps their order identical, and both are cleared together when
-replay starts. Verification takes one snapshot of the internal record and
-passes it to `UnexpectedCommandVerifier` and `OrderVerifier`, so evicting a
-diagnostic journal entry never weakens verification.
+replay starts. Verification takes one snapshot under the lock, composed of
+retained entries that the journal has evicted plus surviving journal entries
+that verification needs. Composing the two keeps calls that completed before
+`in_order()` was applied available to `OrderVerifier`. The snapshot is passed to
+`UnexpectedCommandVerifier` and `OrderVerifier`, so evicting a diagnostic
+journal entry never weakens verification.
 
 ### 8.9 Design Decisions for Documentation and Examples
 

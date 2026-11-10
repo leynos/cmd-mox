@@ -81,8 +81,7 @@ class CmdMox:
             the environment is restored. Disable for explicit control.
         max_journal_entries:
             Maximum number of invocations retained in the public diagnostic
-            ``journal``. When ``None``, the journal is unbounded. Older
-            entries are discarded once the limit is exceeded. Verification
+            ``journal``; when ``None`` the journal is unbounded. Verification
             uses a separate internal record, so eviction never weakens it.
         environment:
             Optional :class:`EnvironmentManager` instance used to prepare shim and
@@ -766,7 +765,10 @@ class CmdMox:
         expectations = {n: d.expectation for n, d in self.mocks.items()}
         inv_map = {n: d.invocations for n, d in self.mocks.items()}
         with self._history_lock:
-            verification_log = list(self._verification_log)
+            surviving = {id(inv) for inv in self.journal}
+            verification_log = [
+                inv for inv in self._verification_log if id(inv) not in surviving
+            ] + [inv for inv in self.journal if self._needs_verification_record(inv)]
 
         UnexpectedCommandVerifier().verify(verification_log, self._doubles)
         OrderVerifier(self._ordered).verify(verification_log)

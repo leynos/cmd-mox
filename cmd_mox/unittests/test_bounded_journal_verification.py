@@ -152,6 +152,36 @@ def test_passthrough_results_follow_completion_order() -> None:
     assert [inv.command for inv in mox._verification_log] == ["second", "first"]
 
 
+def test_late_in_order_still_sees_completed_stub_call() -> None:
+    """A stub call completed before in_order() still satisfies ordering."""
+    mox = CmdMox()
+    first = mox.stub("first").returns()
+    second = mox.stub("second").returns()
+    _dispatch(mox, "first")
+    _dispatch(mox, "second")
+
+    first.in_order()
+    second.in_order()
+
+    mox._run_verifiers()
+
+
+def test_late_in_order_preserves_completion_order() -> None:
+    """Late ordering still reports calls that completed out of order."""
+    mox = CmdMox()
+    first = mox.stub("first").returns()
+    second = mox.stub("second").returns()
+    _dispatch(mox, "second")
+    _dispatch(mox, "first")
+
+    first.in_order()
+    second.in_order()
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        mox._run_verifiers()
+    assert "Ordered expectation violated." in str(excinfo.value)
+
+
 def test_verification_log_retains_only_calls_verification_uses() -> None:
     """Unordered stub calls stay out of the record; ordered ones stay in."""
     mox = CmdMox()
