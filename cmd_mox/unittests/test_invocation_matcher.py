@@ -164,6 +164,15 @@ class TestInvocationMatcherStrictMode:
             pytest.param(
                 MatchCase(
                     strict=True,
+                    spec=RecordedInvocationSpec(env_subset={"GO_EXTLINK_ENABLED": "1"}),
+                    inv_kwargs={"env": {"GO_EXTLINK_ENABLED": "0"}},
+                    expected=False,
+                ),
+                id="go-extlink-enabled-differs",
+            ),
+            pytest.param(
+                MatchCase(
+                    strict=True,
                     spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
                     inv_kwargs={"env": {"GIT_DIR": ".git", "EXTRA": "value"}},
                     expected=True,

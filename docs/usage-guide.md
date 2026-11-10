@@ -536,13 +536,14 @@ Recordings capture only a safe, portable subset of environment variables:
   bare `GO` prefix would also capture unrelated names such as
   `GOOGLE_CLOUD_PROJECT`. Other `GO*` names and `CGO_*` names are not recorded
   unless allowlisted.
-- **Override:** `env_allowlist` and `explicit_keys` share one precedence and
-  their union is applied. Force-include specific keys through `env_allowlist`,
-  or pass `explicit_keys` to `filter_env_subset()` for keys from `.with_env()`.
-  A requested key must be present in the environment to appear in the
-  recording, and CmdMox-internal keys remain excluded. Requests take precedence
-  over the sensitive-key rule, so allowlisting a key such as
-  `DOCKER_AUTH_CONFIG` persists its raw value in the fixture.
+- **Override:** Use `env_allowlist` to include specific keys. Keys specified
+  by `.with_env()` do not automatically widen recordings. Direct callers of
+  `filter_env_subset()` can pass `explicit_keys`; the function applies the
+  union of `allowlist` and `explicit_keys`. A requested key must be present in
+  the environment to appear in the recording, and CmdMox-internal keys remain
+  excluded. Requests take precedence over the sensitive-key rule, so
+  allowlisting a key such as `DOCKER_AUTH_CONFIG` persists its raw value in the
+  fixture.
 
 Existing fixtures are unaffected by the narrower `go` rule: the fixture loader
 does not re-filter a stored `env_subset`, so recordings made before this change

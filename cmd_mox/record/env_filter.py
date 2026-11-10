@@ -58,6 +58,7 @@ GO_ENV_KEYS: typ.Final[frozenset[str]] = frozenset({
     "GODEBUG",
     "GOENV",
     "GOEXPERIMENT",
+    "GO_EXTLINK_ENABLED",
     "GOFIPS140",
     "GOFLAGS",
     "GOGC",

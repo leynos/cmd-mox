@@ -336,6 +336,7 @@ class TestFilterEnvSubset:
             "GOAUTH",
             "GODEBUG",
             "GOCACHEPROG",
+            "GO_EXTLINK_ENABLED",
         ]
         env = dict.fromkeys(retained, "keep")
         env.update({
