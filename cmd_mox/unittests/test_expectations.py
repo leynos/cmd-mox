@@ -310,6 +310,36 @@ def test_expectation_times_alias(
     assert len(mox.mocks["second"].invocations) == 2
 
 
+def test_zero_count_mock_passes_when_not_invoked() -> None:
+    """A zero-count mock passes verification when the command never runs."""
+    mox = CmdMox()
+    mox.mock("blocked").returns(stdout="ok").times(0)
+    mox.__enter__()
+    mox.replay()
+
+    mox.verify()
+
+    assert len(mox.mocks["blocked"].invocations) == 0
+
+
+def test_ordered_times_two_passes_after_two_calls(
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """An ordered expectation with a count of two is satisfied by two calls."""
+    mox = CmdMox()
+    mox.mock("step").returns(stdout="ok").in_order().times(2)
+    mox.__enter__()
+    mox.replay()
+
+    path = require_shim_dir(mox.environment) / "step"
+    run([str(path)], shell=False)
+    run([str(path)], shell=False)
+
+    mox.verify()
+
+    assert len(mox.mocks["step"].invocations) == 2
+
+
 @pytest.mark.parametrize(
     (
         "mock_configurator",
@@ -340,6 +370,12 @@ def test_expectation_times_alias(
             ),
             UnfulfilledExpectationError,
             id="count-validation",
+        ),
+        pytest.param(
+            lambda mox: (mox.mock("first").returns(stdout="1").times_called(0),),
+            lambda run, paths: (run([str(paths["first"])], shell=False),),
+            UnexpectedCommandError,
+            id="zero-count-invoked",
         ),
         pytest.param(
             lambda mox: (mox.mock("first").returns(stdout="1").any_order().times(2),),

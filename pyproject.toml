@@ -453,6 +453,10 @@ reason = "Two unrelated one-statement idioms in the same pair of files. verifier
 members = ["cmd_mox/controller.py", "cmd_mox/passthrough.py"]
 reason = "One call repeated in each file. cmd_mox/controller.py invokes self._require_replay_environment() from both the replay and verify preconditions because the two entry points need the same environment attributes; cmd_mox/passthrough.py invokes self._prune_expired_locked() under its own lock from both record and finalize_result because both must observe a pruned ledger. Neither pair shares a behaviour beyond the single guarded call, and the shared helper already exists in each case, so the duplication is the call itself. Both fragments are reported unnamed, so the keys are path-only and also cover any future family contained entirely within these two files."
 
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/_validators.py::validate_retry_attempts", "cmd_mox/_validators.py::validate_expectation_count"]
+reason = "Both public validators state a fixed contract and delegate their whole body to the shared _validate_int_minimum helper; only the inclusive bound and the parameter name differ. nose is matching the one-line delegation plus the identical NumPy Raises boilerplate, not omitted behaviour. Merging them would put a caller-supplied minimum and name on a public API that exists to make each contract explicit at its entry point."
+
 [tool.skylos.gate]
 strict = true
 

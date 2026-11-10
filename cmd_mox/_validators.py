@@ -106,6 +106,39 @@ def validate_optional_timeout(timeout: float | None, *, name: str) -> None:
     return
 
 
+def _validate_int_minimum(value: int, *, name: str, minimum: int) -> None:
+    """Reject a bool or non-integer *value* below *minimum*.
+
+    Retry attempts and expectation counts share this shape: ``bool`` is
+    rejected first because it is an ``int`` subclass that would otherwise slip
+    through an ``isinstance(value, int)`` check, then the inclusive lower bound
+    is applied. Only the bound and the parameter name differ between callers.
+
+    Parameters
+    ----------
+    value : int
+        Value supplied by the caller.
+    name : str
+        Parameter name used in error messages.
+    minimum : int
+        Smallest permitted value, inclusive.
+
+    Raises
+    ------
+    TypeError
+        If *value* is a bool or not an integer.
+    ValueError
+        If *value* is less than *minimum*.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        msg = f"{name} must be an integer"
+        raise TypeError(msg)
+
+    if value < minimum:
+        msg = f"{name} must be >= {minimum}"
+        raise ValueError(msg)
+
+
 def validate_retry_attempts(retries: int) -> None:
     """Ensure retry attempt counts are sensible.
 
@@ -120,14 +153,26 @@ def validate_retry_attempts(retries: int) -> None:
         If *retries* is not an integer.
     ValueError
         If *retries* is less than one.
-    """
-    if isinstance(retries, bool) or not isinstance(retries, int):
-        msg = "retries must be an integer"
-        raise TypeError(msg)
+    """  # ruff: ignore[docstring-extraneous-exception] - _validate_int_minimum raises these caller-visible failures
+    _validate_int_minimum(retries, name="retries", minimum=1)
 
-    if retries < 1:
-        msg = "retries must be >= 1"
-        raise ValueError(msg)
+
+def validate_expectation_count(count: int) -> None:
+    """Ensure an expectation invocation count is a non-negative integer.
+
+    Parameters
+    ----------
+    count : int
+        Required number of invocations.
+
+    Raises
+    ------
+    TypeError
+        If *count* is a bool or not an integer.
+    ValueError
+        If *count* is negative.
+    """  # ruff: ignore[docstring-extraneous-exception] - _validate_int_minimum raises these caller-visible failures
+    _validate_int_minimum(count, name="count", minimum=0)
 
 
 def validate_retry_backoff(backoff: float) -> None:

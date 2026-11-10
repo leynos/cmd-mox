@@ -1095,6 +1095,14 @@ few common ones are:
   verified; an uncounted spy's total is not checked, except that `in_order()`
   alone still enforces one call in sequence.
 
+  `count` must be a non-negative `int`. Bools are rejected even though `bool`
+  subclasses `int`, and floats, strings, and `None` are rejected too. Invalid
+  counts raise `TypeError` (wrong type) or `ValueError` (negative) when the
+  expectation is configured, before any replay, and leave the expectation's
+  count unchanged. A zero count means the command must not be invoked at all:
+  verification passes when it never ran and raises `UnexpectedCommandError` if
+  it ran even once.
+
 - `in_order()` – enforce strict ordering with other expectations.
 - `any_order()` – allow the expectation to be satisfied in any position.
 - `passthrough()` – for spies, run the real command while recording it.

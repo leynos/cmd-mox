@@ -177,6 +177,18 @@ def test_times_alias_maps_to_times_called() -> None:
     pass
 
 
+@scenario(str(FEATURES_DIR / "controller.feature"), "zero-count mock is not invoked")
+def test_zero_count_mock_is_not_invoked() -> None:
+    """A zero-count mock passes verification when never invoked."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "zero-count mock is invoked once")
+def test_zero_count_mock_is_invoked_once() -> None:
+    """A zero-count mock fails verification when invoked once."""
+    pass
+
+
 @scenario(str(FEATURES_DIR / "controller.feature"), "context manager usage")
 def test_context_manager_usage() -> None:
     """CmdMox works within a ``with`` block."""
