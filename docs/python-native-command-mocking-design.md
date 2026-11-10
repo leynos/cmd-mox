@@ -2600,7 +2600,7 @@ classDiagram
         - datetime | None _started_at
         - bool _finalized
         + start() None
-        + record(invocation: Invocation, response: Response) None
+        + record(invocation: Invocation, response: Response, duration_ms: int, explicit_keys: Iterable~str~ | None) None
         + finalize() FixtureFile
         + from_passthrough_spy(spy, fixture_path, **kwargs) RecordingSession
     }
@@ -2820,7 +2820,7 @@ classDiagram
         - FixtureFile | None _fixture_file
         + RecordingSession(fixture_path, scrubber, env_allowlist, command_filter)
         + start() void
-        + record(invocation, response, duration_ms) void
+        + record(invocation, response, duration_ms, explicit_keys) void
         + finalize() FixtureFile
     }
 
@@ -3785,7 +3785,7 @@ classDiagram
         - list~str~ env_allowlist
         - list~RecordedInvocation~ _recordings
         + start() None
-        + record(invocation, response) None
+        + record(invocation, response, duration_ms, explicit_keys) None
         + finalize() FixtureFile
     }
 
