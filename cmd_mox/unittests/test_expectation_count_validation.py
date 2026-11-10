@@ -25,6 +25,14 @@ class _CountSetter(typ.Protocol):
         """Require the command to be invoked exactly *count* times."""
 
 
+class _InvalidCount(typ.NamedTuple):
+    """An invalid count and the failure it should produce."""
+
+    value: object
+    exception: type[Exception]
+    message: str
+
+
 def _expectation_for(receiver: _CountSetter) -> Expectation:
     """Return the expectation backing *receiver*."""
     if isinstance(receiver, Expectation):
@@ -55,27 +63,38 @@ _SET_COUNT_PARAMS = pytest.mark.parametrize(
 @_RECEIVER_PARAMS
 @_SET_COUNT_PARAMS
 @pytest.mark.parametrize(
-    ("count", "expected_exception", "message"),
+    "case",
     [
-        pytest.param(-1, ValueError, r"^count must be >= 0$", id="negative"),
-        pytest.param(True, TypeError, r"^count must be an integer$", id="bool"),
-        pytest.param(2.5, TypeError, r"^count must be an integer$", id="float"),
-        pytest.param("2", TypeError, r"^count must be an integer$", id="string"),
+        pytest.param(
+            _InvalidCount(-1, ValueError, r"^count must be >= 0$"), id="negative"
+        ),
+        pytest.param(
+            _InvalidCount(
+                value=True,
+                exception=TypeError,
+                message=r"^count must be an integer$",
+            ),
+            id="bool",
+        ),
+        pytest.param(
+            _InvalidCount(2.5, TypeError, r"^count must be an integer$"), id="float"
+        ),
+        pytest.param(
+            _InvalidCount("2", TypeError, r"^count must be an integer$"), id="string"
+        ),
     ],
 )
 def test_invalid_count_is_rejected_without_mutation(
     make_receiver: cabc.Callable[[], _CountSetter],
     set_count: cabc.Callable[[_CountSetter, int], object],
-    count: object,
-    expected_exception: type[Exception],
-    message: str,
+    case: _InvalidCount,
 ) -> None:
     """An invalid count raises and leaves the configured count untouched."""
     receiver = make_receiver()
     set_count(receiver, 3)
 
-    with pytest.raises(expected_exception, match=message):
-        set_count(receiver, typ.cast("int", count))
+    with pytest.raises(case.exception, match=case.message):
+        set_count(receiver, typ.cast("int", case.value))
 
     assert _expectation_for(receiver).count == 3
 

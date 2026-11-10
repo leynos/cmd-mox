@@ -457,6 +457,10 @@ reason = "One call repeated in each file. cmd_mox/controller.py invokes self._re
 members = ["cmd_mox/_validators.py::validate_retry_attempts", "cmd_mox/_validators.py::validate_expectation_count"]
 reason = "Both public validators state a fixed contract and delegate their whole body to the shared _validate_int_minimum helper; only the inclusive bound and the parameter name differ. nose is matching the one-line delegation plus the identical NumPy Raises boilerplate, not omitted behaviour. Merging them would put a caller-supplied minimum and name on a public API that exists to make each contract explicit at its entry point."
 
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/_validators.py::validate_positive_finite_timeout", "cmd_mox/_validators.py::validate_retry_backoff"]
+reason = "Both public validators state a fixed contract and delegate their whole body to the shared _validate_finite_minimum helper; only the inclusive bound and the parameter name differ. nose is matching the one-line delegation plus the identical NumPy Raises boilerplate, not omitted behaviour. Merging them would put a caller-supplied minimum and name on a public API that exists to make each contract explicit at its entry point."
+
 [tool.skylos.gate]
 strict = true
 

@@ -52,6 +52,47 @@ def _validate_numeric(
         raise ValueError(invalid_message)
 
 
+def _validate_finite_minimum(
+    value: float,
+    *,
+    name: str,
+    minimum: float,
+    exclusive: bool,
+) -> None:
+    """Reject a *value* that is non-finite or fails the *minimum* bound.
+
+    Parameters
+    ----------
+    value : float
+        Value supplied by the caller.
+    name : str
+        Parameter name used in error messages.
+    minimum : float
+        Inclusive or exclusive lower bound, depending on *exclusive*.
+    exclusive : bool
+        Whether *value* must be strictly greater than *minimum*.
+
+    Raises
+    ------
+    TypeError
+        If *value* is a bool or not a real number.
+    ValueError
+        If *value* is not finite or is on the wrong side of *minimum*.
+    """  # ruff: ignore[docstring-extraneous-exception] - _validate_numeric raises these caller-visible failures
+    comparator = ">" if exclusive else ">="
+    _validate_numeric(
+        value,
+        name=name,
+        invalid_message=f"{name} must be {comparator} {minimum:g} and finite",
+        rejection=lambda candidate: (
+            not (
+                (candidate > minimum if exclusive else candidate >= minimum)
+                and math.isfinite(candidate)
+            )
+        ),
+    )
+
+
 def validate_positive_finite_timeout(timeout: float) -> None:
     """Ensure *timeout* represents a usable IPC timeout value.
 
@@ -66,13 +107,8 @@ def validate_positive_finite_timeout(timeout: float) -> None:
         If *timeout* is not a real number.
     ValueError
         If *timeout* is not finite and strictly positive.
-    """  # ruff: ignore[docstring-extraneous-exception] - _validate_numeric raises these caller-visible failures
-    _validate_numeric(
-        timeout,
-        name="timeout",
-        invalid_message="timeout must be > 0 and finite",
-        rejection=lambda value: not (value > 0 and math.isfinite(value)),
-    )
+    """  # ruff: ignore[docstring-extraneous-exception] - _validate_finite_minimum raises these caller-visible failures
+    _validate_finite_minimum(timeout, name="timeout", minimum=0.0, exclusive=True)
 
 
 def validate_optional_timeout(timeout: float | None, *, name: str) -> None:
@@ -189,13 +225,8 @@ def validate_retry_backoff(backoff: float) -> None:
         If *backoff* is not a real number.
     ValueError
         If *backoff* is negative or not finite.
-    """  # ruff: ignore[docstring-extraneous-exception] - _validate_numeric raises these caller-visible failures
-    _validate_numeric(
-        backoff,
-        name="backoff",
-        invalid_message="backoff must be >= 0 and finite",
-        rejection=lambda value: not (value >= 0 and math.isfinite(value)),
-    )
+    """  # ruff: ignore[docstring-extraneous-exception] - _validate_finite_minimum raises these caller-visible failures
+    _validate_finite_minimum(backoff, name="backoff", minimum=0.0, exclusive=False)
 
 
 def validate_retry_jitter(jitter: float) -> None:

@@ -28,6 +28,8 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
     from pathlib import Path
 
+    from cmd_mox.test_doubles import CommandDouble
+
 
 def _with_metadata(expectation: Expectation) -> Expectation:
     """Register an exact metadata argument expectation.
@@ -322,22 +324,97 @@ def test_zero_count_mock_passes_when_not_invoked() -> None:
     assert len(mox.mocks["blocked"].invocations) == 0
 
 
+def _replay_and_invoke(
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+    configure: cabc.Callable[[CmdMox], object],
+    *,
+    name: str,
+    calls: int,
+) -> CmdMox:
+    """Configure *mox*, start replay, and invoke the *name* shim *calls* times."""
+    mox = CmdMox()
+    configure(mox)
+    mox.__enter__()
+    mox.replay()
+
+    path = require_shim_dir(mox.environment) / name
+    for _ in range(calls):
+        run([str(path)], shell=False)
+
+    return mox
+
+
 def test_ordered_times_two_passes_after_two_calls(
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """An ordered expectation with a count of two is satisfied by two calls."""
-    mox = CmdMox()
-    mox.mock("step").returns(stdout="ok").in_order().times(2)
-    mox.__enter__()
-    mox.replay()
-
-    path = require_shim_dir(mox.environment) / "step"
-    run([str(path)], shell=False)
-    run([str(path)], shell=False)
+    mox = _replay_and_invoke(
+        run,
+        lambda mox: mox.mock("step").returns(stdout="ok").in_order().times(2),
+        name="step",
+        calls=2,
+    )
 
     mox.verify()
 
     assert len(mox.mocks["step"].invocations) == 2
+
+
+@pytest.mark.parametrize(
+    ("configure_count", "calls", "expected_error"),
+    [
+        pytest.param(lambda spy: spy, 3, None, id="permissive"),
+        pytest.param(lambda spy: spy.times(0), 0, None, id="zero-not-invoked"),
+        pytest.param(
+            lambda spy: spy.times_called(0),
+            1,
+            UnexpectedCommandError,
+            id="zero-invoked",
+        ),
+        pytest.param(
+            lambda spy: spy.times(2),
+            1,
+            UnfulfilledExpectationError,
+            id="under-called",
+        ),
+        pytest.param(lambda spy: spy.times_called(2), 2, None, id="satisfied"),
+    ],
+)
+def test_spy_count_enforcement(
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+    configure_count: cabc.Callable[[CommandDouble], CommandDouble],
+    calls: int,
+    expected_error: type[Exception] | None,
+) -> None:
+    """Spies enforce a count only when it is set explicitly."""
+    mox = _replay_and_invoke(
+        run,
+        lambda mox: configure_count(mox.spy("watched").returns(stdout="ok")),
+        name="watched",
+        calls=calls,
+    )
+
+    if expected_error is None:
+        mox.verify()
+    else:
+        with pytest.raises(expected_error):
+            mox.verify()
+
+    assert len(mox.spies["watched"].invocations) == calls
+
+
+def test_stub_ignores_explicit_count(
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Stubs are non-strict and ignore an explicit count."""
+    mox = _replay_and_invoke(
+        run,
+        lambda mox: mox.stub("free").returns(stdout="ok").times(0),
+        name="free",
+        calls=1,
+    )
+
+    mox.verify()
 
 
 @pytest.mark.parametrize(
@@ -567,3 +644,4 @@ def test_count_explicit_supports_positional_construction() -> None:
     )
     assert expectation.count == 2
     assert expectation.count_explicit is True
+# weave: run 'weave explain cmd_mox/unittests/test_expectations.py' for per-hunk detail, 'weave check' to verify your resolution
