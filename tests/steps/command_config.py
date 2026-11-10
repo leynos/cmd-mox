@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shlex
 import typing as typ
 
@@ -19,6 +18,13 @@ from tests.helpers.parameters import (
     resolve_empty_placeholder,
 )
 
+if typ.TYPE_CHECKING:  # pragma: no cover - typing only
+    from cmd_mox.controller import CmdMox
+    from cmd_mox.ipc import Invocation
+
+
+
+"""pytest-bdd steps that configure command doubles and behaviours."""
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.controller import CmdMox
     from cmd_mox.ipc import Invocation
@@ -255,7 +261,7 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
         """Return the injected environment variable's value as stdout."""
-        return (os.environ.get(var, ""), "", 0)
+        return (invocation.env.get(var, ""), "", 0)
 
     mox.stub(cmd).with_env({var: val}).runs(handler)
 

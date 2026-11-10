@@ -419,7 +419,7 @@ class CmdMox:
         Response
             The handler response with *overrides* merged into its environment.
         """
-        resp = execute_handler(double, invocation, overrides)
+        resp = execute_handler(double, invocation)
         finalize_response_env(resp, overrides)
         return resp
 

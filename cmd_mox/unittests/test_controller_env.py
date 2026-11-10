@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import typing as typ
 
 import pytest
@@ -17,6 +18,8 @@ pytestmark = pytest.mark.requires_unix_sockets
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import collections.abc as cabc
     import subprocess
+
+    from cmd_mox.test_doubles import CommandDouble
 
 
 def test_mock_with_env_static_response(
@@ -93,14 +96,17 @@ def test_response_for_regular_masks_conflicting_secret_env() -> None:
     assert invocation.env == {key: provided_value}, "Conflict mutated the invocation"
 
 
-def test_response_for_regular_applies_env() -> None:
-    """_response_for_regular uses temporary_env and propagates env in Response."""
+def test_response_for_regular_applies_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_response_for_regular exposes overrides through invocation.env only."""
     key = "SOME_VAR"
+    monkeypatch.delenv(key, raising=False)
     mox = CmdMox()
+    host_observations: list[str | None] = []
 
     def handler(invocation: Invocation) -> Response:
         """Return stdout echoing the variable as the handler sees it."""
-        return Response(stdout=os.environ.get(key, ""))
+        host_observations.append(os.environ.get(key))
+        return Response(stdout=invocation.env.get(key, ""))
 
     dbl = mox.stub("demo").with_env({key: "VAL"}).runs(handler)
     inv = Invocation(command="demo", args=[], stdin="", env={})
@@ -108,14 +114,18 @@ def test_response_for_regular_applies_env() -> None:
     assert key not in os.environ
     resp = mox._response_for_regular(dbl, inv)
     assert resp.stdout == "VAL"
+    assert host_observations == [None], "handler observed a mutated host environment"
     assert key not in os.environ
     assert resp.env == {key: "VAL"}
     assert inv.env[key] == "VAL"
 
 
-def test_response_for_regular_applies_env_to_static_response() -> None:
+def test_response_for_regular_applies_env_to_static_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Environment overrides apply when returning a canned response."""
     key = "STATIC_VAR"
+    monkeypatch.delenv(key, raising=False)
     mox = CmdMox()
     dbl = mox.stub("demo").with_env({key: "VAL"}).returns(stdout="ok")
     inv = Invocation(command="demo", args=[], stdin="", env={})
@@ -126,6 +136,159 @@ def test_response_for_regular_applies_env_to_static_response() -> None:
     assert resp.env == {key: "VAL"}
     assert key not in os.environ
     assert inv.env[key] == "VAL"
+
+
+def test_concurrent_handlers_leave_host_environment_untouched(  # ruff: ignore[too-many-locals,too-many-statements] - the regression needs the full two-thread harness in one scope
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent handler calls must not restore a stale os.environ snapshot."""
+    shared_key = "CONCURRENT_SHARED"
+    a_key = "CONCURRENT_A_ONLY"
+    b_key = "CONCURRENT_B_ONLY"
+    caller_a_key = "CONCURRENT_CALLER_A"
+    caller_b_key = "CONCURRENT_CALLER_B"
+    host_key = "CONCURRENT_HOST"
+    for key in (shared_key, a_key, b_key, caller_a_key, caller_b_key):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(host_key, "BEFORE")
+
+    barrier = threading.Barrier(2, timeout=10)
+    release_a = threading.Event()
+    release_b = threading.Event()
+    entered = {"A": threading.Event(), "B": threading.Event()}
+    observations: dict[str, dict[str, str | None]] = {}
+    responses: dict[str, Response] = {}
+    errors: list[BaseException] = []
+
+    def make_handler(
+        label: str, own_key: str, release: threading.Event
+    ) -> cabc.Callable[[Invocation], Response]:
+        """Build a handler that records host state and waits for release."""
+
+        def handler(invocation: Invocation) -> Response:
+            """Record host state, synchronise with the peer, then respond."""
+            observations[label] = {
+                "shared": invocation.env.get(shared_key),
+                "own": invocation.env.get(own_key),
+                "host_shared": os.environ.get(shared_key),
+                "host_own": os.environ.get(own_key),
+                "host_key": os.environ.get(host_key),
+            }
+            entered[label].set()
+            barrier.wait()
+            release.wait(timeout=10)
+            return Response(stdout=label)
+
+        return handler
+
+    def run_worker(label: str, double: CommandDouble, invocation: Invocation) -> None:
+        """Dispatch one invocation and collect any failure for the main thread."""
+        try:
+            responses[label] = mox._response_for_regular(double, invocation)
+        except BaseException as exc:  # ruff: ignore[blind-except] - surfaced on the main thread
+            errors.append(exc)
+
+    mox = CmdMox()
+    double_a = (
+        mox
+        .stub("concurrent-a")
+        .with_env({shared_key: "SHARED", a_key: "A"})
+        .runs(make_handler("A", a_key, release_a))
+    )
+    double_b = (
+        mox
+        .stub("concurrent-b")
+        .with_env({shared_key: "SHARED", b_key: "B"})
+        .runs(make_handler("B", b_key, release_b))
+    )
+    invocation_a = Invocation(
+        command="concurrent-a", args=[], stdin="", env={caller_a_key: "CALLER_A"}
+    )
+    invocation_b = Invocation(
+        command="concurrent-b", args=[], stdin="", env={caller_b_key: "CALLER_B"}
+    )
+
+    thread_a = threading.Thread(
+        target=run_worker, args=("A", double_a, invocation_a), daemon=True
+    )
+    thread_b = threading.Thread(
+        target=run_worker, args=("B", double_b, invocation_b), daemon=True
+    )
+    try:
+        thread_a.start()
+        thread_b.start()
+        assert entered["A"].wait(timeout=10), "handler A did not start"
+        assert entered["B"].wait(timeout=10), "handler B did not start"
+        os.environ[host_key] = "AFTER"
+        release_a.set()
+        thread_a.join(timeout=10)
+        assert not thread_a.is_alive(), "handler A did not finish"
+        release_b.set()
+        thread_b.join(timeout=10)
+        assert not thread_b.is_alive(), "handler B did not finish"
+    finally:
+        release_a.set()
+        release_b.set()
+        barrier.abort()
+        thread_a.join(timeout=10)
+        thread_b.join(timeout=10)
+
+    assert not errors, errors
+    assert observations["A"] == {
+        "shared": "SHARED",
+        "own": "A",
+        "host_shared": None,
+        "host_own": None,
+        "host_key": "BEFORE",
+    }
+    assert observations["B"] == {
+        "shared": "SHARED",
+        "own": "B",
+        "host_shared": None,
+        "host_own": None,
+        "host_key": "BEFORE",
+    }
+    assert invocation_a.env == {
+        caller_a_key: "CALLER_A",
+        shared_key: "SHARED",
+        a_key: "A",
+    }
+    assert invocation_b.env == {
+        caller_b_key: "CALLER_B",
+        shared_key: "SHARED",
+        b_key: "B",
+    }
+    assert responses["A"].env == {shared_key: "SHARED", a_key: "A"}
+    assert responses["B"].env == {shared_key: "SHARED", b_key: "B"}
+    assert os.environ.get(host_key) == "AFTER"
+    for key in (shared_key, a_key, b_key, caller_a_key, caller_b_key):
+        assert key not in os.environ
+
+
+def test_raising_handler_leaves_host_environment_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A handler exception propagates without touching the host environment."""
+    key = "RAISING_HANDLER"
+    monkeypatch.delenv(key, raising=False)
+    original_env = os.environ.copy()
+    mox = CmdMox()
+    observed: list[str | None] = []
+
+    def handler(invocation: Invocation) -> Response:
+        """Record the merged override, then fail."""
+        observed.append(invocation.env.get(key))
+        raise RuntimeError("boom")
+
+    dbl = mox.stub("demo").with_env({key: "VAL"}).runs(handler)
+    inv = Invocation(command="demo", args=[], stdin="", env={})
+
+    with pytest.raises(RuntimeError, match="boom"):
+        mox._response_for_regular(dbl, inv)
+
+    assert observed == ["VAL"]
+    assert inv.env[key] == "VAL"
+    assert os.environ == original_env
 
 
 @pytest.mark.parametrize("call_replay_before_exception", [True, False])
