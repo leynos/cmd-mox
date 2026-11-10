@@ -530,9 +530,13 @@ fixture = session.finalize()                 # Persist and return FixtureFile
 
 - `start()` initializes the session timestamp. Calling `record()` before
   `start()` raises `LifecycleError`.
-- `record(invocation, response, *, duration_ms=0)` appends a recording with
-  auto-incrementing sequence numbers and filtered environment variables. The
-  optional `duration_ms` parameter records execution timing.
+- `record(invocation, response, *, duration_ms=0, explicit_keys=None)` appends
+  a recording with auto-incrementing sequence numbers and filtered environment
+  variables. The optional `duration_ms` parameter records execution timing, and
+  `explicit_keys` names keys requested through `.with_env()`. Such keys
+  override the system-key and sensitive-name exclusions but never the
+  CmdMox-internal exclusion, and are recorded only when present in the
+  invocation environment.
 - `finalize()` writes the fixture to disk and returns the `FixtureFile`. It
   is idempotent: calling it again returns the same object. Calling `record()`
   after `finalize()` raises `LifecycleError`.
