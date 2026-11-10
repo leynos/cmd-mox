@@ -941,9 +941,12 @@ the context-manager API:
   control. When enabled, verification still runs if the body raises; when both
   verification and the body fail, the verification error is suppressed so the
   original exception surfaces.
-- `max_journal_entries` bounds the number of stored invocations (oldest entries
-  are evicted FIFO when the bound is reached). The journal is exposed via
-  `cmd_mox.journal`, a `collections.deque[Invocation]` recorded during replay.
+- `max_journal_entries` bounds the number of invocations retained in the public
+  diagnostic `journal` (oldest entries are evicted FIFO when the bound is
+  reached). The journal is exposed via `cmd_mox.journal`, a
+  `collections.deque[Invocation]` recorded during replay. The bound applies
+  only to that diagnostic view: verification uses a separate internal record,
+  so eviction never weakens verification.
 - `lifecycle_hint` (default `None`) appends caller-provided guidance to
   `LifecycleError` messages for invalid phase transitions.
 
@@ -953,6 +956,26 @@ The journal is especially handy when debugging:
 exercise_system()
 assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 # Verification will run during fixture teardown.
+```
+
+The internal verification record retains every mock, spy, unregistered-command
+and ordered-stub call for the whole replay, regardless of
+`max_journal_entries`. Memory savings therefore apply mainly to stub calls;
+mock and spy histories are unbounded in all cases. Mutating `cmd_mox.journal`
+does not affect verification. A bounded controller still reports an unexpected
+call that has already been evicted from the journal:
+
+```python
+import shutil
+import subprocess
+
+with CmdMox(max_journal_entries=1) as cmd_mox:
+    cmd_mox.register_command("rm")
+    cmd_mox.stub("ok").returns()
+    cmd_mox.replay()
+    for name in ("rm", "ok"):
+        subprocess.run([shutil.which(name)], stdin=subprocess.DEVNULL)
+# Verification still raises UnexpectedCommandError for the evicted "rm" call.
 ```
 
 To intercept a command without configuring a double—for example, to ensure it

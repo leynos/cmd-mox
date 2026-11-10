@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 import logging
 import os
+import threading
 import typing as typ
 from collections import deque
 from pathlib import Path
@@ -79,9 +80,10 @@ class CmdMox:
             call :meth:`verify`. This catches missed verifications and ensures
             the environment is restored. Disable for explicit control.
         max_journal_entries:
-            Maximum number of invocations retained in the journal. When ``None``,
-            the journal is unbounded. Older entries are discarded once the limit
-            is exceeded. The journal is cleared at the start of each ``replay()``.
+            Maximum number of invocations retained in the public diagnostic
+            ``journal``. When ``None``, the journal is unbounded. Older
+            entries are discarded once the limit is exceeded. Verification
+            uses a separate internal record, so eviction never weakens it.
         environment:
             Optional :class:`EnvironmentManager` instance used to prepare shim and
             PATH state. When omitted a fresh manager is created automatically.
@@ -112,6 +114,8 @@ class CmdMox:
 
         self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque(maxlen=max_journal_entries)
+        self._verification_log: list[Invocation] = []
+        self._history_lock = threading.Lock()
         self._commands: set[str] = set()
         self._ordered: list[Expectation] = []
 
@@ -528,6 +532,20 @@ class CmdMox:
         invocation.apply(resp)
         return resp
 
+    def _needs_verification_record(self, invocation: Invocation) -> bool:
+        """Return whether verification relies on *invocation*."""
+        double = self._doubles.get(invocation.command)
+        if double is None or double.kind is not DoubleKind.STUB:
+            return True
+        return any(exp is double.expectation for exp in self._ordered)
+
+    def _record_completed_invocation(self, invocation: Invocation) -> None:
+        """Append a completed invocation to both records under one lock."""
+        with self._history_lock:
+            self.journal.append(invocation)
+            if self._needs_verification_record(invocation):
+                self._verification_log.append(invocation)
+
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response.
 
@@ -538,7 +556,7 @@ class CmdMox:
         """
         resp = self._make_response(invocation)
         if resp.passthrough is None:
-            self.journal.append(invocation)
+            self._record_completed_invocation(invocation)
         return resp
 
     def _prepare_passthrough(
@@ -585,7 +603,7 @@ class CmdMox:
         double, invocation, resp = self._passthrough_coordinator.finalize_result(result)
         if double.is_recording:
             double.invocations.append(invocation)
-        self.journal.append(invocation)
+        self._record_completed_invocation(invocation)
         return resp
 
     def _require_phase(self, expected: Phase, action: str) -> None:
@@ -715,7 +733,9 @@ class CmdMox:
         MissingEnvironmentError
             If the environment manager has not been initialised.
         """
-        self.journal.clear()
+        with self._history_lock:
+            self.journal.clear()
+            self._verification_log.clear()
         self._commands = self._registered_commands() | self._commands
         if not self._entered and not self._is_environment_initialized():
             msg = "Environment manager not initialised"
@@ -745,9 +765,11 @@ class CmdMox:
         """Execute the ordered verification checks."""
         expectations = {n: d.expectation for n, d in self.mocks.items()}
         inv_map = {n: d.invocations for n, d in self.mocks.items()}
+        with self._history_lock:
+            verification_log = list(self._verification_log)
 
-        UnexpectedCommandVerifier().verify(self.journal, self._doubles)
-        OrderVerifier(self._ordered).verify(self.journal)
+        UnexpectedCommandVerifier().verify(verification_log, self._doubles)
+        OrderVerifier(self._ordered).verify(verification_log)
         CountVerifier().verify(expectations, inv_map)
         self._verify_replay_sessions_consumed()
 

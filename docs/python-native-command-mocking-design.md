@@ -1216,8 +1216,11 @@ constructs an `Invocation` object containing the command name, arguments,
 appending non-passthrough invocations to the journal, so those entries also
 contain the resulting `stdout`, `stderr`, and `exit_code`. Passthrough
 invocations are appended after the shim reports their command results.
-`verify()` uses this enriched journal as the definitive record, comparing it
-against predefined expectations to detect discrepancies.
+`verify()` does not read the bounded diagnostic journal directly. It uses a
+separate internal verification record that retains mock, spy,
+unregistered-command and ordered-stub calls for the whole replay, so a bounded
+journal cannot hide a discrepancy. The record shares the journal's completion
+order and is cleared with it when replay starts.
 
 ## IV. Feature Deep Dive: Stubbing
 
@@ -1937,14 +1940,14 @@ strings. This catches typos and accidental `None` values during test
 configuration rather than deep within the replay loop.
 
 Verification is split into focused components. `UnexpectedCommandVerifier`
-checks that every journal entry matches a registered expectation.
-`OrderVerifier` ensures expectations marked `in_order()` appear in the same
-relative order in the journal. It filters the journal to invocations that match
-the ordered expectations so interleaved unordered mocks, even when they share a
-command name, are ignored. `CountVerifier` verifies that each expectation was
-met exactly the declared number of times. This modular approach simplifies the
-logic within :meth:`CmdMox.verify` and clarifies how mixed ordered and
-unordered calls are handled.
+checks that every entry in the verification record matches a registered
+expectation. `OrderVerifier` ensures expectations marked `in_order()` appear in
+the same relative order in the verification record. It filters the record to
+invocations that match the ordered expectations so interleaved unordered mocks,
+even when they share a command name, are ignored. `CountVerifier` verifies that
+each expectation was met exactly the declared number of times. This modular
+approach simplifies the logic within :meth:`CmdMox.verify` and clarifies how
+mixed ordered and unordered calls are handled.
 
 The verifiers now emit diff-style diagnostics that show the expected call, the
 actual invocation, and any mismatching context such as stdin or environment
@@ -2023,10 +2026,18 @@ chronological order. Each entry is an :class:`Invocation` dataclass containing
 the command name, argument list, captured standard input, environment at call
 time, and the resulting `stdout`, `stderr`, and `exit_code`. A
 `collections.deque` backs the journal to guarantee append performance and
-preserve ordering for later verification. Configure bounds via
+preserve ordering for later inspection. Configure bounds via
 `CmdMox(max_journal_entries=n)`; when full, the oldest entries are pruned.
-Verifiers consume this deque directly, ensuring that verification reflects the
-exact sequence observed during replay.
+
+Verification does not consume this bounded deque. A separate internal
+verification record retains only the calls the verifiers need: mock, spy and
+unregistered-command calls, plus calls to ordered stubs. Unordered stub calls
+are omitted, so the memory saving from `max_journal_entries` applies mainly to
+stub traffic. Both records are appended under one lock at the same completion
+point, which keeps their order identical, and both are cleared together when
+replay starts. Verification takes one snapshot of the internal record and
+passes it to `UnexpectedCommandVerifier` and `OrderVerifier`, so evicting a
+diagnostic journal entry never weakens verification.
 
 ### 8.9 Design Decisions for Documentation and Examples
 
