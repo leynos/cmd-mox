@@ -1,33 +1,42 @@
-# Recording environment filter migration note
+# v0.4.0 migration guide
 
-This note helps projects prepare for the release that restricts which
-environment variables a recording keeps for commands without a known prefix. It
-does not assume a release number. For the complete rule order, see
+This guide helps projects prepare for v0.4.0, which changes which environment
+variables a recording keeps. For the complete rule order, see
 [decide what a recording keeps](usage-guide.md#decide-what-a-recording-keeps).
 
 ## What changes
 
-Before this change, `filter_env_subset()` recorded every variable that was not
-a system key, a CmdMox internal key or a sensitive key when the command had no
+### Commands without a known prefix
+
+Before v0.4.0, `filter_env_subset()` recorded every variable that was not a
+system key, a CmdMox internal key or a sensitive key when the command had no
 known prefix. Fixtures therefore captured host names, user paths, tool-cache
 locations and agent session identifiers, and strict replay required all of them
 to be present on the replay machine.
 
-After the change, a command without a known prefix records only:
+From v0.4.0, a command without a known prefix records only:
 
 - keys named in the session's `env_allowlist`
 - keys requested through `.with_env()` for that passthrough request
 
 The eight known prefixes in `COMMAND_ENV_PREFIXES` (`git`, `aws`, `docker`,
-`npm`, `pip`, `cargo`, `go`, `rustc`) keep their existing behaviour. Command
+`npm`, `pip`, `cargo`, `go`, `rustc`) keep their prefix behaviour. Command
 lookup stays exact and case-insensitive, so `/usr/bin/git` and `git.exe` count
 as unknown commands. CmdMox internal keys (`CMOX_*`, `CMD_MOX_*`) remain
 excluded even when requested.
 
+### `.with_env()` keys are recorded for every command
+
 `.with_env()` keys are now captured automatically for the passthrough request
-that declared them. The keys are snapshotted when the request is prepared, so
-mutating the expectation before the request completes does not change what the
-recording keeps.
+that declared them, for known-prefix commands as well as unknown ones. The keys
+are snapshotted when the request is prepared, so mutating the expectation
+before the request completes does not change what the recording keeps.
+
+This is a privacy change for known-prefix commands. A key requested through
+`.with_env()` is recorded even when its name matches the sensitive-name
+heuristic, so a `git` recording can now persist a requested `SECRET_TOKEN`
+value that the old filter excluded. Review or scrub fixtures before committing
+them, and avoid passing secrets through `.with_env()` when recording.
 
 ## Who is affected
 
@@ -37,9 +46,11 @@ recording keeps.
   fixtures continue to replay unchanged until they are re-recorded.
 - Projects that pinned a fixture's exact `env_subset` in assertions or review
   tooling.
+- Projects that pass sensitive values through `.with_env()` while recording a
+  known-prefix command. Those values now reach the fixture.
 
-Commands with a known prefix and fixtures that already request their variables
-through `env_allowlist` or `.with_env()` are otherwise unaffected.
+Fixtures that already request their variables through `env_allowlist` or
+`.with_env()` keep those keys, but review them for sensitive values.
 
 ## Re-record fixtures that carry host data
 

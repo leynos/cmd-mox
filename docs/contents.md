@@ -20,8 +20,9 @@
 - [Handler Environment Migration Note](./handler-environment-migration-note.md):
   Read `with_env()` overrides from `Invocation.env` and expect touched-key
   restoration from `temporary_env()`.
-- [Recording Environment Filter Migration Note](./recording-env-filter-migration-note.md):
-  Prepare for restricted environment capture in recordings.
+- [v0.4.0 Migration Guide](./v-0-4-0-migration-guide.md): Prepare for
+  restricted environment capture in recordings and `.with_env()` capture for
+  known-prefix commands.
 - [Shellmock Migration Guide](./shellmock-migration-guide.md): Migrate from
   `shellmock` to CmdMox.
 - [Design Doc](./python-native-command-mocking-design.md): Design rationale.
