@@ -15,7 +15,7 @@ from cmd_mox.controller import CmdMox
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
-pytestmark = pytest.mark.requires_unix_sockets
+pytestmark = [pytest.mark.requires_unix_sockets]
 
 _COMMAND = "greet"
 _SETTING_KEY = "GREET_SETTING"
@@ -73,10 +73,12 @@ def test_unknown_command_recording_keeps_only_with_env_keys(
         mox.verify()
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == _SETTING_VALUE
+    assert result.stdout.strip() == _SETTING_VALUE, result.stdout
 
     fixture = json.loads(fixture_path.read_text())
-    assert fixture["recordings"][0]["env_subset"] == {_SETTING_KEY: _SETTING_VALUE}
+    assert fixture["recordings"][0]["env_subset"] == {_SETTING_KEY: _SETTING_VALUE}, (
+        fixture
+    )
 
 
 def test_recorded_unknown_command_replays_strictly(
@@ -106,4 +108,4 @@ def test_recorded_unknown_command_replays_strictly(
         mox.verify()
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == _SETTING_VALUE
+    assert result.stdout.strip() == _SETTING_VALUE, result.stdout
