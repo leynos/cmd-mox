@@ -9,44 +9,23 @@ from __future__ import annotations
 
 import sys
 import threading
-import types
 import typing as typ
 
 import pytest
 
-from cmd_mox import _stdin_capture as capture
-from cmd_mox import shim
+from cmd_mox._stdin_system import SYSTEM_STDIN, StdinSystem
 from cmd_mox.ipc import _observability
 from cmd_mox.shim import _create_invocation
 from cmd_mox.unittests._shim_test_support import (
     _assert_exit_code,
     _DummyStdin,
     _InjectedRuntimeError,
+    _stream_dependencies,
 )
-
-if typ.TYPE_CHECKING:
-    import collections.abc as cabc
-
-
-def _stream_dependencies(
-    stream: object,
-    *,
-    monotonic: cabc.Callable[[], float] = lambda: 0.0,
-    duration: cabc.Callable[[], float] = lambda: 0.0,
-) -> shim._InvocationDependencies:
-    """Bind *stream* and the supplied clocks for one invocation.
-
-    Returns
-    -------
-    shim._InvocationDependencies
-        Dependencies that replace the process-backed defaults.
-    """
-    return shim._InvocationDependencies(
-        stdin_stream=typ.cast("shim._StdinTextStream", stream),
-        monotonic_clock=monotonic,
-        duration_clock=duration,
-    )
-
+from cmd_mox.unittests._stdin_capture_fakes import (
+    _SystemDouble,
+    _WindowsSystemDouble,
+)
 
 # --- Invocation construction -------------------------------------------------
 
@@ -267,21 +246,26 @@ def test_direct_stdin_fallback_routes_read_errors(
             """
             return 123
 
+    system: StdinSystem = SYSTEM_STDIN
     if fallback == "windows":
-        monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
-        monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: None)
+        system = _SystemDouble(
+            windows=_WindowsSystemDouble(windows_flag=True, handle_override=None)
+        )
         stdin: object = _FailingStdin()
     elif fallback == "missing-fd":
         stdin = _FailingStdin()
     else:
         stdin = _UnpollableStdin()
-        monkeypatch.setattr(capture, "_create_stdin_poller", lambda _descriptor: None)
+        system = _SystemDouble(create_poller_override=lambda _descriptor: None)
 
-    monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     with pytest.raises(SystemExit) as exc:
-        _create_invocation("shim", timeout=1.0)
+        _create_invocation(
+            "shim",
+            timeout=1.0,
+            dependencies=_stream_dependencies(stdin, system=system),
+        )
 
     _assert_exit_code(exc, 1)
 
@@ -292,11 +276,8 @@ def test_worker_start_failure_uses_controlled_exit(
 ) -> None:
     """Failure to start the bounded reader does not escape as a traceback."""
 
-    class _FailingThread:
+    class _FailingThread(threading.Thread):
         """Thread double whose start raises to simulate worker startup failure."""
-
-        def __init__(self, **_kwargs: object) -> None:
-            """Accept thread construction so the injected start failure is reached."""
 
         def start(self) -> typ.NoReturn:
             """Simulate failure to start the bounded stdin worker.
@@ -331,18 +312,19 @@ def test_worker_start_failure_uses_controlled_exit(
             """
             return "unreachable"
 
-    # Patch the module's ``threading`` reference rather than the stdlib module
-    # itself, so the failing thread cannot leak into unrelated tests.
-    monkeypatch.setattr(
-        capture,
-        "threading",
-        types.SimpleNamespace(Event=threading.Event, Thread=_FailingThread),
+    system = _SystemDouble(
+        worker_factory=lambda _target, *, name: _FailingThread(name=name)
     )
-    monkeypatch.setattr(sys, "stdin", _StreamWithoutDescriptor())
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     with pytest.raises(SystemExit) as exc:
-        _create_invocation("shim", timeout=1.0)
+        _create_invocation(
+            "shim",
+            timeout=1.0,
+            dependencies=_stream_dependencies(
+                _StreamWithoutDescriptor(), system=system
+            ),
+        )
 
     _assert_exit_code(exc, 1)
     assert "IPC error: stdin read failed" in capsys.readouterr().err, (

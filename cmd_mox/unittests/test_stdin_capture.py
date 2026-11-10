@@ -11,29 +11,34 @@ from __future__ import annotations
 import io
 import os
 import threading
-import types
 import typing as typ
 
 import pytest
 
 from cmd_mox import _stdin_capture as capture
+from cmd_mox import _stdin_system as stdin_system
 from cmd_mox.errors import StdinTimeoutError
 from cmd_mox.unittests._stdin_capture_fakes import (
     _BlockingStream,
     _Clock,
     _DescriptorStream,
     _ErrorPoller,
-    _install_completion_clock,
     _NoFileno,
     _open_pipe_stream,
     _PollerOSError,
     _read,
     _Stream,
     _StreamError,
+    _system_with_completion_clock,
+    _SystemDouble,
+    _WindowsSystemDouble,
 )
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from pathlib import Path
+
+    from cmd_mox._stdin_system import StdinSystem
 
 # --- TTY and in-memory fast paths -------------------------------------------
 
@@ -100,27 +105,40 @@ def test_selected_strategy_is_reported_before_the_read() -> None:
     )
 
 
-def test_unpollable_descriptor_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unpollable_descriptor_falls_back() -> None:
     """A descriptor both pollers reject is read through the fallback worker."""
-    monkeypatch.setattr(capture, "_create_stdin_poller", lambda _descriptor: None)
+    system = _SystemDouble(create_poller_override=lambda _descriptor: None)
     stream = _DescriptorStream(0, data="unpollable")
-    assert _read(stream, 1.0, _Clock()) == "unpollable", (
+    assert _read(stream, 1.0, _Clock(), system=system) == "unpollable", (
         "an unpollable descriptor should still yield its text"
     )
     assert stream.read_calls == 1, "the fallback should read exactly once"
 
 
-def test_poll_registration_failure_leaves_select_available(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_poll_registration_failure_leaves_select_available() -> None:
     """A rejected ``poll`` registration still leaves ``select`` as an option."""
-    monkeypatch.delattr(capture.select, "poll")
-    assert capture._create_stdin_poller(0) is not None, (
-        "select should provide a usable fallback poller"
+
+    def fail_poll() -> typ.NoReturn:
+        """Simulate a host without ``select.poll``."""
+        msg = "poll unavailable"
+        raise AttributeError(msg)
+
+    def ready_select(
+        readers: cabc.Sequence[int],
+        _writers: cabc.Sequence[int],
+        _errors: cabc.Sequence[int],
+        _timeout: float,
+    ) -> tuple[list[int], list[int], list[int]]:
+        """Report every watched descriptor as readable."""
+        return list(readers), [], []
+
+    poller = stdin_system._create_stdin_poller(
+        0, native_poll=fail_poll, select_call=ready_select
     )
+    assert poller is not None, "select should provide a usable fallback poller"
 
 
-def test_pollnval_probe_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pollnval_probe_falls_back() -> None:
     """A ``POLLNVAL`` probe result marks the descriptor as unpollable."""
 
     class _InvalidPoller:
@@ -137,16 +155,19 @@ def test_pollnval_probe_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
             list[tuple[int, int]]
                 One event carrying ``POLLNVAL``.
             """
-            return [(0, capture.select.POLLNVAL)]
+            return [(0, stdin_system.select.POLLNVAL)]
 
-    def reject(_descriptor: int) -> capture._Poller:
-        """Simulate a select-based poller that refuses the descriptor."""
+    def reject_select(
+        _readables: object, _writables: object, _exceptables: object, _timeout: object
+    ) -> tuple[list[int], list[int], list[int]]:
+        """Simulate ``select()`` refusing the descriptor."""
         msg = "closed"
         raise ValueError(msg)
 
-    monkeypatch.setattr(capture.select, "poll", _InvalidPoller)
-    monkeypatch.setattr(capture, "_SelectPoller", reject)
-    assert capture._create_stdin_poller(0) is None, "POLLNVAL was not detected"
+    poller = stdin_system._create_stdin_poller(
+        0, native_poll=_InvalidPoller, select_call=reject_select
+    )
+    assert poller is None, "POLLNVAL was not detected"
 
 
 class _PoisonedPoller:
@@ -174,18 +195,15 @@ class _PoisonedPoller:
         return []
 
 
-def test_unselectable_descriptor_plan_falls_back(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_unselectable_descriptor_plan_falls_back() -> None:
     """A descriptor ``select`` cannot watch is read directly, not waited on.
 
     ``select.poll`` has no ``FD_SETSIZE`` limit but ``select.select`` does, so
-    a high-numbered descriptor is rejected only when ``_SelectPoller`` is the
+    a high-numbered descriptor is rejected only when the select adapter is the
     fallback. Swallowing that ``ValueError`` would accept the probe and then
     wait on a poller that can never report readiness, turning a readable
     descriptor into a spurious timeout instead of a direct read.
     """
-    monkeypatch.setattr(capture.select, "poll", _PoisonedPoller)
 
     def reject_select(
         _readables: object, _writables: object, _exceptables: object, _timeout: object
@@ -194,13 +212,19 @@ def test_unselectable_descriptor_plan_falls_back(
         msg = "filedescriptor out of range in select()"
         raise ValueError(msg)
 
-    monkeypatch.setattr(capture.select, "select", reject_select)
+    system = _SystemDouble(
+        create_poller_override=lambda descriptor: stdin_system._create_stdin_poller(
+            descriptor,
+            native_poll=_PoisonedPoller,
+            select_call=reject_select,
+        )
+    )
     stream = _DescriptorStream(0, data="unselectable")
 
-    assert capture._plan_stdin(stream).strategy == "fallback", (
+    assert capture._plan_stdin(stream, system=system).strategy == "fallback", (
         "an unselectable descriptor must plan a direct read"
     )
-    assert _read(stream, 0.05, _Clock()) == "unselectable", (
+    assert _read(stream, 0.05, _Clock(), system=system) == "unselectable", (
         "the fallback should still capture the stream's text"
     )
 
@@ -244,9 +268,7 @@ class _OverflowingEvent:
         """Accept the worker's completion signal without changing the wait."""
 
 
-def test_worker_wait_is_sliced_at_the_platform_timeout_max(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_worker_wait_is_sliced_at_the_platform_timeout_max() -> None:
     """A timeout beyond ``threading.TIMEOUT_MAX`` still ends in a diagnostic.
 
     ``CMOX_IPC_TIMEOUT`` accepts any finite positive float, but
@@ -258,16 +280,12 @@ def test_worker_wait_is_sliced_at_the_platform_timeout_max(
     clock = _Clock()
     stream = _BlockingStream("never returned")
     event = _OverflowingEvent(clock)
-    # Only the capture module's view of ``threading`` is replaced; patching the
-    # real module would also divert the events ``Thread.__init__`` creates.
-    monkeypatch.setattr(
-        capture,
-        "threading",
-        types.SimpleNamespace(Event=lambda: event, Thread=threading.Thread),
-    )
+    # Only the capture's completion event is replaced; the worker still runs
+    # on a real thread, preserving its scheduling behaviour.
+    system = _SystemDouble(event_factory=lambda: event)
     try:
         with pytest.raises(StdinTimeoutError):
-            _read(stream, 1e10, clock)
+            _read(stream, 1e10, clock, system=system)
     finally:
         stream.release.set()
         stream.finished.wait(5.0)
@@ -380,43 +398,40 @@ def test_polled_read_does_not_advance_the_injected_clock() -> None:
     assert clock.now == pytest.approx(0.0), "a fast read must not advance the clock"
 
 
-def test_polled_read_preserves_newlines_on_posix(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_polled_read_preserves_newlines_on_posix() -> None:
     """Piped carriage returns survive on POSIX, matching ``TextIOWrapper``."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
+    system = _SystemDouble(windows=_WindowsSystemDouble(windows_flag=False))
     with _open_pipe_stream(b"first\r\nsecond\rthird") as stream:
-        assert _read(stream, 5.0, _Clock()) == "first\r\nsecond\rthird", (
+        captured = _read(stream, 5.0, _Clock(), system=system)
+        assert captured == "first\r\nsecond\rthird", (
             "POSIX capture must not translate carriage returns"
         )
 
 
-def test_decoder_matches_text_wrapper_on_windows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_decoder_matches_text_wrapper_on_windows() -> None:
     """Windows decoding translates newlines exactly as ``TextIOWrapper`` does."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
     payload = b"a\r\nb\rc\n"
     with io.TextIOWrapper(
         io.BytesIO(payload), encoding="utf-8", errors="strict"
     ) as reference:
         expected = reference.read()
-    decoded = capture._stdin_decoder(_Stream()).decode(payload)
+    decoded = capture._stdin_decoder(_Stream(), translate_newlines=True).decode(payload)
     assert decoded == expected, "Windows capture decoding diverged from TextIOWrapper"
 
 
-def test_decoder_preserves_newlines_off_windows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_decoder_preserves_newlines_off_windows() -> None:
     """POSIX decoding keeps carriage returns, matching ``TextIOWrapper``."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
-    decoded = capture._stdin_decoder(_Stream()).decode(b"a\r\nb\rc\n")
+    decoded = capture._stdin_decoder(_Stream(), translate_newlines=False).decode(
+        b"a\r\nb\rc\n"
+    )
     assert decoded == "a\r\nb\rc\n", "POSIX decoding must preserve carriage returns"
 
 
 def test_decoder_uses_stream_encoding_for_non_ascii() -> None:
     """Non-ASCII text decodes with the stream's declared encoding."""
-    decoded = capture._stdin_decoder(_Stream()).decode("\N{EURO SIGN}".encode())
+    decoded = capture._stdin_decoder(_Stream(), translate_newlines=False).decode(
+        "\N{EURO SIGN}".encode()
+    )
     assert decoded == "\N{EURO SIGN}", (
         "non-ASCII text did not decode with the stream encoding"
     )
@@ -449,25 +464,21 @@ def test_buffered_strategy_reads_through_eof() -> None:
 # --- Regular-file strategy --------------------------------------------------
 
 
-def test_regular_file_strategy_is_selected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_regular_file_strategy_is_selected(tmp_path: Path) -> None:
     """A regular file behind a pollable descriptor reads through the worker."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
+    system = _SystemDouble(windows=_WindowsSystemDouble(windows_flag=False))
     path = tmp_path / "input.txt"
     path.write_text("file data", encoding="utf-8")
     with path.open(encoding="utf-8") as stream:
-        assert capture._plan_stdin(stream).strategy == "regular", (
+        assert capture._plan_stdin(stream, system=system).strategy == "regular", (
             "a regular file should read through the worker"
         )
-        assert _read(stream, 5.0, _Clock()) == "file data", (
+        assert _read(stream, 5.0, _Clock(), system=system) == "file data", (
             "the regular-file strategy should return the file contents"
         )
 
 
-def test_regular_file_timeout_reports_expiry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_regular_file_timeout_reports_expiry(tmp_path: Path) -> None:
     """A stalled regular-file read expires at the shared deadline."""
     stall = threading.Event()
 
@@ -482,13 +493,15 @@ def test_regular_file_timeout_reports_expiry(
         stall.wait(5.0)
         return b""
 
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(capture.os, "read", stalled_read)
+    system = _SystemDouble(
+        windows=_WindowsSystemDouble(windows_flag=False),
+        read_override=stalled_read,
+    )
     path = tmp_path / "input.txt"
     path.write_text("never read", encoding="utf-8")
     try:
         with path.open(encoding="utf-8") as stream, pytest.raises(StdinTimeoutError):
-            _read(stream, 0.05, _Clock())
+            _read(stream, 0.05, _Clock(), system=system)
     finally:
         stall.set()
 
@@ -496,7 +509,9 @@ def test_regular_file_timeout_reports_expiry(
 # --- Worker completion boundary ---------------------------------------------
 
 
-def _fallback_capture(clock: _Clock) -> capture._Capture:
+def _fallback_capture(
+    clock: _Clock, *, system: StdinSystem = stdin_system.SYSTEM_STDIN
+) -> capture._Capture:
     """Build a capture that reads a no-descriptor stream on a worker.
 
     Returns
@@ -510,10 +525,13 @@ def _fallback_capture(clock: _Clock) -> capture._Capture:
         deadline=1.0,
         clock=clock,
         plan=capture._Plan("fallback"),
+        system=system,
     )
 
 
-def _regular_file_capture(clock: _Clock) -> tuple[capture._Capture, int]:
+def _regular_file_capture(
+    clock: _Clock, *, system: StdinSystem = stdin_system.SYSTEM_STDIN
+) -> tuple[capture._Capture, int]:
     """Build a capture over a pipe primed with data and already at EOF.
 
     Returns
@@ -531,6 +549,7 @@ def _regular_file_capture(clock: _Clock) -> tuple[capture._Capture, int]:
             deadline=1.0,
             clock=clock,
             plan=capture._Plan("regular", descriptor=read_fd),
+            system=system,
         ),
         read_fd,
     )
@@ -543,7 +562,6 @@ def _regular_file_capture(clock: _Clock) -> tuple[capture._Capture, int]:
     ids=["before", "at", "after"],
 )
 def test_worker_strategies_reject_late_completion(
-    monkeypatch: pytest.MonkeyPatch,
     strategy: str,
     advance: float,
     *,
@@ -557,13 +575,13 @@ def test_worker_strategies_reject_late_completion(
     the deadline is late, matching the polled reader.
     """
     clock = _Clock()
-    _install_completion_clock(monkeypatch, clock, advance)
+    system = _system_with_completion_clock(clock, advance)
     read_fd: int | None = None
     if strategy == "fallback":
-        worker_capture = _fallback_capture(clock)
+        worker_capture = _fallback_capture(clock, system=system)
         read_worker = capture._read_fallback
     else:
-        worker_capture, read_fd = _regular_file_capture(clock)
+        worker_capture, read_fd = _regular_file_capture(clock, system=system)
         read_worker = capture._read_regular_file
     try:
         if is_late:
@@ -581,12 +599,10 @@ def test_worker_strategies_reject_late_completion(
 # --- Strategy planning ------------------------------------------------------
 
 
-def test_plan_selects_fallback_for_unsupported_stream(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_plan_selects_fallback_for_unsupported_stream() -> None:
     """A stream with no descriptor has no pollable strategy."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", False)
-    assert capture._plan_stdin(_NoFileno()).strategy == "fallback", (
+    system = _SystemDouble(windows=_WindowsSystemDouble(windows_flag=False))
+    assert capture._plan_stdin(_NoFileno(), system=system).strategy == "fallback", (
         "a descriptorless stream should use the fallback worker"
     )
 
@@ -605,28 +621,17 @@ def test_plan_selects_poll_for_a_pipe() -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
-def test_plan_treats_an_unstattable_descriptor_as_pollable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_plan_treats_an_unstattable_descriptor_as_pollable() -> None:
     """A descriptor whose status cannot be read is polled, not worked."""
     read_fd, write_fd = os.pipe()
-    real_fstat = os.fstat
-
-    def reject(descriptor: int) -> os.stat_result:
-        # Reject only the descriptor under test. `capture.os` is the global
-        # `os` module, so this patch is process-wide, and pytest 9.2 stats
-        # its own capture temporary file between the call and teardown while
-        # the patch is still active. Failing that call too would break the
-        # harness rather than exercise the fallback under test.
-        """Fail ``fstat`` for the descriptor under test to force polling."""
-        if descriptor == read_fd:
-            msg = "stat failed"
-            raise OSError(msg)
-        return real_fstat(descriptor)
-
-    monkeypatch.setattr(capture.os, "fstat", reject)
+    # A rejected status query must leave the descriptor on the polled path it
+    # already accepted rather than moving it onto a worker for no reason.
+    system = _SystemDouble(
+        windows=_WindowsSystemDouble(windows_flag=False),
+        regular_file_override=False,
+    )
     try:
-        plan = capture._plan_stdin(_DescriptorStream(read_fd))
+        plan = capture._plan_stdin(_DescriptorStream(read_fd), system=system)
     finally:
         os.close(read_fd)
         os.close(write_fd)

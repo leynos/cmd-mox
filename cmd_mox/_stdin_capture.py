@@ -44,19 +44,15 @@ from __future__ import annotations
 
 import codecs
 import dataclasses
-import importlib
 import io
 import math
-import os
-import select
-import stat
 import threading
 import time
 import typing as typ
 from functools import partial
 
 from cmd_mox import _bounded_thread
-from cmd_mox import _path_utils as path_utils
+from cmd_mox._stdin_system import SYSTEM_STDIN, StdinSystem, _Poller
 from cmd_mox.errors import StdinTimeoutError
 
 if typ.TYPE_CHECKING:
@@ -80,13 +76,6 @@ type _Abandon = cabc.Callable[[threading.Thread], None]
 
 _WORKER_LOCK = threading.Lock()
 _WORKERS: list[threading.Thread] = []
-
-
-class _Poller(typ.Protocol):
-    """Minimal polling interface required by the bounded stdin reader."""
-
-    def poll(self, timeout: int, /) -> list[tuple[int, int]]:
-        """Wait up to *timeout* milliseconds for descriptor events."""
 
 
 class _StdinStream(typ.Protocol):
@@ -118,45 +107,6 @@ class _DescribedStream(typ.Protocol):
         """Return the stream's file descriptor."""
 
 
-class _Msvcrt(typ.Protocol):
-    """Subset of ``msvcrt`` needed to resolve a CRT descriptor to a handle."""
-
-    def get_osfhandle(self, descriptor: int) -> int:
-        """Return the Windows handle behind *descriptor*."""
-
-
-class _SelectPoller:
-    """Adapt ``select.select`` to the polling interface used by the shim."""
-
-    def __init__(self, descriptor: int) -> None:
-        """Bind the descriptor watched by this polling adapter."""
-        self.descriptor = descriptor
-
-    def poll(self, timeout: int, /) -> list[tuple[int, int]]:
-        """Wait up to *timeout* milliseconds for stdin to become readable.
-
-        Returns
-        -------
-        list[tuple[int, int]]
-            A single readiness event when stdin is ready, or an empty list on
-            timeout.
-
-        Raises
-        ------
-        ValueError
-            If *descriptor* cannot be watched by ``select``: it is negative, or
-            at or above ``FD_SETSIZE``. Propagating it is what lets
-            :func:`_create_stdin_poller` reject the adapter and fall back to a
-            direct read; swallowing it would hand back a poller that can never
-            report readiness, so readable input would end in a spurious
-            timeout.
-        """  # ruff: ignore[docstring-extraneous-exception] - select() raises it, so no in-body raise is visible
-        # select.select raises ValueError for a descriptor it cannot watch. It
-        # must reach _create_stdin_poller so that probe rejects this adapter.
-        readable, _, _ = select.select([self.descriptor], [], [], timeout / 1_000)
-        return [(self.descriptor, 1)] if readable else []
-
-
 @dataclasses.dataclass(frozen=True, slots=True)
 class _Plan:
     """Strategy chosen for one stream, plus what that strategy needs."""
@@ -176,6 +126,7 @@ class _Capture:
     deadline: float
     clock: _MonotonicClock
     plan: _Plan
+    system: StdinSystem = SYSTEM_STDIN
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -198,6 +149,7 @@ class _WorkerSpec:
     deadline: float
     clock: _MonotonicClock
     abandon: _Abandon
+    system: StdinSystem = SYSTEM_STDIN
 
 
 def outstanding_workers() -> tuple[threading.Thread, ...]:
@@ -229,12 +181,13 @@ def _register_worker(worker: threading.Thread) -> None:
             _WORKERS.append(worker)
 
 
-def read_stdin(
+def read_stdin(  # ruff: ignore[too-many-arguments] - the public capture shape keeps its existing keywords alongside the injected system
     stream: _StdinStream,
     timeout: float,
     *,
     clock: _MonotonicClock = time.monotonic,
     on_selected: _StrategyObserver | None = None,
+    system: StdinSystem = SYSTEM_STDIN,
 ) -> str:
     """Read *stream* through EOF, giving up after *timeout* seconds.
 
@@ -252,6 +205,10 @@ def read_stdin(
         Called with the chosen strategy before the first read, so a failure
         still reports which strategy was bounding it. Not called when the
         stream is a terminal or in-memory, where no strategy is needed.
+    system:
+        Operating-system and process operations for this capture. Defaults to
+        the stateless production system; tests inject a double here rather
+        than replacing ``os``, ``select`` or ``threading``.
 
     Returns
     -------
@@ -274,10 +231,10 @@ def read_stdin(
     if isinstance(stream, io.StringIO):
         # In-memory streams cannot block, so no worker or deadline is needed.
         return stream.read()
-    plan = _plan_stdin(stream)
+    plan = _plan_stdin(stream, system=system)
     if on_selected is not None:
         on_selected(plan.strategy)
-    capture = _Capture(stream, timeout, deadline, clock, plan)
+    capture = _Capture(stream, timeout, deadline, clock, plan, system)
     match capture.plan.strategy:
         case "win32":
             return _read_win32(capture)
@@ -289,7 +246,7 @@ def read_stdin(
             return _read_fallback(capture)
 
 
-def _plan_stdin(stream: _StdinStream) -> _Plan:
+def _plan_stdin(stream: _StdinStream, *, system: StdinSystem = SYSTEM_STDIN) -> _Plan:
     """Choose the bounded read strategy for *stream*.
 
     Returns
@@ -297,11 +254,12 @@ def _plan_stdin(stream: _StdinStream) -> _Plan:
     _Plan
         The selected strategy with the descriptor, poller or handle it needs.
     """
-    if path_utils.IS_WINDOWS:
-        handle = _stdin_handle(stream)
+    windows = system.windows
+    if windows.is_windows:
+        handle = windows.stdin_handle(stream)
         # Require the pywin32 modules too: without them the read degrades to
         # the fallback worker, and the plan must name the strategy that runs.
-        if handle and _windows_modules() is not None:
+        if handle and windows.modules() is not None:
             return _Plan("win32", handle=handle)
         return _Plan("fallback")
     try:
@@ -309,71 +267,12 @@ def _plan_stdin(stream: _StdinStream) -> _Plan:
     except (AttributeError, OSError, ValueError):
         # In-memory and test-double streams have no descriptor to wait on.
         return _Plan("fallback")
-    poller = _create_stdin_poller(descriptor)
+    poller = system.create_poller(descriptor)
     if poller is None:
         return _Plan("fallback")
-    if _is_regular_file(descriptor):
+    if system.is_regular_file(descriptor):
         return _Plan("regular", descriptor=descriptor)
     return _Plan("poll", descriptor=descriptor, poller=poller)
-
-
-def _create_stdin_poller(descriptor: int) -> _Poller | None:
-    """Choose a waitable interface, or signal the direct-read fallback.
-
-    Returns
-    -------
-    _Poller or None
-        A polling adapter that accepted a zero-timeout probe, or ``None`` when
-        neither mechanism can wait on *descriptor*.
-    """
-    try:
-        poller = select.poll()
-        poller.register(descriptor, select.POLLIN | select.POLLHUP)
-        probe = poller.poll(0)
-    except (AttributeError, OSError, TypeError, ValueError):
-        pass
-    else:
-        if not any(mask & select.POLLNVAL for _descriptor, mask in probe):
-            return poller
-
-    try:
-        select_poller = _SelectPoller(descriptor)
-        select_poller.poll(0)
-    except (AttributeError, OSError, TypeError, ValueError):
-        return None
-    return select_poller
-
-
-def _is_regular_file(descriptor: int) -> bool:
-    """Report whether *descriptor* is backed by a regular file.
-
-    Returns
-    -------
-    bool
-        ``True`` only for a regular file. A descriptor whose status cannot be
-        queried reports ``False``, so it keeps the polled read that already
-        accepted it rather than being moved onto a worker for no reason.
-    """
-    try:
-        return stat.S_ISREG(os.fstat(descriptor).st_mode)
-    except OSError:
-        return False
-
-
-def _stdin_handle(stream: _StdinStream) -> object | None:
-    """Resolve the Windows handle behind *stream*.
-
-    Returns
-    -------
-    object or None
-        The ``HANDLE`` for *stream*, or ``None`` when Windows cannot provide
-        one, such as for an in-memory test double.
-    """
-    try:
-        msvcrt = typ.cast("_Msvcrt", importlib.import_module("msvcrt"))
-        return msvcrt.get_osfhandle(_stream_descriptor(stream))
-    except (AttributeError, ImportError, OSError, ValueError):
-        return None
 
 
 def _stream_descriptor(stream: _StdinStream) -> int:
@@ -393,41 +292,30 @@ def _stream_descriptor(stream: _StdinStream) -> int:
     return typ.cast("_DescribedStream", stream).fileno()
 
 
-def _windows_modules() -> tuple[object, object, object] | None:
-    """Return ``(win32file, win32api, pywintypes)`` when pywin32 is present.
-
-    Returns
-    -------
-    tuple[object, object, object] or None
-        The modules used to read and cancel a handle read, or ``None`` when
-        they are unavailable.
-    """
-    if not path_utils.IS_WINDOWS:
-        return None
-    try:
-        return (
-            importlib.import_module("win32file"),
-            importlib.import_module("win32api"),
-            importlib.import_module("pywintypes"),
-        )
-    except ImportError:
-        return None
-
-
-def _stdin_decoder(stream: _StdinStream) -> io.IncrementalNewlineDecoder:
+def _stdin_decoder(
+    stream: _StdinStream, *, translate_newlines: bool
+) -> io.IncrementalNewlineDecoder:
     """Build a decoder using the supplied stream's text settings.
+
+    Parameters
+    ----------
+    stream:
+        Stream supplying the encoding and error handler.
+    translate_newlines:
+        Whether universal-newline translation follows Windows rules. The
+        capture strategies pass the host flag from their injected system.
 
     Returns
     -------
     io.IncrementalNewlineDecoder
-        Decoder configured for the stream's encoding and the host's newline
-        translation, matching ``TextIOWrapper.read``.
+        Decoder configured for the stream's encoding and newline translation,
+        matching ``TextIOWrapper.read``.
     """
     encoding = getattr(stream, "encoding", None) or "utf-8"
     errors = getattr(stream, "errors", None) or "strict"
     return io.IncrementalNewlineDecoder(
         codecs.getincrementaldecoder(encoding)(errors=errors),
-        translate=path_utils.IS_WINDOWS,
+        translate=translate_newlines,
     )
 
 
@@ -476,7 +364,7 @@ def _await_worker[T](func: cabc.Callable[[], T], spec: _WorkerSpec) -> T:
         :func:`outstanding_workers` when it is still alive.
     """
     outcome: dict[str, object] = {}
-    finished = threading.Event()
+    finished = spec.system.create_event()
 
     def run() -> None:
         """Run *func* on the worker thread and signal completion when done."""
@@ -485,7 +373,7 @@ def _await_worker[T](func: cabc.Callable[[], T], spec: _WorkerSpec) -> T:
         finally:
             finished.set()
 
-    worker = threading.Thread(target=run, name=spec.name, daemon=True)
+    worker = spec.system.create_worker(run, name=spec.name)
     worker.start()
     # Deadlines arrive from a validated but arbitrary finite float. Slicing the
     # wait inside ``wait_for_finish`` keeps an over-large one from raising
@@ -514,6 +402,7 @@ def _worker_spec(capture: _Capture, abandon: _Abandon) -> _WorkerSpec:
         deadline=capture.deadline,
         clock=capture.clock,
         abandon=abandon,
+        system=capture.system,
     )
 
 
@@ -543,14 +432,20 @@ def _read_regular_file(capture: _Capture) -> str:
     descriptor = capture.plan.descriptor
     if descriptor is None:
         return _read_fallback(capture)
-    decoder = _stdin_decoder(capture.stream)
+    decoder = _stdin_decoder(
+        capture.stream,
+        translate_newlines=capture.system.windows.is_windows,
+    )
+    # Capture the per-capture read callable, so a worker that outlives the
+    # capture cannot observe a different system than the one it planned with.
+    read_descriptor = capture.system.read
 
     def read_all() -> str:
         """Read raw bytes from the descriptor until EOF and return the text."""
         chunks: list[str] = []
         # Raw reads avoid holding TextIOWrapper's buffer lock if this worker
         # outlives the deadline and the interpreter starts shutting down.
-        while chunk := os.read(descriptor, _READ_CHUNK):
+        while chunk := read_descriptor(descriptor, _READ_CHUNK):
             chunks.append(decoder.decode(chunk))
         chunks.append(_decode(decoder, b""))
         return "".join(chunks)
@@ -567,7 +462,7 @@ def _read_win32(capture: _Capture) -> str:
         The decoded text read through EOF.
     """
     handle = capture.plan.handle
-    modules = _windows_modules()
+    modules = capture.system.windows.modules()
     if handle is None or modules is None:
         return _read_fallback(capture)
     win32_file = typ.cast("_Win32File", modules[0])
@@ -585,7 +480,10 @@ def _read_win32(capture: _Capture) -> str:
             win32_file,
             win32_errors,
             handle,
-            _stdin_decoder(capture.stream),
+            _stdin_decoder(
+                capture.stream,
+                translate_newlines=capture.system.windows.is_windows,
+            ),
         ),
         _worker_spec(
             capture,
@@ -750,17 +648,11 @@ def _read_buffered(
     str
         The decoded text read through EOF.
     """
-    decoder = _stdin_decoder(capture.stream)
-    chunks: list[str] = []
-    while True:
-        _wait_for_readiness(context)
-        chunk = _read_buffered_chunk(context, read_chunk)
-        if chunk is None:
-            continue
-        if not chunk:
-            chunks.append(_decode(decoder, b""))
-            return "".join(chunks)
-        chunks.append(decoder.decode(chunk))
+    return _decode_polled_chunks(
+        capture,
+        context,
+        partial(_read_buffered_chunk, context, read_chunk),
+    )
 
 
 def _read_buffered_chunk(
@@ -786,6 +678,37 @@ def _read_buffered_chunk(
     return None
 
 
+def _decode_polled_chunks(
+    capture: _Capture,
+    context: _PollContext,
+    next_chunk: cabc.Callable[[], bytes | None],
+) -> str:
+    """Decode polled chunks until *next_chunk* reports EOF.
+
+    ``None`` means the buffered reader made no progress and the loop should
+    wait for readiness again, which is how ``read1`` reports readiness without
+    a full line.
+
+    Returns
+    -------
+    str
+        The decoded text read through EOF.
+    """
+    decoder = _stdin_decoder(
+        capture.stream,
+        translate_newlines=capture.system.windows.is_windows,
+    )
+    chunks: list[str] = []
+    while True:
+        _wait_for_readiness(context)
+        chunk = next_chunk()
+        if chunk is None:
+            continue
+        chunks.append(_decode(decoder, chunk))
+        if not chunk:
+            return "".join(chunks)
+
+
 def _read_raw_polled(capture: _Capture, context: _PollContext) -> str:
     """Read custom stdin descriptors that have no buffered reader.
 
@@ -794,11 +717,8 @@ def _read_raw_polled(capture: _Capture, context: _PollContext) -> str:
     str
         The decoded text read through EOF.
     """
-    decoder = _stdin_decoder(capture.stream)
-    chunks: list[str] = []
-    while True:
-        _wait_for_readiness(context)
-        chunk = os.read(context.descriptor, _POLL_CHUNK)
-        chunks.append(_decode(decoder, chunk))
-        if not chunk:
-            return "".join(chunks)
+    return _decode_polled_chunks(
+        capture,
+        context,
+        partial(capture.system.read, context.descriptor, _POLL_CHUNK),
+    )

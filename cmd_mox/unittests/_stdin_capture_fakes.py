@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import os
 import threading
-import types
 import typing as typ
 
 from cmd_mox import _stdin_capture as capture
+from cmd_mox._stdin_system import (
+    SYSTEM_STDIN,
+    CompletionEvent,
+    StdinSystem,
+    WindowsStdinSystem,
+)
 
 if typ.TYPE_CHECKING:
-    import pytest
+    import collections.abc as cabc
+
+    from cmd_mox._stdin_system import _Poller
+
+
+class _Unset:
+    """Sentinel marking a double operation that delegates to production."""
+
+
+_UNSET = _Unset()
 
 
 class _Clock:
@@ -180,19 +195,123 @@ class _ClockAdvancingEvent:
         return finished
 
 
-def _install_completion_clock(
-    monkeypatch: pytest.MonkeyPatch, clock: _Clock, advance: float
-) -> None:
-    """Make the capture module build a clock-advancing completion event.
+@dataclasses.dataclass(frozen=True, slots=True)
+class _RecordingNativePoller:
+    """Native ``select.poll`` double recording registration and probes."""
 
-    Both the real :class:`threading.Thread` and the double are installed
-    together so worker startup keeps its real scheduling behaviour.
+    events: list[tuple[int, int]] = dataclasses.field(default_factory=list)
+    registered: list[tuple[int, int]] = dataclasses.field(default_factory=list)
+    timeouts: list[int] = dataclasses.field(default_factory=list)
+
+    def register(self, descriptor: int, mask: int) -> None:
+        """Record the watched descriptor and its event mask."""
+        self.registered.append((descriptor, mask))
+
+    def poll(self, timeout: int, /) -> list[tuple[int, int]]:
+        """Record the wait and return the scripted readiness events."""
+        self.timeouts.append(timeout)
+        return list(self.events)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _WindowsSystemDouble:
+    """Windows system double; unset members delegate to the production half."""
+
+    windows_flag: bool | _Unset = _UNSET
+    handle_override: object = _UNSET
+    modules_override: tuple[object, object, object] | _Unset | None = _UNSET
+
+    @property
+    def is_windows(self) -> bool:
+        """The injected platform flag, or the host's flag."""
+        if isinstance(self.windows_flag, _Unset):
+            return SYSTEM_STDIN.windows.is_windows
+        return self.windows_flag
+
+    def stdin_handle(self, stream: object) -> object | None:
+        """Return the injected handle, or resolve it through the host."""
+        if isinstance(self.handle_override, _Unset):
+            return SYSTEM_STDIN.windows.stdin_handle(stream)
+        return self.handle_override
+
+    def modules(self) -> tuple[object, object, object] | None:
+        """Return the injected pywin32 modules, or acquire them from the host."""
+        if isinstance(self.modules_override, _Unset):
+            return SYSTEM_STDIN.windows.modules()
+        return self.modules_override
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _SystemDouble:
+    """Stdin system double; unset operations delegate to the host system."""
+
+    windows: WindowsStdinSystem = dataclasses.field(
+        default_factory=_WindowsSystemDouble
+    )
+    create_poller_override: cabc.Callable[[int], _Poller | None] | _Unset = _UNSET
+    read_override: cabc.Callable[[int, int], bytes] | _Unset = _UNSET
+    regular_file_override: bool | _Unset = _UNSET
+    event_factory: cabc.Callable[[], CompletionEvent] | _Unset = _UNSET
+    worker_factory: cabc.Callable[..., threading.Thread] | _Unset = _UNSET
+
+    def create_poller(self, descriptor: int) -> _Poller | None:
+        """Return the injected poller, or build the production one."""
+        if isinstance(self.create_poller_override, _Unset):
+            return SYSTEM_STDIN.create_poller(descriptor)
+        return self.create_poller_override(descriptor)
+
+    def read(self, descriptor: int, size: int) -> bytes:
+        """Return the injected read result, or read from the host."""
+        if isinstance(self.read_override, _Unset):
+            return SYSTEM_STDIN.read(descriptor, size)
+        return self.read_override(descriptor, size)
+
+    def is_regular_file(self, descriptor: int) -> bool:
+        """Return the injected descriptor kind, or query the host."""
+        if isinstance(self.regular_file_override, _Unset):
+            return SYSTEM_STDIN.is_regular_file(descriptor)
+        return self.regular_file_override
+
+    def create_event(self) -> CompletionEvent:
+        """Return the injected event, or create a real one."""
+        if isinstance(self.event_factory, _Unset):
+            return SYSTEM_STDIN.create_event()
+        return self.event_factory()
+
+    def create_worker(
+        self, target: cabc.Callable[[], object], *, name: str
+    ) -> threading.Thread:
+        """Return the injected worker, or create a real daemon worker.
+
+        Returns
+        -------
+        threading.Thread
+            An unstarted worker for the capture to start and track.
+        """
+        if isinstance(self.worker_factory, _Unset):
+            return SYSTEM_STDIN.create_worker(target, name=name)
+        return self.worker_factory(target, name=name)
+
+
+def _system_with_completion_clock(
+    clock: _Clock,
+    advance: float,
+    *,
+    windows: WindowsStdinSystem | None = None,
+) -> _SystemDouble:
+    """Build a system whose completion events advance *clock* on success.
+
+    Real worker creation is kept, so the fake clock only models a waiter that
+    resumed after its worker finished.
+
+    Returns
+    -------
+    _SystemDouble
+        Double backed by the real worker factory and the advancing events.
     """
-    event = _ClockAdvancingEvent(clock, advance)
-    monkeypatch.setattr(
-        capture,
-        "threading",
-        types.SimpleNamespace(Event=lambda: event, Thread=threading.Thread),
+    return _SystemDouble(
+        windows=windows if windows is not None else _WindowsSystemDouble(),
+        event_factory=lambda: _ClockAdvancingEvent(clock, advance),
     )
 
 
@@ -200,8 +319,14 @@ class _StreamError(RuntimeError):
     """Failure raised by a test stream."""
 
 
-def _read(stream: object, timeout: float, clock: _Clock) -> str:
-    """Capture stdin for a test using an explicit clock.
+def _read(
+    stream: object,
+    timeout: float,
+    clock: _Clock,
+    *,
+    system: StdinSystem = SYSTEM_STDIN,
+) -> str:
+    """Capture stdin for a test using an explicit clock and system.
 
     Returns
     -------
@@ -209,7 +334,10 @@ def _read(stream: object, timeout: float, clock: _Clock) -> str:
         The captured text.
     """
     return capture.read_stdin(
-        typ.cast("capture._StdinStream", stream), timeout, clock=clock
+        typ.cast("capture._StdinStream", stream),
+        timeout,
+        clock=clock,
+        system=system,
     )
 
 
