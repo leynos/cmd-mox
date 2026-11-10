@@ -315,6 +315,18 @@ def _system_with_completion_clock(
     )
 
 
+def _fail_poll() -> typ.NoReturn:
+    """Simulate an unavailable ``select.poll``.
+
+    Raises
+    ------
+    OSError
+        Always, so poller creation falls through to ``select``.
+    """
+    msg = "poll unavailable"
+    raise OSError(msg)
+
+
 class _StreamError(RuntimeError):
     """Failure raised by a test stream."""
 

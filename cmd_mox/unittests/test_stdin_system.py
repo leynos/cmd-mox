@@ -11,7 +11,7 @@ import pytest
 
 from cmd_mox import _path_utils as path_utils
 from cmd_mox import _stdin_system as stdin_system
-from cmd_mox.unittests._stdin_capture_fakes import _RecordingNativePoller
+from cmd_mox.unittests._stdin_capture_fakes import _fail_poll, _RecordingNativePoller
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -214,22 +214,10 @@ def test_create_stdin_poller_prefers_the_native_poller() -> None:
 
 def test_create_stdin_poller_falls_back_when_native_poll_fails() -> None:
     """A native poller failure selects the ``select`` adapter."""
-
-    def fail_poll() -> typ.NoReturn:
-        """Simulate an unavailable ``select.poll``.
-
-        Raises
-        ------
-        OSError
-            Always, so creation falls through to ``select``.
-        """
-        msg = "poll unavailable"
-        raise OSError(msg)
-
     select_call = _RecordingSelect()
 
     created = stdin_system._create_stdin_poller(
-        7, native_poll=fail_poll, select_call=select_call
+        7, native_poll=_fail_poll, select_call=select_call
     )
 
     assert isinstance(created, stdin_system._SelectPoller), (
@@ -255,20 +243,8 @@ def test_create_stdin_poller_rejects_a_native_poller_reporting_pollnval() -> Non
 
 def test_create_stdin_poller_returns_none_when_neither_mechanism_works() -> None:
     """`None` tells the planner to use the tracked direct-read fallback."""
-
-    def fail_poll() -> typ.NoReturn:
-        """Simulate an unavailable ``select.poll``.
-
-        Raises
-        ------
-        OSError
-            Always, so creation falls through to ``select``.
-        """
-        msg = "poll unavailable"
-        raise OSError(msg)
-
     created = stdin_system._create_stdin_poller(
-        7, native_poll=fail_poll, select_call=_RejectingSelect()
+        7, native_poll=_fail_poll, select_call=_RejectingSelect()
     )
 
     assert created is None, "an unwatchable descriptor produced a poller"
@@ -404,7 +380,7 @@ def test_production_system_detects_regular_files(tmp_path: Path) -> None:
     try:
         with path.open(encoding="utf-8") as regular_file:
             assert stdin_system.SYSTEM_STDIN.is_regular_file(regular_file.fileno()), (
-                "a regular file was not recognised"
+                "a regular file was not recognized"
             )
         assert not stdin_system.SYSTEM_STDIN.is_regular_file(read_fd), (
             "a pipe was classified as a regular file"

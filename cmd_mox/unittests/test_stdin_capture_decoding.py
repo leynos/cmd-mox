@@ -95,7 +95,7 @@ def _expected(text: str, *, translate_newlines: bool) -> str:
     -------
     str
         *text* unchanged when newline translation is off, or with newlines
-        normalised when it is on, matching ``TextIOWrapper``.
+        normalized when it is on, matching ``TextIOWrapper``.
     """
     if translate_newlines:
         return text.replace("\r\n", "\n").replace("\r", "\n")
