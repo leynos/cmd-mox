@@ -38,22 +38,30 @@ def _complete_passthrough(mox: CmdMox, invocation_id: str, *, stdout: str = "") 
     )
 
 
-def test_evicted_unregistered_command_is_still_reported() -> None:
-    """An unregistered call evicted from the journal still fails verification."""
-    mox = CmdMox(max_journal_entries=1)
-    mox.register_command("rm")
-    mox.stub("ok").returns()
-
-    _dispatch(mox, "rm")
+def _assert_evicted_call_fails_verification(
+    mox: CmdMox, fragments: tuple[str, ...]
+) -> None:
+    """Evict the final call, then require verification to report the first."""
     _dispatch(mox, "ok")
-
     assert [inv.command for inv in mox.journal] == ["ok"]
     with pytest.raises(UnexpectedCommandError) as excinfo:
         mox._run_verifiers()
 
     message = str(excinfo.value)
-    assert "Unexpected command invocation." in message
-    assert "Actual call:" in message
+    for fragment in fragments:
+        assert fragment in message, f"{fragment!r} missing from {message!r}"
+
+
+def test_evicted_unregistered_command_is_still_reported() -> None:
+    """An unregistered call evicted from the journal still fails verification."""
+    mox = CmdMox(max_journal_entries=1)
+    mox.register_command("rm")
+    mox.stub("ok").returns()
+    _dispatch(mox, "rm")
+
+    _assert_evicted_call_fails_verification(
+        mox, ("Unexpected command invocation.", "Actual call:")
+    )
 
 
 def test_evicted_mismatching_spy_call_is_still_reported() -> None:
@@ -61,17 +69,9 @@ def test_evicted_mismatching_spy_call_is_still_reported() -> None:
     mox = CmdMox(max_journal_entries=1)
     mox.spy("git").with_args("status")
     mox.stub("ok").returns()
-
     _dispatch(mox, "git", "commit")
-    _dispatch(mox, "ok")
 
-    assert [inv.command for inv in mox.journal] == ["ok"]
-    with pytest.raises(UnexpectedCommandError) as excinfo:
-        mox._run_verifiers()
-
-    message = str(excinfo.value)
-    for fragment in ("Expected:", "Actual:", "Reason:"):
-        assert fragment in message, f"{fragment!r} missing from {message!r}"
+    _assert_evicted_call_fails_verification(mox, ("Expected:", "Actual:", "Reason:"))
 
 
 @pytest.mark.parametrize("max_journal_entries", [1, None])
@@ -214,11 +214,14 @@ def test_late_in_order_is_rejected_when_bounded_journal_discards_calls() -> None
     mox.stub("third").returns().in_order()
 
 
-def test_late_in_order_on_bounded_mocks_is_still_supported() -> None:
-    """Mock calls are always retained, so late ordering still verifies."""
-    mox = CmdMox(max_journal_entries=1)
-    first = mox.mock("first").returns()
-    second = mox.mock("second").returns()
+@pytest.mark.parametrize(("kind", "max_journal_entries"), [("mock", 1), ("stub", None)])
+def test_late_in_order_accepts_completed_calls(
+    kind: str, max_journal_entries: int | None
+) -> None:
+    """Retained calls satisfy in_order() applied after they complete."""
+    mox = CmdMox(max_journal_entries=max_journal_entries)
+    first = getattr(mox, kind)("first").returns()
+    second = getattr(mox, kind)("second").returns()
     _dispatch(mox, "first")
     _dispatch(mox, "second")
 
@@ -228,41 +231,14 @@ def test_late_in_order_on_bounded_mocks_is_still_supported() -> None:
     mox._run_verifiers()
 
 
-def test_late_in_order_on_bounded_mocks_reports_reversed_calls() -> None:
-    """Late ordering of retained mock calls still detects reversed order."""
-    mox = CmdMox(max_journal_entries=1)
-    first = mox.mock("first").returns()
-    second = mox.mock("second").returns()
-    _dispatch(mox, "second")
-    _dispatch(mox, "first")
-
-    first.in_order()
-    second.in_order()
-
-    with pytest.raises(UnexpectedCommandError) as excinfo:
-        mox._run_verifiers()
-    assert "Ordered expectation violated." in str(excinfo.value)
-
-
-def test_late_in_order_still_sees_completed_stub_call() -> None:
-    """An unbounded journal retains stub calls for late in_order()."""
-    mox = CmdMox()
-    first = mox.stub("first").returns()
-    second = mox.stub("second").returns()
-    _dispatch(mox, "first")
-    _dispatch(mox, "second")
-
-    first.in_order()
-    second.in_order()
-
-    mox._run_verifiers()
-
-
-def test_late_in_order_preserves_completion_order() -> None:
+@pytest.mark.parametrize(("kind", "max_journal_entries"), [("mock", 1), ("stub", None)])
+def test_late_in_order_reports_reversed_calls(
+    kind: str, max_journal_entries: int | None
+) -> None:
     """Late ordering still reports calls that completed out of order."""
-    mox = CmdMox()
-    first = mox.stub("first").returns()
-    second = mox.stub("second").returns()
+    mox = CmdMox(max_journal_entries=max_journal_entries)
+    first = getattr(mox, kind)("first").returns()
+    second = getattr(mox, kind)("second").returns()
     _dispatch(mox, "second")
     _dispatch(mox, "first")
 
