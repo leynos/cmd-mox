@@ -1,15 +1,11 @@
 # Documentation Contents
 
-- [User Guide](./users-guide.md): User-facing workflows and shim timeout
-  behaviour.
-- [Usage Guide](./usage-guide.md): Mocking, stubbing, and spying on commands.
+- [User's Guide](./users-guide.md): From a first test to record and replay,
+  troubleshooting, and the public API reference.
+- [0.3.0 Migration Guide](./v0-3-0-migration-guide.md): Upgrade a suite from
+  CmdMox 0.2 to 0.3.0.
+- [Changelog](./CHANGELOG.md): Notable changes in each release.
 - [Developer Guide](./developers-guide.md): Local checks and linting policy.
-- [IPC Timeout Migration Note](./ipc-timeout-migration-note.md): Prepare for
-  bounded shim stdin and IPC waits in the next minor release.
-- [IPC Payload Migration Note](./ipc-payload-migration-note.md): Replace
-  removed payload conversion methods before upgrading.
-- [Fixture Schema Migration Note](./fixture-schema-migration-note.md): Prepare
-  for three-component recording fixture versions.
 - [Shellmock Migration Guide](./shellmock-migration-guide.md): Migrate from
   `shellmock` to CmdMox.
 - [Design Doc](./python-native-command-mocking-design.md): Design rationale.

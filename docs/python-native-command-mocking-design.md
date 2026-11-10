@@ -2043,25 +2043,47 @@ skipped on Windows where shell semantics and built-in commands differ.
 ### 8.10 Design Decisions for API Documentation Completeness
 
 CmdMox treats `cmd_mox.__all__` as the source of truth for the package's
-top-level public API. The usage guide therefore includes a dedicated "Public
+top-level public API. The user's guide therefore includes a dedicated "Public
 API reference" section that mirrors `__all__` so consumers can see what is
 supported without inspecting the source.
 
 To prevent documentation drift, the test suite enforces that every symbol
-listed in `cmd_mox.__all__` is present in the usage guide's API reference. This
-check is implemented twice:
+listed in `cmd_mox.__all__` is present in the user's guide's API reference.
+This check is implemented twice:
 
 - A unit test asserts coverage at the string level for fast feedback.
 - A `pytest-bdd` scenario verifies the same user-facing behaviour as an
   acceptance criterion ("the docs list every public symbol").
 
+The published examples are held to the same standard. `README.md`,
+`docs/users-guide.md`, and `docs/v0-3-0-migration-guide.md` mark every fenced
+block with an HTML comment declaring how it is checked, following the model
+used by the cuprum project:
+
+- `tested-example` fences are Python that the suite executes in a fresh
+  interpreter. A fence defining `test_*` functions runs under pytest with the
+  document's own `conftest-example` written as `conftest.py`, so the published
+  plugin set-up is exercised too; anything else runs as a script. Each must
+  contain an `assert`, so passing proves an outcome rather than merely an
+  absence of exceptions.
+- `fixture-example` fences are JSON recording fixtures, loaded through
+  `FixtureFile.from_dict()` so the documented schema cannot drift.
+- `shell-example` fences (installation commands) are published but not run.
+- `illustrative-example` fences are excluded from execution only with a
+  bullet in the document that names them and states the reason.
+
+An unmarked fence fails the suite, so a new example cannot escape testing
+unnoticed. The parser lives in `tests/helpers/documentation_examples.py`; the
+executing tests are in `tests/test_documentation_examples.py`, with a
+`pytest-bdd` scenario in `features/documentation.feature`.
+
 ### 8.11 Design Decisions for the `shellmock` Migration Guide
 
 The `shellmock` migration guide will be published as a standalone document at
 `docs/shellmock-migration-guide.md` to keep migration content focused without
-overloading the usage guide. The documentation index in `docs/contents.md` will
-link to this guide, and `docs/usage-guide.md` will include a short cross-link
-for discoverability.
+overloading the user's guide. The documentation index in `docs/contents.md`
+will link to this guide, and `docs/users-guide.md` will include a short
+cross-link for discoverability.
 
 The guide will include a concise feature mapping table (`shellmock` CLI flags
 to CmdMox fluent API calls), at least two end-to-end translated examples (a

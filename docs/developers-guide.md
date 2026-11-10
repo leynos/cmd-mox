@@ -58,8 +58,8 @@ Minor and patch differences within the same major version are tolerated.
 Migrations are registered in `_MIGRATIONS` by source major version and chain
 older major versions forward; an unsupported higher major version is rejected
 with `ValueError`. See the
-[schema versioning guide](usage-guide.md#schema-versioning-and-migration) and
-the
+[schema versions section of the user's guide](users-guide.md#schema-versions)
+and the
 [detailed versioning design](python-native-command-mocking-design.md#911-versioning-and-forward-compatibility).
 
 ## Diagnostic environment masking

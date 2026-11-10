@@ -13,8 +13,17 @@ FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 
 @scenario(
     str(FEATURES_DIR / "documentation.feature"),
-    "usage guide lists public API exports",
+    "user's guide lists public API exports",
 )
-def test_usage_guide_lists_public_api_exports() -> None:
-    """The usage guide should list every public export in a single reference."""
+def test_users_guide_lists_public_api_exports() -> None:
+    """The user's guide should list every public export in a single reference."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "documentation.feature"),
+    "published examples are declared and runnable",
+)
+def test_published_examples_are_declared_and_runnable() -> None:
+    """Published examples are all marked, and the README quick start runs."""
     pass
