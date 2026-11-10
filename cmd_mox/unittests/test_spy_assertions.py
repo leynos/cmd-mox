@@ -609,3 +609,42 @@ class TestSpyAssertions:
         """_assert_equal returns quietly when values match."""
         spy = self._create_spy_with_invocation("hi", [], "", {})
         assert spy._assert_equal("label", "expected", "expected") is None
+
+
+class TestSpyCountVerification:
+    """Edge cases where only one verifier can catch the defect."""
+
+    # ------------------------------------------------------------------
+    def test_ordered_spy_wrong_order_with_met_counts_fails(
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
+    ) -> None:
+        """Order is enforced even when every explicit count is met."""
+        mox = CmdMox()
+        mox.spy("first").returns(stdout="1").in_order().times_called(2)
+        mox.spy("second").returns(stdout="2").in_order().times_called(2)
+        mox.__enter__()
+        mox.replay()
+        path_first = require_shim_dir(mox.environment) / "first"
+        path_second = require_shim_dir(mox.environment) / "second"
+        # Every count is satisfied, but the interleaving breaks the declared
+        # order, so only OrderVerifier can catch this sequence.
+        run([str(path_second)], shell=False)
+        run([str(path_first)], shell=False)
+        run([str(path_second)], shell=False)
+        run([str(path_first)], shell=False)
+        with pytest.raises(UnexpectedCommandError):
+            mox.verify()
+
+    # ------------------------------------------------------------------
+    def test_replay_backed_spy_explicit_count_under_count_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """Consuming the fixture once is not enough when two calls are expected."""
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        mox = CmdMox()
+        mox.spy("git").replay(fixture_path).times_called(2)
+        mox.__enter__()
+        mox.replay()
+        mox._handle_invocation(Invocation("git", ["status"], "", {}))
+        with pytest.raises(UnfulfilledExpectationError):
+            mox.verify()

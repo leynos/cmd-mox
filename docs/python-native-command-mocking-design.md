@@ -39,10 +39,11 @@ explicitness about a system's interactions with its dependencies.
    test enters the final verification phase. In this phase, `CmdMox` checks
    whether the actual invocations that occurred during the replay phase
    perfectly match the expectations set during the record phase. The test
-   succeeds only if every mock expectation, and every spy whose count was set
-   explicitly, was met exactly as specified (including call counts and
-   ordering) and no unexpected command calls occurred. Any deviation results in
-   a `VerificationError` with a detailed report of the discrepancy.
+   succeeds only if every mock expectation, every ordered expectation, and
+   every spy whose count was set explicitly, was met exactly as specified
+   (including call counts and ordering) and no unexpected command calls
+   occurred. Any deviation results in a `VerificationError` with a detailed
+   report of the discrepancy.
 
 Adopting this strict paradigm for command-line testing offers significant
 advantages. It forces developers to be deliberate about the external process
@@ -267,7 +268,10 @@ internally return `CommandDouble` instances. Each double tracks invocations so
 verification can assert on call counts and order. Mocks and spies record calls
 (`double.is_recording` is `True`), while stubs do not. Mocks always enforce
 their counts; spies enforce a count only when it was set explicitly and
-otherwise remain observational.
+otherwise remain observational. Ordering is independent of that distinction: an
+`in_order()` expectation is expanded to its configured count (one by default)
+in the order check, so an ordered spy or stub is still held to that sequence
+and total.
 
 The `kind` flag determines whether a double is considered an expectation (stubs
 and mocks) or merely observational (spies). It also governs how
@@ -322,7 +326,9 @@ provided `exit_code`.
   expectation is expected to be met. This is inspired by PyMox's
   `MultipleTimes()` modifier. Mocks always enforce the count. A spy enforces it
   only when the count was set through this method or `.times_called()`;
-  otherwise the spy stays observational.
+  otherwise the spy stays observational. A stub does not record invocations, so
+  the count check skips it; `.in_order()` still expands the expectation to
+  `count` calls and checks that total against the journal.
 
 - `.in_order()`**:** Marks this expectation as part of a default, strictly
   ordered group. Invocations must occur in the order they were recorded. An
@@ -335,7 +341,9 @@ DSL described here. Both `times()` and the more explicit `times_called()` alias
 also set a non-comparison `count_explicit` flag on the expectation.
 Verification uses that flag to distinguish an explicit `times(1)` from the
 implicit default, which lets counted spies take part in verification without
-changing the observational behaviour of uncounted ones.
+changing the observational behaviour of uncounted ones. The order check does
+not consult the flag: it always expands an ordered expectation to its `count`,
+so an uncounted ordered spy is still held to one call in sequence.
 
 To ensure `CmdMox` is a compelling replacement for `shellmock`, the following
 table maps the core features of `shellmock` to their more expressive `CmdMox`
@@ -1407,7 +1415,10 @@ The verification algorithm will perform several critical checks:
    whose count was set explicitly with `.times(N)` or `.times_called(N)`, the
    verifier ensures that the expectation was met exactly `N` times. If it was
    met more or fewer times, a `VerificationError` is raised. A spy without an
-   explicit count is not checked.
+   explicit count is not checked by this step. Ordering is separate: an
+   `.in_order()` expectation is expanded to its configured count, so an
+   uncounted ordered spy's default count of one must still match the journal
+   exactly.
 
 4. **Order Violations:** For expectations marked with `.in_order()`, the
    verifier ensures that they were met in the same sequence in which they were
@@ -1439,12 +1450,13 @@ Spies are observational by default. Calling `times(count)` or its spy-flavoured
 alias `times_called(count)` on a spy marks the count as explicit, and
 `mox.verify()` then enforces it: too few calls raise
 `UnfulfilledExpectationError`, and too many raise `UnexpectedCommandError`. An
-uncounted spy is never failed for its call total.
+uncounted spy's own count is never checked, though an `in_order()` spy is still
+expanded to its count (one by default) for the ordering check.
 
-After `mox.verify()` has been called (which for an uncounted spy confirms only
-that no unexpected errors occurred and performs cleanup), the test can inspect
-the spy object to access its recorded history. The spy object will expose a
-public API for this purpose:
+After `mox.verify()` has been called (which for an uncounted, unordered spy
+confirms only that no unexpected errors occurred and performs cleanup), the
+test can inspect the spy object to access its recorded history. The spy object
+will expose a public API for this purpose:
 
 - `spy.call_count`: An integer representing the total number of times the
   command was called.
