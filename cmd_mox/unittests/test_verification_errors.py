@@ -153,9 +153,11 @@ def test_extra_invocation_reports_count(
     with pytest.raises(UnexpectedCommandError) as excinfo:
         mox.verify()
 
+    # The count and the final call are the parts users act on; assert their
+    # rendered values rather than only the section headings.
     _assert_message_contains(
         excinfo,
         "Unexpected additional invocation.",
-        "Observed calls",
-        "Last call",
+        "Observed calls:\n  2",
+        "Last call:\n  echo()",
     )

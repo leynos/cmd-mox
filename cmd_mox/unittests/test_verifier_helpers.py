@@ -65,10 +65,33 @@ def test_format_env_masks_and_sorts_entries() -> None:
     assert formatted == "{'API_KEY': '***', 'PATH': '/bin'}"
 
 
+def test_format_env_renders_an_empty_mapping() -> None:
+    """An empty environment renders as an empty literal, not a blank line."""
+    assert v._format_env({}) == "{}"
+
+
 def test_format_items_handles_empty_and_content() -> None:
     """Item formatting should collapse empty sequences to an empty string."""
     assert v._format_items([]) == ""
+    assert v._format_items(None) == ""
     assert v._format_items(["alpha", "beta"]) == "'alpha', 'beta'"
+
+
+def test_format_call_renders_empty_and_populated_arguments() -> None:
+    """Call formatting omits the parentheses' contents when there are no args."""
+    assert v._format_call("deploy", "") == "deploy()"
+    assert v._format_call("deploy", "'--flag'") == "deploy('--flag')"
+
+
+def test_expectation_args_repr_prefers_literal_args() -> None:
+    """Literal args win over matchers, and an unconfigured expectation is empty."""
+    literal = Expectation("deploy").with_args("--flag")
+    matchers = Expectation("deploy").with_matching_args(str.isdigit)
+    unconfigured = Expectation("deploy")
+
+    assert v._expectation_args_repr(literal) == "'--flag'"
+    assert v._expectation_args_repr(matchers) == "<method 'isdigit' of 'str' objects>"
+    assert v._expectation_args_repr(unconfigured) == ""
 
 
 def test_format_items_formats_matcher_callables() -> None:
@@ -114,10 +137,78 @@ def test_describe_invocation_focuses_requested_env_keys() -> None:
     assert description == "deploy('--flag')\nstdin='payload'\nenv={'API_KEY': '***'}"
 
 
+def test_describe_invocation_omits_optional_sections_by_default() -> None:
+    """Without focus_env or include_stdin, only the call is rendered."""
+    inv = Invocation(
+        command="deploy",
+        args=["--flag"],
+        stdin="payload",
+        env={"API_KEY": "secret"},
+    )
+
+    assert v._describe_invocation(inv) == "deploy('--flag')"
+
+
+def test_describe_invocation_renders_missing_focused_env_as_none() -> None:
+    """A focused key absent from the invocation is rendered as ``None``."""
+    inv = Invocation(command="deploy", args=[], stdin="", env={})
+
+    assert v._describe_invocation(inv, focus_env=["TOKEN"]) == (
+        "deploy()\nenv={'TOKEN': None}"
+    )
+
+
+def test_describe_invocations_omits_stdin_by_default() -> None:
+    """The default description leaves stdin out even when it was recorded."""
+    inv = Invocation(command="deploy", args=[], stdin="payload", env={})
+
+    assert v._describe_invocations([inv]) == "deploy()"
+
+
+def test_describe_invocations_handles_empty_and_multiple_entries() -> None:
+    """Empty sequences render ``(none)``; entries are joined with newlines."""
+    assert v._describe_invocations([]) == "(none)"
+
+    invocations = [
+        Invocation(
+            command="deploy",
+            args=["--one"],
+            stdin="a",
+            env={"TOKEN": "classified"},
+        ),
+        Invocation(
+            command="deploy",
+            args=["--two"],
+            stdin="b",
+            env={"TOKEN": "classified"},
+        ),
+    ]
+
+    assert v._describe_invocations(
+        invocations,
+        focus_env=["TOKEN"],
+        include_stdin=True,
+    ) == (
+        "deploy('--one')\n"
+        "stdin='a'\n"
+        "env={'TOKEN': '***'}\n"
+        "deploy('--two')\n"
+        "stdin='b'\n"
+        "env={'TOKEN': '***'}"
+    )
+
+
 def test_numbered_renders_multiline_entries() -> None:
     """Numbered helper should indent continuation lines."""
     entries = ["first line", "second\nwith extra"]
     assert v._numbered(entries) == "1. first line\n2. second\n   with extra"
+
+
+def test_numbered_handles_empty_entries_and_custom_start() -> None:
+    """Empty sequences render ``(none)``; numbering can start above one."""
+    assert v._numbered([]) == "(none)"
+    assert v._numbered([""]) == "1. "
+    assert v._numbered(["alpha", "beta"], start=3) == "3. alpha\n4. beta"
 
 
 def test_format_sections_omits_empty_sections() -> None:
@@ -128,6 +219,11 @@ def test_format_sections_omits_empty_sections() -> None:
     )
 
     assert body == "Header\n\nDetails:\n  line1\n  line2"
+
+
+def test_format_sections_renders_only_the_title_when_all_empty() -> None:
+    """A message with no populated sections is just its title."""
+    assert v._format_sections("Header", [("Empty", "")]) == "Header"
 
 
 def test_list_expected_commands_excludes_stubs() -> None:
