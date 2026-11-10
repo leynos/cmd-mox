@@ -25,6 +25,7 @@ from cmd_mox.unittests._stdin_capture_fakes import (
     _ErrorPoller,
     _NoFileno,
     _open_pipe_stream,
+    _poller_system,
     _PollerOSError,
     _read,
     _Stream,
@@ -35,7 +36,6 @@ from cmd_mox.unittests._stdin_capture_fakes import (
 )
 
 if typ.TYPE_CHECKING:
-    import collections.abc as cabc
     from pathlib import Path
 
     from cmd_mox._stdin_system import StdinSystem
@@ -115,61 +115,6 @@ def test_unpollable_descriptor_falls_back() -> None:
     assert stream.read_calls == 1, "the fallback should read exactly once"
 
 
-def test_poll_registration_failure_leaves_select_available() -> None:
-    """A rejected ``poll`` registration still leaves ``select`` as an option."""
-
-    def fail_poll() -> typ.NoReturn:
-        """Simulate a host without ``select.poll``."""
-        msg = "poll unavailable"
-        raise AttributeError(msg)
-
-    def ready_select(
-        readers: cabc.Sequence[int],
-        _writers: cabc.Sequence[int],
-        _errors: cabc.Sequence[int],
-        _timeout: float,
-    ) -> tuple[list[int], list[int], list[int]]:
-        """Report every watched descriptor as readable."""
-        return list(readers), [], []
-
-    poller = stdin_system._create_stdin_poller(
-        0, native_poll=fail_poll, select_call=ready_select
-    )
-    assert poller is not None, "select should provide a usable fallback poller"
-
-
-def test_pollnval_probe_falls_back() -> None:
-    """A ``POLLNVAL`` probe result marks the descriptor as unpollable."""
-
-    class _InvalidPoller:
-        """Poller double that reports every registered descriptor as invalid."""
-
-        def register(self, _descriptor: int, _mask: int) -> None:
-            """Accept registration."""
-
-        def poll(self, _timeout: int) -> list[tuple[int, int]]:
-            """Report the descriptor as invalid.
-
-            Returns
-            -------
-            list[tuple[int, int]]
-                One event carrying ``POLLNVAL``.
-            """
-            return [(0, stdin_system.select.POLLNVAL)]
-
-    def reject_select(
-        _readables: object, _writables: object, _exceptables: object, _timeout: object
-    ) -> tuple[list[int], list[int], list[int]]:
-        """Simulate ``select()`` refusing the descriptor."""
-        msg = "closed"
-        raise ValueError(msg)
-
-    poller = stdin_system._create_stdin_poller(
-        0, native_poll=_InvalidPoller, select_call=reject_select
-    )
-    assert poller is None, "POLLNVAL was not detected"
-
-
 class _PoisonedPoller:
     """Poller that rejects every registration, forcing the ``select`` probe."""
 
@@ -212,12 +157,9 @@ def test_unselectable_descriptor_plan_falls_back() -> None:
         msg = "filedescriptor out of range in select()"
         raise ValueError(msg)
 
-    system = _SystemDouble(
-        create_poller_override=lambda descriptor: stdin_system._create_stdin_poller(
-            descriptor,
-            native_poll=_PoisonedPoller,
-            select_call=reject_select,
-        )
+    system = _poller_system(
+        native_poll=_PoisonedPoller,
+        select_call=reject_select,
     )
     stream = _DescriptorStream(0, data="unselectable")
 

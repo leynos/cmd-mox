@@ -11,7 +11,6 @@ import typing as typ
 import pytest
 
 from cmd_mox import _stdin_capture as capture
-from cmd_mox import _stdin_system as stdin_system
 from cmd_mox.ipc import _observability
 from cmd_mox.shim import _create_invocation
 from cmd_mox.unittests._shim_test_support import (
@@ -23,6 +22,7 @@ from cmd_mox.unittests._shim_test_support import (
     _stream_dependencies,
 )
 from cmd_mox.unittests._stdin_capture_fakes import (
+    _poller_system,
     _RecordingNativePoller,
     _SystemDouble,
     _WindowsSystemDouble,
@@ -288,21 +288,9 @@ def test_create_invocation_uses_select_when_poll_is_unavailable(
         select_timeouts.append(timeout)
         return list(readers), [], []
 
-    def fail_poll() -> typ.NoReturn:
-        """Simulate an unavailable poll implementation.
-
-        Raises
-        ------
-        _InjectedOSError
-            Poll setup failure used to select the ``select`` fallback.
-        """
-        raise _InjectedOSError
-
     chunks = iter([b"payload", b""])
-    system = _SystemDouble(
-        create_poller_override=lambda descriptor: stdin_system._create_stdin_poller(
-            descriptor, native_poll=fail_poll, select_call=fake_select
-        ),
+    system = _poller_system(
+        select_call=fake_select,
         read_override=lambda _descriptor, _size: next(chunks),
     )
     monkeypatch.setattr(sys, "argv", ["shim"])

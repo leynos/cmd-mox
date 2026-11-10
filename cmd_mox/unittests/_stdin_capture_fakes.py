@@ -7,6 +7,7 @@ import io
 import os
 import threading
 import typing as typ
+from functools import partial
 
 from cmd_mox import _stdin_capture as capture
 from cmd_mox._stdin_system import (
@@ -14,12 +15,13 @@ from cmd_mox._stdin_system import (
     CompletionEvent,
     StdinSystem,
     WindowsStdinSystem,
+    _create_stdin_poller,
 )
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
-    from cmd_mox._stdin_system import _Poller
+    from cmd_mox._stdin_system import _NativePoller, _Poller, _SelectCall
 
 
 class _Unset:
@@ -325,6 +327,28 @@ def _fail_poll() -> typ.NoReturn:
     """
     msg = "poll unavailable"
     raise OSError(msg)
+
+
+def _poller_system(
+    *,
+    native_poll: cabc.Callable[[], _NativePoller] = _fail_poll,
+    select_call: _SelectCall,
+    read_override: cabc.Callable[[int, int], bytes] | _Unset = _UNSET,
+) -> _SystemDouble:
+    """Return a system whose poller comes from the ``select`` fallback.
+
+    Returns
+    -------
+    _SystemDouble
+        Double that delegates poller selection to the production factory with
+        the supplied native-poller and ``select`` doubles.
+    """
+    return _SystemDouble(
+        create_poller_override=partial(
+            _create_stdin_poller, native_poll=native_poll, select_call=select_call
+        ),
+        read_override=read_override,
+    )
 
 
 class _StreamError(RuntimeError):

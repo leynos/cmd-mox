@@ -241,6 +241,18 @@ def test_create_stdin_poller_rejects_a_native_poller_reporting_pollnval() -> Non
     )
 
 
+@_NEEDS_POLL
+def test_create_stdin_poller_returns_none_when_pollnval_and_select_reject() -> None:
+    """A ``POLLNVAL`` probe plus a rejecting ``select`` leaves no poller."""
+    poller = _RecordingNativePoller(events=[(7, select.POLLNVAL)])
+
+    created = stdin_system._create_stdin_poller(
+        7, native_poll=lambda: poller, select_call=_RejectingSelect()
+    )
+
+    assert created is None, "an invalid descriptor produced a poller"
+
+
 def test_create_stdin_poller_returns_none_when_neither_mechanism_works() -> None:
     """`None` tells the planner to use the tracked direct-read fallback."""
     created = stdin_system._create_stdin_poller(
