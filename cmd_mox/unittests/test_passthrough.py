@@ -58,6 +58,26 @@ def _make_invocation(command: str = "echo") -> Invocation:
     return Invocation(command=command, args=["hi"], stdin="", env={})
 
 
+def _prepare_and_finalize(
+    coordinator: PassthroughCoordinator,
+    double: CommandDouble,
+    invocation: Invocation,
+    config: PassthroughConfig,
+) -> None:
+    """Prepare a request and finalise it with an empty successful result."""
+    response = coordinator.prepare_request(double, invocation, config)
+    directive = response.passthrough
+    assert directive is not None
+    coordinator.finalize_result(
+        PassthroughResult(
+            invocation_id=directive.invocation_id,
+            stdout="",
+            stderr="",
+            exit_code=0,
+        )
+    )
+
+
 def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     """Coordinator should record invocations until results arrive."""
     coordinator = PassthroughCoordinator()
@@ -299,17 +319,7 @@ def test_finalize_records_expectation_keys_not_extra_env() -> None:
         extra_env={"EXTRA": "2"},
     )
 
-    response = coordinator.prepare_request(double, invocation, config)
-    directive = response.passthrough
-    assert directive is not None
-    coordinator.finalize_result(
-        PassthroughResult(
-            invocation_id=directive.invocation_id,
-            stdout="",
-            stderr="",
-            exit_code=0,
-        )
-    )
+    _prepare_and_finalize(coordinator, double, invocation, config)
 
     _, _, explicit_keys = session.recordings[0]
     assert explicit_keys == frozenset({"EXPECTED"})
@@ -324,17 +334,7 @@ def test_finalize_records_caller_invocation_without_injected_values() -> None:
     invocation.env.update({"CALLER": "1"})
     config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
 
-    response = coordinator.prepare_request(double, invocation, config)
-    directive = response.passthrough
-    assert directive is not None
-    coordinator.finalize_result(
-        PassthroughResult(
-            invocation_id=directive.invocation_id,
-            stdout="",
-            stderr="",
-            exit_code=0,
-        )
-    )
+    _prepare_and_finalize(coordinator, double, invocation, config)
 
     stored_invocation, _, explicit_keys = session.recordings[0]
     assert stored_invocation.env == {"CALLER": "1"}

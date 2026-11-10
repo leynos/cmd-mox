@@ -7,13 +7,25 @@ import typing as typ
 import pytest
 
 from cmd_mox.controller import CmdMox
-from cmd_mox.ipc import Invocation, PassthroughResult
 from cmd_mox.record.fixture import FixtureFile
+from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.requires_unix_sockets
+
+
+def _complete_passthrough(mox: CmdMox, directive: PassthroughRequest) -> None:
+    """Finalise *directive* with an empty, successful passthrough result."""
+    mox._handle_passthrough_result(
+        PassthroughResult(
+            invocation_id=directive.invocation_id,
+            stdout="",
+            stderr="",
+            exit_code=0,
+        )
+    )
 
 
 class TestPassthroughRecording:
@@ -173,14 +185,7 @@ class TestPassthroughRecording:
             directive = response.passthrough
             assert directive is not None
 
-            mox._handle_passthrough_result(
-                PassthroughResult(
-                    invocation_id=directive.invocation_id,
-                    stdout="",
-                    stderr="",
-                    exit_code=0,
-                )
-            )
+            _complete_passthrough(mox, directive)
 
         assert spy._recording_session is not None
         assert spy._recording_session._recordings[0].env_subset == {
@@ -203,14 +208,7 @@ class TestPassthroughRecording:
             directive = response.passthrough
             assert directive is not None
 
-            mox._handle_passthrough_result(
-                PassthroughResult(
-                    invocation_id=directive.invocation_id,
-                    stdout="",
-                    stderr="",
-                    exit_code=0,
-                )
-            )
+            _complete_passthrough(mox, directive)
 
         assert spy._recording_session is not None
         assert spy._recording_session._recordings[0].env_subset == {}
@@ -235,14 +233,7 @@ class TestPassthroughRecording:
 
             spy.expectation.env.clear()
 
-            mox._handle_passthrough_result(
-                PassthroughResult(
-                    invocation_id=directive.invocation_id,
-                    stdout="",
-                    stderr="",
-                    exit_code=0,
-                )
-            )
+            _complete_passthrough(mox, directive)
 
         assert spy._recording_session is not None
         assert spy._recording_session._recordings[0].env_subset == {
@@ -274,22 +265,8 @@ class TestPassthroughRecording:
             assert second_directive is not None
 
             # Complete the second request before the first.
-            mox._handle_passthrough_result(
-                PassthroughResult(
-                    invocation_id=second_directive.invocation_id,
-                    stdout="",
-                    stderr="",
-                    exit_code=0,
-                )
-            )
-            mox._handle_passthrough_result(
-                PassthroughResult(
-                    invocation_id=first_directive.invocation_id,
-                    stdout="",
-                    stderr="",
-                    exit_code=0,
-                )
-            )
+            _complete_passthrough(mox, second_directive)
+            _complete_passthrough(mox, first_directive)
 
         assert spy._recording_session is not None
         recordings = spy._recording_session._recordings
