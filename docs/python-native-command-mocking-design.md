@@ -287,9 +287,11 @@ inspiration from PyMox's method-chaining style.
 - `.with_args(*args: str)`**:** Specifies the exact, ordered list of
   command-line arguments that are expected. The match must be precise.
 
-- `.with_matching_args(*comparators)`**:** For more flexible matching, this
-  method accepts a sequence of `CmdMox` comparator objects (see Section V).
-  This allows for matching based on type, regular expressions, or custom logic.
+- `.with_matching_args(*matchers)`**:** For more flexible matching, this method
+  accepts a literal string or a `CmdMox` comparator object (see Section V) at
+  each position. A literal string requires exact equality; a comparator allows
+  matching based on type, regular expressions, or custom logic. Any other value
+  raises `ExpectationConfigurationError` when the expectation is configured.
 
   Each `CommandDouble` accepts one argument expectation. A second call to
   `with_args()` or `with_matching_args()`, including a call that mixes both
@@ -1410,7 +1412,9 @@ The library will provide a suite of built-in comparators:
   callable that takes the argument as input and returns `True` for a match and
   `False` otherwise.
 
-When a developer defines an expectation using
+A position may also hold a literal string, which matches only an identical
+argument, so `with_matching_args('clone', Any())` mixes exact and flexible
+matching. When a developer defines an expectation using
 `with_matching_args(IsA(str), Regex(r'--file=\S+'))`, these comparator objects
 are stored as part of the `Expectation` configuration. During the replay phase,
 when the IPC server receives an invocation from a shim, it iterates through its
@@ -1774,18 +1778,18 @@ files across worker boundaries.
 This table provides a quick, scannable reference for the core Domain-Specific
 Language (DSL) used to build expectations.
 
-| Method                              | Purpose                                                           | Example                                             |
-| ----------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------- |
-| .with_args(\*args)                  | Specifies the exact arguments the command must be called with.    | .with_args('ls', '-l', '/tmp')                      |
-| .with_matching_args(\*matchers)     | Specifies flexible argument matchers (e.g., comparators).         | .with_matching_args(IsA(str), Regex(r'--foo=\\d+')) |
-| .with_stdin(data)                   | Specifies expected stdin content. Can use strings or comparators. | .with_stdin(Contains('payload'))                    |
-| .with_env(vars)                     | Specifies environment variables for the command's context.        | .with_env({'API_KEY': 'secret'})                    |
-| .returns(stdout, stderr, exit_code) | Defines the static output and exit code of the mocked command.    | .returns(stdout=b'OK', exit_code=0)                 |
-| .runs(handler)                      | Provides a callable for dynamic, stateful behaviour.              | .runs(my_handler_func)                              |
-| .times(count)                       | Sets the expected number of times the command will be called.     | .times(2)                                           |
-| .in_order()                         | Marks this expectation as part of an ordered sequence.            | .in_order()                                         |
-| .any_order()                        | Explicitly opts out of ordered verification.                      | .any_order()                                        |
-| .passthrough()                      | (Spy only) Executes the real command and records the interaction. | mox.spy('ssh').passthrough()                        |
+| Method                              | Purpose                                                           | Example                             |
+| ----------------------------------- | ----------------------------------------------------------------- | ----------------------------------- |
+| .with_args(\*args)                  | Specifies the exact arguments the command must be called with.    | .with_args('ls', '-l', '/tmp')      |
+| .with_matching_args(\*matchers)     | Specifies literal strings or flexible argument matchers.          | .with_matching_args('clone', Any()) |
+| .with_stdin(data)                   | Specifies expected stdin content. Can use strings or comparators. | .with_stdin(Contains('payload'))    |
+| .with_env(vars)                     | Specifies environment variables for the command's context.        | .with_env({'API_KEY': 'secret'})    |
+| .returns(stdout, stderr, exit_code) | Defines the static output and exit code of the mocked command.    | .returns(stdout=b'OK', exit_code=0) |
+| .runs(handler)                      | Provides a callable for dynamic, stateful behaviour.              | .runs(my_handler_func)              |
+| .times(count)                       | Sets the expected number of times the command will be called.     | .times(2)                           |
+| .in_order()                         | Marks this expectation as part of an ordered sequence.            | .in_order()                         |
+| .any_order()                        | Explicitly opts out of ordered verification.                      | .any_order()                        |
+| .passthrough()                      | (Spy only) Executes the real command and records the interaction. | mox.spy('ssh').passthrough()        |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -2085,14 +2089,16 @@ Both mocks and spies maintain an `invocations` list. A convenience property
 Comparator helpers such as :class:`Any`, :class:`IsA`, :class:`Regex`, :class:
 `Contains`, :class:`StartsWith`, and :class:`Predicate` are implemented as
 simple callables. Each inherits a lightweight `_ReprMixin` so failing tests
-display meaningful values. `Expectation.with_matching_args` accepts callables
-of the form `Callable[[str], bool]` and requires one comparator per positional
-argument. The matcher result is interpreted as truthy. This keeps the matching
-engine agnostic to comparator implementations while enabling user-supplied
-predicates to participate alongside the built-ins. Regular expressions are
-compiled once per comparator and `IsA` relies on type conversion to avoid
-bespoke parsing logic. Comparator exceptions surface their class and message in
-mismatch reports.
+display meaningful values. `Expectation.with_matching_args` accepts a literal
+string or a callable of the form `Callable[[str], bool]` at each position and
+requires one matcher per positional argument. A literal string matches only an
+identical argument; a callable's result is interpreted as truthy. Any other
+value is rejected with `ExpectationConfigurationError` at configuration time.
+This keeps the matching engine agnostic to comparator implementations while
+enabling user-supplied predicates to participate alongside the built-ins.
+Regular expressions are compiled once per comparator and `IsA` relies on type
+conversion to avoid bespoke parsing logic. Comparator exceptions surface their
+class and message in mismatch reports.
 
 ### 8.8 Design Decisions for the Invocation Journal
 

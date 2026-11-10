@@ -214,7 +214,8 @@ token: its `repr` has always printed `<redacted>` for the same sensitive keys.
 Other exposures, such as interpolating a `Response` or `Expectation` directly,
 are outside this guarantee.
 
-Argument comparators support flexible matching:
+Argument matchers support flexible matching. Each position accepts a literal
+string, which must match exactly, or a comparator:
 
 ```python
 from cmd_mox import Regex, Contains
@@ -232,16 +233,21 @@ The design document lists the available comparators:
 - `StartsWith`
 - `Predicate`
 
-Each comparator is a callable that returns `True` on match.
-`with_matching_args` expects one comparator per element of `argv[1:]`; the
-program name at `argv[0]` is excluded. `with_stdin` accepts either an exact
-string or a predicate `Callable[[str], bool]` for flexible input checks.
+Each comparator is a callable that returns `True` on match, and literal strings
+and comparators can be mixed freely. `with_matching_args` expects one matcher
+per element of `argv[1:]`; the program name at `argv[0]` is excluded. Passing
+any other value, such as an integer, raises `ExpectationConfigurationError`
+naming the zero-based position and the value's type. `with_stdin` accepts
+either an exact string or a predicate `Callable[[str], bool]` for flexible
+input checks.
 
 ### Argument matchers (comparators)
 
 CmdMox ships with a small set of matcher objects for `with_matching_args`. Each
-matcher is callable (`Callable[[str], bool]`) and can be mixed with custom
-predicates.
+position accepts a literal string for exact equality or a callable
+(`Callable[[str], bool]`) for flexible matching. Literal strings and
+comparators can be mixed freely, and custom predicates can be used alongside
+the built-ins. Use `with_args()` when every argument is an exact literal.
 
 - `Any` – matches any single argument.
 
@@ -259,7 +265,8 @@ predicates.
   cmd_mox.mock("tool").with_matching_args("--count", IsA(int)).returns()
   ```
 
-- `Regex(pattern)` – matches when a regular expression search succeeds.
+- `Regex(pattern)` – matches when a regular expression search succeeds. The
+  search is unanchored; use `^` and `$` to require a full match.
 
   ```python
   from cmd_mox import Regex
@@ -1061,7 +1068,8 @@ The DSL methods closely mirror those described in the design specification. A
 few common ones are:
 
 - `with_args(*args)` – require exact arguments.
-- `with_matching_args(*matchers)` – match arguments using comparators.
+- `with_matching_args(*matchers)` – match arguments using literal strings
+  (exact equality) or comparators.
 - `with_stdin(data_or_matcher)` – expect specific standard input (`str`) or
   validate it with a predicate `Callable[[str], bool]`. Shims read non-terminal
   standard input until EOF; terminal input is skipped. Close or redirect

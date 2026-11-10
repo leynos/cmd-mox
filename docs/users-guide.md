@@ -33,6 +33,22 @@ rules, and the
 explains how to replace invalid counts and update tests that relied on
 permissive explicitly counted spies.
 
+## Flexible arguments with comparators
+
+`with_matching_args()` accepts a literal string for exact equality or a
+comparator for flexible matching at each position, and the two can be mixed:
+
+```python
+from cmd_mox import Any
+
+cmd_mox.mock("git").with_matching_args("clone", Any()).returns(exit_code=0)
+```
+
+Any other value is rejected with `ExpectationConfigurationError` when the
+expectation is configured. See
+[Argument matchers (comparators)](usage-guide.md#argument-matchers-comparators)
+for the available comparators and matching rules.
+
 ## Sensitive environment values in diagnostics
 
 Conflict errors from `UnexpectedCommandError`, verifier failures, and spy
