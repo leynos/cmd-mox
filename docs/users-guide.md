@@ -69,10 +69,14 @@ records which diagnostic paths the guarantee covers.
 
 Recordings keep only a portable subset of the environment. Commands with a
 known prefix keep that tool's variables, while any other command records just
-the `env_allowlist` and `.with_env()` keys. CmdMox internal keys are never
-recorded. See
+the `env_allowlist` and `.with_env()` keys. `.with_env()` keys are recorded for
+every command, including known-prefix commands, and a requested key is kept
+even when its name looks sensitive. CmdMox internal keys are never recorded.
+Review or scrub a fixture before committing it if an expectation passed a
+secret through `.with_env()`. See
 [decide what a recording keeps](usage-guide.md#decide-what-a-recording-keeps)
-before committing a fixture or sharing one between machines.
+and the [v0.4.0 migration guide](v-0-4-0-migration-guide.md) before committing
+a fixture or sharing one between machines.
 
 ## Go environment variables in recordings
 

@@ -85,6 +85,30 @@ constructors: direct construction keeps accepting typed Python values, while
 [fixture validation policy](python-native-command-mocking-design.md#934-fixture-validation-policy)
 for the complete field rules.
 
+## Recording environment provenance
+
+`PassthroughCoordinator.prepare_request()` copies the double's
+`expectation.env` into a frozen `frozenset` and stores it with the pending
+request. `finalize_result()` passes that snapshot to
+`RecordingSession.record(explicit_keys=...)`, which forwards it to
+`filter_env_subset()`. Snapshotting at preparation makes the recording depend
+on the expectation as it was when the request began: a later `.with_env()` call
+or an out-of-order completion cannot change which keys an earlier request
+records.
+
+`filter_env_subset()` applies its rules in a fixed order. CmdMox internal keys
+(`CMOX_*`, `CMD_MOX_*`) are always excluded. Explicit and allowlisted keys are
+then kept, so they override the system-key and sensitive-name exclusions when
+present in the environment. Remaining system keys and sensitive names are
+dropped, a known command prefix keeps its tool's variables, and everything else
+is dropped, including every unrequested variable for a command without a known
+prefix.
+
+`PassthroughConfig.extra_env` is a separate merge: it is layered onto the
+environment returned to the shim, but its keys are not added to the
+explicit-key snapshot and therefore do not become recording provenance. Only
+`.with_env()` keys and the session's `env_allowlist` do that.
+
 ## Diagnostic environment masking
 
 `cmd_mox.domain` owns both halves of diagnostic masking. The shared
