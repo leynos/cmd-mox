@@ -164,7 +164,7 @@ def filter_env_subset(
         The command name, matched case-insensitively.  Most commands include
         keys under their prefix (for example ``"git"`` includes ``GIT_*``
         variables).  ``"go"`` includes only the documented names in
-        :data:`GO_ENV_KEYS`.  An unrecognised command includes every key that
+        :data:`GO_ENV_KEYS`.  An unrecognized command includes every key that
         is not excluded by another rule.
     allowlist : list[str] | None
         Caller-configured keys to retain, such as

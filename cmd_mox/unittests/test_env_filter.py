@@ -33,7 +33,7 @@ _ENV_KEYS = st.one_of(
 _ENVS = st.dictionaries(_ENV_KEYS, st.text(max_size=8), max_size=8)
 _KEY_LISTS = st.lists(_ENV_KEYS, max_size=4)
 
-#: Every recognised command plus the two fallback spellings.  Kept explicit so
+#: Every recognized command plus the two fallback spellings.  Kept explicit so
 #: a new entry in either mapping must be added here deliberately.
 _ALL_COMMANDS = [
     "git",
@@ -48,7 +48,7 @@ _ALL_COMMANDS = [
     "unknown-command",
 ]
 
-#: One row per recognised command: the key its rule retains, an unrelated
+#: One row per recognized command: the key its rule retains, an unrelated
 #: benign key, another command's prefix key, and a sensitive key that would
 #: otherwise match the command's rule.
 _COMMAND_ENV_TABLE: list[tuple[str, str, str, str, str]] = [
@@ -279,7 +279,7 @@ class TestFilterEnvSubset:
         assert filter_env_subset(env, command=command) == {retained: "keep"}
 
     def test_command_table_covers_every_recognised_command(self) -> None:
-        """The table names exactly the commands the filter recognises."""
+        """The table names exactly the commands the filter recognizes."""
         table_commands = {row[0] for row in _COMMAND_ENV_TABLE}
         recognised = set(COMMAND_ENV_PREFIXES) | set(COMMAND_ENV_KEYS)
 
@@ -298,7 +298,7 @@ class TestFilterEnvSubset:
         retained: str,
         dropped: str,
     ) -> None:
-        """Command names are normalised before their rule is selected."""
+        """Command names are normalized before their rule is selected."""
         env = {retained: "keep", dropped: "drop"}
 
         assert filter_env_subset(env, command=command) == {retained: "keep"}
@@ -370,7 +370,7 @@ class TestFilterEnvSubset:
         assert not sensitive, sensitive
 
     def test_unknown_command_uses_permissive_fallback(self) -> None:
-        """An unrecognised command keeps every non-excluded key."""
+        """An unrecognized command keeps every non-excluded key."""
         env = {"GIT_DIR": "x", "APP_MODE": "y", "PATH": "/usr/bin"}
 
         assert filter_env_subset(env, command="unknown-command") == {
