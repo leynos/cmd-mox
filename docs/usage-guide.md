@@ -604,8 +604,10 @@ are rejected), `args` and `applied_to` must be arrays of strings, and
 `$schema`.
 
 Malformed values raise `ValueError` with a path, for example
-`Invalid fixture schema: recordings[0].stdout: expected str, got NoneType`. See
-the
+`Invalid fixture schema: recordings[0].stdout: expected str, got NoneType`. A
+fixture that omits a required key — including `recordings`, `scrubbing_rules`,
+`applied_to`, or an invocation field such as `stdin` — now fails to load
+instead of relying on a former default; add the key to the fixture. See the
 [fixture validation policy](python-native-command-mocking-design.md#934-fixture-validation-policy)
 in the design document for the complete rules.
 

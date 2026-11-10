@@ -2378,6 +2378,8 @@ compatibility with the established invocation-field schema.
 | `scrubbing_rules[].applied_to`  | list    | Recording fields the rule applies to        |
 | `scrubbing_rules[].description` | string  | Optional: human-readable rule description   |
 
+_Table: Fixture schema field definitions._
+
 #### 9.3.3 Environment Variable Subset Strategy
 
 Recording the full environment would bloat fixture files (100+ variables
@@ -2410,16 +2412,30 @@ Types are checked rather than converted:
 Unknown keys at any level are ignored, so fixtures written by a later minor
 version still load. `$schema` is one such ignored key.
 
-Validation failures raise `ValueError` in one of two forms, where `<path>` uses
-dotted keys and indexed list positions such as `recordings[0].stdout`:
+Field-validation failures raise `ValueError` in one of two forms, where
+`<path>` uses dotted keys and indexed list positions such as
+`recordings[0].stdout`:
 
-```
+```plaintext
 Invalid fixture schema: missing required field '<path>'
 Invalid fixture schema: <path>: expected <kind>, got <type name>
 ```
 
+Version syntax and migration failures keep their existing distinct messages,
+such as `Invalid schema version ...` and
+`Unsupported fixture schema version …`; a non-string `version` field uses the
+field-validation form above.
+
 The loader validates types only. It does not parse timestamp formats,
 range-check integers, compile scrubbing patterns, or require `$schema`.
+
+**Migration note.** Older fixtures must include every key the 1.0.0 writer
+emits. In particular, `recordings`, `scrubbing_rules`,
+`scrubbing_rules[].applied_to`, and the invocation fields `stdin`, `env_subset`,
+`stdout`, `stderr`, `exit_code` and `duration_ms` are no longer defaulted or
+coerced. A fixture that omits one of them, or stores a value of the wrong type,
+fails to load with the path-aware errors above rather than replaying incorrect
+data. Rewrite such fixtures with the missing key before loading them.
 
 ### 9.4 Module Structure
 

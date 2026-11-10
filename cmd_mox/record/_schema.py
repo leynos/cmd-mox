@@ -119,13 +119,20 @@ def _require_str_list(
     return strings
 
 
+def _require_mapping(
+    mapping: cabc.Mapping[str, object], key: str, *, path: str = ""
+) -> cabc.Mapping[str, object]:
+    """Return a required object field as a mapping."""
+    field, value = _require_value(mapping, key, path=path)
+    return _require_object(value, field)
+
+
 def _require_str_mapping(
     mapping: cabc.Mapping[str, object], key: str, *, path: str = ""
 ) -> dict[str, str]:
     """Return a required string-to-string mapping, reporting the offending key."""
-    field, value = _require_value(mapping, key, path=path)
-    if not isinstance(value, cabc.Mapping):
-        raise _wrong_type(field, "object", value)
+    field = _join_path(path, key)
+    value = _require_mapping(mapping, key, path=path)
     strings: dict[str, str] = {}
     for map_key, map_value in value.items():
         if not isinstance(map_key, str):

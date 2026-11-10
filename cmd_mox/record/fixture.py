@@ -25,6 +25,7 @@ from ._schema import (
     _optional_str,
     _require_int,
     _require_list,
+    _require_mapping,
     _require_object,
     _require_str,
     _require_str_list,
@@ -156,7 +157,7 @@ def _normalize_version_field(data: dict[str, typ.Any]) -> None:
         data["version"] = "0.0.0"
     elif not isinstance(data["version"], str):
         actual = type(data["version"]).__name__
-        msg = f"Invalid fixture version field: expected str, got {actual}"
+        msg = f"{SCHEMA_ERROR_PREFIX}: version: expected str, got {actual}"
         raise ValueError(msg)
 
 
@@ -520,21 +521,15 @@ class FixtureFile:
         ------
         ValueError
             If the mapping does not conform to the fixture schema.
-        """
-        try:
-            root = _require_object(data, "fixture")
-            migrated = _apply_migrations(dict(root))
-            return cls(
-                version=cls.SCHEMA_VERSION,
-                metadata=FixtureMetadata.from_dict(migrated["metadata"]),
-                recordings=_parse_indexed(migrated, "recordings", RecordedInvocation),
-                scrubbing_rules=_parse_indexed(
-                    migrated, "scrubbing_rules", ScrubbingRule
-                ),
-            )
-        except (AttributeError, KeyError, TypeError) as exc:
-            msg = f"{SCHEMA_ERROR_PREFIX}: {exc}"
-            raise ValueError(msg) from exc
+        """  # ruff: ignore[docstring-extraneous-exception] - _schema helpers and migrations raise this caller-visible error.
+        root = _require_object(data, "fixture")
+        migrated = _apply_migrations(dict(root))
+        return cls(
+            version=cls.SCHEMA_VERSION,
+            metadata=FixtureMetadata.from_dict(_require_mapping(migrated, "metadata")),
+            recordings=_parse_indexed(migrated, "recordings", RecordedInvocation),
+            scrubbing_rules=_parse_indexed(migrated, "scrubbing_rules", ScrubbingRule),
+        )
 
     def save(self, path: Path) -> None:
         """Write this fixture to *path* as JSON, creating directories as needed.

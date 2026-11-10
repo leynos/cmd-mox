@@ -348,14 +348,20 @@ class TestFixtureFile:
         """from_dict() raises ValueError when version is explicitly None."""
         data = _sample_fixture().to_dict()
         data["version"] = None
-        with pytest.raises(ValueError, match="expected str"):
+        with pytest.raises(
+            ValueError,
+            match=r"^Invalid fixture schema: version: expected str, got NoneType$",
+        ):
             FixtureFile.from_dict(data)
 
     def test_from_dict_normalizes_missing_metadata_to_value_error(self) -> None:
         """Missing required fields surface as a schema ValueError."""
         data = _sample_fixture().to_dict()
         del data["metadata"]
-        with pytest.raises(ValueError, match="Invalid fixture schema"):
+        with pytest.raises(
+            ValueError,
+            match=r"^Invalid fixture schema: missing required field 'metadata'$",
+        ):
             FixtureFile.from_dict(data)
 
     def test_scrubbing_rules_serialization(self) -> None:
@@ -469,12 +475,12 @@ _SCHEMA_REJECTION_CASES = [
     ),
     pytest.param(
         _mutate_path("recordings", value=None),
-        r"recordings",
+        r"^Invalid fixture schema: recordings: expected list, got NoneType$",
         id="null-recordings",
     ),
     pytest.param(
         _mutate_path("recordings", value={"0": {}}),
-        r"recordings",
+        r"^Invalid fixture schema: recordings: expected list, got dict$",
         id="object-recordings",
     ),
     pytest.param(
@@ -499,12 +505,12 @@ _SCHEMA_REJECTION_CASES = [
     ),
     pytest.param(
         _mutate_path("metadata", value=None),
-        r"metadata",
+        r"^Invalid fixture schema: metadata: expected object, got NoneType$",
         id="null-metadata",
     ),
     pytest.param(
         _mutate_path("metadata", value="nope"),
-        r"metadata",
+        r"^Invalid fixture schema: metadata: expected object, got str$",
         id="string-metadata",
     ),
 ]
