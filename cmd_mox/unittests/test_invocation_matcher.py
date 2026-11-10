@@ -173,6 +173,17 @@ class TestInvocationMatcherStrictMode:
             pytest.param(
                 MatchCase(
                     strict=True,
+                    spec=RecordedInvocationSpec(
+                        env_subset={"GORACE": "halt_on_error=1"}
+                    ),
+                    inv_kwargs={"env": {"GORACE": "halt_on_error=0"}},
+                    expected=False,
+                ),
+                id="gorace-differs",
+            ),
+            pytest.param(
+                MatchCase(
+                    strict=True,
                     spec=RecordedInvocationSpec(env_subset={"GIT_DIR": ".git"}),
                     inv_kwargs={"env": {"GIT_DIR": ".git", "EXTRA": "value"}},
                     expected=True,

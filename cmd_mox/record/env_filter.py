@@ -75,6 +75,7 @@ GO_ENV_KEYS: typ.Final[frozenset[str]] = frozenset({
     "GOPPC64",
     "GOPRIVATE",
     "GOPROXY",
+    "GORACE",
     "GORISCV64",
     "GOROOT",
     "GOSUMDB",
@@ -173,11 +174,14 @@ def filter_env_subset(
         *env* to appear in the result.  ``allowlist`` and *explicit_keys*
         share one precedence and their union is applied.
     explicit_keys : list[str] | None
-        Keys requested through ``.with_env()``.  Treated exactly like
-        *allowlist*: an entry in either keyword includes the key.  Requests
-        take precedence over the system and sensitive rules, so a requested
-        sensitive key is persisted raw.  CmdMox internal keys (``CMOX_*``,
-        ``CMD_MOX_*``) remain excluded even when requested.
+        Keys requested by direct callers of :func:`filter_env_subset`.
+        Treated exactly like *allowlist*: an entry in either keyword includes
+        the key.  ``RecordingSession`` does not currently pass this keyword, so
+        ``.with_env()`` keys do not automatically widen recordings; that
+        wiring is tracked in issue #368.  Requests take precedence over the
+        system and sensitive rules, so a requested sensitive key is persisted
+        raw.  CmdMox internal keys (``CMOX_*``, ``CMD_MOX_*``) remain excluded
+        even when requested.
 
     Returns
     -------

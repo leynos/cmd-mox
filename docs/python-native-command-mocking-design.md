@@ -2383,9 +2383,10 @@ leak sensitive data. Instead, recordings capture an `env_subset` containing:
    `GOFLAGS`
 3. Variables specified in a configurable allowlist
 
-The two request channels, `.with_env()` and the allowlist, share one
-precedence: their union is applied, and a requested key must be present in the
-environment to be recorded.
+The `.with_env()` and allowlist channels are both accepted by
+`filter_env_subset()`, which applies their union with one precedence. The
+recording session currently forwards only its allowlist, so `.with_env()` keys
+do not automatically widen recordings; that wiring is tracked in issue #368.
 
 ### 9.4 Module Structure
 
@@ -3022,9 +3023,10 @@ rather than relying on `.replay()`.
 - Variables matching command-specific prefixes (e.g., `GIT_*` for git), or,
   for `go`, the documented exact names such as `GOPATH` and `GOFLAGS`
 
-The two request channels, `.with_env()` and the allowlist, share one
-precedence: their union is applied, and a requested key must be present in the
-environment to be recorded.
+The `.with_env()` and allowlist channels are both accepted by
+`filter_env_subset()`, which applies their union with one precedence. The
+recording session currently forwards only its allowlist, so `.with_env()` keys
+do not automatically widen recordings; that wiring is tracked in issue #368.
 
 #### 9.9.3 Command argument diagnostics
 
