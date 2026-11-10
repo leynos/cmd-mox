@@ -2379,8 +2379,12 @@ leak sensitive data. Instead, recordings capture an `env_subset` containing:
 
 1. Variables explicitly requested via `.with_env()`
 2. Variables matching known command prefixes (e.g., `GIT_*`, `AWS_*`,
-   `DOCKER_*`)
+   `DOCKER_*`), or, for `go`, the documented exact names such as `GOPATH` and
+   `GOFLAGS`
 3. Variables specified in a configurable allowlist
+
+The `.with_env()` and allowlist channels share one precedence: their union is
+applied, and a requested key must be present in the environment to be recorded.
 
 ### 9.4 Module Structure
 
@@ -3014,7 +3018,11 @@ rather than relying on `.replay()`.
 
 - Variables explicitly requested via `.with_env()`
 - Variables on the user-defined allowlist
-- Variables matching command-specific prefixes (e.g., `GIT_*` for git)
+- Variables matching command-specific prefixes (e.g., `GIT_*` for git), or,
+  for `go`, the documented exact names such as `GOPATH` and `GOFLAGS`
+
+The `.with_env()` and allowlist channels share one precedence: their union is
+applied, and a requested key must be present in the environment to be recorded.
 
 #### 9.9.3 Command argument diagnostics
 

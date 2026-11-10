@@ -498,7 +498,9 @@ session = RecordingSession(
 ```
 
 The `env_allowlist` parameter specifies environment variable keys that should
-always be included in recordings, even if they would otherwise be filtered.
+be included in recordings when present in the environment, even if they would
+otherwise be filtered. CmdMox-internal keys (`CMOX_*`, `CMD_MOX_*`) remain
+excluded.
 
 ### Lifecycle: start, record, finalize
 
@@ -529,9 +531,21 @@ Recordings capture only a safe, portable subset of environment variables:
   matching sensitive patterns (`*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_KEY`,
   `*_CREDENTIALS`).
 - **Included by default:** command-specific prefix keys (e.g., `GIT_*` for
-  git, `AWS_*` for aws), allowlisted keys, and explicitly requested keys.
-- **Override:** use `env_allowlist` to force-include specific keys, or pass
-  `explicit_keys` to `filter_env_subset()` for keys from `.with_env()`.
+  git, `AWS_*` for aws). `go` is the exception: it uses an exact list of
+  documented Go variables (`GOPATH`, `GOFLAGS`, `GOOS`, and so on) because a
+  bare `GO` prefix would also capture unrelated names such as
+  `GOOGLE_CLOUD_PROJECT`. Other `GO*` names and `CGO_*` names are not recorded
+  unless allowlisted.
+- **Override:** `env_allowlist` and `explicit_keys` share one precedence and
+  their union is applied. Use `env_allowlist` to force-include specific keys,
+  or pass `explicit_keys` to `filter_env_subset()` for keys from `.with_env()`.
+  A requested key must be present in the environment to appear in the
+  recording, and CmdMox-internal keys remain excluded.
+
+Existing fixtures are unaffected by the narrower `go` rule: the fixture loader
+does not re-filter a stored `env_subset`, so recordings made before this change
+keep the variables they captured, and strict replay continues to match them.
+Only new `go` recordings omit non-Go `GO*` names.
 
 ### Fixture file format
 
@@ -644,8 +658,9 @@ spy = cmd_mox.spy("aws").passthrough().record(
 - **`scrubber`** (`Scrubber | None`): optional scrubber instance for sanitizing
   recordings before persistence. When `None` (the default), no scrubbing is
   applied.
-- **`env_allowlist`** (`list[str] | None`): environment variable keys to always
-  include in recordings, in addition to the default command-specific prefixes.
+- **`env_allowlist`** (`list[str] | None`): environment variable keys to
+  include in recordings when present, in addition to the default
+  command-specific rules. CmdMox-internal keys remain excluded.
 
 ### Record validation
 
