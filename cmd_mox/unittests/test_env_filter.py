@@ -382,25 +382,15 @@ class TestFilterEnvSubset:
 
         assert result == {}
 
-    def test_unknown_command_keeps_allowlisted_keys(self) -> None:
-        """An unknown command still records allowlisted keys."""
+    @pytest.mark.parametrize("request_kind", ["allowlist", "explicit_keys"])
+    def test_unknown_command_keeps_requested_keys(self, request_kind: str) -> None:
+        """An unknown command still records allowlisted or explicit keys."""
         env = {"MY_SETTING": "enabled", "UNRELATED": "value"}
-        result = filter_env_subset(
-            env,
-            command="greet",
-            allowlist=["MY_SETTING"],
-        )
-
-        assert result == {"MY_SETTING": "enabled"}
-
-    def test_unknown_command_keeps_explicit_keys(self) -> None:
-        """An unknown command still records explicitly requested keys."""
-        env = {"MY_SETTING": "enabled", "UNRELATED": "value"}
-        result = filter_env_subset(
-            env,
-            command="greet",
-            explicit_keys=["MY_SETTING"],
-        )
+        requested = ["MY_SETTING"]
+        if request_kind == "allowlist":
+            result = filter_env_subset(env, command="greet", allowlist=requested)
+        else:
+            result = filter_env_subset(env, command="greet", explicit_keys=requested)
 
         assert result == {"MY_SETTING": "enabled"}
 
