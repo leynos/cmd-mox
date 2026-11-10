@@ -6,7 +6,13 @@ import hypothesis.strategies as st
 import pytest
 from hypothesis import given
 
-from cmd_mox.record.env_filter import filter_env_subset
+from cmd_mox.domain import is_sensitive_recording_env_key
+from cmd_mox.record.env_filter import (
+    COMMAND_ENV_KEYS,
+    COMMAND_ENV_PREFIXES,
+    GO_ENV_KEYS,
+    filter_env_subset,
+)
 
 #: Keys drawn from a mix of arbitrary text and names that exercise each
 #: filtering rule (system, sensitive, command-prefixed, CmdMox-internal).
@@ -17,6 +23,8 @@ _ENV_KEYS = st.one_of(
         "HOME",
         "SAFE_VAR",
         "GIT_AUTHOR_NAME",
+        "GOPATH",
+        "GOOGLE_CLOUD_PROJECT",
         "API_TOKEN",
         "CMOX_IPC_SOCKET",
         "CMD_MOX_DEBUG",
@@ -24,7 +32,48 @@ _ENV_KEYS = st.one_of(
 )
 _ENVS = st.dictionaries(_ENV_KEYS, st.text(max_size=8), max_size=8)
 _KEY_LISTS = st.lists(_ENV_KEYS, max_size=4)
-_COMMANDS = st.sampled_from(["", "git", "aws", "npm", "unknown-command"])
+
+#: Every recognised command plus the two fallback spellings.  Kept explicit so
+#: a new entry in either mapping must be added here deliberately.
+_ALL_COMMANDS = [
+    "git",
+    "aws",
+    "docker",
+    "npm",
+    "pip",
+    "cargo",
+    "go",
+    "rustc",
+    "",
+    "unknown-command",
+]
+
+#: One row per recognised command: the key its rule retains, an unrelated
+#: benign key, another command's prefix key, and a sensitive key that would
+#: otherwise match the command's rule.
+_COMMAND_ENV_TABLE: list[tuple[str, str, str, str, str]] = [
+    ("git", "GIT_DIR", "UNRELATED_SETTING", "AWS_REGION", "GIT_TOKEN"),
+    ("aws", "AWS_REGION", "UNRELATED_SETTING", "GIT_DIR", "AWS_SECRET_ACCESS_KEY"),
+    (
+        "docker",
+        "DOCKER_HOST",
+        "UNRELATED_SETTING",
+        "NPM_CONFIG_CACHE",
+        "DOCKER_AUTH_CONFIG",
+    ),
+    ("npm", "NPM_CONFIG_CACHE", "UNRELATED_SETTING", "DOCKER_HOST", "NPM_TOKEN"),
+    ("pip", "PIP_INDEX_URL", "UNRELATED_SETTING", "CARGO_HOME", "PIP_PASSWORD"),
+    (
+        "cargo",
+        "CARGO_HOME",
+        "UNRELATED_SETTING",
+        "PIP_INDEX_URL",
+        "CARGO_REGISTRY_TOKEN",
+    ),
+    ("go", "GOPATH", "UNRELATED_SETTING", "GIT_DIR", "GO_TOKEN"),
+    ("rustc", "RUSTC_WRAPPER", "UNRELATED_SETTING", "GOPATH", "RUSTC_TOKEN"),
+]
+_COMMAND_ENV_CASES = [pytest.param(*row, id=row[0]) for row in _COMMAND_ENV_TABLE]
 
 
 class TestFilterEnvSubset:
@@ -207,8 +256,131 @@ class TestFilterEnvSubset:
             assert key not in result, f"{key} should be excluded even when in {label}"
         assert "SAFE_VAR" in result
 
+    @pytest.mark.parametrize(
+        ("command", "retained", "unrelated", "foreign", "sensitive"),
+        _COMMAND_ENV_CASES,
+    )
+    def test_command_rules_retain_only_their_own_keys(
+        self,
+        command: str,
+        retained: str,
+        unrelated: str,
+        foreign: str,
+        sensitive: str,
+    ) -> None:
+        """Each command keeps its own keys and drops everything else."""
+        env = {
+            retained: "keep",
+            unrelated: "drop",
+            foreign: "drop",
+            sensitive: "drop",
+        }
 
-@given(env=_ENVS, command=_COMMANDS, allowlist=_KEY_LISTS, explicit_keys=_KEY_LISTS)
+        assert filter_env_subset(env, command=command) == {retained: "keep"}
+
+    def test_command_table_covers_every_recognised_command(self) -> None:
+        """The table names exactly the commands the filter recognises."""
+        table_commands = {row[0] for row in _COMMAND_ENV_TABLE}
+        recognised = set(COMMAND_ENV_PREFIXES) | set(COMMAND_ENV_KEYS)
+
+        assert table_commands == recognised
+
+    @pytest.mark.parametrize(
+        ("command", "retained", "dropped"),
+        [
+            pytest.param("GO", "GOPATH", "GIT_DIR", id="upper-go"),
+            pytest.param("Git", "GIT_DIR", "GOPATH", id="mixed-git"),
+        ],
+    )
+    def test_command_matching_is_case_insensitive(
+        self,
+        command: str,
+        retained: str,
+        dropped: str,
+    ) -> None:
+        """Command names are normalised before their rule is selected."""
+        env = {retained: "keep", dropped: "drop"}
+
+        assert filter_env_subset(env, command=command) == {retained: "keep"}
+
+    def test_go_retains_only_documented_variables(self) -> None:
+        """Go's exact-name rule keeps documented names and drops lookalikes."""
+        retained = [
+            "GOPATH",
+            "GOFLAGS",
+            "GOOS",
+            "GOAUTH",
+            "GODEBUG",
+            "GOCACHEPROG",
+        ]
+        env = dict.fromkeys(retained, "keep")
+        env.update({
+            "GOOGLE_CLOUD_PROJECT": "drop",
+            "GOLDEN_FLAG": "drop",
+            "CGO_CFLAGS": "drop",
+        })
+
+        result = filter_env_subset(env, command="go")
+
+        assert result == dict.fromkeys(retained, "keep")
+
+    def test_go_does_not_record_google_cloud_project(self) -> None:
+        """The issue #432 regression: ``GO`` must not match ``GOOGLE_*``."""
+        env = {"GOOGLE_CLOUD_PROJECT": "x", "GOPATH": "y"}
+
+        assert filter_env_subset(env, command="go") == {"GOPATH": "y"}
+
+    @pytest.mark.parametrize(
+        ("allowlist", "explicit_keys", "key"),
+        [
+            pytest.param(
+                ["GOOGLE_CLOUD_PROJECT"],
+                None,
+                "GOOGLE_CLOUD_PROJECT",
+                id="allowlist",
+            ),
+            pytest.param(
+                None,
+                ["CGO_CFLAGS"],
+                "CGO_CFLAGS",
+                id="explicit_keys",
+            ),
+        ],
+    )
+    def test_requested_keys_readmit_go_lookalikes(
+        self,
+        allowlist: list[str] | None,
+        explicit_keys: list[str] | None,
+        key: str,
+    ) -> None:
+        """Either override keyword re-admits a key the Go rule rejects."""
+        result = filter_env_subset(
+            {key: "x"},
+            command="go",
+            allowlist=allowlist,
+            explicit_keys=explicit_keys,
+        )
+
+        assert result == {key: "x"}
+
+    def test_go_exact_names_are_not_sensitive(self) -> None:
+        """Every documented Go variable survives the sensitivity classifier."""
+        sensitive = [key for key in GO_ENV_KEYS if is_sensitive_recording_env_key(key)]
+
+        assert not sensitive, sensitive
+
+    def test_unknown_command_uses_permissive_fallback(self) -> None:
+        """An unrecognised command keeps every non-excluded key."""
+        env = {"GIT_DIR": "x", "APP_MODE": "y", "PATH": "/usr/bin"}
+
+        assert filter_env_subset(env, command="unknown-command") == {
+            "GIT_DIR": "x",
+            "APP_MODE": "y",
+        }
+
+
+@pytest.mark.parametrize("command", _ALL_COMMANDS)
+@given(env=_ENVS, allowlist=_KEY_LISTS, explicit_keys=_KEY_LISTS)
 def test_filter_env_subset_returns_a_sub_mapping(
     env: dict[str, str],
     command: str,
@@ -226,7 +398,8 @@ def test_filter_env_subset_returns_a_sub_mapping(
     assert result.items() <= env.items(), result
 
 
-@given(env=_ENVS, command=_COMMANDS, allowlist=_KEY_LISTS, explicit_keys=_KEY_LISTS)
+@pytest.mark.parametrize("command", _ALL_COMMANDS)
+@given(env=_ENVS, allowlist=_KEY_LISTS, explicit_keys=_KEY_LISTS)
 def test_filter_env_subset_never_leaks_cmdmox_internals(
     env: dict[str, str],
     command: str,
@@ -245,7 +418,8 @@ def test_filter_env_subset_never_leaks_cmdmox_internals(
     assert not leaked, leaked
 
 
-@given(env=_ENVS, command=_COMMANDS, allowlist=_KEY_LISTS, explicit_keys=_KEY_LISTS)
+@pytest.mark.parametrize("command", _ALL_COMMANDS)
+@given(env=_ENVS, allowlist=_KEY_LISTS, explicit_keys=_KEY_LISTS)
 def test_filter_env_subset_is_idempotent(
     env: dict[str, str],
     command: str,
@@ -264,3 +438,34 @@ def test_filter_env_subset_is_idempotent(
         once, command=command, allowlist=allowlist, explicit_keys=explicit_keys
     )
     assert twice == once, twice
+
+
+@given(env=_ENVS, allowlist=_KEY_LISTS, explicit_keys=_KEY_LISTS)
+def test_allowlist_and_explicit_keys_are_equivalent_when_unioned(
+    env: dict[str, str],
+    allowlist: list[str],
+    explicit_keys: list[str],
+) -> None:
+    """The two override keywords share one precedence and union.
+
+    Invariant: passing *allowlist* and *explicit_keys* separately is equivalent
+    to passing their union through either keyword alone.
+    """
+    separate = filter_env_subset(
+        env,
+        command="go",
+        allowlist=allowlist,
+        explicit_keys=explicit_keys,
+    )
+    as_allowlist = filter_env_subset(
+        env,
+        command="go",
+        allowlist=allowlist + explicit_keys,
+    )
+    as_explicit = filter_env_subset(
+        env,
+        command="go",
+        explicit_keys=allowlist + explicit_keys,
+    )
+
+    assert separate == as_allowlist == as_explicit
