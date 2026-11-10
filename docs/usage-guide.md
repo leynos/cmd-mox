@@ -528,8 +528,8 @@ Recordings capture only a safe, portable subset of environment variables:
 
 - **Excluded by default:** `PATH`, `HOME`, `USER`, `SHELL`, `SSH_AUTH_SOCK`,
   `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and keys
-  matching sensitive patterns (`*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_KEY`,
-  `*_CREDENTIALS`).
+  matching sensitive patterns (`*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_PASS`,
+  `*_PASSPHRASE`, `*_PWD`, `*_KEY`, `*_CREDENTIALS`, `*_AUTH_CONFIG`).
 - **Included by default:** command-specific prefix keys (e.g., `GIT_*` for
   git, `AWS_*` for aws). `go` is the exception: it uses an exact list of
   documented Go variables (`GOPATH`, `GOFLAGS`, `GOOS`, and so on) because a
