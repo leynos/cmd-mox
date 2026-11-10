@@ -14,6 +14,7 @@ from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocat
 from cmd_mox.record.scrubber import ScrubbingRule
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
     from pathlib import Path
 
     from syrupy.assertion import SnapshotAssertion
@@ -378,6 +379,250 @@ class TestFixtureFile:
         assert rebuilt.scrubbing_rules[0].replacement == "<GITHUB_TOKEN>"
         assert rebuilt.scrubbing_rules[0].applied_to == ["env", "stdout"]
         assert rebuilt.scrubbing_rules[0].description == "GitHub PAT"
+
+
+def _fixture_with_rule() -> dict[str, typ.Any]:
+    """Return a sample fixture mapping that includes one scrubbing rule."""
+    data = _sample_fixture().to_dict()
+    data["scrubbing_rules"] = [
+        ScrubbingRule(pattern="secret", replacement="[redacted]").to_dict()
+    ]
+    return data
+
+
+_MISSING = object()
+
+
+def _mutate_path(
+    *path: str | int, value: object = _MISSING
+) -> cabc.Callable[[dict[str, typ.Any]], None]:
+    """Return a mutator that replaces or removes the value at *path*."""
+
+    def mutate(data: dict[str, typ.Any]) -> None:
+        """Apply the mutation to *data*."""
+        target: typ.Any = data
+        for key in path[:-1]:
+            target = target[key]
+        if value is _MISSING:
+            del target[path[-1]]
+        else:
+            target[path[-1]] = value
+
+    return mutate
+
+
+_SCHEMA_REJECTION_CASES = [
+    pytest.param(
+        _mutate_path("recordings", 0, "stdout", value=None),
+        r"recordings\[0\]\.stdout",
+        id="null-stdout",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "args", value="status"),
+        r"recordings\[0\]\.args",
+        id="string-args",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "exit_code", value=1.9),
+        r"recordings\[0\]\.exit_code",
+        id="float-exit-code",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "exit_code", value=True),
+        r"recordings\[0\]\.exit_code",
+        id="bool-exit-code",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "args", value=["ok", 3]),
+        r"recordings\[0\]\.args\[1\]",
+        id="non-string-arg",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "env_subset", value={"A": 1}),
+        r"recordings\[0\]\.env_subset\['A'\]",
+        id="non-string-env-value",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "env_subset", value={1: "value"}),
+        r"recordings\[0\]\.env_subset\[1\]",
+        id="non-string-env-key",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "env_subset", value=[]),
+        r"recordings\[0\]\.env_subset",
+        id="non-object-env-subset",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "stdin"),
+        r"recordings\[0\]\.stdin",
+        id="missing-stdin",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "test_module", value=42),
+        r"metadata\.test_module",
+        id="non-string-test-module",
+    ),
+    pytest.param(
+        _mutate_path("recordings"),
+        r"missing required field 'recordings'",
+        id="missing-recordings",
+    ),
+    pytest.param(
+        _mutate_path("recordings", value=None),
+        r"recordings",
+        id="null-recordings",
+    ),
+    pytest.param(
+        _mutate_path("recordings", value={"0": {}}),
+        r"recordings",
+        id="object-recordings",
+    ),
+    pytest.param(
+        _mutate_path("recordings", value=["nope"]),
+        r"recordings\[0\]",
+        id="non-object-recording",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, "applied_to", value="stdout"),
+        r"scrubbing_rules\[0\]\.applied_to",
+        id="string-applied-to",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, "applied_to", value=["env", 2]),
+        r"scrubbing_rules\[0\]\.applied_to\[1\]",
+        id="non-string-applied-to",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules"),
+        r"missing required field 'scrubbing_rules'",
+        id="missing-scrubbing-rules",
+    ),
+    pytest.param(
+        _mutate_path("metadata", value=None),
+        r"metadata",
+        id="null-metadata",
+    ),
+    pytest.param(
+        _mutate_path("metadata", value="nope"),
+        r"metadata",
+        id="string-metadata",
+    ),
+]
+
+
+class TestFixtureSchemaValidation:
+    """Tests for strict 1.0.0 fixture schema validation."""
+
+    @pytest.mark.parametrize(("mutate", "expected_path"), _SCHEMA_REJECTION_CASES)
+    def test_rejects_malformed_field(
+        self,
+        mutate: cabc.Callable[[dict[str, typ.Any]], None],
+        expected_path: str,
+    ) -> None:
+        """A malformed field raises a path-aware schema error."""
+        data = _fixture_with_rule()
+        mutate(data)
+
+        with pytest.raises(ValueError, match=expected_path):
+            FixtureFile.from_dict(data)
+
+    def test_rejects_non_object_root(self) -> None:
+        """A non-object root raises a schema error before migration."""
+        with pytest.raises(ValueError, match=r"fixture: expected object, got list"):
+            FixtureFile.from_dict(typ.cast("dict[str, typ.Any]", []))
+
+    @pytest.mark.parametrize("key", ["test_module", "test_function"])
+    def test_optional_metadata_keys_accept_missing_and_null(self, key: str) -> None:
+        """Optional metadata keys accept both an absent key and an explicit null."""
+        data = _sample_fixture().to_dict()
+        data["metadata"].pop(key, None)
+        assert getattr(FixtureFile.from_dict(data).metadata, key) is None
+
+        data["metadata"][key] = None
+        assert getattr(FixtureFile.from_dict(data).metadata, key) is None
+
+    def test_missing_rule_description_defaults_to_empty_string(self) -> None:
+        """A missing rule description becomes an empty string."""
+        data = _fixture_with_rule()
+        del data["scrubbing_rules"][0]["description"]
+
+        result = FixtureFile.from_dict(data)
+
+        assert result.scrubbing_rules[0].description == ""
+        assert result.to_dict()["scrubbing_rules"][0]["description"] is None
+
+    def test_null_rule_description_defaults_to_empty_string(self) -> None:
+        """A null rule description becomes an empty string and reserializes as null."""
+        data = _fixture_with_rule()
+        data["scrubbing_rules"][0]["description"] = None
+
+        result = FixtureFile.from_dict(data)
+
+        assert result.scrubbing_rules[0].description == ""
+        assert result.to_dict()["scrubbing_rules"][0]["description"] is None
+
+    def test_unknown_nested_keys_are_ignored(self) -> None:
+        """Unknown keys at every level are ignored rather than rejected."""
+        data = _fixture_with_rule()
+        data["future_root"] = {"value": 1}
+        data["metadata"]["future_metadata"] = 1
+        data["recordings"][0]["future_recording"] = [1, 2]
+        data["scrubbing_rules"][0]["future_rule"] = None
+
+        result = FixtureFile.from_dict(data)
+
+        assert result.recordings[0].command == "git"
+        assert result.scrubbing_rules[0].pattern == "secret"
+
+    def test_load_rejects_reproduction_mapping(self, tmp_path: Path) -> None:
+        """The audit reproduction mapping fails schema validation on load."""
+        data = {
+            "version": "1.0.0",
+            "metadata": {
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "cmdmox_version": "0.3.0",
+                "platform": "linux",
+                "python_version": "3.12",
+            },
+            "recordings": [
+                {
+                    "sequence": 0,
+                    "command": "git",
+                    "args": "status",
+                    "stdin": None,
+                    "env_subset": {},
+                    "stdout": None,
+                    "stderr": "",
+                    "exit_code": 1.9,
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "duration_ms": 0,
+                }
+            ],
+        }
+        path = tmp_path / "reproduction.json"
+        path.write_text(json.dumps(data))
+
+        with pytest.raises(ValueError, match=r"recordings\[0\]\.args"):
+            FixtureFile.load(path)
+
+    def test_direct_from_dict_reports_bare_field_name(self) -> None:
+        """A direct invocation parse reports the bare field name."""
+        data = _sample_invocation().to_dict()
+        data["stdout"] = None
+
+        with pytest.raises(
+            ValueError,
+            match=r"^Invalid fixture schema: stdout: expected str, got NoneType$",
+        ):
+            RecordedInvocation.from_dict(data)
+
+    def test_direct_from_dict_rejects_non_object(self) -> None:
+        """A direct invocation parse rejects a non-object input."""
+        with pytest.raises(
+            ValueError,
+            match=r"^Invalid fixture schema: expected object, got list$",
+        ):
+            RecordedInvocation.from_dict(typ.cast("dict[str, typ.Any]", []))
 
 
 class TestVersionParsing:

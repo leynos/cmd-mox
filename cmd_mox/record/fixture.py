@@ -20,6 +20,16 @@ import typing as typ
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+from ._schema import (
+    SCHEMA_ERROR_PREFIX,
+    _optional_str,
+    _require_int,
+    _require_list,
+    _require_object,
+    _require_str,
+    _require_str_list,
+    _require_str_mapping,
+)
 from .scrubber import ScrubbingRule
 
 _SCHEMA_VERSION: typ.Final[str] = "1.0.0"
@@ -269,6 +279,29 @@ def _cmdmox_version() -> str:
         return "unknown"
 
 
+class _Deserializable[ModelT](typ.Protocol):
+    """A fixture model that can be reconstructed from a mapping."""
+
+    @classmethod
+    def from_dict(cls, data: cabc.Mapping[str, object], *, path: str = "") -> ModelT:
+        """Reconstruct the model from *data*."""
+        ...
+
+
+def _parse_indexed[ModelT](
+    data: cabc.Mapping[str, object],
+    key: str,
+    model: type[_Deserializable[ModelT]],
+) -> list[ModelT]:
+    """Parse the objects in the list at *key* with *model*."""
+    return [
+        model.from_dict(
+            _require_object(item, f"{key}[{index}]"), path=f"{key}[{index}]"
+        )
+        for index, item in enumerate(_require_list(data, key))
+    ]
+
+
 @dc.dataclass(slots=True)
 class RecordedInvocation:
     """A single recorded command invocation within a fixture."""
@@ -306,30 +339,41 @@ class RecordedInvocation:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, typ.Any]) -> RecordedInvocation:
+    def from_dict(
+        cls, data: cabc.Mapping[str, object], *, path: str = ""
+    ) -> RecordedInvocation:
         """Construct an invocation from a JSON-compatible mapping.
 
         Parameters
         ----------
-        data : dict[str, typing.Any]
+        data : collections.abc.Mapping[str, object]
             Mapping containing serialized invocation fields.
+        path : str
+            Schema path used in validation errors; defaults to the bare field
+            names of a standalone invocation.
 
         Returns
         -------
         RecordedInvocation
             Parsed invocation model.
-        """
+
+        Raises
+        ------
+        ValueError
+            If a required field is missing or has the wrong type.
+        """  # ruff: ignore[docstring-extraneous-exception] - _schema helpers raise this caller-visible error.
+        recording = _require_object(data, path)
         return cls(
-            sequence=int(data["sequence"]),
-            command=str(data["command"]),
-            args=[str(a) for a in data["args"]],
-            stdin=str(data.get("stdin", "")),
-            env_subset={str(k): str(v) for k, v in data.get("env_subset", {}).items()},
-            stdout=str(data.get("stdout", "")),
-            stderr=str(data.get("stderr", "")),
-            exit_code=int(data.get("exit_code", 0)),
-            timestamp=str(data["timestamp"]),
-            duration_ms=int(data.get("duration_ms", 0)),
+            sequence=_require_int(recording, "sequence", path=path),
+            command=_require_str(recording, "command", path=path),
+            args=_require_str_list(recording, "args", path=path),
+            stdin=_require_str(recording, "stdin", path=path),
+            env_subset=_require_str_mapping(recording, "env_subset", path=path),
+            stdout=_require_str(recording, "stdout", path=path),
+            stderr=_require_str(recording, "stderr", path=path),
+            exit_code=_require_int(recording, "exit_code", path=path),
+            timestamp=_require_str(recording, "timestamp", path=path),
+            duration_ms=_require_int(recording, "duration_ms", path=path),
         )
 
 
@@ -365,28 +409,36 @@ class FixtureMetadata:
         return d
 
     @classmethod
-    def from_dict(cls, data: dict[str, typ.Any]) -> FixtureMetadata:
+    def from_dict(
+        cls, data: cabc.Mapping[str, object], *, path: str = "metadata"
+    ) -> FixtureMetadata:
         """Construct metadata from a JSON-compatible mapping.
 
         Parameters
         ----------
-        data : dict[str, typing.Any]
+        data : collections.abc.Mapping[str, object]
             Mapping containing serialized metadata fields.
+        path : str
+            Schema path used in validation errors.
 
         Returns
         -------
         FixtureMetadata
             Parsed metadata model.
-        """
-        raw_module = data.get("test_module")
-        raw_function = data.get("test_function")
+
+        Raises
+        ------
+        ValueError
+            If a required field is missing or has the wrong type.
+        """  # ruff: ignore[docstring-extraneous-exception] - _schema helpers raise this caller-visible error.
+        metadata = _require_object(data, path)
         return cls(
-            created_at=str(data["created_at"]),
-            cmdmox_version=str(data["cmdmox_version"]),
-            platform=str(data["platform"]),
-            python_version=str(data["python_version"]),
-            test_module=raw_module if isinstance(raw_module, str) else None,
-            test_function=raw_function if isinstance(raw_function, str) else None,
+            created_at=_require_str(metadata, "created_at", path=path),
+            cmdmox_version=_require_str(metadata, "cmdmox_version", path=path),
+            platform=_require_str(metadata, "platform", path=path),
+            python_version=_require_str(metadata, "python_version", path=path),
+            test_module=_optional_str(metadata, "test_module", path=path),
+            test_function=_optional_str(metadata, "test_function", path=path),
         )
 
     @classmethod
@@ -470,19 +522,18 @@ class FixtureFile:
             If the mapping does not conform to the fixture schema.
         """
         try:
-            data = _apply_migrations(data)
+            root = _require_object(data, "fixture")
+            migrated = _apply_migrations(dict(root))
             return cls(
                 version=cls.SCHEMA_VERSION,
-                metadata=FixtureMetadata.from_dict(data["metadata"]),
-                recordings=[
-                    RecordedInvocation.from_dict(r) for r in data.get("recordings", [])
-                ],
-                scrubbing_rules=[
-                    ScrubbingRule.from_dict(r) for r in data.get("scrubbing_rules", [])
-                ],
+                metadata=FixtureMetadata.from_dict(migrated["metadata"]),
+                recordings=_parse_indexed(migrated, "recordings", RecordedInvocation),
+                scrubbing_rules=_parse_indexed(
+                    migrated, "scrubbing_rules", ScrubbingRule
+                ),
             )
         except (AttributeError, KeyError, TypeError) as exc:
-            msg = f"Invalid fixture schema: {exc}"
+            msg = f"{SCHEMA_ERROR_PREFIX}: {exc}"
             raise ValueError(msg) from exc
 
     def save(self, path: Path) -> None:

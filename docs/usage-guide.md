@@ -593,6 +593,22 @@ differences within the same major version are tolerated—for example, a `1.1.0`
 fixture loads correctly into `1.0.0` code because unknown fields are ignored. A
 higher major version with no registered migration path raises `ValueError`.
 
+### Fixture schema validation
+
+Fixture loading validates the 1.0.0 schema strictly. A key written by the 1.0.0
+schema is required unless it is `metadata.test_module`,
+`metadata.test_function` or `scrubbing_rules[].description`, which may be
+absent or `null`. Integers must be integers (booleans and fractional numbers
+are rejected), `args` and `applied_to` must be arrays of strings, and
+`env_subset` must map strings to strings. Unknown keys are ignored, including
+`$schema`.
+
+Malformed values raise `ValueError` with a path, for example
+`Invalid fixture schema: recordings[0].stdout: expected str, got NoneType`. See
+the
+[fixture validation policy](python-native-command-mocking-design.md#934-fixture-validation-policy)
+in the design document for the complete rules.
+
 ## Automatic recording with `.record()`
 
 The `CommandDouble.record()` fluent method connects passthrough spies to

@@ -241,6 +241,39 @@ class TestReplaySessionLoad:
         assert session._fixture is not None
         assert session._fixture.version == "1.0.0"
 
+    def test_load_rejects_malformed_field(self, tmp_path: Path) -> None:
+        """load() raises ValueError when a recording field has the wrong type."""
+        data = {
+            "version": "1.0.0",
+            "metadata": {
+                "created_at": "2026-01-15T10:30:00Z",
+                "cmdmox_version": "0.1.0",
+                "platform": "linux",
+                "python_version": "3.13.0",
+            },
+            "recordings": [
+                {
+                    "sequence": 0,
+                    "command": "echo",
+                    "args": ["hello"],
+                    "stdin": "",
+                    "env_subset": {},
+                    "stdout": None,
+                    "stderr": "",
+                    "exit_code": 0,
+                    "timestamp": "2026-01-15T10:30:01Z",
+                    "duration_ms": 5,
+                },
+            ],
+            "scrubbing_rules": [],
+        }
+        path = tmp_path / "malformed_fixture.json"
+        path.write_text(json.dumps(data, indent=2) + "\n")
+
+        session = ReplaySession(path)
+        with pytest.raises(ValueError, match=r"recordings\[0\]\.stdout"):
+            session.load()
+
     def test_load_file_not_found_raises(self, tmp_path: Path) -> None:
         """load() with a non-existent path raises FileNotFoundError."""
         session = ReplaySession(tmp_path / "missing.json")
