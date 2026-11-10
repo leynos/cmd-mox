@@ -234,12 +234,11 @@ def test_temporary_env_restores_environment(monkeypatch: pytest.MonkeyPatch) -> 
     """temporary_env restores touched keys and preserves unrelated additions."""
     monkeypatch.delenv("TMP", raising=False)
     with temporary_env({"TMP": "1"}):
-        os.environ["EXTRA"] = "foo"
+        monkeypatch.setenv("EXTRA", "foo")
         assert os.environ["TMP"] == "1"
         assert os.environ["EXTRA"] == "foo"
     assert "TMP" not in os.environ
     assert os.environ["EXTRA"] == "foo"
-    monkeypatch.delenv("EXTRA")
 
 
 def test_temporary_env_restores_deleted_vars(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,14 +259,13 @@ def test_temporary_env_restores_on_exception(monkeypatch: pytest.MonkeyPatch) ->
     def trigger() -> None:
         """Mutate the environment and raise inside ``temporary_env``."""
         with temporary_env({"ERR": "1"}):
-            os.environ["EXTRA"] = "bar"
+            monkeypatch.setenv("EXTRA", "bar")
             raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="boom"):
         trigger()
     assert "ERR" not in os.environ
     assert os.environ["EXTRA"] == "bar"
-    monkeypatch.delenv("EXTRA")
 
 
 def test_nested_temporary_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,13 +274,12 @@ def test_nested_temporary_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("B", raising=False)
     with temporary_env({"A": "1"}):
         with temporary_env({"B": "2"}):
-            os.environ["C"] = "3"
+            monkeypatch.setenv("C", "3")
         assert "B" not in os.environ
         assert os.environ["A"] == "1"
         assert os.environ["C"] == "3"
     assert "A" not in os.environ
     assert os.environ["C"] == "3"
-    monkeypatch.delenv("C")
 
 
 def test_temporary_env_interleaved_exits_do_not_leak(

@@ -612,8 +612,8 @@ def temporary_env(mapping: dict[str, str]) -> cabc.Iterator[None]:
         yield
     finally:
         for key in reversed(list(saved)):
-            value = saved[key]
-            if isinstance(value, _AbsentKey):
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+            match saved[key]:
+                case _AbsentKey():
+                    os.environ.pop(key, None)
+                case str() as value:
+                    os.environ[key] = value
