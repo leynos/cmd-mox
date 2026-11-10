@@ -372,7 +372,7 @@ def _read(
     return capture.read_stdin(
         typ.cast("capture._StdinStream", stream),
         timeout,
-        clock=clock,
+        options=capture._CaptureOptions(clock=clock),
         system=system,
     )
 

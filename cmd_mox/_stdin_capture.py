@@ -152,6 +152,22 @@ class _WorkerSpec:
     system: StdinSystem = SYSTEM_STDIN
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _CaptureOptions:
+    """Injected time source and strategy observer for one bounded capture.
+
+    The two capture instrumentation seams travel together so
+    :func:`read_stdin` keeps its small public call shape while the
+    operating-system and process seam stays an explicit ``system`` keyword.
+    """
+
+    clock: _MonotonicClock = time.monotonic
+    on_selected: _StrategyObserver | None = None
+
+
+_DEFAULT_CAPTURE_OPTIONS: typ.Final[_CaptureOptions] = _CaptureOptions()
+
+
 def outstanding_workers() -> tuple[threading.Thread, ...]:
     """Return the reader workers still blocked after their deadline.
 
@@ -181,12 +197,11 @@ def _register_worker(worker: threading.Thread) -> None:
             _WORKERS.append(worker)
 
 
-def read_stdin(  # ruff: ignore[too-many-arguments] - the public capture shape keeps its existing keywords alongside the injected system
+def read_stdin(
     stream: _StdinStream,
     timeout: float,
     *,
-    clock: _MonotonicClock = time.monotonic,
-    on_selected: _StrategyObserver | None = None,
+    options: _CaptureOptions = _DEFAULT_CAPTURE_OPTIONS,
     system: StdinSystem = SYSTEM_STDIN,
 ) -> str:
     """Read *stream* through EOF, giving up after *timeout* seconds.
@@ -199,12 +214,10 @@ def read_stdin(  # ruff: ignore[too-many-arguments] - the public capture shape k
     timeout:
         Deadline in seconds, measured from the start of the capture. The shim
         passes the validated ``CMOX_IPC_TIMEOUT`` value.
-    clock:
-        Monotonic clock used to measure the deadline.
-    on_selected:
-        Called with the chosen strategy before the first read, so a failure
-        still reports which strategy was bounding it. Not called when the
-        stream is a terminal or in-memory, where no strategy is needed.
+    options:
+        Clock and strategy observer for this capture. The default uses the
+        monotonic clock and reports no strategy; tests inject a fake clock or
+        observer here.
     system:
         Operating-system and process operations for this capture. Defaults to
         the stateless production system; tests inject a double here rather
@@ -227,14 +240,14 @@ def read_stdin(  # ruff: ignore[too-many-arguments] - the public capture shape k
         return ""
     # The deadline is computed once and shared by every step below, so a slow
     # stream cannot accumulate a fresh budget per chunk.
-    deadline = clock() + timeout
+    deadline = options.clock() + timeout
     if isinstance(stream, io.StringIO):
         # In-memory streams cannot block, so no worker or deadline is needed.
         return stream.read()
     plan = _plan_stdin(stream, system=system)
-    if on_selected is not None:
-        on_selected(plan.strategy)
-    capture = _Capture(stream, timeout, deadline, clock, plan, system)
+    if options.on_selected is not None:
+        options.on_selected(plan.strategy)
+    capture = _Capture(stream, timeout, deadline, options.clock, plan, system)
     match capture.plan.strategy:
         case "win32":
             return _read_win32(capture)

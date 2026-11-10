@@ -259,8 +259,10 @@ def _capture_stdin(
         text = _stdin_capture.read_stdin(
             typ.cast("_stdin_capture._StdinStream", stream),
             timeout,
-            clock=dependencies.monotonic_clock,
-            on_selected=selected.append,
+            options=_stdin_capture._CaptureOptions(
+                clock=dependencies.monotonic_clock,
+                on_selected=selected.append,
+            ),
             system=dependencies.stdin_system,
         )
     except StdinTimeoutError as exc:

@@ -109,7 +109,9 @@ def test_windows_handle_reads_until_broken_pipe() -> None:
     harness = _Win32Harness(read_file)
     system = _windows_system(harness)
 
-    captured = capture.read_stdin(_Stream(), 5.0, clock=_Clock(), system=system)
+    captured = capture.read_stdin(
+        _Stream(), 5.0, options=capture._CaptureOptions(clock=_Clock()), system=system
+    )
 
     assert captured == "windows", (
         "the Windows strategy should return the decoded handle data"
@@ -135,7 +137,12 @@ def test_windows_handle_reports_unexpected_errors_as_oserror() -> None:
 
     system = _windows_system(_Win32Harness(read_file))
     with pytest.raises(OSError, match="stdin handle read failed") as excinfo:
-        capture.read_stdin(_Stream(), 5.0, clock=_Clock(), system=system)
+        capture.read_stdin(
+            _Stream(),
+            5.0,
+            options=capture._CaptureOptions(clock=_Clock()),
+            system=system,
+        )
 
     assert excinfo.value.errno == _FakeWinError.ACCESS_DENIED, (
         "the Windows error code was not preserved"
@@ -174,7 +181,12 @@ def test_windows_handle_timeout_cancels_and_closes_one_handle(
 
     try:
         with pytest.raises(StdinTimeoutError) as excinfo:
-            capture.read_stdin(_Stream(), 0.05, clock=_Clock(), system=system)
+            capture.read_stdin(
+                _Stream(),
+                0.05,
+                options=capture._CaptureOptions(clock=_Clock()),
+                system=system,
+            )
     finally:
         release.set()
 
@@ -223,7 +235,12 @@ def test_windows_cancel_lets_the_worker_exit_within_the_grace(
 
     try:
         with pytest.raises(StdinTimeoutError) as excinfo:
-            capture.read_stdin(_Stream(), 0.05, clock=_Clock(), system=system)
+            capture.read_stdin(
+                _Stream(),
+                0.05,
+                options=capture._CaptureOptions(clock=_Clock()),
+                system=system,
+            )
     finally:
         release.set()
 
@@ -275,9 +292,15 @@ def test_windows_handle_completes_without_cancellation() -> None:
     harness = _Win32Harness(lambda _handle, _size: (0, b""))
     system = _windows_system(harness)
 
-    assert capture.read_stdin(_Stream(), 5.0, clock=_Clock(), system=system) == "", (
-        "an immediate EOF should capture no text"
-    )
+    assert (
+        capture.read_stdin(
+            _Stream(),
+            5.0,
+            options=capture._CaptureOptions(clock=_Clock()),
+            system=system,
+        )
+        == ""
+    ), "an immediate EOF should capture no text"
     assert harness.cancelled == [], "a completed read must not be cancelled"
     assert harness.closed == [], "no thread handle should be opened"
 
@@ -290,7 +313,9 @@ def test_windows_without_a_handle_uses_the_fallback() -> None:
     stream = _Stream("fallback on windows")
 
     assert (
-        capture.read_stdin(stream, 5.0, clock=_Clock(), system=system)
+        capture.read_stdin(
+            stream, 5.0, options=capture._CaptureOptions(clock=_Clock()), system=system
+        )
         == "fallback on windows"
     ), "a missing handle should fall back to a direct read"
     assert stream.read_calls == 1, "the fallback should read exactly once"
@@ -307,7 +332,9 @@ def test_windows_missing_pywin32_uses_the_fallback() -> None:
     )
     stream = _Stream("no pywin32")
 
-    captured = capture.read_stdin(stream, 5.0, clock=_Clock(), system=system)
+    captured = capture.read_stdin(
+        stream, 5.0, options=capture._CaptureOptions(clock=_Clock()), system=system
+    )
     assert captured == "no pywin32", "a host without pywin32 should still capture stdin"
     assert stream.read_calls == 1, "the fallback should read exactly once"
 

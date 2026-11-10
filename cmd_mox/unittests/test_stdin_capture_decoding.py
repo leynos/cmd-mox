@@ -182,62 +182,76 @@ def test_regular_file_decode_is_independent_of_chunk_boundaries(
     )
 
 
-@_POSIX_ONLY
-@settings(max_examples=40, deadline=None)
-@given(text=_TEXT, splits=_SPLITS)
-def test_raw_polled_decode_is_independent_of_chunk_boundaries(
+def _read_raw_polled_pipe(read_fd: int, chunks: list[bytes]) -> str:
+    """Capture raw polled reads from *read_fd* replaying *chunks*.
+
+    Returns
+    -------
+    str
+        The text decoded by the raw polled strategy.
+    """
+    return capture._read_raw_polled(
+        _capture(
+            capture._Plan("poll", descriptor=read_fd, poller=_ReadyPoller()),
+            stream=_DescriptorStream(read_fd),
+            clock=_Clock(),
+            system=_SystemDouble(read_override=_scripted(chunks)),
+        ),
+        capture._PollContext(read_fd, _ReadyPoller(), 1.0, 1.0, _Clock()),
+    )
+
+
+def _read_buffered_pipe(read_fd: int, chunks: list[bytes]) -> str:
+    """Capture buffered polled reads from *read_fd* replaying *chunks*.
+
+    Returns
+    -------
+    str
+        The text decoded by the buffered polled strategy.
+    """
+    return capture._read_polled(
+        _capture(
+            capture._Plan("poll", descriptor=read_fd, poller=_ReadyPoller()),
+            stream=_DescriptorStdin(read_fd, buffer=_BufferedInput([*chunks, b""])),
+            clock=_Clock(),
+        )
+    )
+
+
+def _assert_decode_independent_of_chunk_boundaries(
     text: str,
     splits: list[float],
+    read: cabc.Callable[[int, list[bytes]], str],
 ) -> None:
-    """Raw polled reads decode a payload identically for every byte split."""
-    chunks = _split(text.encode(), splits)
+    """Assert *read* decodes *text* identically for every generated split."""
     read_fd, write_fd = os.pipe()
     os.close(write_fd)
-    system = _SystemDouble(read_override=_scripted(chunks))
     try:
-        result = capture._read_raw_polled(
-            _capture(
-                capture._Plan("poll", descriptor=read_fd, poller=_ReadyPoller()),
-                stream=_DescriptorStream(read_fd),
-                clock=_Clock(),
-                system=system,
-            ),
-            capture._PollContext(read_fd, _ReadyPoller(), 1.0, 1.0, _Clock()),
-        )
+        result = read(read_fd, _split(text.encode(), splits))
     finally:
         os.close(read_fd)
-
     assert result == _expected(text, translate_newlines=False), (
         "chunk boundaries changed the decoded text"
     )
 
 
 @_POSIX_ONLY
+@pytest.mark.parametrize(
+    "read",
+    [
+        pytest.param(_read_raw_polled_pipe, id="raw-polled"),
+        pytest.param(_read_buffered_pipe, id="buffered"),
+    ],
+)
 @settings(max_examples=40, deadline=None)
 @given(text=_TEXT, splits=_SPLITS)
-def test_buffered_decode_is_independent_of_chunk_boundaries(
+def test_polled_decode_is_independent_of_chunk_boundaries(
+    read: cabc.Callable[[int, list[bytes]], str],
     text: str,
     splits: list[float],
 ) -> None:
-    """Buffered reads decode a payload identically for every byte split."""
-    chunks = _split(text.encode(), splits)
-    read_fd, write_fd = os.pipe()
-    os.close(write_fd)
-    stream = _DescriptorStdin(read_fd, buffer=_BufferedInput([*chunks, b""]))
-    try:
-        result = capture._read_polled(
-            _capture(
-                capture._Plan("poll", descriptor=read_fd, poller=_ReadyPoller()),
-                stream=stream,
-                clock=_Clock(),
-            )
-        )
-    finally:
-        os.close(read_fd)
-
-    assert result == _expected(text, translate_newlines=False), (
-        "chunk boundaries changed the decoded text"
-    )
+    """Polled reads decode a payload identically for every byte split."""
+    _assert_decode_independent_of_chunk_boundaries(text, splits, read)
 
 
 @settings(max_examples=40, deadline=None)

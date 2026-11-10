@@ -96,8 +96,10 @@ def test_selected_strategy_is_reported_before_the_read() -> None:
         capture.read_stdin(
             typ.cast("capture._StdinStream", _FailingStream()),
             1.0,
-            clock=_Clock(),
-            on_selected=selected.append,
+            options=capture._CaptureOptions(
+                clock=_Clock(),
+                on_selected=selected.append,
+            ),
         )
 
     assert selected == ["fallback"], (

@@ -18,7 +18,9 @@ import threading
 import time
 import typing as typ
 
-from cmd_mox import create_shim_symlinks
+import pytest
+
+from cmd_mox import _stdin_capture, create_shim_symlinks
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.ipc import IPCHandlers, IPCServer, NamedPipeServer, Response
 
@@ -164,6 +166,31 @@ def test_stalled_stdin_exits_while_the_writer_stays_open(tmp_path: Path) -> None
     assert b"".join(stderr) == _as_written(
         f"IPC error: stdin read timed out after {_SHIM_TIMEOUT:g} seconds\n"
     ), "the shim did not report the bounded stdin diagnostic"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the win32 strategy needs a Windows handle")
+def test_piped_payload_selects_the_win32_strategy() -> None:
+    """A non-empty piped payload is captured through the production win32 path."""
+    payload = "piped payload\n"
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, payload.encode())
+    os.close(write_fd)
+    selected: list[str] = []
+    stream = os.fdopen(read_fd, encoding="utf-8", errors="strict")
+    try:
+        captured = _stdin_capture.read_stdin(
+            typ.cast("_stdin_capture._StdinStream", stream),
+            5.0,
+            options=_stdin_capture._CaptureOptions(on_selected=selected.append),
+        )
+    finally:
+        stream.close()
+
+    assert selected == ["win32"], (
+        "the production adapter did not select the win32 strategy, "
+        f"selected: {selected}"
+    )
+    assert captured == payload, "the win32 strategy lost the piped payload"
 
 
 @contextlib.contextmanager
