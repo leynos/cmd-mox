@@ -44,15 +44,17 @@ overlap and exit out of order restore an undefined value for that key.
 ## Upgrade handlers
 
 Replace any handler that reads an injected variable from `os.environ` with a
-read from `invocation.env`. The two mappings agree for the keys named by
-`with_env()`, but only `invocation.env` is guaranteed to carry them.
+read from `invocation.env`. The host `os.environ` no longer carries the keys
+named by `with_env()`, so a handler that reads them there observes no injected
+value.
 
-If a handler needs the whole process environment to be rolled back after it
-runs, do that explicitly in the test rather than relying on CmdMox. Capture
-`os.environ.copy()` before the call and restore it afterwards, or use
-`EnvironmentManager` when the change is part of CmdMox's own shim setup. A
-targeted `temporary_env()` context around the specific keys is usually enough
-and avoids discarding unrelated changes.
+If a test needs the whole process environment rolled back after replay, do that
+explicitly in the test thread rather than relying on CmdMox. Capture
+`os.environ.copy()` before `replay()` and restore it after `verify()`. Do not
+restore a whole-environment snapshot inside a handler, because handlers run
+concurrently. Alternatively, use `EnvironmentManager` when the change is part
+of CmdMox's own shim setup. A targeted `temporary_env()` context around the
+specific keys is usually enough and avoids discarding unrelated changes.
 
 The internal `execute_handler()` helper no longer accepts an `overrides`
 argument. It is not part of the public API; callers that imported it directly

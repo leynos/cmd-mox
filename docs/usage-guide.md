@@ -1068,10 +1068,12 @@ few common ones are:
   standard input when no input is intended. See the
   [shim path guidance](#wiring-a-tool-to-a-shim-by-absolute-path).
 - `with_env(mapping)` – inject additional environment variables into the
-  invocation. The mapping is merged into `Invocation.env`, which custom
-  handlers and canned responses read, and does not mutate the test process's
-  `os.environ`. When the caller already provides a different value for a key,
-  CmdMox raises `UnexpectedCommandError` instead of overriding it.
+  invocation. CmdMox merges the mapping into `Invocation.env`, which custom
+  handlers read. Canned responses carry the mapping on their response
+  environment, and passthrough commands receive it as an environment overlay.
+  CmdMox does not mutate the test process's `os.environ`. When the caller
+  already provides a different value for a key, CmdMox raises
+  `UnexpectedCommandError` instead of overriding it.
 - `returns(stdout="", stderr="", exit_code=0)` – static response using text
   values; CmdMox operates in text mode—pass `str` (bytes are not supported).
   Note: For binary payloads, prefer `passthrough()` or encode/decode at the
