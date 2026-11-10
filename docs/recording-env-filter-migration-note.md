@@ -34,7 +34,7 @@ recording keeps.
 - Projects that recorded commands outside the eight known-prefix tools and
   relied on unrelated variables being present in `env_subset`.
 - Projects whose fixtures currently contain host-specific values. Those
-  fixtures keep replaying as before until they are re-recorded.
+  fixtures continue to replay unchanged until they are re-recorded.
 - Projects that pinned a fixture's exact `env_subset` in assertions or review
   tooling.
 
