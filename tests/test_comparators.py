@@ -228,6 +228,69 @@ def test_expectation_matcher_exception_message() -> None:
     assert "ValueError: boom" in msg, "Assertion failed"
 
 
+def test_expectation_with_literal_and_comparator_matchers() -> None:
+    """A literal string matches exactly while comparators stay flexible."""
+    exp = Expectation("git").with_matching_args("clone", AnyComparator())
+    inv = Invocation(
+        command="git",
+        args=["clone", "https://example.com/repo.git"],
+        stdin="",
+        env={},
+    )
+    assert exp.matches(inv), "Assertion failed"
+
+
+def test_expectation_with_literal_only_matchers() -> None:
+    """Literal strings require exact argument equality."""
+    exp = Expectation("git").with_matching_args("clone", "url")
+    matching = Invocation(command="git", args=["clone", "url"], stdin="", env={})
+    differing = Invocation(command="git", args=["clone", "other"], stdin="", env={})
+    assert exp.matches(matching), "identical literals should match"
+    assert not exp.matches(differing), "different literals must not match"
+
+
+def test_expectation_literal_matcher_arity_takes_precedence() -> None:
+    """Arity is reported before any literal comparison."""
+    exp = Expectation("git").with_matching_args("clone", "url")
+    inv = Invocation(command="git", args=["clone"], stdin="", env={})
+    assert exp.explain_mismatch(inv) == "expected 2 args but got 1", (
+        "arity mismatch should be reported first"
+    )
+
+
+def test_expectation_literal_matcher_mismatch_message() -> None:
+    """A literal mismatch explains equality rather than calling the literal."""
+    exp = Expectation("git").with_matching_args("clone", AnyComparator())
+    inv = Invocation(command="git", args=["pull", "url"], stdin="", env={})
+    verifier = UnexpectedCommandVerifier()
+    dbl = _mock_double(exp)
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        verifier.verify([inv], {"git": dbl})
+    msg = str(excinfo.value)
+    assert "arg[0]='pull' != 'clone'" in msg, "the literal mismatch should be shown"
+    assert "TypeError" not in msg, "literal matching must not raise TypeError"
+    assert "not callable" not in msg, "a literal must not be treated as callable"
+    assert "git('clone', Any())" in msg, "the expected call should render matchers"
+
+
+def test_expectation_mixed_matcher_exception_message() -> None:
+    """A callable exception is still reported after a literal match."""
+
+    def boom(_: str) -> bool:
+        """Raise ``ValueError`` to simulate a failing matcher."""
+        raise ValueError("boom")
+
+    exp = Expectation("git").with_matching_args("clone", Predicate(boom))
+    inv = Invocation(command="git", args=["clone", "x"], stdin="", env={})
+    verifier = UnexpectedCommandVerifier()
+    dbl = _mock_double(exp)
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        verifier.verify([inv], {"git": dbl})
+    msg = str(excinfo.value)
+    assert "arg[1] predicate" in msg, "the raising matcher should be identified"
+    assert "ValueError: boom" in msg, "the matcher exception should be reported"
+
+
 def test_expectation_stdin_predicate_failure_message() -> None:
     """Reports a helpful reason when stdin predicate fails."""
     exp = Expectation("cmd").with_stdin(lambda s: s == "ok")
