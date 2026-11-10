@@ -1,6 +1,6 @@
 [project]
 name = "cmd-mox"
-version = "0.2.0"
+version = "0.3.0-beta1"
 description = "Python-native command mocking for pytest, replacing shell-based command tests with fast socket-backed shims"
 readme = "README.md"
 requires-python = ">=3.12"

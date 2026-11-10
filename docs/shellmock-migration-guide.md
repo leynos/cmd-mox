@@ -9,10 +9,10 @@ execution.
 
 This guide is intended for projects that already use shellmock-based tests or
 command-line interface (CLI) fixtures and are moving to CmdMox's pytest-first
-workflow. For new CmdMox users, read `docs/usage-guide.md` first, then return
-here for the mapping examples. Shellmock CLI syntax can vary by version, so the
-shellmock snippets are conceptual; confirm the exact flags in local shellmock
-documentation.
+workflow. For new CmdMox users, read the [user's guide](users-guide.md) first,
+then return here for the mapping examples. Shellmock CLI syntax can vary by
+version, so the shellmock snippets are conceptual; confirm the exact flags in
+local shellmock documentation.
 
 ## What changes when moving to CmdMox
 
@@ -128,6 +128,7 @@ If the order or call count matters, add `.times(n)`, `.in_order()`, or
 
 ## Where to go next
 
-- `docs/usage-guide.md` for the full API reference and matcher descriptions.
+- The [user's guide](users-guide.md) for the full API reference and matcher
+  descriptions.
 - `examples/` for runnable pytest examples covering stubs, mocks, spies, and
   passthrough mode.
