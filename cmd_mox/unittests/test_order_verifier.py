@@ -85,80 +85,77 @@ def test_order_verifier_reports_missing_expectations_with_numbering() -> None:
     )
 
 
-def test_order_verifier_reports_the_first_mismatch_with_position() -> None:
-    """The first violating position is reported with expectation and actual."""
-    first = Expectation("git").with_args("fetch").in_order()
-    second = Expectation("git").with_args("status").in_order()
-
-    journal = [
-        _invocation("git", "status"),
-        _invocation("git", "fetch"),
-    ]
+@pytest.mark.parametrize(
+    ("ordered_args", "journal_args", "expected"),
+    [
+        (
+            (("fetch",), ("status",)),
+            (("status",), ("fetch",)),
+            (
+                "Ordered expectation violated.\n"
+                "\n"
+                "Expected order:\n"
+                "  1. git('fetch')\n"
+                "  2. git('status')\n"
+                "\n"
+                "Observed order:\n"
+                "  1. git('status')\n"
+                "  2. git('fetch')\n"
+                "\n"
+                "First mismatch:\n"
+                "  position 1\n"
+                "  expected:\n"
+                "    git('fetch')\n"
+                "  actual:\n"
+                "    git('status')\n"
+                "\n"
+                "Reason:\n"
+                "  arguments ['status'] != ['fetch']"
+            ),
+        ),
+        (
+            (("fetch",), ("status",), ("push",)),
+            (("fetch",), ("push",), ("status",)),
+            (
+                "Ordered expectation violated.\n"
+                "\n"
+                "Expected order:\n"
+                "  1. git('fetch')\n"
+                "  2. git('status')\n"
+                "  3. git('push')\n"
+                "\n"
+                "Observed order:\n"
+                "  1. git('fetch')\n"
+                "  2. git('push')\n"
+                "  3. git('status')\n"
+                "\n"
+                "First mismatch:\n"
+                "  position 2\n"
+                "  expected:\n"
+                "    git('status')\n"
+                "  actual:\n"
+                "    git('push')\n"
+                "\n"
+                "Reason:\n"
+                "  arguments ['push'] != ['status']"
+            ),
+        ),
+    ],
+    ids=["first-position", "after-matching-prefix"],
+)
+def test_order_verifier_reports_the_first_positional_violation(
+    ordered_args: tuple[tuple[str, ...], ...],
+    journal_args: tuple[tuple[str, ...], ...],
+    expected: str,
+) -> None:
+    """The first violating position is reported, including a matching prefix."""
+    ordered = [Expectation("git").with_args(*args).in_order() for args in ordered_args]
+    journal = [_invocation("git", *args) for args in journal_args]
 
     with pytest.raises(UnexpectedCommandError) as excinfo:
-        OrderVerifier([first, second]).verify(journal)
+        OrderVerifier(ordered).verify(journal)
 
-    assert str(excinfo.value) == (
-        "Ordered expectation violated.\n"
-        "\n"
-        "Expected order:\n"
-        "  1. git('fetch')\n"
-        "  2. git('status')\n"
-        "\n"
-        "Observed order:\n"
-        "  1. git('status')\n"
-        "  2. git('fetch')\n"
-        "\n"
-        "First mismatch:\n"
-        "  position 1\n"
-        "  expected:\n"
-        "    git('fetch')\n"
-        "  actual:\n"
-        "    git('status')\n"
-        "\n"
-        "Reason:\n"
-        "  arguments ['status'] != ['fetch']"
-    )
-
-
-def test_order_verifier_reports_a_violation_after_an_initial_match() -> None:
-    """Checking continues past a matching prefix to the first violation."""
-    fetch = Expectation("git").with_args("fetch").in_order()
-    status = Expectation("git").with_args("status").in_order()
-    push = Expectation("git").with_args("push").in_order()
-
-    journal = [
-        _invocation("git", "fetch"),
-        _invocation("git", "push"),
-        _invocation("git", "status"),
-    ]
-
-    with pytest.raises(UnexpectedCommandError) as excinfo:
-        OrderVerifier([fetch, status, push]).verify(journal)
-
-    assert str(excinfo.value) == (
-        "Ordered expectation violated.\n"
-        "\n"
-        "Expected order:\n"
-        "  1. git('fetch')\n"
-        "  2. git('status')\n"
-        "  3. git('push')\n"
-        "\n"
-        "Observed order:\n"
-        "  1. git('fetch')\n"
-        "  2. git('push')\n"
-        "  3. git('status')\n"
-        "\n"
-        "First mismatch:\n"
-        "  position 2\n"
-        "  expected:\n"
-        "    git('status')\n"
-        "  actual:\n"
-        "    git('push')\n"
-        "\n"
-        "Reason:\n"
-        "  arguments ['push'] != ['status']"
-    )
+    assert str(excinfo.value) == expected
 
 
 def test_order_verifier_renders_env_and_stdin_for_the_mismatch() -> None:

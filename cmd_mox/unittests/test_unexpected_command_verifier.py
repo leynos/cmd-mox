@@ -239,15 +239,31 @@ def test_mock_counts_reset_between_verify_calls() -> None:
 
 
 def test_mismatch_is_reported_before_the_count_limit() -> None:
-    """A non-matching call fails as a mismatch, not as an overflow."""
+    """A mismatch wins over overflow once the call limit is already spent."""
     expectation = Expectation("deploy").with_args("--flag").times_called(1)
     doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
 
     with pytest.raises(UnexpectedCommandError) as excinfo:
         UnexpectedCommandVerifier().verify(
-            [_invocation("deploy", "--other"), _invocation("deploy", "--other")],
+            [
+                # The first call matches and exhausts the mock's budget.
+                _invocation("deploy", "--flag"),
+                # The second call would overflow, but it does not match, so the
+                # mismatch must be reported instead of the count violation.
+                _invocation("deploy", "--other"),
+            ],
             doubles,
         )
 
-    assert "Reason:" in str(excinfo.value)
-    assert "Observed calls:" not in str(excinfo.value)
+    assert str(excinfo.value) == (
+        "Unexpected command invocation.\n"
+        "\n"
+        "Expected:\n"
+        "  deploy('--flag')\n"
+        "\n"
+        "Actual:\n"
+        "  deploy('--other')\n"
+        "\n"
+        "Reason:\n"
+        "  arguments ['--other'] != ['--flag']"
+    )
