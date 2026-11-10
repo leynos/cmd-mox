@@ -8,12 +8,18 @@ call.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.environment import EnvironmentManager
-from cmd_mox.errors import ExpectationConfigurationError, UnexpectedCommandError
-from cmd_mox.ipc import Invocation, PassthroughResult
+from cmd_mox.errors import (
+    ExpectationConfigurationError,
+    UnexpectedCommandError,
+    UnfulfilledExpectationError,
+)
+from cmd_mox.ipc import Invocation, PassthroughResult, Response
 
 
 def _invocation(command: str, *args: str) -> Invocation:
@@ -195,6 +201,61 @@ def test_mutating_journal_entry_arguments_does_not_change_verification() -> None
     with pytest.raises(UnexpectedCommandError) as excinfo:
         mox._run_verifiers()
     assert "Expected:" in str(excinfo.value)
+
+
+def test_rejected_late_in_order_leaves_expectation_unordered() -> None:
+    """A rejected in_order() must not mark the expectation as ordered."""
+    mox = CmdMox(max_journal_entries=1)
+    double = mox.stub("first").returns()
+    _dispatch(mox, "first")
+
+    with pytest.raises(ExpectationConfigurationError):
+        double.in_order()
+
+    assert double.expectation.ordered is False
+    assert double.expectation not in mox._ordered
+
+
+def test_in_order_with_in_flight_stub_call_retains_the_call() -> None:
+    """A call in flight when ordering is applied is retained as ordered."""
+    mox = CmdMox(max_journal_entries=1)
+    started = threading.Event()
+    release = threading.Event()
+
+    def handler(_invocation: Invocation) -> Response:
+        """Hold the call in flight until ordering has been applied."""
+        started.set()
+        release.wait(timeout=5)
+        return Response()
+
+    double = mox.stub("race").runs(handler)
+    worker = threading.Thread(target=_dispatch, args=(mox, "race"))
+    worker.start()
+    try:
+        assert started.wait(timeout=5)
+        double.in_order()
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert [inv.command for inv in mox._verification_log] == ["race"]
+    mox._run_verifiers()
+
+
+def test_count_diagnostics_ignore_journal_entry_mutation() -> None:
+    """Count failures describe the recorded call, not a mutated journal entry."""
+    mox = CmdMox()
+    mox.mock("git").with_args("status").times(2)
+    _dispatch(mox, "git", "status")
+
+    mox.journal[0].args[:] = ["mutated"]
+
+    with pytest.raises(UnfulfilledExpectationError) as excinfo:
+        mox._run_verifiers()
+    message = str(excinfo.value)
+    assert "git('status')" in message
+    assert "mutated" not in message
 
 
 def test_late_in_order_is_rejected_when_bounded_journal_discards_calls() -> None:

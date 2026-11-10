@@ -532,22 +532,33 @@ class CmdMox:
             return True
         return any(exp is double.expectation for exp in self._ordered)
 
-    def _assert_orderable(self, name: str) -> None:
-        """Reject late ordering when a bounded journal dropped stub calls.
+    def _register_order(self, expectation: Expectation) -> None:
+        """Mark *expectation* ordered, rejecting unrecoverable late ordering.
 
         Raises
         ------
         ExpectationConfigurationError
-            If *name*'s completed calls were not retained for verification.
+            If a bounded journal discarded the stub's completed calls.
         """
+        # Check and register under one lock so a concurrent call cannot be
+        # discarded between the two steps.
         with self._history_lock:
-            discarded = name in self._discarded_stub_calls
-        if discarded:
-            msg = (
-                f"Cannot mark {name!r} in_order() after its calls were discarded; "
-                "configure ordering before replay or raise max_journal_entries"
-            )
-            raise ExpectationConfigurationError(msg)
+            if expectation.name in self._discarded_stub_calls:
+                msg = (
+                    f"Cannot mark {expectation.name!r} in_order() after its calls "
+                    "were discarded; configure ordering before replay or raise "
+                    "max_journal_entries"
+                )
+                raise ExpectationConfigurationError(msg)
+            expectation.in_order()
+            if expectation not in self._ordered:
+                self._ordered.append(expectation)
+
+    def _unregister_order(self, expectation: Expectation) -> None:
+        """Mark *expectation* unordered under the history lock."""
+        with self._history_lock:
+            expectation.any_order()
+            self._ordered = [exp for exp in self._ordered if exp is not expectation]
 
     def _record_completed_invocation(self, invocation: Invocation) -> None:
         """Append a completed invocation to both records under one lock."""
@@ -579,13 +590,9 @@ class CmdMox:
     ) -> Response:
         """Record passthrough intent and return instructions for the shim.
 
-        This method prepares two separate values: ``extra_env`` (expectation
-        overrides from :meth:`_apply_expectation_env`) and ``lookup_path``
-        (the original PATH for command resolution). These are passed to
-        :class:`~cmd_mox.passthrough.PassthroughCoordinator` separately; the
-        final merging into an effective execution environment happens
-        downstream when the shim consumes the resulting
-        :class:`~cmd_mox.ipc.PassthroughRequest`.
+        ``extra_env`` (expectation overrides) and ``lookup_path`` (the original
+        PATH) stay separate here; the shim merges them into the effective
+        execution environment when it consumes the request.
 
         Returns
         -------
@@ -608,13 +615,7 @@ class CmdMox:
         )
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:
-        """Finalize a passthrough invocation once the shim reports results.
-
-        Returns
-        -------
-        Response
-            The recorded response derived from the shim's passthrough result.
-        """
+        """Finalize a passthrough invocation once the shim reports results."""
         double, invocation, resp = self._passthrough_coordinator.finalize_result(result)
         if double.is_recording:
             double.invocations.append(invocation)
@@ -756,12 +757,18 @@ class CmdMox:
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""
         expectations = {n: d.expectation for n, d in self.mocks.items()}
-        inv_map = {n: d.invocations for n, d in self.mocks.items()}
         with self._history_lock:
             verification_log = list(self._verification_log)
+            ordered = list(self._ordered)
+
+        # Count diagnostics must not read the public journal's live entries.
+        inv_map = {
+            name: [inv for inv in verification_log if inv.command == name]
+            for name in expectations
+        }
 
         UnexpectedCommandVerifier().verify(verification_log, self._doubles)
-        OrderVerifier(self._ordered).verify(verification_log)
+        OrderVerifier(ordered).verify(verification_log)
         CountVerifier().verify(expectations, inv_map)
         self._verify_replay_sessions_consumed()
 

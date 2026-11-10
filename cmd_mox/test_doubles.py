@@ -197,17 +197,6 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     # ------------------------------------------------------------------
     # Expectation configuration via delegation
     # ------------------------------------------------------------------
-    def _ensure_in_order(self) -> None:
-        """Register this expectation for ordered verification."""
-        self.controller._assert_orderable(self.name)
-        if self.expectation not in self.controller._ordered:
-            self.controller._ordered.append(self.expectation)
-
-    def _ensure_any_order(self) -> None:
-        """Remove this expectation from ordered verification."""
-        if self.expectation in self.controller._ordered:
-            self.controller._ordered.remove(self.expectation)
-
     def with_args(self, *args: str) -> typ.Self:
         """Require the command to be invoked with *args*.
 
@@ -312,8 +301,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         typ.Self
             This double, for fluent configuration.
         """
-        self.expectation.in_order()
-        self._ensure_in_order()
+        self.controller._register_order(self.expectation)
         return self
 
     def any_order(self) -> typ.Self:
@@ -324,8 +312,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         typ.Self
             This double, for fluent configuration.
         """
-        self.expectation.any_order()
-        self._ensure_any_order()
+        self.controller._unregister_order(self.expectation)
         return self
 
     def passthrough(self) -> typ.Self:
