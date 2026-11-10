@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
+
 import hypothesis.strategies as st
 import pytest
 from hypothesis import given
@@ -48,32 +50,66 @@ _ALL_COMMANDS = [
     "unknown-command",
 ]
 
-#: One row per recognized command: the key its rule retains, an unrelated
-#: benign key, another command's prefix key, and a sensitive key that would
-#: otherwise match the command's rule.
-_COMMAND_ENV_TABLE: list[tuple[str, str, str, str, str]] = [
-    ("git", "GIT_DIR", "UNRELATED_SETTING", "AWS_REGION", "GIT_TOKEN"),
-    ("aws", "AWS_REGION", "UNRELATED_SETTING", "GIT_DIR", "AWS_SECRET_ACCESS_KEY"),
-    (
+
+@dc.dataclass(frozen=True, slots=True)
+class CommandEnvCase:
+    """One command's filtering expectations.
+
+    Attributes
+    ----------
+    command : str
+        The command name passed to :func:`filter_env_subset`.
+    retained : str
+        A key the command's own rule keeps.
+    unrelated : str
+        A benign key no rule keeps.
+    foreign : str
+        Another command's prefix key, which this command must drop.
+    sensitive : str
+        A sensitive key that would otherwise match the command's rule.
+    """
+
+    command: str
+    retained: str
+    unrelated: str
+    foreign: str
+    sensitive: str
+
+
+#: One row per recognized command.
+_COMMAND_ENV_TABLE: list[CommandEnvCase] = [
+    CommandEnvCase("git", "GIT_DIR", "UNRELATED_SETTING", "AWS_REGION", "GIT_TOKEN"),
+    CommandEnvCase(
+        "aws", "AWS_REGION", "UNRELATED_SETTING", "GIT_DIR", "AWS_SECRET_ACCESS_KEY"
+    ),
+    CommandEnvCase(
         "docker",
         "DOCKER_HOST",
         "UNRELATED_SETTING",
         "NPM_CONFIG_CACHE",
         "DOCKER_AUTH_CONFIG",
     ),
-    ("npm", "NPM_CONFIG_CACHE", "UNRELATED_SETTING", "DOCKER_HOST", "NPM_TOKEN"),
-    ("pip", "PIP_INDEX_URL", "UNRELATED_SETTING", "CARGO_HOME", "PIP_PASSWORD"),
-    (
+    CommandEnvCase(
+        "npm", "NPM_CONFIG_CACHE", "UNRELATED_SETTING", "DOCKER_HOST", "NPM_TOKEN"
+    ),
+    CommandEnvCase(
+        "pip", "PIP_INDEX_URL", "UNRELATED_SETTING", "CARGO_HOME", "PIP_PASSWORD"
+    ),
+    CommandEnvCase(
         "cargo",
         "CARGO_HOME",
         "UNRELATED_SETTING",
         "PIP_INDEX_URL",
         "CARGO_REGISTRY_TOKEN",
     ),
-    ("go", "GOPATH", "UNRELATED_SETTING", "GIT_DIR", "GO_TOKEN"),
-    ("rustc", "RUSTC_WRAPPER", "UNRELATED_SETTING", "GOPATH", "RUSTC_TOKEN"),
+    CommandEnvCase("go", "GOPATH", "UNRELATED_SETTING", "GIT_DIR", "GO_TOKEN"),
+    CommandEnvCase(
+        "rustc", "RUSTC_WRAPPER", "UNRELATED_SETTING", "GOPATH", "RUSTC_TOKEN"
+    ),
 ]
-_COMMAND_ENV_CASES = [pytest.param(*row, id=row[0]) for row in _COMMAND_ENV_TABLE]
+_COMMAND_ENV_CASES = [
+    pytest.param(case, id=case.command) for case in _COMMAND_ENV_TABLE
+]
 
 
 class TestFilterEnvSubset:
@@ -280,31 +316,23 @@ class TestFilterEnvSubset:
             assert key not in result, f"{key} should be excluded even when in {label}"
         assert "SAFE_VAR" in result
 
-    @pytest.mark.parametrize(
-        ("command", "retained", "unrelated", "foreign", "sensitive"),
-        _COMMAND_ENV_CASES,
-    )
+    @pytest.mark.parametrize("case", _COMMAND_ENV_CASES)
     def test_command_rules_retain_only_their_own_keys(
-        self,
-        command: str,
-        retained: str,
-        unrelated: str,
-        foreign: str,
-        sensitive: str,
+        self, case: CommandEnvCase
     ) -> None:
         """Each command keeps its own keys and drops everything else."""
         env = {
-            retained: "keep",
-            unrelated: "drop",
-            foreign: "drop",
-            sensitive: "drop",
+            case.retained: "keep",
+            case.unrelated: "drop",
+            case.foreign: "drop",
+            case.sensitive: "drop",
         }
 
-        assert filter_env_subset(env, command=command) == {retained: "keep"}
+        assert filter_env_subset(env, command=case.command) == {case.retained: "keep"}
 
     def test_command_table_covers_every_recognised_command(self) -> None:
         """The table names exactly the commands the filter recognizes."""
-        table_commands = {row[0] for row in _COMMAND_ENV_TABLE}
+        table_commands = {case.command for case in _COMMAND_ENV_TABLE}
         recognised = set(COMMAND_ENV_PREFIXES) | set(COMMAND_ENV_KEYS)
 
         assert table_commands == recognised
