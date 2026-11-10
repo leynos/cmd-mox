@@ -111,6 +111,30 @@ class TestFilterEnvSubset:
         assert "AUTH_CONFIG" not in result
         assert "DOCKER_HOST" in result
 
+    @pytest.mark.parametrize(
+        ("allowlist", "explicit_keys"),
+        [
+            pytest.param(["DOCKER_AUTH_CONFIG"], None, id="allowlist"),
+            pytest.param(None, ["DOCKER_AUTH_CONFIG"], id="explicit_keys"),
+        ],
+    )
+    def test_requested_sensitive_key_is_persisted_raw(
+        self,
+        allowlist: list[str] | None,
+        explicit_keys: list[str] | None,
+    ) -> None:
+        """A request outranks the sensitive rule and stores the raw value."""
+        raw = '{"auths": {"registry.test": {"auth": "opaque"}}}'
+
+        result = filter_env_subset(
+            {"DOCKER_AUTH_CONFIG": raw},
+            command="docker",
+            allowlist=allowlist,
+            explicit_keys=explicit_keys,
+        )
+
+        assert result == {"DOCKER_AUTH_CONFIG": raw}
+
     def test_excludes_system_keys(self) -> None:
         """System-specific keys are excluded."""
         env = {

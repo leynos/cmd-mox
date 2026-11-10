@@ -173,9 +173,10 @@ def filter_env_subset(
         share one precedence and their union is applied.
     explicit_keys : list[str] | None
         Keys requested through ``.with_env()``.  Treated exactly like
-        *allowlist*: an entry in either keyword includes the key.  CmdMox
-        internal keys (``CMOX_*``, ``CMD_MOX_*``) remain excluded even when
-        requested.
+        *allowlist*: an entry in either keyword includes the key.  Requests
+        take precedence over the system and sensitive rules, so a requested
+        sensitive key is persisted raw.  CmdMox internal keys (``CMOX_*``,
+        ``CMD_MOX_*``) remain excluded even when requested.
 
     Returns
     -------
