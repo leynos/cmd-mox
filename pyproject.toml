@@ -556,6 +556,11 @@ full_name = ["cmd_mox.ipc.server._InnerServer"]
 path = "cmd_mox/ipc/server.py"
 reason = "_create_backend instantiates the cached class; Skylos misses the dynamic edge."
 
+[[tool.skylos.dead_code.entrypoints]]
+type = "method"
+full_name = ["cmd_mox.controller.CmdMox._assert_orderable"]
+reason = "CommandDouble._ensure_in_order invokes this controller guard through its controller reference when in_order() is applied; Skylos does not follow the cross-module attribute call."
+
 [tool.skylos.whitelist]
 names = ["bootstrap_shim_path"]
 

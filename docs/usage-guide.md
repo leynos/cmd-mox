@@ -946,7 +946,8 @@ the context-manager API:
   reached). The journal is exposed via `cmd_mox.journal`, a
   `collections.deque[Invocation]` recorded during replay. The bound applies
   only to that diagnostic view: verification uses a separate internal record,
-  so eviction never weakens verification.
+  so eviction never weakens verification. A bounded controller also requires
+  `in_order()` to be applied before a stub's first call.
 - `lifecycle_hint` (default `None`) appends caller-provided guidance to
   `LifecycleError` messages for invalid phase transitions.
 
@@ -961,11 +962,14 @@ assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 The internal verification record retains every mock, spy, unregistered-command
 and ordered-stub call for the whole replay, regardless of
 `max_journal_entries`. Memory savings therefore apply mainly to stub calls;
-mock and spy histories are unbounded in all cases. If `in_order()` is applied
-after a stub call has completed, that call is still recovered from the
-surviving journal during verification. Mutating `cmd_mox.journal` does not
-affect verification. A bounded controller still reports an unexpected call that
-has already been evicted from the journal:
+mock and spy histories are unbounded in all cases. With an unbounded journal
+every call is retained in completion order, so `in_order()` may be applied
+after calls complete. A bounded controller omits unordered stub calls, so
+`in_order()` must be applied to a stub before its first call; applying it later
+raises `ExpectationConfigurationError`. Verification reads only its own
+snapshot copies, so mutating `cmd_mox.journal`, including its order or its
+entries, does not affect verification. A bounded controller still reports an
+unexpected call that has already been evicted from the journal:
 
 ```python
 import shutil

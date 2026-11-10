@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import enum
 import logging
 import os
@@ -17,7 +18,12 @@ from .environment import (
     ensure_dir_exists,
     validate_env_attr,
 )
-from .errors import LifecycleError, MissingEnvironmentError, UnexpectedCommandError
+from .errors import (
+    ExpectationConfigurationError,
+    LifecycleError,
+    MissingEnvironmentError,
+    UnexpectedCommandError,
+)
 from .ipc import (
     CallbackIPCServer,
     CallbackNamedPipeServer,
@@ -83,6 +89,8 @@ class CmdMox:
             Maximum number of invocations retained in the public diagnostic
             ``journal``; when ``None`` the journal is unbounded. Verification
             uses a separate internal record, so eviction never weakens it.
+            Unordered stub calls are not retained by a bounded controller, so
+            ``in_order()`` must be applied before a stub's first call.
         environment:
             Optional :class:`EnvironmentManager` instance used to prepare shim and
             PATH state. When omitted a fresh manager is created automatically.
@@ -110,6 +118,7 @@ class CmdMox:
             raise ValueError(msg)
 
         self._verify_on_exit = verify_on_exit
+        self._max_journal_entries = max_journal_entries
 
         self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque(maxlen=max_journal_entries)
@@ -117,18 +126,14 @@ class CmdMox:
         self._history_lock = threading.Lock()
         self._commands: set[str] = set()
         self._ordered: list[Expectation] = []
+        # Stub commands whose completed calls a bounded journal did not retain.
+        self._discarded_stub_calls: set[str] = set()
 
     # ------------------------------------------------------------------
     # Double accessors
     # ------------------------------------------------------------------
     def _doubles_of_kind(self, kind: DoubleKind) -> dict[str, CommandDouble]:
-        """Return the registered doubles whose kind is *kind*.
-
-        Returns
-        -------
-        dict[str, CommandDouble]
-            A new mapping holding only doubles of the requested kind.
-        """
+        """Return a new mapping of the doubles whose kind is *kind*."""
         return {name: dbl for name, dbl in self._doubles.items() if dbl.kind is kind}
 
     @property
@@ -182,13 +187,7 @@ class CmdMox:
     # Internal helper accessors
     # ------------------------------------------------------------------
     def _registered_commands(self) -> set[str]:
-        """Return all commands registered via doubles.
-
-        Returns
-        -------
-        set[str]
-            The names of every registered double.
-        """
+        """Return the names of every registered double."""
         return set(self._doubles)
 
     # ------------------------------------------------------------------
@@ -299,14 +298,7 @@ class CmdMox:
         create_shim_symlinks(shim_path.parent, [name])
 
     def _get_replay_shim_path(self, name: str) -> Path | None:
-        """Return the target shim path when replay shims are writable.
-
-        Returns
-        -------
-        Path or None
-            The shim path for *name*, or ``None`` when no shim directory has
-            been prepared.
-        """
+        """Return the shim path for *name*, or ``None`` when none is prepared."""
         env = self.environment
         if env is None or env.shim_dir is None:
             return None
@@ -532,18 +524,42 @@ class CmdMox:
         return resp
 
     def _needs_verification_record(self, invocation: Invocation) -> bool:
-        """Return whether verification relies on *invocation*."""
+        """Return whether verification must retain *invocation*."""
+        if self._max_journal_entries is None:
+            return True
         double = self._doubles.get(invocation.command)
         if double is None or double.kind is not DoubleKind.STUB:
             return True
         return any(exp is double.expectation for exp in self._ordered)
 
+    def _assert_orderable(self, name: str) -> None:
+        """Reject late ordering when a bounded journal dropped stub calls.
+
+        Raises
+        ------
+        ExpectationConfigurationError
+            If *name*'s completed calls were not retained for verification.
+        """
+        with self._history_lock:
+            discarded = name in self._discarded_stub_calls
+        if discarded:
+            msg = (
+                f"Cannot mark {name!r} in_order() after its calls were discarded; "
+                "configure ordering before replay or raise max_journal_entries"
+            )
+            raise ExpectationConfigurationError(msg)
+
     def _record_completed_invocation(self, invocation: Invocation) -> None:
         """Append a completed invocation to both records under one lock."""
+        snapshot = dc.replace(
+            invocation, args=list(invocation.args), env=dict(invocation.env)
+        )
         with self._history_lock:
             self.journal.append(invocation)
             if self._needs_verification_record(invocation):
-                self._verification_log.append(invocation)
+                self._verification_log.append(snapshot)
+            else:
+                self._discarded_stub_calls.add(invocation.command)
 
     def _handle_invocation(self, invocation: Invocation) -> Response:
         """Record *invocation* and return the configured response.
@@ -633,13 +649,7 @@ class CmdMox:
         return f"{message}; {self._lifecycle_hint}"
 
     def _require_env_attrs(self, *attrs: str) -> None:
-        """Ensure all referenced ``EnvironmentManager`` attributes exist.
-
-        Raises
-        ------
-        MissingEnvironmentError
-            If the environment manager is absent or any *attrs* is unset.
-        """
+        """Ensure all referenced ``EnvironmentManager`` attributes exist."""
         env = self.environment
         if env is None:  # pragma: no cover - defensive guard
             raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
@@ -684,18 +694,7 @@ class CmdMox:
         self._require_replay_environment()
 
     def _validate_replay_environment(self) -> tuple[Path, Path]:
-        """Ensure the replay environment is fully prepared.
-
-        Returns
-        -------
-        tuple[Path, Path]
-            A tuple containing the shim directory and socket path.
-
-        Raises
-        ------
-        MissingEnvironmentError
-            If the environment manager or required paths are missing.
-        """
+        """Return the prepared shim directory and socket path."""
         env = self.environment
         if env is None:
             raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
@@ -711,14 +710,7 @@ class CmdMox:
         return shim_dir, Path(env.socket_path)
 
     def _is_environment_initialized(self) -> bool:
-        """Check if environment manager is properly initialized.
-
-        Returns
-        -------
-        bool
-            ``True`` when the manager exists with a shim directory and socket
-            path.
-        """
+        """Return whether the environment has a shim directory and socket path."""
         env = self.environment
         return (
             env is not None and env.shim_dir is not None and env.socket_path is not None
@@ -735,6 +727,7 @@ class CmdMox:
         with self._history_lock:
             self.journal.clear()
             self._verification_log.clear()
+            self._discarded_stub_calls.clear()
         self._commands = self._registered_commands() | self._commands
         if not self._entered and not self._is_environment_initialized():
             msg = "Environment manager not initialised"
@@ -765,10 +758,7 @@ class CmdMox:
         expectations = {n: d.expectation for n, d in self.mocks.items()}
         inv_map = {n: d.invocations for n, d in self.mocks.items()}
         with self._history_lock:
-            surviving = {id(inv) for inv in self.journal}
-            verification_log = [
-                inv for inv in self._verification_log if id(inv) not in surviving
-            ] + [inv for inv in self.journal if self._needs_verification_record(inv)]
+            verification_log = list(self._verification_log)
 
         UnexpectedCommandVerifier().verify(verification_log, self._doubles)
         OrderVerifier(self._ordered).verify(verification_log)

@@ -120,6 +120,11 @@ _MAKEUTIL_INSTALL_TOKENS: typ.Final = (
 )
 EXPECTED_WHITELIST_NAMES = frozenset({"bootstrap_shim_path"})
 EXPECTED_ENTRYPOINT_REASONS = {
+    "cmd_mox.controller.CmdMox._assert_orderable": (
+        "CommandDouble._ensure_in_order invokes this controller guard through "
+        "its controller reference when in_order() is applied; Skylos does not "
+        "follow the cross-module attribute call."
+    ),
     "cmd_mox.environment._Win32Function.argtypes": (
         "_get_short_path assigns this ctypes argument signature to "
         "GetShortPathNameW through the typed protocol."
@@ -199,6 +204,7 @@ EXPECTED_ENTRYPOINT_REASONS = {
     ),
 }
 EXPECTED_ENTRYPOINT_TYPES = {
+    "cmd_mox.controller.CmdMox._assert_orderable": "method",
     "cmd_mox.environment._Win32Function.argtypes": "variable",
     "cmd_mox.environment._Win32Function.restype": "variable",
     "cmd_mox.ipc._server_core._BaseIPCServer._export_environment": "method",

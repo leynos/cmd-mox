@@ -1217,10 +1217,13 @@ appending non-passthrough invocations to the journal, so those entries also
 contain the resulting `stdout`, `stderr`, and `exit_code`. Passthrough
 invocations are appended after the shim reports their command results.
 `verify()` does not read the bounded diagnostic journal directly. It uses a
-separate internal verification record that retains mock, spy,
-unregistered-command and ordered-stub calls for the whole replay, so a bounded
-journal cannot hide a discrepancy. The record shares the journal's completion
-order and is cleared with it when replay starts.
+separate internal verification record of immutable snapshots that retains mock,
+spy, unregistered-command and ordered-stub calls for the whole replay, so a
+bounded journal cannot hide a discrepancy, and mutating the public journal
+cannot alter verification. The record shares the journal's completion order and
+is cleared with it when replay starts. An unbounded journal retains every call,
+so `in_order()` may be applied after calls complete; a bounded controller
+discards unordered stub calls and rejects late `in_order()` for them.
 
 ## IV. Feature Deep Dive: Stubbing
 
@@ -2035,12 +2038,15 @@ unregistered-command calls, plus calls to ordered stubs. Unordered stub calls
 are omitted, so the memory saving from `max_journal_entries` applies mainly to
 stub traffic. Both records are appended under one lock at the same completion
 point, which keeps their order identical, and both are cleared together when
-replay starts. Verification takes one snapshot under the lock, composed of
-retained entries that the journal has evicted plus surviving journal entries
-that verification needs. Composing the two keeps calls that completed before
-`in_order()` was applied available to `OrderVerifier`. The snapshot is passed to
-`UnexpectedCommandVerifier` and `OrderVerifier`, so evicting a diagnostic
-journal entry never weakens verification.
+replay starts. The verification record stores immutable snapshots, so mutating
+the public journal, including its order or its entries, cannot change
+verification. Verification takes one snapshot of that record under the lock and
+passes it to `UnexpectedCommandVerifier` and `OrderVerifier`, so evicting a
+diagnostic journal entry never weakens verification. An unbounded journal
+retains every call, which keeps calls that completed before `in_order()` was
+applied available to `OrderVerifier`. A bounded controller discards unordered
+stub calls, so it rejects `in_order()` applied after a stub's first call with
+`ExpectationConfigurationError`.
 
 ### 8.9 Design Decisions for Documentation and Examples
 

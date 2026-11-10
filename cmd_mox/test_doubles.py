@@ -199,6 +199,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     # ------------------------------------------------------------------
     def _ensure_in_order(self) -> None:
         """Register this expectation for ordered verification."""
+        self.controller._assert_orderable(self.name)
         if self.expectation not in self.controller._ordered:
             self.controller._ordered.append(self.expectation)
 
