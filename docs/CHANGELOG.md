@@ -27,7 +27,7 @@ _If you are upgrading: please see the
 - Publish the source distribution alongside the wheel, and attach both with
   their provenance bundle to GitHub Releases ([#340])
 - Rename the usage guide to the user's guide, rework it from first test to
-  expert use, and execute every published example in the test suite
+  expert use, and execute every published example in the test suite ([#392])
 
 ### Added
 
@@ -44,7 +44,7 @@ _If you are upgrading: please see the
   `CmdMox(lifecycle_hint=...)` option ([#260])
 - Emit bounded, structured IPC observability events with correlation
   identifiers ([#229])
-- Add a 0.3.0 migration guide and this changelog
+- Add a 0.3.0 migration guide and this changelog ([#392])
 
 ### Removed
 
@@ -114,3 +114,4 @@ _Initial release._
 [#348]: https://github.com/leynos/cmd-mox/pull/348
 [#349]: https://github.com/leynos/cmd-mox/pull/349
 [#361]: https://github.com/leynos/cmd-mox/pull/361
+[#392]: https://github.com/leynos/cmd-mox/pull/392
