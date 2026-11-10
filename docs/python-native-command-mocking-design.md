@@ -2282,7 +2282,10 @@ sequenceDiagram
     RealCommand-->>Passthrough: stdout, stderr, exit_code
     Passthrough-->>CommandDouble: result
     Passthrough->>RecordingSession: record(invocation, response)
-    RecordingSession->>RecordingSession: scrub + env_subset
+    RecordingSession->>RecordingSession: env_subset
+    opt scrubber is not None
+        RecordingSession->>RecordingSession: scrub
+    end
     RecordingSession->>FixtureStore: append_recording()
     CommandDouble-->>TestCode: response
 
