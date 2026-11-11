@@ -28,6 +28,33 @@ def _complete_passthrough(mox: CmdMox, directive: PassthroughRequest) -> None:
     )
 
 
+def _record_env_subset(
+    tmp_path: Path,
+    *,
+    command: str,
+    with_env: dict[str, str] | None = None,
+    invocation_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Record one passthrough and return the resulting ``env_subset``."""
+    fixture_path = tmp_path / "fixture.json"
+    with CmdMox() as mox:
+        spy = mox.spy(command)
+        if with_env:
+            spy = spy.with_env(with_env)
+        spy = spy.passthrough().record(fixture_path)
+        invocation = Invocation(
+            command=command, args=["status"], stdin="", env=invocation_env or {}
+        )
+        response = mox._prepare_passthrough(spy, invocation)
+        directive = response.passthrough
+        assert directive is not None
+
+        _complete_passthrough(mox, directive)
+
+    assert spy._recording_session is not None
+    return spy._recording_session._recordings[0].env_subset
+
+
 class TestPassthroughRecording:
     """Tests for PassthroughCoordinator recording integration."""
 
@@ -166,83 +193,40 @@ class TestPassthroughRecording:
         self, tmp_path: Path
     ) -> None:
         """A ``.with_env()`` key is recorded even without the tool's prefix."""
-        fixture_path = tmp_path / "fixture.json"
-        with CmdMox() as mox:
-            spy = (
-                mox
-                .spy("git")
-                .with_env({"CUSTOM_KEY": "custom"})
-                .passthrough()
-                .record(fixture_path)
-            )
-            invocation = Invocation(
-                command="git",
-                args=["status"],
-                stdin="",
-                env={"CUSTOM_KEY": "custom", "GIT_DIR": ".git"},
-            )
-            response = mox._prepare_passthrough(spy, invocation)
-            directive = response.passthrough
-            assert directive is not None
+        env_subset = _record_env_subset(
+            tmp_path,
+            command="git",
+            with_env={"CUSTOM_KEY": "custom"},
+            invocation_env={"CUSTOM_KEY": "custom", "GIT_DIR": ".git"},
+        )
 
-            _complete_passthrough(mox, directive)
-
-        assert spy._recording_session is not None
-        assert spy._recording_session._recordings[0].env_subset == {
-            "CUSTOM_KEY": "custom",
-            "GIT_DIR": ".git",
-        }
+        assert env_subset == {"CUSTOM_KEY": "custom", "GIT_DIR": ".git"}
 
     def test_known_prefix_sensitive_with_env_key_is_recorded(
         self, tmp_path: Path
     ) -> None:
         """An explicitly requested sensitive key survives the sensitivity rule."""
-        fixture_path = tmp_path / "fixture.json"
-        with CmdMox() as mox:
-            spy = (
-                mox
-                .spy("git")
-                .with_env({"GIT_TOKEN": "s3cr3t"})
-                .passthrough()
-                .record(fixture_path)
-            )
-            invocation = Invocation(
-                command="git",
-                args=["status"],
-                stdin="",
-                env={"GIT_AUTHOR_NAME": "Ada"},
-            )
-            response = mox._prepare_passthrough(spy, invocation)
-            directive = response.passthrough
-            assert directive is not None
+        env_subset = _record_env_subset(
+            tmp_path,
+            command="git",
+            with_env={"GIT_TOKEN": "s3cr3t"},
+            invocation_env={"GIT_AUTHOR_NAME": "Ada"},
+        )
 
-            _complete_passthrough(mox, directive)
-
-        assert spy._recording_session is not None
-        assert spy._recording_session._recordings[0].env_subset == {
+        assert env_subset == {
             "GIT_TOKEN": "s3cr3t",
             "GIT_AUTHOR_NAME": "Ada",
         }
 
     def test_unknown_command_records_no_unrequested_keys(self, tmp_path: Path) -> None:
         """Passthrough recording uses the restrictive unknown-command default."""
-        fixture_path = tmp_path / "fixture.json"
-        with CmdMox() as mox:
-            spy = mox.spy("greet").passthrough().record(fixture_path)
-            invocation = Invocation(
-                command="greet",
-                args=[],
-                stdin="",
-                env={"HOSTISH_VALUE": "host", "MY_SETTING": "enabled"},
-            )
-            response = mox._prepare_passthrough(spy, invocation)
-            directive = response.passthrough
-            assert directive is not None
+        env_subset = _record_env_subset(
+            tmp_path,
+            command="greet",
+            invocation_env={"HOSTISH_VALUE": "host", "MY_SETTING": "enabled"},
+        )
 
-            _complete_passthrough(mox, directive)
-
-        assert spy._recording_session is not None
-        assert spy._recording_session._recordings[0].env_subset == {}
+        assert env_subset == {}
 
     def test_with_env_snapshot_survives_expectation_mutation(
         self, tmp_path: Path
