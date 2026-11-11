@@ -111,6 +111,129 @@ _COMMAND_ENV_CASES = [
     pytest.param(case, id=case.command) for case in _COMMAND_ENV_TABLE
 ]
 
+#: Hand-written copy of the Go variables documented by ``go help environment``
+#: and ``go doc runtime``.  Written independently of :data:`GO_ENV_KEYS` so a
+#: name dropped from the production set fails a test instead of silently
+#: redefining the expected list.
+_EXPECTED_GO_ENV_KEYS = frozenset({
+    "GO111MODULE",
+    "GO386",
+    "GOAMD64",
+    "GOARCH",
+    "GOARM",
+    "GOARM64",
+    "GOAUTH",
+    "GOBIN",
+    "GOCACHE",
+    "GOCACHEPROG",
+    "GOCOVERDIR",
+    "GODEBUG",
+    "GOENV",
+    "GOEXPERIMENT",
+    "GO_EXTLINK_ENABLED",
+    "GOFIPS140",
+    "GOFLAGS",
+    "GOGC",
+    "GOINSECURE",
+    "GOMAXPROCS",
+    "GOMEMLIMIT",
+    "GOMIPS",
+    "GOMIPS64",
+    "GOMODCACHE",
+    "GONOPROXY",
+    "GONOSUMDB",
+    "GOOS",
+    "GOPATH",
+    "GOPPC64",
+    "GOPRIVATE",
+    "GOPROXY",
+    "GORACE",
+    "GORISCV64",
+    "GOROOT",
+    "GOSUMDB",
+    "GOTMPDIR",
+    "GOTOOLCHAIN",
+    "GOTRACEBACK",
+    "GOVCS",
+    "GOWASM",
+    "GOWORK",
+})
+
+
+class TestGoEnvironmentRule:
+    """Tests for the exact-name rule that replaced Go's ``GO`` prefix."""
+
+    def test_go_env_keys_match_the_documented_list(self) -> None:
+        """The production set matches the independently written Go list."""
+        assert GO_ENV_KEYS == _EXPECTED_GO_ENV_KEYS, (
+            "GO_ENV_KEYS diverged from the documented Go variables: "
+            f"missing {sorted(_EXPECTED_GO_ENV_KEYS - GO_ENV_KEYS)}, "
+            f"unexpected {sorted(GO_ENV_KEYS - _EXPECTED_GO_ENV_KEYS)}"
+        )
+
+    def test_go_retains_every_documented_variable(self) -> None:
+        """Go's exact-name rule keeps the whole documented list and no lookalikes."""
+        env = dict.fromkeys(_EXPECTED_GO_ENV_KEYS, "keep")
+        env.update({
+            "GOOGLE_CLOUD_PROJECT": "drop",
+            "GOLDEN_FLAG": "drop",
+            "CGO_CFLAGS": "drop",
+        })
+
+        result = filter_env_subset(env, command="go")
+
+        assert set(result) == _EXPECTED_GO_ENV_KEYS, (
+            "go should retain every documented variable and drop lookalikes: "
+            f"{sorted(_EXPECTED_GO_ENV_KEYS - set(result))} were dropped"
+        )
+
+    def test_go_does_not_record_google_cloud_project(self) -> None:
+        """The issue #432 regression: ``GO`` must not match ``GOOGLE_*``."""
+        env = {"GOOGLE_CLOUD_PROJECT": "x", "GOPATH": "y"}
+
+        assert filter_env_subset(env, command="go") == {"GOPATH": "y"}, (
+            "the go rule must not match GOOGLE_* names"
+        )
+
+    @pytest.mark.parametrize(
+        ("allowlist", "explicit_keys", "key"),
+        [
+            pytest.param(
+                ["GOOGLE_CLOUD_PROJECT"],
+                None,
+                "GOOGLE_CLOUD_PROJECT",
+                id="allowlist",
+            ),
+            pytest.param(
+                None,
+                ["CGO_CFLAGS"],
+                "CGO_CFLAGS",
+                id="explicit_keys",
+            ),
+        ],
+    )
+    def test_requested_keys_readmit_go_lookalikes(
+        self,
+        allowlist: list[str] | None,
+        explicit_keys: list[str] | None,
+        key: str,
+    ) -> None:
+        """Either override keyword re-admits a key the Go rule rejects."""
+        result = filter_env_subset(
+            {key: "x"},
+            command="go",
+            allowlist=allowlist,
+            explicit_keys=explicit_keys,
+        )
+
+        assert result == {key: "x"}, f"{key} should be re-admitted when requested"
+
+    def test_go_exact_names_are_not_sensitive(self) -> None:
+        """Every documented Go variable survives the sensitivity classifier."""
+        sensitive = [key for key in GO_ENV_KEYS if is_sensitive_recording_env_key(key)]
+
+        assert not sensitive, sensitive
+
 
 class TestFilterEnvSubset:
     """Tests for filter_env_subset()."""
@@ -363,78 +486,6 @@ class TestFilterEnvSubset:
             f"{command} should retain {retained} and drop the other keys"
         )
 
-    def test_go_retains_only_documented_variables(self) -> None:
-        """Go's exact-name rule keeps documented names and drops lookalikes."""
-        retained = [
-            "GOPATH",
-            "GOFLAGS",
-            "GOOS",
-            "GOAUTH",
-            "GODEBUG",
-            "GOCACHEPROG",
-            "GO_EXTLINK_ENABLED",
-            "GORACE",
-        ]
-        env = dict.fromkeys(retained, "keep")
-        env.update({
-            "GOOGLE_CLOUD_PROJECT": "drop",
-            "GOLDEN_FLAG": "drop",
-            "CGO_CFLAGS": "drop",
-        })
-
-        result = filter_env_subset(env, command="go")
-
-        assert result == dict.fromkeys(retained, "keep"), (
-            f"go should retain {sorted(retained)} and drop the lookalikes"
-        )
-
-    def test_go_does_not_record_google_cloud_project(self) -> None:
-        """The issue #432 regression: ``GO`` must not match ``GOOGLE_*``."""
-        env = {"GOOGLE_CLOUD_PROJECT": "x", "GOPATH": "y"}
-
-        assert filter_env_subset(env, command="go") == {"GOPATH": "y"}, (
-            "the go rule must not match GOOGLE_* names"
-        )
-
-    @pytest.mark.parametrize(
-        ("allowlist", "explicit_keys", "key"),
-        [
-            pytest.param(
-                ["GOOGLE_CLOUD_PROJECT"],
-                None,
-                "GOOGLE_CLOUD_PROJECT",
-                id="allowlist",
-            ),
-            pytest.param(
-                None,
-                ["CGO_CFLAGS"],
-                "CGO_CFLAGS",
-                id="explicit_keys",
-            ),
-        ],
-    )
-    def test_requested_keys_readmit_go_lookalikes(
-        self,
-        allowlist: list[str] | None,
-        explicit_keys: list[str] | None,
-        key: str,
-    ) -> None:
-        """Either override keyword re-admits a key the Go rule rejects."""
-        result = filter_env_subset(
-            {key: "x"},
-            command="go",
-            allowlist=allowlist,
-            explicit_keys=explicit_keys,
-        )
-
-        assert result == {key: "x"}, f"{key} should be re-admitted when requested"
-
-    def test_go_exact_names_are_not_sensitive(self) -> None:
-        """Every documented Go variable survives the sensitivity classifier."""
-        sensitive = [key for key in GO_ENV_KEYS if is_sensitive_recording_env_key(key)]
-
-        assert not sensitive, sensitive
-
     def test_unknown_command_uses_permissive_fallback(self) -> None:
         """An unrecognized command keeps every non-excluded key."""
         env = {"GIT_DIR": "x", "APP_MODE": "y", "PATH": "/usr/bin"}
@@ -537,3 +588,27 @@ def test_allowlist_and_explicit_keys_are_equivalent_when_unioned(
     assert separate == as_allowlist == as_explicit, (
         "the two override keywords should be equivalent to their union"
     )
+
+
+@given(env=_ENVS, allowlist=_KEY_LISTS)
+def test_go_keeps_only_documented_or_requested_names(
+    env: dict[str, str],
+    allowlist: list[str],
+) -> None:
+    """The Go rule admits documented names and explicitly requested keys.
+
+    Invariant: an undocumented Go key survives only when requested, every
+    documented name present in *env* survives, and each request re-admits its
+    key unless it is CmdMox-internal.
+    """
+    requested = set(allowlist)
+    retained = set(filter_env_subset(env, command="go", allowlist=allowlist))
+
+    undocumented = retained - GO_ENV_KEYS - requested
+    assert not undocumented, undocumented
+
+    documented = set(env) & GO_ENV_KEYS
+    assert documented <= retained, sorted(documented - retained)
+
+    internal = {key for key in requested if key.startswith(("CMOX_", "CMD_MOX_"))}
+    assert (requested & set(env)) - internal <= retained

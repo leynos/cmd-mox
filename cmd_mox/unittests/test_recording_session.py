@@ -316,3 +316,59 @@ class TestRecordingSessionThreadSafety:
         assert len(session._recordings) == 10
         sequences = sorted(r.sequence for r in session._recordings)
         assert sequences == list(range(10))
+
+
+class TestRecordingSessionEnvironmentFiltering:
+    """End-to-end tests for the environment subset persisted by a session."""
+
+    @staticmethod
+    def _record_go_session(
+        path: Path,
+        *,
+        env_allowlist: list[str] | None = None,
+    ) -> FixtureFile:
+        """Record one Go invocation, finalize, and reload the saved fixture."""
+        session = RecordingSession(path, env_allowlist=env_allowlist)
+        session.start()
+        session.record(
+            _make_invocation(
+                command="go",
+                env={
+                    "GOPATH": "/work",
+                    "GORACE": "halt_on_error=1",
+                    "GOOGLE_CLOUD_PROJECT": "proj",
+                    "PATH": "/usr/bin",
+                },
+            ),
+            _make_response(),
+        )
+        session.finalize()
+        return FixtureFile.load(path)
+
+    def test_go_recording_keeps_documented_names_and_drops_lookalikes(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A saved Go recording keeps documented names, not GOOGLE_* names."""
+        fixture = self._record_go_session(tmp_path / "go.json")
+
+        assert fixture.recordings[0].env_subset == {
+            "GOPATH": "/work",
+            "GORACE": "halt_on_error=1",
+        }, "a Go recording should keep GOPATH and GORACE, not GOOGLE_CLOUD_PROJECT"
+
+    def test_go_recording_keeps_allowlisted_lookalike(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """An allowlisted lookalike is persisted in the saved fixture."""
+        fixture = self._record_go_session(
+            tmp_path / "go-allow.json",
+            env_allowlist=["GOOGLE_CLOUD_PROJECT"],
+        )
+
+        assert fixture.recordings[0].env_subset == {
+            "GOPATH": "/work",
+            "GORACE": "halt_on_error=1",
+            "GOOGLE_CLOUD_PROJECT": "proj",
+        }, "an allowlisted lookalike should be recorded alongside the Go names"

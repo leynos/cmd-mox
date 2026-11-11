@@ -8,9 +8,13 @@ Section 9.9.2.
 
 from __future__ import annotations
 
+import types
 import typing as typ
 
 from cmd_mox.domain import is_sensitive_recording_env_key
+
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
 
 # System-specific keys that are excluded by default.
 EXCLUDED_SYSTEM_KEYS: typ.Final[frozenset[str]] = frozenset({
@@ -88,10 +92,14 @@ GO_ENV_KEYS: typ.Final[frozenset[str]] = frozenset({
 })
 
 # Known command-specific exact names: command name -> accepted env var names.
-# Commands absent from this mapping use their prefix rule instead.
-COMMAND_ENV_KEYS: typ.Final[dict[str, frozenset[str]]] = {
-    "go": GO_ENV_KEYS,
-}
+# Commands absent from this mapping use their prefix rule instead.  The
+# mapping is read-only so importing code cannot widen the accepted set at
+# runtime; ``Final`` alone does not prevent mutation of a plain ``dict``.
+COMMAND_ENV_KEYS: typ.Final[cabc.Mapping[str, frozenset[str]]] = (
+    types.MappingProxyType({
+        "go": GO_ENV_KEYS,
+    })
+)
 
 
 def _is_cmox_internal(key: str) -> bool:
