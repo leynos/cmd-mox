@@ -7,6 +7,8 @@ import typing as typ
 from types import SimpleNamespace
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cmd_mox.comparators import (
     Any as AnyComparator,
@@ -26,6 +28,8 @@ from cmd_mox.verifiers import UnexpectedCommandVerifier
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
+
+    from cmd_mox.expectations import ArgMatcher
 
 
 @pytest.mark.parametrize(
@@ -247,6 +251,90 @@ def test_expectation_with_literal_only_matchers() -> None:
     differing = Invocation(command="git", args=["clone", "other"], stdin="", env={})
     assert exp.matches(matching), "identical literals should match"
     assert not exp.matches(differing), "different literals must not match"
+
+
+@pytest.mark.parametrize("argument", ["clon", "clone-extra", "lone", "c"])
+def test_expectation_literal_matcher_rejects_partial_matches(
+    argument: str,
+) -> None:
+    """Literal matchers must not accept prefixes, suffixes, or substrings."""
+    exp = Expectation("git").with_matching_args("clone")
+    inv = Invocation(command="git", args=[argument], stdin="", env={})
+    assert not exp.matches(inv), "literal matching must be exact equality"
+
+
+def test_expectation_mixed_matchers_reject_partial_literal() -> None:
+    """A literal inside a mixed matcher list still requires exact equality."""
+    exp = Expectation("git").with_matching_args("clone", AnyComparator())
+    inv = Invocation(
+        command="git",
+        args=["clone-extra", "https://example.com/repo.git"],
+        stdin="",
+        env={},
+    )
+    assert exp.explain_mismatch(inv) == "arg[0]='clone-extra' != 'clone'", (
+        "the first literal mismatch should be reported"
+    )
+
+
+@st.composite
+def _literal_and_callable_matchers(draw: st.DrawFn) -> list[ArgMatcher]:
+    """Generate literal strings and deterministic equality predicates."""
+    matchers: list[ArgMatcher] = []
+    for _ in range(draw(st.integers(min_value=0, max_value=4))):
+        literal = draw(st.text())
+        if draw(st.booleans()):
+            matchers.append(literal)
+        else:
+
+            def accepts(value: str, expected: str = literal) -> bool:
+                """Accept only the generated literal."""
+                return value == expected
+
+            matchers.append(accepts)
+    return matchers
+
+
+@given(
+    matchers=_literal_and_callable_matchers(),
+    args=st.lists(st.text(), max_size=5),
+)
+def test_expectation_mixed_matchers_report_first_failing_position(
+    matchers: list[ArgMatcher],
+    args: list[str],
+) -> None:
+    """Matching requires equal arity and acceptance at every position."""
+    exp = Expectation("cmd").with_matching_args(*matchers)
+    inv = Invocation(command="cmd", args=args, stdin="", env={})
+
+    if len(args) != len(matchers):
+        assert not exp.matches(inv), "an arity mismatch must not match"
+        assert exp.explain_mismatch(inv) == (
+            f"expected {len(matchers)} args but got {len(args)}"
+        ), "arity mismatch should be reported before any position"
+        return
+
+    def accepts(matcher: ArgMatcher, value: str) -> bool:
+        """Return whether *matcher* accepts *value*."""
+        if isinstance(matcher, str):
+            return matcher == value
+        return bool(matcher(value))
+
+    first_failure = next(
+        (
+            index
+            for index, (matcher, arg) in enumerate(zip(matchers, args, strict=True))
+            if not accepts(matcher, arg)
+        ),
+        None,
+    )
+    assert exp.matches(inv) is (first_failure is None), (
+        "matching must agree with per-position acceptance"
+    )
+    if first_failure is not None:
+        assert exp.explain_mismatch(inv).startswith(f"arg[{first_failure}]"), (
+            "the first failing position should be reported"
+        )
 
 
 def test_expectation_literal_matcher_arity_takes_precedence() -> None:
