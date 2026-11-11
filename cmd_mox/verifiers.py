@@ -237,20 +237,30 @@ class UnexpectedCommandVerifier:
         self,
         journal: cabc.Iterable[Invocation],
         doubles: cabc.Mapping[str, CommandDouble],
+        dispatch_doubles: cabc.Iterable[CommandDouble | None] | None = None,
     ) -> None:
-        """Raise if *journal* contains calls not matching registered doubles."""
+        """Raise if *journal* contains calls not matching registered doubles.
+
+        ``dispatch_doubles`` aligns with *journal* and records the double each
+        call was actually dispatched to, so a double registered later cannot
+        retroactively claim an earlier call. When omitted, the current mapping
+        is used for every call.
+        """
+        invocations = list(journal)
+        if dispatch_doubles is None:
+            dispatch_doubles = [doubles.get(inv.command) for inv in invocations]
         mock_counts: dict[str, int] = defaultdict(int)
-        for inv in journal:
-            self._process_single_invocation(inv, doubles, mock_counts)
+        for inv, dbl in zip(invocations, dispatch_doubles, strict=True):
+            self._process_single_invocation(inv, dbl, doubles, mock_counts)
 
     def _process_single_invocation(
         self,
         inv: Invocation,
+        dbl: CommandDouble | None,
         doubles: cabc.Mapping[str, CommandDouble],
         mock_counts: dict[str, int],
     ) -> None:
-        """Check one invocation against its double, skipping stubs."""
-        dbl = doubles.get(inv.command)
+        """Check one invocation against the double it was dispatched to."""
         if dbl is None:
             self._raise_unregistered_command_error(inv, doubles)
             return

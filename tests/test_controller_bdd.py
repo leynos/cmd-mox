@@ -281,6 +281,15 @@ def test_journal_prunes_excess_entries() -> None:
 
 
 @scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "bounded journal still reports an evicted unexpected command",
+)
+def test_bounded_journal_reports_evicted_unexpected_command() -> None:
+    """Verification still reports an unexpected call evicted from the journal."""
+    pass
+
+
+@scenario(
     str(FEATURES_DIR / "controller.feature"), "invalid max journal size is rejected"
 )
 def test_invalid_max_journal_size_is_rejected() -> None:

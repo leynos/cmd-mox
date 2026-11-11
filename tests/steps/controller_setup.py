@@ -74,6 +74,12 @@ def create_controller_with_limit(size: int) -> cabc.Generator[CmdMox, None, None
             mox.__exit__(None, None, None)
 
 
+@given(parsers.cfparse('the command "{cmd}" is registered without a double'))
+def register_command_without_double(mox: CmdMox, cmd: str) -> None:
+    """Register *cmd* so its shim routes to the controller without a double."""
+    mox.register_command(cmd)
+
+
 @given(
     parsers.cfparse("creating a CmdMox controller with max journal size {size:d} fails")
 )

@@ -120,6 +120,12 @@ _MAKEUTIL_INSTALL_TOKENS: typ.Final = (
 )
 EXPECTED_WHITELIST_NAMES = frozenset({"bootstrap_shim_path"})
 EXPECTED_ENTRYPOINT_REASONS = {
+    "cmd_mox.controller.CmdMox._register_order": (
+        "CommandDouble.in_order calls this controller registration; Skylos misses it."
+    ),
+    "cmd_mox.controller.CmdMox._unregister_order": (
+        "CommandDouble.any_order calls this controller registration; Skylos misses it."
+    ),
     "cmd_mox.environment._Win32Function.argtypes": (
         "_get_short_path assigns this ctypes argument signature to "
         "GetShortPathNameW through the typed protocol."
@@ -199,6 +205,8 @@ EXPECTED_ENTRYPOINT_REASONS = {
     ),
 }
 EXPECTED_ENTRYPOINT_TYPES = {
+    "cmd_mox.controller.CmdMox._register_order": "method",
+    "cmd_mox.controller.CmdMox._unregister_order": "method",
     "cmd_mox.environment._Win32Function.argtypes": "variable",
     "cmd_mox.environment._Win32Function.restype": "variable",
     "cmd_mox.ipc._server_core._BaseIPCServer._export_environment": "method",
