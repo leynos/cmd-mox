@@ -51,6 +51,105 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.env == {"PATH": "/usr/bin"}
 
 
+def _unrecorded_commands(
+    coordinator: PassthroughCoordinator, double: CommandDouble
+) -> list[str]:
+    """Return the commands of *double*'s unrecorded invocations."""
+    return [
+        invocation.command
+        for pending_double, invocation in coordinator.unrecorded_invocations()
+        if pending_double is double
+    ]
+
+
+def test_unrecorded_invocations_are_scoped_to_the_double() -> None:
+    """Only the requested double's unrecorded invocations are returned."""
+    coordinator = PassthroughCoordinator()
+    first = typ.cast("CommandDouble", _FakeDouble({}))
+    second = typ.cast("CommandDouble", _FakeDouble({}))
+    config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
+
+    first_response = coordinator.prepare_request(first, _make_invocation("one"), config)
+    coordinator.prepare_request(second, _make_invocation("two"), config)
+
+    assert _unrecorded_commands(coordinator, first) == ["one"]
+
+    directive = first_response.passthrough
+    assert directive is not None
+    coordinator.finalize_result(
+        PassthroughResult(
+            invocation_id=directive.invocation_id,
+            stdout="",
+            stderr="",
+            exit_code=0,
+        )
+    )
+
+    # Finalisation alone does not remove the call: the controller records it
+    # afterwards, and verification must still see it until then.
+    assert _unrecorded_commands(coordinator, first) == ["one"]
+
+    coordinator.mark_recorded(directive.invocation_id)
+    assert _unrecorded_commands(coordinator, first) == []
+
+
+def test_expired_invocation_stays_unrecorded_after_pruning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pruning a pending entry leaves the expired call countable."""
+    now = 100.0
+
+    def fake_monotonic() -> float:
+        """Return the test's current monotonic time."""
+        return now
+
+    monkeypatch.setattr("cmd_mox.passthrough.time.monotonic", fake_monotonic)
+    coordinator = PassthroughCoordinator(cleanup_ttl=5.0)
+    double = typ.cast("CommandDouble", _FakeDouble({}))
+    config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
+    response = coordinator.prepare_request(double, _make_invocation("slow"), config)
+    directive = response.passthrough
+    assert directive is not None
+
+    now += 10.0
+    # A normal coordinator access prunes the expired pending entry, and the
+    # late result is rejected. The call must still count as unrecorded.
+    with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
+        coordinator.finalize_result(
+            PassthroughResult(
+                invocation_id=directive.invocation_id,
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        )
+
+    assert _unrecorded_commands(coordinator, double) == ["slow"]
+
+
+def test_reset_clears_pending_and_unrecorded() -> None:
+    """A new replay starts with no pending or unrecorded invocations."""
+    coordinator = PassthroughCoordinator()
+    double = typ.cast("CommandDouble", _FakeDouble({}))
+    config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
+    response = coordinator.prepare_request(double, _make_invocation("one"), config)
+    directive = response.passthrough
+    assert directive is not None
+
+    coordinator.reset()
+
+    assert coordinator.unrecorded_invocations() == []
+    with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
+        coordinator.finalize_result(
+            PassthroughResult(
+                invocation_id=directive.invocation_id,
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        )
+
+
 @pytest.mark.parametrize(
     ("initial_env", "extra_env", "expected_merged"),
     [

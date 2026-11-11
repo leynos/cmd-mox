@@ -189,6 +189,40 @@ Feature: CmdMox basic functionality
     Then the mock "first" should record 2 invocation
     And the mock "second" should record 2 invocation
 
+  Scenario: zero-count mock is not invoked
+    Given a CmdMox controller
+    And the command "blocked" is mocked to return "ok" times 0
+    When I replay the controller
+    When I verify the controller
+    Then the mock "blocked" should record 0 invocation
+
+  Scenario: zero-count mock is invoked once
+    Given a CmdMox controller
+    And the command "blocked" is mocked to return "ok" times 0
+    When I replay the controller
+    And I run the command "blocked"
+    Then the output should be "ok"
+    And the exit code should be 0
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "Unexpected additional invocation."
+    And the verification error message should contain "expected calls=0"
+    And the mock "blocked" should record 1 invocation
+
+  Scenario: invalid spy count is rejected and leaves the spy permissive
+    Given a CmdMox controller
+    And the command "first" is spied to return "one"
+    And the command "second" is spied to return "two"
+    When requesting an invalid count of -1 on the spy "first" using times raises ValueError
+    And requesting an invalid count of -1 on the spy "second" using times_called raises ValueError
+    When I replay the controller
+    And I run the command "first"
+    And I run the command "first"
+    And I run the command "second"
+    And I run the command "second"
+    When I verify the controller
+    Then the spy "first" should record 2 invocation
+    And the spy "second" should record 2 invocation
+
   Scenario: context manager usage
     Given a CmdMox controller
     And the command "hi" is stubbed to return "hello"
@@ -285,6 +319,15 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the spy "echo" should record 1 invocation
     And the spy "echo" call count should be 1
+
+  Scenario: explicitly counted passthrough spy is satisfied by a real call
+    Given a CmdMox controller
+    And the command "echo" is spied to passthrough times 1
+    When I replay the controller
+    And I run the command "echo" with arguments "hello"
+    Then the output should be "hello"
+    When I verify the controller
+    Then the spy "echo" should record 1 invocation
 
   Scenario: passthrough spy handles missing command
     Given a CmdMox controller

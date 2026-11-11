@@ -11,6 +11,7 @@ from ._argument_redaction import (
 from ._argument_redaction import (
     redact_sensitive_argument_values as _redact_sensitive_argument_values,
 )
+from ._validators import validate_expectation_count
 from .errors import ExpectationConfigurationError
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
@@ -161,11 +162,25 @@ class Expectation:
         the count as explicit. Verification enforces explicit counts on mocks
         and spies, while an unconfigured spy remains observational.
 
+        Parameters
+        ----------
+        count : int
+            Required number of invocations. Must be a non-negative integer;
+            a zero count requires the command not to be invoked at all.
+
         Returns
         -------
         Expectation
             This expectation, allowing further fluent configuration.
-        """
+
+        Raises
+        ------
+        TypeError
+            If *count* is a bool or not an integer.
+        ValueError
+            If *count* is negative.
+        """  # ruff: ignore[docstring-extraneous-exception] - validate_expectation_count raises these caller-visible failures
+        validate_expectation_count(count)
         self.count = count
         self.count_explicit = True
         return self
@@ -181,7 +196,8 @@ class Expectation:
         Like :meth:`times_called`, this marks the count as explicit so that
         verification enforces it for mocks and spies. Assigning ``count``
         directly does not set the flag, which keeps an unconfigured spy
-        observational.
+        observational. See :meth:`times_called` for the accepted values and
+        the errors raised for an invalid count.
 
         Returns
         -------

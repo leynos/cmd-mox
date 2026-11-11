@@ -38,13 +38,23 @@ class PassthroughCoordinator:
     originates from :attr:`~cmd_mox.command_runner.CommandRunner.timeout`,
     while ``cleanup_ttl`` is set via this class's constructor. Because
     ``cleanup_ttl`` may exceed ``timeout``, entries can persist longer than
-    the per-request timeout would suggest. Stale entries are pruned lazily
-    on each coordinator access.
+    the per-request timeout would suggest. Stale pending entries are pruned
+    lazily on each coordinator access.
+
+    The unrecorded registry is separate from the pending map. An invocation
+    stays registered until the controller records its result, or until
+    :meth:`reset` starts a new replay, so verification can count a call that
+    is in flight or whose pending entry expired.
     """
 
     def __init__(self, *, cleanup_ttl: float = 300.0) -> None:
         """Create an empty pending map guarded by a lock, with the cleanup TTL."""
         self._pending: dict[str, tuple[CommandDouble, Invocation, float]] = {}
+        # Every invocation registered since the last reset whose result the
+        # controller has not yet recorded. Verification reads this registry so
+        # a call cannot slip between the pending map and the completed-call
+        # log. Expired entries stay here: the call still happened.
+        self._unrecorded: dict[str, tuple[CommandDouble, Invocation]] = {}
         self._lock = threading.Lock()
         self._cleanup_ttl = cleanup_ttl
 
@@ -118,6 +128,7 @@ class PassthroughCoordinator:
                 stored_invocation,
                 self._expiry_deadline(config.timeout),
             )
+            self._unrecorded[invocation_id] = (double, stored_invocation)
 
         env = dict(double.expectation.env)
         if config.extra_env:
@@ -130,10 +141,58 @@ class PassthroughCoordinator:
         )
         return Response(env=dict(env), passthrough=passthrough)
 
+    def unrecorded_invocations(self) -> list[tuple[CommandDouble, Invocation]]:
+        """Return registered invocations the controller has not recorded yet.
+
+        Verification runs before the IPC server is stopped, so a passthrough
+        call can still be in flight, or can have expired, when counts are
+        checked. Those calls have already happened from the caller's
+        perspective, so they must count towards an explicit expectation even
+        though their result has not been recorded.
+
+        Callers must snapshot this registry *before* the controller's
+        completed-call log. A call leaves the registry only after it is
+        appended to that log, so the two snapshots together contain every
+        call; a call that completes between them appears in both and must be
+        de-duplicated by invocation ID.
+
+        Returns
+        -------
+        list[tuple[CommandDouble, Invocation]]
+            Registered invocations paired with their owning double.
+        """
+        with self._lock:
+            return list(self._unrecorded.values())
+
+    def mark_recorded(self, invocation_id: str | None) -> None:
+        """Stop counting *invocation_id* as unrecorded.
+
+        Parameters
+        ----------
+        invocation_id : str or None
+            Identifier of the invocation the controller has recorded. A
+            ``None`` identifier belongs to a non-passthrough call and is
+            ignored.
+        """
+        if invocation_id is None:
+            return
+        with self._lock:
+            self._unrecorded.pop(invocation_id, None)
+
+    def reset(self) -> None:
+        """Forget pending and unrecorded invocations for a new replay."""
+        with self._lock:
+            self._pending.clear()
+            self._unrecorded.clear()
+
     def finalize_result(
         self, result: PassthroughResult
     ) -> tuple[CommandDouble, Invocation, Response]:
         """Finalize passthrough and return its double, invocation, and response.
+
+        The invocation remains in the unrecorded registry until the controller
+        calls :meth:`mark_recorded` after appending it to its completed-call
+        log.
 
         Parameters
         ----------

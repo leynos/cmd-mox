@@ -6,7 +6,8 @@ import os
 import shlex
 import typing as typ
 
-from pytest_bdd import given, parsers
+import pytest
+from pytest_bdd import given, parsers, when
 
 from cmd_mox.comparators import Any, Contains, IsA, Predicate, Regex, StartsWith
 from cmd_mox.expectations import Expectation
@@ -19,8 +20,6 @@ from tests.helpers.parameters import (
 )
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
-    import pytest
-
     from cmd_mox.controller import CmdMox
     from cmd_mox.ipc import Invocation
 
@@ -172,10 +171,32 @@ def spy_command_times_called(mox: CmdMox, cmd: str, text: str, count: int) -> No
     mox.spy(cmd).returns(stdout=text).times_called(count)
 
 
+@when(
+    parsers.re(
+        r"requesting an invalid count of (?P<count>-?\d+) on the spy "
+        r'"(?P<cmd>[^"]+)" using (?P<method>times|times_called) raises ValueError'
+    )
+)
+def invalid_spy_count(mox: CmdMox, count: str, cmd: str, method: str) -> None:
+    """Assert an invalid spy count is rejected and leaves the spy permissive."""
+    spy = mox.spies[cmd]
+    with pytest.raises(ValueError, match=r"^count must be >= 0$"):
+        getattr(spy, method)(int(count))
+    assert spy.expectation.count_explicit is False, (
+        "a rejected count must not mark the spy as explicitly counted"
+    )
+
+
 @given(parsers.cfparse('the command "{cmd}" is spied to passthrough'))
 def spy_passthrough(mox: CmdMox, cmd: str) -> None:
     """Configure a command spy that forwards to the real executable."""
     mox.spy(cmd).passthrough()
+
+
+@given(parsers.cfparse('the command "{cmd}" is spied to passthrough times {count:d}'))
+def spy_passthrough_times(mox: CmdMox, cmd: str, count: int) -> None:
+    """Configure a passthrough spy with an explicit invocation count."""
+    mox.spy(cmd).passthrough().times(count)
 
 
 @given(

@@ -177,6 +177,27 @@ def test_times_alias_maps_to_times_called() -> None:
     pass
 
 
+@scenario(str(FEATURES_DIR / "controller.feature"), "zero-count mock is not invoked")
+def test_zero_count_mock_is_not_invoked() -> None:
+    """A zero-count mock passes verification when never invoked."""
+    pass
+
+
+@scenario(str(FEATURES_DIR / "controller.feature"), "zero-count mock is invoked once")
+def test_zero_count_mock_is_invoked_once() -> None:
+    """A zero-count mock fails verification when invoked once."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "invalid spy count is rejected and leaves the spy permissive",
+)
+def test_invalid_spy_count_is_rejected_and_leaves_the_spy_permissive() -> None:
+    """An invalid spy count raises and the spy keeps accepting any call count."""
+    pass
+
+
 @scenario(str(FEATURES_DIR / "controller.feature"), "context manager usage")
 def test_context_manager_usage() -> None:
     """CmdMox works within a ``with`` block."""
@@ -232,6 +253,15 @@ def test_passthrough_spy_merges_expectation_env() -> None:
 )
 def test_passthrough_spy() -> None:
     """Spy runs the real command while recording."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "explicitly counted passthrough spy is satisfied by a real call",
+)
+def test_counted_passthrough_spy() -> None:
+    """An explicit count is satisfied by a real passthrough call."""
     pass
 
 

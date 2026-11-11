@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+import typing as typ
 
 import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.ipc import Invocation, PassthroughResult
+
+if typ.TYPE_CHECKING:
+    from cmd_mox.test_doubles import CommandDouble
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -57,6 +61,138 @@ def test_prepare_passthrough_masks_conflicting_secret_env() -> None:
         message = str(exc.value)
         assert f"{key}='***'" in message, "Sensitive conflict was not masked"
         assert provided_value not in message, "Invocation value leaked into the message"
+
+
+def test_zero_count_passthrough_spy_counts_in_flight_invocation() -> None:
+    """An in-flight passthrough call violates an explicit zero count."""
+    with CmdMox() as mox:
+        spy = mox.spy("echo").times(0).passthrough()
+        mox.replay()
+        invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
+        mox._prepare_passthrough(spy, invocation)
+
+        with pytest.raises(
+            UnexpectedCommandError, match="Unexpected additional invocation"
+        ):
+            mox.verify()
+
+
+def test_explicit_count_is_satisfied_by_in_flight_passthrough_call() -> None:
+    """An in-flight passthrough call counts towards an explicit count."""
+    with CmdMox() as mox:
+        spy = mox.spy("echo").times(1).passthrough()
+        mox.replay()
+        invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
+        mox._prepare_passthrough(spy, invocation)
+
+        mox.verify()
+
+
+def test_completed_passthrough_call_counts_once() -> None:
+    """A call recorded before verification is not counted twice."""
+    with CmdMox() as mox:
+        spy = mox.spy("echo").times(1).passthrough()
+        mox.replay()
+        invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
+        response = mox._prepare_passthrough(spy, invocation)
+        directive = response.passthrough
+        assert directive is not None
+        mox._handle_passthrough_result(
+            PassthroughResult(
+                invocation_id=directive.invocation_id,
+                stdout="out",
+                stderr="",
+                exit_code=0,
+            )
+        )
+
+        mox.verify()
+
+
+def test_completion_during_verification_counts_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A call completing between the snapshots is counted exactly once."""
+    with CmdMox() as mox:
+        spy = mox.spy("echo").times(1).passthrough()
+        mox.replay()
+        invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
+        response = mox._prepare_passthrough(spy, invocation)
+        directive = response.passthrough
+        assert directive is not None
+        coordinator = mox._passthrough_coordinator
+        snapshot = coordinator.unrecorded_invocations
+        completed = False
+
+        def snapshot_then_complete() -> list[tuple[CommandDouble, Invocation]]:
+            """Snapshot the registry, then finalise the call before returning."""
+            nonlocal completed
+            entries = snapshot()
+            if not completed:
+                completed = True
+                mox._handle_passthrough_result(
+                    PassthroughResult(
+                        invocation_id=directive.invocation_id,
+                        stdout="out",
+                        stderr="",
+                        exit_code=0,
+                    )
+                )
+            return entries
+
+        monkeypatch.setattr(
+            coordinator, "unrecorded_invocations", snapshot_then_complete
+        )
+
+        mox.verify()
+
+        assert completed, "the interleaving did not run"
+
+
+@pytest.mark.parametrize("count", [0, 1])
+def test_expired_passthrough_call_counts_after_pruning(
+    count: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An expired call still counts after its pending entry is pruned."""
+
+    class _Clock:
+        """Frozen monotonic clock for the passthrough coordinator."""
+
+        now = 100.0
+
+        @classmethod
+        def monotonic(cls) -> float:
+            """Return the frozen time."""
+            return cls.now
+
+    monkeypatch.setattr("cmd_mox.passthrough.time", _Clock)
+    with CmdMox() as mox:
+        spy = mox.spy("echo").times(count).passthrough()
+        mox.replay()
+        invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
+        response = mox._prepare_passthrough(spy, invocation)
+        directive = response.passthrough
+        assert directive is not None
+
+        _Clock.now += 10_000.0
+        # The late result prunes the expired pending entry and is rejected.
+        with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
+            mox._handle_passthrough_result(
+                PassthroughResult(
+                    invocation_id=directive.invocation_id,
+                    stdout="out",
+                    stderr="",
+                    exit_code=0,
+                )
+            )
+
+        if count == 0:
+            with pytest.raises(
+                UnexpectedCommandError, match="Unexpected additional invocation"
+            ):
+                mox.verify()
+        else:
+            mox.verify()
 
 
 def test_handle_passthrough_result_rejects_unknown_invocation() -> None:

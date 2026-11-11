@@ -118,27 +118,6 @@ records the rationale, and the
 [usage guide](usage-guide.md#environment-variable-filtering) describes the
 user-visible rules.
 
-## Spy count verification
-
-`Expectation.count_explicit` records whether a caller set a count through
-`times()` or its `times_called()` alias. The field is excluded from equality and
-`repr`, so it distinguishes an explicit `times(1)` from the implicit default
-without changing how expectations compare or print.
-
-`CmdMox._run_verifiers()` builds the count-checked set from every mock plus
-every spy whose `count_explicit` is true, then passes it to `CountVerifier`.
-Uncounted spies stay observational: their totals are reported through
-`spy.call_count` and the assertion helpers rather than failing verification.
-
-Ordering is a separate check. `OrderVerifier` does not consult
-`count_explicit`; it expands each ordered expectation to its `count` (one by
-default) and compares that sequence against the journal. An uncounted
-`in_order()` spy is therefore still held to one call in sequence, and an
-ordered stub is held to its count even though stubs do not record invocations
-on the double. The
-[design document](python-native-command-mocking-design.md#24-the-fluent-api-for-defining-expectations)
-records the full verification contract.
-
 ## Coverage ownership
 
 Pull-request CI generates coverage with the ratchet (`with-ratchet: 'true'`)
@@ -564,6 +543,48 @@ The private deadline helpers accept an optional monotonic clock callable and use
 `time.monotonic` when runtime callers omit it. The Unix request handler binds
 its clock once and reuses it for each receive-budget check. Tests can pass a
 fake clock directly without replacing the process-wide time function.
+
+## Expectation count validation and verification
+
+Count validation lives at the fluent boundary. `Expectation.times_called()`
+calls `_validators.validate_expectation_count()`, and `times()` delegates to
+`times_called()`, so both aliases and the `CommandDouble` wrappers share one
+check. `validate_expectation_count()` delegates to `_validate_int_minimum()`
+with `name="count"` and `minimum=0`; the shared helper rejects `bool` before
+`int` because `bool` subclasses `int`, then applies the inclusive lower bound.
+`validate_retry_attempts()` uses the same helper with a minimum of one. The
+float validators share `_validate_finite_minimum()`, which delegates to
+`_validate_numeric()`; keep new numeric knobs on those helpers rather than
+duplicating the bool and finiteness checks.
+
+`Expectation.times_called()` sets `count_explicit` when it accepts a count. The
+flag is excluded from equality and repr because the default value is an
+implementation detail. `CmdMox._run_verifiers()` builds the count map from
+every mock plus only those spies whose `count_explicit` is true. Mocks always
+enforce their count; unconfigured spies stay permissive, reporting their totals
+through `spy.call_count` and the assertion helpers rather than failing
+verification; stubs are intentionally non-strict and never join the count check.
+
+Ordering is a separate check. `OrderVerifier` does not consult
+`count_explicit`; it expands each ordered expectation to its `count` (one by
+default) and compares that sequence against the journal. An uncounted
+`in_order()` spy is therefore still held to one call in sequence, and an
+ordered stub is held to its count even though stubs do not record invocations
+on the double. The
+[design document](python-native-command-mocking-design.md#24-the-fluent-api-for-defining-expectations)
+records the full verification contract.
+
+Verification runs before the IPC server stops, so a passthrough spy call can
+still be in flight, or can have expired, when counts are checked. The
+coordinator registers the invocation at `prepare_request()` time and keeps it
+in an unrecorded-invocation registry until the controller appends it to the
+completed-call log. `_run_verifiers()` snapshots that registry before the log
+and merges both through `verifiers.build_count_map()`, de-duplicating by
+invocation ID. A call therefore counts exactly once even if it completes during
+verification, and an explicitly counted spy sees a call that started but has
+not completed because the call has already happened from the caller's
+perspective. Do not move the count check after server shutdown without
+preserving that guarantee.
 
 ## IPC deadlines and stdin reads
 

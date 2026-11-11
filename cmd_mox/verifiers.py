@@ -542,6 +542,51 @@ class OrderVerifier:
         raise UnexpectedCommandError(msg)
 
 
+def build_count_map(
+    expectations: cabc.Mapping[str, Expectation],
+    doubles: cabc.Mapping[str, CommandDouble],
+    dispatched: cabc.Sequence[tuple[Invocation, CommandDouble | None]],
+    unrecorded: cabc.Iterable[tuple[CommandDouble, Invocation]],
+) -> dict[str, list[Invocation]]:
+    """Combine recorded and unrecorded calls for count verification.
+
+    Passthrough calls are registered before their result is recorded, so a
+    call can be in flight, or can have expired, when verification runs. The
+    caller snapshots the unrecorded registry before the completed-call log;
+    a call leaves the registry only after it is appended to the log, so the
+    snapshots together contain every call. A call that completes between the
+    snapshots appears in both, so calls are de-duplicated by invocation ID.
+
+    Parameters
+    ----------
+    expectations : collections.abc.Mapping
+        Expectations to check, keyed by command name.
+    doubles : collections.abc.Mapping
+        Registered doubles keyed by command name.
+    dispatched : collections.abc.Sequence
+        Completed invocations paired with the double that dispatched them.
+    unrecorded : collections.abc.Iterable
+        Registered invocations the controller has not recorded, paired with
+        their owning double.
+
+    Returns
+    -------
+    dict[str, list[Invocation]]
+        Every call counted exactly once, keyed by command name.
+    """
+    inv_map: dict[str, list[Invocation]] = {}
+    for name in expectations:
+        double = doubles[name]
+        recorded = [inv for inv, dbl in dispatched if dbl is double]
+        seen = {inv.invocation_id for inv in recorded}
+        inv_map[name] = recorded + [
+            inv
+            for pending_double, inv in unrecorded
+            if pending_double is double and inv.invocation_id not in seen
+        ]
+    return inv_map
+
+
 class CountVerifier:
     """Check that each expectation was met the expected number of times."""
 

@@ -345,6 +345,16 @@ changing the observational behaviour of uncounted ones. The order check does
 not consult the flag: it always expands an ordered expectation to its `count`,
 so an uncounted ordered spy is still held to one call in sequence.
 
+The count is validated when the expectation is configured, before any replay.
+It must be a non-negative `int`: `bool` is rejected along with every other
+non-integer type, because `bool` subclasses `int` and would otherwise be
+accepted as zero or one. Invalid types raise `TypeError` and negative values
+raise `ValueError`; a rejected value leaves the previously configured count
+unchanged. A count of zero is valid and means the command must not run at all.
+Validation is deliberately at the fluent boundary rather than in the verifier,
+so an invalid expectation fails at the line that created it instead of
+producing an obscure `IndexError` or `TypeError` during verification.
+
 To ensure `CmdMox` is a compelling replacement for `shellmock`, the following
 table maps the core features of `shellmock` to their more expressive `CmdMox`
 API equivalents, demonstrating complete functional parity.
@@ -1440,11 +1450,16 @@ The verification algorithm will perform several critical checks:
 3. **Incorrect Call Counts:** For mock expectations, and for spy expectations
    whose count was set explicitly with `.times(N)` or `.times_called(N)`, the
    verifier ensures that the expectation was met exactly `N` times. If it was
-   met more or fewer times, a `VerificationError` is raised. A spy without an
-   explicit count is not checked by this step. Ordering is separate: an
-   `.in_order()` expectation is expanded to its configured count, so an
-   uncounted ordered spy's default count of one must still match the journal
-   exactly.
+   met more or fewer times, a `VerificationError` is raised. The count check
+   covers every mock and every spy that set a count explicitly, while a spy
+   without an explicit count is permissive and a stub is intentionally
+   non-strict and ignores counts. Ordering is separate: an `.in_order()`
+   expectation is expanded to its configured count, so an uncounted ordered
+   spy's default count of one must still match the journal exactly. Because
+   verification runs before the IPC server stops, the count check also includes
+   passthrough spy calls that are still in flight, so a call that has started
+   but not yet reported its result still counts: it can satisfy a positive
+   count and can also cause an excess-count failure.
 
 4. **Order Violations:** For expectations marked with `.in_order()`, the
    verifier ensures that they were met in the same sequence in which they were
@@ -1515,6 +1530,16 @@ def test_downloader_uses_correct_user_agent(mox):
 This style of verification is less rigid than mocking and is preferred when the
 goal is simply to check that "a call happened with these properties" rather
 than enforcing a strict sequence of interactions.
+
+A spy is permissive by default, but a test can opt into strictness by setting a
+count with `times()` or `times_called()`. When a count is set explicitly,
+verification requires exactly that many calls, including zero. This is a
+deliberate asymmetry: the spy's default remains observational, while an
+explicit count is a promise the test has chosen to make. Stubs are
+intentionally non-strict and ignore counts entirely. The implementation tracks
+the distinction with `Expectation.count_explicit`, which is excluded from
+equality and repr, and `CmdMox._run_verifiers()` includes only explicitly
+counted spies in the count check.
 
 ### 6.2 Passthrough Spies: The "Record Mode"
 
@@ -2090,10 +2115,11 @@ double each call was dispatched to, so mutating the public journal, including
 its order or its entries, cannot change verification, and a double registered
 after a call cannot retroactively claim it. `UnexpectedCommandVerifier` and
 `CountVerifier` therefore use the dispatch-time association: a call made
-without a double is unexpected, and only calls dispatched to a mock count
-towards its expectation. Verification takes one snapshot of that record under
-the lock, so evicting a diagnostic journal entry never weakens verification. An
-unbounded journal retains every call, which keeps calls that completed before
+without a double is unexpected, and only calls dispatched to an expectation
+that count verification covers (a mock, or a spy with an explicit count) count
+towards it. Verification takes one snapshot of that record under the lock, so
+evicting a diagnostic journal entry never weakens verification. An unbounded
+journal retains every call, which keeps calls that completed before
 `in_order()` was applied available to `OrderVerifier`. A bounded controller
 discards unordered stub calls, so it rejects `in_order()` applied after a
 stub's first call with `ExpectationConfigurationError`.
@@ -3069,17 +3095,39 @@ class CmdMox:
 Replay integration in `_make_response()` is intentionally separate from replay
 consumption verification in `verify()`. The former is roadmap item `12.2.4`;
 the latter is implemented by extending the existing verifier pass rather than
-the teardown path:
+the teardown path. Count verification covers every mock and every spy whose
+count was set explicitly; stubs stay non-strict, and passthrough calls that are
+still in flight, or that expired, are merged in from the coordinator's
+unrecorded registry:
 
 ```python
 class CmdMox:
     def _run_verifiers(self) -> None:
-        """Execute mock, order, and replay-consumption verification."""
-        expectations = {n: d.expectation for n, d in self.mocks.items()}
-        inv_map = {n: d.invocations for n, d in self.mocks.items()}
+        """Execute the ordered verification checks."""
+        # Mocks always count; spies join only when a setter marked it explicit.
+        expectations = {
+            name: double.expectation
+            for name, double in self._doubles.items()
+            if double.kind is DoubleKind.MOCK
+            or (double.kind is DoubleKind.SPY and double.expectation.count_explicit)
+        }
+        # Snapshot unrecorded calls first; a call leaves the registry only after
+        # it is appended to the log, so these snapshots cannot miss one.
+        unrecorded = self._passthrough_coordinator.unrecorded_invocations()
+        with self._history_lock:
+            verification_log = list(self._verification_log)
+            dispatch_doubles = list(self._verification_doubles)
+            ordered = list(self._ordered)
 
-        UnexpectedCommandVerifier().verify(self.journal, self._doubles)
-        OrderVerifier(self._ordered).verify(self.journal)
+        dispatched = list(zip(verification_log, dispatch_doubles, strict=True))
+        inv_map = verifiers.build_count_map(
+            expectations, self._doubles, dispatched, unrecorded
+        )
+
+        UnexpectedCommandVerifier().verify(
+            verification_log, self._doubles, dispatch_doubles
+        )
+        OrderVerifier(ordered).verify(verification_log)
         CountVerifier().verify(expectations, inv_map)
         self._verify_replay_sessions_consumed()
 
