@@ -129,8 +129,8 @@ def test_unrecorded_invocations_are_scoped_to_the_double() -> None:
     second = typ.cast("CommandDouble", _FakeDouble({}))
     config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
 
-    first_response = coordinator.prepare_request(first, _make_invocation("one"), config)
-    coordinator.prepare_request(second, _make_invocation("two"), config)
+    first_response = _prepare(coordinator, first, _make_invocation("one"), config)
+    _prepare(coordinator, second, _make_invocation("two"), config)
 
     assert _unrecorded_commands(coordinator, first) == ["one"]
 
@@ -167,7 +167,7 @@ def test_expired_invocation_stays_unrecorded_after_pruning(
     coordinator = PassthroughCoordinator(cleanup_ttl=5.0)
     double = typ.cast("CommandDouble", _FakeDouble({}))
     config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
-    response = coordinator.prepare_request(double, _make_invocation("slow"), config)
+    response = _prepare(coordinator, double, _make_invocation("slow"), config)
     directive = response.passthrough
     assert directive is not None
 
@@ -192,7 +192,7 @@ def test_reset_clears_pending_and_unrecorded() -> None:
     coordinator = PassthroughCoordinator()
     double = typ.cast("CommandDouble", _FakeDouble({}))
     config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
-    response = coordinator.prepare_request(double, _make_invocation("one"), config)
+    response = _prepare(coordinator, double, _make_invocation("one"), config)
     directive = response.passthrough
     assert directive is not None
 
