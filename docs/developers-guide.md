@@ -882,6 +882,19 @@ them for compatibility, while `cmd_mox.ipc.wire` owns conversion between those
 values and JSON-ready payloads. Keep payload dictionaries at that transport
 boundary; domain code must not depend on IPC encoding.
 
+Decoding treats every payload as untrusted. `decode_invocation`,
+`decode_passthrough_result`, `decode_passthrough_request`, and
+`decode_response` check each field against the dataclass annotation and raise a
+single `WireFormatError` for a wrong type, a missing or unknown field, or a
+malformed nested directive. `response_from_payload` is a strict compatibility
+alias for `decode_response`. Error messages name a field path and an expected
+type only; they must never include received values, environment keys,
+environment values, or list elements. A present, non-null `passthrough` value
+must decode in full: dropping a malformed directive would make the shim treat
+it as an ordinary response and skip the real command. The shared pipeline maps
+`WireFormatError` to the existing `invalid_request` outcome with the
+`ValidationError` category and a fixed rejection frame.
+
 `cmd_mox.response_policy` merges `with_env()` overrides into `Invocation.env`
 before the handler runs, and validates expectation environments.
 `cmd_mox.response_strategy.execute_handler(double, invocation)` runs the
