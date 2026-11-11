@@ -7,8 +7,8 @@ import typing as typ
 import pytest
 
 from cmd_mox.controller import CmdMox
-from cmd_mox.record.fixture import FixtureFile
 from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult
+from cmd_mox.record.fixture import FixtureFile
 
 if typ.TYPE_CHECKING:
     from pathlib import Path

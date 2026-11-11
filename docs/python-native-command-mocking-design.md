@@ -2499,8 +2499,8 @@ from:
    request
 2. Variables specified in a configurable allowlist
 3. Variables matching a known command prefix (e.g., `GIT_*`, `AWS_*`,
-   `DOCKER_*`) when the command is exactly that tool's name, or, for `go`,
-   the documented exact names such as `GOPATH` and `GOFLAGS`
+   `DOCKER_*`) when the command is exactly that tool's name, or, for `go`, the
+   documented exact names such as `GOPATH` and `GOFLAGS`
 
 CmdMox internal variables are never recorded. A command without a known prefix
 records no unrequested variables, which reduces machine dependence: strict

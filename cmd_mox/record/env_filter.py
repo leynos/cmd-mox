@@ -211,4 +211,3 @@ def filter_env_subset(
             cmd_prefix=cmd_prefix,
         )
     }
-# weave: run 'weave explain cmd_mox/record/env_filter.py' for per-hunk detail, 'weave check' to verify your resolution

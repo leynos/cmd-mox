@@ -552,12 +552,12 @@ subset of the process environment. Filtering applies these rules in order:
    `env_allowlist`, or one named by `.with_env()` for that invocation, is
    recorded whenever it is present in the environment.
 3. **System and sensitive keys are dropped.** `PATH`, `HOME`, `USER`,
-   `SHELL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, and sensitive keys are
-   excluded. A key is sensitive when it contains `SECRET`, `TOKEN`, `API_KEY`,
-   or `PASSWORD` anywhere, regardless of case. It is also sensitive when a
-   segment starting at the key's beginning, after `_`, or after `-` is `KEY`,
-   `TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE`, `PASS`, `PWD`, `CREDENTIAL`,
-   or `CREDENTIALS`, optionally with an `API` prefix, or is `AUTH_CONFIG` or
+   `SHELL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, and sensitive keys are excluded.
+   A key is sensitive when it contains `SECRET`, `TOKEN`, `API_KEY`, or
+   `PASSWORD` anywhere, regardless of case. It is also sensitive when a segment
+   starting at the key's beginning, after `_`, or after `-` is `KEY`, `TOKEN`,
+   `SECRET`, `PASSWORD`, `PASSPHRASE`, `PASS`, `PWD`, `CREDENTIAL`, or
+   `CREDENTIALS`, optionally with an `API` prefix, or is `AUTH_CONFIG` or
    `AUTHENTICATION_CONFIG`. That segment must end at `_`, `-`, `=`, `:`, a
    digit, or the end of the key. So `TOKENIZER_MODE` is excluded by the
    substring rule, while `GITHUB_KEY` and `DOCKER_AUTH_CONFIG` are excluded by
@@ -570,8 +570,7 @@ subset of the process environment. Filtering applies these rules in order:
    bare `GO` prefix would also capture unrelated names such as
    `GOOGLE_CLOUD_PROJECT`. Other `GO*` names and `CGO_*` names are not recorded
    unless allowlisted. Lookup is exact and case-insensitive; paths such as
-   `/usr/bin/git` and `git.exe` are not normalized and therefore gain no
-   prefix.
+   `/usr/bin/git` and `git.exe` are not normalized and therefore gain no prefix.
 5. **Everything else is dropped.** In particular, a command with no known
    prefix records no unrequested environment keys, so host names, user paths,
    tool caches and agent session identifiers held in the environment do not
