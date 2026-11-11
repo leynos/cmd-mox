@@ -968,8 +968,12 @@ after calls complete. A bounded controller omits unordered stub calls, so
 `in_order()` must be applied to a stub before its first call; applying it later
 raises `ExpectationConfigurationError`. Verification reads only its own
 snapshot copies, so mutating `cmd_mox.journal`, including its order or its
-entries, does not affect verification. A bounded controller still reports an
-unexpected call that has already been evicted from the journal:
+entries, does not affect verification. Verification also records the double
+each call was dispatched to, so a double registered later cannot claim an
+earlier call: a call made without a double is reported as unexpected even if a
+mock or stub for that command is registered afterwards. A bounded controller
+still reports an unexpected call that has already been evicted from the
+journal:
 
 ```python
 import shutil

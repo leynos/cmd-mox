@@ -9,6 +9,7 @@ call.
 from __future__ import annotations
 
 import threading
+import typing as typ
 
 import pytest
 
@@ -20,6 +21,9 @@ from cmd_mox.errors import (
     UnfulfilledExpectationError,
 )
 from cmd_mox.ipc import Invocation, PassthroughResult, Response
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
 
 
 def _invocation(command: str, *args: str) -> Invocation:
@@ -203,6 +207,47 @@ def test_mutating_journal_entry_arguments_does_not_change_verification() -> None
     assert "Expected:" in str(excinfo.value)
 
 
+class _ReleaseHookLock:
+    """Lock that runs a one-shot callback after its first release."""
+
+    def __init__(self, on_first_release: cabc.Callable[[], None]) -> None:
+        """Store the callback to run once the first holder releases."""
+        self._lock = threading.Lock()
+        self._on_first_release = on_first_release
+        self._fired = False
+
+    def __enter__(self) -> _ReleaseHookLock:
+        """Acquire the underlying lock."""
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        """Release the lock, running the callback after the first release."""
+        self._lock.release()
+        if not self._fired:
+            self._fired = True
+            self._on_first_release()
+
+
+def test_in_order_registration_is_atomic_with_call_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A call completing inside the ordering guard must still be retained."""
+    mox = CmdMox(max_journal_entries=1)
+    double = mox.stub("race").returns()
+
+    # The hook fires when the guard releases its lock. The old two-step
+    # registration released before appending to the ordered list, so the
+    # hooked call was discarded and in_order() succeeded against no history.
+    hook = _ReleaseHookLock(lambda: _dispatch(mox, "race"))
+    monkeypatch.setattr(mox, "_history_lock", hook)
+
+    double.in_order()
+
+    assert [inv.command for inv in mox._verification_log] == ["race"]
+    mox._run_verifiers()
+
+
 def test_rejected_late_in_order_leaves_expectation_unordered() -> None:
     """A rejected in_order() must not mark the expectation as ordered."""
     mox = CmdMox(max_journal_entries=1)
@@ -256,6 +301,41 @@ def test_count_diagnostics_ignore_journal_entry_mutation() -> None:
     message = str(excinfo.value)
     assert "git('status')" in message
     assert "mutated" not in message
+
+
+@pytest.mark.parametrize("max_journal_entries", [1, None])
+def test_late_mock_registration_does_not_claim_earlier_call(
+    max_journal_entries: int | None,
+) -> None:
+    """A call made without a double is unexpected even if a mock follows."""
+    mox = CmdMox(max_journal_entries=max_journal_entries)
+    mox.register_command("git")
+    _dispatch(mox, "git", "status")
+    mox.mock("git").with_args("status").returns()
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        mox._run_verifiers()
+    assert "Unexpected command invocation." in str(excinfo.value)
+
+
+def test_late_stub_registration_does_not_claim_earlier_call() -> None:
+    """A call made before its stub was registered is still unexpected."""
+    mox = CmdMox()
+    mox.register_command("deploy")
+    _dispatch(mox, "deploy")
+    mox.stub("deploy").returns()
+
+    with pytest.raises(UnexpectedCommandError):
+        mox._run_verifiers()
+
+
+def test_call_dispatched_to_mock_counts_for_its_expectation() -> None:
+    """Dispatch-time association still counts calls made after registration."""
+    mox = CmdMox()
+    mox.mock("git").with_args("status").returns()
+    _dispatch(mox, "git", "status")
+
+    mox._run_verifiers()
 
 
 def test_late_in_order_is_rejected_when_bounded_journal_discards_calls() -> None:

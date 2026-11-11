@@ -1220,8 +1220,11 @@ invocations are appended after the shim reports their command results.
 separate internal verification record of immutable snapshots that retains mock,
 spy, unregistered-command and ordered-stub calls for the whole replay, so a
 bounded journal cannot hide a discrepancy, and mutating the public journal
-cannot alter verification. The record shares the journal's completion order and
-is cleared with it when replay starts. An unbounded journal retains every call,
+cannot alter verification. Each record also stores the double the call was
+dispatched to, or `None` when no double existed, so a double registered later
+cannot retroactively claim an earlier call as expected or count it toward its
+expectation. The record shares the journal's completion order and is cleared
+with it when replay starts. An unbounded journal retains every call,
 so `in_order()` may be applied after calls complete; a bounded controller
 discards unordered stub calls and rejects late `in_order()` for them.
 
@@ -2038,11 +2041,14 @@ unregistered-command calls, plus calls to ordered stubs. Unordered stub calls
 are omitted, so the memory saving from `max_journal_entries` applies mainly to
 stub traffic. Both records are appended under one lock at the same completion
 point, which keeps their order identical, and both are cleared together when
-replay starts. The verification record stores immutable snapshots, so mutating
-the public journal, including its order or its entries, cannot change
-verification. Verification takes one snapshot of that record under the lock and
-passes it to `UnexpectedCommandVerifier` and `OrderVerifier`, so evicting a
-diagnostic journal entry never weakens verification. An unbounded journal
+replay starts. The verification record stores immutable snapshots and the
+double each call was dispatched to, so mutating the public journal, including
+its order or its entries, cannot change verification, and a double registered
+after a call cannot retroactively claim it. `UnexpectedCommandVerifier` and
+`CountVerifier` therefore use the dispatch-time association: a call made
+without a double is unexpected, and only calls dispatched to a mock count
+towards its expectation. Verification takes one snapshot of that record under
+the lock, so evicting a diagnostic journal entry never weakens verification. An unbounded journal
 retains every call, which keeps calls that completed before `in_order()` was
 applied available to `OrderVerifier`. A bounded controller discards unordered
 stub calls, so it rejects `in_order()` applied after a stub's first call with

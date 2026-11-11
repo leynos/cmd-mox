@@ -58,6 +58,13 @@ if typ.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _Unset:
+    """Sentinel marking an omitted dispatch double."""
+
+
+_UNSET = _Unset()
+
+
 class Phase(enum.StrEnum):
     """Lifecycle phases for :class:`CmdMox`."""
 
@@ -123,6 +130,7 @@ class CmdMox:
         self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque(maxlen=max_journal_entries)
         self._verification_log: list[Invocation] = []
+        self._verification_doubles: list[CommandDouble | None] = []
         self._history_lock = threading.Lock()
         self._commands: set[str] = set()
         self._ordered: list[Expectation] = []
@@ -505,15 +513,14 @@ class CmdMox:
                 msg = f"Unhandled response strategy: {strategy}"
                 raise RuntimeError(msg)
 
-    def _make_response(self, invocation: Invocation) -> Response:
-        """Build the response for an invocation using the appropriate strategy.
-
-        Returns
-        -------
-        Response
-            The response for *invocation*, already applied to it.
-        """
-        double = self._doubles.get(invocation.command)
+    def _make_response(
+        self,
+        invocation: Invocation,
+        double: CommandDouble | _Unset | None = _UNSET,
+    ) -> Response:
+        """Build the response for an invocation using the appropriate strategy."""
+        if isinstance(double, _Unset):
+            double = self._doubles.get(invocation.command)
 
         if double is not None and double.replay_session is not None:
             resp = self._response_for_replay(double, invocation)
@@ -523,23 +530,16 @@ class CmdMox:
         invocation.apply(resp)
         return resp
 
-    def _needs_verification_record(self, invocation: Invocation) -> bool:
-        """Return whether verification must retain *invocation*."""
+    def _needs_verification_record(self, double: CommandDouble | None) -> bool:
+        """Return whether verification must retain a completed call."""
         if self._max_journal_entries is None:
             return True
-        double = self._doubles.get(invocation.command)
         if double is None or double.kind is not DoubleKind.STUB:
             return True
         return any(exp is double.expectation for exp in self._ordered)
 
     def _register_order(self, expectation: Expectation) -> None:
-        """Mark *expectation* ordered, rejecting unrecoverable late ordering.
-
-        Raises
-        ------
-        ExpectationConfigurationError
-            If a bounded journal discarded the stub's completed calls.
-        """
+        """Mark *expectation* ordered, rejecting unrecoverable late ordering."""
         # Check and register under one lock so a concurrent call cannot be
         # discarded between the two steps.
         with self._history_lock:
@@ -560,49 +560,38 @@ class CmdMox:
             expectation.any_order()
             self._ordered = [exp for exp in self._ordered if exp is not expectation]
 
-    def _record_completed_invocation(self, invocation: Invocation) -> None:
+    def _record_completed_invocation(
+        self, invocation: Invocation, double: CommandDouble | None
+    ) -> None:
         """Append a completed invocation to both records under one lock."""
         snapshot = dc.replace(
             invocation, args=list(invocation.args), env=dict(invocation.env)
         )
         with self._history_lock:
             self.journal.append(invocation)
-            if self._needs_verification_record(invocation):
+            if self._needs_verification_record(double):
                 self._verification_log.append(snapshot)
+                self._verification_doubles.append(double)
             else:
                 self._discarded_stub_calls.add(invocation.command)
 
     def _handle_invocation(self, invocation: Invocation) -> Response:
-        """Record *invocation* and return the configured response.
-
-        Returns
-        -------
-        Response
-            The response for *invocation*.
-        """
-        resp = self._make_response(invocation)
+        """Record *invocation* and return the configured response."""
+        double = self._doubles.get(invocation.command)
+        resp = self._make_response(invocation, double)
         if resp.passthrough is None:
-            self._record_completed_invocation(invocation)
+            self._record_completed_invocation(invocation, double)
         return resp
 
     def _prepare_passthrough(
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
-        """Record passthrough intent and return instructions for the shim.
-
-        ``extra_env`` (expectation overrides) and ``lookup_path`` (the original
-        PATH) stay separate here; the shim merges them into the effective
-        execution environment when it consumes the request.
-
-        Returns
-        -------
-        Response
-            Instructions that make the shim execute the passthrough command.
-        """
+        """Record passthrough intent and return instructions for the shim."""
         overrides = apply_expectation_env(double, invocation)
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
+        # Keep overrides and lookup_path separate; the shim merges them.
         config = PassthroughConfig(
             lookup_path=lookup_path,
             timeout=self._runner.timeout,
@@ -619,7 +608,7 @@ class CmdMox:
         double, invocation, resp = self._passthrough_coordinator.finalize_result(result)
         if double.is_recording:
             double.invocations.append(invocation)
-        self._record_completed_invocation(invocation)
+        self._record_completed_invocation(invocation, double)
         return resp
 
     def _require_phase(self, expected: Phase, action: str) -> None:
@@ -728,6 +717,7 @@ class CmdMox:
         with self._history_lock:
             self.journal.clear()
             self._verification_log.clear()
+            self._verification_doubles.clear()
             self._discarded_stub_calls.clear()
         self._commands = self._registered_commands() | self._commands
         if not self._entered and not self._is_environment_initialized():
@@ -759,15 +749,20 @@ class CmdMox:
         expectations = {n: d.expectation for n, d in self.mocks.items()}
         with self._history_lock:
             verification_log = list(self._verification_log)
+            dispatch_doubles = list(self._verification_doubles)
             ordered = list(self._ordered)
 
-        # Count diagnostics must not read the public journal's live entries.
+        # Count only calls dispatched to the mock, and only from the immutable
+        # snapshots, so journal mutation and late registration cannot count.
+        dispatched = list(zip(verification_log, dispatch_doubles, strict=True))
         inv_map = {
-            name: [inv for inv in verification_log if inv.command == name]
+            name: [inv for inv, dbl in dispatched if dbl is self._doubles[name]]
             for name in expectations
         }
 
-        UnexpectedCommandVerifier().verify(verification_log, self._doubles)
+        UnexpectedCommandVerifier().verify(
+            verification_log, self._doubles, dispatch_doubles
+        )
         OrderVerifier(ordered).verify(verification_log)
         CountVerifier().verify(expectations, inv_map)
         self._verify_replay_sessions_consumed()
