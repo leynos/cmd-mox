@@ -151,6 +151,7 @@ def test_concurrent_handlers_leave_host_environment_untouched(  # ruff: ignore[t
     for key in (shared_key, a_key, b_key, caller_a_key, caller_b_key):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv(host_key, "BEFORE")
+    original_env = os.environ.copy()
 
     barrier = threading.Barrier(2, timeout=10)
     release_a = threading.Event()
@@ -263,6 +264,11 @@ def test_concurrent_handlers_leave_host_environment_untouched(  # ruff: ignore[t
     assert os.environ.get(host_key) == "AFTER"
     for key in (shared_key, a_key, b_key, caller_a_key, caller_b_key):
         assert key not in os.environ
+    # The host change made while the handlers were blocked must be the only
+    # difference from the entry snapshot; a stale restore would remove it or
+    # leak a handler's override.
+    expected_env = {**original_env, host_key: "AFTER"}
+    assert os.environ == expected_env, "handler threads changed the host environment"
 
 
 def test_raising_handler_leaves_host_environment_unchanged(
