@@ -52,6 +52,34 @@ for the available comparators and matching rules, and the
 [argument matcher migration note](with-matching-args-migration-note.md) for
 upgrading expectations that pass plain strings or invalid matcher values.
 
+## Reading a verification failure
+
+By default a mock answers every call with its configured response, even when
+the arguments, stdin, or environment cannot match its expectation. `verify()`
+then reports the mismatch as `UnexpectedCommandError`, naming the expected and
+actual calls. This deferred behaviour keeps a test body running to its own
+assertions and collects every problem in one report.
+
+Opt into fail-fast handling when a mismatched call should fail where it
+happens. Pass `fail_fast=True` to `CmdMox`, or enable it for pytest with
+`--cmd-mox-fail-fast`, the `cmd_mox_fail_fast` ini option,
+`@pytest.mark.cmd_mox(fail_fast=True)`, or an indirect fixture parameter such as
+`{"fail_fast": True}`. A rejected call exits with status `1`, writes no
+standard output, and prints a diagnostic such as:
+
+```text
+No mock expectation matches: git push (arguments ['push'] != ['status'])
+```
+
+The configured handler and canned response are not used, but the call is still
+recorded, so `verify()` reports it as well. Only mismatches that need no
+callback are rejected early: literal argument inequality, matcher arity, and
+literal stdin inequality. Predicate and regex matchers, environment
+constraints, call counts, and ordering remain verify-time checks, so a call
+that might still match is never rejected. Sensitive argument values are
+redacted in the diagnostic and in the verification error, and stdin content is
+never echoed.
+
 ## Sensitive environment values in diagnostics
 
 Conflict errors from `UnexpectedCommandError`, verifier failures, and spy
