@@ -17,6 +17,7 @@ from cmd_mox.domain import (
     Response,
 )
 from cmd_mox.ipc.wire import (
+    WireFormatError,
     invocation_to_payload,
     passthrough_to_payload,
     response_from_payload,
@@ -89,11 +90,10 @@ def test_passthrough_result_to_payload() -> None:
     assert passthrough_to_payload(result) == expected, "Result payload changed"
 
 
-def test_response_from_payload_warns_on_invalid_env(
+def test_response_from_payload_rejects_invalid_env_without_logging(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Response decoding should warn when env is not a mapping."""
-    assert isinstance(caplog, pytest.LogCaptureFixture), "Assertion failed"
+    """Response decoding rejects a non-mapping env without logging its contents."""
     payload = {
         "stdout": "out",
         "stderr": "",
@@ -101,16 +101,15 @@ def test_response_from_payload_warns_on_invalid_env(
         "env": ["synthetic-secret-value"],
     }
 
-    with caplog.at_level("WARNING", logger="cmd_mox.ipc.wire"):
-        response = response_from_payload(payload)
+    with (
+        caplog.at_level("DEBUG", logger="cmd_mox.ipc.wire"),
+        pytest.raises(WireFormatError) as excinfo,
+    ):
+        response_from_payload(payload)
 
-    assert isinstance(response.env, dict), "invalid env should become a mapping"
-    assert not response.env, "normalized env mapping should be empty"
-    assert any(
-        "Payload 'env' is not a dict" in record.message for record in caplog.records
-    ), "Assertion failed"
+    assert "env must be an object" in str(excinfo.value), "Wrong field diagnostic"
     assert all(
-        "synthetic-secret-value" not in record.message for record in caplog.records
+        "synthetic-secret-value" not in record.getMessage() for record in caplog.records
     ), "Malformed environment contents reached the log"
 
 
@@ -125,13 +124,17 @@ def test_invalid_passthrough_does_not_log_environment(
         }
     }
 
-    with caplog.at_level("WARNING", logger="cmd_mox.ipc.wire"):
-        response = response_from_payload(payload)
+    with (
+        caplog.at_level("DEBUG", logger="cmd_mox.ipc.wire"),
+        pytest.raises(WireFormatError) as excinfo,
+    ):
+        response_from_payload(payload)
 
-    assert response.passthrough is None, "Malformed directive should be ignored"
-    assert caplog.records, "Missing directive diagnostic"
+    assert "passthrough is missing required field(s)" in str(excinfo.value), (
+        "Malformed directive was not rejected"
+    )
     assert all(
-        "synthetic-secret-value" not in record.message for record in caplog.records
+        "synthetic-secret-value" not in record.getMessage() for record in caplog.records
     ), "Passthrough environment contents reached the log"
 
 
@@ -151,25 +154,23 @@ def test_response_serialises_passthrough(snapshot: SnapshotAssertion) -> None:
 
 
 def test_response_from_payload_rejects_invalid_fields() -> None:
-    """Response decoding should retain its invalid-payload error contract."""
-    with pytest.raises(
-        RuntimeError,
-        match="Invalid response payload from IPC server",
-    ):
+    """Response decoding rejects fields outside the response model."""
+    with pytest.raises(WireFormatError, match="unknown field"):
         response_from_payload({"unexpected": "field"})
 
 
 def test_response_from_payload_decodes_passthrough_without_mutating_input() -> None:
-    """Nested directives retain coercion and leave the supplied payload intact."""
+    """A valid nested directive decodes without mutating the supplied payload."""
     payload: dict[str, typ.Any] = {
         "stdout": "out",
         "passthrough": {
-            "invocation_id": 123,
+            "invocation_id": "123",
             "lookup_path": "/bin/echo",
-            "extra_env": {"COUNT": 2},
-            "timeout": "invalid",
+            "extra_env": {"COUNT": "2"},
+            "timeout": 4.5,
         },
     }
+    original = json.loads(json.dumps(payload))
 
     response = response_from_payload(payload)
 
@@ -177,9 +178,9 @@ def test_response_from_payload_decodes_passthrough_without_mutating_input() -> N
         invocation_id="123",
         lookup_path="/bin/echo",
         extra_env={"COUNT": "2"},
-        timeout=30.0,
+        timeout=4.5,
     ), "Passthrough directive changed"
-    assert payload["passthrough"]["invocation_id"] == 123, "Input payload was mutated"
+    assert payload == original, "Input payload was mutated"
 
 
 def test_invocation_apply_updates_result_fields() -> None:

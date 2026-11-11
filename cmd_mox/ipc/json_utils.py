@@ -5,10 +5,6 @@ from __future__ import annotations
 import json
 import typing as typ
 
-from cmd_mox.domain import Invocation, PassthroughResult
-
-from .wire import request_from_payload
-
 
 def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
     """Return a JSON object parsed from *data* or ``None`` on failure.
@@ -27,32 +23,4 @@ def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
     return payload
 
 
-def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | None:
-    """Return an :class:`Invocation` if *payload* has the required fields.
-
-    Returns
-    -------
-    Invocation or None
-        The validated invocation, or ``None`` for malformed payloads.
-    """
-    return request_from_payload(payload, Invocation)
-
-
-def validate_passthrough_payload(
-    payload: dict[str, typ.Any],
-) -> PassthroughResult | None:
-    """Return a :class:`PassthroughResult` for passthrough result payloads.
-
-    Returns
-    -------
-    PassthroughResult or None
-        The validated result, or ``None`` for malformed payloads.
-    """
-    return request_from_payload(payload, PassthroughResult)
-
-
-__all__ = [
-    "parse_json_safely",
-    "validate_invocation_payload",
-    "validate_passthrough_payload",
-]
+__all__ = ["parse_json_safely"]
