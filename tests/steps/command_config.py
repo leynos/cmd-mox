@@ -23,13 +23,6 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.ipc import Invocation
 
 
-
-"""pytest-bdd steps that configure command doubles and behaviours."""
-if typ.TYPE_CHECKING:  # pragma: no cover - typing only
-    from cmd_mox.controller import CmdMox
-    from cmd_mox.ipc import Invocation
-
-
 @given(parsers.cfparse('the command "{cmd}" is stubbed to return "{text}"'))
 def stub_command(mox: CmdMox, cmd: str, text: str) -> None:
     """Configure a stubbed command."""
