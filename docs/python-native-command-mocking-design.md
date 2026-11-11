@@ -2377,7 +2377,8 @@ Recording the full environment would bloat fixture files (100+ variables
 typical), include system-specific paths that break portability, and potentially
 leak sensitive data. Instead, recordings capture an `env_subset` containing:
 
-1. Variables explicitly requested via `.with_env()`
+1. Variables requested through the filter's explicit-key channel, which a
+   `.with_env()` channel would supply
 2. Variables matching known command prefixes (e.g., `GIT_*`, `AWS_*`,
    `DOCKER_*`), or, for `go`, the documented exact names such as `GOPATH` and
    `GOFLAGS`
@@ -3018,7 +3019,8 @@ rather than relying on `.replay()`.
 
 **Included by default**:
 
-- Variables explicitly requested via `.with_env()`
+- Variables requested through the filter's explicit-key channel, which a
+  `.with_env()` channel would supply
 - Variables on the user-defined allowlist
 - Variables matching command-specific prefixes (e.g., `GIT_*` for git), or,
   for `go`, the documented exact names such as `GOPATH` and `GOFLAGS`
@@ -3083,8 +3085,10 @@ such variables from fixtures and masks them in argument diagnostics, which is
 the intended coarse-grained posture: a false positive hides one value, while a
 false negative discloses a credential. `DOCKER_AUTH_CONFIG` carried registry
 credentials that no earlier rule classified, and it is the case that prompted
-the addition. Variables named explicitly through `.with_env()` remain exempt
-from subset filtering by the existing precedence rule.
+the addition. Variables requested through the filter's explicit-key channel
+remain exempt from subset filtering by the precedence rule. `RecordingSession`
+does not currently forward `.with_env()` keys, so at the recording level they
+are not yet re-admitted; that wiring is tracked in issue #368.
 
 Known exposures remain out of scope here and need their own design decisions:
 
