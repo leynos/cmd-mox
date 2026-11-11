@@ -64,6 +64,7 @@ else:
     from cmd_mox._shim_bootstrap import bootstrap_shim_path
 
 from cmd_mox import _path_utils as path_utils, _stdin_capture  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - shim bootstrap configures sys.path before package imports
+from cmd_mox._stdin_system import SYSTEM_STDIN, StdinSystem, system_stdin  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
 from cmd_mox._shim_failures import (  # ruff: ignore[module-import-not-at-top-of-file] - shim bootstrap configures sys.path before package imports
     _ShimEventContext,
     _emit_shim_event,
@@ -105,6 +106,7 @@ class _InvocationDependencies:
     stdin_stream: _StdinTextStream
     monotonic_clock: cabc.Callable[[], float]
     duration_clock: cabc.Callable[[], float]
+    stdin_system: StdinSystem = SYSTEM_STDIN
 
 
 class _StdinTextStream(typ.Protocol):
@@ -129,6 +131,7 @@ def _system_invocation_dependencies() -> _InvocationDependencies:
         stdin_stream=sys.stdin,
         monotonic_clock=time.monotonic,
         duration_clock=time.perf_counter,
+        stdin_system=system_stdin(),
     )
 
 
@@ -256,8 +259,11 @@ def _capture_stdin(
         text = _stdin_capture.read_stdin(
             typ.cast("_stdin_capture._StdinStream", stream),
             timeout,
-            clock=dependencies.monotonic_clock,
-            on_selected=selected.append,
+            options=_stdin_capture._CaptureOptions(
+                clock=dependencies.monotonic_clock,
+                on_selected=selected.append,
+            ),
+            system=dependencies.stdin_system,
         )
     except StdinTimeoutError as exc:
         # A timed-out capture never contacts IPC: the command would otherwise

@@ -4,10 +4,35 @@ from __future__ import annotations
 
 import typing as typ
 
+from cmd_mox import shim
+from cmd_mox._stdin_system import SYSTEM_STDIN, StdinSystem
+
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
     import pytest
+
+
+def _stream_dependencies(
+    stream: object,
+    *,
+    monotonic: cabc.Callable[[], float] = lambda: 0.0,
+    duration: cabc.Callable[[], float] = lambda: 0.0,
+    system: StdinSystem = SYSTEM_STDIN,
+) -> shim._InvocationDependencies:
+    """Bind *stream*, the supplied clocks and stdin system for one invocation.
+
+    Returns
+    -------
+    shim._InvocationDependencies
+        Dependencies that replace the process-backed defaults.
+    """
+    return shim._InvocationDependencies(
+        stdin_stream=typ.cast("shim._StdinTextStream", stream),
+        monotonic_clock=monotonic,
+        duration_clock=duration,
+        stdin_system=system,
+    )
 
 
 class _DummyStdin:

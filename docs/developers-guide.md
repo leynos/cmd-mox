@@ -241,24 +241,51 @@ flag, runs through `uv_gate` in the `dev` group, is ordered before coverage in
 compatibility floor. The scenarios themselves are the behavioural evidence; the
 contract tests only keep the gate from degenerating into a no-op.
 
-### Patching `os` in a test
+### Injecting the stdin system in a test
 
-`cmd_mox._stdin_capture` imports `os` by name, so a test that patches it through
-`monkeypatch.setattr(capture.os, "fstat", ...)` is patching the `os` module
-itself, not a private copy. Such a patch is process-wide and stays active until
-the `monkeypatch` fixture tears down, which is _after_ pytest has torn down the
-test's capture.
+`cmd_mox._stdin_system` gathers every operating-system and process operation
+used by stdin capture: poller creation, descriptor reads and status queries,
+the Windows module and handle lookups, daemon-worker creation, and completion
+events. `read_stdin` accepts a `system` keyword that defaults to
+`SYSTEM_STDIN`, and `shim._InvocationDependencies` carries the same object as
+`stdin_system`, so an invocation can be exercised end to end with a double.
 
-pytest 9.2 added an `os.fstat` call to that teardown:
-`_pytest.capture.FDCapture.snap()` now stats its own temporary file before
-reading it. A stub that rejects _every_ descriptor therefore fails pytest's
-capture rather than the code under test, and the failure points at the test's
-`raise` with no CmdMox frame in the traceback. This is why
-`test_plan_treats_an_unstattable_descriptor_as_pollable` rejects only the
-descriptor it created and delegates every other call to the real `os.fstat`.
+`read_stdin` also accepts an `options` keyword carrying a `_CaptureOptions`
+value. It groups the two capture instrumentation seams that are not operating
+system operations: `clock`, the monotonic time source used to compute the
+deadline, and `on_selected`, an optional observer called with the chosen
+strategy before the read starts. Grouping them keeps `read_stdin` at four
+arguments while the `system` seam stays explicit. Tests that need a fake clock
+or a strategy observer pass
+`options=_CaptureOptions(clock=..., on_selected=...)`; production callers use
+the default.
 
-Apply the same shape to any new test that patches `os` globally: narrow the
-stub to the inputs the test owns, and pass everything else through.
+Tests should use the doubles in `cmd_mox/unittests/_stdin_capture_fakes.py`
+instead of patching `capture.os`, `capture.select`, `capture.threading`, or the
+Windows module seam. `_SystemDouble` delegates any unset operation to the
+production system; set only the operation a test needs. The Windows half is
+replaced separately with `_WindowsSystemDouble`, whose `windows_flag`,
+`handle_override`, and `modules_override` pin the platform branch, the resolved
+handle, and the pywin32 module triple. `None` is a meaningful override (no
+handle or no modules), which is why the double uses an `_Unset` sentinel for
+delegation.
+
+The production operations still live behind factories such as
+`_create_stdin_poller`, `_stdin_handle`, and `_windows_modules`, and
+`test_stdin_system.py` holds their contract tests. Those factories exist so the
+system can be exercised without a Windows host; strategy tests should not reach
+for them directly.
+
+Replacing `os` globally used to be the only option, and the pytest 9.2 trap is
+still worth knowing if a test has no system seam. A `monkeypatch.setattr` on a
+module object is process-wide and stays active until the fixture tears down,
+which is _after_ pytest has torn down the test's capture. pytest 9.2 added an
+`os.fstat` call to that teardown: `_pytest.capture.FDCapture.snap()` stats its
+own temporary file before reading it. A stub that rejects _every_ descriptor
+therefore fails pytest's capture rather than the code under test, and the
+failure points at the test's `raise` with no CmdMox frame in the traceback.
+Prefer a system double; when a global patch is unavoidable, narrow it to the
+inputs the test owns and pass everything else through.
 
 [pytest-bdd]: https://github.com/pytest-dev/pytest-bdd
 [pytest-bdd-851]: https://github.com/pytest-dev/pytest-bdd/pull/851
@@ -560,26 +587,36 @@ a failure into a diagnostic. The strategies are:
   first and `select.select` second, so an unpollable descriptor is detected
   before any bytes are read;
 - chunked reads against the remaining budget for pollable descriptors, taken
-  through a buffered stream's `read1` when it has one and `os.read` when it
-  does not, and `os.read` on a daemon worker for regular files, which cannot be
-  waited on;
+  through a buffered stream's `read1` when it has one and a descriptor read
+  when it does not, and a descriptor read on a daemon worker for regular files,
+  which cannot be waited on;
 - bounded `ReadFile` chunks on a daemon worker for a resolved Windows handle,
   with `CancelSynchronousIo` followed by a bounded join when the deadline
   expires;
 - the stream's own `read()` on a tracked daemon worker when there is no usable
   descriptor or handle.
 
+Every operating-system and process operation those strategies need is reached
+through `cmd_mox._stdin_system.SYSTEM_STDIN`, the default `system` argument of
+`read_stdin`. A strategy test injects a `_SystemDouble` there rather than
+replacing `os`, `select`, or `threading` for the whole process, which keeps
+each test's patch local and avoids the global-patch teardown trap described
+above.
+
 The Windows arms of that list are covered on POSIX, for the same reason the
 named-pipe adapter is: code that only runs on Windows would otherwise sit
 uncovered and drag the line-coverage ratchet down, and no Windows runner is
-needed to reach it. `test_stdin_capture_windows.py` patches `IS_WINDOWS` on
-`path_utils` and supplies stand-in `win32file`, `win32api`, and `pywintypes`
-modules through the `_windows_modules` seam. Its `_Win32Harness` records
-`ReadFile`, `OpenThread`, `CancelSynchronousIo`, and `CloseHandle` calls, so
-the cancellation path — including `request_synchronous_io_cancel` and
-`HandleCloser` in `_bounded_thread` — is driven without a Windows host. Keep
-new Windows behaviour behind `_windows_modules` rather than importing `pywin32`
-at module scope, where those stand-ins could not replace it.
+needed to reach it. `test_stdin_capture_windows.py` injects a system whose
+`_WindowsSystemDouble` sets `windows_flag=True`, returns a synthetic handle,
+and supplies stand-in `win32file`, `win32api`, and `pywintypes` modules. Its
+`_Win32Harness` records `ReadFile`, `OpenThread`, `CancelSynchronousIo`, and
+`CloseHandle` calls, so the cancellation path — including
+`request_synchronous_io_cancel` and `HandleCloser` in `_bounded_thread` — is
+driven without a Windows host. Keep new Windows behaviour behind the
+`WindowsStdinSystem` half rather than importing `pywin32` at module scope,
+where the double could not replace it. The production `_windows_modules`
+factory still imports the modules lazily, and `test_stdin_system.py` pins its
+import order and its behaviour when pywin32 is absent.
 
 A stream that never reaches EOF leaves its reader blocked inside the stream.
 That thread cannot be joined because only the stream's owner can end the read,

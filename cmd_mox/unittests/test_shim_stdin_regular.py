@@ -9,13 +9,14 @@ import typing as typ
 
 import pytest
 
-from cmd_mox import _stdin_capture as capture
 from cmd_mox.shim import _create_invocation
 from cmd_mox.unittests._shim_test_support import (
     _assert_exit_code,
     _DummyStdin,
     _InjectedOSError,
+    _stream_dependencies,
 )
+from cmd_mox.unittests._stdin_capture_fakes import _SystemDouble
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -88,14 +89,18 @@ def test_create_invocation_bounds_stalled_regular_file_read(
 
     path = tmp_path / "stalled.txt"
     path.write_text("never read", encoding="utf-8")
-    monkeypatch.setattr(capture.os, "read", stalled_read)
+    system = _SystemDouble(read_override=stalled_read)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     with path.open(encoding="utf-8") as regular_file:
-        monkeypatch.setattr(sys, "stdin", _DescriptorTextStream(regular_file.fileno()))
+        stdin = _DescriptorTextStream(regular_file.fileno())
         try:
             with pytest.raises(SystemExit) as exc:
-                _create_invocation("shim", timeout=0.05)
+                _create_invocation(
+                    "shim",
+                    timeout=0.05,
+                    dependencies=_stream_dependencies(stdin, system=system),
+                )
         finally:
             release.set()
 
@@ -144,13 +149,16 @@ def test_regular_stdin_reads_descriptor_without_buffered_stream(
 
     path = tmp_path / "regular.txt"
     path.write_text("ignored", encoding="utf-8")
-    monkeypatch.setattr(capture.os, "read", read_raw)
+    system = _SystemDouble(read_override=read_raw)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     with path.open(encoding="utf-8") as regular_file:
         stdin = _RegularStdin(regular_file.fileno())
-        monkeypatch.setattr(sys, "stdin", stdin)
-        invocation = _create_invocation("shim", timeout=1.0)
+        invocation = _create_invocation(
+            "shim",
+            timeout=1.0,
+            dependencies=_stream_dependencies(stdin, system=system),
+        )
 
     assert invocation.stdin == "\N{EURO SIGN}\r\n", (
         "Raw stdin chunks did not preserve the original newline sequence"
@@ -182,13 +190,17 @@ def test_regular_stdin_read_error_uses_controlled_exit(
 
     path = tmp_path / "failing.txt"
     path.write_text("ignored", encoding="utf-8")
-    monkeypatch.setattr(capture.os, "read", fail_read)
+    system = _SystemDouble(read_override=fail_read, regular_file_override=True)
     monkeypatch.setattr(sys, "argv", ["shim"])
 
     with path.open(encoding="utf-8") as regular_file:
-        monkeypatch.setattr(sys, "stdin", _DescriptorTextStream(regular_file.fileno()))
+        stdin = _DescriptorTextStream(regular_file.fileno())
         with pytest.raises(SystemExit) as exc:
-            _create_invocation("shim", timeout=1.0)
+            _create_invocation(
+                "shim",
+                timeout=1.0,
+                dependencies=_stream_dependencies(stdin, system=system),
+            )
 
     _assert_exit_code(exc, 1)
     assert "IPC error: stdin read failed" in capsys.readouterr().err, (

@@ -22,11 +22,16 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from cmd_mox import _stdin_capture as capture
+from cmd_mox._stdin_system import SYSTEM_STDIN, StdinSystem
 from cmd_mox.unittests._shim_test_support import (
     _BufferedInput,
     _DescriptorStdin,
 )
-from cmd_mox.unittests._stdin_capture_fakes import _Clock, _DescriptorStream
+from cmd_mox.unittests._stdin_capture_fakes import (
+    _Clock,
+    _DescriptorStream,
+    _SystemDouble,
+)
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -83,16 +88,16 @@ def _split(payload: bytes, fractions: cabc.Iterable[float]) -> list[bytes]:
     ]
 
 
-def _expected(text: str) -> str:
+def _expected(text: str, *, translate_newlines: bool) -> str:
     """Return the text the capture decoder contract produces for *text*.
 
     Returns
     -------
     str
-        *text* unchanged on POSIX, or with newlines normalised on Windows,
-        where the decoder mirrors ``TextIOWrapper`` translation.
+        *text* unchanged when newline translation is off, or with newlines
+        normalized when it is on, matching ``TextIOWrapper``.
     """
-    if capture.path_utils.IS_WINDOWS:
+    if translate_newlines:
         return text.replace("\r\n", "\n").replace("\r", "\n")
     return text
 
@@ -127,13 +132,14 @@ def _capture(
     *,
     stream: capture._StdinStream,
     clock: _Clock,
+    system: StdinSystem = SYSTEM_STDIN,
 ) -> capture._Capture:
     """Build a capture whose deadline is far beyond the fake clock.
 
     Returns
     -------
     capture._Capture
-        Capture bound to *plan* and *stream* under *clock*.
+        Capture bound to *plan*, *stream* and *system* under *clock*.
     """
     return capture._Capture(
         stream=stream,
@@ -141,6 +147,7 @@ def _capture(
         deadline=1.0,
         clock=clock,
         plan=plan,
+        system=system,
     )
 
 
@@ -155,76 +162,96 @@ def test_regular_file_decode_is_independent_of_chunk_boundaries(
     chunks = _split(text.encode(), splits)
     read_fd, write_fd = os.pipe()
     os.close(write_fd)
+    # A per-example system keeps the injected read local to each input; the
+    # fixture form is not reset between Hypothesis examples.
+    system = _SystemDouble(read_override=_scripted(chunks))
     try:
-        # A per-example context keeps the injected read local to each input;
-        # the fixture form is not reset between Hypothesis examples.
-        with pytest.MonkeyPatch.context() as patcher:
-            patcher.setattr(capture.os, "read", _scripted(chunks))
-            result = capture._read_regular_file(
-                _capture(
-                    capture._Plan("regular", descriptor=read_fd),
-                    stream=_DescriptorStream(read_fd),
-                    clock=_Clock(),
-                )
-            )
-    finally:
-        os.close(read_fd)
-
-    assert result == _expected(text), "chunk boundaries changed the decoded text"
-
-
-@_POSIX_ONLY
-@settings(max_examples=40, deadline=None)
-@given(text=_TEXT, splits=_SPLITS)
-def test_raw_polled_decode_is_independent_of_chunk_boundaries(
-    text: str,
-    splits: list[float],
-) -> None:
-    """Raw polled reads decode a payload identically for every byte split."""
-    chunks = _split(text.encode(), splits)
-    read_fd, write_fd = os.pipe()
-    os.close(write_fd)
-    try:
-        with pytest.MonkeyPatch.context() as patcher:
-            patcher.setattr(capture.os, "read", _scripted(chunks))
-            result = capture._read_raw_polled(
-                _capture(
-                    capture._Plan("poll", descriptor=read_fd, poller=_ReadyPoller()),
-                    stream=_DescriptorStream(read_fd),
-                    clock=_Clock(),
-                ),
-                capture._PollContext(read_fd, _ReadyPoller(), 1.0, 1.0, _Clock()),
-            )
-    finally:
-        os.close(read_fd)
-
-    assert result == _expected(text), "chunk boundaries changed the decoded text"
-
-
-@_POSIX_ONLY
-@settings(max_examples=40, deadline=None)
-@given(text=_TEXT, splits=_SPLITS)
-def test_buffered_decode_is_independent_of_chunk_boundaries(
-    text: str,
-    splits: list[float],
-) -> None:
-    """Buffered reads decode a payload identically for every byte split."""
-    chunks = _split(text.encode(), splits)
-    read_fd, write_fd = os.pipe()
-    os.close(write_fd)
-    stream = _DescriptorStdin(read_fd, buffer=_BufferedInput([*chunks, b""]))
-    try:
-        result = capture._read_polled(
+        result = capture._read_regular_file(
             _capture(
-                capture._Plan("poll", descriptor=read_fd, poller=_ReadyPoller()),
-                stream=stream,
+                capture._Plan("regular", descriptor=read_fd),
+                stream=_DescriptorStream(read_fd),
                 clock=_Clock(),
+                system=system,
             )
         )
     finally:
         os.close(read_fd)
 
-    assert result == _expected(text), "chunk boundaries changed the decoded text"
+    assert result == _expected(text, translate_newlines=False), (
+        "chunk boundaries changed the decoded text"
+    )
+
+
+def _read_raw_polled_pipe(read_fd: int, chunks: list[bytes]) -> str:
+    """Capture raw polled reads from *read_fd* replaying *chunks*.
+
+    Returns
+    -------
+    str
+        The text decoded by the raw polled strategy.
+    """
+    return capture._read_raw_polled(
+        _capture(
+            capture._Plan("poll", descriptor=read_fd, poller=_ReadyPoller()),
+            stream=_DescriptorStream(read_fd),
+            clock=_Clock(),
+            system=_SystemDouble(read_override=_scripted(chunks)),
+        ),
+        capture._PollContext(read_fd, _ReadyPoller(), 1.0, 1.0, _Clock()),
+    )
+
+
+def _read_buffered_pipe(read_fd: int, chunks: list[bytes]) -> str:
+    """Capture buffered polled reads from *read_fd* replaying *chunks*.
+
+    Returns
+    -------
+    str
+        The text decoded by the buffered polled strategy.
+    """
+    return capture._read_polled(
+        _capture(
+            capture._Plan("poll", descriptor=read_fd, poller=_ReadyPoller()),
+            stream=_DescriptorStdin(read_fd, buffer=_BufferedInput([*chunks, b""])),
+            clock=_Clock(),
+        )
+    )
+
+
+def _assert_decode_independent_of_chunk_boundaries(
+    text: str,
+    splits: list[float],
+    read: cabc.Callable[[int, list[bytes]], str],
+) -> None:
+    """Assert *read* decodes *text* identically for every generated split."""
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    try:
+        result = read(read_fd, _split(text.encode(), splits))
+    finally:
+        os.close(read_fd)
+    assert result == _expected(text, translate_newlines=False), (
+        "chunk boundaries changed the decoded text"
+    )
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize(
+    "read",
+    [
+        pytest.param(_read_raw_polled_pipe, id="raw-polled"),
+        pytest.param(_read_buffered_pipe, id="buffered"),
+    ],
+)
+@settings(max_examples=40, deadline=None)
+@given(text=_TEXT, splits=_SPLITS)
+def test_polled_decode_is_independent_of_chunk_boundaries(
+    read: cabc.Callable[[int, list[bytes]], str],
+    text: str,
+    splits: list[float],
+) -> None:
+    """Polled reads decode a payload identically for every byte split."""
+    _assert_decode_independent_of_chunk_boundaries(text, splits, read)
 
 
 @settings(max_examples=40, deadline=None)
@@ -243,7 +270,9 @@ def test_windows_handle_decode_is_independent_of_chunk_boundaries(
         typ.cast("capture._Win32File", win32file),
         typ.cast("capture._bounded_thread._PyWinTypes", types.SimpleNamespace()),
         object(),
-        capture._stdin_decoder(stream),
+        capture._stdin_decoder(stream, translate_newlines=os.name == "nt"),
     )
 
-    assert result == _expected(text), "chunk boundaries changed the decoded text"
+    assert result == _expected(text, translate_newlines=os.name == "nt"), (
+        "chunk boundaries changed the decoded text"
+    )

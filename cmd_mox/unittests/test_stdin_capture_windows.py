@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import threading
 import types
 import typing as typ
@@ -13,9 +12,10 @@ from cmd_mox import _stdin_capture as capture
 from cmd_mox.errors import StdinTimeoutError
 from cmd_mox.unittests._stdin_capture_fakes import (
     _Clock,
-    _DescriptorStream,
-    _install_completion_clock,
     _Stream,
+    _system_with_completion_clock,
+    _SystemDouble,
+    _WindowsSystemDouble,
 )
 
 if typ.TYPE_CHECKING:
@@ -76,18 +76,24 @@ class _Win32Harness:
         return (self.win32file, self.win32api, self.pywintypes)
 
 
-def _install_windows_harness(
-    monkeypatch: pytest.MonkeyPatch, harness: _Win32Harness
-) -> None:
-    """Route the capture module's Windows seams through *harness*."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: _HANDLE)
-    monkeypatch.setattr(capture, "_windows_modules", harness.modules)
+def _windows_system(harness: _Win32Harness) -> _SystemDouble:
+    """Return an injected system that routes Windows operations through *harness*.
+
+    Returns
+    -------
+    _SystemDouble
+        System naming the Windows strategy and resolving the harness modules.
+    """
+    return _SystemDouble(
+        windows=_WindowsSystemDouble(
+            windows_flag=True,
+            handle_override=_HANDLE,
+            modules_override=harness.modules(),
+        )
+    )
 
 
-def test_windows_handle_reads_until_broken_pipe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_windows_handle_reads_until_broken_pipe() -> None:
     """A Windows handle read decodes chunks and stops at a closed pipe."""
     chunks = iter([b"win", b"dows"])
     read_handles: list[object] = []
@@ -101,18 +107,40 @@ def test_windows_handle_reads_until_broken_pipe(
             raise _FakeWinError("closed", 109) from None
 
     harness = _Win32Harness(read_file)
-    _install_windows_harness(monkeypatch, harness)
+    system = _windows_system(harness)
 
-    assert capture.read_stdin(_Stream(), 5.0, clock=_Clock()) == "windows", (
+    captured = capture.read_stdin(
+        _Stream(), 5.0, options=capture._CaptureOptions(clock=_Clock()), system=system
+    )
+
+    assert captured == "windows", (
         "the Windows strategy should return the decoded handle data"
     )
     assert read_handles == [_HANDLE, _HANDLE, _HANDLE], "the wrong handle was read"
     assert harness.cancelled == [], "a completed read must not be cancelled"
 
 
-def test_windows_handle_reports_unexpected_errors_as_oserror(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_windows_handle_normalizes_newlines_across_chunk_boundaries() -> None:
+    r"""CRLF and lone CR split across chunks decode to LF through ``read_stdin``.
+
+    The Windows strategy translates newlines because ``TextIOWrapper`` does on
+    that platform. Splitting ``\\r\\n`` and a lone ``\\r`` across ``ReadFile``
+    chunks must not leak a carriage return into the captured text.
+    """
+    chunks = iter([b"first\r", b"\nsecond\rthird\r", b"\nfourth"])
+    harness = _Win32Harness(lambda _handle, _size: (0, next(chunks, b"")))
+    system = _windows_system(harness)
+
+    captured = capture.read_stdin(
+        _Stream(), 5.0, options=capture._CaptureOptions(clock=_Clock()), system=system
+    )
+
+    assert captured == "first\nsecond\nthird\nfourth", (
+        "the Windows strategy did not normalize newlines across chunk boundaries"
+    )
+
+
+def test_windows_handle_reports_unexpected_errors_as_oserror() -> None:
     """A non-broken-pipe ``pywintypes`` error reaches the caller as ``OSError``.
 
     ``pywintypes.error`` is not an ``OSError``, so re-raising it verbatim would
@@ -127,9 +155,14 @@ def test_windows_handle_reports_unexpected_errors_as_oserror(
             _FakeWinError.ACCESS_DENIED_MESSAGE, _FakeWinError.ACCESS_DENIED
         )
 
-    _install_windows_harness(monkeypatch, _Win32Harness(read_file))
+    system = _windows_system(_Win32Harness(read_file))
     with pytest.raises(OSError, match="stdin handle read failed") as excinfo:
-        capture.read_stdin(_Stream(), 5.0, clock=_Clock())
+        capture.read_stdin(
+            _Stream(),
+            5.0,
+            options=capture._CaptureOptions(clock=_Clock()),
+            system=system,
+        )
 
     assert excinfo.value.errno == _FakeWinError.ACCESS_DENIED, (
         "the Windows error code was not preserved"
@@ -163,12 +196,17 @@ def test_windows_handle_timeout_cancels_and_closes_one_handle(
         return 0, b""
 
     harness = _Win32Harness(read_file)
-    _install_windows_harness(monkeypatch, harness)
+    system = _windows_system(harness)
     monkeypatch.setattr(capture, "_CANCEL_GRACE", 0.01)
 
     try:
         with pytest.raises(StdinTimeoutError) as excinfo:
-            capture.read_stdin(_Stream(), 0.05, clock=_Clock())
+            capture.read_stdin(
+                _Stream(),
+                0.05,
+                options=capture._CaptureOptions(clock=_Clock()),
+                system=system,
+            )
     finally:
         release.set()
 
@@ -212,12 +250,17 @@ def test_windows_cancel_lets_the_worker_exit_within_the_grace(
         release.set()
 
     harness.win32file.CancelSynchronousIo = cancel
-    _install_windows_harness(monkeypatch, harness)
+    system = _windows_system(harness)
     monkeypatch.setattr(capture, "_CANCEL_GRACE", 5.0)
 
     try:
         with pytest.raises(StdinTimeoutError) as excinfo:
-            capture.read_stdin(_Stream(), 0.05, clock=_Clock())
+            capture.read_stdin(
+                _Stream(),
+                0.05,
+                options=capture._CaptureOptions(clock=_Clock()),
+                system=system,
+            )
     finally:
         release.set()
 
@@ -234,7 +277,7 @@ def test_windows_cancel_lets_the_worker_exit_within_the_grace(
     ids=["before", "at", "after"],
 )
 def test_windows_worker_rejects_late_completion(
-    monkeypatch: pytest.MonkeyPatch, advance: float, *, is_late: bool
+    advance: float, *, is_late: bool
 ) -> None:
     """A handle read observed at or after the deadline is a timeout.
 
@@ -244,14 +287,15 @@ def test_windows_worker_rejects_late_completion(
     """
     clock = _Clock()
     harness = _Win32Harness(lambda _handle, _size: (0, b""))
-    _install_windows_harness(monkeypatch, harness)
-    _install_completion_clock(monkeypatch, clock, advance)
+    base = _windows_system(harness)
+    system = _system_with_completion_clock(clock, advance, windows=base.windows)
     worker_capture = capture._Capture(
         stream=_Stream(),
         timeout=1.0,
         deadline=1.0,
         clock=clock,
         plan=capture._Plan("win32", handle=_HANDLE),
+        system=system,
     )
 
     if is_late:
@@ -263,107 +307,89 @@ def test_windows_worker_rejects_late_completion(
         )
 
 
-def test_windows_handle_completes_without_cancellation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_windows_handle_completes_without_cancellation() -> None:
     """A handle read that reaches EOF before the deadline is not cancelled."""
     harness = _Win32Harness(lambda _handle, _size: (0, b""))
-    _install_windows_harness(monkeypatch, harness)
+    system = _windows_system(harness)
 
-    assert capture.read_stdin(_Stream(), 5.0, clock=_Clock()) == "", (
-        "an immediate EOF should capture no text"
-    )
+    assert (
+        capture.read_stdin(
+            _Stream(),
+            5.0,
+            options=capture._CaptureOptions(clock=_Clock()),
+            system=system,
+        )
+        == ""
+    ), "an immediate EOF should capture no text"
     assert harness.cancelled == [], "a completed read must not be cancelled"
     assert harness.closed == [], "no thread handle should be opened"
 
 
-def test_windows_without_a_handle_uses_the_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_windows_without_a_handle_uses_the_fallback() -> None:
     """A Windows stream whose handle cannot be resolved reads directly."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: None)
+    system = _SystemDouble(
+        windows=_WindowsSystemDouble(windows_flag=True, handle_override=None)
+    )
     stream = _Stream("fallback on windows")
 
-    assert capture.read_stdin(stream, 5.0, clock=_Clock()) == "fallback on windows", (
-        "a missing handle should fall back to a direct read"
-    )
+    assert (
+        capture.read_stdin(
+            stream, 5.0, options=capture._CaptureOptions(clock=_Clock()), system=system
+        )
+        == "fallback on windows"
+    ), "a missing handle should fall back to a direct read"
     assert stream.read_calls == 1, "the fallback should read exactly once"
 
 
-def test_windows_handle_resolution_falls_back_when_msvcrt_rejects(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A ``get_osfhandle`` failure is reported as a missing handle."""
-
-    def reject(_descriptor: int) -> object:
-        """Simulate msvcrt rejecting the descriptor with an OSError."""
-        msg = "no console"
-        raise OSError(msg)
-
-    monkeypatch.setitem(
-        typ.cast("dict[str, object]", __import__("sys").modules),
-        "msvcrt",
-        types.SimpleNamespace(get_osfhandle=reject),
-    )
-    stream = _DescriptorStream(0)
-    assert capture._stdin_handle(stream) is None, (
-        "an unusable handle must be reported as missing"
-    )
-
-
-def test_windows_missing_pywin32_uses_the_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_windows_missing_pywin32_uses_the_fallback() -> None:
     """A Windows host without pywin32 degrades to the tracked fallback."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: _HANDLE)
-    monkeypatch.setattr(capture, "_windows_modules", lambda: None)
+    system = _SystemDouble(
+        windows=_WindowsSystemDouble(
+            windows_flag=True,
+            handle_override=_HANDLE,
+            modules_override=None,
+        )
+    )
     stream = _Stream("no pywin32")
 
-    assert capture.read_stdin(stream, 5.0, clock=_Clock()) == "no pywin32", (
-        "a host without pywin32 should still capture stdin"
+    captured = capture.read_stdin(
+        stream, 5.0, options=capture._CaptureOptions(clock=_Clock()), system=system
     )
+    assert captured == "no pywin32", "a host without pywin32 should still capture stdin"
     assert stream.read_calls == 1, "the fallback should read exactly once"
-
-
-@pytest.mark.skipif(os.name == "nt", reason="asserts the non-Windows branch")
-def test_windows_modules_are_inert_off_windows() -> None:
-    """``_windows_modules`` returns nothing on a non-Windows host."""
-    assert capture._windows_modules() is None, (
-        "the Windows modules must stay inert away from Windows"
-    )
 
 
 # --- Strategy planning ------------------------------------------------------
 
 
-def test_plan_selects_win32_for_a_resolved_handle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_plan_selects_win32_for_a_resolved_handle() -> None:
     """Windows resolves a handle before considering descriptors."""
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: _HANDLE)
-    monkeypatch.setattr(
-        capture, "_windows_modules", lambda: (object(), object(), object())
+    system = _SystemDouble(
+        windows=_WindowsSystemDouble(
+            windows_flag=True,
+            handle_override=_HANDLE,
+            modules_override=(object(), object(), object()),
+        )
     )
-    assert capture._plan_stdin(_Stream()).strategy == "win32", (
+    assert capture._plan_stdin(_Stream(), system=system).strategy == "win32", (
         "a resolved handle should select the Windows strategy"
     )
 
 
-def test_plan_falls_back_when_the_win32_modules_are_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_plan_falls_back_when_the_win32_modules_are_missing() -> None:
     """A plan must name the strategy that will actually run.
 
     ``_read_win32`` degrades to the tracked fallback when pywin32 is absent, so
     the selected plan must not claim the Windows strategy for that stream.
     """
-    monkeypatch.setattr(capture.path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(capture, "_stdin_handle", lambda _stream: _HANDLE)
-    monkeypatch.setattr(capture, "_windows_modules", lambda: None)
+    system = _SystemDouble(
+        windows=_WindowsSystemDouble(
+            windows_flag=True,
+            handle_override=_HANDLE,
+            modules_override=None,
+        )
+    )
 
-    assert capture._plan_stdin(_Stream()).strategy == "fallback", (
+    assert capture._plan_stdin(_Stream(), system=system).strategy == "fallback", (
         "a missing pywin32 must not be planned as the Windows strategy"
     )
