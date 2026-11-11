@@ -87,7 +87,7 @@ for the complete field rules.
 
 ## Recording environment provenance
 
-`Controller._prepare_passthrough()` validates the expectation environment with
+`CmdMox._prepare_passthrough()` validates the expectation environment with
 `apply_expectation_env()` and passes that same mapping to
 `PassthroughCoordinator.prepare_request(expectation_env=...)`. The coordinator
 copies it into a frozen `frozenset` and stores it with the pending request, so
@@ -156,17 +156,19 @@ accept a requested key; drop system and sensitive keys; then apply the command
 rule. Most commands match a prefix from `COMMAND_ENV_PREFIXES` (`GIT_*`,
 `AWS_*`, and so on). A command listed in `COMMAND_ENV_KEYS` matches exact names
 instead, and the entry's empty-set case stays restrictive rather than falling
-through to the permissive unknown-command rule. `go` is the only exact-name
-command: `GO_ENV_KEYS` lists the variables documented by `go help environment`
-and `go doc runtime`, because a bare `GO` prefix would also capture unrelated
-names such as `GOOGLE_CLOUD_PROJECT`. `COMMAND_ENV_KEYS` is a read-only
-`MappingProxyType`, so importing code cannot widen the policy at runtime.
+through to the prefix rule. `go` is the only exact-name command: `GO_ENV_KEYS`
+lists the variables documented by `go help environment` and `go doc runtime`,
+because a bare `GO` prefix would also capture unrelated names such as
+`GOOGLE_CLOUD_PROJECT`. `COMMAND_ENV_KEYS` is a read-only `MappingProxyType`,
+so importing code cannot widen the policy at runtime.
 
-The recording session forwards only its allowlist, so `.with_env()` keys do not
-yet reach recordings; issue #368 tracks that wiring. The
+The recording session forwards the keys each passthrough request captured
+through `.with_env()`: `CmdMox._prepare_passthrough()` snapshots them and
+`PassthroughCoordinator.finalize_result()` passes them to
+`RecordingSession.record(explicit_keys=...)`. The
 [design document](python-native-command-mocking-design.md#933-environment-variable-subset-strategy)
 records the rationale, and the
-[usage guide](usage-guide.md#environment-variable-filtering) describes the
+[usage guide](usage-guide.md#decide-what-a-recording-keeps) describes the
 user-visible rules.
 
 ## Argument matcher internals

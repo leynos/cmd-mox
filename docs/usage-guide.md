@@ -585,8 +585,10 @@ declared them, including keys whose names would otherwise look sensitive. Use
 keep. A key on either list is recorded only when it is present in the
 environment, and never when it is a CmdMox internal key.
 
-Scrubbers are a separate, value-level control: pass `scrubber=` to `record()`
-to rewrite `RecordedInvocation` fields before persistence.
+Scrubbers are a separate, value-level control: pass `scrubber=` to
+`RecordingSession(...)` for manual sessions, or to `CommandDouble.record(...)`
+for automatic recording, to rewrite `RecordedInvocation` fields before
+persistence.
 
 Strict replay, the default, requires every recorded `env_subset` pair to be
 present in the live invocation. Recording only portable keys is what lets a

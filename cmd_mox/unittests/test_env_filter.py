@@ -272,11 +272,18 @@ class TestFilterEnvSubset:
             "GIT_SECRET": "s3cr3t",
             "GIT_PASSWORD": "hunter2",
             "GIT_API_KEY": "key",
+            "GIT_KEY": "plain-key",
             "GIT_AUTHOR_NAME": "keep",
         }
         result = filter_env_subset(env, command="git")
 
-        for key in ("GIT_TOKEN", "GIT_SECRET", "GIT_PASSWORD", "GIT_API_KEY"):
+        for key in (
+            "GIT_TOKEN",
+            "GIT_SECRET",
+            "GIT_PASSWORD",
+            "GIT_API_KEY",
+            "GIT_KEY",
+        ):
             assert key not in result, f"{key} should be excluded as sensitive"
         assert result == {"GIT_AUTHOR_NAME": "keep"}
 
