@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from cmd_mox import _lifecycle_checks
 from cmd_mox.controller import CmdMox
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.errors import MissingEnvironmentError
@@ -116,22 +117,20 @@ def test_replay_detects_environment_loss(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_require_env_attrs_rejects_missing_environment() -> None:
-    """_require_env_attrs surfaces the default missing environment message."""
-    mox = CmdMox()
-    mox.environment = typ.cast("EnvironmentManager", None)
+    """require_env_attrs surfaces the default missing environment message."""
     with pytest.raises(
         MissingEnvironmentError, match="Replay environment is not ready"
     ):
-        mox._require_env_attrs("shim_dir")
+        _lifecycle_checks.require_env_attrs(
+            typ.cast("EnvironmentManager", None), "shim_dir"
+        )
 
 
 def test_validate_replay_environment_handles_missing_and_file_paths(
     tmp_path: Path,
 ) -> None:
-    """_validate_replay_environment reports missing and non-directory shim paths."""
-    mox = CmdMox()
+    """validate_replay_environment reports missing and non-directory shim paths."""
     env = EnvironmentManager()
-    mox.environment = env
 
     env.shim_dir = tmp_path / "absent"
     env.socket_path = tmp_path / "ipc.sock"
@@ -139,7 +138,7 @@ def test_validate_replay_environment_handles_missing_and_file_paths(
         MissingEnvironmentError,
         match="Replay shim directory does not exist",
     ):
-        mox._validate_replay_environment()
+        _lifecycle_checks.validate_replay_environment(env)
 
     file_path = tmp_path / "not_a_dir"
     file_path.write_text("content")
@@ -148,30 +147,26 @@ def test_validate_replay_environment_handles_missing_and_file_paths(
         MissingEnvironmentError,
         match="Replay shim directory is not a directory",
     ):
-        mox._validate_replay_environment()
+        _lifecycle_checks.validate_replay_environment(env)
 
 
 def test_validate_replay_environment_missing_socket(tmp_path: Path) -> None:
     """Missing socket path is reported with a normalised message."""
-    mox = CmdMox()
     env = EnvironmentManager()
     env.shim_dir = tmp_path
     env.socket_path = None
-    mox.environment = env
 
     with pytest.raises(MissingEnvironmentError, match="Replay socket path is missing"):
-        mox._validate_replay_environment()
+        _lifecycle_checks.validate_replay_environment(env)
 
 
 def test_validate_replay_environment_success(tmp_path: Path) -> None:
     """Returns Path objects when both paths are valid."""
-    mox = CmdMox()
     env = EnvironmentManager()
     env.shim_dir = tmp_path
     env.socket_path = tmp_path / "ipc.sock"
-    mox.environment = env
 
-    shim_dir, socket_path = mox._validate_replay_environment()
+    shim_dir, socket_path = _lifecycle_checks.validate_replay_environment(env)
     assert shim_dir == tmp_path
     assert socket_path == env.socket_path
 

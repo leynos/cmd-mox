@@ -11,13 +11,10 @@ import typing as typ
 from collections import deque
 from pathlib import Path
 
-from . import _path_utils, verifiers
+from . import _lifecycle_checks, _path_utils, verifiers
+from ._mock_rejection import RejectionLedger, rejection_response
 from .command_runner import CommandRunner
-from .environment import (
-    EnvironmentManager,
-    ensure_dir_exists,
-    validate_env_attr,
-)
+from .environment import EnvironmentManager
 from .errors import (
     ExpectationConfigurationError,
     LifecycleError,
@@ -76,13 +73,14 @@ class Phase(enum.StrEnum):
 class CmdMox:
     """Central orchestrator implementing the record-replay-verify lifecycle."""
 
-    def __init__(
+    def __init__(  # ruff: ignore[too-many-arguments] - cohesive keyword-only options; splitting them would fragment the public constructor
         self,
         *,
         verify_on_exit: bool = True,
         max_journal_entries: int | None = None,
         environment: EnvironmentManager | None = None,
         lifecycle_hint: str | None = None,
+        fail_fast: bool = False,
     ) -> None:
         """Create a new controller.
 
@@ -104,6 +102,13 @@ class CmdMox:
         lifecycle_hint:
             Optional text appended to lifecycle errors when a phase transition
             is invalid.
+        fail_fast:
+            When ``True``, a mock call that definitely cannot match its
+            expectation is answered with exit status ``1`` and a
+            ``No mock expectation matches: ...`` diagnostic instead of the
+            configured response. Predicate, environment, count, and ordering
+            checks still happen during :meth:`verify`, which also reports the
+            rejected call. Defaults to ``False`` to preserve deferred reporting.
 
         Raises
         ------
@@ -126,12 +131,14 @@ class CmdMox:
 
         self._verify_on_exit = verify_on_exit
         self._max_journal_entries = max_journal_entries
+        self._fail_fast = fail_fast
 
         self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque(maxlen=max_journal_entries)
         self._verification_log: list[Invocation] = []
         self._verification_doubles: list[CommandDouble | None] = []
         self._history_lock = threading.Lock()
+        self._rejections = RejectionLedger()
         self._commands: set[str] = set()
         self._ordered: list[Expectation] = []
         # Stub commands whose completed calls a bounded journal did not retain.
@@ -429,13 +436,17 @@ class CmdMox:
         invocation: Invocation,
         overrides: dict[str, str] | None = None,
     ) -> Response:
-        """Handle a non-passthrough invocation with optional recording.
+        """Handle a non-passthrough invocation, honouring fail-fast rejection.
 
         Returns
         -------
         Response
-            The handler response for *invocation*.
+            The handler response, or a failure response for a rejected call.
         """
+        if self._fail_fast and double.kind is DoubleKind.MOCK:
+            reason = double.expectation.definite_mismatch_reason(invocation)
+            if reason is not None:
+                return self._reject_mock_invocation(double, invocation, reason)
         applied_overrides = (
             apply_expectation_env(double, invocation)
             if overrides is None
@@ -447,6 +458,23 @@ class CmdMox:
         if double.is_recording:
             double.invocations.append(invocation)
         return resp
+
+    def _reject_mock_invocation(
+        self, double: CommandDouble, invocation: Invocation, reason: str
+    ) -> Response:
+        """Answer a definitely mismatched mock call with a failure response.
+
+        The call is still recorded so verification can report it, but the
+        configured handler and canned response are not used.
+
+        Returns
+        -------
+        Response
+            A failure response carrying the redacted mismatch diagnostic.
+        """
+        double.invocations.append(invocation)
+        self._rejections.record(double, invocation, reason)
+        return rejection_response(invocation, reason)
 
     def _response_for_replay(
         self, double: CommandDouble, invocation: Invocation
@@ -625,44 +653,13 @@ class CmdMox:
                 f"Cannot call {action}(): not in '{expected.name.lower()}' phase "
                 f"(current phase: {self._phase.name.lower()})"
             )
-            raise LifecycleError(self._append_lifecycle_hint(msg))
-
-    def _append_lifecycle_hint(self, message: str) -> str:
-        """Append the configured lifecycle hint to a phase error message.
-
-        Returns
-        -------
-        str
-            The original message with the configured hint appended, if set.
-        """
-        if self._lifecycle_hint is None:
-            return message
-        return f"{message}; {self._lifecycle_hint}"
-
-    def _require_env_attrs(self, *attrs: str) -> None:
-        """Ensure all referenced ``EnvironmentManager`` attributes exist."""
-        env = self.environment
-        if env is None:  # pragma: no cover - defensive guard
-            raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
-
-        missing: list[str] = []
-        for attr in attrs:
-            error = validate_env_attr(env, attr)
-            if error is not None:
-                missing.append(error)
-
-        if missing:
-            raise MissingEnvironmentError("; ".join(missing))
+            raise LifecycleError(
+                _lifecycle_checks.append_lifecycle_hint(self._lifecycle_hint, msg)
+            )
 
     def _require_replay_environment(self) -> None:
-        """Ensure the replay environment attributes the run depends on exist.
-
-        Raises
-        ------
-        MissingEnvironmentError
-            If the shim directory or socket path is unavailable.
-        """  # ruff: ignore[docstring-extraneous-exception] - _require_env_attrs propagates this caller-visible failure.
-        self._require_env_attrs("shim_dir", "socket_path")
+        """Ensure the replay environment attributes the run depends on exist."""
+        _lifecycle_checks.require_env_attrs(self.environment, "shim_dir", "socket_path")
 
     def _check_replay_preconditions(self) -> None:
         """Validate state and environment before starting replay.
@@ -681,31 +678,10 @@ class CmdMox:
                 "replay() called without entering context "
                 f"(current phase: {self._phase.name.lower()})"
             )
-            raise LifecycleError(self._append_lifecycle_hint(msg))
+            raise LifecycleError(
+                _lifecycle_checks.append_lifecycle_hint(self._lifecycle_hint, msg)
+            )
         self._require_replay_environment()
-
-    def _validate_replay_environment(self) -> tuple[Path, Path]:
-        """Return the prepared shim directory and socket path."""
-        env = self.environment
-        if env is None:
-            raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
-
-        shim_dir = ensure_dir_exists(
-            env.shim_dir,
-            name="Replay shim directory",
-            error_type=MissingEnvironmentError,
-        )
-        if env.socket_path is None:
-            msg = "Replay socket path is missing"
-            raise MissingEnvironmentError(msg)
-        return shim_dir, Path(env.socket_path)
-
-    def _is_environment_initialized(self) -> bool:
-        """Return whether the environment has a shim directory and socket path."""
-        env = self.environment
-        return (
-            env is not None and env.shim_dir is not None and env.socket_path is not None
-        )
 
     def _start_ipc_server(self) -> None:
         """Prepare shims and launch the IPC server.
@@ -720,12 +696,17 @@ class CmdMox:
             self._verification_log.clear()
             self._verification_doubles.clear()
             self._discarded_stub_calls.clear()
+        self._rejections.clear()
         self._passthrough_coordinator.reset()
         self._commands = self._registered_commands() | self._commands
-        if not self._entered and not self._is_environment_initialized():
+        if not self._entered and not _lifecycle_checks.is_environment_initialized(
+            self.environment
+        ):
             msg = "Environment manager not initialised"
             raise MissingEnvironmentError(msg)
-        shim_dir, socket_path = self._validate_replay_environment()
+        shim_dir, socket_path = _lifecycle_checks.validate_replay_environment(
+            self.environment
+        )
         create_shim_symlinks(shim_dir, self._commands)
         server_factory = (
             CallbackNamedPipeServer if _path_utils.IS_WINDOWS else CallbackIPCServer
@@ -746,8 +727,19 @@ class CmdMox:
         self._require_phase(Phase.REPLAY, "verify")
         self._require_replay_environment()
 
+    def _raise_first_rejected_mock_call(self) -> None:
+        """Raise for the earliest call fail-fast rejected, if any."""
+        entry = self._rejections.first()
+        if entry is not None:
+            verifiers.raise_rejected_mock_error(
+                entry.double.expectation,
+                entry.invocation,
+                entry.reason,
+            )
+
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""
+        self._raise_first_rejected_mock_call()
         # Mocks always count; spies join only when a setter marked it explicit.
         expectations = {
             name: double.expectation

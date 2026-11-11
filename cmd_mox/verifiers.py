@@ -230,6 +230,43 @@ def _list_expected_commands(doubles: cabc.Mapping[str, CommandDouble]) -> str:
     )
 
 
+def raise_rejected_mock_error(
+    exp: Expectation, inv: Invocation, reason: str
+) -> typ.NoReturn:
+    """Raise for a mock call rejected at invocation time by fail-fast mode.
+
+    Parameters
+    ----------
+    exp : Expectation
+        The mock's expectation.
+    inv : Invocation
+        The rejected invocation.
+    reason : str
+        The stored, redacted mismatch reason.
+
+    Raises
+    ------
+    UnexpectedCommandError
+        Always, describing the expected and actual calls.
+    """
+    msg = _format_sections(
+        "Unexpected command invocation.",
+        [
+            ("Expected", _describe_expectation(exp)),
+            (
+                "Actual",
+                _describe_invocation(
+                    inv,
+                    focus_env=exp.env.keys(),
+                    include_stdin=exp.stdin is not None,
+                ),
+            ),
+            ("Reason", reason),
+        ],
+    )
+    raise UnexpectedCommandError(msg)
+
+
 class UnexpectedCommandVerifier:
     """Check invocations match registered expectations."""
 

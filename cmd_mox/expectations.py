@@ -331,6 +331,38 @@ class Expectation:
                 return False
         return True
 
+    def definite_mismatch_reason(self, invocation: Invocation) -> str | None:
+        """Return a reason when *invocation* definitely cannot match.
+
+        Only checks that need no callback are considered: literal argument
+        inequality, matcher arity, and literal stdin inequality. Predicates,
+        environment constraints, and counts stay with verification, so a call
+        that might still match is never rejected early.
+
+        Rendered arguments are redacted, and stdin content is never echoed
+        because either may carry a credential.
+
+        Returns
+        -------
+        str or None
+            A redacted mismatch description, or ``None`` when the invocation
+            is not definitely mismatched.
+        """
+        if self.args is not None and invocation.args != self.args:
+            actual = _redact_sensitive_argument_values(
+                invocation.args, command=self.name
+            )
+            expected = _redact_sensitive_argument_values(self.args, command=self.name)
+            return f"arguments {actual!r} != {expected!r}"
+        if self.match_args is not None and len(invocation.args) != len(self.match_args):
+            expected_count = len(self.match_args)
+            actual_count = len(invocation.args)
+            return f"expected {expected_count} args but got {actual_count}"
+        if isinstance(self.stdin, str) and invocation.stdin != self.stdin:
+            # Never echo stdin: it may carry a credential or another secret.
+            return "stdin does not match the expected value"
+        return None
+
     def explain_mismatch(self, invocation: Invocation) -> str:
         """Return a reason why ``invocation`` failed to match.
 

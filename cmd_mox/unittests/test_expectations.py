@@ -771,3 +771,71 @@ def test_count_explicit_supports_positional_construction() -> None:
     )
     assert expectation.count == 2
     assert expectation.count_explicit is True
+
+
+@pytest.mark.parametrize(
+    ("expectation", "invocation", "expected"),
+    [
+        pytest.param(
+            Expectation("git").with_args("status"),
+            Invocation("git", ["push"], "", {}),
+            "arguments ['push'] != ['status']",
+            id="literal-args",
+        ),
+        pytest.param(
+            Expectation("git").with_matching_args(lambda _: True),
+            Invocation("git", ["a", "b"], "", {}),
+            "expected 1 args but got 2",
+            id="matcher-arity",
+        ),
+        pytest.param(
+            Expectation("git").with_stdin("expected"),
+            Invocation("git", [], "actual", {}),
+            "stdin does not match the expected value",
+            id="literal-stdin",
+        ),
+        pytest.param(
+            Expectation("git").with_stdin(lambda _: False),
+            Invocation("git", [], "actual", {}),
+            None,
+            id="stdin-predicate",
+        ),
+        pytest.param(
+            Expectation("git").with_matching_args(lambda _: False),
+            Invocation("git", ["value"], "", {}),
+            None,
+            id="matcher-rejection",
+        ),
+        pytest.param(
+            Expectation("git").with_env({"KEY": "value"}),
+            Invocation("git", [], "", {}),
+            None,
+            id="env-constraint",
+        ),
+        pytest.param(
+            Expectation("git"),
+            Invocation("git", ["anything"], "anything", {}),
+            None,
+            id="unconstrained",
+        ),
+    ],
+)
+def test_definite_mismatch_reason_only_rejects_certain_mismatches(
+    expectation: Expectation,
+    invocation: Invocation,
+    expected: str | None,
+) -> None:
+    """Only callback-free, definite mismatches produce an early reason."""
+    assert expectation.definite_mismatch_reason(invocation) == expected
+
+
+def test_definite_mismatch_reason_redacts_arguments() -> None:
+    """Rendered arguments hide sensitive option values."""
+    expectation = Expectation("deploy").with_args("--expected")
+    invocation = Invocation("deploy", ["--token", "supersecret"], "", {})
+
+    reason = expectation.definite_mismatch_reason(invocation)
+
+    assert reason is not None
+    assert "supersecret" not in reason
+    assert "<redacted>" in reason
