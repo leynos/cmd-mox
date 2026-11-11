@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import typing as typ
 
 import hypothesis.strategies as st
 import pytest
@@ -170,6 +171,15 @@ class TestGoEnvironmentRule:
             f"missing {sorted(_EXPECTED_GO_ENV_KEYS - GO_ENV_KEYS)}, "
             f"unexpected {sorted(GO_ENV_KEYS - _EXPECTED_GO_ENV_KEYS)}"
         )
+
+    def test_command_env_keys_rejects_mutation(self) -> None:
+        """The shared exact-name policy cannot be widened at runtime."""
+        # The cast is deliberate: it lets the test attempt the mutation that
+        # the Mapping annotation otherwise makes unrepresentable.
+        mutable_policy = typ.cast("dict[str, frozenset[str]]", COMMAND_ENV_KEYS)
+
+        with pytest.raises(TypeError):
+            mutable_policy["go"] = frozenset()
 
     def test_go_retains_every_documented_variable(self) -> None:
         """Go's exact-name rule keeps the whole documented list and no lookalikes."""
@@ -612,3 +622,48 @@ def test_go_keeps_only_documented_or_requested_names(
 
     internal = {key for key in requested if key.startswith(("CMOX_", "CMD_MOX_"))}
     assert (requested & set(env)) - internal <= retained
+
+
+#: Names that start with ``GO`` but are not documented Go variables, so the
+#: exact-name rule must reject them unless a caller requests them.  Sensitive
+#: names are excluded so the property can assert an exact retained set.
+_GO_LOOKALIKES = (
+    st
+    .text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789", min_size=2, max_size=8)
+    .map(lambda suffix: f"GO{suffix}")
+    .filter(
+        lambda key: key not in GO_ENV_KEYS and not is_sensitive_recording_env_key(key)
+    )
+)
+
+
+@st.composite
+def _go_env_with_requests(draw: st.DrawFn) -> tuple[dict[str, str], list[str]]:
+    """Draw a Go-flavoured environment and a subset of its keys as requests."""
+    documented = draw(
+        st.lists(st.sampled_from(sorted(GO_ENV_KEYS)), max_size=4, unique=True)
+    )
+    lookalikes = draw(st.lists(_GO_LOOKALIKES, max_size=4, unique=True))
+    keys = sorted(set(documented) | set(lookalikes))
+    env = dict.fromkeys(keys, "value")
+    requested = draw(st.lists(st.sampled_from(keys), max_size=4)) if keys else []
+    return env, requested
+
+
+@given(case=_go_env_with_requests())
+def test_go_lookalikes_survive_only_when_requested(
+    case: tuple[dict[str, str], list[str]],
+) -> None:
+    """Go-shaped names outside the documented list need an explicit request.
+
+    Invariant: the retained set is exactly the documented names present in the
+    environment plus the requested keys, so an unrequested lookalike never
+    survives.
+    """
+    env, requested = case
+
+    retained = set(filter_env_subset(env, command="go", allowlist=requested))
+
+    assert retained == set(env) & (GO_ENV_KEYS | set(requested)), (
+        f"unexpected retention for {sorted(retained)}"
+    )
