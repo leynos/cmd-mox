@@ -502,3 +502,38 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the journal should contain 1 invocation of "grep"
     And the journal should contain 1 invocation of "sort"
+
+  Scenario: mismatched mock call is answered before deferred verification fails
+    Given a CmdMox controller
+    And the command "git" is mocked with args "status" returning "clean" any order
+    When I replay the controller
+    And I run the command "git" with arguments "push"
+    Then the output should be "clean"
+    And the exit code should be 0
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "Unexpected command invocation."
+    And the verification error message should contain "git('status')"
+    And the verification error message should contain "git('push')"
+
+  Scenario: fail-fast rejects a mismatched mock call at invocation time
+    Given a CmdMox controller with fail-fast enabled
+    And the command "git" is mocked with args "status" returning "clean" any order
+    When I replay the controller
+    And I run the command "git" with arguments "push" expecting failure
+    Then the output should be empty
+    And the exit code should be 1
+    And the stderr should contain "No mock expectation matches: git push"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "git('status')"
+    And the verification error message should contain "git('push')"
+    And the verification error message should contain "arguments ['push'] != ['status']"
+
+  Scenario: fail-fast mock still answers a matching call
+    Given a CmdMox controller with fail-fast enabled
+    And the command "git" is mocked with args "status" returning "clean" any order
+    When I replay the controller
+    And I run the command "git" with arguments "status"
+    Then the output should be "clean"
+    And the exit code should be 0
+    When I verify the controller
+    Then the journal should contain 1 invocation of "git"

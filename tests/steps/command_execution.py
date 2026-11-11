@@ -177,6 +177,25 @@ def run_command_args(
 
 
 @when(
+    parsers.cfparse(
+        'I run the command "{cmd}" with arguments "{args}" expecting failure'
+    ),
+    target_fixture="result",
+)
+def run_command_args_failure(cmd: str, args: str) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* with additional arguments, expecting a non-zero exit status.
+
+    Returns
+    -------
+    subprocess.CompletedProcess[str]
+        The completed command process and its captured output.
+    """
+    decoded = decode_placeholders(args)
+    argv = [_resolve_command(cmd), *shlex.split(decoded)]
+    return _run(argv, check=False)
+
+
+@when(
     parsers.cfparse('I run the shell command "{command_line}"'),
     target_fixture="result",
 )
