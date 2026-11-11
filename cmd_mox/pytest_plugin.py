@@ -30,6 +30,10 @@ _AUTO_LIFECYCLE_HINT: typ.Final[str] = (
     "overrides the ini option."
 )
 
+# Fixture parameter dict keys the manager understands. A dictionary must carry
+# at least one of these so typos in a sole key are not silently ignored.
+_PARAM_KEYS: typ.Final[frozenset[str]] = frozenset({"auto_lifecycle", "fail_fast"})
+
 # Stash key to record per-item call-stage failure state.
 STASH_CALL_FAILED: pytest.StashKey[bool] = pytest.StashKey()
 
@@ -217,6 +221,35 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type="bool",
         default=True,
     )
+    group.addoption(
+        "--cmd-mox-fail-fast",
+        action="store_true",
+        dest="cmd_mox_fail_fast",
+        default=None,
+        help=(
+            "Answer a mock call that cannot match its expectation with a "
+            "failure response. Overrides the pytest.ini setting."
+        ),
+    )
+    group.addoption(
+        "--no-cmd-mox-fail-fast",
+        action="store_false",
+        dest="cmd_mox_fail_fast",
+        default=None,
+        help=(
+            "Answer mock calls normally even when they cannot match, deferring "
+            "the failure to verify(). Overrides the pytest.ini setting."
+        ),
+    )
+    parser.addini(
+        "cmd_mox_fail_fast",
+        (
+            "Answer a mock call that cannot match its expectation with a "
+            "failure response instead of deferring the failure to verify()."
+        ),
+        type="bool",
+        default=False,
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -230,8 +263,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         (
-            "cmd_mox(auto_lifecycle: bool = True): override automatic "
-            "replay()/verify() behaviour for a single test."
+            "cmd_mox(auto_lifecycle: bool = True, fail_fast: bool = False): "
+            "override automatic replay()/verify() behaviour or fail-fast mock "
+            "mismatch handling for a single test."
         ),
     )
 
@@ -294,11 +328,19 @@ class _CmdMoxManager:
         self.config = request.config
         node = getattr(request, "node", None)
         self._nodeid = getattr(node, "nodeid", "<cmd_mox item>")
-        self._auto_lifecycle = self._auto_lifecycle_enabled()
+        param = self._param_overrides()
+        marker_kwargs = self._marker_kwargs()
+        self._auto_lifecycle = self._resolve_flag(
+            "auto_lifecycle", param, marker_kwargs, "cmd_mox_auto_lifecycle"
+        )
+        fail_fast = self._resolve_flag(
+            "fail_fast", param, marker_kwargs, "cmd_mox_fail_fast"
+        )
         self.mox = CmdMox(
             verify_on_exit=False,
             environment=EnvironmentManager(prefix=_build_worker_prefix(self.config)),
             lifecycle_hint=(_AUTO_LIFECYCLE_HINT if self._auto_lifecycle else None),
+            fail_fast=fail_fast,
         )
         # CmdMox wires its command runner to the provided environment during
         # initialisation, so injecting the worker-scoped manager here ensures the
@@ -445,79 +487,90 @@ class _CmdMoxManager:
         message = _format_teardown_failure(errors, nodeid=self._nodeid)
         pytest.fail(message)
 
-    def _auto_lifecycle_enabled(self) -> bool:
-        """Resolve the auto-lifecycle flag respecting all configuration sources.
+    def _resolve_flag(
+        self,
+        key: str,
+        param: dict[str, typ.Any] | None,
+        marker_kwargs: cabc.Mapping[str, typ.Any],
+        option: str,
+    ) -> bool:
+        """Resolve a boolean flag from parameter, marker, CLI, then ini.
 
-        The fixture parameter provides the most granular override, followed by
-        a ``@pytest.mark.cmd_mox`` marker, the command-line option, and finally
-        the ``pytest.ini`` default.
+        Parameters
+        ----------
+        key : str
+            Setting name shared by the parameter dictionary and marker kwargs.
+        param : dict[str, Any] or None
+            Fixture parameter overrides, if any.
+        marker_kwargs : Mapping[str, Any]
+            Keyword arguments of the closest ``cmd_mox`` marker.
+        option : str
+            Name of the matching command-line and ini option.
 
         Returns
         -------
         bool
-            Whether the plugin should manage the controller lifecycle.
+            The most specific configured value, or the ini default.
         """
-        param_value = self._param_override()
-        if param_value is not None:
-            return param_value
-
-        marker_value = self._marker_override()
-        if marker_value is not None:
-            return marker_value
-
-        cli_value = self.config.getoption("cmd_mox_auto_lifecycle")
+        if param is not None and key in param:
+            return bool(param[key])
+        if key in marker_kwargs:
+            return bool(marker_kwargs[key])
+        cli_value = self.config.getoption(option)
         if cli_value is not None:
             return bool(cli_value)
+        return bool(self.config.getini(option))
 
-        return bool(self.config.getini("cmd_mox_auto_lifecycle"))
-
-    def _marker_override(self) -> bool | None:
-        """Return marker override for auto lifecycle if configured.
+    def _marker_kwargs(self) -> cabc.Mapping[str, typ.Any]:
+        """Return the closest ``cmd_mox`` marker's keyword arguments.
 
         Returns
         -------
-        bool or None
-            Marker value, or ``None`` when no override is present.
+        Mapping[str, Any]
+            Marker keyword arguments, or an empty mapping when no marker is
+            present.
         """
         marker = self.request.node.get_closest_marker("cmd_mox")
         if marker is None:
-            return None
-        if "auto_lifecycle" in marker.kwargs:
-            return bool(marker.kwargs["auto_lifecycle"])
-        return None
+            return {}
+        return marker.kwargs
 
-    def _param_override(self) -> bool | None:
-        """Return fixture parameter override for auto lifecycle if present.
+    def _param_overrides(self) -> dict[str, typ.Any] | None:
+        """Return the fixture parameter as a settings dictionary.
+
+        A boolean parameter keeps its historical meaning and configures only
+        the auto-lifecycle flag.
 
         Returns
         -------
-        bool or None
-            Fixture parameter value, or ``None`` when no parameter is supplied.
+        dict[str, Any] or None
+            Parameter overrides, or ``None`` when no parameter is supplied.
 
         Raises
         ------
         TypeError
-            If the fixture parameter has an unsupported shape.
+            If the parameter is a dictionary with no recognised key or has an
+            unsupported type.
         """
         param = getattr(self.request, "param", None)
         match param:
             case None:
                 return None
-            case dict() as parameter if "auto_lifecycle" in parameter:
-                return bool(parameter["auto_lifecycle"])
             case dict() as parameter:
-                keys = list(parameter.keys())
-                msg = (
-                    "cmd_mox fixture param dict must contain 'auto_lifecycle' key, "
-                    f"got keys: {keys}"
-                )
-                raise TypeError(msg)
+                if not _PARAM_KEYS.intersection(parameter):
+                    keys = list(parameter.keys())
+                    msg = (
+                        "cmd_mox fixture param dict must contain 'auto_lifecycle' "
+                        f"or 'fail_fast' key, got keys: {keys}"
+                    )
+                    raise TypeError(msg)
+                return typ.cast("dict[str, typ.Any]", parameter)
             case bool():
-                return param
+                return {"auto_lifecycle": param}
             case _:
                 msg = (
                     "cmd_mox fixture param must be a bool or dict with "
-                    f"'auto_lifecycle' key, got {type(param).__name__}"
+                    f"'auto_lifecycle' or 'fail_fast' key, got {type(param).__name__}"
                 )
                 raise TypeError(msg)
 

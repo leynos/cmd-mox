@@ -521,3 +521,144 @@ def test_auto_lifecycle_configuration(
         result.stdout.fnmatch_lines(["*UnfulfilledExpectationError*"])
     else:
         result.assert_outcomes(passed=1)
+
+
+def _fail_fast_test_module(expected_returncode: int) -> str:
+    """Return a nested module observing one mismatched mock call."""
+    expected_stdout = "" if expected_returncode else "clean"
+    return textwrap.dedent(
+        f"""
+        import subprocess
+
+        import pytest
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        def _shim(mox, name):
+            shim_dir = mox.environment.shim_dir
+            assert shim_dir is not None
+            return str(shim_dir / name)
+
+        def test_mismatch(cmd_mox):
+            cmd_mox.mock("git").with_args("status").returns(stdout="clean")
+            result = subprocess.run(
+                [_shim(cmd_mox, "git"), "push"],
+                capture_output=True,
+                text=True,
+                check=False,
+                stdin=subprocess.DEVNULL,
+            )
+            assert result.returncode == {expected_returncode}
+            assert result.stdout.strip() == {expected_stdout!r}
+            if {expected_returncode}:
+                assert "No mock expectation matches: git push" in result.stderr
+        """
+    )
+
+
+def _with_decorator(module: str, decorator: str) -> str:
+    """Insert *decorator* above the generated test function."""
+    if not decorator:
+        return module
+    return module.replace("def test_mismatch", f"{decorator}\ndef test_mismatch")
+
+
+@pytest.mark.parametrize(
+    ("decorator", "ini_setting", "cli_args", "expected_returncode"),
+    [
+        pytest.param("", None, (), 0, id="default-defers"),
+        pytest.param("", "cmd_mox_fail_fast = true", (), 1, id="ini-enables"),
+        pytest.param(
+            "",
+            "cmd_mox_fail_fast = false",
+            ("--cmd-mox-fail-fast",),
+            1,
+            id="cli-over-ini",
+        ),
+        pytest.param(
+            "@pytest.mark.cmd_mox(fail_fast=True)",
+            "cmd_mox_fail_fast = false",
+            ("--no-cmd-mox-fail-fast",),
+            1,
+            id="marker-over-cli-and-ini",
+        ),
+        pytest.param(
+            '@pytest.mark.parametrize("cmd_mox", [{"fail_fast": False}], '
+            "indirect=True)",
+            "cmd_mox_fail_fast = true",
+            ("--cmd-mox-fail-fast",),
+            0,
+            id="param-over-marker-and-cli",
+        ),
+        pytest.param(
+            '@pytest.mark.parametrize("cmd_mox", [{"fail_fast": True}], indirect=True)',
+            None,
+            (),
+            1,
+            id="param-fail-fast-only",
+        ),
+        pytest.param(
+            '@pytest.mark.parametrize("cmd_mox", '
+            '[{"auto_lifecycle": True, "fail_fast": True}], indirect=True)',
+            None,
+            (),
+            1,
+            id="param-combined",
+        ),
+    ],
+)
+def test_fail_fast_configuration(
+    pytester: pytest.Pytester,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+    decorator: str,
+    ini_setting: str | None,
+    cli_args: tuple[str, ...],
+    expected_returncode: int,
+) -> None:
+    """Exercise fail-fast precedence through real shims and the fixture."""
+    if ini_setting:
+        pytester.makeini(f"[pytest]\n{ini_setting}\n")
+
+    module = _with_decorator(
+        _fail_fast_test_module(expected_returncode),
+        decorator,
+    )
+    test_file = pytester.makepyfile(test_fail_fast=module)
+
+    plugins: tuple[str, ...] = ("cmd_mox.pytest_plugin",) if cli_args else ()
+    result = run_nested_pytester(
+        *cli_args,
+        *_DISABLE_CI_PLUGINS,
+        test_path=test_file,
+        plugins=plugins,
+    )
+
+    result.assert_outcomes(passed=1, errors=1)
+    result.stdout.fnmatch_lines(["*UnexpectedCommandError*"])
+
+
+def test_unknown_fixture_param_key_is_rejected(
+    pytester: pytest.Pytester,
+    run_nested_pytester: cabc.Callable[..., RunResult],
+) -> None:
+    """A parameter dictionary with no recognised key fails fixture setup."""
+    module = textwrap.dedent(
+        """
+        import pytest
+
+        pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+        @pytest.mark.parametrize("cmd_mox", [{"unexpected": True}], indirect=True)
+        def test_mismatch(cmd_mox):
+            pass
+        """
+    )
+    test_file = pytester.makepyfile(test_unknown_param=module)
+
+    result = run_nested_pytester(
+        *_DISABLE_CI_PLUGINS,
+        test_path=test_file,
+    )
+
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*must contain 'auto_lifecycle' or 'fail_fast'*"])

@@ -14,6 +14,19 @@ from cmd_mox import pytest_plugin
 from cmd_mox.controller import Phase
 from cmd_mox.environment import EnvironmentManager
 from cmd_mox.pytest_plugin import STASH_CALL_FAILED, _CmdMoxManager
+from tests.helpers.pytest_plugin_stubs import (
+    ExitSpyCmdMoxManager,
+    FixtureWithWrapped,
+    RequestKwargs,
+    StubConfig,
+    StubMarker,
+    StubMox,
+    StubMoxBehaviorConfig,
+    StubNode,
+    StubRequest,
+    assert_lifecycle_calls,
+    assert_teardown_sections,
+)
 
 pytest_plugins = ("pytester",)
 
@@ -22,189 +35,6 @@ if typ.TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.pytester import RunResult
-
-    type _CmdMoxFixtureGenerator = cabc.Callable[
-        [pytest.FixtureRequest],
-        cabc.Generator[pytest_plugin.CmdMox, None, None],
-    ]
-
-_VERIFY_ERROR_MESSAGE = "verify boom"
-_EXIT_ERROR_MESSAGE = "exit boom"
-
-
-class _StubConfig:
-    """Mimic ``pytest.Config`` with controllable lifecycle settings."""
-
-    __slots__ = ("_cli", "_ini", "workerinput")
-
-    def __init__(
-        self,
-        *,
-        workerinput: object | None = None,
-        cli: bool | None = None,
-        ini: bool = True,
-    ) -> None:
-        """Store the worker input and the CLI and ini lifecycle settings."""
-        self.workerinput = workerinput
-        self._cli = cli
-        self._ini = ini
-
-    def getoption(self, name: str) -> bool | None:
-        """Return the command-line value of the lifecycle option."""
-        assert name == "cmd_mox_auto_lifecycle", "Assertion failed"
-        return self._cli
-
-    def getini(self, name: str) -> bool:
-        """Return the ini-file value of the lifecycle option."""
-        assert name == "cmd_mox_auto_lifecycle", "Assertion failed"
-        return self._ini
-
-
-class _StubMarker:
-    """Simple marker surrogate exposing keyword arguments."""
-
-    __slots__ = ("kwargs",)
-
-    def __init__(self, **kwargs: object) -> None:
-        """Store the marker keyword arguments."""
-        self.kwargs = kwargs
-
-
-class _StubNode:
-    """Minimal pytest node supporting markers and report sections."""
-
-    __slots__ = ("_marker", "nodeid", "sections", "stash")
-
-    def __init__(
-        self, marker: _StubMarker | None = None, nodeid: str = "test::stub"
-    ) -> None:
-        """Create a node with an optional ``cmd_mox`` marker and node identifier."""
-        self._marker = marker
-        self.sections: list[tuple[str, str, str]] = []
-        self.stash = pytest.Stash()
-        self.nodeid = nodeid
-
-    def get_closest_marker(self, name: str) -> _StubMarker | None:
-        """Return the ``cmd_mox`` marker for that name, or ``None`` for others."""
-        return self._marker if name == "cmd_mox" else None
-
-    def add_report_section(self, when: str, key: str, content: str) -> None:
-        """Record a report section for the given phase, key, and content."""
-        self.sections.append((when, key, content))
-
-
-class _RequestKwargs(typ.TypedDict, total=False):
-    """Keyword arguments forwarded into ``_StubRequest``."""
-
-    node: _StubNode
-    param: dict[str, bool]
-
-
-class _FixtureWithWrapped(typ.Protocol):
-    """Describe pytest's runtime wrapper around a fixture function."""
-
-    __wrapped__: _CmdMoxFixtureGenerator
-
-
-class _StubRequest:
-    """Minimal fixture request exposing ``config``/``node``/``param``."""
-
-    __slots__ = ("config", "node", "param")
-
-    def __init__(
-        self,
-        *,
-        config: _StubConfig,
-        node: _StubNode | None = None,
-        param: object | None = None,
-    ) -> None:
-        """Store the config, node, and optional fixture parameter."""
-        self.config = config
-        self.node = node or _StubNode()
-        if param is not None:
-            self.param = param
-
-
-@dc.dataclass(slots=True)
-class StubMoxBehaviorConfig:
-    """Configuration for _StubMox behavioral flags."""
-
-    raise_on_exit: bool = False
-    raise_on_verify: bool = False
-    verify_on_exit: bool = False
-
-
-class _StubMox:
-    """Minimal CmdMox stand-in for exercising manager behaviour."""
-
-    def __init__(
-        self,
-        *,
-        phase: Phase = Phase.REPLAY,
-        behavior: StubMoxBehaviorConfig | None = None,
-        environment: EnvironmentManager | None = None,
-        lifecycle_hint: str | None = None,
-    ) -> None:
-        """Create a stub CmdMox in the given phase with its behaviour flags."""
-        self.phase = phase
-        config = behavior or StubMoxBehaviorConfig()
-        self.raise_on_exit = config.raise_on_exit
-        self.raise_on_verify = config.raise_on_verify
-        self.verify_on_exit = config.verify_on_exit
-        self.enter_calls = 0
-        self.replay_calls = 0
-        self.verify_calls = 0
-        self.exit_calls: list[tuple[object | None, object | None, object | None]] = []
-        self.environment: object | None = environment
-        self._lifecycle_hint = lifecycle_hint
-
-    def __enter__(self) -> _StubMox:
-        """Count the context entry and return the stub itself."""
-        self.enter_calls += 1
-        return self
-
-    def replay(self) -> None:
-        """Count the replay call and move the stub into the replay phase."""
-        self.replay_calls += 1
-        self.phase = Phase.REPLAY
-
-    def verify(self) -> None:
-        """Count the verify call, raising if configured, then enter verify phase."""
-        self.verify_calls += 1
-        if self.raise_on_verify:
-            raise RuntimeError(_VERIFY_ERROR_MESSAGE)
-        self.phase = Phase.VERIFY
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: object | None,
-    ) -> None:
-        """Record the exit arguments, raise if configured, then enter verify phase."""
-        self.exit_calls.append((exc_type, exc, tb))
-        if self.raise_on_exit:
-            raise OSError(_EXIT_ERROR_MESSAGE)
-        self.phase = Phase.VERIFY
-
-
-class _ExitSpyCmdMoxManager(_CmdMoxManager):
-    """Record the fixture's body-failure decision before teardown."""
-
-    last_instance: _ExitSpyCmdMoxManager | None = None
-
-    @typ.override
-    def __init__(self, request: pytest.FixtureRequest) -> None:
-        """Initialize the manager spy for one fixture instance."""
-        super().__init__(request)
-        self.body_failed_values: list[bool] = []
-        type(self).last_instance = self
-
-    @typ.override
-    def exit(self, *, body_failed: bool) -> None:
-        """Record the fixture decision before delegating to manager teardown."""
-        self.body_failed_values.append(body_failed)
-        super().exit(body_failed=body_failed)
 
 
 @pytest.fixture
@@ -216,20 +46,9 @@ def reset_exit_spy_manager_state() -> cabc.Iterator[None]:
     None
         Test execution between the initial reset and the teardown reset.
     """
-    _ExitSpyCmdMoxManager.last_instance = None
+    ExitSpyCmdMoxManager.last_instance = None
     yield
-    _ExitSpyCmdMoxManager.last_instance = None
-
-
-def _assert_teardown_sections(node: _StubNode, *expected: tuple[str, str, str]) -> None:
-    """Assert the node recorded exactly the expected teardown report sections."""
-    assert node.sections == list(expected), "Assertion failed"
-
-
-def _assert_lifecycle_calls(stub: _StubMox, *, enter: int, replay: int) -> None:
-    """Assert the stub recorded the expected enter and replay call counts."""
-    assert stub.enter_calls == enter, "Assertion failed"
-    assert stub.replay_calls == replay, "Assertion failed"
+    ExitSpyCmdMoxManager.last_instance = None
 
 
 @pytest.fixture
@@ -245,7 +64,7 @@ def make_manager(
         returning a manager whose CmdMox dependency has been substituted.
     """
 
-    def _make(request: _StubRequest, **stub_kwargs: object) -> _CmdMoxManager:
+    def _make(request: StubRequest, **stub_kwargs: object) -> _CmdMoxManager:
         """Build a manager whose CmdMox is a stub configured by ``stub_kwargs``."""
 
         def _factory(
@@ -253,8 +72,8 @@ def make_manager(
             verify_on_exit: bool = False,
             environment: EnvironmentManager | None = None,
             lifecycle_hint: str | None = None,
-        ) -> _StubMox:
-            # Keep signature compatible with real CmdMox; forward kwargs to stub.
+            fail_fast: bool = False,
+        ) -> StubMox:
             """Build a stub CmdMox that accepts the real constructor keywords."""
             behavior_config = StubMoxBehaviorConfig(
                 verify_on_exit=verify_on_exit,
@@ -264,16 +83,17 @@ def make_manager(
                 ),
             )
             phase = typ.cast("Phase", stub_kwargs.get("phase", Phase.REPLAY))
-            return _StubMox(
+            return StubMox(
                 phase=phase,
                 behavior=behavior_config,
                 environment=environment,
                 lifecycle_hint=lifecycle_hint,
+                fail_fast=fail_fast,
             )
 
         monkeypatch.setattr(pytest_plugin, "CmdMox", _factory)
         manager = _CmdMoxManager(typ.cast("pytest.FixtureRequest", request))
-        assert isinstance(manager.mox, _StubMox), "Assertion failed"
+        assert isinstance(manager.mox, StubMox), "Assertion failed"
         return manager
 
     return _make
@@ -336,8 +156,8 @@ def test_worker_prefix_generation(
     else:
         monkeypatch.setenv("PYTEST_XDIST_WORKER", case.env_var)
 
-    config = _StubConfig(workerinput=case.workerinput)
-    request = _StubRequest(config=config)
+    config = StubConfig(workerinput=case.workerinput)
+    request = StubRequest(config=config)
 
     manager = make_manager(request)
 
@@ -396,16 +216,16 @@ def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """An injected generator interruption is recorded before propagation."""
-    node = _StubNode()
-    request = _StubRequest(config=_StubConfig(), node=node)
-    # Install the _StubMox factory used when the fixture creates the spy manager.
+    node = StubNode()
+    request = StubRequest(config=StubConfig(), node=node)
+    # Install the StubMox factory used when the fixture creates the spy manager.
     make_manager(request, raise_on_verify=True)
 
     with (
         mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
-        mock.patch.object(pytest_plugin, "_CmdMoxManager", _ExitSpyCmdMoxManager),
+        mock.patch.object(pytest_plugin, "_CmdMoxManager", ExitSpyCmdMoxManager),
     ):
-        fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
+        fixture = typ.cast("FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
         generator = fixture(typ.cast("pytest.FixtureRequest", request))
         next(generator)
         interruption = KeyboardInterrupt()
@@ -413,11 +233,11 @@ def test_cmd_mox_fixture_marks_injected_keyboardinterrupt_as_body_failure(
         with pytest.raises(KeyboardInterrupt) as raised:
             generator.throw(interruption)
 
-    manager = _ExitSpyCmdMoxManager.last_instance
+    manager = ExitSpyCmdMoxManager.last_instance
     assert manager is not None, "Assertion failed"
     assert manager.body_failed_values == [True], "Assertion failed"
     assert raised.value is interruption, "Assertion failed"
-    _assert_teardown_sections(
+    assert_teardown_sections(
         node,
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom"),
     )
@@ -436,22 +256,22 @@ def test_cmd_mox_fixture_marks_setup_baseexception_as_body_failure(
     interruption_type: type[BaseException],
 ) -> None:
     """Setup interrupts are recorded before the fixture re-raises them."""
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     make_manager(request)
     interruption = interruption_type()
 
     with (
         mock.patch.object(pytest_plugin, "skip_if_unsupported", return_value=None),
-        mock.patch.object(pytest_plugin, "_CmdMoxManager", _ExitSpyCmdMoxManager),
-        mock.patch.object(_ExitSpyCmdMoxManager, "enter", side_effect=interruption),
+        mock.patch.object(pytest_plugin, "_CmdMoxManager", ExitSpyCmdMoxManager),
+        mock.patch.object(ExitSpyCmdMoxManager, "enter", side_effect=interruption),
     ):
-        fixture = typ.cast("_FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
+        fixture = typ.cast("FixtureWithWrapped", pytest_plugin.cmd_mox).__wrapped__
         generator = fixture(typ.cast("pytest.FixtureRequest", request))
 
         with pytest.raises(interruption_type) as raised:
             next(generator)
 
-    manager = _ExitSpyCmdMoxManager.last_instance
+    manager = ExitSpyCmdMoxManager.last_instance
     assert manager is not None, "Assertion failed"
     assert manager.body_failed_values == [True], "Assertion failed"
     assert raised.value is interruption, "Assertion failed"
@@ -461,20 +281,20 @@ def test_enter_cmd_mox_replays_when_enabled(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Manager enters context and replays when auto lifecycle is enabled."""
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     manager = make_manager(request)
 
     manager.enter()
 
-    stub = typ.cast("_StubMox", manager.mox)
-    _assert_lifecycle_calls(stub, enter=1, replay=1)
+    stub = typ.cast("StubMox", manager.mox)
+    assert_lifecycle_calls(stub, enter=1, replay=1)
 
 
 @pytest.mark.parametrize(
     "request_kwargs",
     [
         pytest.param(
-            {"node": _StubNode(marker=_StubMarker(auto_lifecycle=False))},
+            {"node": StubNode(marker=StubMarker(auto_lifecycle=False))},
             id="marker-override",
         ),
         pytest.param(
@@ -484,10 +304,10 @@ def test_enter_cmd_mox_replays_when_enabled(
     ],
 )
 def test_enter_cmd_mox_auto_lifecycle_overrides(
-    make_manager: cabc.Callable[..., _CmdMoxManager], request_kwargs: _RequestKwargs
+    make_manager: cabc.Callable[..., _CmdMoxManager], request_kwargs: RequestKwargs
 ) -> None:
     """Marker and fixture parameter overrides disable automatic replay."""
-    request = _StubRequest(config=_StubConfig(), **request_kwargs)
+    request = StubRequest(config=StubConfig(), **request_kwargs)
     manager = make_manager(request)
 
     assert not manager.auto_lifecycle, "Assertion failed"
@@ -495,21 +315,21 @@ def test_enter_cmd_mox_auto_lifecycle_overrides(
 
     manager.enter()
 
-    stub = typ.cast("_StubMox", manager.mox)
-    _assert_lifecycle_calls(stub, enter=1, replay=0)
+    stub = typ.cast("StubMox", manager.mox)
+    assert_lifecycle_calls(stub, enter=1, replay=0)
 
 
 def test_exit_cmd_mox_verifies_when_needed(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Replay phase triggers verification during teardown."""
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     manager = make_manager(request)
 
     manager.enter()
     manager.exit(body_failed=False)
 
-    stub = typ.cast("_StubMox", manager.mox)
+    stub = typ.cast("StubMox", manager.mox)
     assert stub.verify_calls == 1, "Assertion failed"
     assert stub.exit_calls == [(None, None, None)], "Assertion failed"
 
@@ -518,11 +338,11 @@ def test_exit_cmd_mox_skips_verification_when_phase_not_replay(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Manager avoids redundant verification once phase has advanced."""
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     manager = make_manager(request)
 
     manager.enter()
-    stub = typ.cast("_StubMox", manager.mox)
+    stub = typ.cast("StubMox", manager.mox)
     stub.phase = Phase.VERIFY
 
     manager.exit(body_failed=False)
@@ -534,16 +354,16 @@ def test_exit_cmd_mox_records_verify_error_when_test_failed(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Verification errors surface as teardown sections when body fails."""
-    node = _StubNode()
-    request = _StubRequest(config=_StubConfig(), node=node)
+    node = StubNode()
+    request = StubRequest(config=StubConfig(), node=node)
     manager = make_manager(request, raise_on_verify=True)
 
     manager.enter()
     manager.exit(body_failed=True)
 
-    stub = typ.cast("_StubMox", manager.mox)
+    stub = typ.cast("StubMox", manager.mox)
     assert stub.verify_calls == 1, "Assertion failed"
-    _assert_teardown_sections(
+    assert_teardown_sections(
         node, ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
     )
 
@@ -552,8 +372,8 @@ def test_exit_cmd_mox_records_verify_error_when_call_stage_failed(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Call-stage failure suppresses verify error and records a section."""
-    node = _StubNode()
-    request = _StubRequest(config=_StubConfig(), node=node)
+    node = StubNode()
+    request = StubRequest(config=StubConfig(), node=node)
     manager = make_manager(request, raise_on_verify=True)
 
     manager.enter()
@@ -563,9 +383,9 @@ def test_exit_cmd_mox_records_verify_error_when_call_stage_failed(
     # Should not raise; error is suppressed and recorded as a teardown section.
     manager.exit(body_failed=False)
 
-    stub = typ.cast("_StubMox", manager.mox)
+    stub = typ.cast("StubMox", manager.mox)
     assert stub.verify_calls == 1, "Assertion failed"
-    _assert_teardown_sections(
+    assert_teardown_sections(
         node, ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
     )
     # Stash flag is consumed and cleared
@@ -576,10 +396,10 @@ def test_enter_cmd_mox_param_override_precedes_marker(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Fixture param takes precedence over marker configuration."""
-    marker = _StubMarker(auto_lifecycle=True)
-    request = _StubRequest(
-        config=_StubConfig(),
-        node=_StubNode(marker=marker),
+    marker = StubMarker(auto_lifecycle=True)
+    request = StubRequest(
+        config=StubConfig(),
+        node=StubNode(marker=marker),
         param={"auto_lifecycle": False},
     )
     manager = make_manager(request)
@@ -588,17 +408,115 @@ def test_enter_cmd_mox_param_override_precedes_marker(
 
     manager.enter()
 
-    stub = typ.cast("_StubMox", manager.mox)
-    _assert_lifecycle_calls(stub, enter=1, replay=0)
+    stub = typ.cast("StubMox", manager.mox)
+    assert_lifecycle_calls(stub, enter=1, replay=0)
+
+
+@pytest.mark.parametrize(
+    ("config", "marker_kwargs", "param", "expected"),
+    [
+        pytest.param(StubConfig(), {}, None, False, id="default-off"),
+        pytest.param(StubConfig(fail_fast_ini=True), {}, None, True, id="ini-enables"),
+        pytest.param(
+            StubConfig(fail_fast_ini=False, fail_fast_cli=True),
+            {},
+            None,
+            True,
+            id="cli-over-ini",
+        ),
+        pytest.param(
+            StubConfig(fail_fast_ini=True, fail_fast_cli=False),
+            {"fail_fast": True},
+            None,
+            True,
+            id="marker-over-cli-and-ini",
+        ),
+        pytest.param(
+            StubConfig(fail_fast_ini=True, fail_fast_cli=True),
+            {"fail_fast": True},
+            {"fail_fast": False},
+            False,
+            id="param-over-marker",
+        ),
+    ],
+)
+def test_fail_fast_resolution_precedence(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+    config: StubConfig,
+    marker_kwargs: dict[str, bool],
+    param: dict[str, bool] | None,
+    expected: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized case flag
+) -> None:
+    """Fail-fast resolves independently from parameter, marker, CLI, then ini."""
+    request = StubRequest(
+        config=config,
+        node=StubNode(marker=StubMarker(**marker_kwargs)),
+        param=param,
+    )
+    manager = make_manager(request)
+
+    stub = typ.cast("StubMox", manager.mox)
+    assert stub.fail_fast is expected, "fail_fast must follow the precedence order"
+
+
+def test_fail_fast_only_param_keeps_lifecycle_default(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """A fail-fast-only parameter leaves auto lifecycle at its ini default."""
+    request = StubRequest(config=StubConfig(), param={"fail_fast": True})
+    manager = make_manager(request)
+
+    stub = typ.cast("StubMox", manager.mox)
+    assert manager.auto_lifecycle, "auto lifecycle must keep its ini default"
+    assert stub.fail_fast, "fail_fast must be applied from the parameter"
+
+
+def test_combined_param_dict_sets_both_flags(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """A parameter dictionary may configure both flags at once."""
+    request = StubRequest(
+        config=StubConfig(),
+        param={"auto_lifecycle": False, "fail_fast": True},
+    )
+    manager = make_manager(request)
+
+    stub = typ.cast("StubMox", manager.mox)
+    assert not manager.auto_lifecycle, "auto lifecycle must be disabled"
+    assert stub.fail_fast, "fail_fast must be enabled"
+
+
+def test_param_dict_ignores_extra_keys(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """Unrecognised keys are ignored once a recognised key is present."""
+    request = StubRequest(
+        config=StubConfig(),
+        param={"fail_fast": True, "unexpected": True},
+    )
+    manager = make_manager(request)
+
+    stub = typ.cast("StubMox", manager.mox)
+    assert stub.fail_fast, "recognised keys must still be applied"
+
+
+def test_param_dict_without_recognised_key_is_rejected(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """A dictionary with no recognised key remains a configuration error."""
+    request = StubRequest(config=StubConfig(), param={"unexpected": True})
+
+    with pytest.raises(TypeError, match="auto_lifecycle"):
+        make_manager(request)
 
 
 def test_auto_lifecycle_hint_explains_override_precedence(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """The lifecycle hint makes higher-precedence opt-outs clear."""
-    request = _StubRequest(
-        config=_StubConfig(cli=False, ini=False),
-        node=_StubNode(marker=_StubMarker(auto_lifecycle=True)),
+    request = StubRequest(
+        config=StubConfig(cli=False, ini=False),
+        node=StubNode(marker=StubMarker(auto_lifecycle=True)),
         param={"auto_lifecycle": True},
     )
     manager = make_manager(request)
@@ -624,10 +542,10 @@ def test_exit_cmd_mox_cleanup_error_handling(
 ) -> None:
     """Cleanup errors fail the test and emit teardown sections across scenarios."""
     if mode == "explicit-node":
-        node = _StubNode()
-        request = _StubRequest(config=_StubConfig(), node=node)
+        node = StubNode()
+        request = StubRequest(config=StubConfig(), node=node)
     else:
-        request = _StubRequest(config=_StubConfig())
+        request = StubRequest(config=StubConfig())
         node = request.node
 
     manager = make_manager(request, raise_on_exit=True)
@@ -641,7 +559,7 @@ def test_exit_cmd_mox_cleanup_error_handling(
     assert "cmd_mox fixture cleanup failed" in message, "Assertion failed"
     assert node.nodeid in message, "Assertion failed"
     assert "OSError: exit boom" in message, "Assertion failed"
-    _assert_teardown_sections(
+    assert_teardown_sections(
         node, ("teardown", "cmd_mox cleanup", "OSError: exit boom")
     )
 
@@ -650,7 +568,7 @@ def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Verification errors fail the test when the body succeeded."""
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     node = request.node
     manager = make_manager(request, raise_on_verify=True)
 
@@ -661,7 +579,7 @@ def test_exit_cmd_mox_fails_on_verify_error_when_body_passes(
 
     expected = f"cmd_mox verification for {node.nodeid} RuntimeError: verify boom"
     assert expected in str(excinfo.value), "Assertion failed"
-    _assert_teardown_sections(
+    assert_teardown_sections(
         node, ("teardown", "cmd_mox verification", "RuntimeError: verify boom")
     )
 
@@ -670,7 +588,7 @@ def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Combined teardown failures report both verification and cleanup issues."""
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     node = request.node
     manager = make_manager(request, raise_on_exit=True, raise_on_verify=True)
 
@@ -684,7 +602,7 @@ def test_exit_cmd_mox_reports_both_verify_and_cleanup_errors(
     assert f"cleanup for {node.nodeid} OSError: exit boom" in message, (
         "Assertion failed"
     )
-    _assert_teardown_sections(
+    assert_teardown_sections(
         node,
         ("teardown", "cmd_mox verification", "RuntimeError: verify boom"),
         ("teardown", "cmd_mox cleanup", "OSError: exit boom"),
@@ -697,7 +615,7 @@ def test_exit_cmd_mox_logs_verification_context(
 ) -> None:
     """Verification failures include node context in logs."""
     caplog.set_level("ERROR")
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     manager = make_manager(request, raise_on_verify=True)
 
     manager.enter()
@@ -715,7 +633,7 @@ def test_exit_cmd_mox_logs_cleanup_context(
 ) -> None:
     """Cleanup failures include node context in logs."""
     caplog.set_level("ERROR")
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     manager = make_manager(request, raise_on_exit=True)
 
     manager.enter()
@@ -731,12 +649,12 @@ def test_exit_cmd_mox_is_idempotent_without_enter(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Calling exit before a successful enter is a no-op."""
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     manager = make_manager(request)
 
     manager.exit(body_failed=False)
 
-    stub = typ.cast("_StubMox", manager.mox)
+    stub = typ.cast("StubMox", manager.mox)
     assert stub.exit_calls == [], "Assertion failed"
 
 
@@ -744,7 +662,7 @@ def test_exit_cmd_mox_is_idempotent_after_teardown(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:
     """Repeated exit calls after teardown keep succeeding."""
-    request = _StubRequest(config=_StubConfig())
+    request = StubRequest(config=StubConfig())
     manager = make_manager(request)
 
     manager.enter()
@@ -753,5 +671,5 @@ def test_exit_cmd_mox_is_idempotent_after_teardown(
     # A second exit should be a no-op and not trigger additional cleanup.
     manager.exit(body_failed=False)
 
-    stub = typ.cast("_StubMox", manager.mox)
+    stub = typ.cast("StubMox", manager.mox)
     assert len(stub.exit_calls) == 1, "Assertion failed"
