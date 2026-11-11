@@ -2443,11 +2443,18 @@ from:
    `DOCKER_*`), or, for `go`, the documented exact names such as `GOPATH` and
    `GOFLAGS`
 3. Variables specified in a configurable allowlist
+4. For a command with no configured prefix or exact-name set, every key that
+   is not excluded by another rule
 
 `filter_env_subset()` accepts `explicit_keys` and `allowlist`, and applies
 their union with one precedence. The recording session currently forwards only
 its allowlist, so `.with_env()` keys do not automatically widen recordings;
 that wiring is tracked in issue #368.
+
+The last rule is permissive: an unrecognized command records every non-excluded
+key, so a fixture can retain values that no prefix or allowlist selected. The
+sensitive-key classifier is a name-based heuristic, so review fixtures before
+committing or sharing them.
 
 ### 9.4 Module Structure
 
@@ -3128,6 +3135,8 @@ committing or sharing them.
 - Variables on the user-defined allowlist
 - Variables matching command-specific prefixes (e.g., `GIT_*` for git), or,
   for `go`, the documented exact names such as `GOPATH` and `GOFLAGS`
+- For a command with no configured prefix or exact-name set, every key not
+  excluded above
 
 **Included when requested**:
 
@@ -3138,6 +3147,11 @@ committing or sharing them.
 their union with one precedence. The recording session currently forwards only
 its allowlist, so `.with_env()` keys do not automatically widen recordings;
 that wiring is tracked in issue #368.
+
+The last default rule is permissive: an unrecognized command records every
+non-excluded key, so a fixture can retain values that no prefix or allowlist
+selected. The sensitive-key classifier is a name-based heuristic, so review
+fixtures before committing or sharing them.
 
 #### 9.9.3 Command argument diagnostics
 
