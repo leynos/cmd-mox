@@ -438,6 +438,41 @@ _SCHEMA_REJECTION_CASES = [
         id="string-args",
     ),
     pytest.param(
+        _mutate_path("recordings", 0, "args"),
+        r"missing required field 'recordings\[0\]\.args'",
+        id="missing-args",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "sequence"),
+        r"missing required field 'recordings\[0\]\.sequence'",
+        id="missing-sequence",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "sequence", value="0"),
+        r"recordings\[0\]\.sequence",
+        id="non-int-sequence",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "command"),
+        r"missing required field 'recordings\[0\]\.command'",
+        id="missing-command",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "command", value=1),
+        r"recordings\[0\]\.command",
+        id="non-string-command",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "timestamp"),
+        r"missing required field 'recordings\[0\]\.timestamp'",
+        id="missing-timestamp",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "timestamp", value=1),
+        r"recordings\[0\]\.timestamp",
+        id="non-string-timestamp",
+    ),
+    pytest.param(
         _mutate_path("recordings", 0, "exit_code", value=1.9),
         r"recordings\[0\]\.exit_code",
         id="float-exit-code",
@@ -473,9 +508,39 @@ _SCHEMA_REJECTION_CASES = [
         id="missing-stdin",
     ),
     pytest.param(
+        _mutate_path("recordings", 0, "stdin", value=None),
+        r"recordings\[0\]\.stdin",
+        id="null-stdin",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "stdout"),
+        r"missing required field 'recordings\[0\]\.stdout'",
+        id="missing-stdout",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "stderr"),
+        r"missing required field 'recordings\[0\]\.stderr'",
+        id="missing-stderr",
+    ),
+    pytest.param(
         _mutate_path("recordings", 0, "stderr", value=None),
         r"recordings\[0\]\.stderr",
         id="null-stderr",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "env_subset"),
+        r"missing required field 'recordings\[0\]\.env_subset'",
+        id="missing-env-subset",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "exit_code"),
+        r"missing required field 'recordings\[0\]\.exit_code'",
+        id="missing-exit-code",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "duration_ms"),
+        r"missing required field 'recordings\[0\]\.duration_ms'",
+        id="missing-duration-ms",
     ),
     pytest.param(
         _mutate_path("recordings", 0, "duration_ms", value=2.5),
@@ -491,6 +556,41 @@ _SCHEMA_REJECTION_CASES = [
         _mutate_path("metadata", "created_at", value=5),
         r"metadata\.created_at",
         id="non-string-created-at",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "cmdmox_version"),
+        r"missing required field 'metadata\.cmdmox_version'",
+        id="missing-cmdmox-version",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "cmdmox_version", value=5),
+        r"metadata\.cmdmox_version",
+        id="non-string-cmdmox-version",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "platform"),
+        r"missing required field 'metadata\.platform'",
+        id="missing-platform",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "platform", value=5),
+        r"metadata\.platform",
+        id="non-string-platform",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "python_version"),
+        r"missing required field 'metadata\.python_version'",
+        id="missing-python-version",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "python_version", value=5),
+        r"metadata\.python_version",
+        id="non-string-python-version",
+    ),
+    pytest.param(
+        _mutate_path("metadata"),
+        r"missing required field 'metadata'",
+        id="missing-metadata",
     ),
     pytest.param(
         _mutate_path("metadata", "test_module", value=42),
@@ -521,6 +621,11 @@ _SCHEMA_REJECTION_CASES = [
         _mutate_path("recordings", value=["nope"]),
         r"recordings\[0\]",
         id="non-object-recording",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, value="nope"),
+        r"scrubbing_rules\[0\]",
+        id="non-object-rule",
     ),
     pytest.param(
         _mutate_path("scrubbing_rules", 0, "pattern"),
