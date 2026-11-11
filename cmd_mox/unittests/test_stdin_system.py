@@ -362,11 +362,17 @@ def test_production_system_is_shared() -> None:
     )
 
 
-def test_production_system_reports_the_live_platform() -> None:
+@pytest.mark.parametrize("flag", [True, False])
+def test_production_system_reports_the_live_platform(
+    monkeypatch: pytest.MonkeyPatch, *, flag: bool
+) -> None:
     """The Windows half reads the platform flag on every access."""
+    # Construct first, then change the flag: a system that cached the value in
+    # ``__init__`` would still report the original platform and fail here.
     system = stdin_system._OsWindowsStdinSystem()
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", flag)
 
-    assert system.is_windows == path_utils.IS_WINDOWS, (
+    assert system.is_windows is flag, (
         "the Windows flag was not read from the live platform"
     )
 
