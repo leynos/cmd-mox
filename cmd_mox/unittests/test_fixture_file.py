@@ -483,6 +483,16 @@ _SCHEMA_REJECTION_CASES = [
         id="float-duration-ms",
     ),
     pytest.param(
+        _mutate_path("metadata", "created_at"),
+        r"missing required field 'metadata\.created_at'",
+        id="missing-created-at",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "created_at", value=5),
+        r"metadata\.created_at",
+        id="non-string-created-at",
+    ),
+    pytest.param(
         _mutate_path("metadata", "test_module", value=42),
         r"metadata\.test_module",
         id="non-string-test-module",
@@ -511,6 +521,26 @@ _SCHEMA_REJECTION_CASES = [
         _mutate_path("recordings", value=["nope"]),
         r"recordings\[0\]",
         id="non-object-recording",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, "pattern"),
+        r"missing required field 'scrubbing_rules\[0\]\.pattern'",
+        id="missing-pattern",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, "pattern", value=3),
+        r"scrubbing_rules\[0\]\.pattern",
+        id="non-string-pattern",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, "replacement"),
+        r"missing required field 'scrubbing_rules\[0\]\.replacement'",
+        id="missing-replacement",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, "replacement", value=3),
+        r"scrubbing_rules\[0\]\.replacement",
+        id="non-string-replacement",
     ),
     pytest.param(
         _mutate_path("scrubbing_rules", 0, "applied_to", value="stdout"),
@@ -695,6 +725,24 @@ def test_env_subset_rejects_non_string_generated_key(
     """A non-string key at any generated mapping position names that key."""
     fixture = _fixture_with_rule()
     fixture["recordings"][0]["env_subset"] = {**entries, key: "value"}
+
+    with pytest.raises(
+        ValueError, match=re.escape(f"recordings[0].env_subset[{key!r}]")
+    ):
+        FixtureFile.from_dict(fixture)
+
+
+@given(
+    entries=st.dictionaries(st.text(), st.text(), max_size=4),
+    key=st.text(),
+    invalid=_NON_STRING_JSON_VALUES,
+)
+def test_env_subset_rejects_non_string_generated_value(
+    entries: dict[str, str], key: str, invalid: object
+) -> None:
+    """A non-string value at any generated mapping key names that key."""
+    fixture = _fixture_with_rule()
+    fixture["recordings"][0]["env_subset"] = {**entries, key: invalid}
 
     with pytest.raises(
         ValueError, match=re.escape(f"recordings[0].env_subset[{key!r}]")
