@@ -16,6 +16,26 @@ Readers of the updated release tolerate minor and patch differences within the
 same major version and raise `ValueError` for a higher major version with no
 migration path.
 
+## Stricter fixture field validation
+
+Fixture loading now validates every field the 1.0.0 writer emits instead of
+defaulting or coercing malformed values. A fixture that omits a required key,
+or supplies a value of the wrong JSON type, fails to load with a `ValueError`
+naming the offending path, for example
+`Invalid fixture schema: recordings[0].stdout: expected str, got NoneType`.
+
+Three fields remain optional and may be absent or `null`:
+`metadata.test_module`, `metadata.test_function`, and
+`scrubbing_rules[].description`. A missing `version` is the separate legacy
+exception: it is treated as `0.0.0` and migrated forward. An explicit non-string
+`version` is rejected.
+
+Update a fixture that fails validation by adding the missing key or replacing
+the malformed value with the type the schema requires. In particular,
+`recordings`, `scrubbing_rules`, `scrubbing_rules[].applied_to`, and the
+invocation fields `stdin`, `env_subset`, `stdout`, `stderr`, `exit_code`, and
+`duration_ms` are no longer defaulted.
+
 ## Upgrade shared fixture workflows
 
 Upgrade every CmdMox installation that reads or writes a shared fixture before

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import typing as typ
 
@@ -33,6 +34,14 @@ _RECORDED_INVOCATIONS = st.builds(
     exit_code=st.integers(),
     timestamp=st.text(),
     duration_ms=st.integers(),
+)
+
+#: JSON scalars that are never valid where the schema requires a string.
+_NON_STRING_JSON_VALUES = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(),
+    st.floats(allow_nan=False, allow_infinity=False),
 )
 
 
@@ -464,9 +473,24 @@ _SCHEMA_REJECTION_CASES = [
         id="missing-stdin",
     ),
     pytest.param(
+        _mutate_path("recordings", 0, "stderr", value=None),
+        r"recordings\[0\]\.stderr",
+        id="null-stderr",
+    ),
+    pytest.param(
+        _mutate_path("recordings", 0, "duration_ms", value=2.5),
+        r"recordings\[0\]\.duration_ms",
+        id="float-duration-ms",
+    ),
+    pytest.param(
         _mutate_path("metadata", "test_module", value=42),
         r"metadata\.test_module",
         id="non-string-test-module",
+    ),
+    pytest.param(
+        _mutate_path("metadata", "test_function", value=42),
+        r"metadata\.test_function",
+        id="non-string-test-function",
     ),
     pytest.param(
         _mutate_path("recordings"),
@@ -497,6 +521,16 @@ _SCHEMA_REJECTION_CASES = [
         _mutate_path("scrubbing_rules", 0, "applied_to", value=["env", 2]),
         r"scrubbing_rules\[0\]\.applied_to\[1\]",
         id="non-string-applied-to",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, "applied_to"),
+        r"missing required field 'scrubbing_rules\[0\]\.applied_to'",
+        id="missing-applied-to",
+    ),
+    pytest.param(
+        _mutate_path("scrubbing_rules", 0, "description", value=3),
+        r"scrubbing_rules\[0\]\.description",
+        id="non-string-description",
     ),
     pytest.param(
         _mutate_path("scrubbing_rules"),
@@ -629,6 +663,43 @@ class TestFixtureSchemaValidation:
             match=r"^Invalid fixture schema: expected object, got list$",
         ):
             RecordedInvocation.from_dict(typ.cast("dict[str, typ.Any]", []))
+
+
+@given(
+    data=st.data(),
+    args=st.lists(st.text(), max_size=5),
+    invalid=_NON_STRING_JSON_VALUES,
+)
+def test_args_reject_non_string_value_at_generated_position(
+    data: st.DataObject,
+    args: list[str],
+    invalid: object,
+) -> None:
+    """A non-string value at any generated argument position names that index."""
+    index = data.draw(st.integers(min_value=0, max_value=len(args)))
+    mutated = [*args[:index], invalid, *args[index:]]
+    fixture = _fixture_with_rule()
+    fixture["recordings"][0]["args"] = mutated
+
+    with pytest.raises(ValueError, match=re.escape(f"recordings[0].args[{index}]")):
+        FixtureFile.from_dict(fixture)
+
+
+@given(
+    entries=st.dictionaries(st.text(), st.text(), max_size=4),
+    key=st.integers(),
+)
+def test_env_subset_rejects_non_string_generated_key(
+    entries: dict[str, str], key: int
+) -> None:
+    """A non-string key at any generated mapping position names that key."""
+    fixture = _fixture_with_rule()
+    fixture["recordings"][0]["env_subset"] = {**entries, key: "value"}
+
+    with pytest.raises(
+        ValueError, match=re.escape(f"recordings[0].env_subset[{key!r}]")
+    ):
+        FixtureFile.from_dict(fixture)
 
 
 class TestVersionParsing:

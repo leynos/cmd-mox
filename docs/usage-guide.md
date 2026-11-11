@@ -603,6 +603,10 @@ are rejected), `args` and `applied_to` must be arrays of strings, and
 `env_subset` must map strings to strings. Unknown keys are ignored, including
 `$schema`.
 
+`version` is a separate exception. A fixture that omits it is treated as a
+legacy `0.0.0` document and migrated forward, so the key is not required. An
+explicit non-string `version` is still rejected.
+
 Malformed values raise `ValueError` with a path, for example
 `Invalid fixture schema: recordings[0].stdout: expected str, got NoneType`. A
 fixture that omits a required key — including `recordings`, `scrubbing_rules`,
