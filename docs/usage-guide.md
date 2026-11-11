@@ -972,8 +972,7 @@ entries, does not affect verification. Verification also records the double
 each call was dispatched to, so a double registered later cannot claim an
 earlier call: a call made without a double is reported as unexpected even if a
 mock or stub for that command is registered afterwards. A bounded controller
-still reports an unexpected call that has already been evicted from the
-journal:
+still reports an unexpected call that has already been evicted from the journal:
 
 ```python
 import shutil

@@ -1224,9 +1224,9 @@ cannot alter verification. Each record also stores the double the call was
 dispatched to, or `None` when no double existed, so a double registered later
 cannot retroactively claim an earlier call as expected or count it toward its
 expectation. The record shares the journal's completion order and is cleared
-with it when replay starts. An unbounded journal retains every call,
-so `in_order()` may be applied after calls complete; a bounded controller
-discards unordered stub calls and rejects late `in_order()` for them.
+with it when replay starts. An unbounded journal retains every call, so
+`in_order()` may be applied after calls complete; a bounded controller discards
+unordered stub calls and rejects late `in_order()` for them.
 
 ## IV. Feature Deep Dive: Stubbing
 
@@ -2048,11 +2048,11 @@ after a call cannot retroactively claim it. `UnexpectedCommandVerifier` and
 `CountVerifier` therefore use the dispatch-time association: a call made
 without a double is unexpected, and only calls dispatched to a mock count
 towards its expectation. Verification takes one snapshot of that record under
-the lock, so evicting a diagnostic journal entry never weakens verification. An unbounded journal
-retains every call, which keeps calls that completed before `in_order()` was
-applied available to `OrderVerifier`. A bounded controller discards unordered
-stub calls, so it rejects `in_order()` applied after a stub's first call with
-`ExpectationConfigurationError`.
+the lock, so evicting a diagnostic journal entry never weakens verification. An
+unbounded journal retains every call, which keeps calls that completed before
+`in_order()` was applied available to `OrderVerifier`. A bounded controller
+discards unordered stub calls, so it rejects `in_order()` applied after a
+stub's first call with `ExpectationConfigurationError`.
 
 ### 8.9 Design Decisions for Documentation and Examples
 
