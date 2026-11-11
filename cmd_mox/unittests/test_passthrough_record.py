@@ -193,6 +193,37 @@ class TestPassthroughRecording:
             "GIT_DIR": ".git",
         }
 
+    def test_known_prefix_sensitive_with_env_key_is_recorded(
+        self, tmp_path: Path
+    ) -> None:
+        """An explicitly requested sensitive key survives the sensitivity rule."""
+        fixture_path = tmp_path / "fixture.json"
+        with CmdMox() as mox:
+            spy = (
+                mox
+                .spy("git")
+                .with_env({"GIT_TOKEN": "s3cr3t"})
+                .passthrough()
+                .record(fixture_path)
+            )
+            invocation = Invocation(
+                command="git",
+                args=["status"],
+                stdin="",
+                env={"GIT_AUTHOR_NAME": "Ada"},
+            )
+            response = mox._prepare_passthrough(spy, invocation)
+            directive = response.passthrough
+            assert directive is not None
+
+            _complete_passthrough(mox, directive)
+
+        assert spy._recording_session is not None
+        assert spy._recording_session._recordings[0].env_subset == {
+            "GIT_TOKEN": "s3cr3t",
+            "GIT_AUTHOR_NAME": "Ada",
+        }
+
     def test_unknown_command_records_no_unrequested_keys(self, tmp_path: Path) -> None:
         """Passthrough recording uses the restrictive unknown-command default."""
         fixture_path = tmp_path / "fixture.json"

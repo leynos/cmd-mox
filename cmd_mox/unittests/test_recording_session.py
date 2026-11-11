@@ -329,6 +329,44 @@ class TestRecordingSessionScrubber:
         loaded = FixtureFile.load(path)
         assert loaded.recordings[0].stdout == "<redacted>"
 
+    def test_explicit_sensitive_key_is_scrubbed_before_persistence(
+        self, tmp_path: Path
+    ) -> None:
+        """A sensitive explicit key is scrubbed, not persisted in clear text."""
+
+        class _RedactToken:
+            """Scrubber double that observes recordings and redacts API_TOKEN."""
+
+            def __init__(self) -> None:
+                """Start with no observed recordings."""
+                self.seen: list[RecordedInvocation] = []
+
+            def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+                """Retain the incoming recording and redact the token value."""
+                self.seen.append(recording)
+                redacted = {
+                    key: "<redacted>" if key == "API_TOKEN" else value
+                    for key, value in recording.env_subset.items()
+                }
+                return dc.replace(recording, env_subset=redacted)
+
+        scrubber = _RedactToken()
+        path = tmp_path / "fixture.json"
+        session = RecordingSession(path, scrubber=scrubber)
+        session.start()
+        session.record(
+            _make_invocation(env={"API_TOKEN": "tok123"}),
+            _make_response(),
+            explicit_keys=["API_TOKEN"],
+        )
+        session.finalize()
+
+        # The sensitive value reaches the scrubber, which is the only place a
+        # caller-supplied redaction rule can act on it.
+        assert scrubber.seen[0].env_subset == {"API_TOKEN": "tok123"}
+        loaded = FixtureFile.load(path)
+        assert loaded.recordings[0].env_subset == {"API_TOKEN": "<redacted>"}
+
 
 class TestRecordingSessionDurationValidation:
     """Tests for duration_ms validation in RecordingSession."""

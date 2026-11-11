@@ -94,7 +94,9 @@ present in the live invocation. Fixtures recorded under the old default fail
 strict replay whenever a captured variable is absent, which is the usual
 outcome on another machine or in CI. Re-recording fixes the fixture. As a
 temporary workaround, replay with `strict=False`, but a narrower recording is
-the durable fix.
+the durable fix. `strict=False` also stops requiring stdin to match, so replay
+can return a response recorded for different input; treat it as a short-lived
+local unblock rather than a way to keep a stale fixture.
 
 ## See also
 

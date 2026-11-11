@@ -87,9 +87,13 @@ for the complete field rules.
 
 ## Recording environment provenance
 
-`PassthroughCoordinator.prepare_request()` copies the double's
-`expectation.env` into a frozen `frozenset` and stores it with the pending
-request. `finalize_result()` passes that snapshot to
+`Controller._prepare_passthrough()` validates the expectation environment with
+`apply_expectation_env()` and passes that same mapping to
+`PassthroughCoordinator.prepare_request(expectation_env=...)`. The coordinator
+copies it into a frozen `frozenset` and stores it with the pending request, so
+the directive merge and the recording provenance cannot diverge even if
+`.with_env()` replaces the expectation mapping concurrently.
+`finalize_result()` passes the snapshot to
 `RecordingSession.record(explicit_keys=...)`, which forwards it to
 `filter_env_subset()`. Snapshotting at preparation makes the recording depend
 on the expectation as it was when the request began: a later `.with_env()` call

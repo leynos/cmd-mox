@@ -573,8 +573,12 @@ subset of the process environment. Filtering applies these rules in order:
    `/usr/bin/git` and `git.exe` are not normalized and therefore gain no
    prefix.
 5. **Everything else is dropped.** In particular, a command with no known
-   prefix records no unrequested variables, so host names, user paths, tool
-   caches and agent session identifiers never reach a fixture.
+   prefix records no unrequested environment keys, so host names, user paths,
+   tool caches and agent session identifiers held in the environment do not
+   reach `env_subset`. This guarantee covers the environment only: recorded
+   `stdin`, `stdout` and `stderr` still contain whatever the command received
+   or printed, which can include host paths. Review those fields, or apply a
+   scrubber, before committing a fixture.
 
 `.with_env()` keys are captured automatically for the passthrough request that
 declared them, including keys whose names would otherwise look sensitive. Use

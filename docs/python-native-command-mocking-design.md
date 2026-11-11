@@ -1641,7 +1641,7 @@ sequenceDiagram
   Shim->>Server: send Invocation (kind=invocation, invocation_id)
   Server->>Controller: handle invocation
   alt controller selects passthrough
-    Controller->>Passthrough: prepare_request(double, invocation, PassthroughConfig)
+    Controller->>Passthrough: prepare_request(double, invocation, PassthroughConfig, expectation_env)
     Passthrough-->>Controller: Response(passthrough=PassthroughRequest)
     Controller-->>Server: Response with passthrough
     Server-->>Shim: Response with PassthroughRequest
@@ -2503,10 +2503,13 @@ from:
    the documented exact names such as `GOPATH` and `GOFLAGS`
 
 CmdMox internal variables are never recorded. A command without a known prefix
-records no unrequested variables, so strict replay of its fixture does not
-depend on the machine that recorded it. Request-time explicit keys keep their
-provenance per request in `PassthroughCoordinator`, so a later mutation of the
-expectation does not change an earlier recording.
+records no unrequested variables, which reduces machine dependence: strict
+replay no longer requires every host variable to be present. It does not remove
+that dependence entirely, because an allowlisted or explicitly requested key
+can still hold a machine-specific value such as `HOME`, and replay then
+requires the same value. Request-time explicit keys keep their provenance per
+request in `PassthroughCoordinator`, so a later mutation of the expectation
+does not change an earlier recording.
 
 #### 9.3.4 Fixture validation policy
 

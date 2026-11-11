@@ -265,6 +265,21 @@ class TestFilterEnvSubset:
         assert "GITHUB_KEY" not in result
         assert "GIT_AUTHOR_NAME" in result
 
+    def test_sensitive_keys_sharing_command_prefix_are_excluded(self) -> None:
+        """Sensitivity wins over the known-prefix rule for the same command."""
+        env = {
+            "GIT_TOKEN": "tok123",
+            "GIT_SECRET": "s3cr3t",
+            "GIT_PASSWORD": "hunter2",
+            "GIT_API_KEY": "key",
+            "GIT_AUTHOR_NAME": "keep",
+        }
+        result = filter_env_subset(env, command="git")
+
+        for key in ("GIT_TOKEN", "GIT_SECRET", "GIT_PASSWORD", "GIT_API_KEY"):
+            assert key not in result, f"{key} should be excluded as sensitive"
+        assert result == {"GIT_AUTHOR_NAME": "keep"}
+
     def test_excludes_credential_config_keys(self) -> None:
         """Registry credentials in ``*_AUTH_CONFIG`` never reach fixtures."""
         env = {

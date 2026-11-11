@@ -601,6 +601,7 @@ class CmdMox:
             double,
             invocation,
             config,
+            expectation_env=overrides,
         )
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:

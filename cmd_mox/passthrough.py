@@ -11,6 +11,8 @@ import uuid
 from .ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
     from .test_doubles import CommandDouble
 
 
@@ -103,6 +105,8 @@ class PassthroughCoordinator:
         double: CommandDouble,
         invocation: Invocation,
         config: PassthroughConfig,
+        *,
+        expectation_env: cabc.Mapping[str, str],
     ) -> Response:
         """Record passthrough intent and return instructions for shim.
 
@@ -114,6 +118,12 @@ class PassthroughCoordinator:
             Invocation to retain until the shim reports its result.
         config : PassthroughConfig
             Lookup path, timeout, and environment additions for the request.
+        expectation_env : collections.abc.Mapping[str, str]
+            The expectation environment the caller already validated and
+            applied to *invocation*.  Passing the caller's snapshot keeps the
+            directive merge and the recording provenance on the same values
+            even if ``.with_env()`` replaces the expectation mapping
+            concurrently.
 
         Returns
         -------
@@ -134,10 +144,10 @@ class PassthroughCoordinator:
             invocation_id=invocation_id,
         )
 
-        # Snapshot the expectation environment once.  The same copy feeds the
-        # directive merge and the explicit-key provenance, so a later mutation
-        # of the expectation cannot change this request's recording.
-        expectation_env = dict(double.expectation.env)
+        # Copy the caller's snapshot once.  The same copy feeds the directive
+        # merge and the explicit-key provenance, so a later mutation of the
+        # expectation cannot change this request's recording.
+        snapshot = dict(expectation_env)
 
         with self._lock:
             self._prune_expired_locked()
@@ -145,11 +155,11 @@ class PassthroughCoordinator:
                 double=double,
                 invocation=stored_invocation,
                 deadline=self._expiry_deadline(config.timeout),
-                explicit_keys=frozenset(expectation_env),
+                explicit_keys=frozenset(snapshot),
             )
             self._unrecorded[invocation_id] = (double, stored_invocation)
 
-        env = dict(expectation_env)
+        env = dict(snapshot)
         if config.extra_env:
             env.update(config.extra_env)
         passthrough = PassthroughRequest(

@@ -6,9 +6,11 @@ import dataclasses as dc
 import math
 import typing as typ
 
+import hypothesis.strategies as st
 import pytest
+from hypothesis import given
 
-from cmd_mox.ipc import Invocation, PassthroughResult
+from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 from cmd_mox.passthrough import PassthroughConfig, PassthroughCoordinator
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
@@ -58,6 +60,21 @@ def _make_invocation(command: str = "echo") -> Invocation:
     return Invocation(command=command, args=["hi"], stdin="", env={})
 
 
+def _prepare(
+    coordinator: PassthroughCoordinator,
+    double: CommandDouble,
+    invocation: Invocation,
+    config: PassthroughConfig,
+) -> Response:
+    """Prepare a request using the double's current expectation environment."""
+    return coordinator.prepare_request(
+        double,
+        invocation,
+        config,
+        expectation_env=double.expectation.env,
+    )
+
+
 def _prepare_and_finalize(
     coordinator: PassthroughCoordinator,
     double: CommandDouble,
@@ -65,7 +82,7 @@ def _prepare_and_finalize(
     config: PassthroughConfig,
 ) -> None:
     """Prepare a request and finalise it with an empty successful result."""
-    response = coordinator.prepare_request(double, invocation, config)
+    response = _prepare(coordinator, double, invocation, config)
     directive = response.passthrough
     assert directive is not None
     coordinator.finalize_result(
@@ -85,7 +102,7 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
     invocation = _make_invocation()
 
     config = PassthroughConfig(lookup_path="/usr/bin", timeout=2.0)
-    response = coordinator.prepare_request(double, invocation, config)
+    response = _prepare(coordinator, double, invocation, config)
 
     assert response.passthrough is not None
     assert response.passthrough.lookup_path == "/usr/bin"
@@ -225,7 +242,7 @@ def test_prepare_request_extra_env_behavior(
         timeout=1.0,
         extra_env=extra_env,
     )
-    response = coordinator.prepare_request(double, invocation, config)
+    response = _prepare(coordinator, double, invocation, config)
 
     assert response.passthrough is not None
     assert response.passthrough.extra_env == expected_merged
@@ -239,7 +256,7 @@ def test_finalize_result_returns_response_and_clears() -> None:
     invocation = _make_invocation("tool")
     invocation.env.update({"EXTRA": "1"})
     config = PassthroughConfig(lookup_path="/opt/bin", timeout=1.0)
-    response = coordinator.prepare_request(double, invocation, config)
+    response = _prepare(coordinator, double, invocation, config)
     directive = response.passthrough
     assert directive is not None
 
@@ -290,7 +307,7 @@ def test_expired_requests_are_pruned(monkeypatch: pytest.MonkeyPatch) -> None:
     double = typ.cast("CommandDouble", _FakeDouble({}))
     invocation = _make_invocation("slow")
     config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
-    directive = coordinator.prepare_request(double, invocation, config)
+    directive = _prepare(coordinator, double, invocation, config)
     assert directive.passthrough is not None
     pending_id = directive.passthrough.invocation_id
 
@@ -339,3 +356,114 @@ def test_finalize_records_caller_invocation_without_injected_values() -> None:
     stored_invocation, _, explicit_keys = session.recordings[0]
     assert stored_invocation.env == {"CALLER": "1"}
     assert explicit_keys == frozenset({"EXPECTED"})
+
+
+def test_prepare_request_uses_supplied_snapshot() -> None:
+    """The caller's validated snapshot wins over the live expectation."""
+    session = _RecordingSessionStub()
+    double = typ.cast("CommandDouble", _FakeDouble({"LATE_KEY": "late"}, session))
+    coordinator = PassthroughCoordinator()
+    invocation = _make_invocation("git")
+    config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
+
+    response = coordinator.prepare_request(
+        double,
+        invocation,
+        config,
+        expectation_env={"EARLY_KEY": "early"},
+    )
+    directive = response.passthrough
+    assert directive is not None
+    assert directive.extra_env == {"EARLY_KEY": "early"}
+    assert response.env == {"EARLY_KEY": "early"}
+
+    coordinator.finalize_result(
+        PassthroughResult(
+            invocation_id=directive.invocation_id,
+            stdout="",
+            stderr="",
+            exit_code=0,
+        )
+    )
+
+    _, _, explicit_keys = session.recordings[0]
+    assert explicit_keys == frozenset({"EARLY_KEY"})
+
+
+_KEY_NAMES = st.sampled_from(["ALPHA", "BETA", "GAMMA", "DELTA", "EPSILON"])
+
+
+@st.composite
+def _snapshots_and_completion_order(
+    draw: st.DrawFn,
+) -> tuple[list[dict[str, str]], list[int]]:
+    """Generate per-request key snapshots and a completion-order permutation."""
+    snapshots = draw(
+        st.lists(
+            st.dictionaries(_KEY_NAMES, st.text(min_size=1, max_size=6), max_size=4),
+            min_size=1,
+            max_size=5,
+        )
+    )
+    order = draw(st.permutations(range(len(snapshots))))
+    return snapshots, order
+
+
+def _prepare_snapshots(
+    coordinator: PassthroughCoordinator,
+    double: CommandDouble,
+    snapshots: list[dict[str, str]],
+    config: PassthroughConfig,
+) -> list[PassthroughRequest]:
+    """Prepare one request per snapshot, replacing the expectation each time."""
+    directives = []
+    for index, snapshot in enumerate(snapshots):
+        double.expectation = _FakeExpectation(dict(snapshot))
+        invocation = Invocation(
+            command="git", args=[str(index)], stdin="", env=dict(snapshot)
+        )
+        response = coordinator.prepare_request(
+            double,
+            invocation,
+            config,
+            expectation_env=snapshot,
+        )
+        directive = response.passthrough
+        assert directive is not None
+        directives.append(directive)
+        # Replace the expectation before preparing the next request, so a
+        # finalisation-time read would record the wrong keys.
+        double.expectation = _FakeExpectation({"REPLACED": "yes"})
+    return directives
+
+
+@given(case=_snapshots_and_completion_order())
+def test_each_request_records_its_preparation_time_snapshot(
+    case: tuple[list[dict[str, str]], list[int]],
+) -> None:
+    """Out-of-order completions keep the keys captured when each was prepared."""
+    snapshots, order = case
+    session = _RecordingSessionStub()
+    double = typ.cast("CommandDouble", _FakeDouble({}, session))
+    coordinator = PassthroughCoordinator()
+    config = PassthroughConfig(lookup_path="/bin", timeout=60.0)
+
+    directives = _prepare_snapshots(coordinator, double, snapshots, config)
+    for index in order:
+        coordinator.finalize_result(
+            PassthroughResult(
+                invocation_id=directives[index].invocation_id,
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        )
+
+    recorded = {
+        invocation.args[0]: explicit_keys
+        for invocation, _, explicit_keys in session.recordings
+    }
+    expected = {
+        str(index): frozenset(snapshot) for index, snapshot in enumerate(snapshots)
+    }
+    assert recorded == expected
