@@ -288,10 +288,11 @@ inspiration from PyMox's method-chaining style.
   command-line arguments that are expected. The match must be precise.
 
 - `.with_matching_args(*matchers)`**:** For more flexible matching, this method
-  accepts a literal string or a `CmdMox` comparator object (see Section V) at
-  each position. A literal string requires exact equality; a comparator allows
-  matching based on type, regular expressions, or custom logic. Any other value
-  raises `ExpectationConfigurationError` when the expectation is configured.
+  accepts a literal string, a `CmdMox` comparator object (see Section V), or
+  any callable predicate at each position. A literal string requires exact
+  equality; a callable allows matching based on type, regular expressions, or
+  custom logic. A value that is neither a string nor callable raises
+  `ExpectationConfigurationError` when the expectation is configured.
 
   Each `CommandDouble` accepts one argument expectation. A second call to
   `with_args()` or `with_matching_args()`, including a call that mixes both
