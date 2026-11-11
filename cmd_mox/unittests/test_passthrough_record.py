@@ -8,12 +8,49 @@ import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation, PassthroughResult
+from cmd_mox.passthrough import PassthroughCoordinator
 from cmd_mox.record.fixture import FixtureFile
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.requires_unix_sockets
+
+
+class _FakeClock:
+    """Return scripted clock readings in call order."""
+
+    def __init__(self, readings: list[float]) -> None:
+        """Store the readings the coordinator should observe."""
+        self._readings = iter(readings)
+
+    def __call__(self) -> float:
+        """Return the next scripted reading."""
+        return next(self._readings)
+
+
+def _record_one_invocation(tmp_path: Path, readings: list[float]) -> int:
+    """Record a single invocation and return its measured duration."""
+    with CmdMox() as mox:
+        mox._passthrough_coordinator = PassthroughCoordinator(
+            duration_clock=_FakeClock(readings)
+        )
+        spy = mox.spy("echo").passthrough().record(tmp_path / "fixture.json")
+        invocation = Invocation(command="echo", args=["hello"], stdin="", env={})
+        response = mox._prepare_passthrough(spy, invocation)
+        directive = response.passthrough
+        assert directive is not None
+        mox._handle_passthrough_result(
+            PassthroughResult(
+                invocation_id=directive.invocation_id,
+                stdout="hello\n",
+                stderr="",
+                exit_code=0,
+            )
+        )
+        session = spy.recording_session
+        assert session is not None
+        return session._recordings[0].duration_ms
 
 
 class TestPassthroughRecording:
@@ -85,6 +122,63 @@ class TestPassthroughRecording:
         assert recording.args == ["status", "--short"]
         assert recording.stdout == "M file.py\n"
         assert recording.exit_code == 0
+
+    def test_recorded_duration_is_measured_in_milliseconds(
+        self, tmp_path: Path
+    ) -> None:
+        """A quarter-second clock interval is recorded as 250 ms."""
+        assert _record_one_invocation(tmp_path, [10.0, 10.25]) == 250
+
+    def test_out_of_order_results_keep_independent_durations(
+        self, tmp_path: Path
+    ) -> None:
+        """Concurrent requests use their own start readings, not arrival order."""
+        clock = _FakeClock([1.0, 2.0, 2.5, 4.0])
+        with CmdMox() as mox:
+            mox._passthrough_coordinator = PassthroughCoordinator(duration_clock=clock)
+            spy = mox.spy("echo").passthrough().record(tmp_path / "fixture.json")
+            first = mox._prepare_passthrough(
+                spy, Invocation(command="echo", args=["first"], stdin="", env={})
+            )
+            second = mox._prepare_passthrough(
+                spy, Invocation(command="echo", args=["second"], stdin="", env={})
+            )
+            first_directive = first.passthrough
+            second_directive = second.passthrough
+            assert first_directive is not None
+            assert second_directive is not None
+
+            # Finalise the second request before the first to prove the
+            # duration follows the invocation ID rather than insertion order.
+            for directive, stdout in (
+                (second_directive, "second\n"),
+                (first_directive, "first\n"),
+            ):
+                mox._handle_passthrough_result(
+                    PassthroughResult(
+                        invocation_id=directive.invocation_id,
+                        stdout=stdout,
+                        stderr="",
+                        exit_code=0,
+                    )
+                )
+
+            session = spy.recording_session
+            assert session is not None
+            durations = {
+                recording.args[0]: recording.duration_ms
+                for recording in session._recordings
+            }
+
+        assert durations == {"first": 3000, "second": 500}
+
+    def test_sub_millisecond_interval_rounds_to_zero(self, tmp_path: Path) -> None:
+        """An interval below half a millisecond rounds down to 0 ms."""
+        assert _record_one_invocation(tmp_path, [10.0, 10.0004]) == 0
+
+    def test_backwards_clock_clamps_to_zero(self, tmp_path: Path) -> None:
+        """A clock that moves backwards records 0 ms instead of raising."""
+        assert _record_one_invocation(tmp_path, [10.0, 9.5]) == 0
 
     @pytest.mark.parametrize(
         ("env_allowlist", "expected"),

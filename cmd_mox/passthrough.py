@@ -11,7 +11,18 @@ import uuid
 from .ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
     from .test_doubles import CommandDouble
+
+
+class _PendingEntry(typ.NamedTuple):
+    """Book-keeping for one passthrough request awaiting its result."""
+
+    double: CommandDouble
+    invocation: Invocation
+    started_at: float
+    deadline: float
 
 
 @dc.dataclass(slots=True)
@@ -45,11 +56,33 @@ class PassthroughCoordinator:
     stays registered until the controller records its result, or until
     :meth:`reset` starts a new replay, so verification can count a call that
     is in flight or whose pending entry expired.
+
+    Timing
+    ------
+    Each pending entry stores a reading from ``duration_clock`` when its
+    directive is issued. Finalising the entry reads the same clock again, so
+    the recorded duration is independent per invocation even when requests
+    overlap. The interval spans directive issue to result receipt, including
+    the IPC round trip to and from the shim.
     """
 
-    def __init__(self, *, cleanup_ttl: float = 300.0) -> None:
-        """Create an empty pending map guarded by a lock, with the cleanup TTL."""
-        self._pending: dict[str, tuple[CommandDouble, Invocation, float]] = {}
+    def __init__(
+        self,
+        *,
+        cleanup_ttl: float = 300.0,
+        duration_clock: cabc.Callable[[], float] | None = None,
+    ) -> None:
+        """Create an empty pending map guarded by a lock, with the cleanup TTL.
+
+        Parameters
+        ----------
+        cleanup_ttl : float
+            Minimum seconds a pending entry survives before lazy pruning.
+        duration_clock : callable, optional
+            Monotonic clock used to measure invocation duration. Defaults to
+            :func:`time.perf_counter`. Injectable for deterministic tests.
+        """
+        self._pending: dict[str, _PendingEntry] = {}
         # Every invocation registered since the last reset whose result the
         # controller has not yet recorded. Verification reads this registry so
         # a call cannot slip between the pending map and the completed-call
@@ -57,6 +90,9 @@ class PassthroughCoordinator:
         self._unrecorded: dict[str, tuple[CommandDouble, Invocation]] = {}
         self._lock = threading.Lock()
         self._cleanup_ttl = cleanup_ttl
+        self._duration_clock = (
+            duration_clock if duration_clock is not None else time.perf_counter
+        )
 
     def _expiry_deadline(self, timeout: float) -> float:
         """Return the monotonic deadline for a passthrough invocation.
@@ -78,9 +114,7 @@ class PassthroughCoordinator:
         """Remove stale passthrough requests while holding ``self._lock``."""
         current = time.monotonic() if now is None else now
         expired = [
-            key
-            for key, (_, _, deadline) in self._pending.items()
-            if deadline <= current
+            key for key, entry in self._pending.items() if entry.deadline <= current
         ]
         for key in expired:
             self._pending.pop(key, None)
@@ -123,10 +157,13 @@ class PassthroughCoordinator:
 
         with self._lock:
             self._prune_expired_locked()
-            self._pending[invocation_id] = (
-                double,
-                stored_invocation,
-                self._expiry_deadline(config.timeout),
+            # Reusing an invocation ID replaces the previous entry, so it also
+            # gets a fresh start reading rather than inheriting the old one.
+            self._pending[invocation_id] = _PendingEntry(
+                double=double,
+                invocation=stored_invocation,
+                started_at=self._duration_clock(),
+                deadline=self._expiry_deadline(config.timeout),
             )
             self._unrecorded[invocation_id] = (double, stored_invocation)
 
@@ -194,6 +231,11 @@ class PassthroughCoordinator:
         calls :meth:`mark_recorded` after appending it to its completed-call
         log.
 
+        When a recording session is attached, the recorded ``duration_ms`` is
+        the interval from directive issue to result receipt. It therefore
+        includes the IPC round trip to and from the shim, not just the real
+        command's execution time.
+
         Parameters
         ----------
         result : PassthroughResult
@@ -217,7 +259,13 @@ class PassthroughCoordinator:
             msg = f"Unexpected passthrough result for {result.invocation_id}"
             raise RuntimeError(msg)
 
-        double, invocation, _ = entry
+        # Read the clock immediately after removing the entry, before building
+        # the response, so the recorded interval ends at result receipt.
+        # Rounding and clamping keep the fixture's non-negative integer
+        # contract even if the injected clock moves backwards.
+        elapsed_ms = max(0, round((self._duration_clock() - entry.started_at) * 1000))
+
+        double, invocation = entry.double, entry.invocation
         resp = Response(
             stdout=result.stdout,
             stderr=result.stderr,
@@ -228,6 +276,6 @@ class PassthroughCoordinator:
 
         recording_session = getattr(double, "_recording_session", None)
         if recording_session is not None:
-            recording_session.record(invocation, resp)
+            recording_session.record(invocation, resp, duration_ms=elapsed_ms)
 
         return double, invocation, resp

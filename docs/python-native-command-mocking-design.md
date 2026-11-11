@@ -2941,6 +2941,12 @@ Until the concrete scrubber lands, supply any object that implements
 `scrub(recording) -> RecordedInvocation`; see the usage guide's
 [recording section](./usage-guide.md#automatic-recording-with-record).
 
+Recordings written through `.record()` carry the real command's wall-clock
+duration as an integer number of milliseconds. The passthrough coordinator
+measures the interval from issuing the passthrough directive to receiving the
+shim's result, so the value includes IPC overhead as well as command execution
+time. See [§9.10.5](#9105-duration-tracking-in-recordingsession).
+
 #### 9.6.2 Table 3: Record Mode API Methods
 
 **Status:** `.record()`, `.replay()`, and `ScrubbingRule` are implemented.
@@ -3465,6 +3471,14 @@ tooling advantages outweigh this.
   brackets the real command execution)
 - Accepting it as a parameter keeps the session stateless with respect to
   timing and avoids coupling to execution infrastructure
+
+The coordinator stores a reading from an injectable monotonic clock when it
+issues the passthrough directive, and takes a second reading when the result
+arrives. It records the difference rounded to integer milliseconds and clamped
+to zero, so `.record()` writes real wall-clock durations rather than a constant
+zero. Because the interval spans directive issue to result receipt, it includes
+the IPC round trip to and from the shim. Injecting the clock keeps unit tests
+deterministic without changing the IPC payload, which carries no timing field.
 
 #### 9.10.6 Scrubber as Protocol
 

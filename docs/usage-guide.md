@@ -668,6 +668,13 @@ write fixtures. The pytest plugin calls `verify()` during teardown when its
 automatic lifecycle is enabled, so fixture-backed recordings need no explicit
 verification call.
 
+Each recording written by `.record()` carries the real command's wall-clock
+duration in integer milliseconds. The `PassthroughCoordinator` measures the
+interval from when it issues the passthrough directive to when the shim's
+result arrives, so the value includes the IPC round trip as well as the command
+itself. Durations are non-negative; a clock that moves backwards is clamped to
+zero.
+
 ### Record parameters
 
 The `record()` method accepts optional parameters for controlling what is
