@@ -498,7 +498,9 @@ session = RecordingSession(
 ```
 
 The `env_allowlist` parameter specifies environment variable keys that should
-always be included in recordings, even if they would otherwise be filtered.
+be included in recordings when present in the environment, even if they would
+otherwise be filtered. CmdMox-internal keys (`CMOX_*`, `CMD_MOX_*`) remain
+excluded.
 
 ### Lifecycle: start, record, finalize
 
@@ -525,13 +527,35 @@ fixture = session.finalize()                 # Persist and return FixtureFile
 Recordings capture only a safe, portable subset of environment variables:
 
 - **Excluded by default:** `PATH`, `HOME`, `USER`, `SHELL`, `SSH_AUTH_SOCK`,
-  `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and keys
-  matching sensitive patterns (`*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_KEY`,
-  `*_CREDENTIALS`).
+  `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and
+  sensitive keys. A key is sensitive when it contains `SECRET`, `TOKEN`,
+  `API_KEY`, or `PASSWORD` anywhere, regardless of case. It is also sensitive
+  when a segment starting at the key's beginning, after `_`, or after `-` is
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE`, `PASS`, `PWD`,
+  `CREDENTIAL`, or `CREDENTIALS`, optionally with an `API` prefix, or is
+  `AUTH_CONFIG` or `AUTHENTICATION_CONFIG`. That segment must end at `_`, `-`,
+  `=`, `:`, a digit, or the end of the key. So `TOKENIZER_MODE` is excluded by
+  the substring rule, while `GITHUB_KEY` and `DOCKER_AUTH_CONFIG` are excluded
+  by the segment rule.
 - **Included by default:** command-specific prefix keys (e.g., `GIT_*` for
-  git, `AWS_*` for aws), allowlisted keys, and explicitly requested keys.
-- **Override:** use `env_allowlist` to force-include specific keys, or pass
-  `explicit_keys` to `filter_env_subset()` for keys from `.with_env()`.
+  git, `AWS_*` for aws). `go` is the exception: it uses an exact list of
+  documented Go variables (`GOPATH`, `GOFLAGS`, `GOOS`, and so on) because a
+  bare `GO` prefix would also capture unrelated names such as
+  `GOOGLE_CLOUD_PROJECT`. Other `GO*` names and `CGO_*` names are not recorded
+  unless allowlisted.
+- **Override:** Use `env_allowlist` to include specific keys. Keys specified
+  by `.with_env()` do not automatically widen recordings. Direct callers of
+  `filter_env_subset()` can pass `explicit_keys`; the function applies the
+  union of `allowlist` and `explicit_keys`. A requested key must be present in
+  the environment to appear in the recording, and CmdMox-internal keys remain
+  excluded. Requests take precedence over the sensitive-key rule, so
+  allowlisting a key such as `DOCKER_AUTH_CONFIG` persists its raw value in the
+  fixture.
+
+Existing fixtures are unaffected by the narrower `go` rule: the fixture loader
+does not re-filter a stored `env_subset`, so recordings made before this change
+keep the variables they captured, and strict replay continues to match them.
+Only new `go` recordings omit non-Go `GO*` names.
 
 ### Fixture file format
 
@@ -644,8 +668,9 @@ spy = cmd_mox.spy("aws").passthrough().record(
 - **`scrubber`** (`Scrubber | None`): optional scrubber instance for sanitizing
   recordings before persistence. When `None` (the default), no scrubbing is
   applied.
-- **`env_allowlist`** (`list[str] | None`): environment variable keys to always
-  include in recordings, in addition to the default command-specific prefixes.
+- **`env_allowlist`** (`list[str] | None`): environment variable keys to
+  include in recordings when present, in addition to the default
+  command-specific rules. CmdMox-internal keys remain excluded.
 
 ### Record validation
 

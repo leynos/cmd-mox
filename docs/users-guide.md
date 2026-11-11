@@ -20,6 +20,33 @@ covers the exact vocabulary, and the
 [design document](python-native-command-mocking-design.md#994-environment-values-in-error-diagnostics)
 records which diagnostic paths the guarantee covers.
 
+## Environment variables in recordings
+
+Recordings keep only a safe subset of the process environment. Commands that
+use a name prefix, such as `git` and `GIT_*`, still record every prefixed key
+that is not sensitive or on the system exclusion list. `go` is different: it
+records only the documented Go toolchain and runtime variables (`GOPATH`,
+`GOFLAGS`, `GOOS`, `GORACE`, and so on). Other names that merely start with
+`GO`, such as `GOOGLE_CLOUD_PROJECT`, and `CGO_*` names, are no longer recorded
+by default.
+
+This change affects new recordings only. Fixtures already on disk keep the keys
+they stored and still replay against those keys, so an old fixture can require
+a variable the current filter would drop. To keep a key that the Go rule now
+rejects, pass it in `env_allowlist` when starting the recording session:
+
+```python
+mox.spy("go").passthrough().record(
+    "go-fixture.json", env_allowlist=["GOOGLE_CLOUD_PROJECT"]
+)
+```
+
+The [usage guide](usage-guide.md#environment-variable-filtering) lists the full
+rule set, including how requested keys interact with the sensitive-key and
+system-key exclusions. The
+[Go environment migration note](go-env-migration-note.md) summarizes the change
+for teams upgrading shared fixtures.
+
 ## Recording fixture schema versions
 
 The fixture `version` uses `MAJOR.MINOR.PATCH`; legacy `1.0` values load as

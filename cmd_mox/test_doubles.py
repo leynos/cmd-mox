@@ -357,7 +357,7 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         scrubber:
             Optional scrubber for sanitizing recordings before persistence.
         env_allowlist:
-            Environment variable keys to always include in recordings.
+            Environment variable keys to include in recordings when present.
 
         Returns
         -------

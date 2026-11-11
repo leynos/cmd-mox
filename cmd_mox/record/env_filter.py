@@ -8,9 +8,13 @@ Section 9.9.2.
 
 from __future__ import annotations
 
+import types
 import typing as typ
 
-from cmd_mox.expectations import is_sensitive_recording_env_key
+from cmd_mox.domain import is_sensitive_recording_env_key
+
+if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
+    import collections.abc as cabc
 
 # System-specific keys that are excluded by default.
 EXCLUDED_SYSTEM_KEYS: typ.Final[frozenset[str]] = frozenset({
@@ -34,9 +38,68 @@ COMMAND_ENV_PREFIXES: typ.Final[dict[str, str]] = {
     "npm": "NPM_",
     "pip": "PIP_",
     "cargo": "CARGO_",
-    "go": "GO",
     "rustc": "RUSTC_",
 }
+
+# ``go`` has no separator-bearing prefix.  Its variables are documented as
+# individual names, and a bare ``GO`` prefix would also capture unrelated
+# names such as ``GOOGLE_CLOUD_PROJECT``.  This list is drawn from the Go
+# toolchain and runtime variables in ``go help environment`` and
+# ``go doc runtime``.  It changes between Go releases, so users must
+# allowlist any newer name that is absent here.
+GO_ENV_KEYS: typ.Final[frozenset[str]] = frozenset({
+    "GO111MODULE",
+    "GO386",
+    "GOAMD64",
+    "GOARCH",
+    "GOARM",
+    "GOARM64",
+    "GOAUTH",
+    "GOBIN",
+    "GOCACHE",
+    "GOCACHEPROG",
+    "GOCOVERDIR",
+    "GODEBUG",
+    "GOENV",
+    "GOEXPERIMENT",
+    "GO_EXTLINK_ENABLED",
+    "GOFIPS140",
+    "GOFLAGS",
+    "GOGC",
+    "GOINSECURE",
+    "GOMAXPROCS",
+    "GOMEMLIMIT",
+    "GOMIPS",
+    "GOMIPS64",
+    "GOMODCACHE",
+    "GONOPROXY",
+    "GONOSUMDB",
+    "GOOS",
+    "GOPATH",
+    "GOPPC64",
+    "GOPRIVATE",
+    "GOPROXY",
+    "GORACE",
+    "GORISCV64",
+    "GOROOT",
+    "GOSUMDB",
+    "GOTMPDIR",
+    "GOTOOLCHAIN",
+    "GOTRACEBACK",
+    "GOVCS",
+    "GOWASM",
+    "GOWORK",
+})
+
+# Known command-specific exact names: command name -> accepted env var names.
+# Commands absent from this mapping use their prefix rule instead.  The
+# mapping is read-only so importing code cannot widen the accepted set at
+# runtime; ``Final`` alone does not prevent mutation of a plain ``dict``.
+COMMAND_ENV_KEYS: typ.Final[cabc.Mapping[str, frozenset[str]]] = (
+    types.MappingProxyType({
+        "go": GO_ENV_KEYS,
+    })
+)
 
 
 def _is_cmox_internal(key: str) -> bool:
@@ -53,8 +116,8 @@ def _is_cmox_internal(key: str) -> bool:
 def _should_include_env_key(
     key: str,
     *,
-    explicit: set[str],
-    allow: set[str],
+    requested: set[str],
+    exact_keys: frozenset[str] | None,
     cmd_prefix: str,
 ) -> bool:
     """Return whether *key* should be included in the filtered subset.
@@ -62,33 +125,36 @@ def _should_include_env_key(
     Returns
     -------
     bool
-        ``True`` when *key* survives the internal, explicit, allowlist, system
-        and tool-prefix filters.
+        ``True`` when *key* survives the internal, requested, system,
+        sensitive and command-matching filters.
     """
-    # CmdMox internals are never recorded, even if allowlisted or explicit.
+    # CmdMox internals are never recorded, even if requested.
     if _is_cmox_internal(key):
         return False
 
-    # Explicitly requested keys always pass through.
-    if key in explicit or key in allow:
+    # Requested keys pass through, whether named in ``allowlist`` or
+    # ``explicit_keys``.
+    if key in requested:
         return True
 
-    # System keys are excluded.
-    if key in EXCLUDED_SYSTEM_KEYS:
+    # System keys are excluded.  Sensitive keys (password, token, secret,
+    # key, credentials, etc.) are excluded too, even if they share a
+    # command-specific prefix or name.
+    if key in EXCLUDED_SYSTEM_KEYS or is_sensitive_recording_env_key(key):
         return False
 
-    # Sensitive keys (password, token, secret, key, credentials, etc.) are
-    # excluded even if they share a command-specific prefix.
-    if is_sensitive_recording_env_key(key):
-        return False
+    # Exact-name commands accept only the variables named for them.  An empty
+    # set stays restrictive rather than falling through to the permissive
+    # unknown-command rule.
+    if exact_keys is not None:
+        return key in exact_keys
 
     # Command-specific prefix keys are included.
-    if cmd_prefix and key.startswith(cmd_prefix):
-        return True
+    if cmd_prefix:
+        return key.startswith(cmd_prefix)
 
-    # When a command is specified, exclude keys that don't match the prefix.
     # When no command is specified, include all remaining non-excluded keys.
-    return not cmd_prefix
+    return True
 
 
 def filter_env_subset(
@@ -105,26 +171,43 @@ def filter_env_subset(
     env : dict[str, str]
         The full environment dictionary to filter.
     command : str
-        The command name, used to include matching prefix keys
-        (e.g. ``"git"`` includes ``GIT_*`` variables).
+        The command name, matched case-insensitively.  Most commands include
+        keys under their prefix (for example ``"git"`` includes ``GIT_*``
+        variables).  ``"go"`` includes only the documented names in
+        :data:`GO_ENV_KEYS`.  An unrecognized command includes every key that
+        is not excluded by another rule.
     allowlist : list[str] | None
-        Additional keys to always include regardless of other rules.
+        Caller-configured keys to retain, such as
+        ``RecordingSession(env_allowlist=...)``.  A key must be present in
+        *env* to appear in the result.  ``allowlist`` and *explicit_keys*
+        share one precedence and their union is applied.
     explicit_keys : list[str] | None
-        Keys explicitly requested via ``.with_env()``; always included.
+        Keys requested by direct callers of :func:`filter_env_subset`.
+        Treated exactly like *allowlist*: an entry in either keyword includes
+        the key.  ``RecordingSession`` does not currently pass this keyword, so
+        ``.with_env()`` keys do not automatically widen recordings; that
+        wiring is tracked in issue #368.  Requests take precedence over the
+        system and sensitive rules, so a requested sensitive key is persisted
+        raw.  CmdMox internal keys (``CMOX_*``, ``CMD_MOX_*``) remain excluded
+        even when requested.
 
     Returns
     -------
     dict[str, str]
         The keys that are safe and relevant to persist in a fixture.
     """
-    allow = set(allowlist or [])
-    explicit = set(explicit_keys or [])
-    cmd_prefix = COMMAND_ENV_PREFIXES.get(command.lower(), "")
+    requested = set(allowlist or []) | set(explicit_keys or [])
+    normalized_command = command.lower()
+    cmd_prefix = COMMAND_ENV_PREFIXES.get(normalized_command, "")
+    exact_keys = COMMAND_ENV_KEYS.get(normalized_command)
 
     return {
         key: value
         for key, value in env.items()
         if _should_include_env_key(
-            key, explicit=explicit, allow=allow, cmd_prefix=cmd_prefix
+            key,
+            requested=requested,
+            exact_keys=exact_keys,
+            cmd_prefix=cmd_prefix,
         )
     }

@@ -8,6 +8,7 @@ import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation, PassthroughResult
+from cmd_mox.record.fixture import FixtureFile
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -84,3 +85,67 @@ class TestPassthroughRecording:
         assert recording.args == ["status", "--short"]
         assert recording.stdout == "M file.py\n"
         assert recording.exit_code == 0
+
+    @pytest.mark.parametrize(
+        ("env_allowlist", "expected"),
+        [
+            pytest.param(
+                None,
+                {"GOPATH": "/work", "GORACE": "halt_on_error=1"},
+                id="default",
+            ),
+            pytest.param(
+                ["GOOGLE_CLOUD_PROJECT"],
+                {
+                    "GOPATH": "/work",
+                    "GORACE": "halt_on_error=1",
+                    "GOOGLE_CLOUD_PROJECT": "proj",
+                },
+                id="allowlisted",
+            ),
+        ],
+    )
+    def test_go_recording_persists_filtered_environment(
+        self,
+        tmp_path: Path,
+        env_allowlist: list[str] | None,
+        expected: dict[str, str],
+    ) -> None:
+        """The spy/passthrough workflow saves the filtered Go environment."""
+        fixture_path = tmp_path / "go.json"
+        with CmdMox() as mox:
+            spy = (
+                mox
+                .spy("go")
+                .passthrough()
+                .record(fixture_path, env_allowlist=env_allowlist)
+            )
+            invocation = Invocation(
+                command="go",
+                args=["test", "-race", "./..."],
+                stdin="",
+                env={
+                    "GOPATH": "/work",
+                    "GORACE": "halt_on_error=1",
+                    "GOOGLE_CLOUD_PROJECT": "proj",
+                    "PATH": "/usr/bin",
+                },
+            )
+            response = mox._prepare_passthrough(spy, invocation)
+            directive = response.passthrough
+            assert directive is not None
+
+            mox._handle_passthrough_result(
+                PassthroughResult(
+                    invocation_id=directive.invocation_id,
+                    stdout="ok\n",
+                    stderr="",
+                    exit_code=0,
+                )
+            )
+            session = spy.recording_session
+            assert session is not None
+            session.finalize()
+
+        fixture = FixtureFile.load(fixture_path)
+        assert fixture.recordings[0].env_subset == expected

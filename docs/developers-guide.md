@@ -92,6 +92,32 @@ the default dataclass representations of `Response.env`, `Expectation.env`, and
 `PassthroughRequest.extra_env`, raw arguments and streams in replay and
 matcher diagnostics, and pytest plugin report sections.
 
+## Recording environment filter
+
+`cmd_mox.record.env_filter.filter_env_subset` chooses the `env_subset` that a
+`RecordingSession` persists. It takes the invocation environment, a
+case-insensitive command name, and two override keywords, `allowlist` and
+`explicit_keys`. Their values are unioned and share one precedence, so the
+choice of keyword does not change the result.
+
+The per-key rule order is: drop CmdMox-internal keys (`CMOX_*`, `CMD_MOX_*`);
+accept a requested key; drop system and sensitive keys; then apply the command
+rule. Most commands match a prefix from `COMMAND_ENV_PREFIXES` (`GIT_*`,
+`AWS_*`, and so on). A command listed in `COMMAND_ENV_KEYS` matches exact names
+instead, and the entry's empty-set case stays restrictive rather than falling
+through to the permissive unknown-command rule. `go` is the only exact-name
+command: `GO_ENV_KEYS` lists the variables documented by `go help environment`
+and `go doc runtime`, because a bare `GO` prefix would also capture unrelated
+names such as `GOOGLE_CLOUD_PROJECT`. `COMMAND_ENV_KEYS` is a read-only
+`MappingProxyType`, so importing code cannot widen the policy at runtime.
+
+The recording session forwards only its allowlist, so `.with_env()` keys do not
+yet reach recordings; issue #368 tracks that wiring. The
+[design document](python-native-command-mocking-design.md#933-environment-variable-subset-strategy)
+records the rationale, and the
+[usage guide](usage-guide.md#environment-variable-filtering) describes the
+user-visible rules.
+
 ## Coverage ownership
 
 Pull-request CI generates coverage with the ratchet (`with-ratchet: 'true'`)
