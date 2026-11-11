@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import enum
 import logging
 import os
+import threading
 import typing as typ
 from collections import deque
 from pathlib import Path
@@ -16,7 +18,12 @@ from .environment import (
     ensure_dir_exists,
     validate_env_attr,
 )
-from .errors import LifecycleError, MissingEnvironmentError, UnexpectedCommandError
+from .errors import (
+    ExpectationConfigurationError,
+    LifecycleError,
+    MissingEnvironmentError,
+    UnexpectedCommandError,
+)
 from .ipc import (
     CallbackIPCServer,
     CallbackNamedPipeServer,
@@ -51,6 +58,13 @@ if typ.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _Unset:
+    """Sentinel marking an omitted dispatch double."""
+
+
+_UNSET = _Unset()
+
+
 class Phase(enum.StrEnum):
     """Lifecycle phases for :class:`CmdMox`."""
 
@@ -79,9 +93,11 @@ class CmdMox:
             call :meth:`verify`. This catches missed verifications and ensures
             the environment is restored. Disable for explicit control.
         max_journal_entries:
-            Maximum number of invocations retained in the journal. When ``None``,
-            the journal is unbounded. Older entries are discarded once the limit
-            is exceeded. The journal is cleared at the start of each ``replay()``.
+            Maximum number of invocations retained in the public diagnostic
+            ``journal``; when ``None`` the journal is unbounded. Verification
+            uses a separate internal record, so eviction never weakens it.
+            Unordered stub calls are not retained by a bounded controller, so
+            ``in_order()`` must be applied before a stub's first call.
         environment:
             Optional :class:`EnvironmentManager` instance used to prepare shim and
             PATH state. When omitted a fresh manager is created automatically.
@@ -109,23 +125,23 @@ class CmdMox:
             raise ValueError(msg)
 
         self._verify_on_exit = verify_on_exit
+        self._max_journal_entries = max_journal_entries
 
         self._doubles: dict[str, CommandDouble] = {}
         self.journal: deque[Invocation] = deque(maxlen=max_journal_entries)
+        self._verification_log: list[Invocation] = []
+        self._verification_doubles: list[CommandDouble | None] = []
+        self._history_lock = threading.Lock()
         self._commands: set[str] = set()
         self._ordered: list[Expectation] = []
+        # Stub commands whose completed calls a bounded journal did not retain.
+        self._discarded_stub_calls: set[str] = set()
 
     # ------------------------------------------------------------------
     # Double accessors
     # ------------------------------------------------------------------
     def _doubles_of_kind(self, kind: DoubleKind) -> dict[str, CommandDouble]:
-        """Return the registered doubles whose kind is *kind*.
-
-        Returns
-        -------
-        dict[str, CommandDouble]
-            A new mapping holding only doubles of the requested kind.
-        """
+        """Return a new mapping of the doubles whose kind is *kind*."""
         return {name: dbl for name, dbl in self._doubles.items() if dbl.kind is kind}
 
     @property
@@ -179,13 +195,7 @@ class CmdMox:
     # Internal helper accessors
     # ------------------------------------------------------------------
     def _registered_commands(self) -> set[str]:
-        """Return all commands registered via doubles.
-
-        Returns
-        -------
-        set[str]
-            The names of every registered double.
-        """
+        """Return the names of every registered double."""
         return set(self._doubles)
 
     # ------------------------------------------------------------------
@@ -296,14 +306,7 @@ class CmdMox:
         create_shim_symlinks(shim_path.parent, [name])
 
     def _get_replay_shim_path(self, name: str) -> Path | None:
-        """Return the target shim path when replay shims are writable.
-
-        Returns
-        -------
-        Path or None
-            The shim path for *name*, or ``None`` when no shim directory has
-            been prepared.
-        """
+        """Return the shim path for *name*, or ``None`` when none is prepared."""
         env = self.environment
         if env is None or env.shim_dir is None:
             return None
@@ -510,15 +513,14 @@ class CmdMox:
                 msg = f"Unhandled response strategy: {strategy}"
                 raise RuntimeError(msg)
 
-    def _make_response(self, invocation: Invocation) -> Response:
-        """Build the response for an invocation using the appropriate strategy.
-
-        Returns
-        -------
-        Response
-            The response for *invocation*, already applied to it.
-        """
-        double = self._doubles.get(invocation.command)
+    def _make_response(
+        self,
+        invocation: Invocation,
+        double: CommandDouble | _Unset | None = _UNSET,
+    ) -> Response:
+        """Build the response for an invocation using the appropriate strategy."""
+        if isinstance(double, _Unset):
+            double = self._doubles.get(invocation.command)
 
         if double is not None and double.replay_session is not None:
             resp = self._response_for_replay(double, invocation)
@@ -528,41 +530,68 @@ class CmdMox:
         invocation.apply(resp)
         return resp
 
-    def _handle_invocation(self, invocation: Invocation) -> Response:
-        """Record *invocation* and return the configured response.
+    def _needs_verification_record(self, double: CommandDouble | None) -> bool:
+        """Return whether verification must retain a completed call."""
+        if self._max_journal_entries is None:
+            return True
+        if double is None or double.kind is not DoubleKind.STUB:
+            return True
+        return any(exp is double.expectation for exp in self._ordered)
 
-        Returns
-        -------
-        Response
-            The response for *invocation*.
-        """
-        resp = self._make_response(invocation)
-        if resp.passthrough is None:
+    def _register_order(self, expectation: Expectation) -> None:
+        """Mark *expectation* ordered, rejecting unrecoverable late ordering."""
+        # Check and register under one lock so a concurrent call cannot be
+        # discarded between the two steps.
+        with self._history_lock:
+            if expectation.name in self._discarded_stub_calls:
+                msg = (
+                    f"Cannot mark {expectation.name!r} in_order() after its calls "
+                    "were discarded; configure ordering before replay or raise "
+                    "max_journal_entries"
+                )
+                raise ExpectationConfigurationError(msg)
+            expectation.in_order()
+            if expectation not in self._ordered:
+                self._ordered.append(expectation)
+
+    def _unregister_order(self, expectation: Expectation) -> None:
+        """Mark *expectation* unordered under the history lock."""
+        with self._history_lock:
+            expectation.any_order()
+            self._ordered = [exp for exp in self._ordered if exp is not expectation]
+
+    def _record_completed_invocation(
+        self, invocation: Invocation, double: CommandDouble | None
+    ) -> None:
+        """Append a completed invocation to both records under one lock."""
+        snapshot = dc.replace(
+            invocation, args=list(invocation.args), env=dict(invocation.env)
+        )
+        with self._history_lock:
             self.journal.append(invocation)
+            if self._needs_verification_record(double):
+                self._verification_log.append(snapshot)
+                self._verification_doubles.append(double)
+            else:
+                self._discarded_stub_calls.add(invocation.command)
+
+    def _handle_invocation(self, invocation: Invocation) -> Response:
+        """Record *invocation* and return the configured response."""
+        double = self._doubles.get(invocation.command)
+        resp = self._make_response(invocation, double)
+        if resp.passthrough is None:
+            self._record_completed_invocation(invocation, double)
         return resp
 
     def _prepare_passthrough(
         self, double: CommandDouble, invocation: Invocation
     ) -> Response:
-        """Record passthrough intent and return instructions for the shim.
-
-        This method prepares two separate values: ``extra_env`` (expectation
-        overrides from :meth:`_apply_expectation_env`) and ``lookup_path``
-        (the original PATH for command resolution). These are passed to
-        :class:`~cmd_mox.passthrough.PassthroughCoordinator` separately; the
-        final merging into an effective execution environment happens
-        downstream when the shim consumes the resulting
-        :class:`~cmd_mox.ipc.PassthroughRequest`.
-
-        Returns
-        -------
-        Response
-            Instructions that make the shim execute the passthrough command.
-        """
+        """Record passthrough intent and return instructions for the shim."""
         overrides = apply_expectation_env(double, invocation)
         lookup_path = self.environment.original_environment.get(
             "PATH", os.environ.get("PATH", "")
         )
+        # Keep overrides and lookup_path separate; the shim merges them.
         config = PassthroughConfig(
             lookup_path=lookup_path,
             timeout=self._runner.timeout,
@@ -575,17 +604,11 @@ class CmdMox:
         )
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:
-        """Finalize a passthrough invocation once the shim reports results.
-
-        Returns
-        -------
-        Response
-            The recorded response derived from the shim's passthrough result.
-        """
+        """Finalize a passthrough invocation once the shim reports results."""
         double, invocation, resp = self._passthrough_coordinator.finalize_result(result)
         if double.is_recording:
             double.invocations.append(invocation)
-        self.journal.append(invocation)
+        self._record_completed_invocation(invocation, double)
         return resp
 
     def _require_phase(self, expected: Phase, action: str) -> None:
@@ -616,13 +639,7 @@ class CmdMox:
         return f"{message}; {self._lifecycle_hint}"
 
     def _require_env_attrs(self, *attrs: str) -> None:
-        """Ensure all referenced ``EnvironmentManager`` attributes exist.
-
-        Raises
-        ------
-        MissingEnvironmentError
-            If the environment manager is absent or any *attrs* is unset.
-        """
+        """Ensure all referenced ``EnvironmentManager`` attributes exist."""
         env = self.environment
         if env is None:  # pragma: no cover - defensive guard
             raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
@@ -667,18 +684,7 @@ class CmdMox:
         self._require_replay_environment()
 
     def _validate_replay_environment(self) -> tuple[Path, Path]:
-        """Ensure the replay environment is fully prepared.
-
-        Returns
-        -------
-        tuple[Path, Path]
-            A tuple containing the shim directory and socket path.
-
-        Raises
-        ------
-        MissingEnvironmentError
-            If the environment manager or required paths are missing.
-        """
+        """Return the prepared shim directory and socket path."""
         env = self.environment
         if env is None:
             raise MissingEnvironmentError(MissingEnvironmentError.DEFAULT_MESSAGE)
@@ -694,14 +700,7 @@ class CmdMox:
         return shim_dir, Path(env.socket_path)
 
     def _is_environment_initialized(self) -> bool:
-        """Check if environment manager is properly initialized.
-
-        Returns
-        -------
-        bool
-            ``True`` when the manager exists with a shim directory and socket
-            path.
-        """
+        """Return whether the environment has a shim directory and socket path."""
         env = self.environment
         return (
             env is not None and env.shim_dir is not None and env.socket_path is not None
@@ -715,7 +714,11 @@ class CmdMox:
         MissingEnvironmentError
             If the environment manager has not been initialised.
         """
-        self.journal.clear()
+        with self._history_lock:
+            self.journal.clear()
+            self._verification_log.clear()
+            self._verification_doubles.clear()
+            self._discarded_stub_calls.clear()
         self._commands = self._registered_commands() | self._commands
         if not self._entered and not self._is_environment_initialized():
             msg = "Environment manager not initialised"
@@ -744,8 +747,7 @@ class CmdMox:
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""
         # Mocks always participate so their implicit default count of one keeps
-        # its existing meaning. Spies join only when a fluent count setter marked
-        # the count explicit; otherwise they stay purely observational.
+        # its meaning; spies join only when a count setter marked it explicit.
         counted = {
             name: double
             for name, double in self._doubles.items()
@@ -753,10 +755,23 @@ class CmdMox:
             or (double.kind is DoubleKind.SPY and double.expectation.count_explicit)
         }
         expectations = {name: double.expectation for name, double in counted.items()}
-        inv_map = {name: double.invocations for name, double in counted.items()}
+        with self._history_lock:
+            verification_log = list(self._verification_log)
+            dispatch_doubles = list(self._verification_doubles)
+            ordered = list(self._ordered)
 
-        UnexpectedCommandVerifier().verify(self.journal, self._doubles)
-        OrderVerifier(self._ordered).verify(self.journal)
+        # Count only calls dispatched to the double, and only from the immutable
+        # snapshots, so journal mutation and late registration cannot count.
+        dispatched = list(zip(verification_log, dispatch_doubles, strict=True))
+        inv_map = {
+            name: [inv for inv, dbl in dispatched if dbl is self._doubles[name]]
+            for name in expectations
+        }
+
+        UnexpectedCommandVerifier().verify(
+            verification_log, self._doubles, dispatch_doubles
+        )
+        OrderVerifier(ordered).verify(verification_log)
         CountVerifier().verify(expectations, inv_map)
         self._verify_replay_sessions_consumed()
 

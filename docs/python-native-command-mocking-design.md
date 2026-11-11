@@ -1231,8 +1231,17 @@ constructs an `Invocation` object containing the command name, arguments,
 appending non-passthrough invocations to the journal, so those entries also
 contain the resulting `stdout`, `stderr`, and `exit_code`. Passthrough
 invocations are appended after the shim reports their command results.
-`verify()` uses this enriched journal as the definitive record, comparing it
-against predefined expectations to detect discrepancies.
+`verify()` does not read the bounded diagnostic journal directly. It uses a
+separate internal verification record of immutable snapshots that retains mock,
+spy, unregistered-command and ordered-stub calls for the whole replay, so a
+bounded journal cannot hide a discrepancy, and mutating the public journal
+cannot alter verification. Each record also stores the double the call was
+dispatched to, or `None` when no double existed, so a double registered later
+cannot retroactively claim an earlier call as expected or count it toward its
+expectation. The record shares the journal's completion order and is cleared
+with it when replay starts. An unbounded journal retains every call, so
+`in_order()` may be applied after calls complete; a bounded controller discards
+unordered stub calls and rejects late `in_order()` for them.
 
 ## IV. Feature Deep Dive: Stubbing
 
@@ -1964,14 +1973,14 @@ strings. This catches typos and accidental `None` values during test
 configuration rather than deep within the replay loop.
 
 Verification is split into focused components. `UnexpectedCommandVerifier`
-checks that every journal entry matches a registered expectation.
-`OrderVerifier` ensures expectations marked `in_order()` appear in the same
-relative order in the journal. It filters the journal to invocations that match
-the ordered expectations so interleaved unordered mocks, even when they share a
-command name, are ignored. `CountVerifier` verifies that each expectation was
-met exactly the declared number of times. This modular approach simplifies the
-logic within :meth:`CmdMox.verify` and clarifies how mixed ordered and
-unordered calls are handled.
+checks that every entry in the verification record matches a registered
+expectation. `OrderVerifier` ensures expectations marked `in_order()` appear in
+the same relative order in the verification record. It filters the record to
+invocations that match the ordered expectations so interleaved unordered mocks,
+even when they share a command name, are ignored. `CountVerifier` verifies that
+each expectation was met exactly the declared number of times. This modular
+approach simplifies the logic within :meth:`CmdMox.verify` and clarifies how
+mixed ordered and unordered calls are handled.
 
 The verifiers now emit diff-style diagnostics that show the expected call, the
 actual invocation, and any mismatching context such as stdin or environment
@@ -2050,10 +2059,27 @@ chronological order. Each entry is an :class:`Invocation` dataclass containing
 the command name, argument list, captured standard input, environment at call
 time, and the resulting `stdout`, `stderr`, and `exit_code`. A
 `collections.deque` backs the journal to guarantee append performance and
-preserve ordering for later verification. Configure bounds via
+preserve ordering for later inspection. Configure bounds via
 `CmdMox(max_journal_entries=n)`; when full, the oldest entries are pruned.
-Verifiers consume this deque directly, ensuring that verification reflects the
-exact sequence observed during replay.
+
+Verification does not consume this bounded deque. A separate internal
+verification record retains only the calls the verifiers need: mock, spy and
+unregistered-command calls, plus calls to ordered stubs. Unordered stub calls
+are omitted, so the memory saving from `max_journal_entries` applies mainly to
+stub traffic. Both records are appended under one lock at the same completion
+point, which keeps their order identical, and both are cleared together when
+replay starts. The verification record stores immutable snapshots and the
+double each call was dispatched to, so mutating the public journal, including
+its order or its entries, cannot change verification, and a double registered
+after a call cannot retroactively claim it. `UnexpectedCommandVerifier` and
+`CountVerifier` therefore use the dispatch-time association: a call made
+without a double is unexpected, and only calls dispatched to a mock count
+towards its expectation. Verification takes one snapshot of that record under
+the lock, so evicting a diagnostic journal entry never weakens verification. An
+unbounded journal retains every call, which keeps calls that completed before
+`in_order()` was applied available to `OrderVerifier`. A bounded controller
+discards unordered stub calls, so it rejects `in_order()` applied after a
+stub's first call with `ExpectationConfigurationError`.
 
 ### 8.9 Design Decisions for Documentation and Examples
 
@@ -2402,12 +2428,20 @@ compatibility with the established invocation-field schema.
 
 Recording the full environment would bloat fixture files (100+ variables
 typical), include system-specific paths that break portability, and potentially
-leak sensitive data. Instead, recordings capture an `env_subset` containing:
+leak sensitive data. Instead, `filter_env_subset()` selects an `env_subset`
+from:
 
-1. Variables explicitly requested via `.with_env()`
+1. Variables named in its `explicit_keys` keyword, which a future `.with_env()`
+   channel would supply (not yet wired; see issue #368)
 2. Variables matching known command prefixes (e.g., `GIT_*`, `AWS_*`,
-   `DOCKER_*`)
+   `DOCKER_*`), or, for `go`, the documented exact names such as `GOPATH` and
+   `GOFLAGS`
 3. Variables specified in a configurable allowlist
+
+`filter_env_subset()` accepts `explicit_keys` and `allowlist`, and applies
+their union with one precedence. The recording session currently forwards only
+its allowlist, so `.with_env()` keys do not automatically widen recordings;
+that wiring is tracked in issue #368.
 
 ### 9.4 Module Structure
 
@@ -3039,9 +3073,19 @@ rather than relying on `.replay()`.
 
 **Included by default**:
 
-- Variables explicitly requested via `.with_env()`
 - Variables on the user-defined allowlist
-- Variables matching command-specific prefixes (e.g., `GIT_*` for git)
+- Variables matching command-specific prefixes (e.g., `GIT_*` for git), or,
+  for `go`, the documented exact names such as `GOPATH` and `GOFLAGS`
+
+**Included when requested**:
+
+- Variables named in the filter's `explicit_keys` keyword, which a future
+  `.with_env()` channel would supply (not yet wired; see issue #368)
+
+`filter_env_subset()` accepts `explicit_keys` and `allowlist`, and applies
+their union with one precedence. The recording session currently forwards only
+its allowlist, so `.with_env()` keys do not automatically widen recordings;
+that wiring is tracked in issue #368.
 
 #### 9.9.3 Command argument diagnostics
 
@@ -3098,8 +3142,12 @@ such variables from fixtures and masks them in argument diagnostics, which is
 the intended coarse-grained posture: a false positive hides one value, while a
 false negative discloses a credential. `DOCKER_AUTH_CONFIG` carried registry
 credentials that no earlier rule classified, and it is the case that prompted
-the addition. Variables named explicitly through `.with_env()` remain exempt
-from subset filtering by the existing precedence rule.
+the addition. Variables requested through the filter's explicit-key channel
+remain exempt from subset filtering by the precedence rule, except CmdMox
+internal keys (`CMOX_*`, `CMD_MOX_*`), which stay excluded even when requested.
+`RecordingSession` does not currently forward `.with_env()` keys, so at the
+recording level they are not yet re-admitted; that wiring is tracked in issue
+#368.
 
 Known exposures remain out of scope here and need their own design decisions:
 

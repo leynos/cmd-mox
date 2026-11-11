@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import dataclasses as dc
 import os
+import shutil
 import subprocess
 import typing as typ
 
@@ -18,6 +19,7 @@ import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.domain import SENSITIVE_ENV_KEY_TOKENS
+from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.ipc import Invocation
 from cmd_mox.ipc.wire import invocation_to_payload
 from tests.helpers.controller import (
@@ -259,6 +261,62 @@ def test_journal_pruning(
 
     assert len(mox.journal) == len(expected)
     assert [inv.args for inv in mox.journal] == expected
+
+
+def _run_name(name: str) -> None:
+    """Run the command shim resolved through the replay PATH."""
+    executable = shutil.which(name)
+    assert executable is not None, f"{name!r} did not resolve to a shim"
+    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a command path prepared by the test harness
+        [executable],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_replay_start_clears_both_records() -> None:
+    """Starting replay clears the diagnostic journal and verification record."""
+    with CmdMox(verify_on_exit=False) as mox:
+        mox.stub("rec").returns(stdout="ok")
+        stale = Invocation(command="stale", args=[], stdin="", env={})
+        mox.journal.append(stale)
+        mox._verification_log.append(stale)
+
+        mox.replay()
+
+        assert len(mox.journal) == 0
+        assert mox._verification_log == []
+        mox.verify()
+
+
+def test_bounded_journal_still_reports_evicted_unexpected_command() -> None:
+    """An unexpected call evicted from a bounded journal still fails verify."""
+    with CmdMox(verify_on_exit=False, max_journal_entries=1) as mox:
+        mox.stub("ok").returns(stdout="ok")
+        mox.register_command("rm")
+        mox.replay()
+
+        _run_name("rm")
+        _run_name("ok")
+
+        assert [inv.command for inv in mox.journal] == ["ok"]
+        with pytest.raises(UnexpectedCommandError):
+            mox.verify()
+
+
+def test_bounded_journal_keeps_ordered_mocks_verifiable() -> None:
+    """Ordered mocks verify when the journal retains only the latest call."""
+    with CmdMox(verify_on_exit=False, max_journal_entries=1) as mox:
+        mox.mock("a").returns(stdout="a").in_order()
+        mox.mock("b").returns(stdout="b").in_order()
+        mox.replay()
+
+        _run_name("a")
+        _run_name("b")
+
+        mox.verify()
+        assert [inv.command for inv in mox.journal] == ["b"]
 
 
 def test_invocation_to_payload() -> None:

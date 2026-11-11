@@ -12,14 +12,15 @@ class LifecycleError(CmdMoxError):
 
 
 class ExpectationConfigurationError(CmdMoxError):
-    """Raised when a command double receives a second argument expectation.
+    """Raised when a command double's expectation cannot be configured.
 
     Notes
     -----
     This occurs when ``with_args()`` or ``with_matching_args()`` is called
-    after an argument expectation has already been configured. Use
-    ``cmd_mox.spy(name).runs(handler)`` to handle several calls to one command.
-    Sensitive option values are redacted from the error message.
+    after an argument expectation has already been configured, or when
+    ``in_order()`` is applied after a bounded journal discarded the stub's
+    calls. Use ``cmd_mox.spy(name).runs(handler)`` to handle several calls to
+    one command. Sensitive option values are redacted from the error message.
     """
 
 

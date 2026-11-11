@@ -35,7 +35,7 @@ class RecordingSession:
     scrubber : Scrubber | None
         Optional scrubber for sanitizing recordings before persistence.
     env_allowlist : list[str] | None
-        Additional environment variable keys to always include.
+        Additional environment variable keys to include when present.
     command_filter : str | list[str] | None
         If set, only record invocations matching the given command name(s).
     """

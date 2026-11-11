@@ -505,7 +505,9 @@ session = RecordingSession(
 ```
 
 The `env_allowlist` parameter specifies environment variable keys that should
-always be included in recordings, even if they would otherwise be filtered.
+be included in recordings when present in the environment, even if they would
+otherwise be filtered. CmdMox-internal keys (`CMOX_*`, `CMD_MOX_*`) remain
+excluded.
 
 ### Lifecycle: start, record, finalize
 
@@ -532,13 +534,35 @@ fixture = session.finalize()                 # Persist and return FixtureFile
 Recordings capture only a safe, portable subset of environment variables:
 
 - **Excluded by default:** `PATH`, `HOME`, `USER`, `SHELL`, `SSH_AUTH_SOCK`,
-  `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and keys
-  matching sensitive patterns (`*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_KEY`,
-  `*_CREDENTIALS`).
+  `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and
+  sensitive keys. A key is sensitive when it contains `SECRET`, `TOKEN`,
+  `API_KEY`, or `PASSWORD` anywhere, regardless of case. It is also sensitive
+  when a segment starting at the key's beginning, after `_`, or after `-` is
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE`, `PASS`, `PWD`,
+  `CREDENTIAL`, or `CREDENTIALS`, optionally with an `API` prefix, or is
+  `AUTH_CONFIG` or `AUTHENTICATION_CONFIG`. That segment must end at `_`, `-`,
+  `=`, `:`, a digit, or the end of the key. So `TOKENIZER_MODE` is excluded by
+  the substring rule, while `GITHUB_KEY` and `DOCKER_AUTH_CONFIG` are excluded
+  by the segment rule.
 - **Included by default:** command-specific prefix keys (e.g., `GIT_*` for
-  git, `AWS_*` for aws), allowlisted keys, and explicitly requested keys.
-- **Override:** use `env_allowlist` to force-include specific keys, or pass
-  `explicit_keys` to `filter_env_subset()` for keys from `.with_env()`.
+  git, `AWS_*` for aws). `go` is the exception: it uses an exact list of
+  documented Go variables (`GOPATH`, `GOFLAGS`, `GOOS`, and so on) because a
+  bare `GO` prefix would also capture unrelated names such as
+  `GOOGLE_CLOUD_PROJECT`. Other `GO*` names and `CGO_*` names are not recorded
+  unless allowlisted.
+- **Override:** Use `env_allowlist` to include specific keys. Keys specified
+  by `.with_env()` do not automatically widen recordings. Direct callers of
+  `filter_env_subset()` can pass `explicit_keys`; the function applies the
+  union of `allowlist` and `explicit_keys`. A requested key must be present in
+  the environment to appear in the recording, and CmdMox-internal keys remain
+  excluded. Requests take precedence over the sensitive-key rule, so
+  allowlisting a key such as `DOCKER_AUTH_CONFIG` persists its raw value in the
+  fixture.
+
+Existing fixtures are unaffected by the narrower `go` rule: the fixture loader
+does not re-filter a stored `env_subset`, so recordings made before this change
+keep the variables they captured, and strict replay continues to match them.
+Only new `go` recordings omit non-Go `GO*` names.
 
 ### Fixture file format
 
@@ -651,8 +675,9 @@ spy = cmd_mox.spy("aws").passthrough().record(
 - **`scrubber`** (`Scrubber | None`): optional scrubber instance for sanitizing
   recordings before persistence. When `None` (the default), no scrubbing is
   applied.
-- **`env_allowlist`** (`list[str] | None`): environment variable keys to always
-  include in recordings, in addition to the default command-specific prefixes.
+- **`env_allowlist`** (`list[str] | None`): environment variable keys to
+  include in recordings when present, in addition to the default
+  command-specific rules. CmdMox-internal keys remain excluded.
 
 ### Record validation
 
@@ -948,9 +973,13 @@ the context-manager API:
   control. When enabled, verification still runs if the body raises; when both
   verification and the body fail, the verification error is suppressed so the
   original exception surfaces.
-- `max_journal_entries` bounds the number of stored invocations (oldest entries
-  are evicted FIFO when the bound is reached). The journal is exposed via
-  `cmd_mox.journal`, a `collections.deque[Invocation]` recorded during replay.
+- `max_journal_entries` bounds the number of invocations retained in the public
+  diagnostic `journal` (oldest entries are evicted FIFO when the bound is
+  reached). The journal is exposed via `cmd_mox.journal`, a
+  `collections.deque[Invocation]` recorded during replay. The bound applies
+  only to that diagnostic view: verification uses a separate internal record,
+  so eviction never weakens verification. A bounded controller also requires
+  `in_order()` to be applied before a stub's first call.
 - `lifecycle_hint` (default `None`) appends caller-provided guidance to
   `LifecycleError` messages for invalid phase transitions.
 
@@ -960,6 +989,34 @@ The journal is especially handy when debugging:
 exercise_system()
 assert [call.command for call in cmd_mox.journal] == ["git", "curl"]
 # Verification will run during fixture teardown.
+```
+
+The internal verification record retains every mock, spy, unregistered-command
+and ordered-stub call for the whole replay, regardless of
+`max_journal_entries`. Memory savings therefore apply mainly to stub calls;
+mock and spy histories are unbounded in all cases. With an unbounded journal
+every call is retained in completion order, so `in_order()` may be applied
+after calls complete. A bounded controller omits unordered stub calls, so
+`in_order()` must be applied to a stub before its first call; applying it later
+raises `ExpectationConfigurationError`. Verification reads only its own
+snapshot copies, so mutating `cmd_mox.journal`, including its order or its
+entries, does not affect verification. Verification also records the double
+each call was dispatched to, so a double registered later cannot claim an
+earlier call: a call made without a double is reported as unexpected even if a
+mock or stub for that command is registered afterwards. A bounded controller
+still reports an unexpected call that has already been evicted from the journal:
+
+```python
+import shutil
+import subprocess
+
+with CmdMox(max_journal_entries=1) as cmd_mox:
+    cmd_mox.register_command("rm")
+    cmd_mox.stub("ok").returns()
+    cmd_mox.replay()
+    for name in ("rm", "ok"):
+        subprocess.run([shutil.which(name)], stdin=subprocess.DEVNULL)
+# Verification still raises UnexpectedCommandError for the evicted "rm" call.
 ```
 
 To intercept a command without configuring a double—for example, to ensure it

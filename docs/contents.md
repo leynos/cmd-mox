@@ -10,6 +10,8 @@
   removed payload conversion methods before upgrading.
 - [Fixture Schema Migration Note](./fixture-schema-migration-note.md): Prepare
   for three-component recording fixture versions.
+- [Go Environment Migration Note](./go-env-migration-note.md): Prepare for
+  exact-name filtering of Go variables in new recordings.
 - [Shellmock Migration Guide](./shellmock-migration-guide.md): Migrate from
   `shellmock` to CmdMox.
 - [Design Doc](./python-native-command-mocking-design.md): Design rationale.

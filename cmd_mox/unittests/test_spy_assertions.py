@@ -615,25 +615,34 @@ class TestSpyCountVerification:
     """Edge cases where only one verifier can catch the defect."""
 
     # ------------------------------------------------------------------
-    def test_uncounted_ordered_spy_single_call_passes(
-        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
-    ) -> None:
-        """An ordered spy without an explicit count accepts its default one call."""
+    def _run_uncounted_ordered_spy(
+        self,
+        run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+        calls: int,
+    ) -> CmdMox:
+        """Run an uncounted ordered spy ``calls`` times and return the controller."""
         mox = CmdMox()
         mox.spy("tool").returns(stdout="ok").in_order()
         mox.__enter__()
         mox.replay()
         path = require_shim_dir(mox.environment) / "tool"
-        run([str(path)], shell=False)
-        mox.verify()
+        for _ in range(calls):
+            run([str(path)], shell=False)
+        return mox
 
     # ------------------------------------------------------------------
-    def test_uncounted_ordered_spy_missing_call_fails(self) -> None:
+    def test_uncounted_ordered_spy_single_call_passes(
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
+    ) -> None:
+        """An ordered spy without an explicit count accepts its default one call."""
+        self._run_uncounted_ordered_spy(run, calls=1).verify()
+
+    # ------------------------------------------------------------------
+    def test_uncounted_ordered_spy_missing_call_fails(
+        self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
+    ) -> None:
         """An ordered spy without an explicit count still requires one call."""
-        mox = CmdMox()
-        mox.spy("tool").returns(stdout="ok").in_order()
-        mox.__enter__()
-        mox.replay()
+        mox = self._run_uncounted_ordered_spy(run, calls=0)
         with pytest.raises(UnfulfilledExpectationError):
             mox.verify()
 
@@ -642,13 +651,7 @@ class TestSpyCountVerification:
         self, run: cabc.Callable[..., subprocess.CompletedProcess[str]]
     ) -> None:
         """An ordered spy without an explicit count rejects a second call."""
-        mox = CmdMox()
-        mox.spy("tool").returns(stdout="ok").in_order()
-        mox.__enter__()
-        mox.replay()
-        path = require_shim_dir(mox.environment) / "tool"
-        run([str(path)], shell=False)
-        run([str(path)], shell=False)
+        mox = self._run_uncounted_ordered_spy(run, calls=2)
         with pytest.raises(UnexpectedCommandError):
             mox.verify()
 

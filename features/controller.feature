@@ -369,6 +369,18 @@ Feature: CmdMox basic functionality
     And the journal should contain 0 invocations of "alpha"
     And the journal order should be beta,gamma
 
+  Scenario: bounded journal still reports an evicted unexpected command
+    Given a CmdMox controller with max journal size 1
+    And the command "rm" is registered without a double
+    And the command "ok" is stubbed to return "ok"
+    When I replay the controller
+    And I run the command "rm"
+    And I run the command "ok"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "Unexpected command invocation."
+    And the journal should contain 0 invocations of "rm"
+    And the journal should contain 1 invocation of "ok"
+
   Scenario: invalid max journal size is rejected
     Given creating a CmdMox controller with max journal size -1 fails
 

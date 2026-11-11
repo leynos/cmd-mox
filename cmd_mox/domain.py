@@ -284,4 +284,10 @@ class Response:
     passthrough: PassthroughRequest | None = None
 
 
-__all__ = ["Invocation", "PassthroughRequest", "PassthroughResult", "Response"]
+__all__ = [
+    "Invocation",
+    "PassthroughRequest",
+    "PassthroughResult",
+    "Response",
+    "is_sensitive_recording_env_key",
+]

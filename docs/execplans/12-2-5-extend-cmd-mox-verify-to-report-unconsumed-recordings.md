@@ -118,6 +118,8 @@ The neighbouring roadmap items matter here:
 - `12.2.4` is complete and already handles runtime replay matching.
 - `12.2.6` remains a follow-on item for broader replay infrastructure coverage.
   This plan should only add tests needed to validate `12.2.5` itself.
+  - Status 2026-11-10: `12.2.6` is now complete; see
+    [12.2.6](../roadmap.md#122-replay-infrastructure) in the roadmap.
 
 ## Relevant docs and skills
 
