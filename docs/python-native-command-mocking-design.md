@@ -755,6 +755,20 @@ features that are infeasible with file-based logging.
   `ReadFile`, so "bounded by `CMOX_IPC_TIMEOUT`" describes the input wait, not
   an exact exit time.
 
+  Every operating-system and process operation those strategies need is reached
+  through an injected `StdinSystem` (`cmd_mox._stdin_system`), whose production
+  implementation is `SYSTEM_STDIN` and whose default is the `system` keyword of
+  `read_stdin`. The boundary covers poller creation, descriptor reads and
+  status queries, the Windows module and handle lookups, daemon-worker
+  creation, and completion events. It exists so a strategy test can supply a
+  poller, a read script, or a worker double without replacing `os`, `select`, or
+  `threading` for the whole process; a process-wide patch outlives the test
+  and can break pytest's own capture teardown. The `WindowsStdinSystem` half
+  keeps pywin32 imports lazy, so the Windows arms stay reachable and testable
+  on a POSIX host. The clock and the strategy observer travel together in
+  `_CaptureOptions`, which keeps `read_stdin` at four arguments while the
+  `system` seam stays explicit.
+
   A strategy that cannot be interrupted leaves a worker blocked in the stream's
   own read. Only the stream's owner can end it, by closing the stream or
   reaching EOF, so the shim's script entry point is the final cancellation

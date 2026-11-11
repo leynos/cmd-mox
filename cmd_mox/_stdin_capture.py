@@ -283,7 +283,15 @@ def _plan_stdin(stream: _StdinStream, *, system: StdinSystem = SYSTEM_STDIN) -> 
     poller = system.create_poller(descriptor)
     if poller is None:
         return _Plan("fallback")
-    if system.is_regular_file(descriptor):
+    try:
+        is_regular = system.is_regular_file(descriptor)
+    except OSError:
+        # The protocol asks implementations to report ``False`` rather than
+        # raise, but a pollable descriptor must not fail the capture when one
+        # lets the failure escape. Treat it as not-regular so the descriptor
+        # keeps the polled read that already accepted it.
+        is_regular = False
+    if is_regular:
         return _Plan("regular", descriptor=descriptor)
     return _Plan("poll", descriptor=descriptor, poller=poller)
 

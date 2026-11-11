@@ -252,7 +252,7 @@ class _SystemDouble:
     )
     create_poller_override: cabc.Callable[[int], _Poller | None] | _Unset = _UNSET
     read_override: cabc.Callable[[int, int], bytes] | _Unset = _UNSET
-    regular_file_override: bool | _Unset = _UNSET
+    regular_file_override: bool | cabc.Callable[[int], bool] | _Unset = _UNSET
     event_factory: cabc.Callable[[], CompletionEvent] | _Unset = _UNSET
     worker_factory: cabc.Callable[..., threading.Thread] | _Unset = _UNSET
 
@@ -270,9 +270,12 @@ class _SystemDouble:
 
     def is_regular_file(self, descriptor: int) -> bool:
         """Return the injected descriptor kind, or query the host."""
-        if isinstance(self.regular_file_override, _Unset):
+        override = self.regular_file_override
+        if isinstance(override, _Unset):
             return SYSTEM_STDIN.is_regular_file(descriptor)
-        return self.regular_file_override
+        if callable(override):
+            return override(descriptor)
+        return override
 
     def create_event(self) -> CompletionEvent:
         """Return the injected event, or create a real one."""

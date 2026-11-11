@@ -580,3 +580,25 @@ def test_plan_treats_an_unstattable_descriptor_as_pollable() -> None:
         os.close(read_fd)
         os.close(write_fd)
     assert plan.strategy == "poll", "an unstattable descriptor should be polled"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stdin polling is POSIX-specific")
+def test_plan_treats_a_raising_status_query_as_pollable() -> None:
+    """An injected status query that raises keeps the polled strategy."""
+
+    def raise_status_error(_descriptor: int) -> bool:
+        """Raise the failure a status query lets escape."""
+        msg = "status unavailable"
+        raise OSError(msg)
+
+    read_fd, write_fd = os.pipe()
+    system = _SystemDouble(
+        windows=_WindowsSystemDouble(windows_flag=False),
+        regular_file_override=raise_status_error,
+    )
+    try:
+        plan = capture._plan_stdin(_DescriptorStream(read_fd), system=system)
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+    assert plan.strategy == "poll", "a raising status query should be polled"

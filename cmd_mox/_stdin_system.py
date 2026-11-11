@@ -109,10 +109,12 @@ class StdinSystem(typ.Protocol):
     def is_regular_file(self, descriptor: int) -> bool:
         """Report whether *descriptor* is backed by a regular file.
 
-        Implementations must not raise when the descriptor's status cannot be
-        queried. They report ``False`` so the capture keeps the polled read
-        that already accepted the descriptor instead of moving it onto a
-        worker for no reason.
+        Implementations report ``False`` when the descriptor's status cannot
+        be queried, so the capture keeps the polled read that already accepted
+        the descriptor instead of moving it onto a worker for no reason. The
+        capture boundary also treats a raised ``OSError`` as not-regular, so a
+        pollable descriptor stays pollable even if an implementation lets the
+        failure escape.
         """
 
     def create_worker(
