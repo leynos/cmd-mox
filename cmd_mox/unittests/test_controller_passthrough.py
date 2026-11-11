@@ -59,6 +59,20 @@ def test_prepare_passthrough_masks_conflicting_secret_env() -> None:
         assert provided_value not in message, "Invocation value leaked into the message"
 
 
+def test_zero_count_passthrough_spy_counts_in_flight_invocation() -> None:
+    """An in-flight passthrough call violates an explicit zero count."""
+    with CmdMox() as mox:
+        spy = mox.spy("echo").times(0).passthrough()
+        mox.replay()
+        invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
+        mox._prepare_passthrough(spy, invocation)
+
+        with pytest.raises(
+            UnexpectedCommandError, match="Unexpected additional invocation"
+        ):
+            mox.verify()
+
+
 def test_handle_passthrough_result_rejects_unknown_invocation() -> None:
     """Unexpected passthrough results should raise a clear RuntimeError."""
     with CmdMox() as mox:

@@ -189,6 +189,15 @@ def test_zero_count_mock_is_invoked_once() -> None:
     pass
 
 
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "invalid spy count is rejected and leaves the spy permissive",
+)
+def test_invalid_spy_count_is_rejected_and_leaves_the_spy_permissive() -> None:
+    """An invalid spy count raises and the spy keeps accepting any call count."""
+    pass
+
+
 @scenario(str(FEATURES_DIR / "controller.feature"), "context manager usage")
 def test_context_manager_usage() -> None:
     """CmdMox works within a ``with`` block."""

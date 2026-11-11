@@ -748,23 +748,23 @@ class CmdMox:
         """Execute the ordered verification checks."""
         # Mocks always participate so their implicit default count of one keeps
         # its meaning; spies join only when a count setter marked it explicit.
-        counted = {
-            name: double
+        expectations = {
+            name: double.expectation
             for name, double in self._doubles.items()
             if double.kind is DoubleKind.MOCK
             or (double.kind is DoubleKind.SPY and double.expectation.count_explicit)
         }
-        expectations = {name: double.expectation for name, double in counted.items()}
         with self._history_lock:
             verification_log = list(self._verification_log)
             dispatch_doubles = list(self._verification_doubles)
             ordered = list(self._ordered)
 
-        # Count only calls dispatched to the double, and only from the immutable
-        # snapshots, so journal mutation and late registration cannot count.
+        # Count only dispatched calls from the immutable snapshots.
         dispatched = list(zip(verification_log, dispatch_doubles, strict=True))
+        # In-flight passthrough calls have happened, so they count too.
         inv_map = {
             name: [inv for inv, dbl in dispatched if dbl is self._doubles[name]]
+            + self._passthrough_coordinator.pending_invocations(self._doubles[name])
             for name in expectations
         }
 

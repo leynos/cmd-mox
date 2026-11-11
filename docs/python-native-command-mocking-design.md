@@ -345,6 +345,16 @@ changing the observational behaviour of uncounted ones. The order check does
 not consult the flag: it always expands an ordered expectation to its `count`,
 so an uncounted ordered spy is still held to one call in sequence.
 
+The count is validated when the expectation is configured, before any replay.
+It must be a non-negative `int`: `bool` is rejected along with every other
+non-integer type, because `bool` subclasses `int` and would otherwise be
+accepted as zero or one. Invalid types raise `TypeError` and negative values
+raise `ValueError`; a rejected value leaves the previously configured count
+unchanged. A count of zero is valid and means the command must not run at all.
+Validation is deliberately at the fluent boundary rather than in the verifier,
+so an invalid expectation fails at the line that created it instead of
+producing an obscure `IndexError` or `TypeError` during verification.
+
 To ensure `CmdMox` is a compelling replacement for `shellmock`, the following
 table maps the core features of `shellmock` to their more expressive `CmdMox`
 API equivalents, demonstrating complete functional parity.
@@ -1423,11 +1433,15 @@ The verification algorithm will perform several critical checks:
 3. **Incorrect Call Counts:** For mock expectations, and for spy expectations
    whose count was set explicitly with `.times(N)` or `.times_called(N)`, the
    verifier ensures that the expectation was met exactly `N` times. If it was
-   met more or fewer times, a `VerificationError` is raised. A spy without an
-   explicit count is not checked by this step. Ordering is separate: an
-   `.in_order()` expectation is expanded to its configured count, so an
-   uncounted ordered spy's default count of one must still match the journal
-   exactly.
+   met more or fewer times, a `VerificationError` is raised. The count check
+   covers every mock and every spy that set a count explicitly, while a spy
+   without an explicit count is permissive and a stub is intentionally
+   non-strict and ignores counts. Ordering is separate: an `.in_order()`
+   expectation is expanded to its configured count, so an uncounted ordered
+   spy's default count of one must still match the journal exactly. Because
+   verification runs before the IPC server stops, the count check also includes
+   passthrough spy calls that are still in flight, so a call that has started
+   but not yet reported its result cannot satisfy or evade an explicit count.
 
 4. **Order Violations:** For expectations marked with `.in_order()`, the
    verifier ensures that they were met in the same sequence in which they were
@@ -1498,6 +1512,16 @@ def test_downloader_uses_correct_user_agent(mox):
 This style of verification is less rigid than mocking and is preferred when the
 goal is simply to check that "a call happened with these properties" rather
 than enforcing a strict sequence of interactions.
+
+A spy is permissive by default, but a test can opt into strictness by setting a
+count with `times()` or `times_called()`. When a count is set explicitly,
+verification requires exactly that many calls, including zero. This is a
+deliberate asymmetry: the spy's default remains observational, while an
+explicit count is a promise the test has chosen to make. Stubs are
+intentionally non-strict and ignore counts entirely. The implementation tracks
+the distinction with `Expectation.count_explicit`, which is excluded from
+equality and repr, and `CmdMox._run_verifiers()` includes only explicitly
+counted spies in the count check.
 
 ### 6.2 Passthrough Spies: The "Record Mode"
 

@@ -8,6 +8,8 @@
   bounded shim stdin and IPC waits in the next minor release.
 - [IPC Payload Migration Note](./ipc-payload-migration-note.md): Replace
   removed payload conversion methods before upgrading.
+- [Expectation Count Migration Note](./expectation-count-migration-note.md):
+  Replace invalid `times()` counts and update explicitly counted spies.
 - [Fixture Schema Migration Note](./fixture-schema-migration-note.md): Prepare
   for three-component recording fixture versions.
 - [Go Environment Migration Note](./go-env-migration-note.md): Prepare for

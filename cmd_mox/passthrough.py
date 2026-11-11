@@ -130,6 +130,34 @@ class PassthroughCoordinator:
         )
         return Response(env=dict(env), passthrough=passthrough)
 
+    def pending_invocations(self, double: CommandDouble) -> list[Invocation]:
+        """Return invocations awaiting a passthrough result for *double*.
+
+        Verification runs before the IPC server is stopped, so a passthrough
+        call can still be in flight when counts are checked. Those calls have
+        already happened from the caller's perspective, so they must count
+        towards an explicit expectation even though their result has not been
+        recorded yet.
+
+        Parameters
+        ----------
+        double : CommandDouble
+            Double whose in-flight passthrough calls should be returned.
+
+        Returns
+        -------
+        list[Invocation]
+            Invocations registered by :meth:`prepare_request` whose results
+            have not yet been finalised.
+        """
+        with self._lock:
+            self._prune_expired_locked()
+            return [
+                invocation
+                for pending_double, invocation, _ in self._pending.values()
+                if pending_double is double
+            ]
+
     def finalize_result(
         self, result: PassthroughResult
     ) -> tuple[CommandDouble, Invocation, Response]:

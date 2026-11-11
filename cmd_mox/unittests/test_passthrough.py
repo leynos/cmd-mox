@@ -51,6 +51,32 @@ def test_prepare_request_registers_pending(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.env == {"PATH": "/usr/bin"}
 
 
+def test_pending_invocations_are_scoped_to_the_double() -> None:
+    """Only the requested double's in-flight invocations are returned."""
+    coordinator = PassthroughCoordinator()
+    first = typ.cast("CommandDouble", _FakeDouble({}))
+    second = typ.cast("CommandDouble", _FakeDouble({}))
+    config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
+
+    first_response = coordinator.prepare_request(first, _make_invocation("one"), config)
+    coordinator.prepare_request(second, _make_invocation("two"), config)
+
+    assert [inv.command for inv in coordinator.pending_invocations(first)] == ["one"]
+
+    directive = first_response.passthrough
+    assert directive is not None
+    coordinator.finalize_result(
+        PassthroughResult(
+            invocation_id=directive.invocation_id,
+            stdout="",
+            stderr="",
+            exit_code=0,
+        )
+    )
+
+    assert coordinator.pending_invocations(first) == []
+
+
 @pytest.mark.parametrize(
     ("initial_env", "extra_env", "expected_merged"),
     [

@@ -208,6 +208,19 @@ Feature: CmdMox basic functionality
     And the verification error message should contain "expected calls=0"
     And the mock "blocked" should record 1 invocation
 
+  Scenario: invalid spy count is rejected and leaves the spy permissive
+    Given a CmdMox controller
+    And the command "first" is spied to return "one"
+    And the command "second" is spied to return "two"
+    When requesting an invalid count of -1 on the spy "first" using times raises ValueError
+    And requesting an invalid count of -1 on the spy "second" using times_called raises ValueError
+    When I replay the controller
+    And I run the command "first"
+    And I run the command "second"
+    When I verify the controller
+    Then the spy "first" should record 1 invocation
+    And the spy "second" should record 1 invocation
+
   Scenario: context manager usage
     Given a CmdMox controller
     And the command "hi" is stubbed to return "hello"

@@ -644,4 +644,3 @@ def test_count_explicit_supports_positional_construction() -> None:
     )
     assert expectation.count == 2
     assert expectation.count_explicit is True
-# weave: run 'weave explain cmd_mox/unittests/test_expectations.py' for per-hunk detail, 'weave check' to verify your resolution

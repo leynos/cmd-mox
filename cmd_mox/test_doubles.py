@@ -264,30 +264,14 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
     def times(self, count: int) -> typ.Self:
         """Require the command to be invoked exactly ``count`` times.
 
-        Verification enforces the count for mocks and spies. Stubs do not
-        record invocations, so a count configured on a stub is not verified.
-        Calling this method marks the count as explicit; an uncounted spy stays
-        observational. The expectation validates the count before storing it,
-        so an invalid value leaves this double unchanged.
-
-        Parameters
-        ----------
-        count : int
-            Required invocation count. Must be a non-negative integer; a zero
-            count requires the command not to be invoked at all.
+        Alias for :meth:`times_called`; see there for the count rules and the
+        errors raised for an invalid count.
 
         Returns
         -------
         typ.Self
             This double, for fluent configuration.
-
-        Raises
-        ------
-        TypeError
-            If *count* is a bool or not an integer.
-        ValueError
-            If *count* is negative.
-        """  # ruff: ignore[docstring-extraneous-exception] - the expectation raises these caller-visible failures
+        """
         self.expectation.times(count)
         return self
 

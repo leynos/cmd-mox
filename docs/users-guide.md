@@ -7,20 +7,31 @@ For installation from PyPI, its source distribution and wheel, and the
 provenance bundle included with GitHub Releases, see
 [Getting started](usage-guide.md#getting-started).
 
-## Spy call counts
+## Expectation counts
 
-A spy stays observational unless you set a count with `times(count)` or its
-`times_called(count)` alias; either call makes `verify()` enforce that the spy
-ran exactly that many times. An uncounted spy's total is not checked, except
-that `in_order()` expands the expectation to its count (one by default), so an
-ordered spy must still be invoked exactly that many times in sequence. The
-[usage guide](usage-guide.md#spies-and-passthrough-mode) covers the full
-behaviour.
+`times(count)` and its alias `times_called(count)` require a command to run
+exactly `count` times. `count` must be a non-negative `int`: booleans, floats,
+strings, and `None` raise `TypeError`, and negative values raise `ValueError`,
+when the expectation is configured. A zero count means the command must not run
+at all.
+
+Counts are enforced for mocks and for spies that set one explicitly. A spy
+stays observational unless you set a count; an uncounted spy's total is not
+checked, except that `in_order()` expands the expectation to its count (one by
+default), so an ordered spy must still be invoked exactly that many times in
+sequence. Stubs are intentionally non-strict and ignore counts. Count
+violations, including a zero-count command that ran, are reported by `verify()`
+rather than at the moment of invocation.
 
 Earlier releases accepted these count setters on spies but did not enforce the
 total. A test that set a spy count and relied on it being ignored now fails
 verification: remove the count to keep the spy observational, or make the
-expected number of calls.
+expected number of calls. The
+[fluent API reference](usage-guide.md#fluent-api-reference) documents the full
+rules, and the
+[expectation count migration note](expectation-count-migration-note.md)
+explains how to replace invalid counts and update tests that relied on
+permissive explicitly counted spies.
 
 ## Sensitive environment values in diagnostics
 
