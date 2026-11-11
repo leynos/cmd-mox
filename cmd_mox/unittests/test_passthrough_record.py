@@ -123,11 +123,22 @@ class TestPassthroughRecording:
         assert recording.stdout == "M file.py\n"
         assert recording.exit_code == 0
 
-    def test_recorded_duration_is_measured_in_milliseconds(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        ("readings", "expected_ms"),
+        [
+            pytest.param([10.0, 10.25], 250, id="quarter-second"),
+            pytest.param([10.0, 10.0004], 0, id="sub-millisecond-rounds-down"),
+            pytest.param([10.0, 9.5], 0, id="backwards-clock-clamps"),
+        ],
+    )
+    def test_recorded_duration_follows_the_coordinator_clock(
+        self, tmp_path: Path, readings: list[float], expected_ms: int
     ) -> None:
-        """A quarter-second clock interval is recorded as 250 ms."""
-        assert _record_one_invocation(tmp_path, [10.0, 10.25]) == 250
+        """Durations are rounded milliseconds, non-negative even if time reverses."""
+        actual_ms = _record_one_invocation(tmp_path, readings)
+        assert actual_ms == expected_ms, (
+            f"recorded {actual_ms} ms, expected {expected_ms}"
+        )
 
     def test_out_of_order_results_keep_independent_durations(
         self, tmp_path: Path
@@ -171,14 +182,6 @@ class TestPassthroughRecording:
             }
 
         assert durations == {"first": 3000, "second": 500}
-
-    def test_sub_millisecond_interval_rounds_to_zero(self, tmp_path: Path) -> None:
-        """An interval below half a millisecond rounds down to 0 ms."""
-        assert _record_one_invocation(tmp_path, [10.0, 10.0004]) == 0
-
-    def test_backwards_clock_clamps_to_zero(self, tmp_path: Path) -> None:
-        """A clock that moves backwards records 0 ms instead of raising."""
-        assert _record_one_invocation(tmp_path, [10.0, 9.5]) == 0
 
     @pytest.mark.parametrize(
         ("env_allowlist", "expected"),
