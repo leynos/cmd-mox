@@ -35,17 +35,20 @@ class _RecordingSessionStub:
 
     def __init__(self) -> None:
         """Start with no recorded calls."""
-        self.recordings: list[tuple[Invocation, object, frozenset[str] | None]] = []
+        self.recordings: list[
+            tuple[Invocation, object, int, frozenset[str] | None]
+        ] = []
 
     def record(
         self,
         invocation: Invocation,
         response: object,
         *,
+        duration_ms: int = 0,
         explicit_keys: frozenset[str] | None = None,
     ) -> None:
         """Store one forwarded call for later assertion."""
-        self.recordings.append((invocation, response, explicit_keys))
+        self.recordings.append((invocation, response, duration_ms, explicit_keys))
 
 
 def _make_invocation(command: str = "echo") -> Invocation:
@@ -331,7 +334,7 @@ def test_finalize_records_expectation_keys_not_extra_env() -> None:
 
     _prepare_and_finalize(coordinator, double, invocation, config)
 
-    _, _, explicit_keys = session.recordings[0]
+    _, _, _, explicit_keys = session.recordings[0]
     assert explicit_keys == frozenset({"EXPECTED"})
 
 
@@ -346,7 +349,7 @@ def test_finalize_records_caller_invocation_without_injected_values() -> None:
 
     _prepare_and_finalize(coordinator, double, invocation, config)
 
-    stored_invocation, _, explicit_keys = session.recordings[0]
+    stored_invocation, _, _, explicit_keys = session.recordings[0]
     assert stored_invocation.env == {"CALLER": "1"}
     assert explicit_keys == frozenset({"EXPECTED"})
 
@@ -379,7 +382,7 @@ def test_prepare_request_uses_supplied_snapshot() -> None:
         )
     )
 
-    _, _, explicit_keys = session.recordings[0]
+    _, _, _, explicit_keys = session.recordings[0]
     assert explicit_keys == frozenset({"EARLY_KEY"})
 
 
@@ -454,7 +457,7 @@ def test_each_request_records_its_preparation_time_snapshot(
 
     recorded = {
         invocation.args[0]: explicit_keys
-        for invocation, _, explicit_keys in session.recordings
+        for invocation, _, _, explicit_keys in session.recordings
     }
     expected = {
         str(index): frozenset(snapshot) for index, snapshot in enumerate(snapshots)
