@@ -193,6 +193,12 @@ def spy_passthrough(mox: CmdMox, cmd: str) -> None:
     mox.spy(cmd).passthrough()
 
 
+@given(parsers.cfparse('the command "{cmd}" is spied to passthrough times {count:d}'))
+def spy_passthrough_times(mox: CmdMox, cmd: str, count: int) -> None:
+    """Configure a passthrough spy with an explicit invocation count."""
+    mox.spy(cmd).passthrough().times(count)
+
+
 @given(
     parsers.cfparse(
         'the command "{cmd}" is mocked with args "{args}" returning "{text}" in order'

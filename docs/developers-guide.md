@@ -548,13 +548,16 @@ on the double. The
 records the full verification contract.
 
 Verification runs before the IPC server stops, so a passthrough spy call can
-still be in flight when counts are checked. `PassthroughCoordinator` records
-the invocation at `prepare_request()` time and only appends it to
-`double.invocations` when the shim reports its result. `_run_verifiers()`
-therefore appends `PassthroughCoordinator.pending_invocations(double)` to the
-recorded list, so an explicit count cannot be satisfied by a call that has
-started but not completed. Do not move the count check after server shutdown
-without preserving that guarantee.
+still be in flight, or can have expired, when counts are checked. The
+coordinator registers the invocation at `prepare_request()` time and keeps it
+in an unrecorded-invocation registry until the controller appends it to the
+completed-call log. `_run_verifiers()` snapshots that registry before the log
+and merges both through `verifiers.build_count_map()`, de-duplicating by
+invocation ID. A call therefore counts exactly once even if it completes during
+verification, and an explicitly counted spy sees a call that started but has
+not completed because the call has already happened from the caller's
+perspective. Do not move the count check after server shutdown without
+preserving that guarantee.
 
 ## IPC deadlines and stdin reads
 

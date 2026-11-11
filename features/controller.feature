@@ -216,10 +216,12 @@ Feature: CmdMox basic functionality
     And requesting an invalid count of -1 on the spy "second" using times_called raises ValueError
     When I replay the controller
     And I run the command "first"
+    And I run the command "first"
+    And I run the command "second"
     And I run the command "second"
     When I verify the controller
-    Then the spy "first" should record 1 invocation
-    And the spy "second" should record 1 invocation
+    Then the spy "first" should record 2 invocation
+    And the spy "second" should record 2 invocation
 
   Scenario: context manager usage
     Given a CmdMox controller
@@ -317,6 +319,15 @@ Feature: CmdMox basic functionality
     When I verify the controller
     Then the spy "echo" should record 1 invocation
     And the spy "echo" call count should be 1
+
+  Scenario: explicitly counted passthrough spy is satisfied by a real call
+    Given a CmdMox controller
+    And the command "echo" is spied to passthrough times 1
+    When I replay the controller
+    And I run the command "echo" with arguments "hello"
+    Then the output should be "hello"
+    When I verify the controller
+    Then the spy "echo" should record 1 invocation
 
   Scenario: passthrough spy handles missing command
     Given a CmdMox controller

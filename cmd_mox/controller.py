@@ -11,7 +11,7 @@ import typing as typ
 from collections import deque
 from pathlib import Path
 
-from . import _path_utils
+from . import _path_utils, verifiers
 from .command_runner import CommandRunner
 from .environment import (
     EnvironmentManager,
@@ -609,6 +609,7 @@ class CmdMox:
         if double.is_recording:
             double.invocations.append(invocation)
         self._record_completed_invocation(invocation, double)
+        self._passthrough_coordinator.mark_recorded(invocation.invocation_id)
         return resp
 
     def _require_phase(self, expected: Phase, action: str) -> None:
@@ -719,6 +720,7 @@ class CmdMox:
             self._verification_log.clear()
             self._verification_doubles.clear()
             self._discarded_stub_calls.clear()
+        self._passthrough_coordinator.reset()
         self._commands = self._registered_commands() | self._commands
         if not self._entered and not self._is_environment_initialized():
             msg = "Environment manager not initialised"
@@ -746,27 +748,25 @@ class CmdMox:
 
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""
-        # Mocks always participate so their implicit default count of one keeps
-        # its meaning; spies join only when a count setter marked it explicit.
+        # Mocks always count; spies join only when a setter marked it explicit.
         expectations = {
             name: double.expectation
             for name, double in self._doubles.items()
             if double.kind is DoubleKind.MOCK
             or (double.kind is DoubleKind.SPY and double.expectation.count_explicit)
         }
+        # Snapshot unrecorded calls first; a call leaves the registry only after
+        # it is appended to the log, so these snapshots cannot miss one.
+        unrecorded = self._passthrough_coordinator.unrecorded_invocations()
         with self._history_lock:
             verification_log = list(self._verification_log)
             dispatch_doubles = list(self._verification_doubles)
             ordered = list(self._ordered)
 
-        # Count only dispatched calls from the immutable snapshots.
         dispatched = list(zip(verification_log, dispatch_doubles, strict=True))
-        # In-flight passthrough calls have happened, so they count too.
-        inv_map = {
-            name: [inv for inv, dbl in dispatched if dbl is self._doubles[name]]
-            + self._passthrough_coordinator.pending_invocations(self._doubles[name])
-            for name in expectations
-        }
+        inv_map = verifiers.build_count_map(
+            expectations, self._doubles, dispatched, unrecorded
+        )
 
         UnexpectedCommandVerifier().verify(
             verification_log, self._doubles, dispatch_doubles

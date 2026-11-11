@@ -3032,17 +3032,39 @@ class CmdMox:
 Replay integration in `_make_response()` is intentionally separate from replay
 consumption verification in `verify()`. The former is roadmap item `12.2.4`;
 the latter is implemented by extending the existing verifier pass rather than
-the teardown path:
+the teardown path. Count verification covers every mock and every spy whose
+count was set explicitly; stubs stay non-strict, and passthrough calls that are
+still in flight, or that expired, are merged in from the coordinator's
+unrecorded registry:
 
 ```python
 class CmdMox:
     def _run_verifiers(self) -> None:
-        """Execute mock, order, and replay-consumption verification."""
-        expectations = {n: d.expectation for n, d in self.mocks.items()}
-        inv_map = {n: d.invocations for n, d in self.mocks.items()}
+        """Execute the ordered verification checks."""
+        # Mocks always count; spies join only when a setter marked it explicit.
+        expectations = {
+            name: double.expectation
+            for name, double in self._doubles.items()
+            if double.kind is DoubleKind.MOCK
+            or (double.kind is DoubleKind.SPY and double.expectation.count_explicit)
+        }
+        # Snapshot unrecorded calls first; a call leaves the registry only after
+        # it is appended to the log, so these snapshots cannot miss one.
+        unrecorded = self._passthrough_coordinator.unrecorded_invocations()
+        with self._history_lock:
+            verification_log = list(self._verification_log)
+            dispatch_doubles = list(self._verification_doubles)
+            ordered = list(self._ordered)
 
-        UnexpectedCommandVerifier().verify(self.journal, self._doubles)
-        OrderVerifier(self._ordered).verify(self.journal)
+        dispatched = list(zip(verification_log, dispatch_doubles, strict=True))
+        inv_map = verifiers.build_count_map(
+            expectations, self._doubles, dispatched, unrecorded
+        )
+
+        UnexpectedCommandVerifier().verify(
+            verification_log, self._doubles, dispatch_doubles
+        )
+        OrderVerifier(ordered).verify(verification_log)
         CountVerifier().verify(expectations, inv_map)
         self._verify_replay_sessions_consumed()
 

@@ -30,6 +30,11 @@ verification, so a test could call `.times(2)` on a spy and still pass after
 one or three calls. The new release enforces the count for every spy that sets
 one, including `times(0)`.
 
+The permissive default has one exception: `in_order()` expands the expectation
+to its count (one by default), so an ordered spy must still be invoked exactly
+that many times in sequence even without an explicit count. Use `any_order()`
+to take the spy out of the ordering check.
+
 Audit tests that call `times()` or `times_called()` on a spy:
 
 - If the test intends to require an exact call count, keep the count and make
@@ -39,6 +44,9 @@ Audit tests that call `times()` or `times_called()` on a spy:
 - If the test relied on a zero count being ignored, expect verification to fail
   whenever the spy runs.
 
-Stubs remain intentionally non-strict and ignore counts. Count violations,
-including a zero-count command that ran, are reported by `verify()` rather than
-at the moment of invocation, matching every other count mismatch.
+Stubs are intentionally non-strict and ignore counts in count verification. The
+ordering check is separate: `in_order()` still expands a stub's count, so an
+ordered stub must be invoked that many times even though its calls are not
+recorded on the double. Count violations, including a zero-count command that
+ran, are reported by `verify()` rather than at the moment of invocation,
+matching every other count mismatch.
