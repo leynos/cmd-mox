@@ -192,7 +192,14 @@ layers.
 
 - [ ] 9.1.1. Reach full test coverage across core components, especially IPC and
   environment manipulation.
-- [ ] 9.1.2. Add explicit pytest-xdist compatibility tests.
+- [x] 9.1.2. Add explicit pytest-xdist compatibility tests.
+  - `cmd_mox/unittests/test_pytest_plugin.py` test
+    `test_parallel_workers_use_isolated_directories` and the
+    `parallel tests use isolated shim directories and sockets` scenario in
+    `features/pytest_plugin.feature` both pass without a skip.
+  - Scope: shim directory and socket isolation on two workers. Recording under
+    xdist remains open in 12.4.4; other worker counts, distribution modes, and
+    full-suite xdist cleanliness are not covered.
 - [ ] 9.1.3. Add regression suite for pipelines, missing commands, and complex
   argument handling.
 - [ ] 9.1.4. Add behavioural acceptance tests covering full fluent API with
@@ -257,18 +264,43 @@ supports deterministic replay without external dependencies. See
 - [x] 12.2.4. Integrate replay into `CmdMox._make_response()` and raise
   `UnexpectedCommandError` for unmatched strict replay invocations.
 - [x] 12.2.5. Extend `CmdMox.verify()` to report unconsumed recordings.
-- [ ] 12.2.6. Add unit tests for fixture loading, matcher behaviour, and
+- [x] 12.2.6. Add unit tests for fixture loading, matcher behaviour, and
   consumption tracking.
+  - `cmd_mox/unittests/test_replay_session.py` covers fixture loading, schema
+    validation, matching, consumption tracking, and `verify_all_consumed()`.
+  - `cmd_mox/unittests/test_invocation_matcher.py` covers strict and fuzzy
+    matcher behaviour and best-fit selection.
+  - `cmd_mox/unittests/test_fixture_file.py` covers fixture serialization,
+    schema migration, and scrubbing-rule round-tripping.
 
 ### 12.3. Scrubbing and security
 
 - [ ] 12.3.1. Implement `Scrubber` with default secret redaction patterns,
   including GitHub PATs, AWS access keys, generic tokens, bearer headers,
   private keys, and database connection strings.
-- [ ] 12.3.2. Implement `ScrubbingRule` dataclass with pattern, replacement,
+  - Still open. `Scrubber` is a protocol, and `scrubber=None` applies no
+    scrubbing, so arguments, stdin, stdout, stderr, and retained environment
+    values are persisted unchanged until the default patterns ship. See
+    `docs/usage-guide.md`.
+- [x] 12.3.2. Implement `ScrubbingRule` dataclass with pattern, replacement,
   target fields, and documentation description.
-- [ ] 12.3.3. Add environment filtering with default exclusions, configurable
+  - `cmd_mox/record/scrubber.py` defines `ScrubbingRule` and
+    `ScrubbingRuleDict`; `test_scrubbing_rules_serialization` in
+    `cmd_mox/unittests/test_fixture_file.py` pins the round-trip.
+  - Scope: `ScrubbingRule` is serialized metadata only. Nothing applies its
+    pattern, and `RecordingSession.finalize()` writes an empty
+    `scrubbing_rules` list.
+  - If [#430](https://github.com/leynos/cmd-mox/issues/430) withdraws the
+    public export, 12.3.2 and 12.6.1 must be revisited.
+- [x] 12.3.3. Add environment filtering with default exclusions, configurable
   allowlist, and command-specific prefix support.
+  - `cmd_mox/record/env_filter.py` implements `filter_env_subset()`, and
+    `cmd_mox/unittests/test_env_filter.py` covers system-key and
+    sensitive-key exclusions, the allowlist, command-prefix inclusion, and
+    explicit keys.
+  - Scope: the filter classifies key names only. It does not change values and
+    does not redact fixture content; an allowlisted sensitive key keeps its raw
+    value. Content redaction remains open in 12.3.1.
 - [ ] 12.3.4. Implement review mode to emit companion `.review` artefacts
   showing original and scrubbed values with sensitivity warnings.
 - [ ] 12.3.5. Add security-focused unit tests for default patterns,
