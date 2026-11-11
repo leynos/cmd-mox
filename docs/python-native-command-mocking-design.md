@@ -2400,6 +2400,10 @@ nullable keys: `metadata.test_module`, `metadata.test_function` and
 absent or null. A missing or null rule description becomes the empty string and
 reserializes as `null`.
 
+`version` is a separate exception: a fixture that omits it is treated as a
+legacy `0.0.0` document and migrated forward, so the key is not required. An
+explicit non-string `version` is still rejected.
+
 Types are checked rather than converted:
 
 - Integers (`sequence`, `exit_code`, `duration_ms`) must be JSON integers.
@@ -2429,13 +2433,15 @@ field-validation form above.
 The loader validates types only. It does not parse timestamp formats,
 range-check integers, compile scrubbing patterns, or require `$schema`.
 
-**Migration note.** Older fixtures must include every key the 1.0.0 writer
-emits. In particular, `recordings`, `scrubbing_rules`,
-`scrubbing_rules[].applied_to`, and the invocation fields `stdin`, `env_subset`,
-`stdout`, `stderr`, `exit_code` and `duration_ms` are no longer defaulted or
-coerced. A fixture that omits one of them, or stores a value of the wrong type,
-fails to load with the path-aware errors above rather than replaying incorrect
-data. Rewrite such fixtures with the missing key before loading them.
+**Migration note.** Older fixtures must include every required key the 1.0.0
+writer emits, apart from `version` (which may be omitted and is then treated as
+legacy `0.0.0`) and the three optional fields listed above. In particular,
+`recordings`, `scrubbing_rules`, `scrubbing_rules[].applied_to`, and the
+invocation fields `stdin`, `env_subset`, `stdout`, `stderr`, `exit_code` and
+`duration_ms` are no longer defaulted or coerced. A fixture that omits one of
+them, or stores a value of the wrong type, fails to load with the path-aware
+errors above rather than replaying incorrect data. Rewrite such fixtures with
+the missing key before loading them.
 
 ### 9.4 Module Structure
 
