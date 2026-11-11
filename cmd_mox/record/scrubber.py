@@ -2,7 +2,7 @@
 
 The ``Scrubber`` protocol defines the interface for sanitizing recorded
 invocations before persistence.  A concrete implementation is deferred to
-the XII-C roadmap item; this module provides the stable type contract.
+roadmap item 12.3.1; this module provides the stable type contract.
 """
 
 from __future__ import annotations

@@ -519,13 +519,15 @@ This component is responsible for the on-the-fly creation of the executable
 launchers that intercept command calls. To maximize efficiency and minimize
 disk I/O, the engine will not write a unique launcher for every mocked command.
 
-CmdMox maintains two launcher backends:
+CmdMox is designed to support two launcher backends:
 
 - **Python backend (current):** a single, generic `shim.py` template.
-- **Rust backend (Phase XIII):** a single, generic `cmdmox-mock` native binary.
+- **Rust backend (Phase XIII, planned):** a single, generic `cmdmox-mock`
+  native binary.
 
-Backend selection is runtime-configurable via `CMOX_SHIM_BACKEND`: `auto`
-(default), `python`, or `rust`.
+Backend selection is planned to be runtime-configurable via `CMOX_SHIM_BACKEND`:
+`auto` (default), `python`, or `rust`. See roadmap §13.1–§13.2 for the backend
+probe and selection work.
 
 When `mox.replay()` is invoked, the `CmdMox` controller executes the following
 steps:
@@ -547,7 +549,8 @@ steps:
 4. Ensure the launcher artefact is executable.
 
 5. The launcher determines which command it impersonates from its invocation
-   name (`argv[0]`).
+   name (`argv[0]`). The current Windows `.cmd` wrapper passes the command name
+   through `CMOX_SHIM_COMMAND` instead.
 
 This single-launcher approach is efficient and ensures bug fixes are applied in
 one place per backend. The Python backend preserves current behaviour, while
@@ -1799,27 +1802,27 @@ Darwin environments, several avenues for future expansion exist.
 - **Windows Support:** CmdMox now provides first-class Windows support. The IPC
   layer retains Unix domain sockets where available and augments the startup
   handshake so Windows clients can detect readiness even though no filesystem
-  socket appears. Shim generation is backend-dependent: the Python backend emits
-  `.cmd` launchers that shell out to the active Python interpreter and invoke
-  `shim.py`, while the Rust backend emits `*.exe` launchers backed by
-  `cmdmox-mock.exe`. Both backends preserve argument quoting and inherit the
-  test process environment. Environment management reuses the existing
-  `PATH`-based interception, ensures `.CMD` lives in `PATHEXT`, and restores
-  the original environment on teardown. Long shim paths are collapsed to their
-  short (8.3) counterparts whenever the Windows `MAX_PATH` limit is at risk,
-  PATH filtering treats casing consistently, and duplicate command names that
-  differ only by case are rejected to avoid filesystem collisions. A dedicated
-  Windows smoke job now runs in CI via the `windows-smoke` Makefile target,
-  exercising mocked invocations and passthrough spies while publishing
-  `windows-ipc.log` for diagnostics.
+  socket appears. Shim generation currently uses the Python backend, which
+  writes `<name>.cmd` launchers with CRLF line endings. Each launcher disables
+  delayed expansion, sets `CMOX_SHIM_COMMAND` to the command name, and runs the
+  generating interpreter (`sys.executable`) with `shim.py` and `%*`. Native
+  `*.exe` launchers backed by `cmdmox-mock.exe` are planned under roadmap §13
+  (§13.2–§13.3). Both the current and planned backends preserve argument
+  quoting and inherit the test process environment. Environment management
+  reuses the existing `PATH`-based interception, ensures `.CMD` lives in
+  `PATHEXT`, and restores the original environment on teardown. Long shim paths
+  are collapsed to their short (8.3) counterparts whenever the Windows
+  `MAX_PATH` limit is at risk, PATH filtering treats casing consistently, and
+  duplicate command names that differ only by case are rejected to avoid
+  filesystem collisions. A dedicated Windows smoke job now runs in CI via the
+  `windows-smoke` Makefile target, exercising mocked invocations and
+  passthrough spies while publishing `windows-ipc.log` for diagnostics.
 
 - **Record Mode (Phase XII):** The comprehensive design for Record Mode is
-  detailed in Section IX. This feature transforms passthrough spy recordings
-  into reusable test fixtures, enabling developers to record interactions once
-  against real systems and replay them indefinitely in CI environments. Key
-  components include fixture persistence with JSON format and schema
-  versioning, scrubbing utilities for sensitive data sanitization, and a CLI
-  tool for recording, replaying, and generating test code from fixtures.
+  detailed in Section IX. Core recording and replay are implemented:
+  passthrough spy recordings are persisted as versioned JSON fixtures and
+  replayed in later runs. Scrubbing utilities and the CLI tool remain planned
+  under roadmap §12.3.1 and §12.5 respectively.
 
 - **Shell Function Mocking:** The current design explicitly excludes the mocking
   of shell functions defined within a script, a notoriously difficult problem.
@@ -2279,7 +2282,10 @@ sequenceDiagram
     RealCommand-->>Passthrough: stdout, stderr, exit_code
     Passthrough-->>CommandDouble: result
     Passthrough->>RecordingSession: record(invocation, response)
-    RecordingSession->>RecordingSession: scrub + env_subset
+    RecordingSession->>RecordingSession: env_subset
+    opt scrubber is not None
+        RecordingSession->>RecordingSession: scrub
+    end
     RecordingSession->>FixtureStore: append_recording()
     CommandDouble-->>TestCode: response
 
@@ -2437,13 +2443,22 @@ from:
    `DOCKER_*`), or, for `go`, the documented exact names such as `GOPATH` and
    `GOFLAGS`
 3. Variables specified in a configurable allowlist
+4. For a command with no configured prefix or exact-name set, every key that
+   is not excluded by another rule
 
 `filter_env_subset()` accepts `explicit_keys` and `allowlist`, and applies
 their union with one precedence. The recording session currently forwards only
 its allowlist, so `.with_env()` keys do not automatically widen recordings;
 that wiring is tracked in issue #368.
 
+The last rule is permissive: an unrecognized command records every non-excluded
+key, so a fixture can retain values that no prefix or allowlist selected. The
+sensitive-key classifier is a name-based heuristic, so review fixtures before
+committing or sharing them.
+
 ### 9.4 Module Structure
+
+**Status:** Implemented, except `cli.py`, which is planned (roadmap §12.5).
 
 Record Mode introduces a new subpackage within `cmd_mox`:
 
@@ -2451,12 +2466,17 @@ Record Mode introduces a new subpackage within `cmd_mox`:
 cmd_mox/
     record/
         __init__.py      # Public API exports
-        session.py       # RecordingSession, ReplaySession
+        env_filter.py    # filter_env_subset
         fixture.py       # FixtureFile, FixtureMetadata, RecordedInvocation
-        scrubber.py      # Scrubber, ScrubbingRule
         matching.py      # InvocationMatcher for replay
-        cli.py           # CLI tool: cmdmox record/replay/generate-test
+        replay.py        # ReplaySession
+        scrubber.py      # Scrubber protocol, ScrubbingRule, ScrubbingRuleDict
+        session.py       # RecordingSession
+        cli.py           # CLI tool (planned, roadmap §12.5)
 ```
+
+The modules other than `cli.py` are implemented and exported from
+`cmd_mox.record`, not from the top-level `cmd_mox` package.
 
 ### 9.5 Core Classes
 
@@ -2603,8 +2623,13 @@ classDiagram
 
 #### 9.5.4 Scrubber
 
-The `Scrubber` class sanitizes sensitive data from recordings before
-persistence:
+**Status:** The `Scrubber` protocol and the `ScrubbingRule` dataclass are
+implemented. The concrete rule-based `Scrubber`, its `add_rule()` method, and
+the default secret patterns are planned (roadmap §12.3.1).
+
+The `Scrubber` protocol defines the interface for sanitizing sensitive data
+from recordings before persistence. The class diagram below shows the planned
+concrete implementation:
 
 ```mermaid
 classDiagram
@@ -2625,7 +2650,7 @@ classDiagram
     Scrubber *-- ScrubbingRule
 ```
 
-Default scrubbing rules detect and redact:
+When implemented, the default scrubbing rules will detect and redact:
 
 - GitHub personal access tokens (`ghp_*`, `gho_*`, `ghu_*`, `ghs_*`, `ghr_*`)
 - AWS access key IDs (`AKIA*`)
@@ -2780,13 +2805,17 @@ classDiagram
 
 #### 9.6.1 Fluent API
 
+**Status:** `.passthrough().record()` and `.replay(path, strict=...)` are
+implemented. The `Scrubber()` and `add_rule()` custom-rules example is planned
+(roadmap §12.3.1).
+
 The `CommandDouble` class gains two new methods for recording and replay:
 
 ```python
 # Recording passthrough interactions to a fixture
 spy = cmd_mox.spy("git").passthrough().record("fixtures/git_clone.json")
 
-# Recording with custom scrubbing rules
+# Recording with custom scrubbing rules (planned, roadmap §12.3.1)
 scrubber = Scrubber()
 scrubber.add_rule(ScrubbingRule(
     pattern=r"--token=\S+",
@@ -2806,24 +2835,34 @@ spy = cmd_mox.spy("git").replay("fixtures/git_clone.json")
 spy = cmd_mox.spy("git").replay("fixtures/git_clone.json", strict=False)
 ```
 
+Until the concrete scrubber lands, supply any object that implements
+`scrub(recording) -> RecordedInvocation`; see the usage guide's
+[recording section](./usage-guide.md#automatic-recording-with-record).
+
 #### 9.6.2 Table 3: Record Mode API Methods
+
+**Status:** `.record()`, `.replay()`, and `ScrubbingRule` are implemented.
+`Scrubber()` and `add_rule()` are planned (roadmap §12.3.1).
 
 <!-- markdownlint-disable MD013 -->
 
-| Method                                      | Purpose                                    | Example                                           |
-| ------------------------------------------- | ------------------------------------------ | ------------------------------------------------- |
-| `.record(path, *, scrubber, env_allowlist)` | Enable recording on passthrough spy        | `.record("fixtures/git.json")`                    |
-| `.replay(path, *, strict)`                  | Load fixture and replay responses on a spy | `.replay("fixtures/git.json")`                    |
-| `Scrubber()`                                | Create scrubber with default rules         | `Scrubber()`                                      |
-| `Scrubber.add_rule(rule)`                   | Add custom scrubbing rule                  | `scrubber.add_rule(rule)`                         |
-| `ScrubbingRule(pattern, replacement)`       | Define a scrubbing pattern                 | `ScrubbingRule(r"token=\S+", "token=<REDACTED>")` |
+| Method                                      | Purpose                                    | Example                                           | Status                    |
+| ------------------------------------------- | ------------------------------------------ | ------------------------------------------------- | ------------------------- |
+| `.record(path, *, scrubber, env_allowlist)` | Enable recording on passthrough spy        | `.record("fixtures/git.json")`                    | Implemented               |
+| `.replay(path, *, strict)`                  | Load fixture and replay responses on a spy | `.replay("fixtures/git.json")`                    | Implemented               |
+| `Scrubber()`                                | Create scrubber with default rules         | `Scrubber()`                                      | Planned (roadmap §12.3.1) |
+| `Scrubber.add_rule(rule)`                   | Add custom scrubbing rule                  | `scrubber.add_rule(rule)`                         | Planned (roadmap §12.3.1) |
+| `ScrubbingRule(pattern, replacement)`       | Define a scrubbing pattern                 | `ScrubbingRule(r"token=\S+", "token=<REDACTED>")` | Implemented               |
 
 <!-- markdownlint-enable MD013 -->
 
 #### 9.6.3 Pytest Markers
 
-Record Mode integrates with pytest through markers for automatic fixture
-management:
+**Status:** Planned (roadmap §12.4.1–§12.4.2). The plugin currently registers
+only the `cmd_mox` lifecycle marker and the `cmd_mox` fixture.
+
+Record Mode is designed to integrate with pytest through markers for automatic
+fixture management:
 
 ```python
 # Automatically record to fixtures/<test_name>_<command>.json
@@ -2842,6 +2881,10 @@ def test_git_operations(cmd_mox):
 ```
 
 #### 9.6.4 Context Manager Interface
+
+**Status:** `RecordingContext` and `ReplayContext` are planned. No dedicated
+roadmap item exists; roadmap §12.4 is the related pytest-integration work. The
+`with CmdMox()` context manager is implemented.
 
 For explicit control or use outside pytest:
 
@@ -2870,7 +2913,11 @@ with cmd_mox.CmdMox() as mox:
 
 ### 9.7 CLI Tool
 
-Record Mode includes a command-line interface for recording, replaying, and
+**Status:** Planned (roadmap §12.5.1–§12.5.5): `record` (§12.5.1), `replay`
+(§12.5.2), `generate-test` (§12.5.3), `scrub` (§12.5.4), and `validate`
+(§12.5.5). No `[project.scripts]` entry exists yet.
+
+Record Mode will include a command-line interface for recording, replaying, and
 managing fixtures:
 
 ```bash
@@ -3046,6 +3093,11 @@ rather than relying on `.replay()`.
 
 #### 9.9.1 Default Scrubbing Patterns
 
+**Status:** Planned (roadmap §12.3.1). No default scrubbing is applied today.
+
+The table below describes the default patterns that the planned concrete
+`Scrubber` will apply.
+
 <!-- markdownlint-disable MD013 -->
 
 | Pattern          | Example                           | Replacement                          |
@@ -3058,6 +3110,13 @@ rather than relying on `.replay()`.
 | Database URLs    | `postgres://user:pass@host/db`    | `postgres://user:<REDACTED>@host/db` |
 
 <!-- markdownlint-enable MD013 -->
+
+**Security caveat:** Recordings are not scrubbed by default. The default is
+`scrubber=None`, so arguments, stdin, stdout, and stderr are stored raw unless
+the caller supplies a scrubber. Fixtures contain `scrubbing_rules=[]`.
+Environment filtering checks key names only, and an allowlist can add sensitive
+keys. Diagnostic masking does not sanitize fixtures. Review fixtures before
+committing or sharing them.
 
 #### 9.9.2 Environment Variable Filtering
 
@@ -3076,6 +3135,8 @@ rather than relying on `.replay()`.
 - Variables on the user-defined allowlist
 - Variables matching command-specific prefixes (e.g., `GIT_*` for git), or,
   for `go`, the documented exact names such as `GOPATH` and `GOFLAGS`
+- For a command with no configured prefix or exact-name set, every key not
+  excluded above
 
 **Included when requested**:
 
@@ -3086,6 +3147,11 @@ rather than relying on `.replay()`.
 their union with one precedence. The recording session currently forwards only
 its allowlist, so `.with_env()` keys do not automatically widen recordings;
 that wiring is tracked in issue #368.
+
+The last default rule is permissive: an unrecognized command records every
+non-excluded key, so a fixture can retain values that no prefix or allowlist
+selected. The sensitive-key classifier is a name-based heuristic, so review
+fixtures before committing or sharing them.
 
 #### 9.9.3 Command argument diagnostics
 
@@ -3162,7 +3228,10 @@ Known exposures remain out of scope here and need their own design decisions:
 
 #### 9.9.5 Review workflow
 
-For sensitive fixtures, a review mode generates a companion file for manual
+**Status:** Planned (roadmap §12.3.4), including `review_mode=True`, `.review`
+files, CLI warnings, and the `review_acknowledged` field.
+
+For sensitive fixtures, a review mode will generate a companion file for manual
 verification:
 
 ```python
@@ -3282,8 +3351,8 @@ method
 
 - Protocols enable structural subtyping without requiring inheritance
 - Any object with a matching `scrub()` method satisfies the type constraint
-- Keeps the XII-A recording MVP independent of the XII-C scrubbing
-  implementation
+- Keeps the 12.1 recording MVP independent of the roadmap item 12.3.1
+  scrubbing implementation
 
 #### 9.10.7 Version Detection via importlib.metadata
 
@@ -3563,6 +3632,9 @@ class FixtureFile:
 ```
 
 ### 9.12 Class Relationships Summary
+
+The concrete `Scrubber` with `_rules` and `add_rule()` shown below is planned
+(roadmap §12.3.1); the current `Scrubber` is a protocol, as shown in §9.5.6.
 
 ```mermaid
 classDiagram
