@@ -105,12 +105,24 @@ skip_if_unsupported()
 ```
 
 `skip_if_unsupported` defers to `pytest.skip` on unsupported platforms.
-`cmd_mox.is_supported()` returns a boolean for a gated code path. Advanced
-tests can override the detected platform by setting the
-`CMD_MOX_PLATFORM_OVERRIDE` environment variable (also exported as
-`PLATFORM_OVERRIDE_ENV`), which is primarily useful for simulating alternative
-environments inside CI pipelines (for example to exercise Windows-specific
-shims from a Linux runner).
+`cmd_mox.is_supported()` returns a boolean for a gated code path. The
+host-classification table is currently empty, so every recognized host is
+reported as supported. The helpers classify hosts; they do not probe runtime
+capabilities.
+
+The `CMD_MOX_PLATFORM_OVERRIDE` environment variable (also exported as
+`PLATFORM_OVERRIDE_ENV`) and the helpers' `platform` argument are deprecated.
+They change only support classification. They never selected shim generation or
+the IPC transport: `IS_WINDOWS`, derived from `os.name`, makes those choices.
+Both inputs still work, but each emits a `DeprecationWarning` and will be
+removed in a future release. See
+[design decision 8.13](./python-native-command-mocking-design.md#813-design-decisions-for-the-platform-override).
+
+To test an unsupported host, monkeypatch
+`cmd_mox.platform._UNSUPPORTED_PLATFORMS` with a `(prefix, reason)` entry, or
+patch the helper under test. To inspect Windows launchers on another host
+without executing them, patch `cmd_mox._path_utils.IS_WINDOWS`; the unit tests
+use that approach.
 
 The cmd-mox test suite also uses the `pytest.mark.requires_unix_sockets` marker
 for scenarios that need to bind a Unix domain socket. Marking these tests keeps
@@ -1312,11 +1324,19 @@ supported surface area without navigating modules.
 
 ### Platform helpers
 
-- `is_supported` – return `True` when cmd-mox supports the platform.
-- `skip_if_unsupported` – `pytest.skip()` on unsupported platforms.
-- `unsupported_reason` – return a human-readable reason when unsupported.
-- `PLATFORM_OVERRIDE_ENV` – name of the platform override env var
-  (`CMD_MOX_PLATFORM_OVERRIDE`).
+- `is_supported` – return `True` when cmd-mox classifies the platform as
+  supported. Its `platform` argument is deprecated.
+- `skip_if_unsupported` – `pytest.skip()` on classified-unsupported platforms.
+  Its `platform` argument is deprecated.
+- `unsupported_reason` – return a human-readable reason when unsupported. Its
+  `platform` argument is deprecated.
+- `PLATFORM_OVERRIDE_ENV` – deprecated name of the platform override env var
+  (`CMD_MOX_PLATFORM_OVERRIDE`). It affects classification only, never shim
+  generation or IPC transport selection.
+
+See
+[design decision 8.13](./python-native-command-mocking-design.md#813-design-decisions-for-the-platform-override)
+for the rationale and migration path.
 
 ### Exceptions
 
