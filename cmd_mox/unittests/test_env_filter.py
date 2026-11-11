@@ -555,14 +555,13 @@ class TestFilterEnvSubset:
             f"{command} should retain {retained} and drop the other keys"
         )
 
-    def test_unknown_command_uses_permissive_fallback(self) -> None:
-        """An unrecognized command keeps every non-excluded key."""
+    def test_unknown_command_drops_unrequested_keys(self) -> None:
+        """An unrecognized command keeps only allowlisted or requested keys."""
         env = {"GIT_DIR": "x", "APP_MODE": "y", "PATH": "/usr/bin"}
 
-        assert filter_env_subset(env, command="unknown-command") == {
-            "GIT_DIR": "x",
-            "APP_MODE": "y",
-        }, "unknown commands should keep every non-excluded key"
+        assert filter_env_subset(env, command="unknown-command") == {}, (
+            "unknown commands should drop every unrequested key"
+        )
 
 
 _UNKNOWN_COMMANDS = st.sampled_from([
