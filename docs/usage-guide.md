@@ -527,9 +527,16 @@ fixture = session.finalize()                 # Persist and return FixtureFile
 Recordings capture only a safe, portable subset of environment variables:
 
 - **Excluded by default:** `PATH`, `HOME`, `USER`, `SHELL`, `SSH_AUTH_SOCK`,
-  `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and keys
-  matching sensitive patterns (`*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_PASS`,
-  `*_PASSPHRASE`, `*_PWD`, `*_KEY`, `*_CREDENTIALS`, `*_AUTH_CONFIG`).
+  `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and
+  sensitive keys. A key is sensitive when it contains `SECRET`, `TOKEN`,
+  `API_KEY`, or `PASSWORD` anywhere, regardless of case. It is also sensitive
+  when a segment starting at the key's beginning, after `_`, or after `-` is
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE`, `PASS`, `PWD`,
+  `CREDENTIAL`, or `CREDENTIALS`, optionally with an `API` prefix, or is
+  `AUTH_CONFIG` or `AUTHENTICATION_CONFIG`. That segment must end at `_`, `-`,
+  `=`, `:`, a digit, or the end of the key. So `TOKENIZER_MODE` is excluded by
+  the substring rule, while `GITHUB_KEY` and `DOCKER_AUTH_CONFIG` are excluded
+  by the segment rule.
 - **Included by default:** command-specific prefix keys (e.g., `GIT_*` for
   git, `AWS_*` for aws). `go` is the exception: it uses an exact list of
   documented Go variables (`GOPATH`, `GOFLAGS`, `GOOS`, and so on) because a

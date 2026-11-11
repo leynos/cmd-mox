@@ -169,7 +169,9 @@ class TestFilterEnvSubset:
             explicit_keys=explicit_keys,
         )
 
-        assert result == {"DOCKER_AUTH_CONFIG": raw}
+        assert result == {"DOCKER_AUTH_CONFIG": raw}, (
+            "a requested sensitive key should be persisted raw"
+        )
 
     def test_excludes_system_keys(self) -> None:
         """System-specific keys are excluded."""
@@ -328,14 +330,18 @@ class TestFilterEnvSubset:
             case.sensitive: "drop",
         }
 
-        assert filter_env_subset(env, command=case.command) == {case.retained: "keep"}
+        assert filter_env_subset(env, command=case.command) == {
+            case.retained: "keep"
+        }, f"{case.command} rule should retain only {case.retained}"
 
     def test_command_table_covers_every_recognised_command(self) -> None:
         """The table names exactly the commands the filter recognizes."""
         table_commands = {case.command for case in _COMMAND_ENV_TABLE}
         recognised = set(COMMAND_ENV_PREFIXES) | set(COMMAND_ENV_KEYS)
 
-        assert table_commands == recognised
+        assert table_commands == recognised, (
+            "the table should name every recognized command"
+        )
 
     @pytest.mark.parametrize(
         ("command", "retained", "dropped"),
@@ -353,7 +359,9 @@ class TestFilterEnvSubset:
         """Command names are normalized before their rule is selected."""
         env = {retained: "keep", dropped: "drop"}
 
-        assert filter_env_subset(env, command=command) == {retained: "keep"}
+        assert filter_env_subset(env, command=command) == {retained: "keep"}, (
+            f"{command} should retain {retained} and drop the other keys"
+        )
 
     def test_go_retains_only_documented_variables(self) -> None:
         """Go's exact-name rule keeps documented names and drops lookalikes."""
@@ -376,13 +384,17 @@ class TestFilterEnvSubset:
 
         result = filter_env_subset(env, command="go")
 
-        assert result == dict.fromkeys(retained, "keep")
+        assert result == dict.fromkeys(retained, "keep"), (
+            f"go should retain {sorted(retained)} and drop the lookalikes"
+        )
 
     def test_go_does_not_record_google_cloud_project(self) -> None:
         """The issue #432 regression: ``GO`` must not match ``GOOGLE_*``."""
         env = {"GOOGLE_CLOUD_PROJECT": "x", "GOPATH": "y"}
 
-        assert filter_env_subset(env, command="go") == {"GOPATH": "y"}
+        assert filter_env_subset(env, command="go") == {"GOPATH": "y"}, (
+            "the go rule must not match GOOGLE_* names"
+        )
 
     @pytest.mark.parametrize(
         ("allowlist", "explicit_keys", "key"),
@@ -415,7 +427,7 @@ class TestFilterEnvSubset:
             explicit_keys=explicit_keys,
         )
 
-        assert result == {key: "x"}
+        assert result == {key: "x"}, f"{key} should be re-admitted when requested"
 
     def test_go_exact_names_are_not_sensitive(self) -> None:
         """Every documented Go variable survives the sensitivity classifier."""
@@ -430,7 +442,7 @@ class TestFilterEnvSubset:
         assert filter_env_subset(env, command="unknown-command") == {
             "GIT_DIR": "x",
             "APP_MODE": "y",
-        }
+        }, "unknown commands should keep every non-excluded key"
 
 
 @pytest.mark.parametrize("command", _ALL_COMMANDS)
@@ -522,4 +534,6 @@ def test_allowlist_and_explicit_keys_are_equivalent_when_unioned(
         explicit_keys=allowlist + explicit_keys,
     )
 
-    assert separate == as_allowlist == as_explicit
+    assert separate == as_allowlist == as_explicit, (
+        "the two override keywords should be equivalent to their union"
+    )
