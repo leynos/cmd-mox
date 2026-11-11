@@ -149,10 +149,11 @@ def test_completion_during_verification_counts_once(
         assert completed, "the interleaving did not run"
 
 
-def test_expired_passthrough_call_still_counts(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("count", [0, 1])
+def test_expired_passthrough_call_counts_after_pruning(
+    count: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A passthrough call that expired before verification still counts."""
+    """An expired call still counts after its pending entry is pruned."""
 
     class _Clock:
         """Frozen monotonic clock for the passthrough coordinator."""
@@ -166,13 +167,32 @@ def test_expired_passthrough_call_still_counts(
 
     monkeypatch.setattr("cmd_mox.passthrough.time", _Clock)
     with CmdMox() as mox:
-        spy = mox.spy("echo").times(1).passthrough()
+        spy = mox.spy("echo").times(count).passthrough()
         mox.replay()
         invocation = Invocation(command="echo", args=["hi"], stdin="", env={})
-        mox._prepare_passthrough(spy, invocation)
-        _Clock.now += 10_000.0
+        response = mox._prepare_passthrough(spy, invocation)
+        directive = response.passthrough
+        assert directive is not None
 
-        mox.verify()
+        _Clock.now += 10_000.0
+        # The late result prunes the expired pending entry and is rejected.
+        with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
+            mox._handle_passthrough_result(
+                PassthroughResult(
+                    invocation_id=directive.invocation_id,
+                    stdout="out",
+                    stderr="",
+                    exit_code=0,
+                )
+            )
+
+        if count == 0:
+            with pytest.raises(
+                UnexpectedCommandError, match="Unexpected additional invocation"
+            ):
+                mox.verify()
+        else:
+            mox.verify()
 
 
 def test_handle_passthrough_result_rejects_unknown_invocation() -> None:

@@ -93,10 +93,10 @@ def test_unrecorded_invocations_are_scoped_to_the_double() -> None:
     assert _unrecorded_commands(coordinator, first) == []
 
 
-def test_expired_invocation_stays_unrecorded(
+def test_expired_invocation_stays_unrecorded_after_pruning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An expired passthrough call still counts as unrecorded."""
+    """Pruning a pending entry leaves the expired call countable."""
     now = 100.0
 
     def fake_monotonic() -> float:
@@ -107,9 +107,22 @@ def test_expired_invocation_stays_unrecorded(
     coordinator = PassthroughCoordinator(cleanup_ttl=5.0)
     double = typ.cast("CommandDouble", _FakeDouble({}))
     config = PassthroughConfig(lookup_path="/bin", timeout=1.0)
-    coordinator.prepare_request(double, _make_invocation("slow"), config)
+    response = coordinator.prepare_request(double, _make_invocation("slow"), config)
+    directive = response.passthrough
+    assert directive is not None
 
     now += 10.0
+    # A normal coordinator access prunes the expired pending entry, and the
+    # late result is rejected. The call must still count as unrecorded.
+    with pytest.raises(RuntimeError, match="Unexpected passthrough result"):
+        coordinator.finalize_result(
+            PassthroughResult(
+                invocation_id=directive.invocation_id,
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        )
 
     assert _unrecorded_commands(coordinator, double) == ["slow"]
 

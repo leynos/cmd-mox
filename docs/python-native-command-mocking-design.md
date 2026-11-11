@@ -1441,7 +1441,8 @@ The verification algorithm will perform several critical checks:
    spy's default count of one must still match the journal exactly. Because
    verification runs before the IPC server stops, the count check also includes
    passthrough spy calls that are still in flight, so a call that has started
-   but not yet reported its result cannot satisfy or evade an explicit count.
+   but not yet reported its result still counts: it can satisfy a positive
+   count and can also cause an excess-count failure.
 
 4. **Order Violations:** For expectations marked with `.in_order()`, the
    verifier ensures that they were met in the same sequence in which they were
@@ -2097,10 +2098,11 @@ double each call was dispatched to, so mutating the public journal, including
 its order or its entries, cannot change verification, and a double registered
 after a call cannot retroactively claim it. `UnexpectedCommandVerifier` and
 `CountVerifier` therefore use the dispatch-time association: a call made
-without a double is unexpected, and only calls dispatched to a mock count
-towards its expectation. Verification takes one snapshot of that record under
-the lock, so evicting a diagnostic journal entry never weakens verification. An
-unbounded journal retains every call, which keeps calls that completed before
+without a double is unexpected, and only calls dispatched to an expectation
+that count verification covers (a mock, or a spy with an explicit count) count
+towards it. Verification takes one snapshot of that record under the lock, so
+evicting a diagnostic journal entry never weakens verification. An unbounded
+journal retains every call, which keeps calls that completed before
 `in_order()` was applied available to `OrderVerifier`. A bounded controller
 discards unordered stub calls, so it rejects `in_order()` applied after a
 stub's first call with `ExpectationConfigurationError`.

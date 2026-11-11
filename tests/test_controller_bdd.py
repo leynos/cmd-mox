@@ -257,6 +257,15 @@ def test_passthrough_spy() -> None:
 
 
 @scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "explicitly counted passthrough spy is satisfied by a real call",
+)
+def test_counted_passthrough_spy() -> None:
+    """An explicit count is satisfied by a real passthrough call."""
+    pass
+
+
+@scenario(
     str(FEATURES_DIR / "controller.feature"), "passthrough spy handles missing command"
 )
 def test_passthrough_spy_missing_command() -> None:
