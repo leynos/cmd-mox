@@ -2440,7 +2440,8 @@ compatibility with the established invocation-field schema.
     {
       "pattern": "\\b[A-Za-z0-9]{40}\\b",
       "replacement": "<GITHUB_TOKEN>",
-      "applied_to": ["env", "stdout", "stderr"]
+      "applied_to": ["env", "stdout", "stderr"],
+      "description": "Redacts GitHub personal access tokens"
     }
   ]
 }
@@ -2450,25 +2451,33 @@ compatibility with the established invocation-field schema.
 
 #### 9.3.2 Field Definitions
 
-| Field                      | Type    | Description                              |
-| -------------------------- | ------- | ---------------------------------------- |
-| `version`                  | string  | Schema version for forward compatibility |
-| `metadata.created_at`      | ISO8601 | Fixture creation timestamp               |
-| `metadata.cmdmox_version`  | string  | CmdMox version used for recording        |
-| `metadata.platform`        | string  | OS platform (linux/darwin/win32)         |
-| `metadata.test_module`     | string  | Optional: originating test file          |
-| `metadata.test_function`   | string  | Optional: originating test function      |
-| `recordings[].sequence`    | int     | Invocation order within session          |
-| `recordings[].command`     | string  | Command name                             |
-| `recordings[].args`        | list    | Command arguments                        |
-| `recordings[].stdin`       | string  | Standard input content                   |
-| `recordings[].env_subset`  | dict    | Relevant environment variables           |
-| `recordings[].stdout`      | string  | Captured standard output                 |
-| `recordings[].stderr`      | string  | Captured standard error                  |
-| `recordings[].exit_code`   | int     | Process exit code                        |
-| `recordings[].timestamp`   | ISO8601 | When invocation occurred                 |
-| `recordings[].duration_ms` | int     | Real execution time                      |
-| `scrubbing_rules`          | list    | Applied sanitization rules               |
+| Field                           | Type    | Description                                 |
+| ------------------------------- | ------- | ------------------------------------------- |
+| `$schema`                       | string  | Optional schema identifier; ignored on load |
+| `version`                       | string  | Schema version for forward compatibility    |
+| `metadata.created_at`           | ISO8601 | Fixture creation timestamp                  |
+| `metadata.cmdmox_version`       | string  | CmdMox version used for recording           |
+| `metadata.platform`             | string  | OS platform (linux/darwin/win32)            |
+| `metadata.python_version`       | string  | Python runtime version used for recording   |
+| `metadata.test_module`          | string  | Optional: originating test file             |
+| `metadata.test_function`        | string  | Optional: originating test function         |
+| `recordings[].sequence`         | int     | Invocation order within session             |
+| `recordings[].command`          | string  | Command name                                |
+| `recordings[].args`             | list    | Command arguments                           |
+| `recordings[].stdin`            | string  | Standard input content                      |
+| `recordings[].env_subset`       | dict    | Relevant environment variables              |
+| `recordings[].stdout`           | string  | Captured standard output                    |
+| `recordings[].stderr`           | string  | Captured standard error                     |
+| `recordings[].exit_code`        | int     | Process exit code                           |
+| `recordings[].timestamp`        | ISO8601 | When invocation occurred                    |
+| `recordings[].duration_ms`      | int     | Real execution time                         |
+| `scrubbing_rules`               | list    | Applied sanitization rules                  |
+| `scrubbing_rules[].pattern`     | string  | Regex pattern to redact                     |
+| `scrubbing_rules[].replacement` | string  | Replacement text for matches                |
+| `scrubbing_rules[].applied_to`  | list    | Recording fields the rule applies to        |
+| `scrubbing_rules[].description` | string  | Optional: human-readable rule description   |
+
+_Table: Fixture schema field definitions._
 
 #### 9.3.3 Environment Variable Subset Strategy
 
@@ -2495,6 +2504,58 @@ The last rule is permissive: an unrecognized command records every non-excluded
 key, so a fixture can retain values that no prefix or allowlist selected. The
 sensitive-key classifier is a name-based heuristic, so review fixtures before
 committing or sharing them.
+
+#### 9.3.4 Fixture validation policy
+
+The loader validates the 1.0.0 schema strictly instead of coercing values. A
+key emitted by the 1.0.0 writer is required unless it is one of three optional,
+nullable keys: `metadata.test_module`, `metadata.test_function` and
+`scrubbing_rules[].description`. The two metadata keys become `None` when
+absent or null. A missing or null rule description becomes the empty string and
+reserializes as `null`.
+
+`version` is a separate exception: a fixture that omits it is treated as a
+legacy `0.0.0` document and migrated forward, so the key is not required. An
+explicit non-string `version` is still rejected.
+
+Types are checked rather than converted:
+
+- Integers (`sequence`, `exit_code`, `duration_ms`) must be JSON integers.
+  Booleans and fractional numbers are rejected.
+- `args` and `scrubbing_rules[].applied_to` must be arrays of strings.
+- `env_subset` must be an object whose keys and values are strings.
+- All other required fields must be strings, arrays or objects as appropriate
+  for the schema.
+
+Unknown keys at any level are ignored, so fixtures written by a later minor
+version still load. `$schema` is one such ignored key.
+
+Field-validation failures raise `ValueError` in one of two forms, where
+`<path>` uses dotted keys and indexed list positions such as
+`recordings[0].stdout`:
+
+```plaintext
+Invalid fixture schema: missing required field '<path>'
+Invalid fixture schema: <path>: expected <kind>, got <type name>
+```
+
+Version syntax and migration failures keep their existing distinct messages,
+such as `Invalid schema version ...` and
+`Unsupported fixture schema version …`; a non-string `version` field uses the
+field-validation form above.
+
+The loader validates types only. It does not parse timestamp formats,
+range-check integers, compile scrubbing patterns, or require `$schema`.
+
+**Migration note.** Older fixtures must include every required key the 1.0.0
+writer emits, apart from `version` (which may be omitted and is then treated as
+legacy `0.0.0`) and the three optional fields listed above. In particular,
+`recordings`, `scrubbing_rules`, `scrubbing_rules[].applied_to`, and the
+invocation fields `stdin`, `env_subset`, `stdout`, `stderr`, `exit_code` and
+`duration_ms` are no longer defaulted or coerced. A fixture that omits one of
+them, or stores a value of the wrong type, fails to load with the path-aware
+errors above rather than replaying incorrect data. Rewrite such fixtures with
+the missing key before loading them.
 
 ### 9.4 Module Structure
 
@@ -2612,7 +2673,8 @@ classDiagram
 
 Key responsibilities:
 
-- Load and parse fixture files with schema validation
+- Load and parse fixture files with strict schema validation (see
+  [§9.3.4](#934-fixture-validation-policy))
 - Match incoming invocations to recorded entries
 - Track which recordings have been consumed
 - Verify all recordings were replayed during `verify()`

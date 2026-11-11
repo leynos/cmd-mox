@@ -91,6 +91,17 @@ fixtures continue to load in the new release and normalize to `1.0.0`; see the
 [fixture schema migration note](fixture-schema-migration-note.md) before
 upgrading shared fixture workflows.
 
+## Fixture schema validation
+
+Fixture loading validates every required field and reports the JSON path that
+failed, for example
+`Invalid fixture schema: recordings[0].stdout: expected str, got NoneType`.
+Malformed fixtures now fail to load instead of being silently coerced. Three
+fields are optional, and a missing `version` is still accepted as a legacy
+document. See the
+[fixture schema validation rules](usage-guide.md#fixture-schema-validation) for
+the complete policy and the migration note for the changes to existing fixtures.
+
 ## IPC payload migration
 
 The domain classes no longer provide the previous IPC conversion methods.

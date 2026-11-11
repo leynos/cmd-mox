@@ -62,6 +62,29 @@ with `ValueError`. See the
 the
 [detailed versioning design](python-native-command-mocking-design.md#911-versioning-and-forward-compatibility).
 
+### Fixture schema validation helpers
+
+`cmd_mox/record/_schema.py` owns the shared strict-validation helpers used by
+the fixture models. It depends only on the standard library, so importing it
+cannot create a cycle through `fixture.py` or `scrubber.py`. The models keep
+their `from_dict()` constructors: each calls the helpers with its own schema
+path and converts the JSON-compatible mapping into the dataclass.
+
+Every message starts with `SCHEMA_ERROR_PREFIX` (`Invalid fixture schema`), and
+nested failures name the full path, such as `recordings[0].args[1]` or
+`scrubbing_rules[0].applied_to`. `_require_str`, `_require_int`,
+`_require_list`, and `_require_mapping` cover scalar and container fields.
+`_require_str_list` reports the offending list index, and
+`_require_str_mapping` reports the offending key or value. `_optional_str`
+accepts an absent key or `null`. `_parse_indexed` applies a model's
+`from_dict()` to each object in a schema list while preserving the indexed path.
+
+Validation belongs to deserialization rather than to the dataclass
+constructors: direct construction keeps accepting typed Python values, while
+`FixtureFile.from_dict()` enforces the JSON schema. See the
+[fixture validation policy](python-native-command-mocking-design.md#934-fixture-validation-policy)
+for the complete field rules.
+
 ## Diagnostic environment masking
 
 `cmd_mox.domain` owns both halves of diagnostic masking. The shared

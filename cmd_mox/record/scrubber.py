@@ -10,7 +10,11 @@ from __future__ import annotations
 import dataclasses as dc
 import typing as typ
 
+from ._schema import _optional_str, _require_object, _require_str, _require_str_list
+
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
     from .fixture import RecordedInvocation
 
 
@@ -50,24 +54,34 @@ class ScrubbingRule:
         )
 
     @classmethod
-    def from_dict(cls, data: ScrubbingRuleDict) -> ScrubbingRule:
+    def from_dict(
+        cls, data: cabc.Mapping[str, object], *, path: str = ""
+    ) -> ScrubbingRule:
         """Construct a rule from a JSON-compatible mapping.
 
         Parameters
         ----------
-        data : ScrubbingRuleDict
+        data : collections.abc.Mapping[str, object]
             Serialized scrubbing rule fields.
+        path : str
+            Schema path used in validation errors.
 
         Returns
         -------
         ScrubbingRule
             Parsed scrubbing rule.
-        """
+
+        Raises
+        ------
+        ValueError
+            If a required field is missing or has the wrong type.
+        """  # ruff: ignore[docstring-extraneous-exception] - _schema helpers raise this caller-visible error.
+        rule = _require_object(data, path)
         return cls(
-            pattern=str(data["pattern"]),
-            replacement=str(data["replacement"]),
-            applied_to=list(data.get("applied_to", ["env", "stdout", "stderr"])),
-            description=str(data.get("description") or ""),
+            pattern=_require_str(rule, "pattern", path=path),
+            replacement=_require_str(rule, "replacement", path=path),
+            applied_to=_require_str_list(rule, "applied_to", path=path),
+            description=_optional_str(rule, "description", path=path) or "",
         )
 
 
