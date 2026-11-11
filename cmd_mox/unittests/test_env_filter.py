@@ -510,6 +510,10 @@ class TestFilterEnvSubset:
             assert key not in result, f"{key} should be excluded even when in {label}"
         assert "GIT_AUTHOR_NAME" in result
 
+
+class TestFilterEnvSubsetCommandRules:
+    """Tests for command-specific filtering rules."""
+
     @pytest.mark.parametrize("case", _COMMAND_ENV_CASES)
     def test_command_rules_retain_only_their_own_keys(
         self, case: CommandEnvCase
