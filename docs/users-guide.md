@@ -7,6 +7,21 @@ For installation from PyPI, its source distribution and wheel, and the
 provenance bundle included with GitHub Releases, see
 [Getting started](usage-guide.md#getting-started).
 
+## Spy call counts
+
+A spy stays observational unless you set a count with `times(count)` or its
+`times_called(count)` alias; either call makes `verify()` enforce that the spy
+ran exactly that many times. An uncounted spy's total is not checked, except
+that `in_order()` expands the expectation to its count (one by default), so an
+ordered spy must still be invoked exactly that many times in sequence. The
+[usage guide](usage-guide.md#spies-and-passthrough-mode) covers the full
+behaviour.
+
+Earlier releases accepted these count setters on spies but did not enforce the
+total. A test that set a spy count and relied on it being ignored now fails
+verification: remove the count to keep the spy observational, or make the
+expected number of calls.
+
 ## Sensitive environment values in diagnostics
 
 Conflict errors from `UnexpectedCommandError`, verifier failures, and spy

@@ -118,6 +118,27 @@ records the rationale, and the
 [usage guide](usage-guide.md#environment-variable-filtering) describes the
 user-visible rules.
 
+## Spy count verification
+
+`Expectation.count_explicit` records whether a caller set a count through
+`times()` or its `times_called()` alias. The field is excluded from equality and
+`repr`, so it distinguishes an explicit `times(1)` from the implicit default
+without changing how expectations compare or print.
+
+`CmdMox._run_verifiers()` builds the count-checked set from every mock plus
+every spy whose `count_explicit` is true, then passes it to `CountVerifier`.
+Uncounted spies stay observational: their totals are reported through
+`spy.call_count` and the assertion helpers rather than failing verification.
+
+Ordering is a separate check. `OrderVerifier` does not consult
+`count_explicit`; it expands each ordered expectation to its `count` (one by
+default) and compares that sequence against the journal. An uncounted
+`in_order()` spy is therefore still held to one call in sequence, and an
+ordered stub is held to its count even though stubs do not record invocations
+on the double. The
+[design document](python-native-command-mocking-design.md#24-the-fluent-api-for-defining-expectations)
+records the full verification contract.
+
 ## Coverage ownership
 
 Pull-request CI generates coverage with the ratchet (`with-ratchet: 'true'`)

@@ -134,6 +134,35 @@ Feature: CmdMox basic functionality
     And the spy "hi" should have been called with arguments "foo bar"
     And the spy "bye" should not have been called
 
+  Scenario: spy explicit call count is verified
+    Given a CmdMox controller
+    And the command "hi" is spied to return "hello" times 2
+    When I replay the controller
+    And I run the command "hi"
+    And I run the command "hi"
+    When I verify the controller
+    Then the spy "hi" should record 2 invocation
+
+  Scenario: spy explicit call count under-count fails verification
+    Given a CmdMox controller
+    And the command "hi" is spied to return "hello" times called 2
+    When I replay the controller
+    And I run the command "hi"
+    When I verify the controller expecting an UnfulfilledExpectationError
+    Then the verification error message should contain "Unfulfilled expectation."
+    And the verification error message should contain "expected calls=2"
+    And the verification error message should contain "Observed calls"
+
+  Scenario: spy explicit call count over-count fails verification
+    Given a CmdMox controller
+    And the command "hi" is spied to return "hello" times called 1
+    When I replay the controller
+    And I run the command "hi"
+    And I run the command "hi"
+    When I verify the controller expecting an UnexpectedCommandError
+    Then the verification error message should contain "Unexpected additional invocation."
+    And the verification error message should contain "expected calls=1"
+
   Scenario: journal preserves invocation order
     Given a CmdMox controller
     And the command "foo" is mocked to return "one" times 2

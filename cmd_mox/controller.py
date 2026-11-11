@@ -746,13 +746,21 @@ class CmdMox:
 
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""
-        expectations = {n: d.expectation for n, d in self.mocks.items()}
+        # Mocks always participate so their implicit default count of one keeps
+        # its meaning; spies join only when a count setter marked it explicit.
+        counted = {
+            name: double
+            for name, double in self._doubles.items()
+            if double.kind is DoubleKind.MOCK
+            or (double.kind is DoubleKind.SPY and double.expectation.count_explicit)
+        }
+        expectations = {name: double.expectation for name, double in counted.items()}
         with self._history_lock:
             verification_log = list(self._verification_log)
             dispatch_doubles = list(self._verification_doubles)
             ordered = list(self._ordered)
 
-        # Count only calls dispatched to the mock, and only from the immutable
+        # Count only calls dispatched to the double, and only from the immutable
         # snapshots, so journal mutation and late registration cannot count.
         dispatched = list(zip(verification_log, dispatch_doubles, strict=True))
         inv_map = {

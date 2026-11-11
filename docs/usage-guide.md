@@ -366,8 +366,15 @@ def test_spy(cmd_mox):
     assert spy.call_count == 1
 ```
 
-A spy expectation can also use `times_called(count)`—an alias of `times(count)`
-—to require a specific call count during verification.
+A spy stays observational unless you configure a count explicitly with
+`times(count)` or its spy-flavoured alias `times_called(count)`. Either call
+makes `verify()` enforce that the spy was invoked exactly that many times:
+fewer calls raise `UnfulfilledExpectationError`, and more calls raise
+`UnexpectedCommandError`. Without an explicit count the spy's total is not
+checked, so `spy.call_count` and the assertion helpers remain the way to check
+ad hoc expectations. Ordering is the exception: an `in_order()` spy is expanded
+to its count (one by default) by the order check, so it must be invoked exactly
+that many times in sequence even without `times()`.
 
 For multiple distinct calls to one command, use a handler that selects a
 response from `invocation.args`. The `spy.invocations` list preserves the call
@@ -1078,8 +1085,15 @@ few common ones are:
   cmd_mox.spy("tool").runs(handler)
   ```
 
-- `times(count)` – expect the command exactly `count` times.
+- `times(count)` – expect the command exactly `count` times. Verification
+  enforces the count for mocks and for spies that set it explicitly. A stub
+  does not record invocations, so the count check skips it; if the stub is also
+  `in_order()`, the order check still expands it to `count` calls and enforces
+  that total against the journal.
 - `times_called(count)` – alias for `times` that emphasizes spy call counts.
+  Configuring either method makes an otherwise observational spy's count
+  verified; an uncounted spy's total is not checked, except that `in_order()`
+  alone still enforces one call in sequence.
 
 - `in_order()` – enforce strict ordering with other expectations.
 - `any_order()` – allow the expectation to be satisfied in any position.
