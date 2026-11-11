@@ -47,7 +47,9 @@ cmd_mox.mock("git").with_matching_args("clone", Any()).returns(exit_code=0)
 Any other value is rejected with `ExpectationConfigurationError` when the
 expectation is configured. See
 [Argument matchers (comparators)](usage-guide.md#argument-matchers-comparators)
-for the available comparators and matching rules.
+for the available comparators and matching rules, and the
+[argument matcher migration note](with-matching-args-migration-note.md) for
+upgrading expectations that pass plain strings or invalid matcher values.
 
 ## Sensitive environment values in diagnostics
 

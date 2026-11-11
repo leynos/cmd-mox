@@ -237,9 +237,10 @@ Each comparator is a callable that returns `True` on match, and literal strings
 and comparators can be mixed freely. `with_matching_args` expects one matcher
 per element of `argv[1:]`; the program name at `argv[0]` is excluded. Passing
 any other value, such as an integer, raises `ExpectationConfigurationError`
-naming the zero-based position and the value's type. `with_stdin` accepts
-either an exact string or a predicate `Callable[[str], bool]` for flexible
-input checks.
+naming the zero-based position and the value's type.
+
+`with_stdin` accepts either an exact string or a predicate
+`Callable[[str], bool]` for flexible input checks.
 
 ### Argument matchers (comparators)
 

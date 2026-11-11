@@ -17,10 +17,12 @@ class ExpectationConfigurationError(CmdMoxError):
     Notes
     -----
     This occurs when ``with_args()`` or ``with_matching_args()`` is called
-    after an argument expectation has already been configured, or when
-    ``in_order()`` is applied after a bounded journal discarded the stub's
-    calls. Use ``cmd_mox.spy(name).runs(handler)`` to handle several calls to
-    one command. Sensitive option values are redacted from the error message.
+    after an argument expectation has already been configured, when
+    ``with_matching_args()`` receives a matcher that is neither a ``str`` nor
+    callable, or when ``in_order()`` is applied after a bounded journal
+    discarded the stub's calls. Use ``cmd_mox.spy(name).runs(handler)`` to
+    handle several calls to one command. Sensitive option values are redacted
+    from the error message.
     """
 
 

@@ -4,6 +4,9 @@
   behaviour.
 - [Usage Guide](./usage-guide.md): Mocking, stubbing, and spying on commands.
 - [Developer Guide](./developers-guide.md): Local checks and linting policy.
+- [Argument Matcher Migration Note](./with-matching-args-migration-note.md):
+  Prepare for literal string matching and configuration-time rejection of
+  invalid matchers in the next minor release.
 - [IPC Timeout Migration Note](./ipc-timeout-migration-note.md): Prepare for
   bounded shim stdin and IPC waits in the next minor release.
 - [IPC Payload Migration Note](./ipc-payload-migration-note.md): Replace

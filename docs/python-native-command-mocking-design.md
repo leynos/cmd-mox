@@ -2090,15 +2090,15 @@ Comparator helpers such as :class:`Any`, :class:`IsA`, :class:`Regex`, :class:
 `Contains`, :class:`StartsWith`, and :class:`Predicate` are implemented as
 simple callables. Each inherits a lightweight `_ReprMixin` so failing tests
 display meaningful values. `Expectation.with_matching_args` accepts a literal
-string or a callable of the form `Callable[[str], bool]` at each position and
-requires one matcher per positional argument. A literal string matches only an
-identical argument; a callable's result is interpreted as truthy. Any other
-value is rejected with `ExpectationConfigurationError` at configuration time.
-This keeps the matching engine agnostic to comparator implementations while
-enabling user-supplied predicates to participate alongside the built-ins.
-Regular expressions are compiled once per comparator and `IsA` relies on type
-conversion to avoid bespoke parsing logic. Comparator exceptions surface their
-class and message in mismatch reports.
+string or a callable with the signature `Callable[[str], bool]` at each
+position and requires one matcher per positional argument. A literal string
+matches only an identical argument; a callable's result is interpreted as
+truthy. Any other value is rejected with `ExpectationConfigurationError` at
+configuration time. This keeps the matching engine agnostic to comparator
+implementations while enabling user-supplied predicates to participate
+alongside the built-ins. Regular expressions are compiled once per comparator
+and `IsA` relies on type conversion to avoid bespoke parsing logic. Comparator
+exceptions surface their class and message in mismatch reports.
 
 ### 8.8 Design Decisions for the Invocation Journal
 
