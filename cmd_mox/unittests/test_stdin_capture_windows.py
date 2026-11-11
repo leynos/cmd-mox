@@ -120,6 +120,26 @@ def test_windows_handle_reads_until_broken_pipe() -> None:
     assert harness.cancelled == [], "a completed read must not be cancelled"
 
 
+def test_windows_handle_normalizes_newlines_across_chunk_boundaries() -> None:
+    r"""CRLF and lone CR split across chunks decode to LF through ``read_stdin``.
+
+    The Windows strategy translates newlines because ``TextIOWrapper`` does on
+    that platform. Splitting ``\\r\\n`` and a lone ``\\r`` across ``ReadFile``
+    chunks must not leak a carriage return into the captured text.
+    """
+    chunks = iter([b"first\r", b"\nsecond\rthird\r", b"\nfourth"])
+    harness = _Win32Harness(lambda _handle, _size: (0, next(chunks, b"")))
+    system = _windows_system(harness)
+
+    captured = capture.read_stdin(
+        _Stream(), 5.0, options=capture._CaptureOptions(clock=_Clock()), system=system
+    )
+
+    assert captured == "first\nsecond\nthird\nfourth", (
+        "the Windows strategy did not normalize newlines across chunk boundaries"
+    )
+
+
 def test_windows_handle_reports_unexpected_errors_as_oserror() -> None:
     """A non-broken-pipe ``pywintypes`` error reaches the caller as ``OSError``.
 

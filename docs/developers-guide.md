@@ -203,6 +203,16 @@ events. `read_stdin` accepts a `system` keyword that defaults to
 `SYSTEM_STDIN`, and `shim._InvocationDependencies` carries the same object as
 `stdin_system`, so an invocation can be exercised end to end with a double.
 
+`read_stdin` also accepts an `options` keyword carrying a `_CaptureOptions`
+value. It groups the two capture instrumentation seams that are not operating
+system operations: `clock`, the monotonic time source used to compute the
+deadline, and `on_selected`, an optional observer called with the chosen
+strategy before the read starts. Grouping them keeps `read_stdin` at four
+arguments while the `system` seam stays explicit. Tests that need a fake clock
+or a strategy observer pass
+`options=_CaptureOptions(clock=..., on_selected=...)`; production callers use
+the default.
+
 Tests should use the doubles in `cmd_mox/unittests/_stdin_capture_fakes.py`
 instead of patching `capture.os`, `capture.select`, `capture.threading`, or the
 Windows module seam. `_SystemDouble` delegates any unset operation to the
