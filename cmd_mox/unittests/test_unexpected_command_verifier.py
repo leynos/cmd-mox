@@ -67,7 +67,7 @@ def test_unregistered_command_reports_stdin_and_excludes_stubs() -> None:
         "\n"
         "Registered expectations:\n"
         "  'alpha', 'zeta'"
-    )
+    ), "an unknown command must show stdin and list only non-stub expectations"
 
 
 def test_unregistered_command_omits_stdin_when_empty() -> None:
@@ -86,7 +86,7 @@ def test_unregistered_command_omits_stdin_when_empty() -> None:
         "\n"
         "Registered expectations:\n"
         "  'deploy'"
-    )
+    ), "an empty stdin must be omitted from the actual-call section"
 
 
 def test_unregistered_command_reports_when_only_stubs_are_registered() -> None:
@@ -104,7 +104,7 @@ def test_unregistered_command_reports_when_only_stubs_are_registered() -> None:
         "\n"
         "Registered expectations:\n"
         "  (none: stubs are excluded from expected commands)"
-    )
+    ), "a registry of only stubs must explain the empty expectation list"
 
 
 def test_expectation_mismatch_reports_env_and_stdin() -> None:
@@ -141,7 +141,7 @@ def test_expectation_mismatch_reports_env_and_stdin() -> None:
         "\n"
         "Reason:\n"
         "  arguments ['--other'] != ['--flag']"
-    )
+    ), "a mismatch must show the expectation, the masked actual call, and the reason"
 
 
 def test_mock_overflow_reports_observed_count_and_last_call() -> None:
@@ -178,7 +178,7 @@ def test_mock_overflow_reports_observed_count_and_last_call() -> None:
         "  deploy('--flag')\n"
         "  stdin='payload'\n"
         "  env={'TOKEN': '***'}"
-    )
+    ), "mock overflow must report the observed count and the final call"
 
 
 def test_mock_accepts_calls_up_to_its_limit() -> None:
@@ -192,6 +192,13 @@ def test_mock_accepts_calls_up_to_its_limit() -> None:
 
     UnexpectedCommandVerifier().verify(invocations, doubles)
 
+    # Failure control: one call past the limit must still raise, proving the
+    # passing case above is not vacuous.
+    with pytest.raises(UnexpectedCommandError):
+        UnexpectedCommandVerifier().verify(
+            [*invocations, _invocation("deploy", "--flag")], doubles
+        )
+
 
 def test_spy_is_not_count_limited() -> None:
     """Spies record calls but are never rejected for exceeding a count."""
@@ -204,6 +211,12 @@ def test_spy_is_not_count_limited() -> None:
 
     UnexpectedCommandVerifier().verify(invocations, doubles)
 
+    # Failure control: the same over-budget calls must raise for a mock, so the
+    # spy exemption is the only reason this test passes.
+    mock_doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
+    with pytest.raises(UnexpectedCommandError):
+        UnexpectedCommandVerifier().verify(invocations, mock_doubles)
+
 
 def test_stub_is_skipped_even_when_its_expectation_does_not_match() -> None:
     """Stubs are not validated against their expectation."""
@@ -211,6 +224,14 @@ def test_stub_is_skipped_even_when_its_expectation_does_not_match() -> None:
     doubles = {"helper": _double("helper", DoubleKind.STUB, expectation)}
 
     UnexpectedCommandVerifier().verify([_invocation("helper", "--other")], doubles)
+
+    # Failure control: the same mismatch must raise for a mock, so the stub
+    # exemption is what keeps the passing case above green.
+    mock_doubles = {"helper": _double("helper", DoubleKind.MOCK, expectation)}
+    with pytest.raises(UnexpectedCommandError):
+        UnexpectedCommandVerifier().verify(
+            [_invocation("helper", "--other")], mock_doubles
+        )
 
 
 def test_mock_counts_are_tracked_per_command() -> None:
@@ -227,6 +248,13 @@ def test_mock_counts_are_tracked_per_command() -> None:
 
     UnexpectedCommandVerifier().verify(invocations, doubles)
 
+    # Failure control: spending one command's budget twice must raise, so the
+    # passing case above proves the budgets are independent rather than unused.
+    with pytest.raises(UnexpectedCommandError):
+        UnexpectedCommandVerifier().verify(
+            [_invocation("first"), _invocation("first")], doubles
+        )
+
 
 def test_mock_counts_reset_between_verify_calls() -> None:
     """A fresh verification starts counting from zero."""
@@ -236,6 +264,11 @@ def test_mock_counts_reset_between_verify_calls() -> None:
 
     verifier.verify([_invocation("deploy")], doubles)
     verifier.verify([_invocation("deploy")], doubles)
+
+    # Failure control: after the reset, two calls must still overflow, so the
+    # second passing verify is not merely an unenforced count.
+    with pytest.raises(UnexpectedCommandError):
+        verifier.verify([_invocation("deploy"), _invocation("deploy")], doubles)
 
 
 def test_mismatch_is_reported_before_the_count_limit() -> None:
@@ -266,4 +299,4 @@ def test_mismatch_is_reported_before_the_count_limit() -> None:
         "\n"
         "Reason:\n"
         "  arguments ['--other'] != ['--flag']"
-    )
+    ), "a mismatch must be reported ahead of the count overflow"

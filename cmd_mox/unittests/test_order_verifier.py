@@ -42,6 +42,11 @@ def test_order_verifier_ignores_unordered_invocations_with_same_command() -> Non
 
     OrderVerifier([fetch]).verify(journal)
 
+    # Failure control: the ordered expectation must still fail when absent, so
+    # the passing case above is not vacuous.
+    with pytest.raises(UnfulfilledExpectationError):
+        OrderVerifier([fetch]).verify([_invocation("git", "status")])
+
 
 def test_order_verifier_flags_out_of_order_matches() -> None:
     """An invocation matching a later ordered expectation should fail fast."""
@@ -82,7 +87,7 @@ def test_order_verifier_reports_missing_expectations_with_numbering() -> None:
         "Missing:\n"
         "  2. git('status')\n"
         "  3. git('push')"
-    )
+    ), "unobserved ordered expectations must be numbered from the first gap"
 
 
 @pytest.mark.parametrize(
@@ -155,7 +160,9 @@ def test_order_verifier_reports_the_first_positional_violation(
     with pytest.raises(UnexpectedCommandError) as excinfo:
         OrderVerifier(ordered).verify(journal)
 
-    assert str(excinfo.value) == expected
+    assert str(excinfo.value) == expected, (
+        "the first violating position must be reported with its reason"
+    )
 
 
 def test_order_verifier_renders_env_and_stdin_for_the_mismatch() -> None:
@@ -213,7 +220,7 @@ def test_order_verifier_renders_env_and_stdin_for_the_mismatch() -> None:
         "\n"
         "Reason:\n"
         "  arguments ['--second'] != ['--first']"
-    )
+    ), "the mismatch section must render the expectation's env keys and stdin"
 
 
 def test_order_verifier_reports_extra_invocations_without_stdin() -> None:
@@ -239,7 +246,7 @@ def test_order_verifier_reports_extra_invocations_without_stdin() -> None:
         "\n"
         "Unexpected calls:\n"
         "  deploy('--two')"
-    )
+    ), "invocations beyond the ordered sequence must be listed without stdin"
 
 
 def test_order_verifier_expands_expected_counts() -> None:
@@ -255,10 +262,23 @@ def test_order_verifier_expands_expected_counts() -> None:
 
     OrderVerifier([fetch, status]).verify(journal)
 
+    # Failure control: one fetch short must leave an unmet ordered slot.
+    with pytest.raises(UnfulfilledExpectationError):
+        OrderVerifier([fetch, status]).verify([
+            _invocation("git", "fetch"),
+            _invocation("git", "status"),
+        ])
+
 
 def test_order_verifier_with_no_ordered_expectations_accepts_anything() -> None:
     """An empty ordered sequence short-circuits verification."""
     OrderVerifier([]).verify([_invocation("deploy", "--anything")])
+
+    # Failure control: the same journal must fail once an ordered expectation
+    # is present, so the empty sequence is what makes the case above pass.
+    ordered = [Expectation("deploy").with_args("--expected").in_order()]
+    with pytest.raises(UnfulfilledExpectationError):
+        OrderVerifier(ordered).verify([_invocation("deploy", "--anything")])
 
 
 def test_order_verifier_treats_zero_count_as_no_ordered_slots() -> None:
@@ -266,3 +286,8 @@ def test_order_verifier_treats_zero_count_as_no_ordered_slots() -> None:
     never = Expectation("git").with_args("fetch").times_called(0).in_order()
 
     OrderVerifier([never]).verify([_invocation("git", "status")])
+
+    # Failure control: raising the count to one must make the same journal fail.
+    once = Expectation("git").with_args("fetch").times_called(1).in_order()
+    with pytest.raises(UnfulfilledExpectationError):
+        OrderVerifier([once]).verify([_invocation("git", "status")])

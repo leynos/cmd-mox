@@ -40,6 +40,11 @@ def test_count_verifier_accepts_exact_counts_and_ignores_extra_keys() -> None:
         {"deploy": calls, "unregistered": [_invocation("--other")]},
     )
 
+    # Failure control: the same setup must fail when the count is short, so a
+    # verifier that never raises cannot pass this test vacuously.
+    with pytest.raises(UnfulfilledExpectationError):
+        CountVerifier().verify({"deploy": expectation}, {"deploy": calls[:1]})
+
 
 def test_count_verifier_reports_absent_command_as_unfulfilled() -> None:
     """A command with no recorded invocations reports the full expectation."""
@@ -68,7 +73,7 @@ def test_count_verifier_reports_absent_command_as_unfulfilled() -> None:
         "\n"
         "Recorded invocations:\n"
         "  (none)"
-    )
+    ), "an absent command must report the full expectation and zero calls"
 
 
 def test_count_verifier_reports_partial_calls_with_env_and_stdin() -> None:
@@ -107,7 +112,7 @@ def test_count_verifier_reports_partial_calls_with_env_and_stdin() -> None:
         "  deploy('--flag')\n"
         "  stdin='payload'\n"
         "  env={'TOKEN': '***'}"
-    )
+    ), "partial calls must report the observed count and the focused call details"
 
 
 def test_count_verifier_reports_overflow_with_the_last_call() -> None:
@@ -144,7 +149,7 @@ def test_count_verifier_reports_overflow_with_the_last_call() -> None:
         "  deploy('three')\n"
         "  stdin='payload'\n"
         "  env={'TOKEN': '***'}"
-    )
+    ), "overflow must report the observed count and the final recorded call"
 
 
 def test_count_verifier_reports_the_first_failing_expectation() -> None:
@@ -159,5 +164,5 @@ def test_count_verifier_reports_the_first_failing_expectation() -> None:
         )
 
     message = str(excinfo.value)
-    assert "first()" in message
-    assert "second()" not in message
+    assert "first()" in message, "the first failing expectation must be reported"
+    assert "second()" not in message, "later expectations must not be reported"

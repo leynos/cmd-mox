@@ -56,31 +56,43 @@ def test_format_env_masks_with_the_shared_vocabulary(
     key: str, value: str | None, expected: str | None
 ) -> None:
     """Verifier formatting agrees with the shared classifier for *key*."""
-    assert v._format_env({key: value}) == "{" + f"{key!r}: {expected!r}" + "}"
+    assert v._format_env({key: value}) == "{" + f"{key!r}: {expected!r}" + "}", (
+        "env formatting must mask sensitive keys and preserve safe ones"
+    )
 
 
 def test_format_env_masks_and_sorts_entries() -> None:
     """Environment formatting redacts sensitive values and sorts keys."""
     formatted = v._format_env({"PATH": "/bin", "API_KEY": "secret"})
-    assert formatted == "{'API_KEY': '***', 'PATH': '/bin'}"
+    assert formatted == "{'API_KEY': '***', 'PATH': '/bin'}", (
+        "env formatting must redact secrets and sort keys"
+    )
 
 
 def test_format_env_renders_an_empty_mapping() -> None:
     """An empty environment renders as an empty literal, not a blank line."""
-    assert v._format_env({}) == "{}"
+    assert v._format_env({}) == "{}", "an empty env must render as an empty literal"
 
 
 def test_format_items_handles_empty_and_content() -> None:
     """Item formatting should collapse empty sequences to an empty string."""
-    assert v._format_items([]) == ""
-    assert v._format_items(None) == ""
-    assert v._format_items(["alpha", "beta"]) == "'alpha', 'beta'"
+    assert v._format_items([]) == "", "an empty sequence must render as an empty string"
+    assert v._format_items(None) == "", (
+        "a missing sequence must render as an empty string"
+    )
+    assert v._format_items(["alpha", "beta"]) == "'alpha', 'beta'", (
+        "items must be rendered as a comma-separated repr list"
+    )
 
 
 def test_format_call_renders_empty_and_populated_arguments() -> None:
     """Call formatting omits the parentheses' contents when there are no args."""
-    assert v._format_call("deploy", "") == "deploy()"
-    assert v._format_call("deploy", "'--flag'") == "deploy('--flag')"
+    assert v._format_call("deploy", "") == "deploy()", (
+        "a call without arguments must render empty parentheses"
+    )
+    assert v._format_call("deploy", "'--flag'") == "deploy('--flag')", (
+        "a call with arguments must render them inside the parentheses"
+    )
 
 
 def test_expectation_args_repr_prefers_literal_args() -> None:
@@ -89,14 +101,22 @@ def test_expectation_args_repr_prefers_literal_args() -> None:
     matchers = Expectation("deploy").with_matching_args(str.isdigit)
     unconfigured = Expectation("deploy")
 
-    assert v._expectation_args_repr(literal) == "'--flag'"
-    assert v._expectation_args_repr(matchers) == "<method 'isdigit' of 'str' objects>"
-    assert v._expectation_args_repr(unconfigured) == ""
+    assert v._expectation_args_repr(literal) == "'--flag'", (
+        "literal args must be rendered as their repr"
+    )
+    assert (
+        v._expectation_args_repr(matchers) == "<method 'isdigit' of 'str' objects>"
+    ), "matcher callables must be rendered as their repr"
+    assert v._expectation_args_repr(unconfigured) == "", (
+        "an unconfigured expectation must render no arguments"
+    )
 
 
 def test_format_items_formats_matcher_callables() -> None:
     """Matcher callables should be formatted with their repr."""
-    assert v._format_items([str.isdigit]) == "<method 'isdigit' of 'str' objects>"
+    assert v._format_items([str.isdigit]) == "<method 'isdigit' of 'str' objects>", (
+        "matcher callables must be rendered as their repr"
+    )
 
 
 def test_describe_expectation_renders_all_fields() -> None:
@@ -110,13 +130,15 @@ def test_describe_expectation_renders_all_fields() -> None:
     description = v._describe_expectation(exp, include_count=True)
     assert description == (
         "deploy('--flag')\nexpected calls=2\nstdin='payload'\nenv={'TOKEN': '***'}"
-    )
+    ), "expectation descriptions must include args, counts, stdin, and masked env"
 
 
 def test_describe_expectation_without_optional_fields() -> None:
     """Expectations without args, stdin, or env render with empty call signature."""
     exp = Expectation("noop")
-    assert v._describe_expectation(exp) == "noop()"
+    assert v._describe_expectation(exp) == "noop()", (
+        "an expectation without optional fields must render an empty call signature"
+    )
 
 
 def test_describe_invocation_focuses_requested_env_keys() -> None:
@@ -134,7 +156,9 @@ def test_describe_invocation_focuses_requested_env_keys() -> None:
         include_stdin=True,
     )
 
-    assert description == "deploy('--flag')\nstdin='payload'\nenv={'API_KEY': '***'}"
+    assert description == "deploy('--flag')\nstdin='payload'\nenv={'API_KEY': '***'}", (
+        "focused invocation descriptions must include stdin and mask the env"
+    )
 
 
 def test_describe_invocation_omits_optional_sections_by_default() -> None:
@@ -146,7 +170,9 @@ def test_describe_invocation_omits_optional_sections_by_default() -> None:
         env={"API_KEY": "secret"},
     )
 
-    assert v._describe_invocation(inv) == "deploy('--flag')"
+    assert v._describe_invocation(inv) == "deploy('--flag')", (
+        "the default invocation description must render only the call"
+    )
 
 
 def test_describe_invocation_renders_missing_focused_env_as_none() -> None:
@@ -155,19 +181,23 @@ def test_describe_invocation_renders_missing_focused_env_as_none() -> None:
 
     assert v._describe_invocation(inv, focus_env=["TOKEN"]) == (
         "deploy()\nenv={'TOKEN': None}"
-    )
+    ), "a focused key absent from the invocation must render as None"
 
 
 def test_describe_invocations_omits_stdin_by_default() -> None:
     """The default description leaves stdin out even when it was recorded."""
     inv = Invocation(command="deploy", args=[], stdin="payload", env={})
 
-    assert v._describe_invocations([inv]) == "deploy()"
+    assert v._describe_invocations([inv]) == "deploy()", (
+        "the default invocation list must omit stdin"
+    )
 
 
 def test_describe_invocations_handles_empty_and_multiple_entries() -> None:
     """Empty sequences render ``(none)``; entries are joined with newlines."""
-    assert v._describe_invocations([]) == "(none)"
+    assert v._describe_invocations([]) == "(none)", (
+        "an empty invocation list must render as (none)"
+    )
 
     invocations = [
         Invocation(
@@ -195,20 +225,24 @@ def test_describe_invocations_handles_empty_and_multiple_entries() -> None:
         "deploy('--two')\n"
         "stdin='b'\n"
         "env={'TOKEN': '***'}"
-    )
+    ), "multiple invocations must be joined with newlines and mask the env"
 
 
 def test_numbered_renders_multiline_entries() -> None:
     """Numbered helper should indent continuation lines."""
     entries = ["first line", "second\nwith extra"]
-    assert v._numbered(entries) == "1. first line\n2. second\n   with extra"
+    assert v._numbered(entries) == "1. first line\n2. second\n   with extra", (
+        "numbered entries must indent continuation lines"
+    )
 
 
 def test_numbered_handles_empty_entries_and_custom_start() -> None:
     """Empty sequences render ``(none)``; numbering can start above one."""
-    assert v._numbered([]) == "(none)"
-    assert v._numbered([""]) == "1. "
-    assert v._numbered(["alpha", "beta"], start=3) == "3. alpha\n4. beta"
+    assert v._numbered([]) == "(none)", "an empty sequence must render as (none)"
+    assert v._numbered([""]) == "1. ", "an empty entry must render its number only"
+    assert v._numbered(["alpha", "beta"], start=3) == "3. alpha\n4. beta", (
+        "numbering must honour a custom start"
+    )
 
 
 def test_format_sections_omits_empty_sections() -> None:
@@ -218,12 +252,16 @@ def test_format_sections_omits_empty_sections() -> None:
         [("Empty", ""), ("Details", "line1\nline2")],
     )
 
-    assert body == "Header\n\nDetails:\n  line1\n  line2"
+    assert body == "Header\n\nDetails:\n  line1\n  line2", (
+        "empty sections must be omitted and populated ones indented"
+    )
 
 
 def test_format_sections_renders_only_the_title_when_all_empty() -> None:
     """A message with no populated sections is just its title."""
-    assert v._format_sections("Header", [("Empty", "")]) == "Header"
+    assert v._format_sections("Header", [("Empty", "")]) == "Header", (
+        "a message with no populated sections must render only its title"
+    )
 
 
 def test_list_expected_commands_excludes_stubs() -> None:
@@ -234,7 +272,9 @@ def test_list_expected_commands_excludes_stubs() -> None:
         "gamma": _double(DoubleKind.SPY),
     }
 
-    assert v._list_expected_commands(doubles) == "'alpha', 'gamma'"
+    assert v._list_expected_commands(doubles) == "'alpha', 'gamma'", (
+        "expected commands must exclude stubs and include mocks and spies"
+    )
 
 
 def test_list_expected_commands_reports_when_only_stubs() -> None:
@@ -246,4 +286,4 @@ def test_list_expected_commands_reports_when_only_stubs() -> None:
     assert (
         v._list_expected_commands(doubles)
         == "(none: stubs are excluded from expected commands)"
-    )
+    ), "a registry of only stubs must document the omission"
