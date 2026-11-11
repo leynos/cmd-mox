@@ -237,6 +237,61 @@ def test_generated_shim_reports_server_rejection(
     assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
 
 
+@pytest.mark.parametrize(
+    "passthrough",
+    [
+        pytest.param({"invocation_id": "abc"}, id="missing-lookup-path"),
+        pytest.param(
+            {
+                "invocation_id": "abc",
+                "lookup_path": "/bin/echo",
+                "timeout": "soon",
+            },
+            id="wrong-timeout",
+        ),
+    ],
+)
+def test_generated_shim_rejects_malformed_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    passthrough: dict[str, object],
+) -> None:
+    """A malformed directive exits non-zero before the real command runs."""
+    marker = tmp_path / "marker"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    command = "marker-command"
+    script = bin_dir / command
+    script.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    with EnvironmentManager() as env:
+        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
+        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "1.0")
+        response_bytes = json.dumps({
+            "stdout": "",
+            "stderr": "",
+            "exit_code": 0,
+            "env": {},
+            "passthrough": passthrough,
+        }).encode()
+
+        result, elapsed = _run_shim_against_socket_peer(
+            env,
+            command,
+            response_bytes=response_bytes,
+        )
+
+    assert result.returncode == 1, "Malformed directive did not fail the shim"
+    assert result.stderr == "IPC error: IPC operation failed\n", (
+        "Shim did not print the bounded IPC diagnostic"
+    )
+    assert not marker.exists(), "The real command ran despite a malformed directive"
+    assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
+
+
 def test_generated_shim_reports_unix_response_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

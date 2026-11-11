@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import threading
 import types
@@ -150,6 +151,47 @@ def test_send_pipe_request_writes_and_reads(monkeypatch: pytest.MonkeyPatch) -> 
     assert response == b"{}", "Assertion failed"
     assert handle_log == ["{}"], "Assertion failed"
     assert fake_handle.closed is True, "Assertion failed"
+
+
+def test_malformed_pipe_reply_raises_wire_format_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wrong-typed named-pipe reply is rejected as a wire format error."""
+    from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
+    from cmd_mox.ipc import client, wire
+    from cmd_mox.ipc.constants import KIND_INVOCATION
+
+    fake_handle = types.SimpleNamespace()
+    monkeypatch.setattr(
+        client,
+        "_connect_pipe_with_retries",
+        lambda *_args, **_kwargs: fake_handle,
+    )
+    malformed = json.dumps({
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+        "env": {},
+        "passthrough": {"invocation_id": "abc"},
+    }).encode()
+    monkeypatch.setattr(
+        client,
+        "win32file",
+        types.SimpleNamespace(
+            WriteFile=lambda *_args, **_kwargs: None,
+            FlushFileBuffers=lambda *_args, **_kwargs: None,
+            CloseHandle=lambda _handle: None,
+            ReadFile=lambda *_args, **_kwargs: (0, malformed),
+        ),
+    )
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "pipe")
+
+    with pytest.raises(wire.WireFormatError, match="passthrough is missing"):
+        client._perform_request(
+            b"{}",
+            KIND_INVOCATION,
+            _ConnectionContext(timeout=0.1, retry_config=RetryConfig()),
+        )
 
 
 def test_send_pipe_request_closes_handle_on_timeout(

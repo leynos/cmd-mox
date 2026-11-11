@@ -29,21 +29,20 @@ from cmd_mox.environment import EnvironmentManager
 
 from . import _observability
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
-from .json_utils import (
-    parse_json_safely,
-    validate_invocation_payload,
-    validate_passthrough_payload,
+from .json_utils import parse_json_safely
+from .wire import (
+    WireFormatError,
+    decode_invocation,
+    decode_passthrough_result,
+    response_to_payload,
 )
-from .wire import response_to_payload
 
 if typ.TYPE_CHECKING:
     from types import TracebackType
 
 logger = logging.getLogger(__name__)
 
-type _RequestValidator = cabc.Callable[
-    [dict[str, typ.Any]], Invocation | PassthroughResult | None
-]
+type _RequestValidator = cabc.Callable[[object], Invocation | PassthroughResult]
 
 
 class _ServerLifecycle[BackendT](abc.ABC):
@@ -351,9 +350,9 @@ type _DispatchOutcome = typ.Literal[
 ]
 
 _REQUEST_HANDLERS: dict[str, tuple[_RequestValidator, _RequestProcessor]] = {
-    KIND_INVOCATION: (validate_invocation_payload, "handle_invocation"),
+    KIND_INVOCATION: (decode_invocation, "handle_invocation"),
     KIND_PASSTHROUGH_RESULT: (
-        validate_passthrough_payload,
+        decode_passthrough_result,
         "handle_passthrough_result",
     ),
 }
@@ -382,14 +381,19 @@ class ParsedRequest:
     processor: _RequestProcessor
     correlation_id: str | None = None
 
-    def validate(self) -> Invocation | PassthroughResult | None:
+    def validate(self) -> Invocation | PassthroughResult:
         """Run the validator associated with this request payload.
 
         Returns
         -------
-        Invocation, PassthroughResult, or None
-            The validated request object, or ``None`` for invalid payloads.
-        """
+        Invocation or PassthroughResult
+            The validated request object.
+
+        Raises
+        ------
+        WireFormatError
+            If the payload does not match the model selected by its kind.
+        """  # ruff: ignore[docstring-extraneous-exception] - the selected decoder raises this caller-visible failure.
         return self.validator(self.payload)
 
 
@@ -633,8 +637,12 @@ def _request_pipeline(
         _emit_dispatch_outcome(_rejection_record(parsed, started, transport))
         return _rejection_result(parsed)
 
-    obj = parsed.validate()
-    if obj is None:
+    try:
+        obj = parsed.validate()
+    except WireFormatError:
+        # The exception message names a field path and expected type, but the
+        # rejection frame, log record, and event stay fixed so no payload
+        # content can reach an observer.
         _emit_dispatch_outcome(_rejection_record(parsed, started, transport))
         return _rejection_result(parsed)
 
