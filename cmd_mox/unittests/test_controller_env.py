@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import os
 import threading
 import typing as typ
@@ -138,137 +139,243 @@ def test_response_for_regular_applies_env_to_static_response(
     assert inv.env[key] == "VAL"
 
 
-def test_concurrent_handlers_leave_host_environment_untouched(  # ruff: ignore[too-many-locals,too-many-statements] - the regression needs the full two-thread harness in one scope
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Concurrent handler calls must not restore a stale os.environ snapshot."""
-    shared_key = "CONCURRENT_SHARED"
-    a_key = "CONCURRENT_A_ONLY"
-    b_key = "CONCURRENT_B_ONLY"
-    caller_a_key = "CONCURRENT_CALLER_A"
-    caller_b_key = "CONCURRENT_CALLER_B"
-    host_key = "CONCURRENT_HOST"
-    for key in (shared_key, a_key, b_key, caller_a_key, caller_b_key):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv(host_key, "BEFORE")
-    original_env = os.environ.copy()
+@dc.dataclass(frozen=True)
+class _ConcurrentKeys:
+    """Environment keys used by the concurrency regression."""
 
-    barrier = threading.Barrier(2, timeout=10)
-    release_a = threading.Event()
-    release_b = threading.Event()
-    entered = {"A": threading.Event(), "B": threading.Event()}
-    observations: dict[str, dict[str, str | None]] = {}
-    responses: dict[str, Response] = {}
-    errors: list[BaseException] = []
+    shared: str = "CONCURRENT_SHARED"
+    a: str = "CONCURRENT_A_ONLY"
+    b: str = "CONCURRENT_B_ONLY"
+    caller_a: str = "CONCURRENT_CALLER_A"
+    caller_b: str = "CONCURRENT_CALLER_B"
+    host: str = "CONCURRENT_HOST"
 
-    def make_handler(
-        label: str, own_key: str, release: threading.Event
-    ) -> cabc.Callable[[Invocation], Response]:
-        """Build a handler that records host state and waits for release."""
+    def handler_keys(self) -> tuple[str, ...]:
+        """Return the keys the handlers must not leak into the host."""
+        return (self.shared, self.a, self.b, self.caller_a, self.caller_b)
 
-        def handler(invocation: Invocation) -> Response:
-            """Record host state, synchronise with the peer, then respond."""
-            observations[label] = {
-                "shared": invocation.env.get(shared_key),
-                "own": invocation.env.get(own_key),
-                "host_shared": os.environ.get(shared_key),
-                "host_own": os.environ.get(own_key),
-                "host_key": os.environ.get(host_key),
-            }
-            entered[label].set()
-            barrier.wait()
-            release.wait(timeout=10)
-            return Response(stdout=label)
 
-        return handler
+@dc.dataclass
+class _ConcurrentHandlerState:
+    """State shared by both blocking handlers."""
 
-    def run_worker(label: str, double: CommandDouble, invocation: Invocation) -> None:
-        """Dispatch one invocation and collect any failure for the main thread."""
-        try:
-            responses[label] = mox._response_for_regular(double, invocation)
-        except BaseException as exc:  # ruff: ignore[blind-except] - surfaced on the main thread
-            errors.append(exc)
+    shared_key: str
+    host_key: str
+    barrier: threading.Barrier
+    entered: dict[str, threading.Event]
+    observations: dict[str, dict[str, str | None]]
 
-    mox = CmdMox()
-    double_a = (
-        mox
-        .stub("concurrent-a")
-        .with_env({shared_key: "SHARED", a_key: "A"})
-        .runs(make_handler("A", a_key, release_a))
-    )
-    double_b = (
-        mox
-        .stub("concurrent-b")
-        .with_env({shared_key: "SHARED", b_key: "B"})
-        .runs(make_handler("B", b_key, release_b))
-    )
-    invocation_a = Invocation(
-        command="concurrent-a", args=[], stdin="", env={caller_a_key: "CALLER_A"}
-    )
-    invocation_b = Invocation(
-        command="concurrent-b", args=[], stdin="", env={caller_b_key: "CALLER_B"}
-    )
 
-    thread_a = threading.Thread(
-        target=run_worker, args=("A", double_a, invocation_a), daemon=True
-    )
-    thread_b = threading.Thread(
-        target=run_worker, args=("B", double_b, invocation_b), daemon=True
-    )
+@dc.dataclass
+class _ConcurrentDispatch:
+    """Dispatch target and collection points for one handler thread."""
+
+    mox: CmdMox
+    double: CommandDouble
+    invocation: Invocation
+    responses: dict[str, Response]
+    errors: list[BaseException]
+
+
+@dc.dataclass
+class _ConcurrentThreads:
+    """Threads and release signals for the concurrency regression."""
+
+    thread_a: threading.Thread
+    thread_b: threading.Thread
+    releases: dict[str, threading.Event]
+    entered: dict[str, threading.Event]
+    barrier: threading.Barrier
+    host_key: str
+
+
+@dc.dataclass
+class _ConcurrentOutcome:
+    """Observed results and entry state to assert after both handlers finish."""
+
+    observations: dict[str, dict[str, str | None]]
+    responses: dict[str, Response]
+    invocation_a: Invocation
+    invocation_b: Invocation
+    original_env: dict[str, str]
+    keys: _ConcurrentKeys
+
+
+def _make_blocking_handler(
+    label: str,
+    own_key: str,
+    release: threading.Event,
+    state: _ConcurrentHandlerState,
+) -> cabc.Callable[[Invocation], Response]:
+    """Build a handler that records host state and waits for release."""
+
+    def handler(invocation: Invocation) -> Response:
+        """Record host state, synchronise with the peer, then respond."""
+        state.observations[label] = {
+            "shared": invocation.env.get(state.shared_key),
+            "own": invocation.env.get(own_key),
+            "host_shared": os.environ.get(state.shared_key),
+            "host_own": os.environ.get(own_key),
+            "host_key": os.environ.get(state.host_key),
+        }
+        state.entered[label].set()
+        state.barrier.wait()
+        release.wait(timeout=10)
+        return Response(stdout=label)
+
+    return handler
+
+
+def _dispatch_concurrent(label: str, dispatch: _ConcurrentDispatch) -> None:
+    """Dispatch one invocation and collect any failure for the main thread."""
     try:
-        thread_a.start()
-        thread_b.start()
-        assert entered["A"].wait(timeout=10), "handler A did not start"
-        assert entered["B"].wait(timeout=10), "handler B did not start"
-        os.environ[host_key] = "AFTER"
-        release_a.set()
-        thread_a.join(timeout=10)
-        assert not thread_a.is_alive(), "handler A did not finish"
-        release_b.set()
-        thread_b.join(timeout=10)
-        assert not thread_b.is_alive(), "handler B did not finish"
-    finally:
-        release_a.set()
-        release_b.set()
-        barrier.abort()
-        thread_a.join(timeout=10)
-        thread_b.join(timeout=10)
+        dispatch.responses[label] = dispatch.mox._response_for_regular(
+            dispatch.double, dispatch.invocation
+        )
+    except BaseException as exc:  # ruff: ignore[blind-except] - surfaced on the main thread
+        dispatch.errors.append(exc)
 
-    assert not errors, errors
-    assert observations["A"] == {
+
+def _run_concurrent_handlers(threads: _ConcurrentThreads) -> None:
+    """Start both handlers, change the host, and release them in order."""
+    try:
+        threads.thread_a.start()
+        threads.thread_b.start()
+        assert threads.entered["A"].wait(timeout=10), "handler A did not start"
+        assert threads.entered["B"].wait(timeout=10), "handler B did not start"
+        os.environ[threads.host_key] = "AFTER"
+        threads.releases["A"].set()
+        threads.thread_a.join(timeout=10)
+        assert not threads.thread_a.is_alive(), "handler A did not finish"
+        threads.releases["B"].set()
+        threads.thread_b.join(timeout=10)
+        assert not threads.thread_b.is_alive(), "handler B did not finish"
+    finally:
+        threads.releases["A"].set()
+        threads.releases["B"].set()
+        threads.barrier.abort()
+        threads.thread_a.join(timeout=10)
+        threads.thread_b.join(timeout=10)
+
+
+def _assert_concurrent_environment(outcome: _ConcurrentOutcome) -> None:
+    """Assert handlers saw the entry environment and left it intact."""
+    keys = outcome.keys
+    assert outcome.observations["A"] == {
         "shared": "SHARED",
         "own": "A",
         "host_shared": None,
         "host_own": None,
         "host_key": "BEFORE",
     }
-    assert observations["B"] == {
+    assert outcome.observations["B"] == {
         "shared": "SHARED",
         "own": "B",
         "host_shared": None,
         "host_own": None,
         "host_key": "BEFORE",
     }
-    assert invocation_a.env == {
-        caller_a_key: "CALLER_A",
-        shared_key: "SHARED",
-        a_key: "A",
+    assert outcome.invocation_a.env == {
+        keys.caller_a: "CALLER_A",
+        keys.shared: "SHARED",
+        keys.a: "A",
     }
-    assert invocation_b.env == {
-        caller_b_key: "CALLER_B",
-        shared_key: "SHARED",
-        b_key: "B",
+    assert outcome.invocation_b.env == {
+        keys.caller_b: "CALLER_B",
+        keys.shared: "SHARED",
+        keys.b: "B",
     }
-    assert responses["A"].env == {shared_key: "SHARED", a_key: "A"}
-    assert responses["B"].env == {shared_key: "SHARED", b_key: "B"}
-    assert os.environ.get(host_key) == "AFTER"
-    for key in (shared_key, a_key, b_key, caller_a_key, caller_b_key):
+    assert outcome.responses["A"].env == {keys.shared: "SHARED", keys.a: "A"}
+    assert outcome.responses["B"].env == {keys.shared: "SHARED", keys.b: "B"}
+    assert os.environ.get(keys.host) == "AFTER"
+    for key in keys.handler_keys():
         assert key not in os.environ
     # The host change made while the handlers were blocked must be the only
     # difference from the entry snapshot; a stale restore would remove it or
     # leak a handler's override.
-    expected_env = {**original_env, host_key: "AFTER"}
+    expected_env = {**outcome.original_env, keys.host: "AFTER"}
     assert os.environ == expected_env, "handler threads changed the host environment"
+
+
+def _make_invocation(command: str, caller_key: str, caller_value: str) -> Invocation:
+    """Build an invocation carrying one caller-provided environment entry."""
+    return Invocation(
+        command=command, args=[], stdin="", env={caller_key: caller_value}
+    )
+
+
+def test_concurrent_handlers_leave_host_environment_untouched(  # ruff: ignore[too-many-locals] - the regression needs the full two-thread harness in one scope
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent handler calls must not restore a stale os.environ snapshot."""
+    keys = _ConcurrentKeys()
+    for key in keys.handler_keys():
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(keys.host, "BEFORE")
+    original_env = os.environ.copy()
+
+    state = _ConcurrentHandlerState(
+        shared_key=keys.shared,
+        host_key=keys.host,
+        barrier=threading.Barrier(2, timeout=10),
+        entered={"A": threading.Event(), "B": threading.Event()},
+        observations={},
+    )
+    releases = {"A": threading.Event(), "B": threading.Event()}
+    responses: dict[str, Response] = {}
+    errors: list[BaseException] = []
+
+    mox = CmdMox()
+    double_a = (
+        mox
+        .stub("concurrent-a")
+        .with_env({keys.shared: "SHARED", keys.a: "A"})
+        .runs(_make_blocking_handler("A", keys.a, releases["A"], state))
+    )
+    double_b = (
+        mox
+        .stub("concurrent-b")
+        .with_env({keys.shared: "SHARED", keys.b: "B"})
+        .runs(_make_blocking_handler("B", keys.b, releases["B"], state))
+    )
+    invocation_a = _make_invocation("concurrent-a", keys.caller_a, "CALLER_A")
+    invocation_b = _make_invocation("concurrent-b", keys.caller_b, "CALLER_B")
+    threads = _ConcurrentThreads(
+        thread_a=threading.Thread(
+            target=_dispatch_concurrent,
+            args=(
+                "A",
+                _ConcurrentDispatch(mox, double_a, invocation_a, responses, errors),
+            ),
+            daemon=True,
+        ),
+        thread_b=threading.Thread(
+            target=_dispatch_concurrent,
+            args=(
+                "B",
+                _ConcurrentDispatch(mox, double_b, invocation_b, responses, errors),
+            ),
+            daemon=True,
+        ),
+        releases=releases,
+        entered=state.entered,
+        barrier=state.barrier,
+        host_key=keys.host,
+    )
+
+    _run_concurrent_handlers(threads)
+
+    assert not errors, errors
+    _assert_concurrent_environment(
+        _ConcurrentOutcome(
+            observations=state.observations,
+            responses=responses,
+            invocation_a=invocation_a,
+            invocation_b=invocation_b,
+            original_env=original_env,
+            keys=keys,
+        )
+    )
 
 
 def test_raising_handler_leaves_host_environment_unchanged(
