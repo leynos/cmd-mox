@@ -41,7 +41,7 @@ def test_with_env_injection(
 
     assert result.stdout.strip() == "WORLD", "with_env() value reaches the handler"
     assert host_observations == [None], "handler observed a mutated host environment"
-    assert "HELLO" not in os.environ
+    assert "HELLO" not in os.environ, "with_env() leaked into the host environment"
 
 
 @pytest.mark.parametrize(

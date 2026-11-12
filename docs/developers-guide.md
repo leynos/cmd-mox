@@ -740,11 +740,19 @@ them for compatibility, while `cmd_mox.ipc.wire` owns conversion between those
 values and JSON-ready payloads. Keep payload dictionaries at that transport
 boundary; domain code must not depend on IPC encoding.
 
-`cmd_mox.response_policy` selects the strategy and validates expectation
-environments without applying process environment changes. The controller then
-calls `cmd_mox.response_strategy` to execute the selected handler and build a
-domain response, applying temporary environment overrides at that execution
-boundary.
+`cmd_mox.response_policy` merges `with_env()` overrides into `Invocation.env`
+before the handler runs, and validates expectation environments.
+`cmd_mox.response_strategy.execute_handler(double, invocation)` runs the
+handler without accepting overrides and without modifying `os.environ`. The
+controller then calls `finalize_response_env(response, overrides)` to merge the
+overrides into the response environment.
+
+#### Handler execution boundary
+
+`execute_handler(double, invocation)` no longer accepts an `overrides`
+argument. Callers must merge any `with_env()` overrides into `invocation.env`
+before calling it. `temporary_env()` restores only the keys in its mapping, so
+a context for one set of keys leaves unrelated environment changes intact.
 
 ### Unix server-base selection
 

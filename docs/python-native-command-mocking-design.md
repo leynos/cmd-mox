@@ -607,9 +607,11 @@ sequenceDiagram
 
 `cmd_mox.domain` owns invocation, response, and passthrough values without
 transport serialization. `cmd_mox.ipc.wire` maps those values to and from
-JSON-ready payloads at the IPC boundary. `cmd_mox.response_policy` selects
-strategies and validates expectation environments; `cmd_mox.response_strategy`
-executes handlers and constructs responses with temporary environment overrides.
+JSON-ready payloads at the IPC boundary. `cmd_mox.response_policy` merges
+expectation environment overrides into `Invocation.env` and validates them;
+`cmd_mox.response_strategy` executes handlers without accepting overrides and
+without modifying `os.environ`, and the controller finalizes the response
+environment.
 
 The following diagram groups the response-strategy concepts. It is a conceptual
 overview, not the literal call order: environment validation occurs before

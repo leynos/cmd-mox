@@ -36,8 +36,17 @@ def execute_handler(double: CommandDouble, invocation: Invocation) -> Response:
     """Execute the handler for *double*.
 
     The response policy merges any ``with_env()`` overrides into
-    ``invocation.env`` before this call, so handlers read them there. The test
-    process's ``os.environ`` is never modified while a handler runs.
+    ``invocation.env`` before this call, so handlers read them there. CmdMox
+    does not modify the test process's ``os.environ`` to apply those overrides;
+    handlers and other threads may still change it during execution.
+
+    Parameters
+    ----------
+    double:
+        The command double whose handler should run.
+    invocation:
+        The invocation passed to the handler. Callers must merge any
+        ``with_env()`` overrides into ``invocation.env`` before calling.
 
     Returns
     -------

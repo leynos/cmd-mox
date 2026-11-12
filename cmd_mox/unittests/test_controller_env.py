@@ -267,29 +267,35 @@ def _assert_concurrent_environment(outcome: _ConcurrentOutcome) -> None:
         "host_shared": None,
         "host_own": None,
         "host_key": "BEFORE",
-    }
+    }, "handler A observed unexpected invocation or host environment values"
     assert outcome.observations["B"] == {
         "shared": "SHARED",
         "own": "B",
         "host_shared": None,
         "host_own": None,
         "host_key": "BEFORE",
-    }
+    }, "handler B observed unexpected invocation or host environment values"
     assert outcome.invocation_a.env == {
         keys.caller_a: "CALLER_A",
         keys.shared: "SHARED",
         keys.a: "A",
-    }
+    }, "invocation A did not receive the merged with_env() overrides"
     assert outcome.invocation_b.env == {
         keys.caller_b: "CALLER_B",
         keys.shared: "SHARED",
         keys.b: "B",
-    }
-    assert outcome.responses["A"].env == {keys.shared: "SHARED", keys.a: "A"}
-    assert outcome.responses["B"].env == {keys.shared: "SHARED", keys.b: "B"}
-    assert os.environ.get(keys.host) == "AFTER"
+    }, "invocation B did not receive the merged with_env() overrides"
+    assert outcome.responses["A"].env == {keys.shared: "SHARED", keys.a: "A"}, (
+        "response A lost the expectation environment overrides"
+    )
+    assert outcome.responses["B"].env == {keys.shared: "SHARED", keys.b: "B"}, (
+        "response B lost the expectation environment overrides"
+    )
+    assert os.environ.get(keys.host) == "AFTER", (
+        "the host change made during handler execution was lost"
+    )
     for key in keys.handler_keys():
-        assert key not in os.environ
+        assert key not in os.environ, f"handler leaked {key} into the host environment"
     # The host change made while the handlers were blocked must be the only
     # difference from the entry snapshot; a stale restore would remove it or
     # leak a handler's override.
@@ -399,9 +405,9 @@ def test_raising_handler_leaves_host_environment_unchanged(
     with pytest.raises(RuntimeError, match="boom"):
         mox._response_for_regular(dbl, inv)
 
-    assert observed == ["VAL"]
-    assert inv.env[key] == "VAL"
-    assert os.environ == original_env
+    assert observed == ["VAL"], "handler did not observe the merged override"
+    assert inv.env[key] == "VAL", "invocation did not receive the merged override"
+    assert os.environ == original_env, "raising handler changed the host environment"
 
 
 @pytest.mark.parametrize("call_replay_before_exception", [True, False])
