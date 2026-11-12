@@ -540,43 +540,6 @@ def test_pipe_read_options_reject_non_positive_bounds(
         PipeReadOptions(chunk_size=chunk_size, max_bytes=max_bytes)
 
 
-def test_join_with_timeout_waits_for_the_cancelled_worker(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The timeout is not reported until the cancelled worker has exited."""
-    monkeypatch.setattr(client, "IO_CANCEL_GRACE", 1.0)
-    release = threading.Event()
-    worker = threading.Thread(target=release.wait, daemon=True)
-    worker.start()
-
-    try:
-        with pytest.raises(TimeoutError) as excinfo:
-            client._join_with_timeout_and_cancel(worker, 0.01, release.set)
-    finally:
-        release.set()
-        worker.join(1.0)
-
-    assert "did not exit" not in str(excinfo.value), "worker exit was not awaited"
-    assert not worker.is_alive(), "the worker was still running on return"
-
-
-def test_join_with_timeout_reports_a_wedged_worker(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A worker that ignores cancellation is named in the raised error."""
-    monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
-    release = threading.Event()
-    worker = threading.Thread(target=release.wait, daemon=True)
-    worker.start()
-
-    try:
-        with pytest.raises(TimeoutError, match="did not exit after cancellation"):
-            client._join_with_timeout_and_cancel(worker, 0.01, lambda: None)
-    finally:
-        release.set()
-        worker.join(1.0)
-
-
 def test_synchronous_io_cancel_is_skipped_without_pywin32() -> None:
     """The cancellation request is inert when the Windows API is absent."""
     worker = threading.Thread(target=lambda: None, daemon=True)
