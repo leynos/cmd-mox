@@ -309,12 +309,10 @@ def test_cmd_mox_fixture_auto_skips_on_unsupported_platform(
 @pytest.mark.requires_unix_sockets
 def test_cmd_mox_fixture_runs_on_supported_platform(
     pytester: Pytester,
-    monkeypatch: pytest.MonkeyPatch,
     run_nested_pytester: cabc.Callable[..., RunResult],
 ) -> None:
     """The fixture performs native IPC when its platform is supported."""
-    # The host platform is already supported, so no override is needed.
-    monkeypatch.setattr(platform, "_UNSUPPORTED_PLATFORMS", (("win", "blocked"),))
+    # The classification table is empty, so the host is supported as-is.
     test_file = pytester.makepyfile(
         """
         import os
