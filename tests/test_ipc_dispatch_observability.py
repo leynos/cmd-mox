@@ -403,29 +403,41 @@ class _RecordingIPCServer(IPCServer):
         return Response(stdout="handled")
 
 
+class _RejectedRequest(typ.NamedTuple):
+    """A malformed request body and the payload text that must not leak."""
+
+    kind: str
+    body: dict[str, object]
+    secrets: list[str]
+
+
 @pytest.mark.parametrize(
-    ("kind", "body", "secrets"),
+    "case",
     [
         pytest.param(
-            _server_core.KIND_INVOCATION,
-            {
-                "command": "s3cr3t-command",
-                "args": ["s3cr3t-arg", 5],
-                "stdin": "",
-                "env": {"SECRET_KEY": "s3cr3t-env"},
-            },
-            ["s3cr3t-command", "s3cr3t-arg", "s3cr3t-env", "SECRET_KEY"],
+            _RejectedRequest(
+                _server_core.KIND_INVOCATION,
+                {
+                    "command": "s3cr3t-command",
+                    "args": ["s3cr3t-arg", 5],
+                    "stdin": "",
+                    "env": {"SECRET_KEY": "s3cr3t-env"},
+                },
+                ["s3cr3t-command", "s3cr3t-arg", "s3cr3t-env", "SECRET_KEY"],
+            ),
             id="invocation-wrong-type",
         ),
         pytest.param(
-            _server_core.KIND_PASSTHROUGH_RESULT,
-            {
-                "invocation_id": "s3cr3t-id",
-                "stdout": 5,
-                "stderr": "",
-                "exit_code": 0,
-            },
-            ["s3cr3t-id"],
+            _RejectedRequest(
+                _server_core.KIND_PASSTHROUGH_RESULT,
+                {
+                    "invocation_id": "s3cr3t-id",
+                    "stdout": 5,
+                    "stderr": "",
+                    "exit_code": 0,
+                },
+                ["s3cr3t-id"],
+            ),
             id="passthrough-wrong-type",
         ),
     ],
@@ -433,9 +445,7 @@ class _RecordingIPCServer(IPCServer):
 def test_request_pipeline_rejects_wrong_types_without_dispatch(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
-    kind: str,
-    body: dict[str, object],
-    secrets: list[str],
+    case: _RejectedRequest,
 ) -> None:
     """A wrong-typed body is rejected before either hook runs."""
     caplog.set_level("DEBUG")
@@ -445,7 +455,7 @@ def test_request_pipeline_rejects_wrong_types_without_dispatch(
     with _observability.capture_events() as emitted:
         result = _server_core._request_pipeline(
             ipc_server,
-            json.dumps({"kind": kind, **body}).encode(),
+            json.dumps({"kind": case.kind, **case.body}).encode(),
         )
 
     assert not ipc_server.invocations, "Invocation hook ran for a rejected payload"
@@ -460,20 +470,20 @@ def test_request_pipeline_rejects_wrong_types_without_dispatch(
         "Rejection frame changed"
     )
     [event] = _dispatch_events(caplog)
-    assert event["kind"] == kind, "Wrong request kind"
+    assert event["kind"] == case.kind, "Wrong request kind"
     assert event["outcome"] == "invalid_request", "Wrong dispatch outcome"
     assert event["error_category"] == "ValidationError", "Wrong error category"
     assert "request" not in event, "Rejected payload must not be attached"
     _assert_bounded_duration(event)
     _assert_single_counter_increment(emitted, counters_before)
-    _assert_bounded_fields(event, secrets)
+    _assert_bounded_fields(event, case.secrets)
     rendered = result.response_bytes.decode("utf-8")
-    for secret in secrets:
+    for secret in case.secrets:
         assert secret not in rendered, f"{secret!r} leaked into the rejection frame"
     leaked = [
         record.getMessage()
         for record in caplog.records
-        if any(secret in record.getMessage() for secret in secrets)
+        if any(secret in record.getMessage() for secret in case.secrets)
     ]
     assert not leaked, f"payload content reached the log: {leaked}"
 
