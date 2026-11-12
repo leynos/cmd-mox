@@ -93,7 +93,10 @@ def _run(
     )
 
 
-@when(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
+@when(
+    parsers.re(r'I run the command "(?P<cmd>[^"]+)"$'),
+    target_fixture="result",
+)
 def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     """Invoke the stubbed command.
 
@@ -106,7 +109,10 @@ def run_command(mox: CmdMox, cmd: str) -> subprocess.CompletedProcess[str]:
     return _run([resolved], check=True)
 
 
-@then(parsers.cfparse('I run the command "{cmd}"'), target_fixture="result")
+@then(
+    parsers.re(r'I run the command "(?P<cmd>[^"]+)"$'),
+    target_fixture="result",
+)
 def then_run_command(
     mox: CmdMox, cmd: str
 ) -> subprocess.CompletedProcess[str]:  # pragma: no cover - pytest-bdd glue
@@ -121,7 +127,7 @@ def then_run_command(
 
 
 @when(
-    parsers.cfparse('I run the command "{cmd}" expecting failure'),
+    parsers.re(r'I run the command "(?P<cmd>[^"]+)" expecting failure$'),
     target_fixture="result",
 )
 def run_command_failure(cmd: str) -> subprocess.CompletedProcess[str]:
@@ -155,44 +161,33 @@ def run_command_env_failure(
     return _run([_resolve_command(cmd)], check=False, env=env)
 
 
+def _argv_for(cmd: str, args: str) -> list[str]:
+    """Return the resolved argv for *cmd* and its placeholder-decoded arguments."""
+    decoded = decode_placeholders(args)
+    return [_resolve_command(cmd), *shlex.split(decoded)]
+
+
 @when(
-    parsers.cfparse('I run the command "{cmd}" with arguments "{args}"'),
+    parsers.re(
+        r'I run the command "(?P<cmd>[^"]+)" with arguments "(?P<args>[^"]+)"'
+        r"(?P<failure> expecting failure)?$"
+    ),
     target_fixture="result",
 )
 def run_command_args(
     mox: CmdMox,
     cmd: str,
     args: str,
+    failure: str | None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* with additional arguments.
+    """Run *cmd* with additional arguments, optionally expecting failure.
 
     Returns
     -------
     subprocess.CompletedProcess[str]
         The completed command process and its captured output.
     """
-    decoded = decode_placeholders(args)
-    argv = [_resolve_command(cmd), *shlex.split(decoded)]
-    return _run(argv, check=True)
-
-
-@when(
-    parsers.cfparse(
-        'I run the command "{cmd}" with arguments "{args}" expecting failure'
-    ),
-    target_fixture="result",
-)
-def run_command_args_failure(cmd: str, args: str) -> subprocess.CompletedProcess[str]:
-    """Run *cmd* with additional arguments, expecting a non-zero exit status.
-
-    Returns
-    -------
-    subprocess.CompletedProcess[str]
-        The completed command process and its captured output.
-    """
-    decoded = decode_placeholders(args)
-    argv = [_resolve_command(cmd), *shlex.split(decoded)]
-    return _run(argv, check=False)
+    return _run(_argv_for(cmd, args), check=failure is None)
 
 
 @when(

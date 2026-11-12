@@ -30,48 +30,46 @@ VERIFY_ERROR_MESSAGE = "verify boom"
 EXIT_ERROR_MESSAGE = "exit boom"
 
 
+@dc.dataclass(slots=True, kw_only=True)
 class StubConfig:
     """Mimic ``pytest.Config`` with controllable plugin settings."""
 
-    __slots__ = ("_cli", "_fail_fast_cli", "_fail_fast_ini", "_ini", "workerinput")
+    workerinput: object | None = None
+    cli: bool | None = None
+    ini: bool = True
+    fail_fast_cli: bool | None = None
+    fail_fast_ini: bool = False
+    _option_values: dict[str, bool | None] = dc.field(init=False, repr=False)
+    _ini_values: dict[str, bool | None] = dc.field(init=False, repr=False)
 
-    def __init__(
-        self,
-        *,
-        workerinput: object | None = None,
-        cli: bool | None = None,
-        ini: bool = True,
-        fail_fast_cli: bool | None = None,
-        fail_fast_ini: bool = False,
-    ) -> None:
-        """Store the worker input, CLI values, and ini defaults."""
-        self.workerinput = workerinput
-        self._cli = cli
-        self._ini = ini
-        self._fail_fast_cli = fail_fast_cli
-        self._fail_fast_ini = fail_fast_ini
+    def __post_init__(self) -> None:
+        """Build the option and ini lookup tables from the configured values."""
+        self._option_values = {
+            "cmd_mox_auto_lifecycle": self.cli,
+            "cmd_mox_fail_fast": self.fail_fast_cli,
+        }
+        self._ini_values = {
+            "cmd_mox_auto_lifecycle": self.ini,
+            "cmd_mox_fail_fast": self.fail_fast_ini,
+        }
 
     def getoption(self, name: str) -> bool | None:
         """Return the command-line value of the named option."""
-        match name:
-            case "cmd_mox_auto_lifecycle":
-                return self._cli
-            case "cmd_mox_fail_fast":
-                return self._fail_fast_cli
-            case _:  # pragma: no cover - guards against unexpected options
-                msg = f"unexpected option: {name}"
-                raise AssertionError(msg)
+        return self._lookup(self._option_values, name, "option")
 
     def getini(self, name: str) -> bool:
         """Return the ini-file value of the named option."""
-        match name:
-            case "cmd_mox_auto_lifecycle":
-                return self._ini
-            case "cmd_mox_fail_fast":
-                return self._fail_fast_ini
-            case _:  # pragma: no cover - guards against unexpected options
-                msg = f"unexpected ini option: {name}"
-                raise AssertionError(msg)
+        # Ini values are always booleans by construction, unlike CLI overrides.
+        return typ.cast("bool", self._lookup(self._ini_values, name, "ini option"))
+
+    @staticmethod
+    def _lookup(values: dict[str, bool | None], name: str, label: str) -> bool | None:
+        """Return *name* from *values*, rejecting unknown settings."""
+        try:
+            return values[name]
+        except KeyError:  # pragma: no cover - guards against unexpected options
+            msg = f"unexpected {label}: {name}"
+            raise AssertionError(msg) from None
 
 
 class StubMarker:
@@ -148,31 +146,33 @@ class StubMoxBehaviorConfig:
     verify_on_exit: bool = False
 
 
+@dc.dataclass(slots=True, kw_only=True)
 class StubMox:
     """Minimal CmdMox stand-in for exercising manager behaviour."""
 
-    def __init__(
-        self,
-        *,
-        phase: Phase = Phase.REPLAY,
-        behavior: StubMoxBehaviorConfig | None = None,
-        environment: EnvironmentManager | None = None,
-        lifecycle_hint: str | None = None,
-        fail_fast: bool = False,
-    ) -> None:
-        """Create a stub CmdMox in the given phase with its behaviour flags."""
-        self.phase = phase
-        config = behavior or StubMoxBehaviorConfig()
+    phase: Phase = Phase.REPLAY
+    behavior: StubMoxBehaviorConfig | None = None
+    environment: EnvironmentManager | None = None
+    lifecycle_hint: str | None = None
+    fail_fast: bool = False
+    raise_on_exit: bool = dc.field(init=False, default=False)
+    raise_on_verify: bool = dc.field(init=False, default=False)
+    verify_on_exit: bool = dc.field(init=False, default=False)
+    enter_calls: int = dc.field(init=False, default=0)
+    replay_calls: int = dc.field(init=False, default=0)
+    verify_calls: int = dc.field(init=False, default=0)
+    exit_calls: list[tuple[object | None, object | None, object | None]] = dc.field(
+        init=False, default_factory=list
+    )
+    _lifecycle_hint: str | None = dc.field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        """Derive the behaviour flags and lifecycle hint from the configuration."""
+        config = self.behavior or StubMoxBehaviorConfig()
         self.raise_on_exit = config.raise_on_exit
         self.raise_on_verify = config.raise_on_verify
         self.verify_on_exit = config.verify_on_exit
-        self.fail_fast = fail_fast
-        self.enter_calls = 0
-        self.replay_calls = 0
-        self.verify_calls = 0
-        self.exit_calls: list[tuple[object | None, object | None, object | None]] = []
-        self.environment: object | None = environment
-        self._lifecycle_hint = lifecycle_hint
+        self._lifecycle_hint = self.lifecycle_hint
 
     def __enter__(self) -> StubMox:
         """Count the context entry and return the stub itself."""

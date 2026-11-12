@@ -73,6 +73,9 @@ class Phase(enum.StrEnum):
 class CmdMox:
     """Central orchestrator implementing the record-replay-verify lifecycle."""
 
+    # These keyword-only options form one cohesive public API; grouping them
+    # into an options object would fragment every caller's construction site.
+    # @codescene(disable:"Excess Number of Function Arguments") 2026-11-12
     def __init__(  # ruff: ignore[too-many-arguments] - cohesive keyword-only options; splitting them would fragment the public constructor
         self,
         *,

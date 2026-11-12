@@ -46,18 +46,33 @@ def _shim(mox: CmdMox, name: str) -> str:
     return str(require_shim_dir(mox.environment) / name)
 
 
+def _run_shim(
+    command: cabc.Sequence[str],
+    *,
+    check: bool,
+    stdin: str | None,
+) -> subprocess.CompletedProcess[str]:
+    """Run *command* capturing text output, feeding *stdin* when given."""
+    options: dict[str, typ.Any] = (
+        {"stdin": subprocess.DEVNULL} if stdin is None else {"input": stdin}
+    )
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a shim path prepared by the harness
+        command,
+        capture_output=True,
+        text=True,
+        check=check,
+        **options,
+    )
+
+
 def _run_ok(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
     mox: CmdMox,
     name: str,
     *args: str,
     stdin: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Invoke a shim expecting success."""
-    shim = _shim(mox, name)
-    if stdin is None:
-        return run([shim, *args], stdin=subprocess.DEVNULL)
-    return run([shim, *args], input=stdin)
+    return _run_shim([_shim(mox, name), *args], check=True, stdin=stdin)
 
 
 def _run_failing(
@@ -67,22 +82,7 @@ def _run_failing(
     stdin: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Invoke a shim with ``check=False`` to observe a rejection response."""
-    shim = _shim(mox, name)
-    if stdin is None:
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a shim path prepared by the harness
-            [shim, *args],
-            capture_output=True,
-            text=True,
-            check=False,
-            stdin=subprocess.DEVNULL,
-        )
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - the test executes a shim path prepared by the harness
-        [shim, *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        input=stdin,
-    )
+    return _run_shim([_shim(mox, name), *args], check=False, stdin=stdin)
 
 
 def _configure_mismatch(mock: CommandDouble, kind: str) -> None:
@@ -99,13 +99,11 @@ def _configure_mismatch(mock: CommandDouble, kind: str) -> None:
             raise AssertionError(msg)
 
 
-def test_default_path_defers_mismatch_to_verify(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def test_default_path_defers_mismatch_to_verify() -> None:
     """Without fail-fast, a mismatched mock still answers with its response."""
     with _running_controller() as mox:
         mox.mock("git").with_args("status").returns(stdout="clean")
-        result = _run_ok(run, mox, "git", "push")
+        result = _run_ok(mox, "git", "push")
         assert result.returncode == 0
         assert result.stdout.strip() == "clean"
         with pytest.raises(UnexpectedCommandError) as excinfo:
@@ -214,27 +212,24 @@ def test_fail_fast_rejects_definite_mismatches(
     ],
 )
 def test_fail_fast_defers_callback_matchers(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
     matcher: cabc.Callable[[str], bool],
 ) -> None:
     """Predicate and regex rejections stay deferred to verification."""
     with _running_controller(fail_fast=True) as mox:
         mox.mock("tool").with_matching_args(matcher).returns(stdout="ran")
-        result = _run_ok(run, mox, "tool", "no")
+        result = _run_ok(mox, "tool", "no")
         assert result.returncode == 0
         assert result.stdout.strip() == "ran"
         with pytest.raises(UnexpectedCommandError):
             mox.verify()
 
 
-def test_fail_fast_defers_excess_calls(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def test_fail_fast_defers_excess_calls() -> None:
     """A call beyond the expected count is answered, then reported by verify."""
     with _running_controller(fail_fast=True) as mox:
         mox.mock("tool").returns(stdout="ok")
-        first = _run_ok(run, mox, "tool")
-        second = _run_ok(run, mox, "tool")
+        first = _run_ok(mox, "tool")
+        second = _run_ok(mox, "tool")
         assert first.returncode == 0
         assert second.returncode == 0
         assert second.stdout.strip() == "ok"
@@ -244,42 +239,36 @@ def test_fail_fast_defers_excess_calls(
     assert "Unexpected additional invocation." in str(excinfo.value)
 
 
-def test_fail_fast_defers_ordering_failures(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def test_fail_fast_defers_ordering_failures() -> None:
     """Out-of-order calls are answered, then reported by verify."""
     with _running_controller(fail_fast=True) as mox:
         mox.mock("first").with_args("a").returns(stdout="one").in_order()
         mox.mock("second").with_args("b").returns(stdout="two").in_order()
-        _run_ok(run, mox, "second", "b")
-        _run_ok(run, mox, "first", "a")
+        _run_ok(mox, "second", "b")
+        _run_ok(mox, "first", "a")
         with pytest.raises(UnexpectedCommandError) as excinfo:
             mox.verify()
 
     assert "Ordered expectation violated." in str(excinfo.value)
 
 
-def test_fail_fast_allows_matching_calls(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def test_fail_fast_allows_matching_calls() -> None:
     """A matching call still receives the configured response and verifies."""
     with _running_controller(fail_fast=True) as mox:
         mox.mock("git").with_args("status").returns(stdout="clean")
-        result = _run_ok(run, mox, "git", "status")
+        result = _run_ok(mox, "git", "status")
         assert result.returncode == 0
         assert result.stdout.strip() == "clean"
         mox.verify()
 
 
-def test_fail_fast_applies_expectation_environment(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def test_fail_fast_applies_expectation_environment() -> None:
     """Environment constraints are ignored by the early check but still applied."""
     with _running_controller(fail_fast=True) as mox:
         mox.mock("envcmd").with_args("status").with_env({"HELLO": "WORLD"}).returns(
             stdout="done"
         )
-        result = _run_ok(run, mox, "envcmd", "status")
+        result = _run_ok(mox, "envcmd", "status")
         assert result.returncode == 0
         assert result.stdout.strip() == "done"
         mox.verify()
@@ -305,15 +294,13 @@ def test_fail_fast_redacts_sensitive_arguments() -> None:
     assert "<redacted>" in reason
 
 
-def test_fail_fast_rejection_survives_journal_eviction(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def test_fail_fast_rejection_survives_journal_eviction() -> None:
     """A bounded journal cannot hide a rejected call from verification."""
     with _running_controller(fail_fast=True, max_journal_entries=1) as mox:
         mox.mock("git").with_args("status").returns(stdout="clean")
         mox.stub("ok").returns(stdout="ok")
         _run_failing(mox, "git", "push")
-        _run_ok(run, mox, "ok")
+        _run_ok(mox, "ok")
 
         assert [inv.command for inv in mox.journal] == ["ok"]
         with pytest.raises(UnexpectedCommandError) as excinfo:
@@ -322,15 +309,13 @@ def test_fail_fast_rejection_survives_journal_eviction(
     assert "git('push')" in str(excinfo.value)
 
 
-def test_fail_fast_leaves_stubs_and_spies_unchanged(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def test_fail_fast_leaves_stubs_and_spies_unchanged() -> None:
     """Stubs and spies keep their permissive behaviour under fail-fast."""
     with _running_controller(fail_fast=True) as mox:
         mox.stub("stubcmd").with_args("expected").returns(stdout="stub")
         mox.spy("spycmd").returns(stdout="spy")
-        stub_result = _run_ok(run, mox, "stubcmd", "other")
-        spy_result = _run_ok(run, mox, "spycmd", "other")
+        stub_result = _run_ok(mox, "stubcmd", "other")
+        spy_result = _run_ok(mox, "spycmd", "other")
         assert stub_result.stdout.strip() == "stub"
         assert spy_result.stdout.strip() == "spy"
         mox.verify()
@@ -343,22 +328,18 @@ def test_fail_fast_is_keyword_only() -> None:
         CmdMox(positional)  # type: ignore[call-arg, ty:too-many-positional-arguments]
 
 
-def _run_body_failure(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def _run_body_failure() -> None:
     """Run a rejected shim inside a controller whose body raises."""
     mox = CmdMox(fail_fast=True)
     mox.mock("git").with_args("status").returns(stdout="clean")
     with mox:
         mox.replay()
-        run([_shim(mox, "git"), "push"], stdin=subprocess.DEVNULL)
+        _run_ok(mox, "git", "push")
 
 
-def test_body_failure_remains_primary(
-    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
+def test_body_failure_remains_primary() -> None:
     """A body failure is not replaced by the verification error it triggers."""
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
-        _run_body_failure(run)
+        _run_body_failure()
 
     assert excinfo.value.returncode == 1

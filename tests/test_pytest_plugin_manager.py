@@ -412,51 +412,79 @@ def test_enter_cmd_mox_param_override_precedes_marker(
     assert_lifecycle_calls(stub, enter=1, replay=0)
 
 
+@dc.dataclass(slots=True, frozen=True)
+class _PrecedenceCase:
+    """One row of the fail-fast precedence truth table."""
+
+    config: StubConfig
+    marker_kwargs: dict[str, bool]
+    param: dict[str, bool] | None
+    expected: bool
+
+
+def _precedence_case(
+    config: StubConfig,
+    *,
+    marker_kwargs: dict[str, bool] | None = None,
+    param: dict[str, bool] | None = None,
+    expected: bool,
+) -> _PrecedenceCase:
+    """Build a precedence case, defaulting the unset sources."""
+    return _PrecedenceCase(
+        config=config,
+        marker_kwargs={} if marker_kwargs is None else marker_kwargs,
+        param=param,
+        expected=expected,
+    )
+
+
 @pytest.mark.parametrize(
-    ("config", "marker_kwargs", "param", "expected"),
+    "case",
     [
-        pytest.param(StubConfig(), {}, None, False, id="default-off"),
-        pytest.param(StubConfig(fail_fast_ini=True), {}, None, True, id="ini-enables"),
+        pytest.param(_precedence_case(StubConfig(), expected=False), id="default-off"),
         pytest.param(
-            StubConfig(fail_fast_ini=False, fail_fast_cli=True),
-            {},
-            None,
-            True,
+            _precedence_case(StubConfig(fail_fast_ini=True), expected=True),
+            id="ini-enables",
+        ),
+        pytest.param(
+            _precedence_case(
+                StubConfig(fail_fast_ini=False, fail_fast_cli=True), expected=True
+            ),
             id="cli-over-ini",
         ),
         pytest.param(
-            StubConfig(fail_fast_ini=True, fail_fast_cli=False),
-            {"fail_fast": True},
-            None,
-            True,
+            _precedence_case(
+                StubConfig(fail_fast_ini=True, fail_fast_cli=False),
+                marker_kwargs={"fail_fast": True},
+                expected=True,
+            ),
             id="marker-over-cli-and-ini",
         ),
         pytest.param(
-            StubConfig(fail_fast_ini=True, fail_fast_cli=True),
-            {"fail_fast": True},
-            {"fail_fast": False},
-            False,
+            _precedence_case(
+                StubConfig(fail_fast_ini=True, fail_fast_cli=True),
+                marker_kwargs={"fail_fast": True},
+                param={"fail_fast": False},
+                expected=False,
+            ),
             id="param-over-marker",
         ),
     ],
 )
 def test_fail_fast_resolution_precedence(
     make_manager: cabc.Callable[..., _CmdMoxManager],
-    config: StubConfig,
-    marker_kwargs: dict[str, bool],
-    param: dict[str, bool] | None,
-    expected: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized case flag
+    case: _PrecedenceCase,
 ) -> None:
     """Fail-fast resolves independently from parameter, marker, CLI, then ini."""
     request = StubRequest(
-        config=config,
-        node=StubNode(marker=StubMarker(**marker_kwargs)),
-        param=param,
+        config=case.config,
+        node=StubNode(marker=StubMarker(**case.marker_kwargs)),
+        param=case.param,
     )
     manager = make_manager(request)
 
     stub = typ.cast("StubMox", manager.mox)
-    assert stub.fail_fast is expected, "fail_fast must follow the precedence order"
+    assert stub.fail_fast is case.expected, "fail_fast must follow the precedence order"
 
 
 def test_fail_fast_only_param_keeps_lifecycle_default(

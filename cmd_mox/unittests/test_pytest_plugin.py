@@ -563,46 +563,64 @@ def _with_decorator(module: str, decorator: str) -> str:
     return module.replace("def test_mismatch", f"{decorator}\ndef test_mismatch")
 
 
+@dc.dataclass(slots=True, frozen=True)
+class _FailFastCase:
+    """One row of the fail-fast configuration matrix."""
+
+    decorator: str
+    ini_setting: str | None
+    cli_args: tuple[str, ...]
+    expected_returncode: int
+
+
 @pytest.mark.parametrize(
-    ("decorator", "ini_setting", "cli_args", "expected_returncode"),
+    "case",
     [
-        pytest.param("", None, (), 0, id="default-defers"),
-        pytest.param("", "cmd_mox_fail_fast = true", (), 1, id="ini-enables"),
+        pytest.param(_FailFastCase("", None, (), 0), id="default-defers"),
         pytest.param(
-            "",
-            "cmd_mox_fail_fast = false",
-            ("--cmd-mox-fail-fast",),
-            1,
+            _FailFastCase("", "cmd_mox_fail_fast = true", (), 1), id="ini-enables"
+        ),
+        pytest.param(
+            _FailFastCase("", "cmd_mox_fail_fast = false", ("--cmd-mox-fail-fast",), 1),
             id="cli-over-ini",
         ),
         pytest.param(
-            "@pytest.mark.cmd_mox(fail_fast=True)",
-            "cmd_mox_fail_fast = false",
-            ("--no-cmd-mox-fail-fast",),
-            1,
+            _FailFastCase(
+                "@pytest.mark.cmd_mox(fail_fast=True)",
+                "cmd_mox_fail_fast = false",
+                ("--no-cmd-mox-fail-fast",),
+                1,
+            ),
             id="marker-over-cli-and-ini",
         ),
         pytest.param(
-            '@pytest.mark.parametrize("cmd_mox", [{"fail_fast": False}], '
-            "indirect=True)",
-            "cmd_mox_fail_fast = true",
-            ("--cmd-mox-fail-fast",),
-            0,
+            _FailFastCase(
+                '@pytest.mark.parametrize("cmd_mox", [{"fail_fast": False}], '
+                "indirect=True)",
+                "cmd_mox_fail_fast = true",
+                ("--cmd-mox-fail-fast",),
+                0,
+            ),
             id="param-over-marker-and-cli",
         ),
         pytest.param(
-            '@pytest.mark.parametrize("cmd_mox", [{"fail_fast": True}], indirect=True)',
-            None,
-            (),
-            1,
+            _FailFastCase(
+                '@pytest.mark.parametrize("cmd_mox", [{"fail_fast": True}], '
+                "indirect=True)",
+                None,
+                (),
+                1,
+            ),
             id="param-fail-fast-only",
         ),
         pytest.param(
-            '@pytest.mark.parametrize("cmd_mox", '
-            '[{"auto_lifecycle": True, "fail_fast": True}], indirect=True)',
-            None,
-            (),
-            1,
+            _FailFastCase(
+                '@pytest.mark.parametrize("cmd_mox", '
+                '[{"auto_lifecycle": True, "fail_fast": True}], indirect=True)',
+                None,
+                (),
+                1,
+            ),
             id="param-combined",
         ),
     ],
@@ -610,24 +628,21 @@ def _with_decorator(module: str, decorator: str) -> str:
 def test_fail_fast_configuration(
     pytester: pytest.Pytester,
     run_nested_pytester: cabc.Callable[..., RunResult],
-    decorator: str,
-    ini_setting: str | None,
-    cli_args: tuple[str, ...],
-    expected_returncode: int,
+    case: _FailFastCase,
 ) -> None:
     """Exercise fail-fast precedence through real shims and the fixture."""
-    if ini_setting:
-        pytester.makeini(f"[pytest]\n{ini_setting}\n")
+    if case.ini_setting:
+        pytester.makeini(f"[pytest]\n{case.ini_setting}\n")
 
     module = _with_decorator(
-        _fail_fast_test_module(expected_returncode),
-        decorator,
+        _fail_fast_test_module(case.expected_returncode),
+        case.decorator,
     )
     test_file = pytester.makepyfile(test_fail_fast=module)
 
-    plugins: tuple[str, ...] = ("cmd_mox.pytest_plugin",) if cli_args else ()
+    plugins: tuple[str, ...] = ("cmd_mox.pytest_plugin",) if case.cli_args else ()
     result = run_nested_pytester(
-        *cli_args,
+        *case.cli_args,
         *_DISABLE_CI_PLUGINS,
         test_path=test_file,
         plugins=plugins,
