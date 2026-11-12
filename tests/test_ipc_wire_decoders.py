@@ -509,27 +509,27 @@ def test_decoders_reject_missing_required_fields(
 def test_decoders_reject_unknown_fields(
     decoder: cabc.Callable[[object], object], base: dict[str, typ.Any]
 ) -> None:
-    """An unknown field is named in the error."""
+    """An unknown field is counted but not named in the error."""
     payload = {**copy.deepcopy(base), "unexpected": 1}
 
     with pytest.raises(WireFormatError) as excinfo:
         decoder(payload)
 
     message = str(excinfo.value)
-    assert "unknown field(s)" in message, "Unknown field was not reported"
-    assert "unexpected" in message, "Unknown field name was not reported"
+    assert "has 1 unknown field(s)" in message, "Unknown field count missing"
+    assert "unexpected" not in message, "Payload-supplied field name leaked"
 
 
 def test_response_rejects_unknown_nested_passthrough_field() -> None:
-    """An unknown field inside a directive is reported with its path."""
+    """An unknown field inside a directive is counted with its path."""
     payload = _with_passthrough_field(_RESPONSE, "unexpected", 1)
 
     with pytest.raises(WireFormatError) as excinfo:
         decode_response(payload)
 
     message = str(excinfo.value)
-    assert "passthrough has unknown field(s)" in message, "Wrong nested path"
-    assert "unexpected" in message, "Unknown nested field was not reported"
+    assert "passthrough has 1 unknown field(s)" in message, "Wrong nested path"
+    assert "unexpected" not in message, "Payload-supplied field name leaked"
 
 
 def test_response_rejects_passthrough_missing_lookup_path() -> None:
@@ -553,6 +553,7 @@ def test_response_rejects_passthrough_missing_lookup_path() -> None:
         pytest.param(-1.0, id="negative"),
         pytest.param(math.nan, id="nan"),
         pytest.param(math.inf, id="inf"),
+        pytest.param(10**400, id="integer-too-large-for-float"),
         pytest.param(None, id="null"),
     ],
 )
@@ -676,7 +677,7 @@ def test_decoders_do_not_mutate_the_input_payload(
 
 def test_decoded_collections_are_independent_copies() -> None:
     """Decoded lists and mappings do not alias the input payload."""
-    payload = {
+    payload: dict[str, typ.Any] = {
         "command": "git",
         "args": ["status"],
         "stdin": "",
@@ -776,12 +777,6 @@ def test_reproduction_response_rejects_wrong_types() -> None:
     """The reported response payload is rejected instead of coerced."""
     with pytest.raises(WireFormatError):
         decode_response({"stdout": 1, "exit_code": "x", "env": None})
-
-
-def test_reproduction_malformed_passthrough_is_rejected() -> None:
-    """The reported malformed directive is rejected instead of dropped."""
-    with pytest.raises(WireFormatError):
-        decode_response({"stdout": "", "passthrough": {"invocation_id": "a"}})
 
 
 def test_reproduction_invocation_rejects_wrong_types() -> None:

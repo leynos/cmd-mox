@@ -8,7 +8,8 @@ its input as untrusted: :func:`decode_invocation`,
 :func:`decode_response` check every field's type and raise
 :class:`WireFormatError` when a payload does not match its model. Error messages
 name a field path and an expected type but never include received values,
-environment keys, environment values, or list elements.
+payload-supplied field names, environment keys, environment values, or list
+elements.
 
 Examples
 --------
@@ -32,8 +33,9 @@ class WireFormatError(RuntimeError):
     """Raised when an IPC payload does not match its domain model.
 
     Messages carry a field path and an expected type only. They never contain
-    received values, environment keys, environment values, or list elements, so
-    a caller may log a message without leaking untrusted payload content.
+    received values, payload-supplied field names, environment keys, environment
+    values, or list elements, so a caller may log a message without leaking
+    untrusted payload content.
     """
 
 
@@ -62,15 +64,24 @@ def _check_keys(
     required: frozenset[str],
     optional: frozenset[str],
 ) -> None:
-    """Reject missing required fields and fields outside the model."""
+    """Reject missing required fields and fields outside the model.
+
+    Unknown field names are caller-supplied text, so the error reports only
+    how many there are. Missing field names come from the model's own field
+    set and are safe to name.
+
+    Raises
+    ------
+    WireFormatError
+        If a required field is absent or the payload carries unknown fields.
+    """
     present = set(payload)
     if missing := required - present:
         msg = f"{path or 'payload'} is missing required field(s): "
         msg += ", ".join(sorted(missing))
         raise WireFormatError(msg)
-    if unknown := present - required - optional:
-        msg = f"{path or 'payload'} has unknown field(s): "
-        msg += ", ".join(sorted(unknown))
+    if unknown_count := len(present - required - optional):
+        msg = f"{path or 'payload'} has {unknown_count} unknown field(s)"
         raise WireFormatError(msg)
 
 
@@ -132,9 +143,11 @@ def _require_timeout(value: object, path: str) -> float:
         _fail(path, "a positive finite number")
     try:
         validate_positive_finite_timeout(typ.cast("float", value))
-    except (TypeError, ValueError):
+        return float(value)
+    except (OverflowError, TypeError, ValueError):
+        # An integer too large for a float makes math.isfinite raise
+        # OverflowError rather than the documented TypeError or ValueError.
         _fail(path, "a positive finite number")
-    return float(value)
 
 
 _INVOCATION_REQUIRED: typ.Final[frozenset[str]] = frozenset({
