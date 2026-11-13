@@ -206,7 +206,7 @@ def retry_with_backoff[T](
         "Unreachable code reached in retry helper: all attempts exhausted "
         "without returning a value."
     )
-    raise RuntimeError(msg)  # pragma: no cover
+    raise RuntimeError(msg)
 
 
 def _pipe_handle_closer(handle: object) -> _bounded_thread.HandleCloser:

@@ -75,3 +75,57 @@ def test_retry_with_backoff_respects_should_retry() -> None:
 
     assert failures == [0]
     assert not sleeps
+
+
+def test_retry_with_backoff_passes_the_configured_jitter_through() -> None:
+    """The retry delay must use the configured jitter, not a substitute."""
+    sleeps: list[float] = []
+
+    def attempt(_attempt: int) -> str:
+        """Fail every attempt so the backoff delay is observable."""
+        raise OSError("temporary")
+
+    strategy = RetryStrategy(sleep=sleeps.append)
+
+    with (
+        mock.patch("cmd_mox.ipc.client.random.uniform", return_value=1.5) as uniform,
+        pytest.raises(OSError, match="temporary"),
+    ):
+        retry_with_backoff(
+            attempt,
+            retry_config=RetryConfig(retries=2, backoff=0.2, jitter=0.5),
+            strategy=strategy,
+        )
+
+    uniform.assert_called_once_with(0.5, 1.5)
+    assert sleeps == [pytest.approx(0.3)], "the jitter was not applied to the delay"
+
+
+def test_retry_with_backoff_reports_an_exhausted_retrying_loop() -> None:
+    """A policy that retries every failure falls through to a RuntimeError."""
+    sleeps: list[float] = []
+
+    def attempt(_attempt: int) -> str:
+        """Fail every attempt so the policy, not the callable, ends the loop."""
+        raise OSError("temporary")
+
+    strategy = RetryStrategy(
+        should_retry=lambda _exc, _attempt, _max: True,
+        sleep=sleeps.append,
+    )
+    expected = (
+        "Unreachable code reached in retry helper: all attempts exhausted "
+        "without returning a value."
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        retry_with_backoff(
+            attempt,
+            retry_config=RetryConfig(retries=2, backoff=0.1, jitter=0.0),
+            strategy=strategy,
+        )
+
+    assert str(excinfo.value) == expected, "the fall-through message changed"
+    assert sleeps == [pytest.approx(0.1), pytest.approx(0.2)], (
+        "every exhausted attempt must still honour its backoff"
+    )
