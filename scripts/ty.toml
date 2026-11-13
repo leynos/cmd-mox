@@ -8,10 +8,3 @@
 # ``scripts`` alone and excludes ``scripts`` from the application pass, so
 # neither surface is checked against the other's interpreter.
 environment = { python-version = "3.14" }
-
-# ``scripts/duplication_gate.py`` declares cyclopts and tomlkit in its PEP 723
-# block and ``uv run`` provisions them per invocation; they are never installed
-# into the application virtualenv, so ty cannot resolve them from site-packages.
-# Naming them here keeps the exemption minimal: any other unresolved import
-# still fails the gate.
-analysis = { allowed-unresolved-imports = ["cyclopts", "tomlkit", "tomlkit.*"] }

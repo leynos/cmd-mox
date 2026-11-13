@@ -184,6 +184,16 @@ only that the tier exists and where it sits;
 [ADR 002](./adr-0002-code-duplication-gate.md) records the scan scope, channel
 pins, ranked budget, exception contract and provisioning.
 
-Consequence: `make lint` now depends on `make install-nose`, and a developer
-workflow that runs the full lint pipeline needs a prebuilt detector release for
-the host platform.
+Consequence: a developer workflow that runs the full lint pipeline needs a
+prebuilt detector release for the host platform.
+
+## Amendment (2026-11-13): gates run from df12-python-lints
+
+The Skylos and nose tiers now run as the installed `df12-skylos` and
+`df12-duplication` commands from df12-python-lints, pinned by commit in the
+Makefile (`DF12_PYTHON_LINTS_REF`) and run in CI through the shared-actions
+`df12-skylos` and `df12-duplication` actions. The earlier `SKYLOS_*` and nose
+Makefile variables, the `make install-nose` and `make duplication-test`
+targets, the vendored gate scripts and their contract tests are gone; their
+behaviour is tested once, in df12-python-lints. The Skylos production roots
+live in `[tool.df12_skylos]` and its exclusions in `[tool.skylos]`.
