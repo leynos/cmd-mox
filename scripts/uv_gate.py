@@ -53,7 +53,7 @@ from pathlib import Path
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 REFUSAL_STATUS = 2
 ALLOW_ONLINE_VARIABLE = "UV_GATE_ALLOW_ONLINE"
 SYSTEM_GIT = Path("/usr/bin/git")
@@ -180,6 +180,11 @@ SIGNATURES: tuple[tuple[Kind, re.Pattern[str]], ...] = (
         re.compile(
             r"not\s+found\s+in\s+the\s+cache(?s:.*)network\s+was\s+disabled"
             r"|network\s+was\s+disabled(?s:.*)not\s+found\s+in\s+the\s+cache"
+            # The variant for a package that a requirement needs but the cache
+            # lacks: "needs to be downloaded from a registry" with the hint
+            # "registry packages may only be read from the cache".
+            r"|needs\s+to\s+be\s+downloaded\s+from\s+a\s+registry"
+            r"(?s:.*)network\s+was\s+disabled"
         ),
     ),
 )

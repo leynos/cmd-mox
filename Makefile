@@ -206,6 +206,7 @@ duplication-allow: ## Record one reasoned duplication exception
 	@case "$${DUPLICATION_FIRST}" in *[![:space:]]*) ;; *) printf "Error: FIRST is required (path[::name])\\n" >&2; exit 2;; esac
 	@case "$${DUPLICATION_REASON}" in *[![:space:]]*) ;; *) printf "Error: REASON is required for a duplication exception\\n" >&2; exit 2;; esac
 	@case "$${DUPLICATION_SECOND}" in *[![:print:][:space:]]*) printf "Error: SECOND members must be printable text\\n" >&2; exit 2;; esac
+	@$(DUPLICATION) install
 	@set -f; set --; for key in $${DUPLICATION_SECOND}; do set -- "$$@" --second "$$key"; done; \
 		$(DUPLICATION) allow --first "$${DUPLICATION_FIRST}" "$$@" \
 			--reason "$${DUPLICATION_REASON}"
