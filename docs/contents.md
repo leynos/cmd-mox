@@ -18,7 +18,8 @@
   `shellmock` to CmdMox.
 - [Design Doc](./python-native-command-mocking-design.md): Design rationale.
 - [Fake Capabilities Design](./cmd-mox-fake-capabilities-design.md):
-  Durable fixture writes and reusable helpers for stateful command fakes.
+  Durable fixture writes, stateful command helpers, and proposed scripted
+  stream and process fakes.
 - [RFC 001](./rfcs/rfc-0001-act-execution-environment.md): Proposed container
   execution environment and Act integration for workflow command doubles.
 - [Roadmap](./roadmap.md): Planned features and progression.

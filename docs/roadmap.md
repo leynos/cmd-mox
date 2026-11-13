@@ -746,6 +746,115 @@ plateau.
     and trust boundaries, propagation rules, and acceptance tests; none becomes
     supported implicitly through the job-container adapter.
 
+## 16. Scripted process fakes
+
+Idea: capability work can make stream and lifecycle regressions reproducible
+through real child processes, without every consumer maintaining executable
+fixtures. Ordered actions and explicit barriers should replace timing guesses
+while retaining actual pipe backpressure and operating-system signal behaviour.
+See
+[the fake capabilities design](cmd-mox-fake-capabilities-design.md#scripted-process-fakes).
+
+### 16.1. Settle the script and ownership contract
+
+This step answers which process behaviours a script can reproduce and which
+remain platform-specific. Stateful handlers in phase 14 remain independent;
+this capability extends process behaviour, not persisted fake application state.
+
+- [ ] 16.1.1. Define a typed, bounded action model and its execution boundary.
+
+  - Specify byte writes to either stream, bounded stdin reads, explicit stream
+    close, bounded delay, named barriers, exit, and signal-response actions.
+  - Keep execution in the shim or an owned child, not the controller's standard
+    streams; distinguish script/control traffic from fake command output.
+  - Success: an indexed design settles action ordering, size and lifetime
+    limits, cancellation, platform capabilities, and compatibility with ordinary
+    responses; unknown actions and invalid scripts fail before execution.
+- [ ] 16.1.2. Define invocation matching, completion and verification semantics.
+
+  - Requires 16.1.1.
+  - Preserve argv, workspace, environment, cwd, concurrent invocation identity,
+    and existing mock/spy verification. Settle stdin matching without requiring
+    EOF before a script can produce output.
+  - Success: the contract distinguishes admission, partial execution, expected
+    interruption, failure and verified completion; static record/replay fixtures
+    are not silently reinterpreted as scripts.
+
+### 16.2. Deliver ordered stream and protocol scenarios
+
+This step answers whether a fake can exercise actual incremental I/O and
+independent EOF through the public command-double entry point. See the fake
+capabilities design's scripted-process scope and verification requirements.
+
+- [ ] 16.2.1. Implement the script executor and bounded barrier control.
+
+  - Requires 16.1.1 and 16.1.2.
+  - Support byte-exact writes, partial-write retry, bounded stdin expectations,
+    independent stdout/stderr close, exit, and test-controlled barrier release.
+  - Success: a real shim emits a prefix before the test releases its suffix,
+    exchanges stdin before EOF, and closes stdout while stderr and the child
+    remain live; UTF-8 splits and invalid bytes survive exactly. Tests assert
+    reconstructed bytes and causal order, not OS read-chunk boundaries.
+- [ ] 16.2.2. Add backpressure and interrupted-stream scenarios.
+
+  - Requires 16.2.1.
+  - Bound script payloads and control queues while permitting generated output
+    larger than a pipe's capacity; acknowledge completed writes rather than
+    equating queued output with delivery.
+  - Success: a paused reader stalls the owned writer, resuming drains exact
+    bytes, and cancellation during that stall settles owned tasks and children.
+    Cover truncated protocol output and delayed EOF without arbitrary sleeps
+    as the sole synchronization mechanism.
+
+### 16.3. Deliver signal and descendant lifecycle scenarios
+
+This step answers whether fakes can reproduce stubborn children and inherited
+pipes without leaking processes or signalling unrelated workloads. A management
+library owns execution; the scripted fake supplies the behaviour under test.
+
+- [ ] 16.3.1. Implement capability-checked signal-response actions.
+
+  - Requires 16.2.1.
+  - Support acknowledged handler installation, ignored termination and defined
+    handler output/exit; document POSIX and Windows differences explicitly.
+  - Success: tests observe graceful termination and forced-kill escalation after
+    the installation barrier, retain partial output, and report unsupported
+    actions rather than silently weakening the scenario.
+- [ ] 16.3.2. Add explicit descendant-held-pipe fixtures and owned cleanup.
+
+  - Requires 16.3.1.
+  - Make descendant creation opt-in, isolate ownership, and cover a parent that
+    exits while its descendant retains a pipe. Bound all control/drain waits.
+  - Success: deadline, repeated cancellation and failed-start paths leave no
+    owned survivors; unrelated process groups remain untouched. Document escaped
+    descendants and unsupported platform containment rather than claiming it.
+
+### 16.4. Prove adoption through the existing fake interface
+
+This step answers whether consumers can replace specialized executable fixtures
+without losing their observable contracts or relying on unreleased APIs.
+
+- [ ] 16.4.1. Integrate a supported provisional entry point and adoption
+      examples.
+
+  - Requires 16.2.2 and 16.3.2.
+  - Coordinate subprocess management with
+    [issue #469](https://github.com/leynos/cmd-mox/issues/469);
+    test the selected Cuprum release, retaining explicit bounded exceptions for
+    unsupported contracts. Do not make the capability depend on all of phase 14
+    or the optional Rust launcher and Act bridge.
+  - Success: a documented command double reproduces incremental JSONL,
+    independent EOF, backpressure and signal escalation with deterministic
+    barriers; ordinary canned responses remain compatible.
+- [ ] 16.4.2. Qualify isolation, failure reporting and supported backends.
+
+  - Requires 16.4.1.
+  - Exercise concurrent invocations, parallel pytest workers, malformed scripts,
+    barrier expiry, unexpected exit and verification after interruption.
+  - Success: behavioural and generated-history tests pin ordering and ownership;
+    supported Python/Windows paths run in CI, and future Rust/container support
+    has an explicit parity gate. Document remaining dedicated-fixture cases.
+
 <!-- markdownlint-disable-next-line MD036 -->
 **Legend**
 
