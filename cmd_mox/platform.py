@@ -35,6 +35,13 @@ _PYTEST_REQUIRED_MESSAGE: typ.Final[str] = (
     "pytest."
 )
 
+# Both deprecation warnings share this explanation, so callers see the same
+# bounded guarantee regardless of which deprecated input triggered the warning.
+_DEPRECATION_EFFECT_NOTE: typ.Final[str] = (
+    "It only changes support classification; it does not change shim generation "
+    "or IPC transport selection. It will be removed in a future release."
+)
+
 
 def _normalize_platform(platform: str) -> str:
     """Return a normalized platform name suitable for prefix checks.
@@ -83,69 +90,75 @@ def _unsupported_reason_for(platform_name: str) -> str | None:
 def _warn_deprecated_inputs(function_name: str, platform: str | None) -> None:
     """Warn once per deprecated input supplied to *function_name*.
 
-    ``stacklevel=3`` attributes the warning to the caller of the public helper.
+    ``stacklevel=4`` attributes the warning to the caller of the public helper.
     When the pytest fixture is the caller, that lands on
     ``cmd_mox/pytest_plugin.py`` rather than on user code.
     """
     if platform is not None:
         warnings.warn(
             f"{function_name}() received the deprecated 'platform' argument. "
-            "It only changes support classification; it does not change shim "
-            "generation or IPC transport selection. It will be removed in a "
-            "future release.",
+            f"{_DEPRECATION_EFFECT_NOTE}",
             DeprecationWarning,
-            stacklevel=3,
+            stacklevel=4,
         )
 
     # The override is consulted only when the explicit argument is falsy.
     if not platform and os.getenv(PLATFORM_OVERRIDE_ENV):
         warnings.warn(
             f"{function_name}() consulted the deprecated "
-            f"{PLATFORM_OVERRIDE_ENV} environment variable. It only changes "
-            "support classification; it does not change shim generation or "
-            "IPC transport selection. It will be removed in a future release.",
+            f"{PLATFORM_OVERRIDE_ENV} environment variable. "
+            f"{_DEPRECATION_EFFECT_NOTE}",
             DeprecationWarning,
-            stacklevel=3,
+            stacklevel=4,
         )
 
 
+def _classify_platform(platform: str | None, *, function_name: str) -> str | None:
+    """Warn about deprecated inputs, then classify the effective platform."""
+    _warn_deprecated_inputs(function_name, platform)
+    return _unsupported_reason_for(_current_platform(platform))
+
+
 def unsupported_reason(platform: str | None = None) -> str | None:
-    """Return the skip reason for a platform, or None when supported.
+    """Return the skip reason for *platform*, or ``None`` when supported.
+
+    The reason comes from the first matching entry in the unsupported-platform
+    table. Classification consults the deprecated ``platform`` argument, then
+    the deprecated ``CMD_MOX_PLATFORM_OVERRIDE``, then ``sys.platform``, and
+    emits a ``DeprecationWarning`` when either deprecated input is used.
 
     Parameters
     ----------
     platform : str, optional
-        Deprecated. A ``sys.platform``-like string. When ``None``, the current
-        platform is used and the deprecated ``CMD_MOX_PLATFORM_OVERRIDE`` is
-        honoured. Supplying either input emits a ``DeprecationWarning``.
+        Deprecated host identifier, such as ``"win32"``.
 
     Returns
     -------
     str or None
-        The user-facing reason if the platform is unsupported; otherwise
-        ``None``.
+        The configured reason when unsupported; otherwise ``None``.
     """
-    _warn_deprecated_inputs("unsupported_reason", platform)
-    return _unsupported_reason_for(_current_platform(platform))
+    return _classify_platform(platform, function_name="unsupported_reason")
 
 
 def is_supported(platform: str | None = None) -> bool:
-    """Return True when the platform supports cmd-mox.
+    """Return whether cmd-mox supports the effective platform.
+
+    This boolean view shares :func:`unsupported_reason`'s classification and
+    deprecation rules, so the two helpers cannot disagree about a host.
 
     Parameters
     ----------
     platform : str, optional
-        Deprecated. A ``sys.platform``-like string. When ``None``, the current
-        platform is used and the deprecated ``CMD_MOX_PLATFORM_OVERRIDE`` is
-        honoured. Supplying either input emits a ``DeprecationWarning``.
+        Deprecated alias for the host identifier to classify. ``None`` uses the
+        override, when set, then ``sys.platform``.
 
     Returns
     -------
     bool
-        ``True`` if cmd-mox is supported; ``False`` if unsupported.
+        ``True`` when no unsupported-platform rule matches; otherwise ``False``.
     """
-    _warn_deprecated_inputs("is_supported", platform)
-    return _unsupported_reason_for(_current_platform(platform)) is None
+    reason = _classify_platform(platform, function_name="is_supported")
+    return reason is None
 
 
 def skip_if_unsupported(
@@ -169,8 +182,7 @@ def skip_if_unsupported(
     RuntimeError
         If pytest cannot be imported in the current environment.
     """
-    _warn_deprecated_inputs("skip_if_unsupported", platform)
-    platform_reason = _unsupported_reason_for(_current_platform(platform))
+    platform_reason = _classify_platform(platform, function_name="skip_if_unsupported")
     if platform_reason is None:
         return
 

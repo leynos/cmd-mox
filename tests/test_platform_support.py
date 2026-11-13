@@ -81,6 +81,28 @@ def _assert_single_deprecation(
     return message
 
 
+def _assert_override_classification(*, supported: bool, reason: str | None) -> None:
+    """Assert both helpers classify the deprecated override consistently."""
+    with pytest.warns(DeprecationWarning, match=_OVERRIDE_WARNING):
+        assert platform.is_supported() is supported, (
+            "is_supported disagreed with the override classification"
+        )
+    with pytest.warns(DeprecationWarning, match=_OVERRIDE_WARNING):
+        assert platform.unsupported_reason() == reason, (
+            "unsupported_reason disagreed with the override classification"
+        )
+
+
+def _assert_platform_skip(expected_reason: str, *, reason: str | None = None) -> None:
+    """Assert an unsupported platform skips with *expected_reason*."""
+    with (
+        pytest.warns(DeprecationWarning, match=_PLATFORM_WARNING),
+        pytest.raises(pytest.skip.Exception) as excinfo,
+    ):
+        platform.skip_if_unsupported(platform="win32", reason=reason)
+    assert str(excinfo.value) == expected_reason, "unexpected skip reason"
+
+
 def test_is_supported_true_for_windows() -> None:
     """Windows is a supported platform."""
     with pytest.warns(DeprecationWarning, match=_PLATFORM_WARNING):
@@ -103,10 +125,7 @@ def test_override_env_forces_windows(monkeypatch: pytest.MonkeyPatch) -> None:
         (("win", "forced block"),),
     )
     monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, "win32")
-    with pytest.warns(DeprecationWarning, match=_OVERRIDE_WARNING):
-        assert platform.is_supported() is False, "Assertion failed"
-    with pytest.warns(DeprecationWarning, match=_OVERRIDE_WARNING):
-        assert platform.unsupported_reason() == "forced block", "Assertion failed"
+    _assert_override_classification(supported=False, reason="forced block")
 
 
 def test_override_env_handles_unknown_platform(
@@ -116,10 +135,7 @@ def test_override_env_handles_unknown_platform(
     unknown_platform = "unknown-os"
     monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, unknown_platform)
 
-    with pytest.warns(DeprecationWarning, match=_OVERRIDE_WARNING):
-        assert platform.is_supported() is True, "Assertion failed"
-    with pytest.warns(DeprecationWarning, match=_OVERRIDE_WARNING):
-        assert platform.unsupported_reason() is None, "Assertion failed"
+    _assert_override_classification(supported=True, reason=None)
 
 
 def test_override_env_forces_supported_platform(
@@ -127,10 +143,7 @@ def test_override_env_forces_supported_platform(
 ) -> None:
     """The deprecated override still classifies supported platforms."""
     monkeypatch.setenv(platform.PLATFORM_OVERRIDE_ENV, "linux")
-    with pytest.warns(DeprecationWarning, match=_OVERRIDE_WARNING):
-        assert platform.is_supported() is True, "Assertion failed"
-    with pytest.warns(DeprecationWarning, match=_OVERRIDE_WARNING):
-        assert platform.unsupported_reason() is None, "Assertion failed"
+    _assert_override_classification(supported=True, reason=None)
 
 
 def test_skip_if_unsupported_triggers_pytest_skip(
@@ -139,12 +152,7 @@ def test_skip_if_unsupported_triggers_pytest_skip(
     """Calling ``skip_if_unsupported`` respects the classification table."""
     reason = "forced block"
     monkeypatch.setattr(platform, "_UNSUPPORTED_PLATFORMS", (("win", reason),))
-    with (
-        pytest.warns(DeprecationWarning, match=_PLATFORM_WARNING),
-        pytest.raises(pytest.skip.Exception) as excinfo,
-    ):
-        platform.skip_if_unsupported(platform="win32")
-    assert str(excinfo.value) == reason, "Assertion failed"
+    _assert_platform_skip(reason)
 
 
 def test_skip_if_unsupported_allows_custom_reason(
@@ -153,12 +161,7 @@ def test_skip_if_unsupported_allows_custom_reason(
     """A provided reason should override the default skip message."""
     custom_reason = "custom skip message"
     monkeypatch.setattr(platform, "_UNSUPPORTED_PLATFORMS", (("win", "nope"),))
-    with (
-        pytest.warns(DeprecationWarning, match=_PLATFORM_WARNING),
-        pytest.raises(pytest.skip.Exception) as excinfo,
-    ):
-        platform.skip_if_unsupported(platform="win32", reason=custom_reason)
-    assert str(excinfo.value) == custom_reason, "Assertion failed"
+    _assert_platform_skip(custom_reason, reason=custom_reason)
 
 
 def test_skip_if_unsupported_uses_custom_reason_with_override(
@@ -299,7 +302,9 @@ def test_cmd_mox_fixture_auto_skips_on_unsupported_platform(
     )
 
     result = run_nested_pytester("-rs", test_path=test_file)
-    result.assert_outcomes(passed=0, skipped=1, errors=0, failed=0, warnings=1)
+    # The nested run can also report warnings from ambient coverage tooling, so
+    # assert our warning's presence rather than an exact warning total.
+    result.assert_outcomes(passed=0, skipped=1, errors=0, failed=0)
     result.stdout.fnmatch_lines(["*DeprecationWarning*", "*blocked*"])
     for output in (result.stdout, result.stderr):
         output.no_fnmatch_line("*FileNotFoundError*")
