@@ -1822,8 +1822,8 @@ distribution, and pass the attested files and Sigstore bundle together as the
 already list. The workflow then reconciles the draft GitHub Release with PyPI
 using SHA-256 digests, preserving existing assets and attaching the bytes PyPI
 holds. The published GitHub Release carries the same distribution bytes and
-their provenance bundle. See [ADR 003](./adr-003-release-pipeline.md) for the
-decision and operating constraints.
+their provenance bundle. See [ADR 003](./adrs/adr-0003-release-pipeline.md) for
+the decision and operating constraints.
 
 ### 8.2 Future Roadmap
 

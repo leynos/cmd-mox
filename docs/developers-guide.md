@@ -12,8 +12,8 @@ where lint policy is configured.
 > implementation exists, the default local environment is unchanged, and
 > neither Act nor a container daemon is required to use CmdMox.
 
-[RFC 001](rfc-001-act-execution-environment.md) proposes an opt-in execution
-environment that runs command doubles inside an Act job while keeping
+[RFC 001](rfcs/rfc-0001-act-execution-environment.md) proposes an opt-in
+execution environment that runs command doubles inside an Act job while keeping
 expectations, Python callbacks, recording, and verification in the host pytest
 controller.
 [Roadmap phase 15](roadmap.md#15-container-execution-and-act-integration)
@@ -921,7 +921,7 @@ The final lint tier runs [nose](https://github.com/corca-ai/nose), the Rust
 `nose-cli` clone detector, behind `scripts/duplication_gate.py`. Nose is not
 the Python test framework of the same name on PyPI. The gate, its exception
 format and the decision to adopt it are recorded in
-[ADR 002](./adr-002-code-duplication-gate.md).
+[ADR 002](./adrs/adr-0002-code-duplication-gate.md).
 
 Run it on its own with:
 
@@ -1351,7 +1351,7 @@ The test validates:
 
 The release workflow publishes pure-Python source distributions and wheels to
 PyPI, then reconciles the GitHub Release with PyPI. The decision and its
-trade-offs are recorded in [ADR 003](./adr-003-release-pipeline.md).
+trade-offs are recorded in [ADR 003](./adrs/adr-0003-release-pipeline.md).
 
 To publish a release:
 
@@ -1491,7 +1491,7 @@ wheel, and uploads both formats with `if-no-files-found: error`. The
 [`release workflow`](../.github/workflows/release.yml) uses this action before
 attesting the distributions and handing them to later jobs as `release-dist`.
 The design rationale and operating decision are recorded in
-[ADR 003](./adr-003-release-pipeline.md).
+[ADR 003](./adrs/adr-0003-release-pipeline.md).
 
 The first automated release must use a numeric release segment later than
 `0.2.0`. The version check rejects older versions and `0.2.0` pre-release,
