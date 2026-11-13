@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses as dc
 import math
 import typing as typ
 
@@ -10,18 +9,12 @@ import hypothesis.strategies as st
 import pytest
 from hypothesis import given
 
+from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 from cmd_mox.passthrough import PassthroughConfig, PassthroughCoordinator
 
 if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     from cmd_mox.test_doubles import CommandDouble
-
-
-@dc.dataclass(frozen=True)
-class _FakeExpectation:
-    """Carry the environment mapping of a fake double's expectation."""
-
-    env: dict[str, str]
 
 
 class _FakeDouble:
@@ -33,7 +26,7 @@ class _FakeDouble:
         recording_session: _RecordingSessionStub | None = None,
     ) -> None:
         """Attach an expectation built from *env* and an optional session."""
-        self.expectation = _FakeExpectation(env)
+        self.expectation = Expectation(name="echo", env=env)
         self._recording_session = recording_session
 
 
@@ -418,7 +411,7 @@ def _prepare_snapshots(
     """Prepare one request per snapshot, replacing the expectation each time."""
     directives = []
     for index, snapshot in enumerate(snapshots):
-        double.expectation = _FakeExpectation(dict(snapshot))
+        double.expectation = Expectation(name="git", env=dict(snapshot))
         invocation = Invocation(
             command="git", args=[str(index)], stdin="", env=dict(snapshot)
         )
@@ -433,7 +426,7 @@ def _prepare_snapshots(
         directives.append(directive)
         # Replace the expectation before preparing the next request, so a
         # finalisation-time read would record the wrong keys.
-        double.expectation = _FakeExpectation({"REPLACED": "yes"})
+        double.expectation = Expectation(name="git", env={"REPLACED": "yes"})
     return directives
 
 
