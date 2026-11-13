@@ -141,6 +141,29 @@ records the rationale, and the
 [usage guide](usage-guide.md#environment-variable-filtering) describes the
 user-visible rules.
 
+## Argument matcher internals
+
+`cmd_mox.expectations.ArgMatcher` is `str | Callable[[str], bool]`. A literal
+string matches by equality; any other matcher must be callable and its result
+is coerced with `bool()`. `Expectation.with_matching_args()` validates every
+position before it assigns `match_args`, and the conflict check runs first so a
+second argument expectation is reported before matcher validation. The
+rejection message names the command, zero-based position, and type, and never
+includes the invalid matcher's `repr`.
+
+`_matcher_accepts` is the single evaluator used by `_validate_matchers` during
+matching and by `_explain_match_args_mismatch` when building a diagnostic.
+`explain_mismatch()` reports an arity difference first, then the first position
+that rejects its argument. A literal reports `arg[i]=... != ...`; a callable
+reports `arg[i]=... failed ...`, and a callable exception reports the exception
+class and message. Literal equality cannot raise, so it is reported without the
+exception wrapper used for caller-supplied predicates.
+
+Raw argument values remain visible in matcher diagnostics. That exposure is
+deliberate and belongs to the documented boundary in the
+[design document](python-native-command-mocking-design.md#994-environment-values-in-error-diagnostics);
+argument redaction covers expectation configuration errors only.
+
 ## Coverage ownership
 
 Pull-request CI generates coverage with the ratchet (`with-ratchet: 'true'`)

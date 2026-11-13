@@ -11,6 +11,7 @@ import typing as typ
 import pytest
 
 from cmd_mox import (
+    Any,
     CmdMox,
     ExpectationConfigurationError,
     Regex,
@@ -28,6 +29,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import subprocess
     from pathlib import Path
 
+    from cmd_mox.expectations import ArgMatcher
     from cmd_mox.test_doubles import CommandDouble
 
 
@@ -159,6 +161,131 @@ def test_with_matching_args_rejects_a_second_argument_expectation() -> None:
     assert "runs(handler)" in message, "the error should direct users to handlers"
     assert expectation.match_args == [existing_matcher], "the prior matcher must remain"
     assert expectation.args is None, "the failed call should not add exact arguments"
+
+
+@pytest.mark.parametrize(
+    ("invalid", "type_name"),
+    [
+        (42, "int"),
+        (3.5, "float"),
+        (None, "NoneType"),
+        (["clone"], "list"),
+    ],
+)
+def test_with_matching_args_rejects_non_string_non_callable(
+    invalid: object, type_name: str
+) -> None:
+    """Matchers must be literal strings or callables, named by position."""
+    expectation = Expectation("git")
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_matching_args("clone", typ.cast("ArgMatcher", invalid))
+
+    message = str(exc_info.value)
+    assert "Command 'git'" in message, "the error should name the command"
+    assert "position 1" in message, "the error should name the zero-based position"
+    assert type_name in message, "the error should name the rejected type"
+    assert "str" in message, "the error should name the accepted literal type"
+    assert "callable" in message, "the error should name the accepted predicate type"
+    assert expectation.match_args is None, "a rejected matcher set must not be stored"
+
+
+def test_with_matching_args_error_does_not_leak_matcher_repr() -> None:
+    """Invalid matchers are identified by type without leaking their repr."""
+
+    class SecretMatcherValue:
+        """Value whose repr contains data that must not reach the error."""
+
+        def __repr__(self) -> str:
+            """Return a repr containing a secret marker."""
+            return "SECRET-MARKER"
+
+    expectation = Expectation("git")
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_matching_args(typ.cast("ArgMatcher", SecretMatcherValue()))
+
+    message = str(exc_info.value)
+    assert "SECRET-MARKER" not in message, "matcher repr must not be leaked"
+    assert "SecretMatcherValue" in message, "the type name should still be shown"
+
+
+def test_with_matching_args_conflict_precedes_matcher_validation() -> None:
+    """An existing argument expectation wins over an invalid new matcher."""
+    expectation = Expectation("git").with_matching_args("clone")
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        expectation.with_matching_args(typ.cast("ArgMatcher", 42))
+
+    message = str(exc_info.value)
+    assert "already has" in message, "the conflict should be reported"
+    assert "position" not in message, "matcher validation should not run first"
+    assert expectation.match_args == ["clone"], "the prior matcher must remain"
+
+
+def test_with_matching_args_accepts_valid_matchers_after_rejection() -> None:
+    """A rejected call leaves the expectation configurable."""
+    expectation = Expectation("git")
+
+    with pytest.raises(ExpectationConfigurationError):
+        expectation.with_matching_args(typ.cast("ArgMatcher", 42))
+
+    expectation.with_matching_args("clone", Any())
+
+    assert expectation.match_args is not None, "valid matchers should be stored"
+    assert expectation.match_args[0] == "clone", "the literal should be kept"
+    assert isinstance(expectation.match_args[1], Any), "the comparator should be kept"
+
+
+def test_command_double_with_matching_args_rejects_invalid_matcher() -> None:
+    """The fluent CommandDouble path surfaces configuration errors."""
+    mox = CmdMox()
+    double = mox.mock("git")
+
+    with pytest.raises(ExpectationConfigurationError) as exc_info:
+        double.with_matching_args("clone", typ.cast("ArgMatcher", 42))
+
+    message = str(exc_info.value)
+    assert "Command 'git'" in message, "the error should name the command"
+    assert "position 1" in message, "the error should name the position"
+    assert double.expectation.match_args is None, "no matcher set should be stored"
+
+
+def test_mock_with_literal_and_comparator_matchers(
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """A literal matcher works alongside a comparator through the shim."""
+    mox = CmdMox()
+    mox.mock("git").with_matching_args("clone", Any()).returns(stdout="cloned")
+    mox.__enter__()
+    mox.replay()
+
+    path = require_shim_dir(mox.environment) / "git"
+    result = run([str(path), "clone", "url"], shell=False)
+
+    assert result.stdout == "cloned", "the mock response should be returned"
+    mox.verify()
+
+
+def test_mock_literal_matcher_mismatch_reports_literal(
+    run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """A differing literal argument reports equality, not a TypeError."""
+    mox = CmdMox()
+    mox.mock("git").with_matching_args("clone", Any()).returns(stdout="cloned")
+    mox.__enter__()
+    mox.replay()
+
+    path = require_shim_dir(mox.environment) / "git"
+    run([str(path), "pull", "url"], shell=False)
+
+    with pytest.raises(UnexpectedCommandError) as exc_info:
+        mox.verify()
+
+    message = str(exc_info.value)
+    assert "arg[0]='pull' != 'clone'" in message, "the literal mismatch should show"
+    assert "TypeError" not in message, "literals must not be called"
+    assert "not callable" not in message, "literals must not be called"
 
 
 def test_mock_with_args_and_order(

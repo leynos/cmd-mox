@@ -13,6 +13,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing-only import
     import collections.abc as cabc
 
     from .controller import CmdMox
+    from .expectations import ArgMatcher
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from pathlib import Path
@@ -27,8 +28,8 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
         def with_args(self, *args: str) -> typ.Self:
             """Require the command to be invoked with exactly *args*."""
 
-        def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> typ.Self:
-            """Validate each positional argument with a matcher predicate."""
+        def with_matching_args(self, *matchers: ArgMatcher) -> typ.Self:
+            """Match positional arguments with literal strings or predicates."""
 
         def with_stdin(self, data: str | cabc.Callable[[str], bool]) -> typ.Self:
             """Expect stdin to equal *data* or satisfy a predicate."""
@@ -213,19 +214,26 @@ class CommandDouble(_ExpectationProxy):  # type: ignore[misc, ty:unsupported-bas
         self.expectation.with_args(*args)
         return self
 
-    def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> typ.Self:
-        """Validate arguments using matcher predicates.
+    def with_matching_args(self, *matchers: ArgMatcher) -> typ.Self:
+        """Match arguments using literal strings or matcher predicates.
 
         Parameters
         ----------
-        *matchers : collections.abc.Callable
-            Predicates applied to corresponding command arguments.
+        *matchers : str or collections.abc.Callable
+            A literal string requires exact equality; a callable acts as a
+            predicate. One matcher is required per positional argument.
 
         Returns
         -------
         typ.Self
             This double, for fluent configuration.
-        """
+
+        Raises
+        ------
+        ExpectationConfigurationError
+            If an argument expectation is already configured, or a matcher is
+            neither a string nor callable.
+        """  # ruff: ignore[docstring-extraneous-exception] - raised by the delegated Expectation method
         self.expectation.with_matching_args(*matchers)
         return self
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import dataclasses as dc
 import typing as typ
 
@@ -15,9 +16,25 @@ from ._validators import validate_expectation_count
 from .errors import ExpectationConfigurationError
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
-    import collections.abc as cabc
-
     from .ipc import Invocation
+
+# A literal string matches an argument exactly; any other matcher must be a
+# callable predicate whose result is coerced to ``bool``.
+ArgMatcher = str | cabc.Callable[[str], bool]
+
+
+def _matcher_accepts(matcher: ArgMatcher, value: str) -> bool:
+    """Return whether *matcher* accepts *value*.
+
+    Returns
+    -------
+    bool
+        ``True`` when a literal string equals *value*, or when a callable
+        returns a truthy result.
+    """
+    if isinstance(matcher, str):
+        return matcher == value
+    return bool(matcher(value))
 
 
 @dc.dataclass(slots=True)
@@ -26,7 +43,7 @@ class Expectation:
 
     name: str
     args: list[str] | None = None
-    match_args: list[cabc.Callable[[str], bool]] | None = None
+    match_args: list[ArgMatcher] | None = None
     stdin: str | cabc.Callable[[str], object] | None = None
     env: dict[str, str] = dc.field(default_factory=dict)
     count: int = 1
@@ -63,8 +80,18 @@ class Expectation:
         self.args = configured_args
         return self
 
-    def with_matching_args(self, *matchers: cabc.Callable[[str], bool]) -> Expectation:
-        """Use callables in ``matchers`` to validate each argument.
+    def with_matching_args(self, *matchers: ArgMatcher) -> Expectation:
+        """Match each argument with a literal string or callable predicate.
+
+        A ``str`` matcher requires exact equality with the corresponding
+        argument. Any other matcher must be callable and is evaluated with the
+        argument; its result is coerced to ``bool``.
+
+        Parameters
+        ----------
+        *matchers : str or collections.abc.Callable
+            One matcher per positional argument. Strings match exactly;
+            callables act as predicates.
 
         Returns
         -------
@@ -74,7 +101,8 @@ class Expectation:
         Raises
         ------
         ExpectationConfigurationError
-            If an argument expectation is already configured.
+            If an argument expectation is already configured, or a matcher is
+            neither a string nor callable.
         """
         configured_matchers = list(matchers)
         matcher_types = [type(matcher).__name__ for matcher in configured_matchers]
@@ -83,6 +111,16 @@ class Expectation:
         )
         if error_message is not None:
             raise ExpectationConfigurationError(error_message)
+        for position, matcher in enumerate(configured_matchers):
+            if isinstance(matcher, str) or callable(matcher):
+                continue
+            msg = (
+                f"Command {self.name!r} matcher at position {position} must be "
+                f"a str or callable, got {type(matcher).__name__}. Use a "
+                "literal string for exact equality or a callable predicate "
+                "such as cmd_mox.Any()."
+            )
+            raise ExpectationConfigurationError(msg)
         self.match_args = configured_matchers
         return self
 
@@ -287,7 +325,7 @@ class Expectation:
             return False
         for arg, matcher in zip(args, matchers, strict=True):
             try:
-                if not matcher(arg):
+                if not _matcher_accepts(matcher, arg):
                     return False
             except Exception:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
                 return False
@@ -356,8 +394,14 @@ class Expectation:
         for i, (arg, matcher) in enumerate(
             zip(invocation.args, self.match_args, strict=True),
         ):
+            if isinstance(matcher, str):
+                # Literal equality cannot raise, so report it without the
+                # exception wrapper used for caller-supplied predicates.
+                if not _matcher_accepts(matcher, arg):
+                    return f"arg[{i}]={arg!r} != {matcher!r}"
+                continue
             try:
-                ok = bool(matcher(arg))
+                ok = _matcher_accepts(matcher, arg)
             except Exception as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
                 return (
                     f"arg[{i}] predicate {matcher!r} raised "
