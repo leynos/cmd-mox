@@ -83,7 +83,7 @@ Success is observable when:
   - `pylintrc-df12.toml`, `typos.toml`, `typos.local.toml` and
     `scripts/ty.toml`, because the new modules and the new `R9104` pragma need
     the gate vocabulary, spelling allowances and interpreter floor the
-    existing surfaces did not carry. `docs/adr-001-linting-architecture.md`
+    existing surfaces did not carry. `docs/adrs/adr-0001-linting-architecture.md`
     gains the amendment that points at ADR 002.
 
   The `scripts/uv_gate.py` exclusion in the brief held: the vendored helper is

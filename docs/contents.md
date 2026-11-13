@@ -19,12 +19,13 @@
 - [Design Doc](./python-native-command-mocking-design.md): Design rationale.
 - [Fake Capabilities Design](./cmd-mox-fake-capabilities-design.md):
   Durable fixture writes and reusable helpers for stateful command fakes.
-- [RFC 001](./rfc-001-act-execution-environment.md): Proposed container
+- [RFC 001](./rfcs/rfc-0001-act-execution-environment.md): Proposed container
   execution environment and Act integration for workflow command doubles.
 - [Roadmap](./roadmap.md): Planned features and progression.
-- [ADR 001](./adr-001-linting-architecture.md): Python linting architecture,
-  including the dated addendum for the fourth Skylos tier.
-- [ADR 002](./adr-002-code-duplication-gate.md): The nose code-duplication
+- [ADR 001](./adrs/adr-0001-linting-architecture.md): Python linting
+  architecture, including the dated addendum for the fourth Skylos tier.
+- [ADR 002](./adrs/adr-0002-code-duplication-gate.md): The nose code-duplication
   gate, its scan scope, its exception contract and its provisioning.
-- [ADR 003](./adr-003-release-pipeline.md): The sdist-first release pipeline,
-  Trusted Publishing and reconciliation between PyPI and GitHub Releases.
+- [ADR 003](./adrs/adr-0003-release-pipeline.md): The sdist-first release
+  pipeline, Trusted Publishing and reconciliation between PyPI and GitHub
+  Releases.

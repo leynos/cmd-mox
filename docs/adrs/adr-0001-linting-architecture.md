@@ -181,7 +181,7 @@ CmdMox adds a fifth lint tier: the nose code-duplication gate. It runs the
 pinned Rust `nose-cli` detector over the production package and fails when a
 clone family is left uncovered by a reasoned exception. This amendment records
 only that the tier exists and where it sits;
-[ADR 002](./adr-002-code-duplication-gate.md) records the scan scope, channel
+[ADR 002](./adr-0002-code-duplication-gate.md) records the scan scope, channel
 pins, ranked budget, exception contract and provisioning.
 
 Consequence: `make lint` now depends on `make install-nose`, and a developer

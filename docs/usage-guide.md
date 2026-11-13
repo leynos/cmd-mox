@@ -15,7 +15,7 @@ This installs CmdMox from PyPI. PyPI provides both a wheel and a source
 distribution. Releases produced by the current workflow attach the same
 distribution bytes and their provenance bundle to the GitHub Release. The
 `0.2.0` GitHub Release predates that process and carries only a separately
-built wheel. See [ADR 003](./adr-003-release-pipeline.md) for the release
+built wheel. See [ADR 003](./adrs/adr-0003-release-pipeline.md) for the release
 details.
 
 On Windows the wheel also pulls in `pywin32`, which provides the `win32pipe` and

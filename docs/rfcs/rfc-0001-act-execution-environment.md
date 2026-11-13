@@ -8,8 +8,8 @@ implement either capability, approve the proposal, or change the default local
 execution environment. New API names and examples below are provisional.
 
 Companion documents are the
-[core design](python-native-command-mocking-design.md), [stateful fake design](cmd-mox-fake-capabilities-design.md),
-and [roadmap](roadmap.md#15-container-execution-and-act-integration).
+[core design](../python-native-command-mocking-design.md), [stateful fake design](../cmd-mox-fake-capabilities-design.md),
+and [roadmap](../roadmap.md#15-container-execution-and-act-integration).
 
 ## Context and problem statement
 
@@ -28,17 +28,20 @@ black-box tests and authoritative GitHub-runner checks would remain necessary.
 The source baseline for this proposal is CmdMox commit
 `808befb775643e360d92a192bd87d852e2ee074f`. Relevant existing boundaries are:
 
-- [Environment management](../cmd_mox/environment.py) combines resource
+- [Environment management](../../cmd_mox/environment.py) combines resource
   allocation with changes to the host process environment.
-- [Shim generation](../cmd_mox/shimgen.py) creates POSIX symlinks to an absolute
-  installation path. Copying that directory alone does not deploy its target.
-- [The controller](../cmd_mox/controller.py) accepts an injected `environment`,
-  but still selects launcher and server behaviour using local assumptions.
-- [The shim](../cmd_mox/shim.py) already performs passthrough execution on the
-  client side. However, its lookup configuration originates in the controller,
-  and shim-directory discovery assumes the socket shares that directory.
-- [Invocation models](../cmd_mox/ipc/models.py) lack a working directory and an
-  execution-target identity.
+- [Shim generation](../../cmd_mox/shimgen.py) creates POSIX symlinks to an
+  absolute installation path. Copying that directory alone does not deploy its
+  target.
+- [The controller](../../cmd_mox/controller.py) accepts an injected
+  `environment`, but still selects launcher and server behaviour using local
+  assumptions.
+- [The shim](../../cmd_mox/shim.py) already performs passthrough execution on
+  the client side. However, its lookup configuration originates in the
+  controller, and shim-directory discovery assumes the socket shares that
+  directory.
+- [Invocation models](../../cmd_mox/ipc/models.py) lack a working directory and
+  an execution-target identity.
 
 These are deployment and execution-context problems, not a need for a second
 expectation matcher. Python callbacks, comparators, recording, and verification
@@ -167,9 +170,9 @@ not depend on editable installations, host `PYTHONPATH`, or absolute symlink
 targets outside the bundle.
 
 Launch through a configured, absolute runner interpreter. The current
-[package metadata](../pyproject.toml) requires Python 3.12 or newer; validate
-the actual interpreter, imports, and permissions in the runner before use. A
-shim for `python` or `python3` must not recursively select itself as its
+[package metadata](../../pyproject.toml) requires Python 3.12 or newer;
+validate the actual interpreter, imports, and permissions in the runner before
+use. A shim for `python` or `python3` must not recursively select itself as its
 interpreter.
 
 The planned phase 13 `cmdmox-mock` binary is a later interchangeable backend.

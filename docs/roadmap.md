@@ -540,7 +540,7 @@ should graduate from internal utility to documented public API.
 ## 15. Container execution and Act integration
 
 Status: Proposed, post-MVP. This phase implements
-[RFC 001](rfc-001-act-execution-environment.md), not an already supported
+[RFC 001](rfcs/rfc-0001-act-execution-environment.md), not an already supported
 execution mode. It adds controlled command dependencies to real Act workflow
 tests while retaining the existing local environment and black-box validation.
 Existing task numbers and completion states remain unchanged.
