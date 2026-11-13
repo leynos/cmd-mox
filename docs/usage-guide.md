@@ -485,6 +485,18 @@ Import the replacement functions from `cmd_mox.ipc.wire` when mapping these
 values to or from IPC payloads. The domain classes no longer perform JSON
 conversion themselves.
 
+Decoding is strict. `response_from_payload(payload)` is retained as a
+compatibility alias for `decode_response(payload)`; both validate every field
+and raise `cmd_mox.ipc.wire.WireFormatError` for a wrong type, a missing or
+unknown field, or a malformed `passthrough` directive. An invalid directive is
+never treated as an ordinary response, so the shim exits non-zero instead of
+skipping the real command. `request_from_payload` and the
+`json_utils.validate_invocation_payload` / `validate_passthrough_payload`
+aliases have been removed; use `decode_invocation`,
+`decode_passthrough_result`, or `decode_passthrough_request`. Error messages
+name only a field path and an expected type, so they do not disclose payload
+values.
+
 ## Recording sessions (fixture capture)
 
 A `RecordingSession` captures passthrough spy interactions and persists them as

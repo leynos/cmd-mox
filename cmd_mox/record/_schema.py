@@ -11,13 +11,10 @@ from __future__ import annotations
 import collections.abc as cabc
 import typing as typ
 
+from cmd_mox._dotted_paths import join_dotted_path
+
 #: Prefix shared by every schema validation error raised by this module.
 SCHEMA_ERROR_PREFIX: typ.Final[str] = "Invalid fixture schema"
-
-
-def _join_path(parent: str, key: str) -> str:
-    """Join *parent* and *key* into a dotted schema path."""
-    return f"{parent}.{key}" if parent else key
 
 
 def _missing_field(path: str) -> ValueError:
@@ -37,7 +34,7 @@ def _require_value(
     mapping: cabc.Mapping[str, object], key: str, *, path: str
 ) -> tuple[str, object]:
     """Return the schema path and value for *key*, raising when it is absent."""
-    field = _join_path(path, key)
+    field = join_dotted_path(path, key)
     if key not in mapping:
         raise _missing_field(field)
     return field, mapping[key]
@@ -75,7 +72,7 @@ def _optional_str(
     mapping: cabc.Mapping[str, object], key: str, *, path: str = ""
 ) -> str | None:
     """Return an optional string field, mapping a missing key or null to ``None``."""
-    field = _join_path(path, key)
+    field = join_dotted_path(path, key)
     value = mapping.get(key)
     if value is None:
         return None
@@ -110,7 +107,7 @@ def _require_str_list(
 ) -> list[str]:
     """Return a required list of strings, reporting the offending index."""
     items = _require_list(mapping, key, path=path)
-    field = _join_path(path, key)
+    field = join_dotted_path(path, key)
     strings: list[str] = []
     for index, item in enumerate(items):
         if not isinstance(item, str):
@@ -131,7 +128,7 @@ def _require_str_mapping(
     mapping: cabc.Mapping[str, object], key: str, *, path: str = ""
 ) -> dict[str, str]:
     """Return a required string-to-string mapping, reporting the offending key."""
-    field = _join_path(path, key)
+    field = join_dotted_path(path, key)
     value = _require_mapping(mapping, key, path=path)
     strings: dict[str, str] = {}
     for map_key, map_value in value.items():

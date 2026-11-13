@@ -305,7 +305,7 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
                 "stderr": "err",
                 "exit_code": 2,
             },
-            _server_core.validate_passthrough_payload,
+            _server_core.decode_passthrough_result,
             "handle_passthrough_result",
         ),
         (
@@ -316,7 +316,7 @@ def test_parse_payload_handles_invalid_utf8(caplog: pytest.LogCaptureFixture) ->
                 "stdin": "",
                 "env": {},
             },
-            _server_core.validate_invocation_payload,
+            _server_core.decode_invocation,
             "handle_invocation",
         ),
     ],
@@ -461,15 +461,16 @@ def test_request_pipeline_validation_failure_returns_error_frame(
     """Validation failures should return a safe error frame without dispatch."""
     calls: list[Invocation] = []
 
-    def failing_validator(_payload: _RequestPayload) -> Invocation | None:
+    def failing_validator(_payload: object) -> Invocation:
         """Reject the payload so dispatch must be skipped.
 
-        Returns
-        -------
-        None
+        Raises
+        ------
+        WireFormatError
             Always, to exercise the invalid-request path.
         """
-        return None
+        msg = "payload rejected"
+        raise _server_core.WireFormatError(msg)
 
     def spy_processor(
         _server: IPCServer, invocation: Invocation
