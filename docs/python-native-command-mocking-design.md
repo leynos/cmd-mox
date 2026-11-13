@@ -607,9 +607,11 @@ sequenceDiagram
 
 `cmd_mox.domain` owns invocation, response, and passthrough values without
 transport serialization. `cmd_mox.ipc.wire` maps those values to and from
-JSON-ready payloads at the IPC boundary. `cmd_mox.response_policy` selects
-strategies and validates expectation environments; `cmd_mox.response_strategy`
-executes handlers and constructs responses with temporary environment overrides.
+JSON-ready payloads at the IPC boundary. `cmd_mox.response_policy` merges
+expectation environment overrides into `Invocation.env` and validates them;
+`cmd_mox.response_strategy` executes handlers without accepting overrides and
+without modifying `os.environ`, and the controller finalizes the response
+environment.
 
 The following diagram groups the response-strategy concepts. It is a conceptual
 overview, not the literal call order: environment validation occurs before
@@ -2002,10 +2004,10 @@ Expectation configuration now lives in a dedicated :class:`Expectation` object
 held by each `CommandDouble`. Builder methods such as `with_args()` and
 `with_stdin()` delegate to this object. During replay, the IPC handler merges
 any `with_env()` variables into the recorded :class:`Invocation` before
-executing the double. The overrides are applied with `temporary_env` so the
-handler or canned response sees them without mutating the process environment.
-Because these overrides are also copied onto `Invocation.env`, verification
-matches against the same environment observed at execution time. When the
+executing the double. Handlers read those overrides from `Invocation.env`, and
+canned responses receive them on their response environment; CmdMox does not
+mutate the test process's `os.environ` while a handler runs. Verification
+matches against the same `Invocation.env` observed at execution time. When the
 caller supplies conflicting values the handler now raises
 ``UnexpectedCommandError`` so mismatched expectations fail immediately instead
 of silently replacing the provided values.

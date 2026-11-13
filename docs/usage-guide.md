@@ -1068,24 +1068,27 @@ few common ones are:
   standard input when no input is intended. See the
   [shim path guidance](#wiring-a-tool-to-a-shim-by-absolute-path).
 - `with_env(mapping)` – inject additional environment variables into the
-  invocation. The mapping is merged into the recorded `Invocation.env`, applied
-  when custom handlers or canned responses run, and does not mutate the test
-  process's `os.environ`. Conflicting keys override the caller-provided
-  environment so passthrough commands honour the injected values.
+  invocation. CmdMox merges the mapping into `Invocation.env`, which custom
+  handlers read. Canned responses carry the mapping on their response
+  environment, and passthrough commands receive it as an environment overlay.
+  CmdMox does not mutate the test process's `os.environ`. When the caller
+  already provides a different value for a key, CmdMox raises
+  `UnexpectedCommandError` instead of overriding it.
 - `returns(stdout="", stderr="", exit_code=0)` – static response using text
   values; CmdMox operates in text mode—pass `str` (bytes are not supported).
   Note: For binary payloads, prefer `passthrough()` or encode/decode at the
   boundary (e.g., base64) so handlers exchange `str`.
 - `runs(handler)` – call a function to produce dynamic output. The handler
-  receives an `Invocation`; `invocation.args` is a `list[str]`. The handler
-  returns either a `(stdout, stderr, exit_code)` tuple or a `Response`
-  instance. It runs in the test process on an IPC request-handler worker
-  thread, not in the shim subprocess. Path arguments may be relative to the
-  invoked command's working directory, but `Invocation` does not carry that
-  directory. Opening a relative argument directly in the handler resolves it
-  against the test process's working directory. Provide the invoking working
-  directory separately or use absolute paths. For a Git merge handler, capture
-  the invoking repository path as `repository` and compute the merged text as
+  receives an `Invocation`; `invocation.args` is a `list[str]` and
+  `invocation.env` carries any `with_env()` overrides. The handler returns
+  either a `(stdout, stderr, exit_code)` tuple or a `Response` instance. It
+  runs in the test process on an IPC request-handler worker thread, not in the
+  shim subprocess. Path arguments may be relative to the invoked command's
+  working directory, but `Invocation` does not carry that directory. Opening a
+  relative argument directly in the handler resolves it against the test
+  process's working directory. Provide the invoking working directory
+  separately or use absolute paths. For a Git merge handler, capture the
+  invoking repository path as `repository` and compute the merged text as
   `result`; then write the target with
   `(repository / invocation.args[1]).write_text(result)`.
 
@@ -1305,7 +1308,9 @@ supported surface area without navigating modules.
 ### Shims and environment helpers
 
 - `EnvironmentManager` – manages shim directory, `PATH`, and IPC env vars.
-- `temporary_env` – context manager to temporarily set `os.environ` entries.
+- `temporary_env` – context manager that temporarily sets the `os.environ`
+  entries named in its mapping and restores only those keys on exit. Unrelated
+  changes made inside the context survive. It provides no thread isolation.
 - `create_shim_symlinks` – low-level helper to generate command shims.
 - `SHIM_PATH` – filesystem path to the shared `shim.py` entrypoint used by
   shims.

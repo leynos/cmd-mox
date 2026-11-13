@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shlex
 import typing as typ
 
@@ -255,7 +254,7 @@ def stub_with_env(mox: CmdMox, cmd: str, var: str, val: str) -> None:
 
     def handler(invocation: Invocation) -> tuple[str, str, int]:
         """Return the injected environment variable's value as stdout."""
-        return (os.environ.get(var, ""), "", 0)
+        return (invocation.env.get(var, ""), "", 0)
 
     mox.stub(cmd).with_env({var: val}).runs(handler)
 

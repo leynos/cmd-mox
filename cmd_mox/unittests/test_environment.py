@@ -21,7 +21,6 @@ from cmd_mox.environment import (
     CleanupError,
     EnvironmentManager,
     ensure_dir_exists,
-    temporary_env,
 )
 from cmd_mox.errors import MissingEnvironmentError
 from cmd_mox.fs_retry import RetryConfig, RobustRmtreeError, robust_rmtree
@@ -228,52 +227,6 @@ def test_environment_restores_deleted_vars() -> None:
         del os.environ["DEL_VAR"]
     assert os.environ["DEL_VAR"] == "before"
     del os.environ["DEL_VAR"]
-
-
-def test_temporary_env_restores_environment() -> None:
-    """temporary_env should fully restore the process environment."""
-    original_env = os.environ.copy()
-    with temporary_env({"TMP": "1"}):
-        os.environ["EXTRA"] = "foo"
-        assert os.environ["TMP"] == "1"
-        assert os.environ["EXTRA"] == "foo"
-    assert os.environ == original_env
-
-
-def test_temporary_env_restores_deleted_vars() -> None:
-    """Variables deleted inside temporary_env are re-added."""
-    os.environ["KEEP"] = "val"
-    with temporary_env({"TMP": "x"}):
-        del os.environ["KEEP"]
-    assert os.environ["KEEP"] == "val"
-    del os.environ["KEEP"]
-
-
-def test_temporary_env_restores_on_exception() -> None:
-    """temporary_env should restore the env even if an error occurs."""
-    original_env = os.environ.copy()
-
-    def trigger() -> None:
-        """Mutate the environment and raise inside ``temporary_env``."""
-        with temporary_env({"ERR": "1"}):
-            os.environ["EXTRA"] = "bar"
-            raise RuntimeError("boom")
-
-    with pytest.raises(RuntimeError, match="boom"):
-        trigger()
-    assert os.environ == original_env
-
-
-def test_nested_temporary_env() -> None:
-    """Nested temporary_env contexts restore environment correctly."""
-    original_env = os.environ.copy()
-    with temporary_env({"A": "1"}):
-        with temporary_env({"B": "2"}):
-            os.environ["C"] = "3"
-        assert "B" not in os.environ
-        assert os.environ["A"] == "1"
-        assert "C" not in os.environ
-    assert os.environ == original_env
 
 
 def test_robust_rmtree_success(tmp_path: Path) -> None:

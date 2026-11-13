@@ -20,13 +20,17 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
 @pytest.mark.requires_unix_sockets
 def test_with_env_injection(
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Environment variables provided via with_env() are applied."""
+    """Environment variables provided via with_env() reach invocation.env."""
+    monkeypatch.delenv("HELLO", raising=False)
     mox = CmdMox()
+    host_observations: list[str | None] = []
 
     def handler(inv: Invocation) -> Response:
-        """Echo the ``HELLO`` environment variable back as stdout."""
-        return Response(stdout=os.environ.get("HELLO", ""))
+        """Echo the injected variable and record the host environment."""
+        host_observations.append(os.environ.get("HELLO"))
+        return Response(stdout=inv.env.get("HELLO", ""))
 
     mox.stub("env").with_env({"HELLO": "WORLD"}).runs(handler)
     with mox:
@@ -36,6 +40,8 @@ def test_with_env_injection(
         mox.verify()
 
     assert result.stdout.strip() == "WORLD", "with_env() value reaches the handler"
+    assert host_observations == [None], "handler observed a mutated host environment"
+    assert "HELLO" not in os.environ, "with_env() leaked into the host environment"
 
 
 @pytest.mark.parametrize(

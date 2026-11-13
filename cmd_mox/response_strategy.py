@@ -10,7 +10,6 @@ import dataclasses as dc
 import typing as typ
 
 from .domain import Response
-from .environment import temporary_env
 from .response_policy import (
     ResponseStrategy,
     apply_expectation_env,
@@ -33,12 +32,21 @@ def default_response(invocation: Invocation) -> Response:
     return Response(stdout=invocation.command)
 
 
-def execute_handler(
-    double: CommandDouble,
-    invocation: Invocation,
-    overrides: dict[str, str],
-) -> Response:
-    """Execute the handler with the appropriate environment context.
+def execute_handler(double: CommandDouble, invocation: Invocation) -> Response:
+    """Execute the handler for *double*.
+
+    The response policy merges any ``with_env()`` overrides into
+    ``invocation.env`` before this call, so handlers read them there. CmdMox
+    does not modify the test process's ``os.environ`` to apply those overrides;
+    handlers and other threads may still change it during execution.
+
+    Parameters
+    ----------
+    double : CommandDouble
+        The command double whose handler should run.
+    invocation : Invocation
+        The invocation passed to the handler. Callers must merge any
+        ``with_env()`` overrides into ``invocation.env`` before calling.
 
     Returns
     -------
@@ -49,9 +57,6 @@ def execute_handler(
     if double.handler is None:
         base = double.response
         return dc.replace(base, env=dict(base.env))
-    if overrides:
-        with temporary_env(overrides):
-            return double.handler(invocation)
     return double.handler(invocation)
 
 

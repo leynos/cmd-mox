@@ -284,10 +284,12 @@ Feature: CmdMox basic functionality
 
   Scenario: environment variables can be injected
     Given a CmdMox controller
+    And the host environment does not define "HELLO"
     And the command "envcmd" is stubbed with env var "HELLO"="WORLD"
     When I replay the controller
     And I run the command "envcmd"
     Then the output should be "WORLD"
+    And the host environment should not define "HELLO"
     When I verify the controller
     Then the journal should contain 1 invocation of "envcmd"
 

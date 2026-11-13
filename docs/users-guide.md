@@ -108,6 +108,20 @@ The domain classes no longer provide the previous IPC conversion methods.
 Callers that used them must migrate to the wire functions listed in the
 [IPC payload migration guide](usage-guide.md#ipc-payload-migration).
 
+## Handler environment overrides
+
+Handlers read `with_env()` overrides from `Invocation.env`. CmdMox no longer
+writes those overrides into `os.environ`, so a handler that reads the process
+environment sees no injected value.
+
+`temporary_env()` restores only the keys in its mapping. It provides no thread
+isolation, so overlapping contexts that set the same key still race.
+
+For upgrade steps, see the
+[handler environment migration note](handler-environment-migration-note.md) and
+the [fluent API reference](usage-guide.md#fluent-api-reference) for the full
+`with_env()` behaviour.
+
 ## Shim stdin and IPC timeouts
 
 `CMOX_IPC_TIMEOUT` defaults to five seconds when the IPC server starts inside

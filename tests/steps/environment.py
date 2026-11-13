@@ -34,6 +34,26 @@ def set_env_var(monkeypatch: pytest.MonkeyPatch, var: str, val: str) -> None:
     monkeypatch.setenv(var, val)
 
 
+@given(parsers.cfparse('the host environment does not define "{var}"'))
+def host_env_absent(monkeypatch: pytest.MonkeyPatch, var: str) -> None:
+    """Remove *var* from the host environment for the duration of the test."""
+    monkeypatch.delenv(var, raising=False)
+
+
+@then(parsers.cfparse('the host environment should not define "{var}"'))
+def host_env_should_be_absent(var: str) -> None:
+    """Assert that *var* is absent from the host environment.
+
+    Raises
+    ------
+    AssertionError
+        If *var* is present in the host environment.
+    """
+    if var in os.environ:
+        msg = f"host environment unexpectedly defines {var}"
+        raise AssertionError(msg)
+
+
 @then(parsers.cfparse('PATHEXT should include "{extension}"'))
 def pathext_should_include(extension: str) -> None:
     """Assert that PATHEXT contains *extension* (case-insensitive).
