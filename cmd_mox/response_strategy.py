@@ -42,9 +42,9 @@ def execute_handler(double: CommandDouble, invocation: Invocation) -> Response:
 
     Parameters
     ----------
-    double:
+    double : CommandDouble
         The command double whose handler should run.
-    invocation:
+    invocation : Invocation
         The invocation passed to the handler. Callers must merge any
         ``with_env()`` overrides into ``invocation.env`` before calling.
 
