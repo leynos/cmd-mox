@@ -444,11 +444,11 @@ reason = "Two fluent DSL verbs whose bodies differ only in the boolean they stor
 members = ["cmd_mox/environment.py", "cmd_mox/fs_retry.py", "cmd_mox/ipc/named_pipe.py"]
 reason = "One early-return idiom repeated in three Windows-only code paths: ensure PATHEXT carries .CMD, repair read-only permissions before rmtree, and guard the named-pipe accept loop. The first two are invoked unconditionally by cross-platform callers and must no-op on POSIX; the third keeps a state object whose production constructor already rejects non-Windows use inert. Each guards a different operation with different consequences, so the shared two lines are the platform check, not omitted behaviour. These fragments are reported unnamed, so the keys must be path-only; they therefore also cover any future family contained entirely within these three files and are not a claim that every new clone in them is safe."
 [[tool.duplication_gate.allow]]
-members = ["cmd_mox/pytest_plugin.py", "cmd_mox/verifiers.py"]
+members = ["cmd_mox/pytest_plugin.py", "cmd_mox/_diagnostic_format.py"]
 reason = "The idiom if not <collection>: return \"<literal>\" appears in four diagnostic formatters that each render a different empty case: a teardown failure banner, an empty environment mapping, an empty invocation list, and an empty numbered list. The literal and the surrounding formatter differ every time, so the shared two lines are the shape of a guard, not a behaviour. A shared helper would need the caller to pass the replacement text, adding indirection for one if-statement."
 [[tool.duplication_gate.allow]]
 members = ["cmd_mox/verifiers.py", "cmd_mox/test_doubles.py"]
-reason = "Two unrelated one-statement idioms in the same pair of files. verifiers.py has inverse length comparisons in OrderVerifier._check_missing_expectations and _check_extra_invocations (bail out when invocations already satisfy or already exceed the ordered sequence) plus the same if-not-then-return shape used by the empty-collection formatters above; test_doubles.py repeats self._validate_spy_usage(\"<method>\") at three assertion entry points that differ only in the method name they report. Both meanings come from the call site, so an extraction would be a shape-only helper. nose reports these fragments unnamed, so the keys are path-only; they also cover any future family contained entirely within these two files."
+reason = "Two unrelated one-statement idioms in the same pair of files. verifiers.py has inverse length comparisons in OrderVerifier._check_missing_expectations and _check_extra_invocations (bail out when invocations already satisfy or already exceed the ordered sequence); test_doubles.py repeats self._validate_spy_usage(\"<method>\") at three assertion entry points that differ only in the method name they report. Both meanings come from the call site, so an extraction would be a shape-only helper. nose reports these fragments unnamed, so the keys are path-only; they also cover any future family contained entirely within these two files."
 
 [[tool.duplication_gate.allow]]
 members = ["cmd_mox/controller.py", "cmd_mox/passthrough.py"]
@@ -465,6 +465,9 @@ reason = "Both public validators state a fixed contract and delegate their whole
 # The dead-code gate is the installed `df12-skylos` command from
 # df12-python-lints. `roots` limits liveness analysis to production sources;
 # the exclusions keep both test trees out of the production liveness graph.
+[[tool.duplication_gate.allow]]
+members = ["cmd_mox/verifiers.py", "cmd_mox/_diagnostic_format.py"]
+reason = "nose matches the import prelude the two modules must share: __future__ annotations, the collections.abc and typing aliases, defaultdict and indent, plus the private formatting names verifiers imports from _diagnostic_format. An import statement has no behaviour to share, and there is nowhere else to put it that does not move the dependency into a third module. Both fragments are reported unnamed, so the keys are path-only and also cover any future family contained entirely within these two files."
 [tool.df12_skylos]
 roots = ["cmd_mox"]
 python = "3.14"

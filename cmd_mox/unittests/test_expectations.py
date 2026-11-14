@@ -947,3 +947,13 @@ def test_definite_mismatch_reason_redacts_masked_matcher_values() -> None:
     reason = expectation.definite_mismatch_reason(invocation)
 
     assert reason == "arg[1]='<redacted>' != '<redacted>'"
+
+
+def test_definite_mismatch_reason_masks_inline_credential_matcher() -> None:
+    """An inline credential matcher masks the bare value the call passed."""
+    expectation = Expectation("deploy").with_matching_args("--token=supersecret")
+    invocation = Invocation("deploy", ["supersecret"], "", {})
+
+    reason = expectation.definite_mismatch_reason(invocation)
+
+    assert reason == "arg[0]='<redacted>' != '--token=<redacted>'"

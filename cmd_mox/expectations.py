@@ -466,7 +466,7 @@ class Expectation:
         tuple[list[str], list[str]]
             Redacted actual arguments and redacted literal matchers.
         """
-        actual = _redact_sensitive_argument_values(invocation.args, command=self.name)
+        actual = self.redacted_arguments(invocation.args)
         literals = [matcher if isinstance(matcher, str) else "" for matcher in matchers]
         expected = _redact_sensitive_argument_values(literals, command=self.name)
         # An option name may itself be a predicate matcher, so the matcher list

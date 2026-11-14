@@ -68,6 +68,47 @@ def test_order_verifier_masks_from_calls_to_the_same_command() -> None:
     assert "deploy(Any(), '<redacted>')" in message
 
 
+def test_order_verifier_masks_observed_calls_from_every_same_command_call() -> None:
+    """A credential under another option stays masked in the observed order."""
+    deploy = (
+        Expectation("deploy")
+        .with_matching_args(Any(), "expected-secret")
+        .times_called(2)
+        .in_order()
+    )
+    other = Expectation("other").with_args("status").in_order()
+    journal = [
+        _invocation("other", "status"),
+        _invocation("deploy", "--token", "expected-secret"),
+        _invocation("deploy", "--label", "expected-secret"),
+    ]
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        OrderVerifier([deploy, other]).verify(journal)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "deploy('--label', '<redacted>')" in message
+
+
+def test_order_verifier_masks_unexpected_call_arguments() -> None:
+    """The unexpected-calls section reuses the masked call descriptions."""
+    expectation = (
+        Expectation("deploy").with_matching_args(Any(), "expected-secret").in_order()
+    )
+    journal = [
+        _invocation("deploy", "--token", "expected-secret"),
+        _invocation("deploy", "--label", "expected-secret"),
+    ]
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        OrderVerifier([expectation]).verify(journal)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "Unexpected calls:\n  deploy('--label', '<redacted>')" in message
+
+
 def test_order_verifier_flags_out_of_order_matches() -> None:
     """An invocation matching a later ordered expectation should fail fast."""
     first = Expectation("git").with_args("fetch").in_order()
