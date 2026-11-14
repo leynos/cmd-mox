@@ -864,10 +864,12 @@ make skylos-allow SYMBOL=handler REASON="Loaded by plugin registry"
 The target hands both variables to `df12-skylos allow`, which requires
 non-whitespace values and records the symbol and reason. `SYMBOL` avoids WSL's
 caller-owned `NAME` environment variable. Each read-modify-write is serialized
-by the command on the ignored repository-local `.pyproject.toml.df12.lock`.
-Treat the helper as a reviewed write: retain the matching
-`[tool.skylos.whitelist.documented]` entry in `pyproject.toml`, with a
-caller-specific reason, and never use it to avoid removing genuine dead code.
+by the command on the ignored repository-local `.pyproject.toml.df12.lock`. The
+command refuses wildcard, dotted and keyword symbols; a qualified symbol
+belongs in a typed entry-point rule instead. Treat the helper as a reviewed
+write: retain the matching `[tool.skylos.whitelist.documented]` entry in
+`pyproject.toml`, with a caller-specific reason, and never use it to avoid
+removing genuine dead code.
 
 When a runtime entry point is reached through a cached factory, declare the
 precise function and generated class types in
@@ -936,8 +938,13 @@ key is a repository-relative POSIX path matched as a full glob, optionally
 suffixed `::name` to require the exact unit name nose reported. A `::name` key
 never matches an unnamed fragment. `FIRST`, `SECOND` and `REASON` are read only
 from the make command line, so an ambient environment variable of the same name
-cannot create an exception. The underlying CLI accepts repeated `--second` for
-families with more than two members.
+cannot create an exception. `SECOND` is a whitespace-separated list, each word
+becoming its own `--second` for families with more than two members, so a key
+containing spaces cannot be passed through the target. `make duplication-allow`
+installs the detector first, because `df12-duplication allow` runs it and
+refuses a set of keys that covers no currently reported family; to change the
+reason of an entry that no longer matches a report, edit `pyproject.toml`
+directly.
 
 An entry silences a family only when every location in that family matches one
 of its keys. Partial coverage from several entries does not combine, and a new
