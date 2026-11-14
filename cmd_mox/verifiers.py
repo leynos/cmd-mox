@@ -7,6 +7,7 @@ import typing as typ
 from collections import defaultdict
 from textwrap import indent
 
+from ._argument_redaction import redact_sensitive_argument_values
 from .domain import mask_env_value
 from .errors import UnexpectedCommandError, UnfulfilledExpectationError
 from .test_doubles import DoubleKind
@@ -101,7 +102,9 @@ def _append_env_line(lines: list[str], exp: Expectation) -> None:
         lines.append(f"env={_format_env(exp.env)}")
 
 
-def _describe_expectation(exp: Expectation, *, include_count: bool = False) -> str:
+def _describe_expectation(
+    exp: Expectation, *, include_count: bool = False, include_stdin: bool = True
+) -> str:
     """Return a human-readable representation of *exp*.
 
     Parameters
@@ -110,6 +113,9 @@ def _describe_expectation(exp: Expectation, *, include_count: bool = False) -> s
         Expectation to describe.
     include_count : bool
         Whether to include the expected call count.
+    include_stdin : bool
+        Whether to include the expected stdin value. Diagnostics that must
+        never echo stdin content pass ``False``.
 
     Returns
     -------
@@ -118,7 +124,8 @@ def _describe_expectation(exp: Expectation, *, include_count: bool = False) -> s
     """
     lines = [_format_call(exp.name, _expectation_args_repr(exp))]
     _append_count_line(lines, exp, include_count=include_count)
-    _append_stdin_line(lines, exp)
+    if include_stdin:
+        _append_stdin_line(lines, exp)
     _append_env_line(lines, exp)
     return "\n".join(lines)
 
@@ -145,7 +152,8 @@ def _describe_invocation(
     str
         Multi-line diagnostic description.
     """
-    lines = [_format_call(inv.command, _format_items(inv.args))]
+    safe_args = redact_sensitive_argument_values(list(inv.args), command=inv.command)
+    lines = [_format_call(inv.command, _format_items(safe_args))]
     if include_stdin:
         lines.append(f"stdin={inv.stdin!r}")
     if focus_env:
@@ -228,6 +236,43 @@ def _list_expected_commands(doubles: cabc.Mapping[str, CommandDouble]) -> str:
         if not names
         else ", ".join(repr(name) for name in names)
     )
+
+
+def raise_rejected_mock_error(
+    exp: Expectation, inv: Invocation, reason: str
+) -> typ.NoReturn:
+    """Raise for a mock call rejected at invocation time by fail-fast mode.
+
+    Parameters
+    ----------
+    exp : Expectation
+        The mock's expectation.
+    inv : Invocation
+        The rejected invocation.
+    reason : str
+        The stored, redacted mismatch reason.
+
+    Raises
+    ------
+    UnexpectedCommandError
+        Always, describing the expected and actual calls.
+    """
+    msg = _format_sections(
+        "Unexpected command invocation.",
+        [
+            ("Expected", _describe_expectation(exp, include_stdin=False)),
+            (
+                "Actual",
+                _describe_invocation(
+                    inv,
+                    focus_env=exp.env.keys(),
+                    include_stdin=False,
+                ),
+            ),
+            ("Reason", reason),
+        ],
+    )
+    raise UnexpectedCommandError(msg)
 
 
 class UnexpectedCommandVerifier:

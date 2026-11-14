@@ -412,3 +412,30 @@ def test_verification_reports_missing_invocations() -> None:
 def test_commands_can_be_used_in_pipelines() -> None:
     """CmdMox supports piped shell commands by mocking each tool."""
     pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "mismatched mock call is answered before deferred verification fails",
+)
+def test_mismatched_mock_call_defers_failure_to_verify() -> None:
+    """A mismatched mock call is answered, then reported by verification."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "fail-fast rejects a mismatched mock call at invocation time",
+)
+def test_fail_fast_rejects_mismatched_mock_call() -> None:
+    """A fail-fast mock rejects a mismatch without using its response."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "fail-fast mock still answers a matching call",
+)
+def test_fail_fast_mock_answers_matching_call() -> None:
+    """Fail-fast leaves matching mock calls unchanged."""
+    pass

@@ -54,6 +54,12 @@ def check_output(result: subprocess.CompletedProcess[str], text: str) -> None:
     assert result.stdout.strip() == text, "Assertion failed"
 
 
+@then("the output should be empty")
+def check_output_empty(result: subprocess.CompletedProcess[str]) -> None:
+    """Ensure the command produced no standard output."""
+    assert not result.stdout, "Assertion failed"
+
+
 @then(parsers.cfparse("the exit code should be {code:d}"))
 def check_exit_code(result: subprocess.CompletedProcess[str], code: int) -> None:
     """Assert the process exit code equals *code*."""

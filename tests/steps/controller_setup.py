@@ -30,8 +30,24 @@ _ERROR_TYPES: dict[str, type[VerificationError]] = {
 }
 
 
+@contextlib.contextmanager
+def _controller_context(
+    *,
+    fail_fast: bool = False,
+    max_journal_entries: int | None = None,
+) -> cabc.Iterator[CmdMox]:
+    """Yield a controller configured by the given options and tear it down."""
+    mox = CmdMox(fail_fast=fail_fast, max_journal_entries=max_journal_entries)
+    try:
+        yield mox
+    finally:
+        # Ensure cleanup even if the test raises.
+        if mox._entered:
+            mox.__exit__(None, None, None)
+
+
 @given("a CmdMox controller", target_fixture="mox")
-def create_controller() -> cabc.Generator[CmdMox, None, None]:
+def create_controller() -> cabc.Iterator[CmdMox]:
     """Create a fresh CmdMox instance with proper cleanup.
 
     Yields
@@ -39,20 +55,28 @@ def create_controller() -> cabc.Generator[CmdMox, None, None]:
     CmdMox
         A fresh controller instance that will be cleaned up after the test.
     """
-    mox = CmdMox()
-    try:
+    with _controller_context() as mox:
         yield mox
-    finally:
-        # Ensure cleanup even if the test raises
-        if mox._entered:
-            mox.__exit__(None, None, None)
+
+
+@given("a CmdMox controller with fail-fast enabled", target_fixture="mox")
+def create_fail_fast_controller() -> cabc.Iterator[CmdMox]:
+    """Create a controller that rejects definite mock mismatches at call time.
+
+    Yields
+    ------
+    CmdMox
+        A fail-fast controller that will be cleaned up after the test.
+    """
+    with _controller_context(fail_fast=True) as mox:
+        yield mox
 
 
 @given(
     parsers.cfparse("a CmdMox controller with max journal size {size:d}"),
     target_fixture="mox",
 )
-def create_controller_with_limit(size: int) -> cabc.Generator[CmdMox, None, None]:
+def create_controller_with_limit(size: int) -> cabc.Iterator[CmdMox]:
     """Create a CmdMox instance with bounded journal and proper cleanup.
 
     Parameters
@@ -65,13 +89,8 @@ def create_controller_with_limit(size: int) -> cabc.Generator[CmdMox, None, None
     CmdMox
         A controller instance with the specified journal size limit.
     """
-    mox = CmdMox(max_journal_entries=size)
-    try:
+    with _controller_context(max_journal_entries=size) as mox:
         yield mox
-    finally:
-        # Ensure cleanup even if the test raises
-        if mox._entered:
-            mox.__exit__(None, None, None)
 
 
 @given(parsers.cfparse('the command "{cmd}" is registered without a double'))

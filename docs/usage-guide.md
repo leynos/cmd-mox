@@ -185,6 +185,13 @@ cmd_mox.spy("curl")
 Each call returns a `CommandDouble` that offers a fluent DSL to configure
 behaviour.
 
+Mocks report a call that cannot match its expectation during `verify()` by
+default. Set `fail_fast=True` on the controller, or enable the pytest option
+described in [Running tests](#running-tests), to answer such a call with exit
+status `1` and a `No mock expectation matches: ...` diagnostic instead. The
+call is still recorded, so verification reports it too. Stubs and spies are
+unaffected.
+
 ## Defining expectations
 
 Combine methods to describe how a command should be invoked:
@@ -325,6 +332,42 @@ interrupt arrived—`CmdMox` tears down the environment before surfacing the
 original error. The controller catches interruptions during replay startup,
 stops the IPC server, removes the shim directory (and its socket), and restores
 `PATH` before re-raising, so temporary artefacts do not leak between tests.
+
+The pytest plugin exposes fail-fast mock handling through several configuration
+sources. The most specific setting wins: an indirect fixture parameter, then a
+`@pytest.mark.cmd_mox` marker, then the command-line option, then the ini
+default.
+
+```python
+@pytest.mark.cmd_mox(fail_fast=True)
+def test_rejects_bad_call(cmd_mox):
+    ...
+```
+
+```ini
+[pytest]
+cmd_mox_fail_fast = true
+```
+
+```bash
+pytest --cmd-mox-fail-fast
+pytest --no-cmd-mox-fail-fast
+```
+
+An indirect parameter may be a boolean, which keeps its historical meaning of
+setting only `auto_lifecycle`, or a dictionary containing `auto_lifecycle`,
+`fail_fast`, or both:
+
+```python
+@pytest.mark.parametrize(
+    "cmd_mox", [{"auto_lifecycle": True, "fail_fast": True}], indirect=True
+)
+def test_combined(cmd_mox):
+    ...
+```
+
+A dictionary with neither key raises `TypeError`; unrecognized extra keys are
+ignored.
 
 ## Parallel execution and isolation
 
@@ -1012,6 +1055,14 @@ the context-manager API:
   `in_order()` to be applied before a stub's first call.
 - `lifecycle_hint` (default `None`) appends caller-provided guidance to
   `LifecycleError` messages for invalid phase transitions.
+- `fail_fast` (default `False`) answers a mock call that definitely cannot
+  match its expectation with exit status `1` and a
+  `No mock expectation matches: ...` diagnostic on stderr instead of the
+  configured response. The call is still recorded, so `verify()` reports it as
+  `UnexpectedCommandError`. Only literal argument inequality, matcher arity,
+  and literal stdin inequality are checked early; predicate and regex matchers,
+  environment constraints, counts, and ordering remain verify-time checks.
+  Stubs and spies are unaffected.
 
 The journal is especially handy when debugging:
 
@@ -1341,7 +1392,7 @@ supported surface area without navigating modules.
 - `MissingEnvironmentError` – raised when replay cannot start due to missing
   env.
 - `UnexpectedCommandError` – raised when a command runs without a matching
-  double.
+  double, or when `verify()` reports a mock call that fail-fast rejected.
 - `UnfulfilledExpectationError` – raised when expected calls did not occur.
 - `VerificationError` – base class for verification failures.
 

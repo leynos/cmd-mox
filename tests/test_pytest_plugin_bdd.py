@@ -48,6 +48,24 @@ def test_cmd_mox_parallel_isolation() -> None:
     pass
 
 
+@scenario(
+    str(FEATURES_DIR / "pytest_plugin.feature"),
+    "fail-fast mock mismatches fail at call time",
+)
+def test_cmd_mox_fail_fast_rejection() -> None:
+    """Bind scenario steps for the fail-fast mismatch scenario."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "pytest_plugin.feature"),
+    "mismatched mock calls defer to verification by default",
+)
+def test_cmd_mox_deferred_mismatch() -> None:
+    """Bind scenario steps for the default deferred mismatch scenario."""
+    pass
+
+
 @dc.dataclass(slots=True)
 class ParallelSuite:
     """Paths for the generated parallel isolation test suite."""
@@ -133,6 +151,78 @@ def create_manual_replay_test_file(pytester: Pytester) -> Path:
     return pytester.makepyfile(test_code)
 
 
+_MISMATCH_TEST_TEMPLATE = """
+import os
+import subprocess
+
+import pytest
+
+pytest_plugins = ("cmd_mox.pytest_plugin",)
+
+
+{decorator}def test_mismatch(cmd_mox):
+    cmd_mox.mock("git").with_args("status").returns(stdout="clean")
+    shim_dir = cmd_mox.environment.shim_dir
+    assert shim_dir is not None
+    shim_name = "git.cmd" if os.name == "nt" else "git"
+    result = subprocess.run(
+        [str(shim_dir / shim_name), "push"],
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+    )
+    assert result.returncode == {returncode}
+    assert result.stdout.strip() == {stdout!r}
+{stderr_check}
+"""
+
+
+def _mismatch_test_module(*, fail_fast: bool) -> str:
+    """Return a test module observing one mismatched mock call."""
+    stderr_check = (
+        '    assert "No mock expectation matches: git push" in result.stderr'
+        if fail_fast
+        else ""
+    )
+    return _MISMATCH_TEST_TEMPLATE.format(
+        decorator="@pytest.mark.cmd_mox(fail_fast=True)\n" if fail_fast else "",
+        returncode=1 if fail_fast else 0,
+        stdout="" if fail_fast else "clean",
+        stderr_check=stderr_check,
+    )
+
+
+@given(
+    "a temporary test file using fail-fast mock handling",
+    target_fixture="test_file",
+)
+def create_fail_fast_test_file(pytester: Pytester) -> Path:
+    """Write a test file whose mock rejects mismatches at call time.
+
+    Returns
+    -------
+    Path
+        The generated pytest module.
+    """
+    return pytester.makepyfile(_mismatch_test_module(fail_fast=True))
+
+
+@given(
+    "a temporary test file using default mock handling",
+    target_fixture="test_file",
+)
+def create_default_mock_test_file(pytester: Pytester) -> Path:
+    """Write a test file whose mock defers mismatch reporting to verify().
+
+    Returns
+    -------
+    Path
+        The generated pytest module.
+    """
+    return pytester.makepyfile(_mismatch_test_module(fail_fast=False))
+
+
 @when("I run pytest on the file", target_fixture="result")
 def run_pytest(
     test_file: Path,
@@ -152,6 +242,25 @@ def run_pytest(
 def assert_success(result: RunResult) -> None:
     """Assert that the test passed."""
     result.assert_outcomes(passed=1)
+
+
+@then("the fail-fast run should fail verification after a rejected call")
+def assert_fail_fast_rejection(result: RunResult) -> None:
+    """Assert the body saw a rejection and teardown reported it."""
+    result.assert_outcomes(passed=1, errors=1)
+    output = result.stdout.str()
+    assert "UnexpectedCommandError" in output, "Assertion failed"
+    assert "git('push')" in output, "Assertion failed"
+    assert "arguments ['push'] != ['status']" in output, "Assertion failed"
+
+
+@then("the deferred run should answer the call and fail verification")
+def assert_deferred_mismatch(result: RunResult) -> None:
+    """Assert the body saw the canned response and teardown reported the call."""
+    result.assert_outcomes(passed=1, errors=1)
+    output = result.stdout.str()
+    assert "UnexpectedCommandError" in output, "Assertion failed"
+    assert "git('push')" in output, "Assertion failed"
 
 
 @then("the failure should explain how to disable auto lifecycle")

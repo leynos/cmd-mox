@@ -3673,7 +3673,47 @@ misses fall back to the spy's configured behaviour.
   replay much less useful for tests that only fixture a subset of command
   variants
 
-#### 9.10.16 Three-component fixture schema versions (2026-10-26)
+#### 9.10.16 Opt-in fail-fast handling for mismatched mock calls (2026-11-12)
+
+**Decision:** Add an opt-in `fail_fast` mode for mocks. When enabled, a mock
+call that definitely cannot match its expectation is answered at invocation
+time with exit status `1`, empty stdout, and a
+`No mock expectation matches: ...` stderr diagnostic instead of the configured
+handler or canned response. The rejected call is recorded in a dedicated ledger
+and still reported by `verify()` as `UnexpectedCommandError`.
+
+The early check is deliberately callback-free. It rejects only literal argument
+inequality, matcher arity mismatch, and literal stdin inequality. Predicate and
+regex matchers, environment constraints, call counts, and ordering remain
+verify-time checks, so a call that might still match is never rejected. Stubs
+and spies keep their existing behaviour.
+
+**Rationale:**
+
+- Answering a clearly wrong call with a success status hides the defect from the
+  code under test, which then acts on a response the test never intended
+- Matching strict replay, which already fails at invocation time with
+  `No fixture recording matches`, gives one consistent failure point for
+  call-time rejections
+- Keeping the default deferred mode preserves the established API and lets a
+  test body gather several failures before `verify()` reports them
+- A separate ledger keeps rejection reporting independent of journal bounds and
+  of matcher re-evaluation, so the stored redacted reason is what verification
+  prints
+
+**Alternatives considered:**
+
+- **Fail fast by default:** Rejected because it changes existing tests that
+  exercise a command's behaviour after a wrong call and rely on the configured
+  response
+- **Reject every mismatch, including callbacks:** Rejected because invoking a
+  user predicate at invocation time changes when its side effects run and may
+  reject calls that verification would accept
+- **Raise from the invocation instead of returning a failure response:**
+  Rejected because the shim must answer every call with a `Response`; an
+  exception would surface as an IPC error rather than the intended diagnostic
+
+#### 9.10.17 Three-component fixture schema versions (2026-10-26)
 
 **Decision:** Represent fixture schema versions with numeric
 `MAJOR.MINOR.PATCH` components. Continue accepting legacy two-component
