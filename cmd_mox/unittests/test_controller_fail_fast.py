@@ -279,11 +279,12 @@ def test_fail_fast_applies_expectation_environment() -> None:
 def test_fail_fast_redacts_sensitive_arguments() -> None:
     """The rejection diagnostic and verification error hide sensitive option values."""
     with _running_controller(fail_fast=True) as mox:
-        mox.mock("deploy").with_args("--expected").returns(stdout="ok")
+        mox.mock("deploy").with_args("--token", "expected-secret").returns(stdout="ok")
         result = _run_failing(mox, "deploy", "--token", "supersecret")
 
         assert result.returncode == 1
         assert "supersecret" not in result.stderr
+        assert "expected-secret" not in result.stderr
         assert "--token <redacted>" in result.stderr
 
         with pytest.raises(UnexpectedCommandError) as excinfo:
@@ -292,8 +293,10 @@ def test_fail_fast_redacts_sensitive_arguments() -> None:
     message = str(excinfo.value)
     reason = message.split("Reason:", 1)[1]
     assert "supersecret" not in message
+    assert "expected-secret" not in message
     assert "<redacted>" in reason
     assert "<redacted>" in message.split("Actual:", 1)[1]
+    assert "<redacted>" in message.split("Expected:", 1)[1]
 
 
 def test_fail_fast_verification_error_never_echoes_stdin() -> None:

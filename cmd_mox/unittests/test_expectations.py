@@ -829,6 +829,35 @@ def test_definite_mismatch_reason_only_rejects_certain_mismatches(
     assert expectation.definite_mismatch_reason(invocation) == expected
 
 
+def _fail_on_call(value: str) -> bool:
+    """Fail the test if the early check invokes this predicate."""
+    pytest.fail(f"definite_mismatch_reason called a predicate with {value!r}")
+
+
+def test_definite_mismatch_reason_never_calls_predicates() -> None:
+    """Argument and stdin predicates stay untouched by the early check."""
+    stdin_expectation = Expectation("git").with_stdin(_fail_on_call)
+    assert (
+        stdin_expectation.definite_mismatch_reason(Invocation("git", [], "data", {}))
+        is None
+    )
+
+    args_expectation = Expectation("git").with_matching_args(_fail_on_call)
+    assert (
+        args_expectation.definite_mismatch_reason(Invocation("git", ["value"], "", {}))
+        is None
+    )
+
+
+def test_definite_mismatch_reason_arity_check_never_calls_predicates() -> None:
+    """An arity rejection is decided without calling the argument predicate."""
+    expectation = Expectation("git").with_matching_args(_fail_on_call)
+
+    reason = expectation.definite_mismatch_reason(Invocation("git", ["a", "b"], "", {}))
+
+    assert reason == "expected 1 args but got 2"
+
+
 def test_definite_mismatch_reason_redacts_arguments() -> None:
     """Rendered arguments hide sensitive option values."""
     expectation = Expectation("deploy").with_args("--expected")

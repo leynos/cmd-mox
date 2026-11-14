@@ -144,6 +144,35 @@ def test_expectation_mismatch_reports_env_and_stdin() -> None:
     ), "a mismatch must show the expectation, the masked actual call, and the reason"
 
 
+@pytest.mark.parametrize(
+    "expectation",
+    [
+        pytest.param(
+            Expectation("deploy").with_args("--token", "expected-secret"),
+            id="exact-args",
+        ),
+        pytest.param(
+            Expectation("deploy").with_matching_args("--token", "expected-secret"),
+            id="literal-matcher",
+        ),
+    ],
+)
+def test_mismatch_redacts_sensitive_expected_arguments(
+    expectation: Expectation,
+) -> None:
+    """Expected and actual secrets never appear in a verification error."""
+    doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
+    invocation = _invocation("deploy", "--token", "actual-secret")
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        UnexpectedCommandVerifier().verify([invocation], doubles)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "actual-secret" not in message
+    assert "<redacted>" in message
+
+
 def test_mock_overflow_reports_observed_count_and_last_call() -> None:
     """A mock called past its limit reports the count and the final call."""
     expectation = (

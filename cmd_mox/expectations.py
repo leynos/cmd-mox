@@ -349,11 +349,7 @@ class Expectation:
             is not definitely mismatched.
         """
         if self.args is not None and invocation.args != self.args:
-            actual = _redact_sensitive_argument_values(
-                invocation.args, command=self.name
-            )
-            expected = _redact_sensitive_argument_values(self.args, command=self.name)
-            return f"arguments {actual!r} != {expected!r}"
+            return self._redacted_literal_argument_mismatch(invocation, self.args)
         if self.match_args is not None and len(invocation.args) != len(self.match_args):
             expected_count = len(self.match_args)
             actual_count = len(invocation.args)
@@ -362,6 +358,20 @@ class Expectation:
             # Never echo stdin: it may carry a credential or another secret.
             return "stdin does not match the expected value"
         return None
+
+    def _redacted_literal_argument_mismatch(
+        self, invocation: Invocation, expected: list[str]
+    ) -> str:
+        """Return a redacted description of unequal literal arguments.
+
+        Returns
+        -------
+        str
+            Both argument lists with sensitive values masked.
+        """
+        actual = _redact_sensitive_argument_values(invocation.args, command=self.name)
+        safe_expected = _redact_sensitive_argument_values(expected, command=self.name)
+        return f"arguments {actual!r} != {safe_expected!r}"
 
     def explain_mismatch(self, invocation: Invocation) -> str:
         """Return a reason why ``invocation`` failed to match.
@@ -406,7 +416,7 @@ class Expectation:
         """
         if self.args is None or invocation.args == self.args:
             return None
-        return f"arguments {invocation.args!r} != {self.args!r}"
+        return self._redacted_literal_argument_mismatch(invocation, self.args)
 
     def _explain_match_args_mismatch(self, invocation: Invocation) -> str | None:
         """Return a message when matcher-based args fail.
@@ -423,6 +433,11 @@ class Expectation:
             return (
                 f"expected {len(self.match_args)} args but got {len(invocation.args)}"
             )
+        actual = _redact_sensitive_argument_values(invocation.args, command=self.name)
+        literals = [
+            matcher if isinstance(matcher, str) else "" for matcher in self.match_args
+        ]
+        expected = _redact_sensitive_argument_values(literals, command=self.name)
         for i, (arg, matcher) in enumerate(
             zip(invocation.args, self.match_args, strict=True),
         ):
@@ -430,7 +445,7 @@ class Expectation:
                 # Literal equality cannot raise, so report it without the
                 # exception wrapper used for caller-supplied predicates.
                 if not _matcher_accepts(matcher, arg):
-                    return f"arg[{i}]={arg!r} != {matcher!r}"
+                    return f"arg[{i}]={actual[i]!r} != {expected[i]!r}"
                 continue
             try:
                 ok = _matcher_accepts(matcher, arg)
@@ -440,7 +455,7 @@ class Expectation:
                     f"{exc.__class__.__name__}: {exc}"
                 )
             if not ok:
-                return f"arg[{i}]={arg!r} failed {matcher!r}"
+                return f"arg[{i}]={actual[i]!r} failed {matcher!r}"
         return None
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:

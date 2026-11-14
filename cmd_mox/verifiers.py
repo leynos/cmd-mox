@@ -67,8 +67,32 @@ def _format_call(name: str, args_repr: str) -> str:
     return f"{name}({args_repr})" if args_repr else f"{name}()"
 
 
+def _redact_expected_items(
+    items: cabc.Sequence[object], *, command: str
+) -> list[object]:
+    """Return *items* with sensitive literal strings redacted.
+
+    Only string entries can carry a credential; matcher callables are
+    rendered unchanged.
+
+    Returns
+    -------
+    list[object]
+        Items with sensitive values masked and positions preserved.
+    """
+    literals = [item if isinstance(item, str) else "" for item in items]
+    redacted = redact_sensitive_argument_values(literals, command=command)
+    return [
+        safe if isinstance(item, str) else item
+        for item, safe in zip(items, redacted, strict=True)
+    ]
+
+
 def _expectation_args_repr(exp: Expectation) -> str:
     """Return the configured argument or matcher representation.
+
+    Expected values may carry credentials, so they are redacted with the same
+    rules applied to an actual invocation.
 
     Returns
     -------
@@ -76,9 +100,9 @@ def _expectation_args_repr(exp: Expectation) -> str:
         Representation of exact arguments, matchers, or no arguments.
     """
     if exp.args is not None:
-        return _format_items(exp.args)
+        return _format_items(_redact_expected_items(exp.args, command=exp.name))
     if exp.match_args is not None:
-        return _format_items(exp.match_args)
+        return _format_items(_redact_expected_items(exp.match_args, command=exp.name))
     return ""
 
 
