@@ -14,6 +14,12 @@ scan scope, the ranked budget and the exception contract stand;
 `[tool.nose] version` is now the only detector pin, and the provisioning and
 helper-test notes below describe the earlier vendored form.
 
+Update, 2026-11-14: `[tool.nose] top` is now `0`, as concordat's
+`python-duplication-gate` rule (NS-001) requires, so the gate adjudicates every
+family and the report is not capped. Statements below about `top = 30`, a
+ranked budget or a cutoff describe the earlier decision; at `top = 0` they no
+longer apply. The 11 families reported at `top = 0` were already allowed.
+
 ## Date
 
 2026-10-09.
