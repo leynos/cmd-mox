@@ -2229,9 +2229,12 @@ Three directions were considered:
 
 The deprecated inputs remain functional for now. Each public entry point emits
 one `DeprecationWarning` per deprecated input per call, attributed to the
-caller with `stacklevel=3`. The message names the public function, states that
+caller with `stacklevel=4`. The message names the public function, states that
 the input changes only support classification rather than shim generation or
-IPC transport selection, and announces removal in a future release. When the
+IPC transport selection, and announces removal in a future release. An explicit
+`platform` argument warns whenever it is supplied, including a falsy value such
+as `""`. A non-empty `CMD_MOX_PLATFORM_OVERRIDE` warns only when it is
+consulted, so a truthy explicit `platform` masks it for that call. When the
 `cmd_mox` fixture is the caller, the warning is attributed to
 `cmd_mox/pytest_plugin.py`.
 

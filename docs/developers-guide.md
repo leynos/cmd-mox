@@ -526,6 +526,52 @@ unresolvable entry stays on `sys.path`. The covering tests in
 deleted working directory, an injected `ELOOP`, a symlink cycle, an embedded
 null byte, and the bootstrap-level retention test.
 
+## Platform classification internals
+
+Support classification lives in `cmd_mox/platform.py`. The public helpers
+`unsupported_reason()`, `is_supported()` and `skip_if_unsupported()` all call
+`_classify_platform()`, which calls `_warn_deprecated_inputs()` and then
+`_unsupported_reason_for()`. `_unsupported_reason_for()` returns the reason of
+the first `(prefix, reason)` entry in `_UNSUPPORTED_PLATFORMS` whose prefix
+matches the effective platform name. The table is empty, so every recognized
+host is currently reported as supported. `is_supported()` is the boolean view
+of the same reason, so the two public classifiers cannot disagree.
+
+### Deprecation warning attribution
+
+Each public entry point emits one `DeprecationWarning` per deprecated input
+supplied to a call. An explicit `platform` argument warns whenever it is not
+`None`, including an empty string. A non-empty `CMD_MOX_PLATFORM_OVERRIDE`
+warns only when the helper consults it; a truthy explicit `platform` masks the
+override for that call. The warnings use `stacklevel=4` so they attribute to
+the caller of the public helper. When the `cmd_mox` fixture is the caller, the
+warning points at `cmd_mox/pytest_plugin.py` rather than at user code.
+
+### Testing unsupported hosts
+
+Patch `cmd_mox.platform._UNSUPPORTED_PLATFORMS` with a `(prefix, reason)` entry
+to exercise the skip path without a genuinely unsupported host:
+
+```python
+from cmd_mox import platform
+
+monkeypatch.setattr(
+    platform,
+    "_UNSUPPORTED_PLATFORMS",
+    (("win", "blocked on Windows"),),
+)
+```
+
+Do not set `CMD_MOX_PLATFORM_OVERRIDE` in new tests; it is deprecated and only
+changes classification. To inspect Windows launchers on another host, patch
+`cmd_mox._path_utils.IS_WINDOWS` as described in
+[design decision 8.13](python-native-command-mocking-design.md#813-design-decisions-for-the-platform-override).
+
+The BDD step `the platform override is "{platform}"` remains only so existing
+feature files keep parsing. It deliberately changes nothing. Scenarios that
+need the Windows branch patch `cmd_mox._path_utils.IS_WINDOWS` instead. See
+[Behavioural test gate and pytest-bdd compatibility](#behavioural-test-gate-and-pytest-bdd-compatibility).
+
 ## IPC request dispatch
 
 The shared IPC request pipeline keeps transport handling separate from request
