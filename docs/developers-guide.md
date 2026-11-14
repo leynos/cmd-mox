@@ -976,12 +976,10 @@ root. `unittests/*` therefore names `cmd_mox/unittests/`; the repository-root
 form `cmd_mox/unittests/*` would match nothing and silently scan the test tree
 instead.
 
-The gate adjudicates a ranked budget of families rather than the whole report.
-`top` bounds how many of the highest-ranked families are checked; duplication
-below that ranking is reported nowhere and enforced nowhere. Do not raise
-thresholds or lower the budget to reach a green build, and do not describe
-lower-ranked duplication as enforced. Re-check saturation rather than assuming
-it, since the control scan recorded in ADR 002 only shows the budget was not
+The gate adjudicates every family in the report: `top = 0` asks nose for all of
+them, and concordat's `python-duplication-gate` rule (NS-001) requires it. Do
+not raise thresholds or cap the report to reach a green build. The control scan
+recorded in ADR 002 predates `top = 0` and only shows the old budget was not
 saturated when it was taken.
 
 ### Recording an exception
@@ -1175,8 +1173,8 @@ where it is enforced, and treat review as the check for the uncovered tree.
 ### Nose and duplication-gate tables
 
 - `[tool.nose]` pins the detector version, the scanned roots, the detection
-  channels, the size floor, the reported surface and the ranked budget. Its
-  `version` is the only detector pin.
+  channels, the size floor, the reported surface and the report size (`top`).
+  Its `version` is the only detector pin.
 - `[tool.duplication_gate]` is otherwise empty; each
   `[[tool.duplication_gate.allow]]` entry below it records one reviewed
   exception with its `unit` or `members` keys and a non-blank `reason`.
