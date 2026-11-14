@@ -344,56 +344,51 @@ def _is_joined_sensitive_header_argument(arg: str) -> bool:
     return _is_sensitive_credential_header(arg[len(_JOINED_SHORT_HEADER_OPTION) :])
 
 
-def _redact_embedded_value_or_keep(arg: str, option: str, separator: str) -> str:
-    """Mask credential markers embedded in an otherwise ordinary argument.
-
-    Returns
-    -------
-    str
-        A redacted argument or the original safe argument.
-    """
-    if not _contains_sensitive_argument_value(arg):
-        return arg
-    return _format_redacted_argument_value(option, separator)
-
-
 def _redact_current_argument(
     arg: str,
     classification: tuple[str, str, bool],
     *,
     command: str | None,
-) -> str:
+) -> tuple[str, bool]:
     """Redact inline sensitive options and embedded credential values.
 
     Returns
     -------
-    str
-        The diagnostic-safe argument representation.
+    tuple[str, bool]
+        The diagnostic-safe argument representation and whether the argument
+        itself held a credential.
     """
     option, separator, is_sensitive_option = classification
     if is_sensitive_option and separator:
-        return _format_redacted_argument_value(option, separator)
+        return _format_redacted_argument_value(option, separator), True
     if _is_joined_sensitive_header_argument(arg):
-        return f"{_JOINED_SHORT_HEADER_OPTION}<redacted>"
+        return f"{_JOINED_SHORT_HEADER_OPTION}<redacted>", True
     if _is_joined_short_authentication_option(arg, command):
-        return f"{arg[:2]}<redacted>"
-    return _redact_embedded_value_or_keep(arg, option, separator)
+        return f"{arg[:2]}<redacted>", True
+    if not _contains_sensitive_argument_value(arg):
+        return arg, False
+    return _format_redacted_argument_value(option, separator), True
 
 
-def _iter_redacted_argument_values(
+def _iter_redacted_arguments(
     args: list[str], command: str | None = None
-) -> cabc.Iterator[str]:
-    """Yield arguments with values for secret-like options hidden.
+) -> cabc.Iterator[tuple[str, bool]]:
+    """Yield each argument's redacted form and whether it held a secret.
+
+    The flag is derived from the same classification that decides redaction, so
+    it stays true even when the argument already looks like a placeholder.
 
     Parameters
     ----------
     args : list[str]
         Command arguments to make safe for diagnostic output.
+    command : str or None, optional
+        Executable name, used to preserve known non-secret short options.
 
     Yields
     ------
-    str
-        Original arguments or ``<redacted>`` placeholders, preserving positions.
+    tuple[str, bool]
+        The safe representation and a sensitivity flag, preserving positions.
     """
     redact_next_value = False
     for index, arg in enumerate(args):
@@ -407,7 +402,7 @@ def _iter_redacted_argument_values(
         if is_known_non_secret_option:
             is_sensitive_option = False
         if redact_next_value:
-            yield REDACTED_ARGUMENT
+            yield REDACTED_ARGUMENT, True
         else:
             yield _redact_current_argument(
                 safe_arg,
@@ -416,6 +411,27 @@ def _iter_redacted_argument_values(
             )
         # Preserve chained sensitive options after consuming their current value.
         redact_next_value = is_sensitive_option and not separator
+
+
+def _iter_redacted_argument_values(
+    args: list[str], command: str | None = None
+) -> cabc.Iterator[str]:
+    """Yield arguments with values for secret-like options hidden.
+
+    Parameters
+    ----------
+    args : list[str]
+        Command arguments to make safe for diagnostic output.
+    command : str or None, optional
+        Executable name, used to preserve known non-secret short options.
+
+    Yields
+    ------
+    str
+        Original arguments or ``<redacted>`` placeholders, preserving positions.
+    """
+    for redacted, _is_sensitive in _iter_redacted_arguments(args, command):
+        yield redacted
 
 
 def redact_sensitive_argument_values(
@@ -467,16 +483,36 @@ def mask_sensitive_positions(
     -------
     list[str]
         Expected values with credential positions replaced by ``<redacted>``.
-        Entries beyond *actual* keep the value they were given.
+        Entries beyond *actual* keep the value they were given, except the one
+        that would hold the value of a dangling sensitive option.
 
     Examples
     --------
     >>> mask_sensitive_positions(["", "opaque"], ["--token", "secret"])
     ['', '<redacted>']
     """
-    safe_actual = redact_sensitive_argument_values(actual, command=command)
-    masked = [
-        REDACTED_ARGUMENT if raw != safe else value
-        for value, raw, safe in zip(expected, actual, safe_actual, strict=False)
+    sensitivity = [
+        is_sensitive
+        for _redacted, is_sensitive in _iter_redacted_arguments(actual, command)
     ]
+    masked = [
+        REDACTED_ARGUMENT if is_sensitive else value
+        for value, is_sensitive in zip(expected, sensitivity, strict=False)
+    ]
+    if _awaits_sensitive_value(actual, command) and len(masked) < len(expected):
+        masked.append(REDACTED_ARGUMENT)
     return masked + expected[len(masked) :]
+
+
+def _awaits_sensitive_value(args: list[str], command: str | None) -> bool:
+    """Return whether the final argument is a sensitive option awaiting a value."""
+    if not args:
+        return False
+    index = len(args) - 1
+    safe_arg = _redact_url_credentials(args[index])
+    _option, separator, is_sensitive = _classify_sensitive_argument_option(
+        safe_arg, command
+    )
+    if _is_known_non_secret_short_option(command, args, index):
+        return False
+    return is_sensitive and not separator

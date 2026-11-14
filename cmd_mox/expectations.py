@@ -7,6 +7,9 @@ import dataclasses as dc
 import typing as typ
 
 from ._argument_redaction import (
+    REDACTED_ARGUMENT as _REDACTED_ARGUMENT,
+)
+from ._argument_redaction import (
     is_sensitive_recording_env_key,
 )
 from ._argument_redaction import (
@@ -514,7 +517,14 @@ class Expectation:
                     f"{exc.__class__.__name__}: {exc}"
                 )
             if not ok:
-                return f"arg[{i}]={actual[i]!r} failed {matcher!r}"
+                # A matcher repr can carry the pattern it matches, so a
+                # sensitive position is reported with the placeholder only.
+                rendered = (
+                    _REDACTED_ARGUMENT
+                    if expected[i] == _REDACTED_ARGUMENT
+                    else repr(matcher)
+                )
+                return f"arg[{i}]={actual[i]!r} failed {rendered}"
         return None
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:

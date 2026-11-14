@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cmd_mox import Any
+from cmd_mox import Any, Regex
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
@@ -176,6 +176,36 @@ def test_mismatch_redacts_sensitive_expected_arguments(
     assert "expected-secret" not in message
     assert "actual-secret" not in message
     assert "<redacted>" in message
+
+
+def test_mismatch_redacts_expected_value_for_missing_option_argument() -> None:
+    """A shorter call still masks the expected value of a dangling option."""
+    expectation = Expectation("deploy").with_matching_args(Any(), "expected-secret")
+    doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
+    invocation = _invocation("deploy", "--token")
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        UnexpectedCommandVerifier().verify([invocation], doubles)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "<redacted>" in message
+
+
+def test_mismatch_redacts_sensitive_matcher_pattern() -> None:
+    """A regex matcher in a sensitive position does not expose its pattern."""
+    expectation = Expectation("deploy").with_matching_args(
+        "--token", Regex("expected-secret")
+    )
+    doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
+    invocation = _invocation("deploy", "--token", "actual-secret")
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        UnexpectedCommandVerifier().verify([invocation], doubles)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "actual-secret" not in message
 
 
 def test_mock_overflow_reports_observed_count_and_last_call() -> None:

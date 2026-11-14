@@ -8,6 +8,7 @@ from collections import defaultdict
 from textwrap import indent
 
 from ._argument_redaction import (
+    REDACTED_ARGUMENT,
     mask_sensitive_positions,
     redact_sensitive_argument_values,
 )
@@ -95,7 +96,7 @@ def _redact_expected_items(
             redacted, list(actual_args), command=command
         )
     return [
-        safe if isinstance(item, str) else item
+        safe if isinstance(item, str) or safe == REDACTED_ARGUMENT else item
         for item, safe in zip(items, redacted, strict=True)
     ]
 

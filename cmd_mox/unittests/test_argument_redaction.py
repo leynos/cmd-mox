@@ -623,3 +623,19 @@ def test_mask_sensitive_positions_preserves_expected_length() -> None:
     masked = mask_sensitive_positions(["a", "b", "c"], ["--token", "secret"])
 
     assert masked == ["a", "<redacted>", "c"]
+
+
+def test_mask_sensitive_positions_masks_value_of_dangling_option() -> None:
+    """A trailing sensitive option masks the expected value it never received."""
+    masked = mask_sensitive_positions(["", "expected-secret"], ["--token"])
+
+    assert masked == ["", "<redacted>"]
+
+
+def test_mask_sensitive_positions_masks_already_redacted_actual_value() -> None:
+    """An actual value that is already masked still marks its position."""
+    masked = mask_sensitive_positions(
+        ["", "expected-secret"], ["--token", "<redacted>"]
+    )
+
+    assert masked == ["", "<redacted>"]
