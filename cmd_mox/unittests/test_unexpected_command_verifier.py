@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cmd_mox import Any
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
@@ -154,6 +155,10 @@ def test_expectation_mismatch_reports_env_and_stdin() -> None:
         pytest.param(
             Expectation("deploy").with_matching_args("--token", "expected-secret"),
             id="literal-matcher",
+        ),
+        pytest.param(
+            Expectation("deploy").with_matching_args(Any(), "expected-secret"),
+            id="predicate-option-matcher",
         ),
     ],
 )

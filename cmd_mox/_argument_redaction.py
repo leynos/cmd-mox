@@ -27,6 +27,10 @@ from .domain import (
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
+
+REDACTED_ARGUMENT = "<redacted>"
+"""Placeholder written in place of a sensitive argument value."""
+
 _AUTHENTICATION_ARGUMENT_OPTIONS: typ.Final[frozenset[str]] = frozenset({
     "--user",
     "--proxy-user",
@@ -201,8 +205,8 @@ def _format_redacted_argument_value(option: str, separator: str) -> str:
         The redacted argument representation.
     """
     if separator:
-        return f"{option}{separator}<redacted>"
-    return "<redacted>"
+        return f"{option}{separator}{REDACTED_ARGUMENT}"
+    return REDACTED_ARGUMENT
 
 
 def _is_joined_short_authentication_option(
@@ -403,7 +407,7 @@ def _iter_redacted_argument_values(
         if is_known_non_secret_option:
             is_sensitive_option = False
         if redact_next_value:
-            yield "<redacted>"
+            yield REDACTED_ARGUMENT
         else:
             yield _redact_current_argument(
                 safe_arg,
@@ -437,3 +441,42 @@ def redact_sensitive_argument_values(
     ['--token', '<redacted>', '--output', 'json']
     """
     return list(_iter_redacted_argument_values(args, command))
+
+
+def mask_sensitive_positions(
+    expected: list[str], actual: list[str], *, command: str | None = None
+) -> list[str]:
+    """Mask *expected* values wherever *actual* holds a sensitive value.
+
+    An expected list cannot always reveal its own secret positions: an option
+    name may be represented by a placeholder, for instance a predicate matcher,
+    which hides that the next entry is a credential. The actual invocation
+    still shows the option, so the positions it marks as sensitive are masked
+    in *expected* as well.
+
+    Parameters
+    ----------
+    expected : list[str]
+        Already redacted expected values, aligned with *actual* by position.
+    actual : list[str]
+        Raw actual arguments whose sensitive positions drive the masking.
+    command : str or None, optional
+        Executable name, used to preserve known non-secret short options.
+
+    Returns
+    -------
+    list[str]
+        Expected values with credential positions replaced by ``<redacted>``.
+        Entries beyond *actual* keep the value they were given.
+
+    Examples
+    --------
+    >>> mask_sensitive_positions(["", "opaque"], ["--token", "secret"])
+    ['', '<redacted>']
+    """
+    safe_actual = redact_sensitive_argument_values(actual, command=command)
+    masked = [
+        REDACTED_ARGUMENT if raw != safe else value
+        for value, raw, safe in zip(expected, actual, safe_actual, strict=False)
+    ]
+    return masked + expected[len(masked) :]

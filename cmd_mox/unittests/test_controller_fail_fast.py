@@ -299,6 +299,27 @@ def test_fail_fast_redacts_sensitive_arguments() -> None:
     assert "<redacted>" in message.split("Expected:", 1)[1]
 
 
+def test_fail_fast_redacts_masked_matcher_values() -> None:
+    """A predicate option matcher must not unmask the expected token value."""
+    with _running_controller(fail_fast=True) as mox:
+        mox.mock("deploy").with_matching_args(Any(), "expected-secret").returns(
+            stdout="ok"
+        )
+        result = _run_failing(mox, "deploy", "--token", "actual-secret")
+
+        assert result.returncode == 1
+        assert "actual-secret" not in result.stderr
+        assert "expected-secret" not in result.stderr
+        assert "--token <redacted>" in result.stderr
+
+        with pytest.raises(UnexpectedCommandError) as excinfo:
+            mox.verify()
+
+    message = str(excinfo.value)
+    assert "actual-secret" not in message
+    assert "expected-secret" not in message
+
+
 def test_fail_fast_verification_error_never_echoes_stdin() -> None:
     """The fail-fast verification error omits expected and actual stdin content."""
     with _running_controller(fail_fast=True) as mox:

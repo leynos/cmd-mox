@@ -10,7 +10,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from cmd_mox import ExpectationConfigurationError
-from cmd_mox._argument_redaction import redact_sensitive_argument_values
+from cmd_mox._argument_redaction import (
+    mask_sensitive_positions,
+    redact_sensitive_argument_values,
+)
 from cmd_mox.expectations import Expectation
 
 
@@ -587,3 +590,36 @@ def test_duplicate_argument_error_preserves_key_like_positionals() -> None:
     message = str(exc_info.value)
     assert "'my-key-file'" in message, "safe key-like positionals must remain visible"
     assert "'ssh-key'" in message, "safe key-like positionals must remain visible"
+
+
+@pytest.mark.parametrize(
+    ("expected", "actual", "want"),
+    [
+        pytest.param(
+            ["", "expected-secret"],
+            ["--token", "actual-secret"],
+            ["", "<redacted>"],
+            id="predicate-option-name",
+        ),
+        pytest.param(
+            ["status", "value"],
+            ["status", "value"],
+            ["status", "value"],
+            id="no-sensitive-position",
+        ),
+    ],
+)
+def test_mask_sensitive_positions_follows_actual_arguments(
+    expected: list[str],
+    actual: list[str],
+    want: list[str],
+) -> None:
+    """Expected literals are masked wherever the actual call holds a secret."""
+    assert mask_sensitive_positions(expected, actual) == want
+
+
+def test_mask_sensitive_positions_preserves_expected_length() -> None:
+    """Expected values beyond the actual call survive unmasked and in place."""
+    masked = mask_sensitive_positions(["a", "b", "c"], ["--token", "secret"])
+
+    assert masked == ["a", "<redacted>", "c"]

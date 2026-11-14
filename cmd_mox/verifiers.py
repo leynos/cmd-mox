@@ -7,7 +7,10 @@ import typing as typ
 from collections import defaultdict
 from textwrap import indent
 
-from ._argument_redaction import redact_sensitive_argument_values
+from ._argument_redaction import (
+    mask_sensitive_positions,
+    redact_sensitive_argument_values,
+)
 from .domain import mask_env_value
 from .errors import UnexpectedCommandError, UnfulfilledExpectationError
 from .test_doubles import DoubleKind
@@ -68,12 +71,17 @@ def _format_call(name: str, args_repr: str) -> str:
 
 
 def _redact_expected_items(
-    items: cabc.Sequence[object], *, command: str
+    items: cabc.Sequence[object],
+    *,
+    command: str,
+    actual_args: cabc.Sequence[str] | None = None,
 ) -> list[object]:
     """Return *items* with sensitive literal strings redacted.
 
     Only string entries can carry a credential; matcher callables are
-    rendered unchanged.
+    rendered unchanged. When *actual_args* is supplied, positions it marks as
+    sensitive are masked too, because a predicate matcher can hide the option
+    name that would otherwise identify the following credential.
 
     Returns
     -------
@@ -82,17 +90,24 @@ def _redact_expected_items(
     """
     literals = [item if isinstance(item, str) else "" for item in items]
     redacted = redact_sensitive_argument_values(literals, command=command)
+    if actual_args is not None:
+        redacted = mask_sensitive_positions(
+            redacted, list(actual_args), command=command
+        )
     return [
         safe if isinstance(item, str) else item
         for item, safe in zip(items, redacted, strict=True)
     ]
 
 
-def _expectation_args_repr(exp: Expectation) -> str:
+def _expectation_args_repr(
+    exp: Expectation, *, actual_args: cabc.Sequence[str] | None = None
+) -> str:
     """Return the configured argument or matcher representation.
 
     Expected values may carry credentials, so they are redacted with the same
-    rules applied to an actual invocation.
+    rules applied to an actual invocation, including the positions that
+    invocation marks as sensitive.
 
     Returns
     -------
@@ -100,9 +115,15 @@ def _expectation_args_repr(exp: Expectation) -> str:
         Representation of exact arguments, matchers, or no arguments.
     """
     if exp.args is not None:
-        return _format_items(_redact_expected_items(exp.args, command=exp.name))
+        return _format_items(
+            _redact_expected_items(exp.args, command=exp.name, actual_args=actual_args)
+        )
     if exp.match_args is not None:
-        return _format_items(_redact_expected_items(exp.match_args, command=exp.name))
+        return _format_items(
+            _redact_expected_items(
+                exp.match_args, command=exp.name, actual_args=actual_args
+            )
+        )
     return ""
 
 
@@ -127,7 +148,11 @@ def _append_env_line(lines: list[str], exp: Expectation) -> None:
 
 
 def _describe_expectation(
-    exp: Expectation, *, include_count: bool = False, include_stdin: bool = True
+    exp: Expectation,
+    *,
+    include_count: bool = False,
+    include_stdin: bool = True,
+    actual_args: cabc.Sequence[str] | None = None,
 ) -> str:
     """Return a human-readable representation of *exp*.
 
@@ -140,13 +165,18 @@ def _describe_expectation(
     include_stdin : bool
         Whether to include the expected stdin value. Diagnostics that must
         never echo stdin content pass ``False``.
+    actual_args : collections.abc.Sequence of str or None
+        Arguments of the call being compared, when one exists. Their sensitive
+        positions also mask the corresponding expected values.
 
     Returns
     -------
     str
         Multi-line diagnostic description.
     """
-    lines = [_format_call(exp.name, _expectation_args_repr(exp))]
+    lines = [
+        _format_call(exp.name, _expectation_args_repr(exp, actual_args=actual_args))
+    ]
     _append_count_line(lines, exp, include_count=include_count)
     if include_stdin:
         _append_stdin_line(lines, exp)
@@ -284,7 +314,10 @@ def raise_rejected_mock_error(
     msg = _format_sections(
         "Unexpected command invocation.",
         [
-            ("Expected", _describe_expectation(exp, include_stdin=False)),
+            (
+                "Expected",
+                _describe_expectation(exp, include_stdin=False, actual_args=inv.args),
+            ),
             (
                 "Actual",
                 _describe_invocation(
@@ -397,7 +430,7 @@ class UnexpectedCommandVerifier:
         msg = _format_sections(
             "Unexpected command invocation.",
             [
-                ("Expected", _describe_expectation(exp)),
+                ("Expected", _describe_expectation(exp, actual_args=inv.args)),
                 (
                     "Actual",
                     _describe_invocation(

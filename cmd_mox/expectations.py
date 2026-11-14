@@ -10,6 +10,9 @@ from ._argument_redaction import (
     is_sensitive_recording_env_key,
 )
 from ._argument_redaction import (
+    mask_sensitive_positions as _mask_sensitive_positions,
+)
+from ._argument_redaction import (
     redact_sensitive_argument_values as _redact_sensitive_argument_values,
 )
 from ._validators import validate_expectation_count
@@ -394,7 +397,11 @@ class Expectation:
         actual = _redact_sensitive_argument_values(invocation.args, command=self.name)
         literals = [matcher if isinstance(matcher, str) else "" for matcher in matchers]
         expected = _redact_sensitive_argument_values(literals, command=self.name)
-        return actual, expected
+        # An option name may itself be a predicate matcher, so the matcher list
+        # cannot reveal which positions carry a credential.
+        return actual, _mask_sensitive_positions(
+            expected, invocation.args, command=self.name
+        )
 
     def _literal_matcher_mismatch(
         self, invocation: Invocation, matchers: cabc.Sequence[object]

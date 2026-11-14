@@ -885,3 +885,13 @@ def test_definite_mismatch_reason_redacts_arguments() -> None:
     assert reason is not None
     assert "supersecret" not in reason
     assert "<redacted>" in reason
+
+
+def test_definite_mismatch_reason_redacts_masked_matcher_values() -> None:
+    """A predicate option matcher must not unmask the expected token value."""
+    expectation = Expectation("deploy").with_matching_args(Any(), "expected-secret")
+    invocation = Invocation("deploy", ["--token", "actual-secret"], "", {})
+
+    reason = expectation.definite_mismatch_reason(invocation)
+
+    assert reason == "arg[1]='<redacted>' != '<redacted>'"
