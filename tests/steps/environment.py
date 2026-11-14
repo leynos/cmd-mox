@@ -23,8 +23,14 @@ def enable_windows_shims(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @given(parsers.cfparse('the platform override is "{platform}"'))
 def set_platform_override(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
-    """Simulate running on an alternate platform such as Windows."""
-    monkeypatch.setenv("CMD_MOX_PLATFORM_OVERRIDE", platform)
+    """Accept the legacy platform-override step without changing behaviour.
+
+    Platform classification never selected shim generation or IPC transport, so
+    setting the deprecated override here had no observable effect. The step is
+    retained so existing feature files keep parsing; the scenarios rely on the
+    ``IS_WINDOWS`` patch above instead.
+    """
+    del monkeypatch, platform
 
 
 @given(parsers.cfparse('I set environment variable "{var}" to "{val}"'))

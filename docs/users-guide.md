@@ -167,3 +167,20 @@ request, is treated as a closed connection and gets no response frame. Other
 connection failures and timeout expiry produce a controlled `IPC error: ...`
 diagnostic and a non-zero exit. If passthrough reporting fails, the shim keeps
 the real command's non-zero exit status.
+
+## Platform support
+
+CmdMox supports Linux, macOS, and Windows. The `is_supported()`,
+`unsupported_reason()`, and `skip_if_unsupported()` helpers classify a host
+identifier against a table that is currently empty, so every recognized host is
+reported as supported. Classification is not a runtime capability guarantee: a
+host may still lack a usable IPC transport.
+
+The `CMD_MOX_PLATFORM_OVERRIDE` environment variable and the helpers'
+`platform` argument are deprecated. They affect classification only, never shim
+generation or IPC transport selection. To test an unsupported host, monkeypatch
+the classification table; to inspect Windows launchers on another host, patch
+`IS_WINDOWS`. The [usage guide](usage-guide.md#platform-helpers) covers the
+helpers, and the
+[design document](python-native-command-mocking-design.md#813-design-decisions-for-the-platform-override)
+records the decision.

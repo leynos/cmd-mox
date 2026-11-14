@@ -2213,6 +2213,53 @@ Verification treats both backends as first-class:
   passthrough behaviour, and failure diagnostics.
 - Extend CI to run at least one backend-parity job per supported OS.
 
+### 8.13 Design Decisions for the Platform Override
+
+`CMD_MOX_PLATFORM_OVERRIDE` (exported as `PLATFORM_OVERRIDE_ENV`) and the
+`platform` parameter of `is_supported()`, `unsupported_reason()` and
+`skip_if_unsupported()` feed only the support-classification table. That table,
+`_UNSUPPORTED_PLATFORMS`, is empty, so every host identifier is classified as
+supported. Earlier documentation claimed the override could "exercise
+Windows-specific shims from a Linux runner". It never could: shim generation
+and IPC transport selection read `IS_WINDOWS`, which is derived from `os.name`,
+and never consult the classification helpers.
+
+Three directions were considered:
+
+- **Populate the table with a legacy UNIX denylist.** Rejected. CmdMox supports
+  POSIX hosts and Windows, so a denylist would misclassify supported hosts and
+  imply a capability guarantee the helpers cannot make.
+- **Detect missing capabilities such as `AF_UNIX` or `pywin32`.** Rejected.
+  Classification would become environment probing, duplicating the availability
+  checks that transport construction already performs and turning a clear
+  construction error into a silent skip.
+- **Deprecate the inputs and keep classification unchanged.** Chosen. It
+  removes a misleading knob without changing any result or skip decision.
+
+The deprecated inputs remain functional for now. Each public entry point emits
+one `DeprecationWarning` per deprecated input per call, attributed to the
+caller with `stacklevel=4`. The message names the public function, states that
+the input changes only support classification rather than shim generation or
+IPC transport selection, and announces removal in a future release. An explicit
+`platform` argument warns whenever it is supplied, including a falsy value such
+as `""`. A non-empty `CMD_MOX_PLATFORM_OVERRIDE` warns only when it is
+consulted, so a truthy explicit `platform` masks it for that call. When the
+`cmd_mox` fixture is the caller, the warning is attributed to
+`cmd_mox/pytest_plugin.py`.
+
+Migration is mechanical:
+
+- Remove `platform=` arguments and stop setting `CMD_MOX_PLATFORM_OVERRIDE`.
+- To test an unsupported host, monkeypatch `_UNSUPPORTED_PLATFORMS` with a
+  `(prefix, reason)` entry, or patch the helper under test.
+- To inspect Windows launchers on another host, patch
+  `cmd_mox._path_utils.IS_WINDOWS` and assert on the generated launcher without
+  executing it.
+
+Classification is not a runtime capability guarantee. A host reported as
+supported may still lack a usable IPC transport, and the transport layer
+reports that failure directly.
+
 ## IX. Record Mode: Persisting Passthrough Recordings
 
 This section details the design for Record Mode, a feature that transforms
