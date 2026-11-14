@@ -405,16 +405,16 @@ package = true
 # in-package test tree (`cmd_mox/unittests/`) rather than a repo-root path.
 #
 # `min-size` counts nose IL tokens, not Python lines. `surface = "all"` widens
-# the reported surface but `top = 30` is not exhaustive: the gate adjudicates
-# the thirty highest-ranked families, so lower-ranked duplication is reported
-# nowhere and enforced nowhere.
+# the reported surface, and `top = 0` asks for every family, so none is
+# truncated: the gate adjudicates all of them. concordat's
+# python-duplication-gate rule (NS-001) requires `top = 0`.
 [tool.nose]
 version = "0.20.0"
 roots = ["cmd_mox"]
 mode = "syntax,semantic,near"
 min-size = 24
 surface = "all"
-top = 30
+top = 0
 exclude = ["unittests/*"]
 
 # Reasoned exceptions for the duplication gate. Entries key on locations, not
