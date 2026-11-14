@@ -225,10 +225,16 @@ class ExitSpyCmdMoxManager(_CmdMoxManager):
 
 def assert_teardown_sections(node: StubNode, *expected: tuple[str, str, str]) -> None:
     """Assert the node recorded exactly the expected teardown report sections."""
-    assert node.sections == list(expected), "Assertion failed"
+    if node.sections != list(expected):
+        msg = f"expected teardown sections {list(expected)!r}, got {node.sections!r}"
+        raise AssertionError(msg)
 
 
 def assert_lifecycle_calls(stub: StubMox, *, enter: int, replay: int) -> None:
     """Assert the stub recorded the expected enter and replay call counts."""
-    assert stub.enter_calls == enter, "Assertion failed"
-    assert stub.replay_calls == replay, "Assertion failed"
+    if stub.enter_calls != enter or stub.replay_calls != replay:
+        msg = (
+            f"expected enter={enter} replay={replay}, "
+            f"got enter={stub.enter_calls} replay={stub.replay_calls}"
+        )
+        raise AssertionError(msg)
