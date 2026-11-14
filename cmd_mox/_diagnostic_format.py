@@ -106,17 +106,36 @@ def _redact_expected_items(
 
 def _masked_call_arguments(
     invocations: cabc.Sequence[Invocation],
-) -> list[list[object]]:
-    """Mask each call's arguments from every call to the same command."""
+    expectations: cabc.Sequence[Expectation],
+) -> list[list[str]]:
+    """Mask each call's arguments from its peers and matching expectations.
+
+    A call's own option names identify most credentials, but the value can
+    hide under another option name in a sibling call, and an expectation's
+    literal option names mark positions the call itself does not. Both
+    sources are applied so every rendering of the same command agrees.
+
+    Returns
+    -------
+    list[list[str]]
+        Masked argument rows aligned with *invocations* by position.
+    """
     peers: dict[str, list[list[str]]] = defaultdict(list)
+    by_command: dict[str, list[Expectation]] = defaultdict(list)
     for inv in invocations:
         peers[inv.command].append(list(inv.args))
-    return [
-        _redact_expected_items(
-            list(inv.args), command=inv.command, actual_calls=peers[inv.command]
-        )
-        for inv in invocations
-    ]
+    for exp in expectations:
+        by_command[exp.name].append(exp)
+
+    masked: list[list[str]] = []
+    for inv in invocations:
+        safe = redact_sensitive_argument_values(list(inv.args), command=inv.command)
+        for exp in by_command[inv.command]:
+            safe = exp.redacted_arguments(safe)
+        for peer in peers[inv.command]:
+            safe = mask_sensitive_positions(safe, peer, command=inv.command)
+        masked.append(safe)
+    return masked
 
 
 def _expectation_args_repr(
@@ -266,8 +285,16 @@ def _describe_invocations(
     *,
     focus_env: cabc.Iterable[str] | None = None,
     include_stdin: bool = False,
+    safe_args: cabc.Sequence[cabc.Sequence[object]] | None = None,
 ) -> str:
     """Describe a sequence of invocations, or ``(none)`` when empty.
+
+    Parameters
+    ----------
+    safe_args : collections.abc.Sequence of collections.abc.Sequence of object or None
+        Masked arguments aligned with *invocations*, when supplied. Rendering
+        every call with the same masking context keeps a credential hidden in
+        the call that happened to carry it under another option name.
 
     Returns
     -------
@@ -276,9 +303,12 @@ def _describe_invocations(
     """
     if not invocations:
         return "(none)"
+    masked = safe_args if safe_args is not None else [None] * len(invocations)
     return "\n".join(
-        _describe_invocation(inv, focus_env=focus_env, include_stdin=include_stdin)
-        for inv in invocations
+        _describe_invocation(
+            inv, focus_env=focus_env, include_stdin=include_stdin, safe_args=safe
+        )
+        for inv, safe in zip(invocations, masked, strict=True)
     )
 
 

@@ -63,9 +63,10 @@ def test_count_verifier_masks_expected_values_from_every_recorded_call() -> None
     with pytest.raises(UnexpectedCommandError) as excinfo:
         CountVerifier().verify({"deploy": expectation}, {"deploy": calls})
 
-    expected_section = str(excinfo.value).partition("Observed calls:")[0]
-    assert "expected-secret" not in expected_section
-    assert "deploy(Any(), '<redacted>')" in expected_section
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "deploy(Any(), '<redacted>')" in message
+    assert "deploy('--label', '<redacted>')" in message
 
 
 def test_count_verifier_reports_absent_command_as_unfulfilled() -> None:

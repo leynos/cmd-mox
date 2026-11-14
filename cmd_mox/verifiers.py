@@ -197,7 +197,7 @@ class OrderVerifier:
         self._ordered = ordered
         self._current_expected_descriptions: list[str] = []
         self._current_actual_descriptions: list[str] = []
-        self._current_masked_actuals: list[list[object]] = []
+        self._current_masked_actuals: list[list[str]] = []
 
     def verify(self, journal: cabc.Iterable[Invocation]) -> None:
         """Ensure ordered expectations appear in order within *journal*."""
@@ -236,13 +236,15 @@ class OrderVerifier:
         # so mask from the calls to each expectation's own command.
         expected_descriptions = [
             _describe_expectation(
-                exp, actual_calls=self._mask_calls(exp, relevant_invocations)
+                exp,
+                actual_calls=self._mask_sources(exp, ordered_seq, relevant_invocations),
             )
             for exp in ordered_seq
         ]
         # A credential can hide under a different option in another call to the
-        # same command, so each observed call is masked from all of them.
-        masked_actuals = _masked_call_arguments(relevant_invocations)
+        # same command, so each observed call is masked from all of them and
+        # from the positions the counted expectations treat as sensitive.
+        masked_actuals = _masked_call_arguments(relevant_invocations, ordered_seq)
         actual_descriptions = [
             _describe_invocation(inv, safe_args=safe)
             for inv, safe in zip(relevant_invocations, masked_actuals, strict=True)
@@ -304,7 +306,7 @@ class OrderVerifier:
                 index,
                 exp,
                 actual_inv,
-                self._mask_calls(exp, relevant_invocations),
+                self._mask_sources(exp, ordered_seq, relevant_invocations),
             )
             return
 
@@ -333,11 +335,30 @@ class OrderVerifier:
         raise UnexpectedCommandError(msg)
 
     @staticmethod
-    def _mask_calls(
-        exp: Expectation, invocations: cabc.Sequence[Invocation]
+    def _mask_sources(
+        exp: Expectation,
+        ordered_seq: cabc.Sequence[Expectation],
+        invocations: cabc.Sequence[Invocation],
     ) -> list[list[str]]:
-        """Return the arguments of calls to *exp*'s own command."""
-        return [list(inv.args) for inv in invocations if inv.command == exp.name]
+        """Return the observed and expected arguments that mask *exp*.
+
+        A sibling expectation can name the option that marks a bare literal as
+        a credential, so its literal positions mask *exp* as well.
+
+        Returns
+        -------
+        list[list[str]]
+            Argument rows whose sensitive positions mask *exp*.
+        """
+        sources = [list(inv.args) for inv in invocations if inv.command == exp.name]
+        for other in ordered_seq:
+            if other is exp or other.name != exp.name:
+                continue
+            literals = other.args if other.args is not None else other.match_args
+            sources.append([
+                item if isinstance(item, str) else "" for item in literals or ()
+            ])
+        return sources
 
     def _raise_mismatch_error(
         self,
@@ -456,6 +477,9 @@ class CountVerifier:
             expected = exp.count
             focus_env = exp.env.keys()
             include_stdin = exp.stdin is not None
+            # Every displayed call is masked with the context of all of them,
+            # so a credential recorded under another option stays hidden.
+            masked_calls = _masked_call_arguments(calls, [exp])
             if actual < expected:
                 msg = _format_sections(
                     "Unfulfilled expectation.",
@@ -477,6 +501,7 @@ class CountVerifier:
                                 calls,
                                 focus_env=focus_env,
                                 include_stdin=include_stdin,
+                                safe_args=masked_calls,
                             ),
                         ),
                     ],
@@ -501,6 +526,7 @@ class CountVerifier:
                                 calls[-1],
                                 focus_env=focus_env,
                                 include_stdin=include_stdin,
+                                safe_args=masked_calls[-1],
                             ),
                         ),
                     ],

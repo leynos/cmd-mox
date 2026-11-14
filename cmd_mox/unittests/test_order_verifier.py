@@ -91,6 +91,22 @@ def test_order_verifier_masks_observed_calls_from_every_same_command_call() -> N
     assert "deploy('--label', '<redacted>')" in message
 
 
+def test_order_verifier_masks_expected_values_from_sibling_expectations() -> None:
+    """A sibling expectation's option name marks a shared literal as a secret."""
+    matcher = (
+        Expectation("deploy").with_matching_args(Any(), "expected-secret").in_order()
+    )
+    literal = Expectation("deploy").with_args("--token", "expected-secret").in_order()
+    journal = [_invocation("deploy", "--label", "expected-secret")]
+
+    with pytest.raises(UnfulfilledExpectationError) as excinfo:
+        OrderVerifier([matcher, literal]).verify(journal)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "1. deploy(Any(), '<redacted>')" in message
+
+
 def test_order_verifier_masks_unexpected_call_arguments() -> None:
     """The unexpected-calls section reuses the masked call descriptions."""
     expectation = (
