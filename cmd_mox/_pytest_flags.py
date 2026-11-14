@@ -51,14 +51,43 @@ class _FlagSources:
         bool
             The most specific configured value.
         """
-        if self.param is not None and key in self.param:
-            return bool(self.param[key])
-        if key in self.marker_kwargs:
-            return bool(self.marker_kwargs[key])
+        override = self._override(key)
+        if override is not None:
+            return override
         cli_value = self.config.getoption(option)
         if cli_value is not None:
             return bool(cli_value)
         return bool(self.config.getini(option))
+
+    def _override(self, key: str) -> bool | None:
+        """Return a validated boolean override for *key*, if one is supplied."""
+        if self.param is not None and key in self.param:
+            return _require_bool(self.param[key], f"fixture parameter {key!r}")
+        if key in self.marker_kwargs:
+            return _require_bool(self.marker_kwargs[key], f"marker keyword {key!r}")
+        return None
+
+
+def _require_bool(value: object, source: str) -> bool:
+    """Return *value* as a bool, rejecting values that only look boolean.
+
+    Coercing with ``bool()`` would turn the string ``"False"`` into ``True``
+    and silently select the opposite of the requested setting.
+
+    Returns
+    -------
+    bool
+        The validated boolean value.
+
+    Raises
+    ------
+    TypeError
+        If *value* is not a boolean.
+    """
+    if not isinstance(value, bool):
+        msg = f"cmd_mox {source} must be a bool, got {type(value).__name__}"
+        raise TypeError(msg)
+    return value
 
 
 def resolve_flags(request: pytest.FixtureRequest) -> CmdMoxFlags:

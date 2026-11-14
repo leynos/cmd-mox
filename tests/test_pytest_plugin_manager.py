@@ -487,6 +487,34 @@ def test_fail_fast_resolution_precedence(
     assert stub.fail_fast is case.expected, "fail_fast must follow the precedence order"
 
 
+def test_non_boolean_marker_value_is_rejected(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """A marker value that only looks boolean must not be coerced."""
+    request = StubRequest(
+        config=StubConfig(),
+        node=StubNode(marker=StubMarker(auto_lifecycle="yes")),
+    )
+
+    with pytest.raises(
+        TypeError, match="marker keyword 'auto_lifecycle' must be a bool"
+    ):
+        make_manager(request)
+
+
+def test_non_boolean_parameter_value_is_rejected(
+    make_manager: cabc.Callable[..., _CmdMoxManager],
+) -> None:
+    """A parameter value of ``"False"`` must not enable the setting."""
+    request = StubRequest(
+        config=StubConfig(),
+        param=typ.cast("dict[str, bool]", {"fail_fast": "False"}),
+    )
+
+    with pytest.raises(TypeError, match="fixture parameter 'fail_fast' must be a bool"):
+        make_manager(request)
+
+
 def test_fail_fast_only_param_keeps_lifecycle_default(
     make_manager: cabc.Callable[..., _CmdMoxManager],
 ) -> None:

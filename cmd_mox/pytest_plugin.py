@@ -260,9 +260,10 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         (
-            "cmd_mox(auto_lifecycle: bool = True, fail_fast: bool = False): "
+            "cmd_mox(auto_lifecycle: bool, fail_fast: bool): "
             "override automatic replay()/verify() behaviour or fail-fast mock "
-            "mismatch handling for a single test."
+            "mismatch handling for a single test. Omitted arguments inherit "
+            "the command-line or ini setting."
         ),
     )
 
