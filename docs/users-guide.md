@@ -74,12 +74,12 @@ No mock expectation matches: git push (arguments ['push'] != ['status'])
 
 The configured handler and canned response are not used, but the call is still
 recorded, so `verify()` reports it as well. Only mismatches that need no
-callback are rejected early: literal argument inequality, matcher arity, and
-literal stdin inequality. Predicate and regex matchers, environment
-constraints, call counts, and ordering remain verify-time checks, so a call
-that might still match is never rejected. Sensitive argument values are
-redacted in the diagnostic and in the verification error, and stdin content is
-never echoed.
+callback are rejected early: literal argument inequality, matcher arity,
+unequal literal string matchers, and literal stdin inequality. Predicate and
+regex matchers, environment constraints, call counts, and ordering remain
+verify-time checks, so a call that might still match is never rejected.
+Sensitive argument values are redacted in the diagnostic and in the
+verification error, and stdin content is never echoed.
 
 ## Sensitive environment values in diagnostics
 

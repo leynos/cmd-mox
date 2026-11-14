@@ -595,6 +595,7 @@ class _FailFastCase:
         ),
         pytest.param(
             _FailFastCase(
+                "@pytest.mark.cmd_mox(fail_fast=True)\n"
                 '@pytest.mark.parametrize("cmd_mox", [{"fail_fast": False}], '
                 "indirect=True)",
                 "cmd_mox_fail_fast = true",

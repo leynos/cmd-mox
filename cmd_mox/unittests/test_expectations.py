@@ -789,6 +789,12 @@ def test_count_explicit_supports_positional_construction() -> None:
             id="matcher-arity",
         ),
         pytest.param(
+            Expectation("git").with_matching_args("status", Any()),
+            Invocation("git", ["push", "origin"], "", {}),
+            "arg[0]='push' != 'status'",
+            id="literal-matcher",
+        ),
+        pytest.param(
             Expectation("git").with_stdin("expected"),
             Invocation("git", [], "actual", {}),
             "stdin does not match the expected value",
@@ -856,6 +862,17 @@ def test_definite_mismatch_reason_arity_check_never_calls_predicates() -> None:
     reason = expectation.definite_mismatch_reason(Invocation("git", ["a", "b"], "", {}))
 
     assert reason == "expected 1 args but got 2"
+
+
+def test_definite_mismatch_reason_skips_predicate_beside_matching_literal() -> None:
+    """A matching literal does not justify evaluating the next predicate."""
+    expectation = Expectation("git").with_matching_args("status", _fail_on_call)
+
+    reason = expectation.definite_mismatch_reason(
+        Invocation("git", ["status", "value"], "", {})
+    )
+
+    assert reason is None
 
 
 def test_definite_mismatch_reason_redacts_arguments() -> None:

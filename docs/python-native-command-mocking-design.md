@@ -3683,10 +3683,11 @@ handler or canned response. The rejected call is recorded in a dedicated ledger
 and still reported by `verify()` as `UnexpectedCommandError`.
 
 The early check is deliberately callback-free. It rejects only literal argument
-inequality, matcher arity mismatch, and literal stdin inequality. Predicate and
-regex matchers, environment constraints, call counts, and ordering remain
-verify-time checks, so a call that might still match is never rejected. Stubs
-and spies keep their existing behaviour.
+inequality, matcher arity mismatch, unequal literal string matchers, and
+literal stdin inequality. Predicate and regex matchers, environment
+constraints, call counts, and ordering remain verify-time checks, so a call
+that might still match is never rejected. Stubs and spies keep their existing
+behaviour.
 
 **Rationale:**
 
@@ -3696,7 +3697,8 @@ and spies keep their existing behaviour.
   `No fixture recording matches`, gives one consistent failure point for
   call-time rejections
 - Keeping the default deferred mode preserves the established API and lets a
-  test body gather several failures before `verify()` reports them
+  test body run to its own assertions before `verify()` reports the first
+  mismatch it finds
 - A separate ledger keeps rejection reporting independent of journal bounds and
   of matcher re-evaluation, so the stored redacted reason is what verification
   prints

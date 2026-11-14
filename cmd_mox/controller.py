@@ -742,7 +742,6 @@ class CmdMox:
 
     def _run_verifiers(self) -> None:
         """Execute the ordered verification checks."""
-        self._raise_first_rejected_mock_call()
         # Mocks always count; spies join only when a setter marked it explicit.
         expectations = {
             name: double.expectation
@@ -757,6 +756,12 @@ class CmdMox:
             verification_log = list(self._verification_log)
             dispatch_doubles = list(self._verification_doubles)
             ordered = list(self._ordered)
+
+        # Read the rejection ledger only after the snapshot: a rejection is
+        # recorded before its call enters the verification log, so anything in
+        # the snapshot is visible here and gets the stdin-free fail-fast
+        # diagnostic instead of the ordinary mismatch formatter.
+        self._raise_first_rejected_mock_call()
 
         dispatched = list(zip(verification_log, dispatch_doubles, strict=True))
         inv_map = verifiers.build_count_map(

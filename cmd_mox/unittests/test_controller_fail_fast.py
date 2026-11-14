@@ -330,6 +330,40 @@ def test_fail_fast_rejection_survives_journal_eviction() -> None:
     assert "git('push')" in str(excinfo.value)
 
 
+def test_verify_reads_rejection_ledger_after_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejection recorded during teardown keeps the stdin-free diagnostic."""
+    with _running_controller(fail_fast=True) as mox:
+        mock = (
+            mox
+            .mock("git")
+            .with_args("status")
+            .with_stdin("expected")
+            .returns(stdout="ok")
+        )
+        coordinator = mox._passthrough_coordinator
+        unrecorded = coordinator.unrecorded_invocations
+
+        def inject_rejected_call() -> list[tuple[CommandDouble, Invocation]]:
+            """Record a rejected call after verification may have read the ledger."""
+            invocation = Invocation("git", ["status"], "actual-secret", {})
+            mox._reject_mock_invocation(
+                mock, invocation, "stdin does not match the expected value"
+            )
+            mox._record_completed_invocation(invocation, mock)
+            return unrecorded()
+
+        monkeypatch.setattr(coordinator, "unrecorded_invocations", inject_rejected_call)
+
+        with pytest.raises(UnexpectedCommandError) as excinfo:
+            mox.verify()
+
+    message = str(excinfo.value)
+    assert "actual-secret" not in message
+    assert "stdin does not match the expected value" in message
+
+
 def test_fail_fast_leaves_stubs_and_spies_unchanged() -> None:
     """Stubs and spies keep their permissive behaviour under fail-fast."""
     with _running_controller(fail_fast=True) as mox:
