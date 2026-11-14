@@ -279,16 +279,17 @@ class OrderVerifier:
             return
 
         index = len(relevant_invocations)
-        remaining = _numbered(expected_descriptions[index:], start=index + 1)
-        msg = _format_sections(
-            "Ordered expectations not satisfied.",
-            [
-                ("Expected order", _numbered(expected_descriptions)),
-                ("Observed order", _numbered(actual_descriptions)),
-                ("Missing", remaining),
-            ],
+        raise UnfulfilledExpectationError(
+            _order_diagnostic(
+                "Ordered expectations not satisfied.",
+                expected_descriptions,
+                actual_descriptions,
+                (
+                    "Missing",
+                    _numbered(expected_descriptions[index:], start=index + 1),
+                ),
+            )
         )
-        raise UnfulfilledExpectationError(msg)
 
     def _check_order_violations(
         self,
@@ -324,15 +325,14 @@ class OrderVerifier:
         # Reuse the masked descriptions so an extra call cannot reintroduce a
         # credential that another call to the same command exposed.
         extras = actual_descriptions[len(ordered_seq) :]
-        msg = _format_sections(
-            "Unexpected additional invocation.",
-            [
-                ("Expected order", _numbered(expected_descriptions)),
-                ("Observed order", _numbered(actual_descriptions)),
+        raise UnexpectedCommandError(
+            _order_diagnostic(
+                "Unexpected additional invocation.",
+                expected_descriptions,
+                actual_descriptions,
                 ("Unexpected calls", "\n".join(extras)),
-            ],
+            )
         )
-        raise UnexpectedCommandError(msg)
 
     @staticmethod
     def _mask_sources(
@@ -447,6 +447,67 @@ def build_count_map(
     return inv_map
 
 
+def _order_diagnostic(
+    title: str,
+    expected_descriptions: list[str],
+    actual_descriptions: list[str],
+    tail: tuple[str, str],
+) -> str:
+    """Return an ordered-verification diagnostic ending with *tail*.
+
+    Returns
+    -------
+    str
+        Message with the numbered expected and observed orders.
+    """
+    return _format_sections(
+        title,
+        [
+            ("Expected order", _numbered(expected_descriptions)),
+            ("Observed order", _numbered(actual_descriptions)),
+            tail,
+        ],
+    )
+
+
+def _count_sections(exp: Expectation, calls: list[Invocation]) -> list[tuple[str, str]]:
+    """Return the expected and observed-count sections for *exp*.
+
+    Any recorded call shows which expected positions the command treats as
+    credentials, so the expected rendering is masked against all of them.
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        Labelled sections shared by both count diagnostics.
+    """
+    return [
+        (
+            "Expected",
+            _describe_expectation(
+                exp, include_count=True, actual_calls=[call.args for call in calls]
+            ),
+        ),
+        ("Observed calls", f"{len(calls)} (expected {exp.count})"),
+    ]
+
+
+def _count_diagnostic(
+    title: str,
+    exp: Expectation,
+    calls: list[Invocation],
+    tail: tuple[str, str],
+) -> str:
+    """Return a count diagnostic ending with *tail*.
+
+    Returns
+    -------
+    str
+        Message with the shared count sections and the caller's final section.
+    """
+    return _format_sections(title, [*_count_sections(exp, calls), tail])
+
+
 class CountVerifier:
     """Check that each expectation was met the expected number of times."""
 
@@ -473,62 +534,39 @@ class CountVerifier:
         """
         for name, exp in expectations.items():
             calls = invocations.get(name, [])
-            actual = len(calls)
-            expected = exp.count
             focus_env = exp.env.keys()
             include_stdin = exp.stdin is not None
-            # Every displayed call is masked with the context of all of them,
-            # so a credential recorded under another option stays hidden.
-            masked_calls = _masked_call_arguments(calls, [exp])
-            if actual < expected:
-                msg = _format_sections(
-                    "Unfulfilled expectation.",
-                    [
-                        (
-                            "Expected",
-                            # Any recorded call shows which expected positions
-                            # the command treats as credentials.
-                            _describe_expectation(
-                                exp,
-                                include_count=True,
-                                actual_calls=[call.args for call in calls],
-                            ),
-                        ),
-                        ("Observed calls", f"{actual} (expected {expected})"),
+            if len(calls) < exp.count:
+                raise UnfulfilledExpectationError(
+                    _count_diagnostic(
+                        "Unfulfilled expectation.",
+                        exp,
+                        calls,
                         (
                             "Recorded invocations",
                             _describe_invocations(
                                 calls,
                                 focus_env=focus_env,
                                 include_stdin=include_stdin,
-                                safe_args=masked_calls,
+                                safe_args=_masked_call_arguments(calls, [exp]),
                             ),
                         ),
-                    ],
+                    )
                 )
-                raise UnfulfilledExpectationError(msg)
-            if actual > expected:
-                msg = _format_sections(
-                    "Unexpected additional invocation.",
-                    [
-                        (
-                            "Expected",
-                            _describe_expectation(
-                                exp,
-                                include_count=True,
-                                actual_calls=[call.args for call in calls],
-                            ),
-                        ),
-                        ("Observed calls", f"{actual} (expected {expected})"),
+            if len(calls) > exp.count:
+                raise UnexpectedCommandError(
+                    _count_diagnostic(
+                        "Unexpected additional invocation.",
+                        exp,
+                        calls,
                         (
                             "Last call",
                             _describe_invocation(
                                 calls[-1],
                                 focus_env=focus_env,
                                 include_stdin=include_stdin,
-                                safe_args=masked_calls[-1],
+                                safe_args=_masked_call_arguments(calls, [exp])[-1],
                             ),
                         ),
-                    ],
+                    )
                 )
-                raise UnexpectedCommandError(msg)

@@ -7,9 +7,6 @@ import dataclasses as dc
 import typing as typ
 
 from ._argument_redaction import (
-    REDACTED_ARGUMENT as _REDACTED_ARGUMENT,
-)
-from ._argument_redaction import (
     is_sensitive_recording_env_key,
 )
 from ._argument_redaction import (
@@ -17,6 +14,15 @@ from ._argument_redaction import (
 )
 from ._argument_redaction import (
     redact_sensitive_argument_values as _redact_sensitive_argument_values,
+)
+from ._matching import (
+    matcher_accepts as _matcher_accepts,
+)
+from ._matching import (
+    matcher_mismatch as _matcher_mismatch,
+)
+from ._matching import (
+    redacted_literal_argument_mismatch as _redacted_literal_argument_mismatch,
 )
 from ._validators import validate_expectation_count
 from .errors import ExpectationConfigurationError
@@ -27,20 +33,6 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
 # A literal string matches an argument exactly; any other matcher must be a
 # callable predicate whose result is coerced to ``bool``.
 ArgMatcher = str | cabc.Callable[[str], bool]
-
-
-def _matcher_accepts(matcher: ArgMatcher, value: str) -> bool:
-    """Return whether *matcher* accepts *value*.
-
-    Returns
-    -------
-    bool
-        ``True`` when a literal string equals *value*, or when a callable
-        returns a truthy result.
-    """
-    if isinstance(matcher, str):
-        return matcher == value
-    return bool(matcher(value))
 
 
 @dc.dataclass(slots=True)
@@ -355,11 +347,12 @@ class Expectation:
             A redacted mismatch description, or ``None`` when the invocation
             is not definitely mismatched.
         """
-        if self.args is not None and invocation.args != self.args:
-            return self._redacted_literal_argument_mismatch(invocation, self.args)
+        literal = self._literal_args_mismatch(invocation)
+        if literal is not None:
+            return literal
         if self.match_args is not None:
-            mismatch = self._matcher_mismatch(
-                invocation, self.match_args, call_predicates=False
+            mismatch = _matcher_mismatch(
+                self, invocation, self.match_args, call_predicates=False
             )
             if mismatch is not None:
                 return mismatch
@@ -367,113 +360,6 @@ class Expectation:
             # Never echo stdin: it may carry a credential or another secret.
             return "stdin does not match the expected value"
         return None
-
-    def _matcher_mismatch(
-        self,
-        invocation: Invocation,
-        matchers: cabc.Sequence[ArgMatcher],
-        *,
-        call_predicates: bool,
-    ) -> str | None:
-        """Return the first arity or per-position matcher failure.
-
-        Positions are examined in argument order so the reported failure is
-        genuinely the first one, not merely the first literal matcher. The
-        ``call_predicates`` flag keeps fail-fast dispatch callback-free: an
-        early rejection may not run caller-supplied code, so predicates are
-        skipped there and left for verification.
-
-        Parameters
-        ----------
-        invocation : Invocation
-            Call being matched.
-        matchers : collections.abc.Sequence[object]
-            Expected matchers, aligned with the invocation arguments.
-        call_predicates : bool
-            Whether non-literal matchers may be invoked.
-
-        Returns
-        -------
-        str or None
-            An arity, ``arg[i]=... != ...``, predicate-failure, or
-            validator-error description, or ``None`` when every checked
-            matcher accepts its argument.
-        """
-        if len(invocation.args) != len(matchers):
-            return f"expected {len(matchers)} args but got {len(invocation.args)}"
-        actual, expected = self._redacted_matcher_arguments(invocation, matchers)
-        for index, (arg, matcher) in enumerate(
-            zip(invocation.args, matchers, strict=True)
-        ):
-            if isinstance(matcher, str):
-                # Literal equality cannot raise, so report it without the
-                # exception wrapper used for caller-supplied predicates.
-                if not _matcher_accepts(matcher, arg):
-                    return f"arg[{index}]={actual[index]!r} != {expected[index]!r}"
-                continue
-            if not call_predicates:
-                continue
-            detail = self._describe_predicate_failure(
-                matcher, arg, expected=expected[index]
-            )
-            if detail is not None:
-                return f"arg[{index}]={actual[index]!r} {detail}"
-        return None
-
-    @staticmethod
-    def _describe_predicate_failure(
-        matcher: cabc.Callable[[str], bool], arg: str, *, expected: str
-    ) -> str | None:
-        """Return the failure detail when *matcher* rejects *arg*.
-
-        The caller supplies the argument index and the redacted argument, so
-        this helper reports only what happened at one position.
-
-        Returns
-        -------
-        str or None
-            A ``predicate raised ...`` or ``failed ...`` detail, or ``None``
-            when *matcher* accepts *arg*.
-        """
-        try:
-            ok = _matcher_accepts(matcher, arg)
-        except Exception as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
-            if expected == _REDACTED_ARGUMENT:
-                # The message may quote the value and the matcher repr may
-                # embed its pattern, so a sensitive position keeps only the
-                # class name.
-                return f"predicate raised {exc.__class__.__name__}"
-            return f"predicate {matcher!r} raised {exc.__class__.__name__}: {exc}"
-        if ok:
-            return None
-        # A matcher repr can carry the pattern it matches, so a sensitive
-        # position is reported with the placeholder only.
-        rendered = (
-            _REDACTED_ARGUMENT if expected == _REDACTED_ARGUMENT else repr(matcher)
-        )
-        return f"failed {rendered}"
-
-    def _redacted_matcher_arguments(
-        self, invocation: Invocation, matchers: cabc.Sequence[object]
-    ) -> tuple[list[str], list[str]]:
-        """Return redacted invocation arguments and literal matcher values.
-
-        Predicate matchers have no literal value, so they are represented by an
-        empty placeholder that keeps positions aligned with the invocation.
-
-        Returns
-        -------
-        tuple[list[str], list[str]]
-            Redacted actual arguments and redacted literal matchers.
-        """
-        actual = self.redacted_arguments(invocation.args)
-        literals = [matcher if isinstance(matcher, str) else "" for matcher in matchers]
-        expected = _redact_sensitive_argument_values(literals, command=self.name)
-        # An option name may itself be a predicate matcher, so the matcher list
-        # cannot reveal which positions carry a credential.
-        return actual, _mask_sensitive_positions(
-            expected, invocation.args, command=self.name
-        )
 
     def redacted_arguments(self, args: cabc.Sequence[str]) -> list[str]:
         """Return *args* with every credential position masked.
@@ -499,25 +385,6 @@ class Expectation:
         literals = [item if isinstance(item, str) else "" for item in expected]
         return _mask_sensitive_positions(safe, literals, command=self.name)
 
-    def _redacted_literal_argument_mismatch(
-        self, invocation: Invocation, expected: list[str]
-    ) -> str:
-        """Return a redacted description of unequal literal arguments.
-
-        Returns
-        -------
-        str
-            Both argument lists with sensitive values masked.
-        """
-        actual = self.redacted_arguments(invocation.args)
-        safe_expected = _redact_sensitive_argument_values(expected, command=self.name)
-        # The option names may differ, so the expected list alone cannot show
-        # which of its values the call treats as a credential.
-        safe_expected = _mask_sensitive_positions(
-            safe_expected, invocation.args, command=self.name
-        )
-        return f"arguments {actual!r} != {safe_expected!r}"
-
     def explain_mismatch(self, invocation: Invocation) -> str:
         """Return a reason why ``invocation`` failed to match.
 
@@ -528,7 +395,7 @@ class Expectation:
         """
         for checker in (
             self._explain_command_mismatch,
-            self._explain_args_mismatch,
+            self._literal_args_mismatch,
             self._explain_match_args_mismatch,
             self._explain_stdin_mismatch,
             self._explain_env_mismatch,
@@ -550,18 +417,18 @@ class Expectation:
             return None
         return f"command {invocation.command!r} != {self.name!r}"
 
-    def _explain_args_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if explicit args do not match.
+    def _literal_args_mismatch(self, invocation: Invocation) -> str | None:
+        """Return the literal-argument mismatch description, if any.
 
         Returns
         -------
         str or None
-            The mismatch description, or ``None`` when the arguments agree or
-            no literal ``args`` were configured.
+            The redacted mismatch, or ``None`` when the arguments agree or no
+            literal ``args`` were configured.
         """
         if self.args is None or invocation.args == self.args:
             return None
-        return self._redacted_literal_argument_mismatch(invocation, self.args)
+        return _redacted_literal_argument_mismatch(self, invocation, self.args)
 
     def _explain_match_args_mismatch(self, invocation: Invocation) -> str | None:
         """Return a message when matcher-based args fail.
@@ -574,7 +441,9 @@ class Expectation:
         """
         if self.match_args is None:
             return None
-        return self._matcher_mismatch(invocation, self.match_args, call_predicates=True)
+        return _matcher_mismatch(
+            self, invocation, self.match_args, call_predicates=True
+        )
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:
         """Return a message if stdin fails to satisfy the expectation.

@@ -31,6 +31,17 @@ def _invocation(
     )
 
 
+def _deploy_expectation(count: int) -> Expectation:
+    """Return a deploy expectation with a flag, stdin, and env constraint."""
+    return (
+        Expectation("deploy")
+        .with_args("--flag")
+        .with_stdin("payload")
+        .with_env({"TOKEN": "classified"})
+        .times_called(count)
+    )
+
+
 def test_count_verifier_accepts_exact_counts_and_ignores_extra_keys() -> None:
     """Exact counts pass, and invocations for unregistered commands are ignored."""
     expectation = Expectation("deploy").with_args("--flag").times_called(2)
@@ -101,13 +112,7 @@ def test_count_verifier_reports_absent_command_as_unfulfilled() -> None:
 
 def test_count_verifier_reports_partial_calls_with_env_and_stdin() -> None:
     """Recorded calls are described with the focused env and stdin."""
-    expectation = (
-        Expectation("deploy")
-        .with_args("--flag")
-        .with_stdin("payload")
-        .with_env({"TOKEN": "classified"})
-        .times_called(3)
-    )
+    expectation = _deploy_expectation(3)
     calls = [
         _invocation(
             "--flag",
@@ -140,13 +145,7 @@ def test_count_verifier_reports_partial_calls_with_env_and_stdin() -> None:
 
 def test_count_verifier_reports_overflow_with_the_last_call() -> None:
     """Overflow reports the observed count and the final recorded call."""
-    expectation = (
-        Expectation("deploy")
-        .with_args("--flag")
-        .with_stdin("payload")
-        .with_env({"TOKEN": "classified"})
-        .times_called(1)
-    )
+    expectation = _deploy_expectation(1)
     calls = [
         _invocation("one", stdin="payload", env={"TOKEN": "classified"}),
         _invocation("two", stdin="payload", env={"TOKEN": "classified"}),
