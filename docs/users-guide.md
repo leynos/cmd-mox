@@ -54,12 +54,15 @@ upgrading expectations that pass plain strings or invalid matcher values.
 
 ## Reading a verification failure
 
-By default a mock answers every call with its configured response, even when
-the arguments, stdin, or environment cannot match its expectation. `verify()`
-then reports the mismatch as `UnexpectedCommandError`, naming the expected and
-actual calls. This deferred behaviour keeps a test body running to its own
-assertions. Verification stops at the first mismatch it finds and reports that
-one, so fix it and rerun to reveal any further problems.
+By default a mock answers a call with its configured response even when the
+arguments, stdin, or environment cannot match its expectation. `verify()` then
+reports the mismatch as `UnexpectedCommandError`, naming the expected and
+actual calls. The exception is a call that supplies a different value for a key
+set with `with_env()`: that conflict fails at invocation time, as the
+[usage guide](usage-guide.md) describes, because replacing the supplied value
+would hide the caller's mistake. This deferred behaviour keeps a test body
+running to its own assertions. Verification stops at the first mismatch it
+finds and reports that one, so fix it and rerun to reveal any further problems.
 
 Opt into fail-fast handling when a mismatched call should fail where it
 happens. Pass `fail_fast=True` to `CmdMox`, or enable it for pytest with

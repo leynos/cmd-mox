@@ -186,10 +186,11 @@ Each call returns a `CommandDouble` that offers a fluent DSL to configure
 behaviour.
 
 Mocks report a call that cannot match its expectation during `verify()` by
-default. Set `fail_fast=True` on the controller, or enable the pytest option
-described in [Running tests](#running-tests), to answer such a call with exit
-status `1` and a `No mock expectation matches: ...` diagnostic instead. The
-call is still recorded, so verification reports it too. Stubs and spies are
+default, except when the call supplies a conflicting `with_env()` value, which
+fails immediately. Set `fail_fast=True` on the controller, or enable the pytest
+option described in [Running tests](#running-tests), to answer such a call with
+exit status `1` and a `No mock expectation matches: ...` diagnostic instead.
+The call is still recorded, so verification reports it too. Stubs and spies are
 unaffected.
 
 ## Defining expectations
@@ -1060,8 +1061,10 @@ the context-manager API:
   `No mock expectation matches: ...` diagnostic on stderr instead of the
   configured response. The call is still recorded, so `verify()` reports it as
   `UnexpectedCommandError`. Only literal argument inequality, matcher arity,
-  and literal stdin inequality are checked early; predicate and regex matchers,
-  environment constraints, counts, and ordering remain verify-time checks.
+  unequal literal string matchers, and literal stdin inequality are checked
+  early; predicate and regex matchers, environment constraints, counts, and
+  ordering remain verify-time checks. A conflicting value for a `with_env()`
+  key already fails at invocation time, whether or not `fail_fast` is enabled.
   Stubs and spies are unaffected.
 
 The journal is especially handy when debugging:

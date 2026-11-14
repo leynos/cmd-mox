@@ -3686,8 +3686,10 @@ The early check is deliberately callback-free. It rejects only literal argument
 inequality, matcher arity mismatch, unequal literal string matchers, and
 literal stdin inequality. Predicate and regex matchers, environment
 constraints, call counts, and ordering remain verify-time checks, so a call
-that might still match is never rejected. Stubs and spies keep their existing
-behaviour.
+that might still match is never rejected. An invocation that supplies a
+conflicting value for a `with_env()` key keeps its existing invocation-time
+failure, which is a caller error rather than an expectation match. Stubs and
+spies keep their existing behaviour.
 
 **Rationale:**
 
