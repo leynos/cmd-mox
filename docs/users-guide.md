@@ -82,7 +82,9 @@ unequal literal string matchers, and literal stdin inequality. Predicate and
 regex matchers, environment constraints, call counts, and ordering remain
 verify-time checks, so a call that might still match is never rejected.
 Sensitive argument values are redacted in the diagnostic and in the
-verification error, and stdin content is never echoed.
+verification error. A call rejected at invocation time never echoes stdin
+content; a deferred mismatch that verification reports may still show it, as
+any verification failure does.
 
 ## Sensitive environment values in diagnostics
 

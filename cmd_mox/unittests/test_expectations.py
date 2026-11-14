@@ -929,6 +929,16 @@ def test_definite_mismatch_reason_masks_expected_values_at_actual_positions() ->
     assert "actual-secret" not in reason
 
 
+def test_definite_mismatch_reason_masks_actual_value_under_a_different_option() -> None:
+    """The expected option name also marks the actual value as a credential."""
+    expectation = Expectation("deploy").with_args("--token", "credential-value")
+    invocation = Invocation("deploy", ["--option", "credential-value"], "", {})
+
+    reason = expectation.definite_mismatch_reason(invocation)
+
+    assert reason == "arguments ['--option', '<redacted>'] != ['--token', '<redacted>']"
+
+
 def test_definite_mismatch_reason_redacts_masked_matcher_values() -> None:
     """A predicate option matcher must not unmask the expected token value."""
     expectation = Expectation("deploy").with_matching_args(Any(), "expected-secret")

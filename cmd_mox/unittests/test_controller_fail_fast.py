@@ -317,6 +317,26 @@ def test_fail_fast_redacts_expected_value_under_a_different_option() -> None:
     assert "expected-secret" not in message
 
 
+def test_fail_fast_masks_expected_value_under_a_different_option_in_diagnostic() -> (
+    None
+):
+    """The stderr diagnostic masks values the expectation marks as credentials."""
+    with _running_controller(fail_fast=True) as mox:
+        mox.mock("deploy").with_args("--token", "credential-value").returns(stdout="ok")
+        result = _run_failing(mox, "deploy", "--option", "credential-value")
+
+        assert result.returncode == 1
+        assert "credential-value" not in result.stderr
+        assert (
+            "No mock expectation matches: deploy --option <redacted>" in result.stderr
+        )
+
+        with pytest.raises(UnexpectedCommandError) as excinfo:
+            mox.verify()
+
+    assert "credential-value" not in str(excinfo.value)
+
+
 def test_fail_fast_redacts_masked_matcher_values() -> None:
     """A predicate option matcher must not unmask the expected token value."""
     with _running_controller(fail_fast=True) as mox:

@@ -475,6 +475,30 @@ class Expectation:
             expected, invocation.args, command=self.name
         )
 
+    def redacted_arguments(self, args: cabc.Sequence[str]) -> list[str]:
+        """Return *args* with every credential position masked.
+
+        The call's own option names identify most secrets, but the option name
+        may differ from the expected one, so the expectation's sensitive
+        positions are applied as well.
+
+        Parameters
+        ----------
+        args : collections.abc.Sequence[str]
+            Arguments of the invocation being reported.
+
+        Returns
+        -------
+        list[str]
+            Diagnostic-safe arguments with positions preserved.
+        """
+        safe = _redact_sensitive_argument_values(list(args), command=self.name)
+        expected = self.args if self.args is not None else self.match_args
+        if expected is None:
+            return safe
+        literals = [item if isinstance(item, str) else "" for item in expected]
+        return _mask_sensitive_positions(safe, literals, command=self.name)
+
     def _redacted_literal_argument_mismatch(
         self, invocation: Invocation, expected: list[str]
     ) -> str:
@@ -485,7 +509,7 @@ class Expectation:
         str
             Both argument lists with sensitive values masked.
         """
-        actual = _redact_sensitive_argument_values(invocation.args, command=self.name)
+        actual = self.redacted_arguments(invocation.args)
         safe_expected = _redact_sensitive_argument_values(expected, command=self.name)
         # The option names may differ, so the expected list alone cannot show
         # which of its values the call treats as a credential.

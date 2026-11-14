@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from cmd_mox import Any
 from cmd_mox.errors import UnexpectedCommandError, UnfulfilledExpectationError
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
@@ -44,6 +45,27 @@ def test_count_verifier_accepts_exact_counts_and_ignores_extra_keys() -> None:
     # verifier that never raises cannot pass this test vacuously.
     with pytest.raises(UnfulfilledExpectationError):
         CountVerifier().verify({"deploy": expectation}, {"deploy": calls[:1]})
+
+
+def test_count_verifier_masks_expected_values_from_every_recorded_call() -> None:
+    """Each recorded call contributes the positions it marks as sensitive."""
+    expectation = (
+        Expectation("deploy")
+        .with_matching_args(Any(), "expected-secret")
+        .times_called(2)
+    )
+    calls = [
+        _invocation("--token", "expected-secret"),
+        _invocation("--label", "expected-secret"),
+        _invocation("--label", "expected-secret"),
+    ]
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        CountVerifier().verify({"deploy": expectation}, {"deploy": calls})
+
+    expected_section = str(excinfo.value).partition("Observed calls:")[0]
+    assert "expected-secret" not in expected_section
+    assert "deploy(Any(), '<redacted>')" in expected_section
 
 
 def test_count_verifier_reports_absent_command_as_unfulfilled() -> None:

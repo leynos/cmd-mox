@@ -465,19 +465,19 @@ class CmdMox:
     def _reject_mock_invocation(
         self, double: CommandDouble, invocation: Invocation, reason: str
     ) -> Response:
-        """Answer a definitely mismatched mock call with a failure response.
+        """Answer a mismatched mock call with a redacted failure response.
 
-        The call is still recorded so verification can report it, but the
-        configured handler and canned response are not used.
+        The call is recorded for verification, but the handler is not run.
 
         Returns
         -------
         Response
-            A failure response carrying the redacted mismatch diagnostic.
+            The failure response sent to the caller.
         """
         double.invocations.append(invocation)
         self._rejections.record(double, invocation, reason)
-        return rejection_response(invocation, reason)
+        safe_args = double.expectation.redacted_arguments(invocation.args)
+        return rejection_response(invocation, reason, safe_args=safe_args)
 
     def _response_for_replay(
         self, double: CommandDouble, invocation: Invocation
@@ -732,12 +732,9 @@ class CmdMox:
 
     def _raise_first_rejected_mock_call(self) -> None:
         """Raise for the earliest call fail-fast rejected, if any."""
-        entry = self._rejections.first()
-        if entry is not None:
+        if (entry := self._rejections.first()) is not None:
             verifiers.raise_rejected_mock_error(
-                entry.double.expectation,
-                entry.invocation,
-                entry.reason,
+                entry.double.expectation, entry.invocation, entry.reason
             )
 
     def _run_verifiers(self) -> None:

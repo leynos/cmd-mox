@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from cmd_mox import Any
 from cmd_mox.errors import UnexpectedCommandError, UnfulfilledExpectationError
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
@@ -46,6 +47,25 @@ def test_order_verifier_ignores_unordered_invocations_with_same_command() -> Non
     # the passing case above is not vacuous.
     with pytest.raises(UnfulfilledExpectationError):
         OrderVerifier([fetch]).verify([_invocation("git", "status")])
+
+
+def test_order_verifier_masks_from_calls_to_the_same_command() -> None:
+    """Masking ignores calls to other commands at the same journal position."""
+    deploy = (
+        Expectation("deploy").with_matching_args(Any(), "expected-secret").in_order()
+    )
+    other = Expectation("other").with_args("status").in_order()
+    journal = [
+        _invocation("other", "status"),
+        _invocation("deploy", "--token", "expected-secret"),
+    ]
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        OrderVerifier([deploy, other]).verify(journal)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "deploy(Any(), '<redacted>')" in message
 
 
 def test_order_verifier_flags_out_of_order_matches() -> None:

@@ -15,6 +15,8 @@ from ._argument_redaction import redact_sensitive_argument_values
 from .ipc import Invocation, Response
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
     from .test_doubles import CommandDouble
 
 
@@ -27,17 +29,33 @@ class RejectedMockCall:
     reason: str
 
 
-def rejection_response(invocation: Invocation, reason: str) -> Response:
+def rejection_response(
+    invocation: Invocation,
+    reason: str,
+    *,
+    safe_args: cabc.Sequence[str] | None = None,
+) -> Response:
     """Build the failure response for a definitely mismatched mock call.
+
+    Parameters
+    ----------
+    invocation : Invocation
+        Rejected call.
+    reason : str
+        Already-redacted mismatch description.
+    safe_args : collections.abc.Sequence of str or None
+        Arguments masked against the expectation. When omitted, only the
+        option names in *invocation* decide what to redact.
 
     Returns
     -------
     Response
         Exit status ``1`` with a redacted diagnostic on stderr and no stdout.
     """
-    safe_args = redact_sensitive_argument_values(
-        invocation.args, command=invocation.command
-    )
+    if safe_args is None:
+        safe_args = redact_sensitive_argument_values(
+            invocation.args, command=invocation.command
+        )
     call = " ".join([invocation.command, *safe_args])
     diagnostic = f"No mock expectation matches: {call} ({reason})\n"
     return Response(stdout="", stderr=diagnostic, exit_code=1)
