@@ -21,6 +21,7 @@ Feature: Recording session captures passthrough interactions
     And the session is finalized
     Then the fixture env_subset does not contain "SECRET_TOKEN"
     And the fixture env_subset does not contain "PATH"
+    And the fixture env_subset does not contain "SAFE_VAR"
     And the fixture env_subset contains "MY_SETTING"
 
   Scenario: recording session generates fixture metadata

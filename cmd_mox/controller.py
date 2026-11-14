@@ -598,9 +598,7 @@ class CmdMox:
             extra_env=overrides or None,
         )
         return self._passthrough_coordinator.prepare_request(
-            double,
-            invocation,
-            config,
+            double, invocation, config, expectation_env=overrides
         )
 
     def _handle_passthrough_result(self, result: PassthroughResult) -> Response:

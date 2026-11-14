@@ -255,15 +255,37 @@ class TestFilterEnvSubset:
             "API_TOKEN": "tok123",
             "DB_PASSWORD": "hunter2",
             "GITHUB_KEY": "ghk",
-            "SAFE_VAR": "keep",
+            "GIT_AUTHOR_NAME": "keep",
         }
-        result = filter_env_subset(env)
+        result = filter_env_subset(env, command="git")
 
         assert "AWS_SECRET_ACCESS_KEY" not in result
         assert "API_TOKEN" not in result
         assert "DB_PASSWORD" not in result
         assert "GITHUB_KEY" not in result
-        assert "SAFE_VAR" in result
+        assert "GIT_AUTHOR_NAME" in result
+
+    def test_sensitive_keys_sharing_command_prefix_are_excluded(self) -> None:
+        """Sensitivity wins over the known-prefix rule for the same command."""
+        env = {
+            "GIT_TOKEN": "tok123",
+            "GIT_SECRET": "s3cr3t",
+            "GIT_PASSWORD": "hunter2",
+            "GIT_API_KEY": "key",
+            "GIT_KEY": "plain-key",
+            "GIT_AUTHOR_NAME": "keep",
+        }
+        result = filter_env_subset(env, command="git")
+
+        for key in (
+            "GIT_TOKEN",
+            "GIT_SECRET",
+            "GIT_PASSWORD",
+            "GIT_API_KEY",
+            "GIT_KEY",
+        ):
+            assert key not in result, f"{key} should be excluded as sensitive"
+        assert result == {"GIT_AUTHOR_NAME": "keep"}
 
     def test_excludes_credential_config_keys(self) -> None:
         """Registry credentials in ``*_AUTH_CONFIG`` never reach fixtures."""
@@ -315,14 +337,14 @@ class TestFilterEnvSubset:
             "SHELL": "/bin/bash",
             "SSH_AUTH_SOCK": "/run/ssh-agent",
             "GPG_AGENT_INFO": "/run/gpg",
-            "SAFE_VAR": "keep",
+            "GIT_AUTHOR_NAME": "keep",
         }
-        result = filter_env_subset(env)
+        result = filter_env_subset(env, command="git")
 
         for key in ("PATH", "HOME", "USER", "SHELL", "SSH_AUTH_SOCK", "GPG_AGENT_INFO"):
             assert key not in result, f"{key} should be excluded"
 
-        assert "SAFE_VAR" in result
+        assert "GIT_AUTHOR_NAME" in result
 
     def test_includes_allowlisted_keys(self) -> None:
         """Allowlisted keys pass through even if they match exclusion patterns."""
@@ -371,16 +393,59 @@ class TestFilterEnvSubset:
         assert result["HOME"] == "/home/user"
         assert result["SECRET_TOKEN"] == requested_value
 
-    def test_preserves_non_sensitive_keys(self) -> None:
-        """Arbitrary non-sensitive, non-system keys pass through."""
+    def test_excludes_unrequested_keys_for_unknown_command(self) -> None:
+        """An unknown command records no unrequested environment variables."""
         env = {
             "MY_SETTING": "enabled",
             "APP_MODE": "test",
             "DEBUG": "1",
         }
-        result = filter_env_subset(env)
+        result = filter_env_subset(env, command="greet")
 
-        assert result == env
+        assert result == {}
+
+    @pytest.mark.parametrize("request_kind", ["allowlist", "explicit_keys"])
+    def test_unknown_command_keeps_requested_keys(self, request_kind: str) -> None:
+        """An unknown command still records allowlisted or explicit keys."""
+        env = {"MY_SETTING": "enabled", "UNRELATED": "value"}
+        requested = ["MY_SETTING"]
+        if request_kind == "allowlist":
+            result = filter_env_subset(env, command="greet", allowlist=requested)
+        else:
+            result = filter_env_subset(env, command="greet", explicit_keys=requested)
+
+        assert result == {"MY_SETTING": "enabled"}
+
+    def test_unknown_command_excludes_requested_internal_keys(self) -> None:
+        """Internal keys stay excluded for an unknown command even when requested."""
+        env = {"CMOX_IPC_SOCKET": "socket", "MY_SETTING": "enabled"}
+        result = filter_env_subset(
+            env,
+            command="greet",
+            allowlist=["CMOX_IPC_SOCKET"],
+            explicit_keys=["CMOX_IPC_SOCKET"],
+        )
+
+        assert result == {}
+
+    def test_unknown_command_does_not_add_absent_requested_keys(self) -> None:
+        """Requested keys that are absent from the input are not invented."""
+        result = filter_env_subset(
+            {"MY_SETTING": "enabled"},
+            command="greet",
+            allowlist=["MISSING"],
+            explicit_keys=["ALSO_MISSING"],
+        )
+
+        assert result == {}
+
+    @pytest.mark.parametrize("command", ["/usr/bin/git", "git.exe"])
+    def test_command_lookup_is_whole_name_only(self, command: str) -> None:
+        """Paths and ``.exe`` suffixes are not normalized to a known prefix."""
+        env = {"GIT_AUTHOR_NAME": "Tester", "MY_SETTING": "enabled"}
+        result = filter_env_subset(env, command=command)
+
+        assert result == {}
 
     def test_empty_env(self) -> None:
         """An empty env produces an empty result."""
@@ -403,14 +468,14 @@ class TestFilterEnvSubset:
             "CMOX_IPC_SOCKET": "ipc-socket-path",
             "CMOX_IPC_TIMEOUT": "5.0",
             "CMOX_REAL_COMMAND_echo": "/usr/bin/echo",
-            "SAFE_VAR": "keep",
+            "GIT_AUTHOR_NAME": "keep",
         }
-        result = filter_env_subset(env)
+        result = filter_env_subset(env, command="git")
 
         assert "CMOX_IPC_SOCKET" not in result
         assert "CMOX_IPC_TIMEOUT" not in result
         assert "CMOX_REAL_COMMAND_echo" not in result
-        assert "SAFE_VAR" in result
+        assert "GIT_AUTHOR_NAME" in result
 
     @pytest.mark.parametrize(
         ("label", "allowlist", "explicit_keys", "cmox_keys"),
@@ -439,17 +504,22 @@ class TestFilterEnvSubset:
     ) -> None:
         """CmdMox internal keys are excluded regardless of request method."""
         env = dict.fromkeys(cmox_keys, "value")
-        env["SAFE_VAR"] = "keep"
+        env["GIT_AUTHOR_NAME"] = "keep"
 
         result = filter_env_subset(
             env,
+            command="git",
             allowlist=allowlist,
             explicit_keys=explicit_keys,
         )
 
         for key in cmox_keys:
             assert key not in result, f"{key} should be excluded even when in {label}"
-        assert "SAFE_VAR" in result
+        assert "GIT_AUTHOR_NAME" in result
+
+
+class TestFilterEnvSubsetCommandRules:
+    """Tests for command-specific filtering rules."""
 
     @pytest.mark.parametrize("case", _COMMAND_ENV_CASES)
     def test_command_rules_retain_only_their_own_keys(
@@ -496,14 +566,47 @@ class TestFilterEnvSubset:
             f"{command} should retain {retained} and drop the other keys"
         )
 
-    def test_unknown_command_uses_permissive_fallback(self) -> None:
-        """An unrecognized command keeps every non-excluded key."""
+    def test_unknown_command_drops_unrequested_keys(self) -> None:
+        """An unrecognized command keeps only allowlisted or requested keys."""
         env = {"GIT_DIR": "x", "APP_MODE": "y", "PATH": "/usr/bin"}
 
-        assert filter_env_subset(env, command="unknown-command") == {
-            "GIT_DIR": "x",
-            "APP_MODE": "y",
-        }, "unknown commands should keep every non-excluded key"
+        assert filter_env_subset(env, command="unknown-command") == {}, (
+            "unknown commands should drop every unrequested key"
+        )
+
+
+_UNKNOWN_COMMANDS = st.sampled_from([
+    "",
+    "greet",
+    "unknown-command",
+    "/usr/bin/git",
+    "git.exe",
+])
+
+
+@given(
+    env=_ENVS,
+    command=_UNKNOWN_COMMANDS,
+    allowlist=_KEY_LISTS,
+    explicit_keys=_KEY_LISTS,
+)
+def test_filter_env_subset_bounds_unknown_command_results(
+    env: dict[str, str],
+    command: str,
+    allowlist: list[str],
+    explicit_keys: list[str],
+) -> None:
+    """A command without a known prefix keeps only requested, non-internal keys.
+
+    Invariant: the result is a subset of ``(allowlist | explicit_keys) & env``
+    once CmdMox-internal keys are removed.
+    """
+    result = filter_env_subset(
+        env, command=command, allowlist=allowlist, explicit_keys=explicit_keys
+    )
+    requested = (set(allowlist) | set(explicit_keys)) & set(env)
+    permitted = {key for key in requested if not key.startswith(("CMOX_", "CMD_MOX_"))}
+    assert set(result) <= permitted, result
 
 
 @pytest.mark.parametrize("command", _ALL_COMMANDS)

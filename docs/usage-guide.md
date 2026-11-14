@@ -512,10 +512,10 @@ session = RecordingSession(
 )
 ```
 
-The `env_allowlist` parameter specifies environment variable keys that should
-be included in recordings when present in the environment, even if they would
-otherwise be filtered. CmdMox-internal keys (`CMOX_*`, `CMD_MOX_*`) remain
-excluded.
+The `env_allowlist` parameter names environment variable keys to keep in every
+recording from this session, even if they would otherwise be filtered. A key is
+kept only when it is present in the environment and is not a CmdMox internal
+key.
 
 ### Lifecycle: start, record, finalize
 
@@ -530,42 +530,71 @@ fixture = session.finalize()                 # Persist and return FixtureFile
 
 - `start()` initializes the session timestamp. Calling `record()` before
   `start()` raises `LifecycleError`.
-- `record(invocation, response, *, duration_ms=0)` appends a recording with
-  auto-incrementing sequence numbers and filtered environment variables. The
-  optional `duration_ms` parameter records execution timing.
+- `record(invocation, response, *, duration_ms=0, explicit_keys=None)` appends
+  a recording with auto-incrementing sequence numbers and filtered environment
+  variables. The optional `duration_ms` parameter records execution timing, and
+  `explicit_keys` names keys requested through `.with_env()`. Such keys
+  override the system-key and sensitive-name exclusions but never the
+  CmdMox-internal exclusion, and are recorded only when present in the
+  invocation environment.
 - `finalize()` writes the fixture to disk and returns the `FixtureFile`. It
   is idempotent: calling it again returns the same object. Calling `record()`
   after `finalize()` raises `LifecycleError`.
 
-### Environment variable filtering
+### Decide what a recording keeps
 
-Recordings capture only a safe, portable subset of environment variables:
+Fixtures are meant to be committed, so a recording keeps only a small, portable
+subset of the process environment. Filtering applies these rules in order:
 
-- **Excluded by default:** `PATH`, `HOME`, `USER`, `SHELL`, `SSH_AUTH_SOCK`,
-  `GPG_AGENT_INFO`, CmdMox internal variables (`CMOX_*`, `CMD_MOX_*`), and
-  sensitive keys. A key is sensitive when it contains `SECRET`, `TOKEN`,
-  `API_KEY`, or `PASSWORD` anywhere, regardless of case. It is also sensitive
-  when a segment starting at the key's beginning, after `_`, or after `-` is
-  `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE`, `PASS`, `PWD`,
-  `CREDENTIAL`, or `CREDENTIALS`, optionally with an `API` prefix, or is
-  `AUTH_CONFIG` or `AUTHENTICATION_CONFIG`. That segment must end at `_`, `-`,
-  `=`, `:`, a digit, or the end of the key. So `TOKENIZER_MODE` is excluded by
-  the substring rule, while `GITHUB_KEY` and `DOCKER_AUTH_CONFIG` are excluded
-  by the segment rule.
-- **Included by default:** command-specific prefix keys (e.g., `GIT_*` for
-  git, `AWS_*` for aws). `go` is the exception: it uses an exact list of
-  documented Go variables (`GOPATH`, `GOFLAGS`, `GOOS`, and so on) because a
-  bare `GO` prefix would also capture unrelated names such as
-  `GOOGLE_CLOUD_PROJECT`. Other `GO*` names and `CGO_*` names are not recorded
-  unless allowlisted.
-- **Override:** Use `env_allowlist` to include specific keys. Keys specified
-  by `.with_env()` do not automatically widen recordings. Direct callers of
-  `filter_env_subset()` can pass `explicit_keys`; the function applies the
-  union of `allowlist` and `explicit_keys`. A requested key must be present in
-  the environment to appear in the recording, and CmdMox-internal keys remain
-  excluded. Requests take precedence over the sensitive-key rule, so
-  allowlisting a key such as `DOCKER_AUTH_CONFIG` persists its raw value in the
-  fixture.
+1. **CmdMox internals are never recorded.** `CMOX_*` and `CMD_MOX_*` keys are
+   dropped even when allowlisted or requested through `.with_env()`.
+2. **Allowlisted and explicitly requested keys are kept.** A key on
+   `env_allowlist`, or one named by `.with_env()` for that invocation, is
+   recorded whenever it is present in the environment.
+3. **System and sensitive keys are dropped.** `PATH`, `HOME`, `USER`,
+   `SHELL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, and sensitive keys are excluded.
+   A key is sensitive when it contains `SECRET`, `TOKEN`, `API_KEY`, or
+   `PASSWORD` anywhere, regardless of case. It is also sensitive when a segment
+   starting at the key's beginning, after `_`, or after `-` is `KEY`, `TOKEN`,
+   `SECRET`, `PASSWORD`, `PASSPHRASE`, `PASS`, `PWD`, `CREDENTIAL`, or
+   `CREDENTIALS`, optionally with an `API` prefix, or is `AUTH_CONFIG` or
+   `AUTHENTICATION_CONFIG`. That segment must end at `_`, `-`, `=`, `:`, a
+   digit, or the end of the key. So `TOKENIZER_MODE` is excluded by the
+   substring rule, while `GITHUB_KEY` and `DOCKER_AUTH_CONFIG` are excluded by
+   the segment rule.
+4. **Known command prefixes are kept.** The whole command name selects a
+   prefix: `git` keeps `GIT_*`, `aws` keeps `AWS_*`, `docker` keeps `DOCKER_*`,
+   `npm` keeps `NPM_*`, `pip` keeps `PIP_*`, `cargo` keeps `CARGO_*`, and
+   `rustc` keeps `RUSTC_*`. `go` is the exception: it uses an exact list of
+   documented Go variables (`GOPATH`, `GOFLAGS`, `GOOS`, and so on) because a
+   bare `GO` prefix would also capture unrelated names such as
+   `GOOGLE_CLOUD_PROJECT`. Other `GO*` names and `CGO_*` names are not recorded
+   unless allowlisted. Lookup is exact and case-insensitive; paths such as
+   `/usr/bin/git` and `git.exe` are not normalized and therefore gain no prefix.
+5. **Everything else is dropped.** In particular, a command with no known
+   prefix records no unrequested environment keys, so host names, user paths,
+   tool caches and agent session identifiers held in the environment do not
+   reach `env_subset`. This guarantee covers the environment only: recorded
+   `stdin`, `stdout` and `stderr` still contain whatever the command received
+   or printed, which can include host paths. Review those fields, or apply a
+   scrubber, before committing a fixture.
+
+`.with_env()` keys are captured automatically for the passthrough request that
+declared them, including keys whose names would otherwise look sensitive. Use
+`env_allowlist` for keys that every recorded invocation of the session should
+keep. A key on either list is recorded only when it is present in the
+environment, and never when it is a CmdMox internal key.
+
+Scrubbers are a separate, value-level control: pass `scrubber=` to
+`RecordingSession(...)` for manual sessions, or to `CommandDouble.record(...)`
+for automatic recording, to rewrite `RecordedInvocation` fields before
+persistence.
+
+Strict replay, the default, requires every recorded `env_subset` pair to be
+present in the live invocation. Recording only portable keys is what lets a
+fixture recorded on one machine match on another or in CI. If strict matching
+is too strong for a particular fixture, replay with `strict=False`, but prefer
+re-recording with a narrower environment.
 
 Existing fixtures are unaffected by the narrower `go` rule: the fixture loader
 does not re-filter a stored `env_subset`, so recordings made before this change
@@ -705,9 +734,10 @@ spy = cmd_mox.spy("aws").passthrough().record(
 - **`scrubber`** (`Scrubber | None`): optional scrubber instance for sanitizing
   recordings before persistence. When `None` (the default), no scrubbing is
   applied.
-- **`env_allowlist`** (`list[str] | None`): environment variable keys to
-  include in recordings when present, in addition to the default
-  command-specific rules. CmdMox-internal keys remain excluded.
+- **`env_allowlist`** (`list[str] | None`): environment variable keys to keep
+  in recordings, in addition to any keys from a known command prefix. A key is
+  kept only when it is present in the environment and is not a CmdMox internal
+  key.
 
 ### Record validation
 

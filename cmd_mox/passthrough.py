@@ -11,6 +11,8 @@ import uuid
 from .ipc import Invocation, PassthroughRequest, PassthroughResult, Response
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
     from .test_doubles import CommandDouble
 
 
@@ -21,6 +23,21 @@ class PassthroughConfig:
     lookup_path: str
     timeout: float
     extra_env: dict[str, str] | None = None
+
+
+@dc.dataclass(slots=True, frozen=True)
+class _PendingPassthrough:
+    """State retained for one in-flight passthrough request.
+
+    ``explicit_keys`` is a snapshot of the double's ``.with_env()`` keys taken
+    when the request was prepared.  Keeping it per request means a later
+    mutation of the expectation cannot change what an earlier recording keeps.
+    """
+
+    double: CommandDouble
+    invocation: Invocation
+    deadline: float
+    explicit_keys: frozenset[str]
 
 
 class PassthroughCoordinator:
@@ -49,7 +66,7 @@ class PassthroughCoordinator:
 
     def __init__(self, *, cleanup_ttl: float = 300.0) -> None:
         """Create an empty pending map guarded by a lock, with the cleanup TTL."""
-        self._pending: dict[str, tuple[CommandDouble, Invocation, float]] = {}
+        self._pending: dict[str, _PendingPassthrough] = {}
         # Every invocation registered since the last reset whose result the
         # controller has not yet recorded. Verification reads this registry so
         # a call cannot slip between the pending map and the completed-call
@@ -78,9 +95,7 @@ class PassthroughCoordinator:
         """Remove stale passthrough requests while holding ``self._lock``."""
         current = time.monotonic() if now is None else now
         expired = [
-            key
-            for key, (_, _, deadline) in self._pending.items()
-            if deadline <= current
+            key for key, entry in self._pending.items() if entry.deadline <= current
         ]
         for key in expired:
             self._pending.pop(key, None)
@@ -90,6 +105,8 @@ class PassthroughCoordinator:
         double: CommandDouble,
         invocation: Invocation,
         config: PassthroughConfig,
+        *,
+        expectation_env: cabc.Mapping[str, str],
     ) -> Response:
         """Record passthrough intent and return instructions for shim.
 
@@ -101,6 +118,12 @@ class PassthroughCoordinator:
             Invocation to retain until the shim reports its result.
         config : PassthroughConfig
             Lookup path, timeout, and environment additions for the request.
+        expectation_env : collections.abc.Mapping[str, str]
+            The expectation environment the caller already validated and
+            applied to *invocation*.  Passing the caller's snapshot keeps the
+            directive merge and the recording provenance on the same values
+            even if ``.with_env()`` replaces the expectation mapping
+            concurrently.
 
         Returns
         -------
@@ -121,16 +144,22 @@ class PassthroughCoordinator:
             invocation_id=invocation_id,
         )
 
+        # Copy the caller's snapshot once.  The same copy feeds the directive
+        # merge and the explicit-key provenance, so a later mutation of the
+        # expectation cannot change this request's recording.
+        snapshot = dict(expectation_env)
+
         with self._lock:
             self._prune_expired_locked()
-            self._pending[invocation_id] = (
-                double,
-                stored_invocation,
-                self._expiry_deadline(config.timeout),
+            self._pending[invocation_id] = _PendingPassthrough(
+                double=double,
+                invocation=stored_invocation,
+                deadline=self._expiry_deadline(config.timeout),
+                explicit_keys=frozenset(snapshot),
             )
             self._unrecorded[invocation_id] = (double, stored_invocation)
 
-        env = dict(double.expectation.env)
+        env = dict(snapshot)
         if config.extra_env:
             env.update(config.extra_env)
         passthrough = PassthroughRequest(
@@ -217,7 +246,8 @@ class PassthroughCoordinator:
             msg = f"Unexpected passthrough result for {result.invocation_id}"
             raise RuntimeError(msg)
 
-        double, invocation, _ = entry
+        double = entry.double
+        invocation = entry.invocation
         resp = Response(
             stdout=result.stdout,
             stderr=result.stderr,
@@ -228,6 +258,10 @@ class PassthroughCoordinator:
 
         recording_session = getattr(double, "_recording_session", None)
         if recording_session is not None:
-            recording_session.record(invocation, resp)
+            recording_session.record(
+                invocation,
+                resp,
+                explicit_keys=entry.explicit_keys,
+            )
 
         return double, invocation, resp

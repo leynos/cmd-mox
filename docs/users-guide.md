@@ -65,15 +65,27 @@ covers the exact vocabulary, and the
 [design document](python-native-command-mocking-design.md#994-environment-values-in-error-diagnostics)
 records which diagnostic paths the guarantee covers.
 
-## Environment variables in recordings
+## Recording environment filtering
 
-Recordings keep only a safe subset of the process environment. Commands that
-use a name prefix, such as `git` and `GIT_*`, still record every prefixed key
-that is not sensitive or on the system exclusion list. `go` is different: it
-records only the documented Go toolchain and runtime variables (`GOPATH`,
-`GOFLAGS`, `GOOS`, `GORACE`, and so on). Other names that merely start with
-`GO`, such as `GOOGLE_CLOUD_PROJECT`, and `CGO_*` names, are no longer recorded
-by default.
+Recordings keep only a portable subset of the environment. Commands with a
+known prefix keep that tool's variables, while any other command records just
+the `env_allowlist` and `.with_env()` keys. `.with_env()` keys are recorded for
+every command, including known-prefix commands, and a requested key is kept
+even when its name looks sensitive. CmdMox internal keys are never recorded.
+Review or scrub a fixture before committing it if an expectation passed a
+secret through `.with_env()`. See
+[decide what a recording keeps](usage-guide.md#decide-what-a-recording-keeps)
+and the [v0.4.0 migration guide](v-0-4-0-migration-guide.md) before committing
+a fixture or sharing one between machines.
+
+## Go environment variables in recordings
+
+Commands that use a name prefix, such as `git` and `GIT_*`, still record every
+prefixed key that is not sensitive or on the system exclusion list. `go` is
+different: it records only the documented Go toolchain and runtime variables
+(`GOPATH`, `GOFLAGS`, `GOOS`, `GORACE`, and so on). Other names that merely
+start with `GO`, such as `GOOGLE_CLOUD_PROJECT`, and `CGO_*` names, are no
+longer recorded by default.
 
 This change affects new recordings only. Fixtures already on disk keep the keys
 they stored and still replay against those keys, so an old fixture can require
@@ -86,7 +98,7 @@ mox.spy("go").passthrough().record(
 )
 ```
 
-The [usage guide](usage-guide.md#environment-variable-filtering) lists the full
+The [usage guide](usage-guide.md#decide-what-a-recording-keeps) lists the full
 rule set, including how requested keys interact with the sensitive-key and
 system-key exclusions. The
 [Go environment migration note](go-env-migration-note.md) summarizes the change

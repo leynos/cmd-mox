@@ -20,6 +20,8 @@ from .env_filter import filter_env_subset
 from .fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 
 if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
     from cmd_mox.ipc import Invocation, Response
 
     from .scrubber import Scrubber
@@ -123,6 +125,7 @@ class RecordingSession:
         response: Response,
         *,
         duration_ms: int = 0,
+        explicit_keys: cabc.Iterable[str] | None = None,
     ) -> None:
         """Record a single passthrough invocation.
 
@@ -134,6 +137,11 @@ class RecordingSession:
             The response from the real command execution.
         duration_ms : int
             Wall-clock execution time in milliseconds (default ``0``).
+        explicit_keys : collections.abc.Iterable[str] | None
+            Keys requested through ``.with_env()`` for this request.  They
+            override the system-key and sensitive-name exclusions, but never
+            the CmdMox-internal exclusion, and are recorded only when present
+            in ``invocation.env``.
 
         Raises
         ------
@@ -157,6 +165,7 @@ class RecordingSession:
                 invocation.env,
                 command=invocation.command,
                 allowlist=self._env_allowlist,
+                explicit_keys=explicit_keys,
             )
 
             recording = RecordedInvocation(
