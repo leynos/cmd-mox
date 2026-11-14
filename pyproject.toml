@@ -393,9 +393,10 @@ also_copy = [
 [tool.uv]
 package = true
 
-# Blocking duplication scan over the shipped package. Keep the detector pin in
-# sync with NOSE_VERSION in the Makefile and the CI install step;
-# tests/test_toolchain_contract.py enforces the match.
+# Blocking duplication scan over the shipped package, run by the installed
+# `df12-duplication` command from df12-python-lints. This is the only place the
+# detector version is pinned; the command verifies the downloaded release
+# against the digest table shipped in the package.
 #
 # `roots` names the maintained production Python only: `cmd_mox/` is the
 # installed package, while `scripts/`, `tests/`, `examples/` and `features/`
@@ -460,6 +461,16 @@ reason = "Both public validators state a fixed contract and delegate their whole
 [[tool.duplication_gate.allow]]
 members = ["cmd_mox/_validators.py::validate_positive_finite_timeout", "cmd_mox/_validators.py::validate_retry_backoff"]
 reason = "Both public validators state a fixed contract and delegate their whole body to the shared _validate_finite_minimum helper; only the inclusive bound and the parameter name differ. nose is matching the one-line delegation plus the identical NumPy Raises boilerplate, not omitted behaviour. Merging them would put a caller-supplied minimum and name on a public API that exists to make each contract explicit at its entry point."
+
+# The dead-code gate is the installed `df12-skylos` command from
+# df12-python-lints. `roots` limits liveness analysis to production sources;
+# the exclusions keep both test trees out of the production liveness graph.
+[tool.df12_skylos]
+roots = ["cmd_mox"]
+python = "3.14"
+
+[tool.skylos]
+exclude = ["tests", "cmd_mox/unittests"]
 
 [tool.skylos.gate]
 strict = true

@@ -215,18 +215,17 @@ target/
 .typos-oxendict-base.toml
 
 # Locally installed tool binaries (the pinned nose duplication detector) and
-# the sidecar lock guarding allowlist updates. Neither is a first-party source
-# artefact: the detector is re-provisioned by `make install-nose`, and the lock
-# is recreated on demand. Keeping `.tools/` ignored also stops the binary from
+# the sidecar lock guarding exception updates. Neither is a first-party source
+# artefact: `df12-duplication install` provisions the detector, and the lock is
+# recreated on demand. Keeping `.tools/` ignored also stops the binary from
 # leaking into the duplication scan surface.
 .tools/
-.*.duplication-gate.lock
+.pyproject.toml.df12.lock
 .vtcode/
 .claude/
 .memdb/
 .grepai/
 .skylos/
-.skylos-whitelist.lock
 *.swp
 *.swo
 *~

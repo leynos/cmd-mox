@@ -17,7 +17,6 @@ TOOLS = $(UV)
 # UV=..., or the fallback in $$HOME/.local/bin) on PATH for every recipe.
 export PATH := $(patsubst %/,%,$(dir $(UV))):$(PATH)
 VENV_TOOLS = pytest
-MAKEUTIL = makeutil
 # Keep nested pytest subprocesses within the 30-second per-test timeout.
 PYTEST_WORKERS ?= 4
 # The CV-005 CodeScene contracts live in shared-actions and run from a full
@@ -46,49 +45,22 @@ PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
 PYLINT_BASELINE_DISABLE = too-many-lines,too-many-arguments,too-many-positional-arguments
 PYLINT = $(UV_GATE) tool --managed-python --python $(PYLINT_PYTHON) --from 'pylint==$(PYLINT_VERSION)' -- pylint --disable=$(PYLINT_BASELINE_DISABLE)
 DF12_PYTHON ?= 3.14
-# Commit SHA of the df12-python-lints v0.3.0 tag.
-DF12_PYTHON_LINTS_REF ?= 4cf41736cce2f7ba2778882a5c629c044568a0e5
+# Commit SHA of the df12-python-lints main commit that adds the df12-skylos and
+# df12-duplication commands; the same pin provisions Pylint and ambrleaks.
+DF12_PYTHON_LINTS_REF ?= 56ad71721c3f1f2164ec84b69150582488f1a927
 DF12_PYTHON_LINTS = git+https://github.com/leynos/df12-python-lints.git@$(DF12_PYTHON_LINTS_REF)
 DF12_PYLINT = UV_PYTHON_PREFERENCE=only-managed $(UV_GATE) tool --python $(DF12_PYTHON) --from '$(DF12_PYTHON_LINTS)' -- pylint
 AMBRLEAKS = UV_PYTHON_PREFERENCE=only-managed $(UV_GATE) tool --python $(DF12_PYTHON) --from '$(DF12_PYTHON_LINTS)' -- ambrleaks
-SKYLOS_VERSION = 4.33.2
-# Skylos parses source using its own Python AST. Python 3.14 avoids phantom
-# dead-code findings from newer syntax that older tool runtimes cannot parse.
-SKYLOS_CLI = $(UV_GATE) tool --python 3.14 --from 'skylos==$(SKYLOS_VERSION)' -- skylos
-SKYLOS = $(SKYLOS_CLI) --config-file pyproject.toml
-SKYLOS_PRODUCTION_TARGETS ?= cmd_mox
-SKYLOS_EXCLUDE_FOLDERS ?= tests cmd_mox/unittests
-SKYLOS_EXCLUDE_ARGS = $(foreach folder,$(SKYLOS_EXCLUDE_FOLDERS),--exclude $(folder))
-SKYLOS_WHITELIST_LOCK ?= .skylos-whitelist.lock
-# Keep this pin in sync with the CI install step and [tool.nose] in
-# pyproject.toml; tests/test_toolchain_contract.py enforces the match.
-NOSE_VERSION ?= 0.20.0
-NOSE_TOOLS_DIR ?= .tools/nose
-NOSE_BIN ?= $(NOSE_TOOLS_DIR)/nose
-CARGO_BINSTALL ?= cargo-binstall
-# The gate is PEP 723 tooling with its own dependencies and a CPython 3.14
-# floor, so it needs a tool environment rather than the application
-# virtualenv. It goes through `uv_gate tool` and not `uv_gate run` for two
-# reasons: `run` always adds `--frozen`, which a PEP 723 script cannot satisfy
-# without a committed script lockfile, and `run` never goes online, so a cold
-# cache could never bootstrap the environment at all. `tool` warms once on a
-# proven cache miss and refuses an unpinned spec, which is also why the
-# interpreter is requested as `python@<version>` rather than a bare `--python`.
-# tests/test_toolchain_contract.py keeps these pins equal to the script's own
-# PEP 723 block, which stays the authored source for direct `uv run` use.
-DUPLICATION_PYTHON ?= 3.14
-CYCLOPTS_VERSION ?= 4.25.2
-TOMLKIT_VERSION ?= 0.15.1
-DUPLICATION_TEST_PYTEST ?= 9.0.2
-DUPLICATION_TEST_HYPOTHESIS ?= 6.165.6
-# A relative NOSE_BIN is resolved against the repository root by the gate.
-DUPLICATION_GATE = NOSE_BIN=$(NOSE_BIN) $(UV_GATE) tool \
-	--from 'python@$(DUPLICATION_PYTHON)' \
-	--with cyclopts==$(CYCLOPTS_VERSION) --with tomlkit==$(TOMLKIT_VERSION) \
-	-- python scripts/duplication_gate.py
-DUPLICATION_TEST_PYTHON ?= $(DUPLICATION_PYTHON)
-DUPLICATION_TEST_PYTEST ?= 9.0.2
-DUPLICATION_TEST_HYPOTHESIS ?= 6.165.6
+# The dead-code gate is the installed df12-skylos command; its `skylos` extra
+# carries the one Skylos pin. Skylos parses source with its own runtime AST, so
+# the tool environment runs Python 3.14.
+SKYLOS = $(UV_GATE) tool --python 3.14 --from \
+	'df12-python-lints[skylos] @ $(DF12_PYTHON_LINTS)' -- df12-skylos
+# The duplication gate is the installed df12-duplication command. It downloads
+# the nose release named by [tool.nose] version and verifies it against the
+# digest table shipped in the package, so no nose pin lives here.
+DUPLICATION = $(UV_GATE) tool --from \
+	'df12-python-lints[duplication] @ $(DF12_PYTHON_LINTS)' -- df12-duplication
 WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	tests/test_named_pipe_server.py \
@@ -109,8 +81,8 @@ BDD_MODULES = tests/test_command_double_record_bdd.py \
 	tests/test_pytest_plugin_bdd.py
 
 .PHONY: help all clean build prepare build-release lint interrogate fmt check-fmt yamllint actionlint
-.PHONY: makeutil markdownlint markdownlint-run nixie spelling skylos-allow test test-workflow-contracts typecheck
-.PHONY: install-nose duplication duplication-test duplication-allow bdd
+.PHONY: markdownlint markdownlint-run nixie spelling skylos skylos-allow test test-workflow-contracts typecheck
+.PHONY: duplication duplication-allow bdd
 .PHONY: $(TOOLS) $(VENV_TOOLS)
 
 .DEFAULT_GOAL := all
@@ -202,74 +174,47 @@ interrogate: ## Enforce complete Python docstring coverage
 	    exit 1; \
 	  fi
 
-lint: build install-nose yamllint actionlint interrogate ## Run linters
+lint: build yamllint actionlint interrogate skylos duplication ## Run linters
 	$(RUFF) check
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
 	$(AMBRLEAKS) tests
-	$(SKYLOS) $(SKYLOS_PRODUCTION_TARGETS) $(SKYLOS_EXCLUDE_ARGS) --category dead_code --gate --format concise --no-upload --no-provenance --no-grep-verify
-	$(DUPLICATION_GATE) check
 	+$(MAKE) spelling
 
-install-nose: ## Install the pinned nose duplication detector
-	@if [ "$$($(NOSE_BIN) --version 2>/dev/null)" = "nose $(NOSE_VERSION)" ]; then \
-	  printf "nose %s already installed at %s\n" "$(NOSE_VERSION)" "$(NOSE_BIN)"; \
-	else \
-	  printf "Installing nose %s into %s\n" "$(NOSE_VERSION)" "$(NOSE_TOOLS_DIR)"; \
-	  mkdir -p "$(NOSE_TOOLS_DIR)"; \
-	  $(CARGO_BINSTALL) --no-confirm --install-path "$(NOSE_TOOLS_DIR)" \
-	    --disable-strategies compile,quick-install \
-	    --git https://github.com/corca-ai/nose 'nose-cli@$(NOSE_VERSION)'; \
-	  test "$$($(NOSE_BIN) --version 2>/dev/null)" = "nose $(NOSE_VERSION)" || { \
-	    printf "Error: %s did not report 'nose %s' after install\n" \
-	      "$(NOSE_BIN)" "$(NOSE_VERSION)" >&2; \
-	    exit 1; \
-	  }; \
-	fi
+skylos: ## Detect dead production code
+	$(SKYLOS) check --repository .
 
-duplication: install-nose ## Run the blocking code-duplication gate
-	$(DUPLICATION_GATE) check
+duplication: ## Run the blocking code-duplication gate
+	$(DUPLICATION) install
+	$(DUPLICATION) check
 
-duplication-test: ## Run the duplication-gate helper tests
-	$(UV_GATE) tool --from 'python@$(DUPLICATION_TEST_PYTHON)' \
-		--with pytest==$(DUPLICATION_TEST_PYTEST) \
-		--with cyclopts==$(CYCLOPTS_VERSION) \
-		--with tomlkit==$(TOMLKIT_VERSION) \
-		--with hypothesis==$(DUPLICATION_TEST_HYPOTHESIS) \
-		-- python -m pytest -c /dev/null --rootdir=. -p no:cacheprovider \
-		scripts/tests/test_atomic_write.py \
-		scripts/tests/test_duplication_gate.py \
-		scripts/tests/test_duplication_gate_commands.py \
-		scripts/tests/test_duplication_gate_make.py \
-		scripts/tests/test_duplication_gate_persistence.py \
-		scripts/tests/test_duplication_gate_properties.py \
-		scripts/tests/test_make_install_nose.py \
-		scripts/tests/test_nose_config_contract.py \
-		scripts/tests/test_nose_detector.py
-
-# Accept FIRST/SECOND/REASON (and skylos SYMBOL) only from the make command
-# line. `cli_value` filters on `$(origin ...)` rather than `$(value ...)`
-# because an ambient FIRST or REASON in the environment must not silently
-# create an exception; the Skylos interface below predates this and keeps
-# `$(value ...)` plus its own empty-value guards.
+# Accept FIRST/SECOND/REASON only from the make command line. `cli_value`
+# filters on `$(origin ...)` rather than `$(value ...)` because an ambient
+# FIRST or REASON in the environment must not silently create an exception.
+#
+# `$(value ...)` stops make from expanding the variable, but not from writing
+# its text into the recipe, where that text becomes part of the shell's own
+# program. Every argument therefore reaches the recipe only through the
+# environment, whose values a shell never re-expands as code, and the repeated
+# options are rebuilt from that value at run time.
 cli_value = $(if $(filter command line,$(origin $(1))),$(value $(1)))
 
 duplication-allow: export DUPLICATION_FIRST = $(call cli_value,FIRST)
 duplication-allow: export DUPLICATION_SECOND = $(call cli_value,SECOND)
 duplication-allow: export DUPLICATION_REASON = $(call cli_value,REASON)
 duplication-allow: ## Record one reasoned duplication exception
-	@test -n "$${DUPLICATION_FIRST}" || { printf "Error: FIRST is required (path[::name])\\n" >&2; exit 2; }
-	@test -n "$${DUPLICATION_REASON}" || { printf "Error: REASON is required for a duplication exception\\n" >&2; exit 2; }
-	$(DUPLICATION_GATE) allow --first "$${DUPLICATION_FIRST}" \
-		$(if $(call cli_value,SECOND),--second "$${DUPLICATION_SECOND}",) \
-		--reason "$${DUPLICATION_REASON}"
+	@case "$${DUPLICATION_FIRST}" in *[![:space:]]*) ;; *) printf "Error: FIRST is required (path[::name])\\n" >&2; exit 2;; esac
+	@case "$${DUPLICATION_REASON}" in *[![:space:]]*) ;; *) printf "Error: REASON is required for a duplication exception\\n" >&2; exit 2;; esac
+	@case "$${DUPLICATION_SECOND}" in *[![:print:][:space:]]*) printf "Error: SECOND members must be printable text\\n" >&2; exit 2;; esac
+	@$(DUPLICATION) install
+	@set -f; set --; for key in $${DUPLICATION_SECOND}; do set -- "$$@" --second "$$key"; done; \
+		$(DUPLICATION) allow --first "$${DUPLICATION_FIRST}" "$$@" \
+			--reason "$${DUPLICATION_REASON}"
 
 skylos-allow: export SKYLOS_SYMBOL = $(value SYMBOL)
 skylos-allow: export SKYLOS_REASON = $(value REASON)
-skylos-allow: ## Add one named Skylos whitelist exception
-	@case "$${SKYLOS_SYMBOL}" in *[![:space:]]*) ;; *) printf "Error: SYMBOL is required for a named whitelist exception\\n" >&2; exit 2;; esac
-	@case "$${SKYLOS_REASON}" in *[![:space:]]*) ;; *) printf "Error: REASON is required for a named whitelist exception\\n" >&2; exit 2;; esac
-	flock "$(SKYLOS_WHITELIST_LOCK)" env $(SKYLOS_CLI) whitelist "$${SKYLOS_SYMBOL}" --reason "$${SKYLOS_REASON}"
+skylos-allow: ## Document one named Skylos exception (SYMBOL=name REASON=text)
+	$(SKYLOS) allow --repository . --symbol="$${SKYLOS_SYMBOL}" --reason="$${SKYLOS_REASON}"
 
 typecheck: build ## Run typechecking
 	$(TY) --version
@@ -303,10 +248,7 @@ spelling: ## Enforce en-GB-oxendict spelling in Markdown prose
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
 
-makeutil: ## Verify the Makefile parser used by contract tests
-	$(call ensure_tool,$@)
-
-test: build $(UV) $(VENV_TOOLS) makeutil test-workflow-contracts ## Run tests
+test: build $(UV) $(VENV_TOOLS) test-workflow-contracts ## Run tests
 	$(UV_GATE) run --group dev -- pytest -v -n $(PYTEST_WORKERS)
 
 bdd: build ## Execute representative pytest-bdd scenarios
