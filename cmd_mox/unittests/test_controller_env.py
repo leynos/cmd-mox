@@ -12,7 +12,7 @@ import pytest
 from cmd_mox.controller import CmdMox
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.ipc import Invocation, Response
-from cmd_mox.unittests._env_helpers import require_shim_dir
+from cmd_mox.unittests._env_helpers import shim_path
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -32,7 +32,7 @@ def test_mock_with_env_static_response(
         mox.mock("envcmd").with_env({key: "VALUE"}).returns(stdout="ok")
         mox.replay()
 
-        cmd_path = require_shim_dir(mox.environment) / "envcmd"
+        cmd_path = shim_path(mox.environment, "envcmd")
         result = run([str(cmd_path)])
 
         assert result.stdout.strip() == "ok"
@@ -456,7 +456,7 @@ def test_context_manager_restores_env_on_exception(
         with mox:
             mox.stub("boom").returns(stdout="oops")
             mox.replay()
-            cmd_path = require_shim_dir(mox.environment) / "boom"
+            cmd_path = shim_path(mox.environment, "boom")
             run([str(cmd_path)])
             raise CustomError
 

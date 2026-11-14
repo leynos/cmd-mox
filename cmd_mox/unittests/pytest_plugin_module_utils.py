@@ -69,17 +69,20 @@ def _build_module_prefix(*, include_subprocess_helper: bool) -> str:
         "from cmd_mox.controller import Phase",
     ]
     if include_subprocess_helper:
-        header_lines.append("from cmd_mox.unittests.conftest import run_subprocess")
+        header_lines.extend([
+            "from cmd_mox.unittests._env_helpers import shim_path",
+            "from cmd_mox.unittests.conftest import run_subprocess",
+        ])
     header_lines.append('pytest_plugins = ("cmd_mox.pytest_plugin",)')
 
     prefix = "\n".join(header_lines) + "\n\n"
     if include_subprocess_helper:
+        # Resolve the launcher through the shared rule so the generated module
+        # also works where Windows uses ``.cmd`` batch launchers.
         prefix += _format_block(
             """\
             def _shim_cmd_path(mox, name):
-                sd = mox.environment.shim_dir
-                assert sd is not None
-                return sd / name
+                return shim_path(mox.environment, name)
             """
         )
         prefix += "\n"

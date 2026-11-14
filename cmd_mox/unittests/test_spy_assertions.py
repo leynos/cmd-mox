@@ -18,7 +18,7 @@ from cmd_mox.errors import (
     VerificationError,
 )
 from cmd_mox.ipc import Invocation
-from cmd_mox.unittests._env_helpers import require_shim_dir
+from cmd_mox.unittests._env_helpers import shim_path
 from tests.helpers.fixtures import write_minimal_replay_fixture
 
 pytestmark = pytest.mark.requires_unix_sockets
@@ -73,7 +73,7 @@ class TestSpyAssertions:
         mox.replay()
 
         full_env = dict(os.environ, **(config.env or {}))
-        cmd_path = require_shim_dir(mox.environment) / config.cmd_name
+        cmd_path = shim_path(mox.environment, config.cmd_name)
         run(
             [str(cmd_path), *(config.cmd_args or [])],
             env=full_env,
@@ -312,7 +312,7 @@ class TestSpyAssertions:
         getattr(spy, count_method)(expected_count)
         mox.__enter__()
         mox.replay()
-        path = require_shim_dir(mox.environment) / "hi"
+        path = shim_path(mox.environment, "hi")
         for _ in range(actual_calls):
             run([str(path)], shell=False)
         return mox, spy
@@ -393,7 +393,7 @@ class TestSpyAssertions:
         spy = mox.spy("hi").returns(stdout="hello")
         mox.__enter__()
         mox.replay()
-        path = require_shim_dir(mox.environment) / "hi"
+        path = shim_path(mox.environment, "hi")
         for _ in range(actual_calls):
             run([str(path)], shell=False)
         mox.verify()
@@ -415,7 +415,7 @@ class TestSpyAssertions:
         spy = mox.spy("tool").runs(handler)
         mox.__enter__()
         mox.replay()
-        path = require_shim_dir(mox.environment) / "tool"
+        path = shim_path(mox.environment, "tool")
         run([str(path), "run"], shell=False)
         run([str(path), "run", "--fail"], shell=False)
         mox.verify()
@@ -431,7 +431,7 @@ class TestSpyAssertions:
         with CmdMox() as mox:
             mox.spy("hi").returns(stdout="hello").times_called(2)
             mox.replay()
-            path = require_shim_dir(mox.environment) / "hi"
+            path = shim_path(mox.environment, "hi")
             run([str(path)], shell=False)
 
     # ------------------------------------------------------------------
@@ -452,8 +452,8 @@ class TestSpyAssertions:
         mox.spy("second").returns(stdout="2").in_order().times_called(1)
         mox.__enter__()
         mox.replay()
-        path_first = require_shim_dir(mox.environment) / "first"
-        path_second = require_shim_dir(mox.environment) / "second"
+        path_first = shim_path(mox.environment, "first")
+        path_second = shim_path(mox.environment, "second")
         run([str(path_second)], shell=False)
         run([str(path_first)], shell=False)
         with pytest.raises(VerificationError):
@@ -625,7 +625,7 @@ class TestSpyCountVerification:
         mox.spy("tool").returns(stdout="ok").in_order()
         mox.__enter__()
         mox.replay()
-        path = require_shim_dir(mox.environment) / "tool"
+        path = shim_path(mox.environment, "tool")
         for _ in range(calls):
             run([str(path)], shell=False)
         return mox
@@ -665,8 +665,8 @@ class TestSpyCountVerification:
         mox.spy("second").returns(stdout="2").in_order().times_called(2)
         mox.__enter__()
         mox.replay()
-        path_first = require_shim_dir(mox.environment) / "first"
-        path_second = require_shim_dir(mox.environment) / "second"
+        path_first = shim_path(mox.environment, "first")
+        path_second = shim_path(mox.environment, "second")
         # Every count is satisfied, but the interleaving breaks the declared
         # order, so only OrderVerifier can catch this sequence.
         run([str(path_second)], shell=False)

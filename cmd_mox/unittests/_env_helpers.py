@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typing as typ
 
+from cmd_mox._path_utils import shim_launcher_path
 from cmd_mox.errors import MissingEnvironmentError
 
 if typ.TYPE_CHECKING:
@@ -31,6 +32,20 @@ def require_shim_dir(env: EnvironmentManager) -> Path:
     return env.shim_dir
 
 
+def shim_path(env: EnvironmentManager, name: str) -> Path:
+    """Return the executable shim path for *name* in *env*'s shim directory.
+
+    The launcher gains a ``.cmd`` suffix on Windows, so callers must not join
+    the command name themselves.
+
+    Returns
+    -------
+    pathlib.Path
+        Path of the launcher that runs the shim for *name*.
+    """
+    return shim_launcher_path(require_shim_dir(env), name)
+
+
 def require_socket_path(env: EnvironmentManager) -> Path:
     """Return ``env.socket_path`` when initialized or raise a helpful error.
 
@@ -50,4 +65,4 @@ def require_socket_path(env: EnvironmentManager) -> Path:
     return env.socket_path
 
 
-__all__ = ["require_shim_dir", "require_socket_path"]
+__all__ = ["require_shim_dir", "require_socket_path", "shim_path"]

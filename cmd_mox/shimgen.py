@@ -206,7 +206,7 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
         Created launcher path.
 
     """
-    launcher = directory / f"{name}.cmd"
+    launcher = path_utils.shim_launcher_path(directory, name)
     _validate_launcher_path(launcher)
     retry_unlink(
         launcher,
@@ -242,7 +242,7 @@ def _create_posix_symlink(directory: Path, name: str) -> Path:
     FileExistsError
         If an existing path is not a symlink.
     """
-    link = directory / name
+    link = path_utils.shim_launcher_path(directory, name)
     if os.path.lexists(link):
         if not link.is_symlink():
             msg = f"{link} already exists and is not a symlink"

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from cmd_mox import _path_utils as path_utils
 from cmd_mox import shim
 from cmd_mox.command_runner import validate_override_path as _validate_override_path
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_REAL_COMMAND_ENV_PREFIX
@@ -59,6 +60,30 @@ def test_normalize_windows_arg_respects_platform(
 
     assert shim._normalize_windows_arg(r"^^^literal^^^^") == expected, (
         "caret normalization did not match the current platform"
+    )
+
+
+@pytest.mark.parametrize(
+    ("is_windows", "expected_name"),
+    [
+        (True, "git.cmd"),
+        (False, "git"),
+    ],
+    ids=["windows-batch-launcher", "posix-suffix-free-symlink"],
+)
+def test_shim_launcher_path_matches_the_platform_launcher_name(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    is_windows: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized platform, not a flag
+    expected_name: str,
+) -> None:
+    """Shim lookups must name the launcher the platform actually creates."""
+    monkeypatch.setattr("cmd_mox._path_utils.IS_WINDOWS", is_windows)
+
+    launcher = path_utils.shim_launcher_path(tmp_path, "git")
+
+    assert launcher == tmp_path / expected_name, (
+        "the shim path must match the launcher created on this platform"
     )
 
 

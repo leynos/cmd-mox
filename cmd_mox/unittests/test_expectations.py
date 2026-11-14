@@ -20,7 +20,7 @@ from cmd_mox import (
 )
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
-from cmd_mox.unittests._env_helpers import require_shim_dir
+from cmd_mox.unittests._env_helpers import shim_path
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -260,7 +260,7 @@ def test_mock_with_literal_and_comparator_matchers(
     mox.__enter__()
     mox.replay()
 
-    path = require_shim_dir(mox.environment) / "git"
+    path = shim_path(mox.environment, "git")
     result = run([str(path), "clone", "url"], shell=False)
 
     assert result.stdout == "cloned", "the mock response should be returned"
@@ -276,7 +276,7 @@ def test_mock_literal_matcher_mismatch_reports_literal(
     mox.__enter__()
     mox.replay()
 
-    path = require_shim_dir(mox.environment) / "git"
+    path = shim_path(mox.environment, "git")
     run([str(path), "pull", "url"], shell=False)
 
     with pytest.raises(UnexpectedCommandError) as exc_info:
@@ -298,8 +298,8 @@ def test_mock_with_args_and_order(
     mox.__enter__()
     mox.replay()
 
-    path_first = require_shim_dir(mox.environment) / "first"
-    path_second = require_shim_dir(mox.environment) / "second"
+    path_first = shim_path(mox.environment, "first")
+    path_second = shim_path(mox.environment, "second")
     run([str(path_first), "a"], shell=False)
     run([str(path_second), "b"], shell=False)
 
@@ -318,7 +318,7 @@ def test_mock_argument_mismatch(
     mox.__enter__()
     mox.replay()
 
-    path = require_shim_dir(mox.environment) / "foo"
+    path = shim_path(mox.environment, "foo")
     run([str(path), "baz"], shell=False)
 
     with pytest.raises(UnexpectedCommandError):
@@ -334,7 +334,7 @@ def test_with_matching_args_and_stdin(
     mox.__enter__()
     mox.replay()
 
-    path = require_shim_dir(mox.environment) / "grep"
+    path = shim_path(mox.environment, "grep")
     run(
         [str(path), "foo=123"],
         input="data",
@@ -354,8 +354,8 @@ def test_any_order_expectations_allow_flexible_sequence(
     mox.__enter__()
     mox.replay()
 
-    path_first = require_shim_dir(mox.environment) / "first"
-    path_second = require_shim_dir(mox.environment) / "second"
+    path_first = shim_path(mox.environment, "first")
+    path_second = shim_path(mox.environment, "second")
 
     # Invoke the any_order expectation before the ordered one
     run([str(path_second)], shell=False)
@@ -374,9 +374,9 @@ def test_multiple_any_order_expectations_do_not_enforce_order(
         mox.mock("third").returns(stdout="3").any_order()
         mox.replay()
 
-        path_first = require_shim_dir(mox.environment) / "first"
-        path_second = require_shim_dir(mox.environment) / "second"
-        path_third = require_shim_dir(mox.environment) / "third"
+        path_first = shim_path(mox.environment, "first")
+        path_second = shim_path(mox.environment, "second")
+        path_third = shim_path(mox.environment, "third")
 
         # Call expectations in a different order than defined
         run([str(path_third)], shell=False)
@@ -404,7 +404,7 @@ def _test_expectation_failure_helper(
     mox.__enter__()
     mox.replay()
 
-    paths = {name: require_shim_dir(mox.environment) / name for name in mox.mocks}
+    paths = {name: shim_path(mox.environment, name) for name in mox.mocks}
 
     execution_strategy(run, paths)
 
@@ -425,8 +425,8 @@ def test_expectation_times_alias(
     mox.__enter__()
     mox.replay()
 
-    path_first = require_shim_dir(mox.environment) / "first"
-    path_second = require_shim_dir(mox.environment) / "second"
+    path_first = shim_path(mox.environment, "first")
+    path_second = shim_path(mox.environment, "second")
 
     run([str(path_first)], shell=False)
     run([str(path_first)], shell=False)
@@ -464,7 +464,7 @@ def _replay_and_invoke(
     mox.__enter__()
     mox.replay()
 
-    path = require_shim_dir(mox.environment) / name
+    path = shim_path(mox.environment, name)
     for _ in range(calls):
         run([str(path)], shell=False)
 

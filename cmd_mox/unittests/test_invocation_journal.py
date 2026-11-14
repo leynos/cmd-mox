@@ -22,6 +22,7 @@ from cmd_mox.domain import SENSITIVE_ENV_KEY_TOKENS
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.ipc import Invocation
 from cmd_mox.ipc.wire import invocation_to_payload
+from cmd_mox.unittests._env_helpers import shim_path
 from tests.helpers.controller import (
     CommandExecution,
     JournalEntryExpectation,
@@ -40,8 +41,8 @@ class StubReturns(typ.TypedDict, total=False):
     exit_code: int
 
 
-def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
-    """Return the path to a command shim for *obj*.
+def _shim_cmd_path(obj: CmdMox | EnvironmentManager, name: str) -> Path:
+    """Return the path to the shim launcher for *name*.
 
     Accepts either a :class:`CmdMox` that has completed ``mox.replay()`` or an
     initialized :class:`EnvironmentManager` whose context has been entered.
@@ -49,7 +50,8 @@ def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
     Returns
     -------
     pathlib.Path
-        The path to the requested command shim.
+        The path to the requested command shim, including the ``.cmd``
+        suffix on Windows.
     """
     env = typ.cast("EnvironmentManager", getattr(obj, "environment", obj))
     shim_dir = env.shim_dir
@@ -57,7 +59,7 @@ def _shim_cmd_path(obj: CmdMox | EnvironmentManager, *parts: str) -> Path:
         "shim_dir is None; pass a CmdMox after mox.replay() or an "
         "initialized EnvironmentManager"
     )
-    return shim_dir.joinpath(*parts)
+    return shim_path(env, name)
 
 
 @dc.dataclass(slots=True, frozen=True)

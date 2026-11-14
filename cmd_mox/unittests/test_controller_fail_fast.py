@@ -12,7 +12,7 @@ from cmd_mox import Any, Predicate, Regex
 from cmd_mox.controller import CmdMox
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.ipc import Invocation, Response
-from cmd_mox.unittests._env_helpers import require_shim_dir
+from cmd_mox.unittests._env_helpers import shim_path
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -43,7 +43,7 @@ def _running_controller(
 
 def _shim(mox: CmdMox, name: str) -> str:
     """Return the shim path for *name*."""
-    return str(require_shim_dir(mox.environment) / name)
+    return str(shim_path(mox.environment, name))
 
 
 def _run_shim(

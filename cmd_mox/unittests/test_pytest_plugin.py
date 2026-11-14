@@ -532,12 +532,12 @@ def _fail_fast_test_module(expected_returncode: int) -> str:
 
         import pytest
 
+        from cmd_mox.unittests._env_helpers import shim_path
+
         pytest_plugins = ("cmd_mox.pytest_plugin",)
 
         def _shim(mox, name):
-            shim_dir = mox.environment.shim_dir
-            assert shim_dir is not None
-            return str(shim_dir / name)
+            return str(shim_path(mox.environment, name))
 
         def test_mismatch(cmd_mox):
             cmd_mox.mock("git").with_args("status").returns(stdout="clean")
