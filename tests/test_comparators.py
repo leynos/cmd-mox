@@ -228,7 +228,7 @@ def test_expectation_matcher_exception_message() -> None:
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"cmd": dbl})
     msg = str(excinfo.value)
-    assert "arg[0] predicate" in msg, "Assertion failed"
+    assert "arg[0]='x' predicate" in msg, "Assertion failed"
     assert "ValueError: boom" in msg, "Assertion failed"
 
 
@@ -375,7 +375,7 @@ def test_expectation_mixed_matcher_exception_message() -> None:
     with pytest.raises(UnexpectedCommandError) as excinfo:
         verifier.verify([inv], {"git": dbl})
     msg = str(excinfo.value)
-    assert "arg[1] predicate" in msg, "the raising matcher should be identified"
+    assert "arg[1]='x' predicate" in msg, "the raising matcher should be identified"
     assert "ValueError: boom" in msg, "the matcher exception should be reported"
 
 

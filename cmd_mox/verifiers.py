@@ -455,7 +455,12 @@ class UnexpectedCommandVerifier:
         msg = _format_sections(
             "Unexpected additional invocation.",
             [
-                ("Expected", _describe_expectation(exp, include_count=True)),
+                (
+                    "Expected",
+                    _describe_expectation(
+                        exp, include_count=True, actual_args=inv.args
+                    ),
+                ),
                 ("Observed calls", str(observed)),
                 (
                     "Last call",
@@ -512,7 +517,19 @@ class OrderVerifier:
         relevant_invocations: list[Invocation],
     ) -> None:
         """Check the relevant journal against the expanded ordered sequence."""
-        expected_descriptions = [_describe_expectation(exp) for exp in ordered_seq]
+        # Pair each expectation with the call at its position so sensitive
+        # positions in that call also mask the expected values.
+        expected_descriptions = [
+            _describe_expectation(
+                exp,
+                actual_args=(
+                    relevant_invocations[index].args
+                    if index < len(relevant_invocations)
+                    else None
+                ),
+            )
+            for index, exp in enumerate(ordered_seq)
+        ]
         actual_descriptions = [
             _describe_invocation(inv) for inv in relevant_invocations
         ]
@@ -614,7 +631,7 @@ class OrderVerifier:
             f"position {index + 1}",
             "expected:\n"
             + indent(
-                _describe_expectation(exp),
+                _describe_expectation(exp, actual_args=actual_inv.args),
                 "  ",
             ),
             "actual:\n"
@@ -726,7 +743,13 @@ class CountVerifier:
                     [
                         (
                             "Expected",
-                            _describe_expectation(exp, include_count=True),
+                            # Any recorded call shows which expected positions
+                            # the command treats as credentials.
+                            _describe_expectation(
+                                exp,
+                                include_count=True,
+                                actual_args=calls[-1].args if calls else None,
+                            ),
                         ),
                         ("Observed calls", f"{actual} (expected {expected})"),
                         (
@@ -746,7 +769,11 @@ class CountVerifier:
                     [
                         (
                             "Expected",
-                            _describe_expectation(exp, include_count=True),
+                            _describe_expectation(
+                                exp,
+                                include_count=True,
+                                actual_args=calls[-1].args,
+                            ),
                         ),
                         ("Observed calls", f"{actual} (expected {expected})"),
                         (

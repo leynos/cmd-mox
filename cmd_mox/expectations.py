@@ -413,23 +413,45 @@ class Expectation:
                 continue
             if not call_predicates:
                 continue
-            try:
-                ok = _matcher_accepts(matcher, arg)
-            except Exception as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
-                return (
-                    f"arg[{index}] predicate {matcher!r} raised "
-                    f"{exc.__class__.__name__}: {exc}"
-                )
-            if not ok:
-                # A matcher repr can carry the pattern it matches, so a
-                # sensitive position is reported with the placeholder only.
-                rendered = (
-                    _REDACTED_ARGUMENT
-                    if expected[index] == _REDACTED_ARGUMENT
-                    else repr(matcher)
-                )
-                return f"arg[{index}]={actual[index]!r} failed {rendered}"
+            detail = self._describe_predicate_failure(
+                matcher, arg, expected=expected[index]
+            )
+            if detail is not None:
+                return f"arg[{index}]={actual[index]!r} {detail}"
         return None
+
+    @staticmethod
+    def _describe_predicate_failure(
+        matcher: cabc.Callable[[str], bool], arg: str, *, expected: str
+    ) -> str | None:
+        """Return the failure detail when *matcher* rejects *arg*.
+
+        The caller supplies the argument index and the redacted argument, so
+        this helper reports only what happened at one position.
+
+        Returns
+        -------
+        str or None
+            A ``predicate raised ...`` or ``failed ...`` detail, or ``None``
+            when *matcher* accepts *arg*.
+        """
+        try:
+            ok = _matcher_accepts(matcher, arg)
+        except Exception as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
+            if expected == _REDACTED_ARGUMENT:
+                # The message may quote the value and the matcher repr may
+                # embed its pattern, so a sensitive position keeps only the
+                # class name.
+                return f"predicate raised {exc.__class__.__name__}"
+            return f"predicate {matcher!r} raised {exc.__class__.__name__}: {exc}"
+        if ok:
+            return None
+        # A matcher repr can carry the pattern it matches, so a sensitive
+        # position is reported with the placeholder only.
+        rendered = (
+            _REDACTED_ARGUMENT if expected == _REDACTED_ARGUMENT else repr(matcher)
+        )
+        return f"failed {rendered}"
 
     def _redacted_matcher_arguments(
         self, invocation: Invocation, matchers: cabc.Sequence[object]

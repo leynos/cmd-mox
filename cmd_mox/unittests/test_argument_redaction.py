@@ -649,3 +649,23 @@ def test_mask_sensitive_positions_flags_url_credentials() -> None:
     )
 
     assert masked == ["<redacted>", "safe"]
+
+
+def test_mask_sensitive_positions_flags_already_redacted_url_credentials() -> None:
+    """A URL whose userinfo is already masked still marks its position."""
+    masked = mask_sensitive_positions(
+        ["expected-secret", "safe"],
+        ["https://<redacted>@example.test", "safe"],
+    )
+
+    assert masked == ["<redacted>", "safe"]
+
+
+def test_mask_sensitive_positions_flags_already_redacted_query_credentials() -> None:
+    """A URL query value already masked still marks its position."""
+    masked = mask_sensitive_positions(
+        ["expected-secret"],
+        ["https://example.test/path?token=<redacted>"],
+    )
+
+    assert masked == ["<redacted>"]

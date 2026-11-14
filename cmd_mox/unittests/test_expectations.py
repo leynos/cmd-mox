@@ -301,6 +301,23 @@ def test_explain_mismatch_reports_first_failing_position() -> None:
     assert "arg[1]" not in reason, "a later literal must not mask position 0"
 
 
+def test_explain_mismatch_hides_predicate_failure_details_at_secret_positions() -> None:
+    """A raising predicate must not echo its value or pattern at a secret."""
+
+    def reject(value: str) -> bool:
+        """Raise with the value so a leak would be visible in the reason."""
+        raise ValueError(value)
+
+    expectation = Expectation("deploy", match_args=["--token", reject])
+
+    reason = expectation.explain_mismatch(
+        Invocation("deploy", ["--token", "actual-secret"], "", {})
+    )
+
+    assert reason == "arg[1]='<redacted>' predicate raised ValueError"
+    assert "actual-secret" not in reason
+
+
 def test_mock_with_args_and_order(
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:

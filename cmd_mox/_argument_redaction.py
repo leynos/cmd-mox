@@ -109,6 +109,26 @@ def _redact_url_credentials(arg: str) -> str:
     return _URL_QUERY_PARAMETER_RE.sub(_redact_url_query_parameter, safe_arg)
 
 
+def _has_url_credentials(arg: str) -> bool:
+    """Return whether *arg* carries URL userinfo or a secret query value.
+
+    Detection reads the syntax rather than comparing the sanitizer's output:
+    an already-redacted URL is left unchanged, yet its position still holds a
+    credential the diagnostics must not reveal.
+
+    Returns
+    -------
+    bool
+        Whether the argument names URL credentials.
+    """
+    if _URL_USERINFO_RE.search(arg):
+        return True
+    return any(
+        is_sensitive_recording_env_key(match.group("key"))
+        for match in _URL_QUERY_PARAMETER_RE.finditer(arg)
+    )
+
+
 def _partition_option_argument(arg: str) -> tuple[str, str, str]:
     """Split a dash-prefixed option at its first supported separator.
 
@@ -409,9 +429,9 @@ def _iter_redacted_arguments(
                 (option, separator, is_sensitive_option),
                 command=command,
             )
-            # URL userinfo is stripped before classification, so the sanitizer
-            # is the only evidence that this argument carried a credential.
-            yield redacted, is_sensitive_argument or safe_arg != arg
+            # URL credentials are stripped before classification, so the
+            # sanitizer's syntax check is the only evidence they were there.
+            yield redacted, is_sensitive_argument or _has_url_credentials(arg)
         # Preserve chained sensitive options after consuming their current value.
         redact_next_value = is_sensitive_option and not separator
 

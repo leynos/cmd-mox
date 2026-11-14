@@ -245,6 +245,24 @@ def test_mock_overflow_reports_observed_count_and_last_call() -> None:
     ), "mock overflow must report the observed count and the final call"
 
 
+def test_mock_overflow_masks_expected_values_at_secret_positions() -> None:
+    """Overflow diagnostics mask expected values the call marks as secret."""
+    expectation = (
+        Expectation("deploy")
+        .with_matching_args(Any(), "expected-secret")
+        .times_called(1)
+    )
+    doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
+    invocation = _invocation("deploy", "--token", "expected-secret")
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        UnexpectedCommandVerifier().verify([invocation, invocation], doubles)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "deploy(Any(), '<redacted>')" in message
+
+
 def test_mock_accepts_calls_up_to_its_limit() -> None:
     """A mock invoked exactly its expected number of times passes."""
     expectation = Expectation("deploy").with_args("--flag").times_called(2)

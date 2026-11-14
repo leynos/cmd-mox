@@ -328,6 +328,7 @@ Feature: CmdMox basic functionality
     When I replay the controller
     And I run the command "echo" with arguments "hello "world peace""
     Then the output should be "hello world peace"
+    And the journal entry for "echo" should record arguments "hello 'world peace'"
     When I verify the controller
 
   Scenario: explicitly counted passthrough spy is satisfied by a real call
