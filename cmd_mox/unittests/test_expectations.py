@@ -288,6 +288,19 @@ def test_mock_literal_matcher_mismatch_reports_literal(
     assert "not callable" not in message, "literals must not be called"
 
 
+def test_explain_mismatch_reports_first_failing_position() -> None:
+    """An earlier failing predicate outranks a later unequal literal."""
+    expectation = Expectation(
+        "git",
+        match_args=[Regex(r"^ok$"), "clone"],
+    )
+
+    reason = expectation.explain_mismatch(Invocation("git", ["no", "pull"], "", {}))
+
+    assert reason.startswith("arg[0]"), "positions are reported in order"
+    assert "arg[1]" not in reason, "a later literal must not mask position 0"
+
+
 def test_mock_with_args_and_order(
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
@@ -885,6 +898,18 @@ def test_definite_mismatch_reason_redacts_arguments() -> None:
     assert reason is not None
     assert "supersecret" not in reason
     assert "<redacted>" in reason
+
+
+def test_definite_mismatch_reason_masks_expected_values_at_actual_positions() -> None:
+    """Expected literal arguments are masked where the actual call holds a secret."""
+    expectation = Expectation("deploy").with_args("--option", "expected-secret")
+    invocation = Invocation("deploy", ["--token", "actual-secret"], "", {})
+
+    reason = expectation.definite_mismatch_reason(invocation)
+
+    assert reason is not None
+    assert "expected-secret" not in reason
+    assert "actual-secret" not in reason
 
 
 def test_definite_mismatch_reason_redacts_masked_matcher_values() -> None:

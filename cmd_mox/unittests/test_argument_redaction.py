@@ -639,3 +639,13 @@ def test_mask_sensitive_positions_masks_already_redacted_actual_value() -> None:
     )
 
     assert masked == ["", "<redacted>"]
+
+
+def test_mask_sensitive_positions_flags_url_credentials() -> None:
+    """An argument redacted as a URL with credentials marks its position."""
+    masked = mask_sensitive_positions(
+        ["expected-secret", "safe"],
+        ["https://alice:secret@example.test", "safe"],
+    )
+
+    assert masked == ["<redacted>", "safe"]

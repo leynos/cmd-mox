@@ -404,11 +404,14 @@ def _iter_redacted_arguments(
         if redact_next_value:
             yield REDACTED_ARGUMENT, True
         else:
-            yield _redact_current_argument(
+            redacted, is_sensitive_argument = _redact_current_argument(
                 safe_arg,
                 (option, separator, is_sensitive_option),
                 command=command,
             )
+            # URL userinfo is stripped before classification, so the sanitizer
+            # is the only evidence that this argument carried a credential.
+            yield redacted, is_sensitive_argument or safe_arg != arg
         # Preserve chained sensitive options after consuming their current value.
         redact_next_value = is_sensitive_option and not separator
 
