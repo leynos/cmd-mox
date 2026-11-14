@@ -277,7 +277,7 @@ def test_fail_fast_applies_expectation_environment() -> None:
 
 
 def test_fail_fast_redacts_sensitive_arguments() -> None:
-    """The rejection diagnostic and stored reason hide sensitive option values."""
+    """The rejection diagnostic and verification error hide sensitive option values."""
     with _running_controller(fail_fast=True) as mox:
         mox.mock("deploy").with_args("--expected").returns(stdout="ok")
         result = _run_failing(mox, "deploy", "--token", "supersecret")
@@ -289,9 +289,27 @@ def test_fail_fast_redacts_sensitive_arguments() -> None:
         with pytest.raises(UnexpectedCommandError) as excinfo:
             mox.verify()
 
-    reason = str(excinfo.value).split("Reason:", 1)[1]
-    assert "supersecret" not in reason
+    message = str(excinfo.value)
+    reason = message.split("Reason:", 1)[1]
+    assert "supersecret" not in message
     assert "<redacted>" in reason
+    assert "<redacted>" in message.split("Actual:", 1)[1]
+
+
+def test_fail_fast_verification_error_never_echoes_stdin() -> None:
+    """The fail-fast verification error omits expected and actual stdin content."""
+    with _running_controller(fail_fast=True) as mox:
+        mox.mock("git").with_args("status").with_stdin("expected-secret").returns(
+            stdout="ok"
+        )
+        _run_failing(mox, "git", "status", stdin="actual-secret")
+
+        with pytest.raises(UnexpectedCommandError) as excinfo:
+            mox.verify()
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "actual-secret" not in message
 
 
 def test_fail_fast_rejection_survives_journal_eviction() -> None:
