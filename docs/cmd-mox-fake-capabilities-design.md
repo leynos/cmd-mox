@@ -285,6 +285,90 @@ content has been written and replaced. Cleanup remains the test's
 responsibility unless the helper receives an explicit CmdMox-managed cleanup
 registry in a later phase.
 
+## Scripted process fakes
+
+Status: proposed capability; no public script API is implemented by this
+document. Roadmap phase 16 extends the stateful-fake plan without making either
+capability depend on the other.
+
+Stateful `.runs(...)` handlers model application state between invocations.
+They do not model a process that emits a prefix, waits for input, closes one
+stream, or ignores a termination request. The ordinary shim gathers stdin to
+EOF before reporting an invocation and receives complete output in its
+response. Sleeping in a controller handler delays that response; it does not
+create incremental duplex I/O.
+
+The proposed script runs in the shim or an explicitly owned child. Controller
+callbacks must not impersonate the fake by writing to the test runner's own
+standard streams. An early design decision must settle invocation admission
+before stdin EOF, bounded script/control framing, matching, and journal
+completion. Existing canned responses and record/replay fixtures keep their
+current meaning; serialized scripts need a separately decided compatibility
+contract before they become persistent fixtures.
+
+### Scripted-process scope
+
+The action model should support:
+
+- Byte-exact writes to stdout or stderr, including split UTF-8 sequences,
+  invalid bytes, truncated protocol records, and generated bounded-size blocks.
+- Bounded stdin expectations, named barriers with explicit acknowledgement and
+  release, bounded delays, explicit exit, and independent stream close.
+- Capability-checked signal handlers, ignored termination, and acknowledgement
+  that a handler is installed before the test sends a signal.
+- Opt-in descendant-held-pipe scenarios where the direct child exits while a
+  descendant retains a stream, with explicit ownership and cleanup bounds.
+
+Write boundaries are not read boundaries. A script orders actions and verifies
+reconstructed bytes and causal events; it cannot promise that one write becomes
+one parent read. Barrier/control traffic must remain separate from the command
+output and must have bounded queues, message sizes and lifetimes. Completed
+write acknowledgement must be distinguished from queued output or successful
+consumption by the parent.
+
+Backpressure scenarios must write through actual pipes rather than emulate
+congestion with sleeps. Payload generation, control queues and diagnostic
+retention remain bounded even when total output exceeds pipe capacity. An
+independent owner deadline bounds blocked writes, unfulfilled barriers and
+cleanup. Expected interruption is a declared terminal outcome, not silent
+success or a bypass of ordinary mock verification.
+
+### Execution ownership and portability
+
+Coordinate the executor with the Cuprum adoption work in
+[issue #469](https://github.com/leynos/cmd-mox/issues/469). Cuprum manages
+child launch, capture, deadlines and teardown; the fake supplies scripted
+behaviour. Check the exact selected release's contracts, including
+wait-relative handle timeouts and post-exit drain behaviour, before replacing
+dedicated fixtures. Retain documented low-level exceptions where necessary
+rather than claiming unreleased behaviour or weakening a regression.
+
+Cuprum follow-ups track
+[owned live byte streams](https://github.com/leynos/cuprum/issues/706) and
+[a wait-independent owned lifetime bound](https://github.com/leynos/cuprum/issues/707).
+These are supporting proposals, not implemented prerequisites or promises
+about the selected beta. Existing supported composition or a documented bounded
+adapter can satisfy the executor contract instead.
+
+Specify which actions work on POSIX and Windows, and reject unsupported actions
+before execution. POSIX process-group ownership does not contain descendants
+that deliberately escape the group; no scenario may signal unrelated groups.
+The optional Rust launcher and container bridge require their own parity gates
+before claiming scripted-process support. No native backend is required for the
+first Python implementation.
+
+### Scripted-process verification
+
+Behavioural tests must drive the public command double through a real child and
+verify prefix-before-release, stdin-before-EOF, independent stream EOF,
+backpressure, truncated output, signal escalation and descendant-held pipes.
+Use barriers for causal ordering and external watchdogs for bounded failure;
+arbitrary delays alone do not prove ordering. Generated histories should cover
+partial writes, concurrent invocation identity, cancellation and terminal-state
+verification. Repeated cancellation, failed startup and expired barriers must
+reap owned children and settle their readers, writers and control waiters.
+Parallel workers must not share script state or control channels.
+
 ## Security and portability
 
 The default file mode for JSON fixture and state writes is `0o600` because
