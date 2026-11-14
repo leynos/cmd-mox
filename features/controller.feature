@@ -322,6 +322,14 @@ Feature: CmdMox basic functionality
     Then the spy "echo" should record 1 invocation
     And the spy "echo" call count should be 1
 
+  Scenario: run a command with a double-quoted operand
+    Given a CmdMox controller
+    And the command "echo" is spied to passthrough
+    When I replay the controller
+    And I run the command "echo" with arguments "hello "world peace""
+    Then the output should be "hello world peace"
+    When I verify the controller
+
   Scenario: explicitly counted passthrough spy is satisfied by a real call
     Given a CmdMox controller
     And the command "echo" is spied to passthrough times 1

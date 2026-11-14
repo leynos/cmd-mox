@@ -169,7 +169,7 @@ def _argv_for(cmd: str, args: str) -> list[str]:
 
 @when(
     parsers.re(
-        r'I run the command "(?P<cmd>[^"]+)" with arguments "(?P<args>[^"]+)"'
+        r'I run the command "(?P<cmd>[^"]+)" with arguments "(?P<args>.*)"'
         r"(?P<failure> expecting failure)?$"
     ),
     target_fixture="result",

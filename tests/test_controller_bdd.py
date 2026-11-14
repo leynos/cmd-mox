@@ -258,6 +258,15 @@ def test_passthrough_spy() -> None:
 
 @scenario(
     str(FEATURES_DIR / "controller.feature"),
+    "run a command with a double-quoted operand",
+)
+def test_run_command_with_double_quoted_operand() -> None:
+    """A double-quoted operand inside the argument list stays one argument."""
+    pass
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
     "explicitly counted passthrough spy is satisfied by a real call",
 )
 def test_counted_passthrough_spy() -> None:
