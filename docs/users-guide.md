@@ -58,7 +58,8 @@ By default a mock answers every call with its configured response, even when
 the arguments, stdin, or environment cannot match its expectation. `verify()`
 then reports the mismatch as `UnexpectedCommandError`, naming the expected and
 actual calls. This deferred behaviour keeps a test body running to its own
-assertions and collects every problem in one report.
+assertions. Verification stops at the first mismatch it finds and reports that
+one, so fix it and rerun to reveal any further problems.
 
 Opt into fail-fast handling when a mismatched call should fail where it
 happens. Pass `fail_fast=True` to `CmdMox`, or enable it for pytest with
