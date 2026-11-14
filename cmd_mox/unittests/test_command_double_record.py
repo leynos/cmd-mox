@@ -97,7 +97,7 @@ class TestRecordFluentAPI:
             .passthrough()
             .record(
                 tmp_path / "fixture.json",
-                env_allowlist=["GIT_AUTHOR_NAME", "GIT_DIR"],
+                env_allowlist=["MY_CUSTOM_KEY"],
             )
         )
         session = spy.recording_session
@@ -108,8 +108,8 @@ class TestRecordFluentAPI:
                 args=["status"],
                 stdin="",
                 env={
+                    "MY_CUSTOM_KEY": "enabled",
                     "GIT_AUTHOR_NAME": "Tester",
-                    "GIT_DIR": ".git",
                     "PATH": "/usr/bin",
                 },
             ),
@@ -117,8 +117,8 @@ class TestRecordFluentAPI:
         )
         fixture = session.finalize()
         env = fixture.recordings[0].env_subset
+        assert env["MY_CUSTOM_KEY"] == "enabled"
         assert "GIT_AUTHOR_NAME" in env
-        assert "GIT_DIR" in env
 
     def test_record_accepts_string_path(self, tmp_path: Path) -> None:
         """record() accepts a string path and converts it to Path."""

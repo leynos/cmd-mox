@@ -192,6 +192,57 @@ class TestRecordingSessionEnvFiltering:
         assert "MY_CUSTOM_KEY" in env
         assert "PATH" not in env
 
+    def test_unknown_command_records_no_unrequested_keys(self, tmp_path: Path) -> None:
+        """A command without a known prefix records no unrequested keys."""
+        session = RecordingSession(tmp_path / "out.json")
+        session.start()
+        session.record(
+            _make_invocation(
+                command="greet",
+                env={"MY_SETTING": "enabled", "HOSTISH_VALUE": "host"},
+            ),
+            _make_response(),
+        )
+
+        assert session._recordings[0].env_subset == {}
+
+    def test_explicit_keys_override_system_and_sensitive_exclusions(
+        self, tmp_path: Path
+    ) -> None:
+        """Explicit keys are recorded despite system or sensitive names."""
+        session = RecordingSession(tmp_path / "out.json")
+        session.start()
+        session.record(
+            _make_invocation(
+                command="greet",
+                env={"SECRET_TOKEN": "tok", "PATH": "/usr/bin"},
+            ),
+            _make_response(),
+            explicit_keys=["SECRET_TOKEN", "PATH"],
+        )
+
+        assert session._recordings[0].env_subset == {
+            "SECRET_TOKEN": "tok",
+            "PATH": "/usr/bin",
+        }
+
+    def test_explicit_keys_do_not_override_internal_exclusion(
+        self, tmp_path: Path
+    ) -> None:
+        """Explicit keys never let a CmdMox-internal key into a recording."""
+        session = RecordingSession(tmp_path / "out.json")
+        session.start()
+        session.record(
+            _make_invocation(
+                command="greet",
+                env={"CMOX_IPC_SOCKET": "socket"},
+            ),
+            _make_response(),
+            explicit_keys=["CMOX_IPC_SOCKET"],
+        )
+
+        assert session._recordings[0].env_subset == {}
+
 
 class TestRecordingSessionCommandFilter:
     """Tests for RecordingSession command_filter behavior."""
@@ -277,6 +328,44 @@ class TestRecordingSessionScrubber:
 
         loaded = FixtureFile.load(path)
         assert loaded.recordings[0].stdout == "<redacted>"
+
+    def test_explicit_sensitive_key_is_scrubbed_before_persistence(
+        self, tmp_path: Path
+    ) -> None:
+        """A sensitive explicit key is scrubbed, not persisted in clear text."""
+
+        class _RedactToken:
+            """Scrubber double that observes recordings and redacts API_TOKEN."""
+
+            def __init__(self) -> None:
+                """Start with no observed recordings."""
+                self.seen: list[RecordedInvocation] = []
+
+            def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
+                """Retain the incoming recording and redact the token value."""
+                self.seen.append(recording)
+                redacted = {
+                    key: "<redacted>" if key == "API_TOKEN" else value
+                    for key, value in recording.env_subset.items()
+                }
+                return dc.replace(recording, env_subset=redacted)
+
+        scrubber = _RedactToken()
+        path = tmp_path / "fixture.json"
+        session = RecordingSession(path, scrubber=scrubber)
+        session.start()
+        session.record(
+            _make_invocation(env={"API_TOKEN": "tok123"}),
+            _make_response(),
+            explicit_keys=["API_TOKEN"],
+        )
+        session.finalize()
+
+        # The sensitive value reaches the scrubber, which is the only place a
+        # caller-supplied redaction rule can act on it.
+        assert scrubber.seen[0].env_subset == {"API_TOKEN": "tok123"}
+        loaded = FixtureFile.load(path)
+        assert loaded.recordings[0].env_subset == {"API_TOKEN": "<redacted>"}
 
 
 class TestRecordingSessionDurationValidation:

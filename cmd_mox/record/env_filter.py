@@ -4,6 +4,10 @@ Recordings capture only a meaningful subset of the process environment to
 avoid bloating fixtures with irrelevant system paths and to prevent leaking
 secrets.  The filtering strategy follows the design spec Section 9.3.3 and
 Section 9.9.2.
+
+A command with a known prefix keeps that tool's variables.  Any other command
+keeps only the allowlisted and explicitly requested keys, because the whole
+environment is neither portable between machines nor safe to commit.
 """
 
 from __future__ import annotations
@@ -149,12 +153,11 @@ def _should_include_env_key(
     if exact_keys is not None:
         return key in exact_keys
 
-    # Command-specific prefix keys are included.
-    if cmd_prefix:
-        return key.startswith(cmd_prefix)
-
-    # When no command is specified, include all remaining non-excluded keys.
-    return True
+    # Command-specific prefix keys are included.  A command without a known
+    # prefix records nothing beyond the requested keys handled above:
+    # capturing the whole environment would leak host-specific values into
+    # committed fixtures and make strict replay fail on any other machine.
+    return bool(cmd_prefix) and key.startswith(cmd_prefix)
 
 
 def filter_env_subset(
@@ -162,7 +165,7 @@ def filter_env_subset(
     *,
     command: str = "",
     allowlist: list[str] | None = None,
-    explicit_keys: list[str] | None = None,
+    explicit_keys: cabc.Iterable[str] | None = None,
 ) -> dict[str, str]:
     """Return a filtered subset of *env* suitable for fixture persistence.
 
@@ -174,22 +177,19 @@ def filter_env_subset(
         The command name, matched case-insensitively.  Most commands include
         keys under their prefix (for example ``"git"`` includes ``GIT_*``
         variables).  ``"go"`` includes only the documented names in
-        :data:`GO_ENV_KEYS`.  An unrecognized command includes every key that
-        is not excluded by another rule.
+        :data:`GO_ENV_KEYS`.  An unknown or empty command keeps only
+        allowlisted and explicit keys.
     allowlist : list[str] | None
         Caller-configured keys to retain, such as
         ``RecordingSession(env_allowlist=...)``.  A key must be present in
         *env* to appear in the result.  ``allowlist`` and *explicit_keys*
         share one precedence and their union is applied.
-    explicit_keys : list[str] | None
-        Keys requested by direct callers of :func:`filter_env_subset`.
-        Treated exactly like *allowlist*: an entry in either keyword includes
-        the key.  ``RecordingSession`` does not currently pass this keyword, so
-        ``.with_env()`` keys do not automatically widen recordings; that
-        wiring is tracked in issue #368.  Requests take precedence over the
-        system and sensitive rules, so a requested sensitive key is persisted
-        raw.  CmdMox internal keys (``CMOX_*``, ``CMD_MOX_*``) remain excluded
-        even when requested.
+    explicit_keys : collections.abc.Iterable[str] | None
+        Keys requested through ``.with_env()`` for this request.  Treated
+        exactly like *allowlist*: an entry in either keyword includes the
+        key.  Requests take precedence over the system and sensitive rules,
+        so a requested sensitive key is persisted raw.  CmdMox internal keys
+        (``CMOX_*``, ``CMD_MOX_*``) remain excluded even when requested.
 
     Returns
     -------

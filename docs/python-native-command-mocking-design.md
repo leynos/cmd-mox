@@ -1641,7 +1641,7 @@ sequenceDiagram
   Shim->>Server: send Invocation (kind=invocation, invocation_id)
   Server->>Controller: handle invocation
   alt controller selects passthrough
-    Controller->>Passthrough: prepare_request(double, invocation, PassthroughConfig)
+    Controller->>Passthrough: prepare_request(double, invocation, PassthroughConfig, expectation_env)
     Passthrough-->>Controller: Response(passthrough=PassthroughRequest)
     Controller-->>Server: Response with passthrough
     Server-->>Shim: Response with PassthroughRequest
@@ -2495,24 +2495,21 @@ typical), include system-specific paths that break portability, and potentially
 leak sensitive data. Instead, `filter_env_subset()` selects an `env_subset`
 from:
 
-1. Variables named in its `explicit_keys` keyword, which a future `.with_env()`
-   channel would supply (not yet wired; see issue #368)
-2. Variables matching known command prefixes (e.g., `GIT_*`, `AWS_*`,
-   `DOCKER_*`), or, for `go`, the documented exact names such as `GOPATH` and
-   `GOFLAGS`
-3. Variables specified in a configurable allowlist
-4. For a command with no configured prefix or exact-name set, every key that
-   is not excluded by another rule
+1. Variables explicitly requested via `.with_env()` for that passthrough
+   request
+2. Variables specified in a configurable allowlist
+3. Variables matching a known command prefix (e.g., `GIT_*`, `AWS_*`,
+   `DOCKER_*`) when the command is exactly that tool's name, or, for `go`, the
+   documented exact names such as `GOPATH` and `GOFLAGS`
 
-`filter_env_subset()` accepts `explicit_keys` and `allowlist`, and applies
-their union with one precedence. The recording session currently forwards only
-its allowlist, so `.with_env()` keys do not automatically widen recordings;
-that wiring is tracked in issue #368.
-
-The last rule is permissive: an unrecognized command records every non-excluded
-key, so a fixture can retain values that no prefix or allowlist selected. The
-sensitive-key classifier is a name-based heuristic, so review fixtures before
-committing or sharing them.
+CmdMox internal variables are never recorded. A command without a known prefix
+records no unrequested variables, which reduces machine dependence: strict
+replay no longer requires every host variable to be present. It does not remove
+that dependence entirely, because an allowlisted or explicitly requested key
+can still hold a machine-specific value such as `HOME`, and replay then
+requires the same value. Request-time explicit keys keep their provenance per
+request in `PassthroughCoordinator`, so a later mutation of the expectation
+does not change an earlier recording.
 
 #### 9.3.4 Fixture validation policy
 
@@ -2606,7 +2603,7 @@ classDiagram
         - datetime | None _started_at
         - bool _finalized
         + start() None
-        + record(invocation: Invocation, response: Response) None
+        + record(invocation: Invocation, response: Response, duration_ms: int, explicit_keys: Iterable~str~ | None) None
         + finalize() FixtureFile
         + from_passthrough_spy(spy, fixture_path, **kwargs) RecordingSession
     }
@@ -2636,11 +2633,11 @@ sequenceDiagram
     TestCode->>Session: start()
     activate Session
 
-    TestCode->>Session: record(invocation, response, duration_ms)
+    TestCode->>Session: record(invocation, response, duration_ms, explicit_keys)
     alt session not started
         Session-->>TestCode: raise LifecycleError
     else session started and not finalized
-        Session->>EnvFilter: filter_env_subset(invocation.env, command, allowlist, explicit_keys=None)
+        Session->>EnvFilter: filter_env_subset(invocation.env, command, allowlist, explicit_keys)
         EnvFilter-->>Session: env_subset
         Session->>Session: build RecordedInvocation
         opt scrubber is not None
@@ -2826,7 +2823,7 @@ classDiagram
         - FixtureFile | None _fixture_file
         + RecordingSession(fixture_path, scrubber, env_allowlist, command_filter)
         + start() void
-        + record(invocation, response, duration_ms) void
+        + record(invocation, response, duration_ms, explicit_keys) void
         + finalize() FixtureFile
     }
 
@@ -3265,26 +3262,35 @@ committing or sharing them.
 
 **Included by default**:
 
+- Variables explicitly requested via `.with_env()` for that passthrough
+  request
 - Variables on the user-defined allowlist
 - Variables matching command-specific prefixes (e.g., `GIT_*` for git), or,
   for `go`, the documented exact names such as `GOPATH` and `GOFLAGS`
-- For a command with no configured prefix or exact-name set, every key not
-  excluded above
 
-**Included when requested**:
+**Excluded for commands without a known prefix**:
 
-- Variables named in the filter's `explicit_keys` keyword, which a future
-  `.with_env()` channel would supply (not yet wired; see issue #368)
+- Every variable that is neither explicitly requested nor allowlisted.
+  Recording the whole environment leaked host-specific values into committed
+  fixtures and made strict replay fail on any other machine. A key still has to
+  be present in the environment, and CmdMox internal keys stay excluded even
+  when requested.
 
-`filter_env_subset()` accepts `explicit_keys` and `allowlist`, and applies
-their union with one precedence. The recording session currently forwards only
-its allowlist, so `.with_env()` keys do not automatically widen recordings;
-that wiring is tracked in issue #368.
+`filter_env_subset()` accepts `explicit_keys` and `allowlist` and applies their
+union with one precedence. `RecordingSession.record()` forwards the keys each
+passthrough request captured through `.with_env()`, and
+`PassthroughCoordinator` snapshots them when the request is prepared.
 
-The last default rule is permissive: an unrecognized command records every
-non-excluded key, so a fixture can retain values that no prefix or allowlist
-selected. The sensitive-key classifier is a name-based heuristic, so review
-fixtures before committing or sharing them.
+The sensitive-key classifier is a name-based heuristic and an explicit request
+overrides it, so review fixtures before committing or sharing them.
+
+**Excluded for commands without a known prefix**:
+
+- Every variable that is neither explicitly requested nor allowlisted.
+  Recording the whole environment leaked host-specific values into committed
+  fixtures and made strict replay fail on any other machine. A key still has to
+  be present in the environment, and CmdMox internal keys stay excluded even
+  when requested.
 
 #### 9.9.3 Command argument diagnostics
 
@@ -3341,12 +3347,10 @@ such variables from fixtures and masks them in argument diagnostics, which is
 the intended coarse-grained posture: a false positive hides one value, while a
 false negative discloses a credential. `DOCKER_AUTH_CONFIG` carried registry
 credentials that no earlier rule classified, and it is the case that prompted
-the addition. Variables requested through the filter's explicit-key channel
-remain exempt from subset filtering by the precedence rule, except CmdMox
-internal keys (`CMOX_*`, `CMD_MOX_*`), which stay excluded even when requested.
-`RecordingSession` does not currently forward `.with_env()` keys, so at the
-recording level they are not yet re-admitted; that wiring is tracked in issue
-#368.
+the addition. Variables named explicitly through `.with_env()` for a
+passthrough request remain exempt from subset filtering by the existing
+precedence rule; the coordinator snapshots those keys at request time, and
+CmdMox internal keys stay excluded regardless.
 
 Known exposures remain out of scope here and need their own design decisions:
 
@@ -3784,7 +3788,7 @@ classDiagram
         - list~str~ env_allowlist
         - list~RecordedInvocation~ _recordings
         + start() None
-        + record(invocation, response) None
+        + record(invocation, response, duration_ms, explicit_keys) None
         + finalize() FixtureFile
     }
 
