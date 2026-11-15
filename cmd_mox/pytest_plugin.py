@@ -10,6 +10,7 @@ import typing as typ
 
 import pytest
 
+from ._pytest_flags import resolve_flags
 from .controller import CmdMox, Phase
 from .environment import EnvironmentManager
 from .platform import skip_if_unsupported
@@ -217,6 +218,35 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type="bool",
         default=True,
     )
+    group.addoption(
+        "--cmd-mox-fail-fast",
+        action="store_true",
+        dest="cmd_mox_fail_fast",
+        default=None,
+        help=(
+            "Answer a mock call that cannot match its expectation with a "
+            "failure response. Overrides the pytest.ini setting."
+        ),
+    )
+    group.addoption(
+        "--no-cmd-mox-fail-fast",
+        action="store_false",
+        dest="cmd_mox_fail_fast",
+        default=None,
+        help=(
+            "Answer mock calls normally even when they cannot match, deferring "
+            "the failure to verify(). Overrides the pytest.ini setting."
+        ),
+    )
+    parser.addini(
+        "cmd_mox_fail_fast",
+        (
+            "Answer a mock call that cannot match its expectation with a "
+            "failure response instead of deferring the failure to verify()."
+        ),
+        type="bool",
+        default=False,
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -230,8 +260,10 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         (
-            "cmd_mox(auto_lifecycle: bool = True): override automatic "
-            "replay()/verify() behaviour for a single test."
+            "cmd_mox(auto_lifecycle: bool, fail_fast: bool): "
+            "override automatic replay()/verify() behaviour or fail-fast mock "
+            "mismatch handling for a single test. Omitted arguments inherit "
+            "the command-line or ini setting."
         ),
     )
 
@@ -294,11 +326,13 @@ class _CmdMoxManager:
         self.config = request.config
         node = getattr(request, "node", None)
         self._nodeid = getattr(node, "nodeid", "<cmd_mox item>")
-        self._auto_lifecycle = self._auto_lifecycle_enabled()
+        flags = resolve_flags(request)
+        self._auto_lifecycle = flags.auto_lifecycle
         self.mox = CmdMox(
             verify_on_exit=False,
             environment=EnvironmentManager(prefix=_build_worker_prefix(self.config)),
             lifecycle_hint=(_AUTO_LIFECYCLE_HINT if self._auto_lifecycle else None),
+            fail_fast=flags.fail_fast,
         )
         # CmdMox wires its command runner to the provided environment during
         # initialisation, so injecting the worker-scoped manager here ensures the
@@ -444,82 +478,6 @@ class _CmdMoxManager:
                 )
         message = _format_teardown_failure(errors, nodeid=self._nodeid)
         pytest.fail(message)
-
-    def _auto_lifecycle_enabled(self) -> bool:
-        """Resolve the auto-lifecycle flag respecting all configuration sources.
-
-        The fixture parameter provides the most granular override, followed by
-        a ``@pytest.mark.cmd_mox`` marker, the command-line option, and finally
-        the ``pytest.ini`` default.
-
-        Returns
-        -------
-        bool
-            Whether the plugin should manage the controller lifecycle.
-        """
-        param_value = self._param_override()
-        if param_value is not None:
-            return param_value
-
-        marker_value = self._marker_override()
-        if marker_value is not None:
-            return marker_value
-
-        cli_value = self.config.getoption("cmd_mox_auto_lifecycle")
-        if cli_value is not None:
-            return bool(cli_value)
-
-        return bool(self.config.getini("cmd_mox_auto_lifecycle"))
-
-    def _marker_override(self) -> bool | None:
-        """Return marker override for auto lifecycle if configured.
-
-        Returns
-        -------
-        bool or None
-            Marker value, or ``None`` when no override is present.
-        """
-        marker = self.request.node.get_closest_marker("cmd_mox")
-        if marker is None:
-            return None
-        if "auto_lifecycle" in marker.kwargs:
-            return bool(marker.kwargs["auto_lifecycle"])
-        return None
-
-    def _param_override(self) -> bool | None:
-        """Return fixture parameter override for auto lifecycle if present.
-
-        Returns
-        -------
-        bool or None
-            Fixture parameter value, or ``None`` when no parameter is supplied.
-
-        Raises
-        ------
-        TypeError
-            If the fixture parameter has an unsupported shape.
-        """
-        param = getattr(self.request, "param", None)
-        match param:
-            case None:
-                return None
-            case dict() as parameter if "auto_lifecycle" in parameter:
-                return bool(parameter["auto_lifecycle"])
-            case dict() as parameter:
-                keys = list(parameter.keys())
-                msg = (
-                    "cmd_mox fixture param dict must contain 'auto_lifecycle' key, "
-                    f"got keys: {keys}"
-                )
-                raise TypeError(msg)
-            case bool():
-                return param
-            case _:
-                msg = (
-                    "cmd_mox fixture param must be a bool or dict with "
-                    f"'auto_lifecycle' key, got {type(param).__name__}"
-                )
-                raise TypeError(msg)
 
     def _verify_if_needed(self) -> Exception | None:
         """Run :meth:`CmdMox.verify` when auto lifecycle is active.

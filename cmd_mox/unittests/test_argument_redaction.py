@@ -10,7 +10,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from cmd_mox import ExpectationConfigurationError
-from cmd_mox._argument_redaction import redact_sensitive_argument_values
+from cmd_mox._argument_redaction import (
+    mask_argument_positions,
+    mask_sensitive_positions,
+    redact_sensitive_argument_values,
+    sensitive_positions,
+)
 from cmd_mox.expectations import Expectation
 
 
@@ -587,3 +592,109 @@ def test_duplicate_argument_error_preserves_key_like_positionals() -> None:
     message = str(exc_info.value)
     assert "'my-key-file'" in message, "safe key-like positionals must remain visible"
     assert "'ssh-key'" in message, "safe key-like positionals must remain visible"
+
+
+@pytest.mark.parametrize(
+    ("expected", "actual", "want"),
+    [
+        pytest.param(
+            ["", "expected-secret"],
+            ["--token", "actual-secret"],
+            ["", "<redacted>"],
+            id="predicate-option-name",
+        ),
+        pytest.param(
+            ["status", "value"],
+            ["status", "value"],
+            ["status", "value"],
+            id="no-sensitive-position",
+        ),
+    ],
+)
+def test_mask_sensitive_positions_follows_actual_arguments(
+    expected: list[str],
+    actual: list[str],
+    want: list[str],
+) -> None:
+    """Expected literals are masked wherever the actual call holds a secret."""
+    assert mask_sensitive_positions(expected, actual) == want
+
+
+def test_mask_sensitive_positions_preserves_expected_length() -> None:
+    """Expected values beyond the actual call survive unmasked and in place."""
+    masked = mask_sensitive_positions(["a", "b", "c"], ["--token", "secret"])
+
+    assert masked == ["a", "<redacted>", "c"]
+
+
+def test_mask_sensitive_positions_masks_value_of_dangling_option() -> None:
+    """A trailing sensitive option masks the expected value it never received."""
+    masked = mask_sensitive_positions(["", "expected-secret"], ["--token"])
+
+    assert masked == ["", "<redacted>"]
+
+
+def test_mask_sensitive_positions_masks_already_redacted_actual_value() -> None:
+    """An actual value that is already masked still marks its position."""
+    masked = mask_sensitive_positions(
+        ["", "expected-secret"], ["--token", "<redacted>"]
+    )
+
+    assert masked == ["", "<redacted>"]
+
+
+def test_mask_sensitive_positions_flags_url_credentials() -> None:
+    """An argument redacted as a URL with credentials marks its position."""
+    masked = mask_sensitive_positions(
+        ["expected-secret", "safe"],
+        ["https://alice:secret@example.test", "safe"],
+    )
+
+    assert masked == ["<redacted>", "safe"]
+
+
+def test_mask_sensitive_positions_flags_already_redacted_url_credentials() -> None:
+    """A URL whose userinfo is already masked still marks its position."""
+    masked = mask_sensitive_positions(
+        ["expected-secret", "safe"],
+        ["https://<redacted>@example.test", "safe"],
+    )
+
+    assert masked == ["<redacted>", "safe"]
+
+
+def test_mask_sensitive_positions_flags_already_redacted_query_credentials() -> None:
+    """A URL query value already masked still marks its position."""
+    masked = mask_sensitive_positions(
+        ["expected-secret"],
+        ["https://example.test/path?token=<redacted>"],
+    )
+
+    assert masked == ["<redacted>"]
+
+
+@pytest.mark.parametrize(
+    ("args", "want"),
+    [
+        pytest.param(["--token", "secret"], {1}, id="option-value"),
+        pytest.param(["--token"], {1}, id="dangling-option"),
+        pytest.param(["status", "clean"], set(), id="no-secret"),
+    ],
+)
+def test_sensitive_positions_reports_the_masked_indices(
+    args: list[str], want: set[int]
+) -> None:
+    """Positions identify exactly the values a diagnostic must mask."""
+    assert sensitive_positions(args) == want
+
+
+def test_mask_argument_positions_applies_precomputed_indices() -> None:
+    """A unioned position set masks every row it is applied to."""
+    values = ["--token", "secret", "--label", "other"]
+
+    assert mask_argument_positions(values, {1, 3}) == [
+        "--token",
+        "<redacted>",
+        "--label",
+        "<redacted>",
+    ]

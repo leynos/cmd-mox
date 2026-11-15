@@ -8,7 +8,7 @@ import pytest
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation, Response
-from cmd_mox.unittests._env_helpers import require_shim_dir
+from cmd_mox.unittests._env_helpers import shim_path
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -48,7 +48,7 @@ def test_stub_runs_handler(
     mox.__enter__()
     mox.replay()
 
-    cmd_path = require_shim_dir(mox.environment) / cmd
+    cmd_path = shim_path(mox.environment, cmd)
     result = run([str(cmd_path)])
 
     mox.verify()

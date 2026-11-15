@@ -10,7 +10,7 @@ import pytest
 from cmd_mox import CmdMox
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation, Response
-from cmd_mox.unittests._env_helpers import require_shim_dir
+from cmd_mox.unittests._env_helpers import shim_path
 
 if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     import collections.abc as cabc
@@ -35,7 +35,7 @@ def test_with_env_injection(
     mox.stub("env").with_env({"HELLO": "WORLD"}).runs(handler)
     with mox:
         mox.replay()
-        path = require_shim_dir(mox.environment) / "env"
+        path = shim_path(mox.environment, "env")
         result = run([str(path)], shell=False)
         mox.verify()
 

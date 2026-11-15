@@ -7,7 +7,16 @@ import typing as typ
 from collections import defaultdict
 from textwrap import indent
 
-from .domain import mask_env_value
+from ._diagnostic_format import (
+    _describe_actual_call,
+    _describe_expectation,
+    _describe_invocation,
+    _describe_invocations,
+    _format_sections,
+    _list_expected_commands,
+    _masked_call_arguments,
+    _numbered,
+)
 from .errors import UnexpectedCommandError, UnfulfilledExpectationError
 from .test_doubles import DoubleKind
 
@@ -17,217 +26,39 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
     from .ipc import Invocation
 
 
-def _format_env(mapping: cabc.Mapping[str, str | None]) -> str:
-    """Return a deterministic representation of environment values.
-
-    Parameters
-    ----------
-    mapping : collections.abc.Mapping
-        Environment values to sort and format.
-
-    Returns
-    -------
-    str
-        Stable representation with sensitive values masked.
-    """
-    if not mapping:
-        return "{}"
-    parts = []
-    for key in sorted(mapping):
-        masked = mask_env_value(key, mapping[key])
-        parts.append(f"{key!r}: {masked!r}")
-    return "{" + ", ".join(parts) + "}"
-
-
-def _format_items[ItemT](items: cabc.Sequence[ItemT] | None) -> str:
-    """Format *items* as a comma-separated representation.
-
-    Parameters
-    ----------
-    items : collections.abc.Sequence or None
-        Values to format, such as command arguments or matcher predicates.
-
-    Returns
-    -------
-    str
-        Repr-formatted items, or an empty string when absent.
-    """
-    return "" if not items else ", ".join(repr(item) for item in items)
-
-
-def _format_call(name: str, args_repr: str) -> str:
-    """Format a command name and preformatted arguments as a call.
-
-    Returns
-    -------
-    str
-        Call-like representation such as ``name('arg')``.
-    """
-    return f"{name}({args_repr})" if args_repr else f"{name}()"
-
-
-def _expectation_args_repr(exp: Expectation) -> str:
-    """Return the configured argument or matcher representation.
-
-    Returns
-    -------
-    str
-        Representation of exact arguments, matchers, or no arguments.
-    """
-    if exp.args is not None:
-        return _format_items(exp.args)
-    if exp.match_args is not None:
-        return _format_items(exp.match_args)
-    return ""
-
-
-def _append_count_line(
-    lines: list[str], exp: Expectation, *, include_count: bool
-) -> None:
-    """Append the expected call count line when *include_count* is set."""
-    if include_count:
-        lines.append(f"expected calls={exp.count}")
-
-
-def _append_stdin_line(lines: list[str], exp: Expectation) -> None:
-    """Append the expected stdin line when the expectation sets stdin."""
-    if exp.stdin is not None:
-        lines.append(f"stdin={exp.stdin!r}")
-
-
-def _append_env_line(lines: list[str], exp: Expectation) -> None:
-    """Append the expected environment line when the expectation sets env."""
-    if exp.env:
-        lines.append(f"env={_format_env(exp.env)}")
-
-
-def _describe_expectation(exp: Expectation, *, include_count: bool = False) -> str:
-    """Return a human-readable representation of *exp*.
+def raise_rejected_mock_error(
+    exp: Expectation, inv: Invocation, reason: str
+) -> typ.NoReturn:
+    """Raise for a mock call rejected at invocation time by fail-fast mode.
 
     Parameters
     ----------
     exp : Expectation
-        Expectation to describe.
-    include_count : bool
-        Whether to include the expected call count.
-
-    Returns
-    -------
-    str
-        Multi-line diagnostic description.
-    """
-    lines = [_format_call(exp.name, _expectation_args_repr(exp))]
-    _append_count_line(lines, exp, include_count=include_count)
-    _append_stdin_line(lines, exp)
-    _append_env_line(lines, exp)
-    return "\n".join(lines)
-
-
-def _describe_invocation(
-    inv: Invocation,
-    *,
-    focus_env: cabc.Iterable[str] | None = None,
-    include_stdin: bool = False,
-) -> str:
-    """Return a readable representation of *inv*.
-
-    Parameters
-    ----------
+        The mock's expectation.
     inv : Invocation
-        Invocation to describe.
-    focus_env : collections.abc.Iterable[str] or None
-        Environment keys to include, when supplied.
-    include_stdin : bool
-        Whether to include stdin in the description.
+        The rejected invocation.
+    reason : str
+        The stored, redacted mismatch reason.
 
-    Returns
-    -------
-    str
-        Multi-line diagnostic description.
+    Raises
+    ------
+    UnexpectedCommandError
+        Always, describing the expected and actual calls.
     """
-    lines = [_format_call(inv.command, _format_items(inv.args))]
-    if include_stdin:
-        lines.append(f"stdin={inv.stdin!r}")
-    if focus_env:
-        env_subset = {key: inv.env.get(key) for key in sorted(focus_env)}
-        lines.append(f"env={_format_env(env_subset)}")
-    return "\n".join(lines)
-
-
-def _describe_invocations(
-    invocations: cabc.Sequence[Invocation],
-    *,
-    focus_env: cabc.Iterable[str] | None = None,
-    include_stdin: bool = False,
-) -> str:
-    """Describe a sequence of invocations, or ``(none)`` when empty.
-
-    Returns
-    -------
-    str
-        Multi-line diagnostic description.
-    """
-    if not invocations:
-        return "(none)"
-    return "\n".join(
-        _describe_invocation(inv, focus_env=focus_env, include_stdin=include_stdin)
-        for inv in invocations
+    msg = _format_sections(
+        "Unexpected command invocation.",
+        [
+            (
+                "Expected",
+                _describe_expectation(
+                    exp, include_stdin=False, actual_calls=[inv.args]
+                ),
+            ),
+            ("Actual", _describe_actual_call(exp, inv, include_stdin=False)),
+            ("Reason", reason),
+        ],
     )
-
-
-def _numbered(entries: cabc.Sequence[str], *, start: int = 1) -> str:
-    """Prefix entries with sequential numbers for diagnostic output.
-
-    Returns
-    -------
-    str
-        Numbered entries, or ``(none)`` when empty.
-    """
-    if not entries:
-        return "(none)"
-    lines: list[str] = []
-    for index, entry in enumerate(entries, start=start):
-        entry_lines = entry.splitlines() or [""]
-        lines.append(f"{index}. {entry_lines[0]}")
-        lines.extend(f"   {extra}" for extra in entry_lines[1:])
-    return "\n".join(lines)
-
-
-def _format_sections(title: str, sections: list[tuple[str, str]]) -> str:
-    """Assemble a titled diagnostic message from labelled sections.
-
-    Returns
-    -------
-    str
-        Formatted message with empty sections omitted.
-    """
-    parts = [title]
-    for label, body in sections:
-        if not body:
-            continue
-        parts.extend(("", f"{label}:", indent(body, "  ")))
-    return "\n".join(parts)
-
-
-def _list_expected_commands(doubles: cabc.Mapping[str, CommandDouble]) -> str:
-    """Return a readable list of registered, invokable commands.
-
-    Commands registered as stubs are omitted because they are not validated as
-    part of unexpected-invocation checks.
-
-    Returns
-    -------
-    str
-        A comma-separated representation of the expected commands.
-    """
-    names = sorted(
-        name for name, dbl in doubles.items() if dbl.kind is not DoubleKind.STUB
-    )
-    return (
-        "(none: stubs are excluded from expected commands)"
-        if not names
-        else ", ".join(repr(name) for name in names)
-    )
+    raise UnexpectedCommandError(msg)
 
 
 class UnexpectedCommandVerifier:
@@ -328,15 +159,8 @@ class UnexpectedCommandVerifier:
         msg = _format_sections(
             "Unexpected command invocation.",
             [
-                ("Expected", _describe_expectation(exp)),
-                (
-                    "Actual",
-                    _describe_invocation(
-                        inv,
-                        focus_env=exp.env.keys(),
-                        include_stdin=exp.stdin is not None,
-                    ),
-                ),
+                ("Expected", _describe_expectation(exp, actual_calls=[inv.args])),
+                ("Actual", _describe_actual_call(exp, inv)),
                 ("Reason", reason),
             ],
         )
@@ -352,16 +176,14 @@ class UnexpectedCommandVerifier:
         msg = _format_sections(
             "Unexpected additional invocation.",
             [
-                ("Expected", _describe_expectation(exp, include_count=True)),
-                ("Observed calls", str(observed)),
                 (
-                    "Last call",
-                    _describe_invocation(
-                        inv,
-                        focus_env=exp.env.keys(),
-                        include_stdin=exp.stdin is not None,
+                    "Expected",
+                    _describe_expectation(
+                        exp, include_count=True, actual_calls=[inv.args]
                     ),
                 ),
+                ("Observed calls", str(observed)),
+                ("Last call", _describe_actual_call(exp, inv)),
             ],
         )
         raise UnexpectedCommandError(msg)
@@ -375,6 +197,7 @@ class OrderVerifier:
         self._ordered = ordered
         self._current_expected_descriptions: list[str] = []
         self._current_actual_descriptions: list[str] = []
+        self._current_masked_actuals: list[list[str]] = []
 
     def verify(self, journal: cabc.Iterable[Invocation]) -> None:
         """Ensure ordered expectations appear in order within *journal*."""
@@ -409,12 +232,26 @@ class OrderVerifier:
         relevant_invocations: list[Invocation],
     ) -> None:
         """Check the relevant journal against the expanded ordered sequence."""
-        expected_descriptions = [_describe_expectation(exp) for exp in ordered_seq]
+        # Journal position need not align with the expectation at that index,
+        # so mask from the calls to each expectation's own command.
+        expected_descriptions = [
+            _describe_expectation(
+                exp,
+                actual_calls=self._mask_sources(exp, ordered_seq, relevant_invocations),
+            )
+            for exp in ordered_seq
+        ]
+        # A credential can hide under a different option in another call to the
+        # same command, so each observed call is masked from all of them and
+        # from the positions the counted expectations treat as sensitive.
+        masked_actuals = _masked_call_arguments(relevant_invocations, ordered_seq)
         actual_descriptions = [
-            _describe_invocation(inv) for inv in relevant_invocations
+            _describe_invocation(inv, safe_args=safe)
+            for inv, safe in zip(relevant_invocations, masked_actuals, strict=True)
         ]
         self._current_expected_descriptions = expected_descriptions
         self._current_actual_descriptions = actual_descriptions
+        self._current_masked_actuals = masked_actuals
 
         self._check_missing_expectations(
             ordered_seq,
@@ -442,16 +279,17 @@ class OrderVerifier:
             return
 
         index = len(relevant_invocations)
-        remaining = _numbered(expected_descriptions[index:], start=index + 1)
-        msg = _format_sections(
-            "Ordered expectations not satisfied.",
-            [
-                ("Expected order", _numbered(expected_descriptions)),
-                ("Observed order", _numbered(actual_descriptions)),
-                ("Missing", remaining),
-            ],
+        raise UnfulfilledExpectationError(
+            _order_diagnostic(
+                "Ordered expectations not satisfied.",
+                expected_descriptions,
+                actual_descriptions,
+                (
+                    "Missing",
+                    _numbered(expected_descriptions[index:], start=index + 1),
+                ),
+            )
         )
-        raise UnfulfilledExpectationError(msg)
 
     def _check_order_violations(
         self,
@@ -465,12 +303,11 @@ class OrderVerifier:
             if exp.matches(actual_inv):
                 continue
 
-            reason = exp.explain_mismatch(actual_inv)
             self._raise_mismatch_error(
                 index,
                 exp,
                 actual_inv,
-                reason,
+                self._mask_sources(exp, ordered_seq, relevant_invocations),
             )
             return
 
@@ -485,41 +322,64 @@ class OrderVerifier:
         if len(relevant_invocations) <= len(ordered_seq):
             return
 
-        extras = relevant_invocations[len(ordered_seq) :]
-        msg = _format_sections(
-            "Unexpected additional invocation.",
-            [
-                ("Expected order", _numbered(expected_descriptions)),
-                ("Observed order", _numbered(actual_descriptions)),
-                (
-                    "Unexpected calls",
-                    _describe_invocations(extras, include_stdin=False),
-                ),
-            ],
+        # Reuse the masked descriptions so an extra call cannot reintroduce a
+        # credential that another call to the same command exposed.
+        extras = actual_descriptions[len(ordered_seq) :]
+        raise UnexpectedCommandError(
+            _order_diagnostic(
+                "Unexpected additional invocation.",
+                expected_descriptions,
+                actual_descriptions,
+                ("Unexpected calls", "\n".join(extras)),
+            )
         )
-        raise UnexpectedCommandError(msg)
+
+    @staticmethod
+    def _mask_sources(
+        exp: Expectation,
+        ordered_seq: cabc.Sequence[Expectation],
+        invocations: cabc.Sequence[Invocation],
+    ) -> list[list[str]]:
+        """Return the observed and expected arguments that mask *exp*.
+
+        A sibling expectation can name the option that marks a bare literal as
+        a credential, so its literal positions mask *exp* as well.
+
+        Returns
+        -------
+        list[list[str]]
+            Argument rows whose sensitive positions mask *exp*.
+        """
+        sources = [list(inv.args) for inv in invocations if inv.command == exp.name]
+        for other in ordered_seq:
+            if other is exp or other.name != exp.name:
+                continue
+            literals = other.args if other.args is not None else other.match_args
+            sources.append([
+                item if isinstance(item, str) else "" for item in literals or ()
+            ])
+        return sources
 
     def _raise_mismatch_error(
         self,
         index: int,
         exp: Expectation,
         actual_inv: Invocation,
-        reason: str,
+        mask_calls: cabc.Sequence[cabc.Sequence[str]],
     ) -> None:
         """Raise a detailed error for the first out-of-order invocation."""
+        reason = exp.explain_mismatch(actual_inv, mask_sources=mask_calls)
         mismatch = "\n".join([
             f"position {index + 1}",
             "expected:\n"
             + indent(
-                _describe_expectation(exp),
+                _describe_expectation(exp, actual_calls=mask_calls),
                 "  ",
             ),
             "actual:\n"
             + indent(
-                _describe_invocation(
-                    actual_inv,
-                    focus_env=exp.env.keys(),
-                    include_stdin=exp.stdin is not None,
+                _describe_actual_call(
+                    exp, actual_inv, safe_args=self._current_masked_actuals[index]
                 ),
                 "  ",
             ),
@@ -587,6 +447,67 @@ def build_count_map(
     return inv_map
 
 
+def _order_diagnostic(
+    title: str,
+    expected_descriptions: list[str],
+    actual_descriptions: list[str],
+    tail: tuple[str, str],
+) -> str:
+    """Return an ordered-verification diagnostic ending with *tail*.
+
+    Returns
+    -------
+    str
+        Message with the numbered expected and observed orders.
+    """
+    return _format_sections(
+        title,
+        [
+            ("Expected order", _numbered(expected_descriptions)),
+            ("Observed order", _numbered(actual_descriptions)),
+            tail,
+        ],
+    )
+
+
+def _count_sections(exp: Expectation, calls: list[Invocation]) -> list[tuple[str, str]]:
+    """Return the expected and observed-count sections for *exp*.
+
+    Any recorded call shows which expected positions the command treats as
+    credentials, so the expected rendering is masked against all of them.
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        Labelled sections shared by both count diagnostics.
+    """
+    return [
+        (
+            "Expected",
+            _describe_expectation(
+                exp, include_count=True, actual_calls=[call.args for call in calls]
+            ),
+        ),
+        ("Observed calls", f"{len(calls)} (expected {exp.count})"),
+    ]
+
+
+def _count_diagnostic(
+    title: str,
+    exp: Expectation,
+    calls: list[Invocation],
+    tail: tuple[str, str],
+) -> str:
+    """Return a count diagnostic ending with *tail*.
+
+    Returns
+    -------
+    str
+        Message with the shared count sections and the caller's final section.
+    """
+    return _format_sections(title, [*_count_sections(exp, calls), tail])
+
+
 class CountVerifier:
     """Check that each expectation was met the expected number of times."""
 
@@ -613,47 +534,39 @@ class CountVerifier:
         """
         for name, exp in expectations.items():
             calls = invocations.get(name, [])
-            actual = len(calls)
-            expected = exp.count
             focus_env = exp.env.keys()
             include_stdin = exp.stdin is not None
-            if actual < expected:
-                msg = _format_sections(
-                    "Unfulfilled expectation.",
-                    [
-                        (
-                            "Expected",
-                            _describe_expectation(exp, include_count=True),
-                        ),
-                        ("Observed calls", f"{actual} (expected {expected})"),
+            if len(calls) < exp.count:
+                raise UnfulfilledExpectationError(
+                    _count_diagnostic(
+                        "Unfulfilled expectation.",
+                        exp,
+                        calls,
                         (
                             "Recorded invocations",
                             _describe_invocations(
                                 calls,
                                 focus_env=focus_env,
                                 include_stdin=include_stdin,
+                                safe_args=_masked_call_arguments(calls, [exp]),
                             ),
                         ),
-                    ],
+                    )
                 )
-                raise UnfulfilledExpectationError(msg)
-            if actual > expected:
-                msg = _format_sections(
-                    "Unexpected additional invocation.",
-                    [
-                        (
-                            "Expected",
-                            _describe_expectation(exp, include_count=True),
-                        ),
-                        ("Observed calls", f"{actual} (expected {expected})"),
+            if len(calls) > exp.count:
+                raise UnexpectedCommandError(
+                    _count_diagnostic(
+                        "Unexpected additional invocation.",
+                        exp,
+                        calls,
                         (
                             "Last call",
                             _describe_invocation(
                                 calls[-1],
                                 focus_env=focus_env,
                                 include_stdin=include_stdin,
+                                safe_args=_masked_call_arguments(calls, [exp])[-1],
                             ),
                         ),
-                    ],
+                    )
                 )
-                raise UnexpectedCommandError(msg)

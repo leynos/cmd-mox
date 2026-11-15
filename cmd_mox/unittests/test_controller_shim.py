@@ -10,7 +10,7 @@ from cmd_mox import _path_utils as path_utils
 from cmd_mox import controller
 from cmd_mox.controller import CmdMox, Phase
 from cmd_mox.errors import UnexpectedCommandError
-from cmd_mox.unittests._env_helpers import require_shim_dir
+from cmd_mox.unittests._env_helpers import require_shim_dir, shim_path
 
 pytestmark = [
     pytest.mark.requires_unix_sockets,
@@ -90,7 +90,7 @@ def test_cmdmox_nonstubbed_command_behavior(
     mox.__enter__()
     mox.replay()
 
-    cmd_path = require_shim_dir(mox.environment) / "not_stubbed"
+    cmd_path = shim_path(mox.environment, "not_stubbed")
     result = run([str(cmd_path)])
 
     assert result.stdout.strip() == "not_stubbed"
@@ -254,7 +254,7 @@ def test_register_command_fails_when_path_exists() -> None:
     mox.__enter__()
     mox.replay()
 
-    collision = require_shim_dir(mox.environment) / "late"
+    collision = shim_path(mox.environment, "late")
     collision.write_text("collision")
 
     with pytest.raises(FileExistsError, match="already exists and is not a symlink"):

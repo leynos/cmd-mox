@@ -10,7 +10,22 @@ from ._argument_redaction import (
     is_sensitive_recording_env_key,
 )
 from ._argument_redaction import (
+    mask_sensitive_positions as _mask_sensitive_positions,
+)
+from ._argument_redaction import (
     redact_sensitive_argument_values as _redact_sensitive_argument_values,
+)
+from ._matching import (
+    MismatchContext as _MismatchContext,
+)
+from ._matching import (
+    matcher_accepts as _matcher_accepts,
+)
+from ._matching import (
+    matcher_mismatch as _matcher_mismatch,
+)
+from ._matching import (
+    redacted_literal_argument_mismatch as _redacted_literal_argument_mismatch,
 )
 from ._validators import validate_expectation_count
 from .errors import ExpectationConfigurationError
@@ -21,20 +36,6 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
 # A literal string matches an argument exactly; any other matcher must be a
 # callable predicate whose result is coerced to ``bool``.
 ArgMatcher = str | cabc.Callable[[str], bool]
-
-
-def _matcher_accepts(matcher: ArgMatcher, value: str) -> bool:
-    """Return whether *matcher* accepts *value*.
-
-    Returns
-    -------
-    bool
-        ``True`` when a literal string equals *value*, or when a callable
-        returns a truthy result.
-    """
-    if isinstance(matcher, str):
-        return matcher == value
-    return bool(matcher(value))
 
 
 @dc.dataclass(slots=True)
@@ -331,25 +332,99 @@ class Expectation:
                 return False
         return True
 
-    def explain_mismatch(self, invocation: Invocation) -> str:
+    def definite_mismatch_reason(self, invocation: Invocation) -> str | None:
+        """Return a reason when *invocation* definitely cannot match.
+
+        Only checks that need no callback are considered: literal argument
+        inequality, matcher arity, unequal literal matchers, and literal stdin
+        inequality. Predicate matchers, environment constraints, and counts
+        stay with verification, so a call that might still match is never
+        rejected early.
+
+        Rendered arguments are redacted, and stdin content is never echoed
+        because either may carry a credential.
+
+        Returns
+        -------
+        str or None
+            A redacted mismatch description, or ``None`` when the invocation
+            is not definitely mismatched.
+        """
+        literal = self._literal_args_mismatch(invocation)
+        if literal is not None:
+            return literal
+        if self.match_args is not None:
+            mismatch = _matcher_mismatch(
+                self,
+                invocation,
+                self.match_args,
+                context=_MismatchContext(call_predicates=False),
+            )
+            if mismatch is not None:
+                return mismatch
+        if isinstance(self.stdin, str) and invocation.stdin != self.stdin:
+            # Never echo stdin: it may carry a credential or another secret.
+            return "stdin does not match the expected value"
+        return None
+
+    def redacted_arguments(self, args: cabc.Sequence[str]) -> list[str]:
+        """Return *args* with every credential position masked.
+
+        The call's own option names identify most secrets, but the option name
+        may differ from the expected one, so the expectation's sensitive
+        positions are applied as well.
+
+        Parameters
+        ----------
+        args : collections.abc.Sequence[str]
+            Arguments of the invocation being reported.
+
+        Returns
+        -------
+        list[str]
+            Diagnostic-safe arguments with positions preserved.
+        """
+        safe = _redact_sensitive_argument_values(list(args), command=self.name)
+        expected = self.args if self.args is not None else self.match_args
+        if expected is None:
+            return safe
+        literals = [item if isinstance(item, str) else "" for item in expected]
+        return _mask_sensitive_positions(safe, literals, command=self.name)
+
+    def explain_mismatch(
+        self,
+        invocation: Invocation,
+        *,
+        mask_sources: cabc.Sequence[cabc.Sequence[str]] | None = None,
+    ) -> str:
         """Return a reason why ``invocation`` failed to match.
+
+        Parameters
+        ----------
+        invocation : Invocation
+            Call that failed to match.
+        mask_sources : collections.abc.Sequence[collections.abc.Sequence[str]], optional
+            Sibling argument rows whose sensitive positions must be masked in
+            the reason, such as the other ordered calls and expectations.
 
         Returns
         -------
         str
             A human-readable explanation of the first mismatch found.
         """
-        for checker in (
-            self._explain_command_mismatch,
-            self._explain_args_mismatch,
-            self._explain_match_args_mismatch,
-            self._explain_stdin_mismatch,
-            self._explain_env_mismatch,
-        ):
-            reason = checker(invocation)
-            if reason:
-                return reason
-        return "args, stdin, or env mismatch"
+        reason = self._explain_command_mismatch(invocation)
+        if reason:
+            return reason
+        reason = self._literal_args_mismatch(invocation, mask_sources)
+        if reason:
+            return reason
+        reason = self._explain_match_args_mismatch(invocation, mask_sources)
+        if reason:
+            return reason
+        reason = self._explain_stdin_mismatch(invocation)
+        if reason:
+            return reason
+        return self._explain_env_mismatch(invocation) or "args, stdin, or env mismatch"
 
     def _explain_command_mismatch(self, invocation: Invocation) -> str | None:
         """Return a message if the command name differs.
@@ -363,20 +438,30 @@ class Expectation:
             return None
         return f"command {invocation.command!r} != {self.name!r}"
 
-    def _explain_args_mismatch(self, invocation: Invocation) -> str | None:
-        """Return a message if explicit args do not match.
+    def _literal_args_mismatch(
+        self,
+        invocation: Invocation,
+        mask_sources: cabc.Sequence[cabc.Sequence[str]] | None = None,
+    ) -> str | None:
+        """Return the literal-argument mismatch description, if any.
 
         Returns
         -------
         str or None
-            The mismatch description, or ``None`` when the arguments agree or
-            no literal ``args`` were configured.
+            The redacted mismatch, or ``None`` when the arguments agree or no
+            literal ``args`` were configured.
         """
         if self.args is None or invocation.args == self.args:
             return None
-        return f"arguments {invocation.args!r} != {self.args!r}"
+        return _redacted_literal_argument_mismatch(
+            self, invocation, self.args, mask_sources
+        )
 
-    def _explain_match_args_mismatch(self, invocation: Invocation) -> str | None:
+    def _explain_match_args_mismatch(
+        self,
+        invocation: Invocation,
+        mask_sources: cabc.Sequence[cabc.Sequence[str]] | None = None,
+    ) -> str | None:
         """Return a message when matcher-based args fail.
 
         Returns
@@ -387,29 +472,12 @@ class Expectation:
         """
         if self.match_args is None:
             return None
-        if len(invocation.args) != len(self.match_args):
-            return (
-                f"expected {len(self.match_args)} args but got {len(invocation.args)}"
-            )
-        for i, (arg, matcher) in enumerate(
-            zip(invocation.args, self.match_args, strict=True),
-        ):
-            if isinstance(matcher, str):
-                # Literal equality cannot raise, so report it without the
-                # exception wrapper used for caller-supplied predicates.
-                if not _matcher_accepts(matcher, arg):
-                    return f"arg[{i}]={arg!r} != {matcher!r}"
-                continue
-            try:
-                ok = _matcher_accepts(matcher, arg)
-            except Exception as exc:  # ruff: ignore[blind-except] - this boundary intentionally converts arbitrary callback failures
-                return (
-                    f"arg[{i}] predicate {matcher!r} raised "
-                    f"{exc.__class__.__name__}: {exc}"
-                )
-            if not ok:
-                return f"arg[{i}]={arg!r} failed {matcher!r}"
-        return None
+        return _matcher_mismatch(
+            self,
+            invocation,
+            self.match_args,
+            context=_MismatchContext(mask_sources=mask_sources),
+        )
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:
         """Return a message if stdin fails to satisfy the expectation.

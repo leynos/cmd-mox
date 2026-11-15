@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cmd_mox import Any, Regex
 from cmd_mox.errors import UnexpectedCommandError
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
@@ -44,6 +45,17 @@ def _invocation(
         stdin=stdin,
         env={} if env is None else env,
     )
+
+
+def _mismatch_message(expectation: Expectation, *args: str) -> str:
+    """Return the verifier's message for one mismatched deploy call."""
+    doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
+    invocation = _invocation("deploy", *args)
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        UnexpectedCommandVerifier().verify([invocation], doubles)
+
+    return str(excinfo.value)
 
 
 def test_unregistered_command_reports_stdin_and_excludes_stubs() -> None:
@@ -144,6 +156,62 @@ def test_expectation_mismatch_reports_env_and_stdin() -> None:
     ), "a mismatch must show the expectation, the masked actual call, and the reason"
 
 
+@pytest.mark.parametrize(
+    "expectation",
+    [
+        pytest.param(
+            Expectation("deploy").with_args("--token", "expected-secret"),
+            id="exact-args",
+        ),
+        pytest.param(
+            Expectation("deploy").with_matching_args("--token", "expected-secret"),
+            id="literal-matcher",
+        ),
+        pytest.param(
+            Expectation("deploy").with_matching_args(Any(), "expected-secret"),
+            id="predicate-option-matcher",
+        ),
+    ],
+)
+def test_mismatch_redacts_sensitive_expected_arguments(
+    expectation: Expectation,
+) -> None:
+    """Expected and actual secrets never appear in a verification error."""
+    doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
+    invocation = _invocation("deploy", "--token", "actual-secret")
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        UnexpectedCommandVerifier().verify([invocation], doubles)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "actual-secret" not in message
+    assert "<redacted>" in message
+
+
+def test_mismatch_redacts_expected_value_for_missing_option_argument() -> None:
+    """A shorter call still masks the expected value of a dangling option."""
+    message = _mismatch_message(
+        Expectation("deploy").with_matching_args(Any(), "expected-secret"),
+        "--token",
+    )
+
+    assert "expected-secret" not in message
+    assert "<redacted>" in message
+
+
+def test_mismatch_redacts_sensitive_matcher_pattern() -> None:
+    """A regex matcher in a sensitive position does not expose its pattern."""
+    message = _mismatch_message(
+        Expectation("deploy").with_matching_args("--token", Regex("expected-secret")),
+        "--token",
+        "actual-secret",
+    )
+
+    assert "expected-secret" not in message
+    assert "actual-secret" not in message
+
+
 def test_mock_overflow_reports_observed_count_and_last_call() -> None:
     """A mock called past its limit reports the count and the final call."""
     expectation = (
@@ -179,6 +247,24 @@ def test_mock_overflow_reports_observed_count_and_last_call() -> None:
         "  stdin='payload'\n"
         "  env={'TOKEN': '***'}"
     ), "mock overflow must report the observed count and the final call"
+
+
+def test_mock_overflow_masks_expected_values_at_secret_positions() -> None:
+    """Overflow diagnostics mask expected values the call marks as secret."""
+    expectation = (
+        Expectation("deploy")
+        .with_matching_args(Any(), "expected-secret")
+        .times_called(1)
+    )
+    doubles = {"deploy": _double("deploy", DoubleKind.MOCK, expectation)}
+    invocation = _invocation("deploy", "--token", "expected-secret")
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        UnexpectedCommandVerifier().verify([invocation, invocation], doubles)
+
+    message = str(excinfo.value)
+    assert "expected-secret" not in message
+    assert "deploy(Any(), '<redacted>')" in message
 
 
 def test_mock_accepts_calls_up_to_its_limit() -> None:

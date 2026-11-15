@@ -52,6 +52,40 @@ for the available comparators and matching rules, and the
 [argument matcher migration note](with-matching-args-migration-note.md) for
 upgrading expectations that pass plain strings or invalid matcher values.
 
+## Reading a verification failure
+
+By default a mock answers a call with its configured response even when the
+arguments, stdin, or environment cannot match its expectation. `verify()` then
+reports the mismatch as `UnexpectedCommandError`, naming the expected and
+actual calls. The exception is a call that supplies a different value for a key
+set with `with_env()`: that conflict fails at invocation time, as the
+[usage guide](usage-guide.md) describes, because replacing the supplied value
+would hide the caller's mistake. This deferred behaviour keeps a test body
+running to its own assertions. Verification stops at the first mismatch it
+finds and reports that one, so fix it and rerun to reveal any further problems.
+
+Opt into fail-fast handling when a mismatched call should fail where it
+happens. Pass `fail_fast=True` to `CmdMox`, or enable it for pytest with
+`--cmd-mox-fail-fast`, the `cmd_mox_fail_fast` ini option,
+`@pytest.mark.cmd_mox(fail_fast=True)`, or an indirect fixture parameter such as
+`{"fail_fast": True}`. A rejected call exits with status `1`, writes no
+standard output, and prints a diagnostic such as:
+
+```text
+No mock expectation matches: git push (arguments ['push'] != ['status'])
+```
+
+The configured handler and canned response are not used, but the call is still
+recorded, so `verify()` reports it as well. Only mismatches that need no
+callback are rejected early: literal argument inequality, matcher arity,
+unequal literal string matchers, and literal stdin inequality. Predicate and
+regex matchers, environment constraints, call counts, and ordering remain
+verify-time checks, so a call that might still match is never rejected.
+Sensitive argument values are redacted in the diagnostic and in the
+verification error. A call rejected at invocation time never echoes stdin
+content; a deferred mismatch that verification reports may still show it, as
+any verification failure does.
+
 ## Sensitive environment values in diagnostics
 
 Conflict errors from `UnexpectedCommandError`, verifier failures, and spy

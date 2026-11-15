@@ -12,6 +12,7 @@ from cmd_mox.errors import LifecycleError, VerificationError
 from cmd_mox.unittests._env_helpers import (
     require_shim_dir,
     require_socket_path,
+    shim_path,
 )
 from tests.helpers.fixtures import write_minimal_replay_fixture
 
@@ -33,7 +34,7 @@ def test_cmdmox_replay_verify_out_of_order(
     mox.stub("foo").returns(stdout="bar")
     mox.__enter__()
     mox.replay()
-    cmd_path = require_shim_dir(mox.environment) / "foo"
+    cmd_path = shim_path(mox.environment, "foo")
     run([str(cmd_path)])
     assert len(mox.journal) == 1
     # Second replay() must be a no-op: phase stays REPLAY and the
@@ -105,7 +106,7 @@ def test_context_manager_auto_verify(
     mox.stub("hi").returns(stdout="hello")
     with mox:
         mox.replay()
-        cmd_path = require_shim_dir(mox.environment) / "hi"
+        cmd_path = shim_path(mox.environment, "hi")
         run([str(cmd_path)])
 
     with pytest.raises(LifecycleError):

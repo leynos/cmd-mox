@@ -27,6 +27,10 @@ from .domain import (
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
+
+REDACTED_ARGUMENT = "<redacted>"
+"""Placeholder written in place of a sensitive argument value."""
+
 _AUTHENTICATION_ARGUMENT_OPTIONS: typ.Final[frozenset[str]] = frozenset({
     "--user",
     "--proxy-user",
@@ -103,6 +107,26 @@ def _redact_url_credentials(arg: str) -> str:
     """
     safe_arg = _URL_USERINFO_RE.sub(r"\g<prefix><redacted>@", arg)
     return _URL_QUERY_PARAMETER_RE.sub(_redact_url_query_parameter, safe_arg)
+
+
+def _has_url_credentials(arg: str) -> bool:
+    """Return whether *arg* carries URL userinfo or a secret query value.
+
+    Detection reads the syntax rather than comparing the sanitizer's output:
+    an already-redacted URL is left unchanged, yet its position still holds a
+    credential the diagnostics must not reveal.
+
+    Returns
+    -------
+    bool
+        Whether the argument names URL credentials.
+    """
+    if _URL_USERINFO_RE.search(arg):
+        return True
+    return any(
+        is_sensitive_recording_env_key(match.group("key"))
+        for match in _URL_QUERY_PARAMETER_RE.finditer(arg)
+    )
 
 
 def _partition_option_argument(arg: str) -> tuple[str, str, str]:
@@ -201,8 +225,8 @@ def _format_redacted_argument_value(option: str, separator: str) -> str:
         The redacted argument representation.
     """
     if separator:
-        return f"{option}{separator}<redacted>"
-    return "<redacted>"
+        return f"{option}{separator}{REDACTED_ARGUMENT}"
+    return REDACTED_ARGUMENT
 
 
 def _is_joined_short_authentication_option(
@@ -340,56 +364,51 @@ def _is_joined_sensitive_header_argument(arg: str) -> bool:
     return _is_sensitive_credential_header(arg[len(_JOINED_SHORT_HEADER_OPTION) :])
 
 
-def _redact_embedded_value_or_keep(arg: str, option: str, separator: str) -> str:
-    """Mask credential markers embedded in an otherwise ordinary argument.
-
-    Returns
-    -------
-    str
-        A redacted argument or the original safe argument.
-    """
-    if not _contains_sensitive_argument_value(arg):
-        return arg
-    return _format_redacted_argument_value(option, separator)
-
-
 def _redact_current_argument(
     arg: str,
     classification: tuple[str, str, bool],
     *,
     command: str | None,
-) -> str:
+) -> tuple[str, bool]:
     """Redact inline sensitive options and embedded credential values.
 
     Returns
     -------
-    str
-        The diagnostic-safe argument representation.
+    tuple[str, bool]
+        The diagnostic-safe argument representation and whether the argument
+        itself held a credential.
     """
     option, separator, is_sensitive_option = classification
     if is_sensitive_option and separator:
-        return _format_redacted_argument_value(option, separator)
+        return _format_redacted_argument_value(option, separator), True
     if _is_joined_sensitive_header_argument(arg):
-        return f"{_JOINED_SHORT_HEADER_OPTION}<redacted>"
+        return f"{_JOINED_SHORT_HEADER_OPTION}<redacted>", True
     if _is_joined_short_authentication_option(arg, command):
-        return f"{arg[:2]}<redacted>"
-    return _redact_embedded_value_or_keep(arg, option, separator)
+        return f"{arg[:2]}<redacted>", True
+    if not _contains_sensitive_argument_value(arg):
+        return arg, False
+    return _format_redacted_argument_value(option, separator), True
 
 
-def _iter_redacted_argument_values(
+def _iter_redacted_arguments(
     args: list[str], command: str | None = None
-) -> cabc.Iterator[str]:
-    """Yield arguments with values for secret-like options hidden.
+) -> cabc.Iterator[tuple[str, bool]]:
+    """Yield each argument's redacted form and whether it held a secret.
+
+    The flag is derived from the same classification that decides redaction, so
+    it stays true even when the argument already looks like a placeholder.
 
     Parameters
     ----------
     args : list[str]
         Command arguments to make safe for diagnostic output.
+    command : str or None, optional
+        Executable name, used to preserve known non-secret short options.
 
     Yields
     ------
-    str
-        Original arguments or ``<redacted>`` placeholders, preserving positions.
+    tuple[str, bool]
+        The safe representation and a sensitivity flag, preserving positions.
     """
     redact_next_value = False
     for index, arg in enumerate(args):
@@ -403,15 +422,39 @@ def _iter_redacted_argument_values(
         if is_known_non_secret_option:
             is_sensitive_option = False
         if redact_next_value:
-            yield "<redacted>"
+            yield REDACTED_ARGUMENT, True
         else:
-            yield _redact_current_argument(
+            redacted, is_sensitive_argument = _redact_current_argument(
                 safe_arg,
                 (option, separator, is_sensitive_option),
                 command=command,
             )
+            # URL credentials are stripped before classification, so the
+            # sanitizer's syntax check is the only evidence they were there.
+            yield redacted, is_sensitive_argument or _has_url_credentials(arg)
         # Preserve chained sensitive options after consuming their current value.
         redact_next_value = is_sensitive_option and not separator
+
+
+def _iter_redacted_argument_values(
+    args: list[str], command: str | None = None
+) -> cabc.Iterator[str]:
+    """Yield arguments with values for secret-like options hidden.
+
+    Parameters
+    ----------
+    args : list[str]
+        Command arguments to make safe for diagnostic output.
+    command : str or None, optional
+        Executable name, used to preserve known non-secret short options.
+
+    Yields
+    ------
+    str
+        Original arguments or ``<redacted>`` placeholders, preserving positions.
+    """
+    for redacted, _is_sensitive in _iter_redacted_arguments(args, command):
+        yield redacted
 
 
 def redact_sensitive_argument_values(
@@ -437,3 +480,124 @@ def redact_sensitive_argument_values(
     ['--token', '<redacted>', '--output', 'json']
     """
     return list(_iter_redacted_argument_values(args, command))
+
+
+def sensitive_positions(
+    args: cabc.Sequence[str], *, command: str | None = None
+) -> set[int]:
+    """Return the indices of *args* that hold a sensitive value.
+
+    Callers that mask many rows from the same sources can union this result
+    once per source and apply it with :func:`mask_argument_positions`, instead
+    of reclassifying every source for every row.
+
+    Parameters
+    ----------
+    args : collections.abc.Sequence[str]
+        Raw arguments to classify.
+    command : str or None, optional
+        Executable name, used to preserve known non-secret short options.
+
+    Returns
+    -------
+    set[int]
+        Indices whose values are sensitive, including the position a dangling
+        sensitive option at the end of *args* would occupy.
+
+    Examples
+    --------
+    >>> sorted(sensitive_positions(["--token", "secret"]))
+    [1]
+    >>> sorted(sensitive_positions(["--token"]))
+    [1]
+    """
+    raw = list(args)
+    positions = {
+        index
+        for index, (_redacted, is_sensitive) in enumerate(
+            _iter_redacted_arguments(raw, command)
+        )
+        if is_sensitive
+    }
+    if _awaits_sensitive_value(raw, command):
+        positions.add(len(raw))
+    return positions
+
+
+def mask_argument_positions(
+    values: cabc.Sequence[str], positions: cabc.Set[int]
+) -> list[str]:
+    """Return *values* with every index in *positions* replaced by a placeholder.
+
+    Parameters
+    ----------
+    values : collections.abc.Sequence[str]
+        Already redacted values to mask further.
+    positions : collections.abc.Set[int]
+        Indices that must be replaced.
+
+    Returns
+    -------
+    list[str]
+        Diagnostic-safe values with their positions preserved.
+
+    Examples
+    --------
+    >>> mask_argument_positions(["a", "b", "c"], {1})
+    ['a', '<redacted>', 'c']
+    """
+    return [
+        REDACTED_ARGUMENT if index in positions else value
+        for index, value in enumerate(values)
+    ]
+
+
+def mask_sensitive_positions(
+    expected: list[str], actual: list[str], *, command: str | None = None
+) -> list[str]:
+    """Mask *expected* values wherever *actual* holds a sensitive value.
+
+    An expected list cannot always reveal its own secret positions: an option
+    name may be represented by a placeholder, for instance a predicate matcher,
+    which hides that the next entry is a credential. The actual invocation
+    still shows the option, so the positions it marks as sensitive are masked
+    in *expected* as well.
+
+    Parameters
+    ----------
+    expected : list[str]
+        Already redacted expected values, aligned with *actual* by position.
+    actual : list[str]
+        Raw actual arguments whose sensitive positions drive the masking.
+    command : str or None, optional
+        Executable name, used to preserve known non-secret short options.
+
+    Returns
+    -------
+    list[str]
+        Expected values with credential positions replaced by ``<redacted>``.
+        Entries beyond *actual* keep the value they were given, except the one
+        that would hold the value of a dangling sensitive option.
+
+    Examples
+    --------
+    >>> mask_sensitive_positions(["", "opaque"], ["--token", "secret"])
+    ['', '<redacted>']
+    """
+    return mask_argument_positions(
+        expected, sensitive_positions(actual, command=command)
+    )
+
+
+def _awaits_sensitive_value(args: list[str], command: str | None) -> bool:
+    """Return whether the final argument is a sensitive option awaiting a value."""
+    if not args:
+        return False
+    index = len(args) - 1
+    safe_arg = _redact_url_credentials(args[index])
+    _option, separator, is_sensitive = _classify_sensitive_argument_option(
+        safe_arg, command
+    )
+    if _is_known_non_secret_short_option(command, args, index):
+        return False
+    return is_sensitive and not separator

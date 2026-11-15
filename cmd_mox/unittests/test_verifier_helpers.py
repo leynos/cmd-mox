@@ -1,4 +1,4 @@
-"""Unit tests for internal formatting helpers in :mod:`cmd_mox.verifiers`."""
+"""Unit tests for internal formatting helpers in :mod:`cmd_mox._diagnostic_format`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import typing as typ
 
 import pytest
 
-import cmd_mox.verifiers as v
+import cmd_mox._diagnostic_format as v
 from cmd_mox.expectations import Expectation
 from cmd_mox.ipc import Invocation
 from cmd_mox.test_doubles import CommandDouble, DoubleKind
