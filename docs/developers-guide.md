@@ -76,11 +76,24 @@ re-evaluating the matchers.
 then the marker keyword, then the command-line option, then the ini value.
 `CmdMoxFlags` carries the resolved pair, and a parameter dictionary must name
 at least one recognized key so a misspelt sole key is not silently ignored.
+Every override is validated as a real `bool`: a non-boolean marker keyword or
+fixture parameter raises `TypeError` rather than being coerced, because
+`bool("False")` would silently select the opposite setting. A dictionary with
+neither recognized key raises `TypeError` too.
 
 `cmd_mox/_lifecycle_checks.py` holds the precondition checks that the
 controller and its lifecycle share. The helpers take the `EnvironmentManager`
 explicitly and raise the lifecycle errors, which keeps orchestration in
 `cmd_mox/controller.py` and removes the validation detail from it.
+
+The pytest-plugin tests share their runtime stand-ins through
+`tests/helpers/pytest_plugin_stubs.py`. `StubConfig` mimics `pytest.Config`
+with controllable command-line and ini values, and the remaining stubs stand in
+for a fixture request, a `CmdMox` manager, and an exit spy, and
+`assert_teardown_sections` and `assert_lifecycle_calls` share the assertions
+those tests repeat. The helper keeps the manager test modules inside the
+module-size ceiling and gives every test one faithful stand-in for the objects
+pytest supplies at runtime.
 
 The design rationale, including why fail-fast remains opt-in, is recorded in
 [the detailed design](python-native-command-mocking-design.md#91016-opt-in-fail-fast-handling-for-mismatched-mock-calls-2026-11-12).
