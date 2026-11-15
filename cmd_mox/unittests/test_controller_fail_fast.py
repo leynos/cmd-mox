@@ -394,6 +394,23 @@ def test_fail_fast_rejection_survives_journal_eviction() -> None:
     assert "git('push')" in str(excinfo.value)
 
 
+def test_verify_reports_the_earliest_of_several_rejections() -> None:
+    """Several fail-fast rejections leave the first one as the reported failure."""
+    with _running_controller(fail_fast=True) as mox:
+        mox.mock("git").with_args("status").returns(stdout="clean")
+        first = _run_failing(mox, "git", "push")
+        second = _run_failing(mox, "git", "pull")
+
+        assert first.returncode == 1
+        assert second.returncode == 1
+        with pytest.raises(UnexpectedCommandError) as excinfo:
+            mox.verify()
+
+    message = str(excinfo.value)
+    assert "git('push')" in message
+    assert "git('pull')" not in message
+
+
 def test_verify_reads_rejection_ledger_after_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

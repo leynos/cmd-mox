@@ -46,6 +46,45 @@ when a body or call-stage failure already exists and controller cleanup
 succeeds, preserving the original failure. Cleanup errors remain visible as
 teardown failures.
 
+## Fail-fast mock rejection
+
+`CmdMox(fail_fast=True)` answers a mock call that definitely cannot match its
+expectation with exit status `1` and a `No mock expectation matches: ...`
+diagnostic instead of the configured response. The decision is split across
+three helpers so each boundary stays small and testable without a shim.
+
+`Expectation.definite_mismatch_reason()` in `cmd_mox/expectations.py` is the
+callback-free check. It reports literal argument inequality, matcher arity
+mismatches, unequal literal string matchers, and literal stdin inequality. It
+never invokes a predicate or regex matcher, and it never echoes stdin content,
+because an early rejection must not run caller-supplied code or disclose
+standard input. Predicate matchers, environment constraints, call counts, and
+ordering remain verify-time checks, so a call that might still match is never
+rejected at invocation time.
+
+`cmd_mox/_mock_rejection.py` owns the response and the bookkeeping.
+`rejection_response()` builds the failure response and redacts sensitive
+argument values. `RejectionLedger` records each rejected call under a lock and
+keeps it outside the bounded invocation journal, so `CmdMox.verify()` can still
+report a rejected call after the journal has evicted it. Verification reports
+the earliest rejection with the stored, already-redacted reason rather than
+re-evaluating the matchers.
+
+`cmd_mox/_pytest_flags.py` resolves the fixture settings for one test item.
+`resolve_flags()` applies one precedence order to both `fail_fast` and
+`auto_lifecycle`: a fixture parameter dictionary override is most specific,
+then the marker keyword, then the command-line option, then the ini value.
+`CmdMoxFlags` carries the resolved pair, and a parameter dictionary must name
+at least one recognized key so a misspelt sole key is not silently ignored.
+
+`cmd_mox/_lifecycle_checks.py` holds the precondition checks that the
+controller and its lifecycle share. The helpers take the `EnvironmentManager`
+explicitly and raise the lifecycle errors, which keeps orchestration in
+`cmd_mox/controller.py` and removes the validation detail from it.
+
+The design rationale, including why fail-fast remains opt-in, is recorded in
+[the detailed design](python-native-command-mocking-design.md#91016-opt-in-fail-fast-handling-for-mismatched-mock-calls-2026-11-12).
+
 ## Recording fixture schema versions
 
 `FixtureFile.load()` reads the JSON and delegates to `from_dict()`, which
