@@ -8,16 +8,16 @@ passthrough helpers.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
 import typing as typ
 
+from cmd_mox import _path_utils as path_utils
 from cmd_mox.controller import CmdMox
 from cmd_mox.environment import CMOX_REAL_COMMAND_ENV_PREFIX
 from cmd_mox.record.fixture import FixtureFile
-from tests.helpers.controller import escape_windows_batch_args
+from tests.helpers.controller import RUN_TIMEOUT_SECONDS, escape_windows_batch_args
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -28,14 +28,12 @@ if typ.TYPE_CHECKING:
 _SLEEP_SECONDS = 0.3
 #: Generous lower bound: the measured interval includes IPC overhead.
 _MIN_DURATION_MS = 200
-#: Outer subprocess timeout, matching the shared command-execution helper.
-_RUN_TIMEOUT_SECONDS = 30
 
 
 def _resolve_shim(name: str) -> str:
     """Return the generated shim path, including the Windows ``.cmd`` variant."""
     resolved = shutil.which(name)
-    if resolved is None and os.name == "nt":
+    if resolved is None and path_utils.IS_WINDOWS:
         resolved = shutil.which(f"{name}.cmd")
     assert resolved is not None, f"the {name} shim must be on PATH"
     return resolved
@@ -61,7 +59,7 @@ def test_recorded_passthrough_reports_real_duration(
             check=False,
             shell=False,
             stdin=subprocess.DEVNULL,
-            timeout=_RUN_TIMEOUT_SECONDS,
+            timeout=RUN_TIMEOUT_SECONDS,
         )
 
         assert result.returncode == 0, result.stderr
