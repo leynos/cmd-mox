@@ -156,6 +156,16 @@ on the expectation as it was when the request began: a later `.with_env()` call
 or an out-of-order completion cannot change which keys an earlier request
 records.
 
+Duration measurement reuses that same per-request record rather than a second
+map. `prepare_request()` stores a reading from the coordinator's injectable
+`duration_clock` beside the explicit-key snapshot, and `finalize_result()`
+reads the clock again after removing the entry, so each invocation is timed
+from its own start even when results arrive out of order. The elapsed value is
+rounded to integer milliseconds and clamped at zero, because
+`RecordingSession.record()` rejects a negative `duration_ms` and an injected
+clock can move backwards. Neither the passthrough IPC payload nor the shim's
+result carries a timing field, so the measurement stays inside the coordinator.
+
 `filter_env_subset()` applies its rules in a fixed order. CmdMox internal keys
 (`CMOX_*`, `CMD_MOX_*`) are always excluded. Explicit and allowlisted keys are
 then kept, so they override the system-key and sensitive-name exclusions when
