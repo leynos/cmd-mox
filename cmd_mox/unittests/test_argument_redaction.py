@@ -11,8 +11,10 @@ from hypothesis import strategies as st
 
 from cmd_mox import ExpectationConfigurationError
 from cmd_mox._argument_redaction import (
+    mask_argument_positions,
     mask_sensitive_positions,
     redact_sensitive_argument_values,
+    sensitive_positions,
 )
 from cmd_mox.expectations import Expectation
 
@@ -669,3 +671,30 @@ def test_mask_sensitive_positions_flags_already_redacted_query_credentials() -> 
     )
 
     assert masked == ["<redacted>"]
+
+
+@pytest.mark.parametrize(
+    ("args", "want"),
+    [
+        pytest.param(["--token", "secret"], {1}, id="option-value"),
+        pytest.param(["--token"], {1}, id="dangling-option"),
+        pytest.param(["status", "clean"], set(), id="no-secret"),
+    ],
+)
+def test_sensitive_positions_reports_the_masked_indices(
+    args: list[str], want: set[int]
+) -> None:
+    """Positions identify exactly the values a diagnostic must mask."""
+    assert sensitive_positions(args) == want
+
+
+def test_mask_argument_positions_applies_precomputed_indices() -> None:
+    """A unioned position set masks every row it is applied to."""
+    values = ["--token", "secret", "--label", "other"]
+
+    assert mask_argument_positions(values, {1, 3}) == [
+        "--token",
+        "<redacted>",
+        "--label",
+        "<redacted>",
+    ]

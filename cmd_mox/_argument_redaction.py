@@ -482,6 +482,76 @@ def redact_sensitive_argument_values(
     return list(_iter_redacted_argument_values(args, command))
 
 
+def sensitive_positions(
+    args: cabc.Sequence[str], *, command: str | None = None
+) -> set[int]:
+    """Return the indices of *args* that hold a sensitive value.
+
+    Callers that mask many rows from the same sources can union this result
+    once per source and apply it with :func:`mask_argument_positions`, instead
+    of reclassifying every source for every row.
+
+    Parameters
+    ----------
+    args : collections.abc.Sequence[str]
+        Raw arguments to classify.
+    command : str or None, optional
+        Executable name, used to preserve known non-secret short options.
+
+    Returns
+    -------
+    set[int]
+        Indices whose values are sensitive, including the position a dangling
+        sensitive option at the end of *args* would occupy.
+
+    Examples
+    --------
+    >>> sorted(sensitive_positions(["--token", "secret"]))
+    [1]
+    >>> sorted(sensitive_positions(["--token"]))
+    [1]
+    """
+    raw = list(args)
+    positions = {
+        index
+        for index, (_redacted, is_sensitive) in enumerate(
+            _iter_redacted_arguments(raw, command)
+        )
+        if is_sensitive
+    }
+    if _awaits_sensitive_value(raw, command):
+        positions.add(len(raw))
+    return positions
+
+
+def mask_argument_positions(
+    values: cabc.Sequence[str], positions: cabc.Set[int]
+) -> list[str]:
+    """Return *values* with every index in *positions* replaced by a placeholder.
+
+    Parameters
+    ----------
+    values : collections.abc.Sequence[str]
+        Already redacted values to mask further.
+    positions : collections.abc.Set[int]
+        Indices that must be replaced.
+
+    Returns
+    -------
+    list[str]
+        Diagnostic-safe values with their positions preserved.
+
+    Examples
+    --------
+    >>> mask_argument_positions(["a", "b", "c"], {1})
+    ['a', '<redacted>', 'c']
+    """
+    return [
+        REDACTED_ARGUMENT if index in positions else value
+        for index, value in enumerate(values)
+    ]
+
+
 def mask_sensitive_positions(
     expected: list[str], actual: list[str], *, command: str | None = None
 ) -> list[str]:
@@ -514,17 +584,9 @@ def mask_sensitive_positions(
     >>> mask_sensitive_positions(["", "opaque"], ["--token", "secret"])
     ['', '<redacted>']
     """
-    sensitivity = [
-        is_sensitive
-        for _redacted, is_sensitive in _iter_redacted_arguments(actual, command)
-    ]
-    masked = [
-        REDACTED_ARGUMENT if is_sensitive else value
-        for value, is_sensitive in zip(expected, sensitivity, strict=False)
-    ]
-    if _awaits_sensitive_value(actual, command) and len(masked) < len(expected):
-        masked.append(REDACTED_ARGUMENT)
-    return masked + expected[len(masked) :]
+    return mask_argument_positions(
+        expected, sensitive_positions(actual, command=command)
+    )
 
 
 def _awaits_sensitive_value(args: list[str], command: str | None) -> bool:

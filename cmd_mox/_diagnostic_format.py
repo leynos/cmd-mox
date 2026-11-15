@@ -14,8 +14,10 @@ from textwrap import indent
 
 from ._argument_redaction import (
     REDACTED_ARGUMENT,
+    mask_argument_positions,
     mask_sensitive_positions,
     redact_sensitive_argument_values,
+    sensitive_positions,
 )
 from .domain import mask_env_value
 from .test_doubles import DoubleKind
@@ -120,21 +122,28 @@ def _masked_call_arguments(
     list[list[str]]
         Masked argument rows aligned with *invocations* by position.
     """
-    peers: dict[str, list[list[str]]] = defaultdict(list)
+    rows: dict[str, list[list[str]]] = defaultdict(list)
     by_command: dict[str, list[Expectation]] = defaultdict(list)
     for inv in invocations:
-        peers[inv.command].append(list(inv.args))
+        rows[inv.command].append(list(inv.args))
     for exp in expectations:
         by_command[exp.name].append(exp)
+
+    # A peer only contributes positions to mask, so union them once per command
+    # instead of reclassifying every peer for every row.
+    peer_positions: dict[str, set[int]] = {
+        command: set().union(
+            *(sensitive_positions(row, command=command) for row in command_rows)
+        )
+        for command, command_rows in rows.items()
+    }
 
     masked: list[list[str]] = []
     for inv in invocations:
         safe = redact_sensitive_argument_values(list(inv.args), command=inv.command)
         for exp in by_command[inv.command]:
             safe = exp.redacted_arguments(safe)
-        for peer in peers[inv.command]:
-            safe = mask_sensitive_positions(safe, peer, command=inv.command)
-        masked.append(safe)
+        masked.append(mask_argument_positions(safe, peer_positions[inv.command]))
     return masked
 
 

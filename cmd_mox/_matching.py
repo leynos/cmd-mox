@@ -7,6 +7,7 @@ configuration and matching, and the verifiers with verification policy.
 
 from __future__ import annotations
 
+import dataclasses as dc
 import typing as typ
 
 from ._argument_redaction import (
@@ -20,6 +21,25 @@ if typ.TYPE_CHECKING:  # pragma: no cover - used only for typing
 
     from .expectations import ArgMatcher, Expectation
     from .ipc import Invocation
+
+
+@dc.dataclass(frozen=True, slots=True)
+class MismatchContext:
+    """Describe the policy and sibling context for a mismatch report.
+
+    Attributes
+    ----------
+    call_predicates : bool
+        Whether non-literal matchers may be invoked to describe a failure.
+        Fail-fast dispatch keeps this ``False`` so an early rejection never
+        runs caller-supplied code.
+    mask_sources : collections.abc.Sequence[collections.abc.Sequence[str]] or None
+        Additional argument rows whose sensitive positions must be masked in
+        the rendered reason, such as sibling ordered calls and expectations.
+    """
+
+    call_predicates: bool = True
+    mask_sources: cabc.Sequence[cabc.Sequence[str]] | None = None
 
 
 def matcher_accepts(matcher: ArgMatcher, value: str) -> bool:
@@ -41,15 +61,17 @@ def matcher_mismatch(
     invocation: Invocation,
     matchers: cabc.Sequence[ArgMatcher],
     *,
-    call_predicates: bool,
+    context: MismatchContext,
 ) -> str | None:
     """Return the first arity or per-position matcher failure.
 
     Positions are examined in argument order so the reported failure is
-    genuinely the first one, not merely the first literal matcher. The
-    ``call_predicates`` flag keeps fail-fast dispatch callback-free: an early
-    rejection may not run caller-supplied code, so predicates are skipped
-    there and left for verification.
+    genuinely the first one, not merely the first literal matcher.
+    ``context.call_predicates`` keeps fail-fast dispatch callback-free: an
+    early rejection may not run caller-supplied code, so predicates are
+    skipped there and left for verification. ``context.mask_sources`` lets a
+    verification path mask values a sibling call or expectation marks as
+    sensitive.
 
     Parameters
     ----------
@@ -59,8 +81,8 @@ def matcher_mismatch(
         Call being matched.
     matchers : collections.abc.Sequence[object]
         Expected matchers, aligned with the invocation arguments.
-    call_predicates : bool
-        Whether non-literal matchers may be invoked.
+    context : MismatchContext
+        Description policy and any sibling masking sources.
 
     Returns
     -------
@@ -71,7 +93,9 @@ def matcher_mismatch(
     """
     if len(invocation.args) != len(matchers):
         return f"expected {len(matchers)} args but got {len(invocation.args)}"
-    actual, expected = _redacted_matcher_arguments(exp, invocation, matchers)
+    actual, expected = _redacted_matcher_arguments(
+        exp, invocation, matchers, context.mask_sources
+    )
     for index, (arg, matcher) in enumerate(zip(invocation.args, matchers, strict=True)):
         if isinstance(matcher, str):
             # Literal equality cannot raise, so report it without the
@@ -79,7 +103,7 @@ def matcher_mismatch(
             if not matcher_accepts(matcher, arg):
                 return f"arg[{index}]={actual[index]!r} != {expected[index]!r}"
             continue
-        if not call_predicates:
+        if not context.call_predicates:
             continue
         detail = _describe_predicate_failure(matcher, arg, expected=expected[index])
         if detail is not None:
@@ -118,7 +142,10 @@ def _describe_predicate_failure(
 
 
 def _redacted_matcher_arguments(
-    exp: Expectation, invocation: Invocation, matchers: cabc.Sequence[object]
+    exp: Expectation,
+    invocation: Invocation,
+    matchers: cabc.Sequence[object],
+    mask_sources: cabc.Sequence[cabc.Sequence[str]] | None,
 ) -> tuple[list[str], list[str]]:
     """Return redacted invocation arguments and literal matcher values.
 
@@ -135,11 +162,40 @@ def _redacted_matcher_arguments(
     expected = redact_sensitive_argument_values(literals, command=exp.name)
     # An option name may itself be a predicate matcher, so the matcher list
     # cannot reveal which positions carry a credential.
-    return actual, mask_sensitive_positions(expected, invocation.args, command=exp.name)
+    expected = mask_sensitive_positions(expected, invocation.args, command=exp.name)
+    return _mask_shared_positions(
+        actual, expected, command=exp.name, mask_sources=mask_sources
+    )
+
+
+def _mask_shared_positions(
+    actual: list[str],
+    expected: list[str],
+    *,
+    command: str,
+    mask_sources: cabc.Sequence[cabc.Sequence[str]] | None,
+) -> tuple[list[str], list[str]]:
+    """Mask both rows at every position the sibling sources mark sensitive.
+
+    A sibling call or expectation can name the option that marks a value as a
+    credential even when neither row under description does.
+
+    Returns
+    -------
+    tuple[list[str], list[str]]
+        Diagnostic-safe actual and expected arguments.
+    """
+    for source in mask_sources or ():
+        actual = mask_sensitive_positions(actual, list(source), command=command)
+        expected = mask_sensitive_positions(expected, list(source), command=command)
+    return actual, expected
 
 
 def redacted_literal_argument_mismatch(
-    exp: Expectation, invocation: Invocation, expected: list[str]
+    exp: Expectation,
+    invocation: Invocation,
+    expected: list[str],
+    mask_sources: cabc.Sequence[cabc.Sequence[str]] | None = None,
 ) -> str:
     """Return a redacted description of unequal literal arguments.
 
@@ -154,5 +210,8 @@ def redacted_literal_argument_mismatch(
     # which of its values the call treats as a credential.
     safe_expected = mask_sensitive_positions(
         safe_expected, invocation.args, command=exp.name
+    )
+    actual, safe_expected = _mask_shared_positions(
+        actual, safe_expected, command=exp.name, mask_sources=mask_sources
     )
     return f"arguments {actual!r} != {safe_expected!r}"

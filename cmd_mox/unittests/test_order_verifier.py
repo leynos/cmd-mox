@@ -91,6 +91,28 @@ def test_order_verifier_masks_observed_calls_from_every_same_command_call() -> N
     assert "deploy('--label', '<redacted>')" in message
 
 
+def test_order_verifier_masks_the_reason_from_sibling_option_names() -> None:
+    """The Reason section masks a value only a sibling expectation marks secret."""
+    label = Expectation("deploy").with_args("--label", "credential-value").in_order()
+    token = Expectation("deploy").with_args("--token", "credential-value").in_order()
+    other = Expectation("deploy").with_args("--other", "credential-value").in_order()
+    journal = [
+        _invocation("deploy", "--other", "credential-value"),
+        _invocation("deploy", "--token", "credential-value"),
+        _invocation("deploy", "--label", "credential-value"),
+    ]
+
+    with pytest.raises(UnexpectedCommandError) as excinfo:
+        OrderVerifier([label, token, other]).verify(journal)
+
+    message = str(excinfo.value)
+    assert "credential-value" not in message
+    assert (
+        "Reason:\n  arguments ['--other', '<redacted>'] != ['--label', '<redacted>']"
+        in message
+    ), "the reason must mask positions a sibling expectation marks sensitive"
+
+
 def test_order_verifier_masks_expected_values_from_sibling_expectations() -> None:
     """A sibling expectation's option name marks a shared literal as a secret."""
     matcher = (

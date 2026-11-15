@@ -368,7 +368,7 @@ class OrderVerifier:
         mask_calls: cabc.Sequence[cabc.Sequence[str]],
     ) -> None:
         """Raise a detailed error for the first out-of-order invocation."""
-        reason = exp.explain_mismatch(actual_inv)
+        reason = exp.explain_mismatch(actual_inv, mask_sources=mask_calls)
         mismatch = "\n".join([
             f"position {index + 1}",
             "expected:\n"

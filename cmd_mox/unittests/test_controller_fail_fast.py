@@ -262,8 +262,13 @@ def test_fail_fast_allows_matching_calls() -> None:
         mox.verify()
 
 
-def test_fail_fast_applies_expectation_environment() -> None:
+def test_fail_fast_applies_expectation_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Environment constraints are ignored by the early check but still applied."""
+    # The shim inherits this process's environment, so an ambient HELLO would
+    # conflict with the expectation's override and mask the injection path.
+    monkeypatch.delenv("HELLO", raising=False)
     with _running_controller(fail_fast=True) as mox:
         mox.mock("envcmd").with_args("status").with_env({"HELLO": "WORLD"}).returns(
             stdout="done"

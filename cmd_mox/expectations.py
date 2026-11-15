@@ -16,6 +16,9 @@ from ._argument_redaction import (
     redact_sensitive_argument_values as _redact_sensitive_argument_values,
 )
 from ._matching import (
+    MismatchContext as _MismatchContext,
+)
+from ._matching import (
     matcher_accepts as _matcher_accepts,
 )
 from ._matching import (
@@ -352,7 +355,10 @@ class Expectation:
             return literal
         if self.match_args is not None:
             mismatch = _matcher_mismatch(
-                self, invocation, self.match_args, call_predicates=False
+                self,
+                invocation,
+                self.match_args,
+                context=_MismatchContext(call_predicates=False),
             )
             if mismatch is not None:
                 return mismatch
@@ -385,25 +391,40 @@ class Expectation:
         literals = [item if isinstance(item, str) else "" for item in expected]
         return _mask_sensitive_positions(safe, literals, command=self.name)
 
-    def explain_mismatch(self, invocation: Invocation) -> str:
+    def explain_mismatch(
+        self,
+        invocation: Invocation,
+        *,
+        mask_sources: cabc.Sequence[cabc.Sequence[str]] | None = None,
+    ) -> str:
         """Return a reason why ``invocation`` failed to match.
+
+        Parameters
+        ----------
+        invocation : Invocation
+            Call that failed to match.
+        mask_sources : collections.abc.Sequence[collections.abc.Sequence[str]], optional
+            Sibling argument rows whose sensitive positions must be masked in
+            the reason, such as the other ordered calls and expectations.
 
         Returns
         -------
         str
             A human-readable explanation of the first mismatch found.
         """
-        for checker in (
-            self._explain_command_mismatch,
-            self._literal_args_mismatch,
-            self._explain_match_args_mismatch,
-            self._explain_stdin_mismatch,
-            self._explain_env_mismatch,
-        ):
-            reason = checker(invocation)
-            if reason:
-                return reason
-        return "args, stdin, or env mismatch"
+        reason = self._explain_command_mismatch(invocation)
+        if reason:
+            return reason
+        reason = self._literal_args_mismatch(invocation, mask_sources)
+        if reason:
+            return reason
+        reason = self._explain_match_args_mismatch(invocation, mask_sources)
+        if reason:
+            return reason
+        reason = self._explain_stdin_mismatch(invocation)
+        if reason:
+            return reason
+        return self._explain_env_mismatch(invocation) or "args, stdin, or env mismatch"
 
     def _explain_command_mismatch(self, invocation: Invocation) -> str | None:
         """Return a message if the command name differs.
@@ -417,7 +438,11 @@ class Expectation:
             return None
         return f"command {invocation.command!r} != {self.name!r}"
 
-    def _literal_args_mismatch(self, invocation: Invocation) -> str | None:
+    def _literal_args_mismatch(
+        self,
+        invocation: Invocation,
+        mask_sources: cabc.Sequence[cabc.Sequence[str]] | None = None,
+    ) -> str | None:
         """Return the literal-argument mismatch description, if any.
 
         Returns
@@ -428,9 +453,15 @@ class Expectation:
         """
         if self.args is None or invocation.args == self.args:
             return None
-        return _redacted_literal_argument_mismatch(self, invocation, self.args)
+        return _redacted_literal_argument_mismatch(
+            self, invocation, self.args, mask_sources
+        )
 
-    def _explain_match_args_mismatch(self, invocation: Invocation) -> str | None:
+    def _explain_match_args_mismatch(
+        self,
+        invocation: Invocation,
+        mask_sources: cabc.Sequence[cabc.Sequence[str]] | None = None,
+    ) -> str | None:
         """Return a message when matcher-based args fail.
 
         Returns
@@ -442,7 +473,10 @@ class Expectation:
         if self.match_args is None:
             return None
         return _matcher_mismatch(
-            self, invocation, self.match_args, call_predicates=True
+            self,
+            invocation,
+            self.match_args,
+            context=_MismatchContext(mask_sources=mask_sources),
         )
 
     def _explain_stdin_mismatch(self, invocation: Invocation) -> str | None:
