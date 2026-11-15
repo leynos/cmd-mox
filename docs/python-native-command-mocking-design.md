@@ -3548,6 +3548,12 @@ zero. Because the interval spans directive issue to result receipt, it includes
 the IPC round trip to and from the shim. Injecting the clock keeps unit tests
 deterministic without changing the IPC payload, which carries no timing field.
 
+The end-to-end test that exercises this path resolves the generated shim
+through the shared `IS_WINDOWS` rule and the same subprocess timeout as the
+other controller tests, so the Windows `.cmd` variant is located by the same
+classification that generates it, and both can be patched through the seams
+described in [§8.13](#813-design-decisions-for-the-platform-override).
+
 #### 9.10.6 Scrubber as Protocol
 
 **Decision:** Define `Scrubber` as a `typing.Protocol` with a single `scrub()`
