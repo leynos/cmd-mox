@@ -74,12 +74,16 @@ re-evaluating the matchers.
 `resolve_flags()` applies one precedence order to both `fail_fast` and
 `auto_lifecycle`: a fixture parameter dictionary override is most specific,
 then the marker keyword, then the command-line option, then the ini value.
-`CmdMoxFlags` carries the resolved pair, and a parameter dictionary must name
-at least one recognized key so a misspelt sole key is not silently ignored.
-Every override is validated as a real `bool`: a non-boolean marker keyword or
-fixture parameter raises `TypeError` rather than being coerced, because
-`bool("False")` would silently select the opposite setting. A dictionary with
-neither recognized key raises `TypeError` too.
+`CmdMoxFlags` carries the resolved pair. The fixture parameter may be a
+boolean, which keeps its historical meaning and configures only
+`auto_lifecycle`, or a dictionary keyed by `auto_lifecycle` and `fail_fast`. A
+dictionary must name at least one recognized key so a misspelt sole key is not
+silently ignored, and otherwise raises `TypeError`; extra keys are ignored once
+a recognized key is present. The selected override is validated as a real
+`bool`, so a non-boolean fixture parameter or marker keyword raises `TypeError`
+rather than being coerced, because `bool("False")` would silently select the
+opposite setting. Validation applies to the source that wins: a valid fixture
+parameter shadows a non-boolean marker value without an error.
 
 `cmd_mox/_lifecycle_checks.py` holds the precondition checks that the
 controller and its lifecycle share. The helpers take the `EnvironmentManager`
