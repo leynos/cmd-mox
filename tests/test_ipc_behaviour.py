@@ -17,7 +17,11 @@ if typ.TYPE_CHECKING:
 import pytest
 
 from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
+from cmd_mox.environment import (
+    CMOX_IPC_SOCKET_ENV,
+    CMOX_IPC_TIMEOUT_ENV,
+    temporary_env,
+)
 from cmd_mox.ipc._server_core import _encode_response
 from cmd_mox.ipc.models import Response
 from cmd_mox.ipc.wire import response_from_payload
@@ -199,12 +203,16 @@ def test_shim_errors_when_socket_unset() -> None:
         assert result.returncode == 1, "Assertion failed"
 
 
-def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_shim_errors_on_invalid_timeout() -> None:
     """Shim prints an error if timeout env var is invalid."""
     with EnvironmentManager() as env:
-        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "dummy")
-        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "nan")
-        result = _run_unserved_shim(env, "baz")
+        # End the overrides before the manager restores its snapshot, so the
+        # deleted socket path cannot outlive the temporary environment.
+        with temporary_env({
+            CMOX_IPC_SOCKET_ENV: "dummy",
+            CMOX_IPC_TIMEOUT_ENV: "nan",
+        }):
+            result = _run_unserved_shim(env, "baz")
         assert not result.stdout, "Assertion failed"
         assert result.stderr == "IPC error: invalid CMOX_IPC_TIMEOUT\n", (
             "Shim did not emit the bounded invalid-timeout diagnostic"
