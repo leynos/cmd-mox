@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from cmd_mox.domain import Invocation, PassthroughResult
-from cmd_mox.ipc.json_utils import (
-    parse_json_safely,
-    validate_invocation_payload,
-    validate_passthrough_payload,
-)
+import pytest
+
+from cmd_mox.ipc.json_utils import JSONParseError, decode_json, parse_json_safely
+
+_DEEP_JSON = b"[" * 100_000 + b"]" * 100_000
+_OVERSIZED_INTEGER_JSON = b'{"value": ' + b"9" * 5_000 + b"}"
 
 
 def test_parse_json_safely_accepts_valid_object() -> None:
@@ -32,61 +32,29 @@ def test_parse_json_safely_handles_invalid_utf8() -> None:
     assert parse_json_safely(b"\x80") is None, "Assertion failed"
 
 
-def test_validate_invocation_payload_returns_model() -> None:
-    """validate_invocation_payload should build Invocation instances."""
-    payload = {
-        "command": "cmd",
-        "args": [],
-        "stdin": "",
-        "env": {},
-    }
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param(
+            b'{"kind": "invocation", "kind": "passthrough_result"}',
+            id="top-level-duplicate-key",
+        ),
+        pytest.param(b'{"section": {"key": 1, "key": 2}}', id="nested-duplicate-key"),
+        pytest.param(_OVERSIZED_INTEGER_JSON, id="oversized-integer"),
+        pytest.param(_DEEP_JSON, id="excessive-nesting"),
+    ],
+)
+def test_unbounded_json_is_a_bounded_parse_failure(data: bytes) -> None:
+    """Duplicate keys and parser limits surface as one bounded error."""
+    with pytest.raises(JSONParseError):
+        decode_json(data)
 
-    result = validate_invocation_payload(payload)
-
-    assert isinstance(result, Invocation), "Assertion failed"
-    assert result.command == "cmd", "Assertion failed"
-
-
-def test_validate_invocation_payload_handles_missing_fields() -> None:
-    """Missing invocation fields should return None."""
-    assert validate_invocation_payload({}) is None, "Assertion failed"
-
-
-def test_validate_invocation_payload_rejects_unexpected_fields() -> None:
-    """Unexpected invocation fields should return None."""
-    payload = {"command": "cmd", "args": [], "stdin": "", "env": {}, "extra": 1}
-
-    assert validate_invocation_payload(payload) is None, "Unexpected field accepted"
+    assert parse_json_safely(data) is None, "Unsafe input survived the safe parser"
 
 
-def test_validate_passthrough_payload_returns_model() -> None:
-    """validate_passthrough_payload should build PassthroughResult instances."""
-    payload = {
-        "invocation_id": "123",
-        "stdout": "out",
-        "stderr": "err",
-        "exit_code": 0,
-    }
+def test_duplicate_key_error_does_not_echo_the_key() -> None:
+    """A duplicate-key failure must not copy untrusted key text into its message."""
+    with pytest.raises(JSONParseError) as excinfo:
+        decode_json(b'{"s3cr3t-key": 1, "s3cr3t-key": 2}')
 
-    result = validate_passthrough_payload(payload)
-
-    assert isinstance(result, PassthroughResult), "Assertion failed"
-    assert result.invocation_id == "123", "Assertion failed"
-
-
-def test_validate_passthrough_payload_handles_missing_fields() -> None:
-    """Missing passthrough fields should return None."""
-    assert validate_passthrough_payload({}) is None, "Assertion failed"
-
-
-def test_validate_passthrough_payload_rejects_unexpected_fields() -> None:
-    """Unexpected passthrough fields should return None."""
-    payload = {
-        "invocation_id": "1",
-        "stdout": "",
-        "stderr": "",
-        "exit_code": 0,
-        "extra": 1,
-    }
-
-    assert validate_passthrough_payload(payload) is None, "Unexpected field accepted"
+    assert "s3cr3t-key" not in str(excinfo.value), "Payload key reached the error"

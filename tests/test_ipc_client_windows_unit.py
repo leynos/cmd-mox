@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import threading
 import types
@@ -11,6 +12,8 @@ import pytest
 
 from cmd_mox.ipc import windows
 from cmd_mox.ipc.client import RetryConfig, _ConnectionContext
+from cmd_mox.ipc.constants import KIND_INVOCATION
+from cmd_mox.ipc.wire import WireFormatError
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -150,6 +153,78 @@ def test_send_pipe_request_writes_and_reads(monkeypatch: pytest.MonkeyPatch) -> 
     assert response == b"{}", "Assertion failed"
     assert handle_log == ["{}"], "Assertion failed"
     assert fake_handle.closed is True, "Assertion failed"
+
+
+@pytest.mark.parametrize(
+    ("reply", "error_type", "match"),
+    [
+        pytest.param(
+            json.dumps({
+                "stdout": "",
+                "stderr": "",
+                "exit_code": 0,
+                "env": {},
+                "passthrough": {"invocation_id": "abc"},
+            }).encode(),
+            WireFormatError,
+            "passthrough is missing",
+            id="wrong-typed-passthrough",
+        ),
+        pytest.param(
+            b'{"stdout": "", "passthrough": {"invocation_id": "a"}, '
+            b'"passthrough": null}',
+            RuntimeError,
+            "Invalid JSON from IPC server",
+            id="duplicate-key",
+        ),
+        pytest.param(
+            b'{"exit_code": ' + b"9" * 5_000 + b"}",
+            RuntimeError,
+            "Invalid JSON from IPC server",
+            id="oversized-integer",
+        ),
+        pytest.param(
+            b"[" * 100_000 + b"]" * 100_000,
+            RuntimeError,
+            "Invalid JSON from IPC server",
+            id="excessive-nesting",
+        ),
+    ],
+)
+def test_unexpected_pipe_reply_raises_bounded_client_error(
+    monkeypatch: pytest.MonkeyPatch,
+    reply: bytes,
+    error_type: type[Exception],
+    match: str,
+) -> None:
+    """A named-pipe reply that cannot be decoded surfaces as a bounded error."""
+    from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
+    from cmd_mox.ipc import client
+
+    fake_handle = types.SimpleNamespace()
+    monkeypatch.setattr(
+        client,
+        "_connect_pipe_with_retries",
+        lambda *_args, **_kwargs: fake_handle,
+    )
+    monkeypatch.setattr(
+        client,
+        "win32file",
+        types.SimpleNamespace(
+            WriteFile=lambda *_args, **_kwargs: None,
+            FlushFileBuffers=lambda *_args, **_kwargs: None,
+            CloseHandle=lambda _handle: None,
+            ReadFile=lambda *_args, **_kwargs: (0, reply),
+        ),
+    )
+    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "pipe")
+
+    with pytest.raises(error_type, match=match):
+        client._perform_request(
+            b"{}",
+            KIND_INVOCATION,
+            _ConnectionContext(timeout=0.1, retry_config=RetryConfig()),
+        )
 
 
 def test_send_pipe_request_closes_handle_on_timeout(

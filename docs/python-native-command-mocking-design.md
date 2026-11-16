@@ -690,10 +690,16 @@ is as follows:
 
 6. **Server-Side Processing:** An IPC request-handler worker thread in the main
    process receives the JSON payload and uses `cmd_mox.ipc.wire` to decode it
-   into a domain `Invocation` object. The controller resolves the invocation
-   against its configured double and expectations, then selects the response. A
-   configured `.runs(handler)` callback runs on an IPC request-handler worker
-   thread in the main test process.
+   into a domain `Invocation` object. Decoding is strict: every field is
+   type-checked and a malformed payload raises `WireFormatError`, which the
+   shared pipeline reports as an `invalid_request` rejection without
+   dispatching a handler. The shared JSON loader rejects duplicate object keys
+   at every depth, and parser limits such as oversized integers or excessive
+   nesting become a bounded parse rejection rather than an unhandled exception.
+   The controller resolves the invocation against its configured double and
+   expectations, then selects the response. A configured `.runs(handler)`
+   callback runs on an IPC request-handler worker thread in the main test
+   process.
 
 7. **Response Delivery:** The controller applies the response to the invocation
    and appends it to the in-memory Invocation Journal only when it is
@@ -1125,7 +1131,9 @@ classDiagram
     InnerServerFactory ..> _InnerServer : creates and caches
     _InnerServer --> _IPCHandler : uses
     class WireMapping {
-        + request_from_payload() Invocation
+        + decode_invocation() Invocation
+        + decode_passthrough_result() PassthroughResult
+        + decode_response() Response
         + response_to_payload() dict
     }
     _IPCHandler --> WireMapping : maps payloads

@@ -1,17 +1,81 @@
-"""Shared JSON parsing helpers for IPC messaging."""
+"""Bounded JSON decoding shared by the IPC client and server.
+
+`decode_json` is the single entry point for both requests and replies: it
+rejects duplicate keys at any depth and translates parser limits into
+`JSONParseError`. `parse_json_safely` wraps it for callers that want either a
+mapping or a bounded failure, and reports no payload content either way.
+"""
 
 from __future__ import annotations
 
 import json
 import typing as typ
 
-from cmd_mox.domain import Invocation, PassthroughResult
 
-from .wire import request_from_payload
+class JSONParseError(ValueError):
+    """Raised when raw IPC bytes cannot be decoded as bounded JSON.
+
+    The message is deliberately fixed. Parser exceptions can embed a snippet
+    of the untrusted payload, so callers must not log the cause.
+    """
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, typ.Any]]) -> dict[str, typ.Any]:
+    """Build an object from *pairs*, rejecting a repeated key at any depth."""
+    result: dict[str, typ.Any] = {}
+    for key, value in pairs:
+        if key in result:
+            msg = "duplicate object key"
+            raise JSONParseError(msg)
+        result[key] = value
+    return result
+
+
+def decode_json(data: bytes) -> object:
+    """Decode one JSON value from *data*, rejecting duplicate object keys.
+
+    Parameters
+    ----------
+    data : bytes
+        Raw wire bytes, treated as untrusted.
+
+    Returns
+    -------
+    object
+        The decoded JSON value, narrowed by the caller after validation.
+
+    Raises
+    ------
+    JSONParseError
+        If *data* is not UTF-8, is not valid JSON, repeats a key in any
+        object, nests too deeply, or contains an integer beyond Python's
+        string-conversion limit.
+
+    Notes
+    -----
+    A parser that accepted duplicate keys would let a later value silently
+    replace an earlier one before the strict wire decoders see it. For
+    example, a malformed ``passthrough`` directive followed by
+    ``"passthrough": null`` would become an ordinary response.
+    """
+    try:
+        return json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except JSONParseError:
+        raise
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        # ValueError covers JSONDecodeError, duplicate keys, and oversized
+        # integer strings; RecursionError covers excessive nesting.
+        raise JSONParseError from exc
 
 
 def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
     """Return a JSON object parsed from *data* or ``None`` on failure.
+
+    Duplicate keys anywhere in the document are rejected, as are parser
+    failures such as excessive nesting or oversized integers.
 
     Returns
     -------
@@ -19,40 +83,12 @@ def parse_json_safely(data: bytes) -> dict[str, typ.Any] | None:
         The decoded object when *data* contains a JSON object.
     """
     try:
-        payload = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = decode_json(data)
+    except JSONParseError:
         return None
     if not isinstance(payload, dict):
         return None
-    return payload
+    return typ.cast("dict[str, typ.Any]", payload)
 
 
-def validate_invocation_payload(payload: dict[str, typ.Any]) -> Invocation | None:
-    """Return an :class:`Invocation` if *payload* has the required fields.
-
-    Returns
-    -------
-    Invocation or None
-        The validated invocation, or ``None`` for malformed payloads.
-    """
-    return request_from_payload(payload, Invocation)
-
-
-def validate_passthrough_payload(
-    payload: dict[str, typ.Any],
-) -> PassthroughResult | None:
-    """Return a :class:`PassthroughResult` for passthrough result payloads.
-
-    Returns
-    -------
-    PassthroughResult or None
-        The validated result, or ``None`` for malformed payloads.
-    """
-    return request_from_payload(payload, PassthroughResult)
-
-
-__all__ = [
-    "parse_json_safely",
-    "validate_invocation_payload",
-    "validate_passthrough_payload",
-]
+__all__ = ["JSONParseError", "decode_json", "parse_json_safely"]

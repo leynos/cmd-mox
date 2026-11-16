@@ -245,17 +245,43 @@ def test_request_pipeline_logs_invalid_request(
     _assert_single_counter_increment(emitted, counters_before)
 
 
+@pytest.mark.parametrize(
+    ("raw", "secrets"),
+    [
+        pytest.param(b"not-json", [], id="malformed-json"),
+        pytest.param(
+            b'{"kind": "invocation", "s3cr3t-key": 1, "s3cr3t-key": 2}',
+            ["s3cr3t-key"],
+            id="duplicate-key",
+        ),
+        pytest.param(
+            b'{"kind": "invocation", "stdout": "s3cr3t-value", "exit_code": '
+            + b"9" * 5_000
+            + b"}",
+            ["s3cr3t-value"],
+            id="oversized-integer",
+        ),
+        pytest.param(b"[" * 100_000 + b"]" * 100_000, [], id="excessive-nesting"),
+    ],
+)
 def test_request_pipeline_logs_rejection_frame(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    raw: bytes,
+    secrets: list[str],
 ) -> None:
     """Parse failures should return an error frame and one bounded outcome."""
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
-    ipc_server = IPCServer(tmp_path / "ipc.sock")
+    ipc_server = _RecordingIPCServer(tmp_path / "ipc.sock")
 
     counters_before = _observability.counter_snapshot()
     with _observability.capture_events() as emitted:
-        result = _server_core._request_pipeline(ipc_server, b"not-json")
+        result = _server_core._request_pipeline(ipc_server, raw)
 
+    assert not ipc_server.invocations, "Invocation hook ran for an unparsable request"
+    assert not ipc_server.passthrough_results, (
+        "Passthrough hook ran for an unparsable request"
+    )
     assert result.response_bytes is not None, (
         "Parse failure did not return an error frame"
     )
@@ -273,6 +299,10 @@ def test_request_pipeline_logs_rejection_frame(
     assert event["error_category"] == "RequestParseError", "Wrong error"
     _assert_bounded_duration(event)
     _assert_single_counter_increment(emitted, counters_before)
+    _assert_bounded_fields(event, secrets)
+    rendered = result.response_bytes.decode("utf-8")
+    for secret in secrets:
+        assert secret not in rendered, f"{secret!r} leaked into the rejection frame"
 
 
 def test_rejection_result_builds_frame_without_emitting_observability(
@@ -379,6 +409,111 @@ def test_request_pipeline_never_logs_malformed_payload_contents(
         record.getMessage()
         for record in caplog.records
         if sentinel in record.getMessage()
+    ]
+    assert not leaked, f"payload content reached the log: {leaked}"
+
+
+class _RecordingIPCServer(IPCServer):
+    """IPC server that records hook calls for rejection assertions."""
+
+    def __init__(self, socket_path: Path) -> None:
+        """Create a server with empty hook-call records."""
+        super().__init__(socket_path)
+        self.invocations: list[Invocation] = []
+        self.passthrough_results: list[PassthroughResult] = []
+
+    def handle_invocation(self, invocation: Invocation) -> Response:
+        """Record an invocation that should never be dispatched."""
+        self.invocations.append(invocation)
+        return Response(stdout="handled")
+
+    def handle_passthrough_result(self, result: PassthroughResult) -> Response:
+        """Record a passthrough result that should never be dispatched."""
+        self.passthrough_results.append(result)
+        return Response(stdout="handled")
+
+
+class _RejectedRequest(typ.NamedTuple):
+    """A malformed request body and the payload text that must not leak."""
+
+    kind: str
+    body: dict[str, object]
+    secrets: list[str]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            _RejectedRequest(
+                _server_core.KIND_INVOCATION,
+                {
+                    "command": "s3cr3t-command",
+                    "args": ["s3cr3t-arg", 5],
+                    "stdin": "",
+                    "env": {"SECRET_KEY": "s3cr3t-env"},
+                },
+                ["s3cr3t-command", "s3cr3t-arg", "s3cr3t-env", "SECRET_KEY"],
+            ),
+            id="invocation-wrong-type",
+        ),
+        pytest.param(
+            _RejectedRequest(
+                _server_core.KIND_PASSTHROUGH_RESULT,
+                {
+                    "invocation_id": "s3cr3t-id",
+                    "stdout": 5,
+                    "stderr": "",
+                    "exit_code": 0,
+                },
+                ["s3cr3t-id"],
+            ),
+            id="passthrough-wrong-type",
+        ),
+    ],
+)
+def test_request_pipeline_rejects_wrong_types_without_dispatch(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    case: _RejectedRequest,
+) -> None:
+    """A wrong-typed body is rejected before either hook runs."""
+    caplog.set_level("DEBUG")
+    ipc_server = _RecordingIPCServer(tmp_path / "ipc.sock")
+    counters_before = _observability.counter_snapshot()
+
+    with _observability.capture_events() as emitted:
+        result = _server_core._request_pipeline(
+            ipc_server,
+            json.dumps({"kind": case.kind, **case.body}).encode(),
+        )
+
+    assert not ipc_server.invocations, "Invocation hook ran for a rejected payload"
+    assert not ipc_server.passthrough_results, (
+        "Passthrough hook ran for a rejected payload"
+    )
+    assert result.response_bytes is not None, "Rejection did not return a frame"
+    assert result.correlation_id is None, "Rejected payload must not carry correlation"
+    frame = json.loads(result.response_bytes.decode("utf-8"))
+    assert frame["exit_code"] == 1, "Rejected payload must fail"
+    assert frame["stderr"] == "IPC request payload failed validation\n", (
+        "Rejection frame changed"
+    )
+    [event] = _dispatch_events(caplog)
+    assert event["kind"] == case.kind, "Wrong request kind"
+    assert event["outcome"] == "invalid_request", "Wrong dispatch outcome"
+    assert event["error_category"] == "ValidationError", "Wrong error category"
+    assert "request" not in event, "Rejected payload must not be attached"
+    _assert_bounded_duration(event)
+    _assert_single_counter_increment(emitted, counters_before)
+    _assert_bounded_fields(event, case.secrets)
+    rendered = result.response_bytes.decode("utf-8")
+    for secret in case.secrets:
+        assert secret not in rendered, f"{secret!r} leaked into the rejection frame"
+    leaked = [
+        record.getMessage()
+        for record in caplog.records
+        if any(secret in record.getMessage() for secret in case.secrets)
     ]
     assert not leaked, f"payload content reached the log: {leaked}"
 

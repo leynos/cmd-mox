@@ -481,7 +481,7 @@ def _decode_response(raw: bytes) -> Response:
     if parsed is None:
         msg = "Invalid JSON from IPC server"
         raise RuntimeError(msg)
-    return wire.response_from_payload(parsed)
+    return wire.decode_response(parsed)
 
 
 def _should_retry_pipe_error(exc: object, attempt: int, max_retries: int) -> bool:

@@ -17,7 +17,11 @@ if typ.TYPE_CHECKING:
 import pytest
 
 from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
-from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
+from cmd_mox.environment import (
+    CMOX_IPC_SOCKET_ENV,
+    CMOX_IPC_TIMEOUT_ENV,
+    temporary_env,
+)
 from cmd_mox.ipc._server_core import _encode_response
 from cmd_mox.ipc.models import Response
 from cmd_mox.ipc.wire import response_from_payload
@@ -199,12 +203,16 @@ def test_shim_errors_when_socket_unset() -> None:
         assert result.returncode == 1, "Assertion failed"
 
 
-def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_shim_errors_on_invalid_timeout() -> None:
     """Shim prints an error if timeout env var is invalid."""
     with EnvironmentManager() as env:
-        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "dummy")
-        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "nan")
-        result = _run_unserved_shim(env, "baz")
+        # End the overrides before the manager restores its snapshot, so the
+        # deleted socket path cannot outlive the temporary environment.
+        with temporary_env({
+            CMOX_IPC_SOCKET_ENV: "dummy",
+            CMOX_IPC_TIMEOUT_ENV: "nan",
+        }):
+            result = _run_unserved_shim(env, "baz")
         assert not result.stdout, "Assertion failed"
         assert result.stderr == "IPC error: invalid CMOX_IPC_TIMEOUT\n", (
             "Shim did not emit the bounded invalid-timeout diagnostic"
@@ -212,14 +220,10 @@ def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None
         assert result.returncode == 1, "Assertion failed"
 
 
-def test_generated_shim_reports_server_rejection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_generated_shim_reports_server_rejection() -> None:
     """A rejection response crosses the Unix socket into the shim diagnostic."""
     with EnvironmentManager() as env:
-        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
-        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
-        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "1.0")
+        env.export_ipc_environment(timeout=1.0)
         response_bytes = _encode_response(
             Response(stderr="IPC request payload failed validation\n", exit_code=1)
         )
@@ -237,14 +241,113 @@ def test_generated_shim_reports_server_rejection(
     assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
 
 
-def test_generated_shim_reports_unix_response_timeout(
+def _run_marker_shim(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    response_bytes: bytes,
+) -> tuple[subprocess.CompletedProcess[str], float, Path]:
+    """Run a shim whose command would touch a marker if it executed.
+
+    Returns
+    -------
+    tuple[subprocess.CompletedProcess[str], float, Path]
+        The shim result, its elapsed duration, and the marker path.
+    """
+    marker = tmp_path / "marker"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    command = "marker-command"
+    script = bin_dir / command
+    script.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    with EnvironmentManager() as env:
+        # Let the manager own the IPC variables: ``monkeypatch`` would capture
+        # the manager's values and restore a socket path that no longer exists.
+        env.export_ipc_environment(timeout=1.0)
+        result, elapsed = _run_shim_against_socket_peer(
+            env,
+            command,
+            response_bytes=response_bytes,
+        )
+    return result, elapsed, marker
+
+
+@pytest.mark.parametrize(
+    "passthrough",
+    [
+        pytest.param({"invocation_id": "abc"}, id="missing-lookup-path"),
+        pytest.param(
+            {
+                "invocation_id": "abc",
+                "lookup_path": "/bin/echo",
+                "timeout": "soon",
+            },
+            id="wrong-timeout",
+        ),
+    ],
+)
+def test_generated_shim_rejects_malformed_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    passthrough: dict[str, object],
 ) -> None:
+    """A malformed directive exits non-zero before the real command runs."""
+    response_bytes = json.dumps({
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+        "env": {},
+        "passthrough": passthrough,
+    }).encode()
+
+    result, elapsed, marker = _run_marker_shim(monkeypatch, tmp_path, response_bytes)
+
+    assert result.returncode == 1, "Malformed directive did not fail the shim"
+    assert result.stderr == "IPC error: IPC operation failed\n", (
+        "Shim did not print the bounded IPC diagnostic"
+    )
+    assert not marker.exists(), "The real command ran despite a malformed directive"
+    assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
+
+
+@pytest.mark.parametrize(
+    "response_bytes",
+    [
+        pytest.param(
+            b'{"stdout": "", "stderr": "", "exit_code": 0, '
+            b'"passthrough": {"invocation_id": "a", "lookup_path": "/bin/echo"}, '
+            b'"passthrough": null}',
+            id="duplicate-passthrough-key",
+        ),
+        pytest.param(
+            b'{"stdout": "", "exit_code": ' + b"9" * 5_000 + b"}",
+            id="oversized-integer",
+        ),
+        pytest.param(b"[" * 100_000 + b"]" * 100_000, id="excessive-nesting"),
+    ],
+)
+def test_generated_shim_rejects_unbounded_reply(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    response_bytes: bytes,
+) -> None:
+    """An unbounded reply exits non-zero before the real command runs."""
+    result, elapsed, marker = _run_marker_shim(monkeypatch, tmp_path, response_bytes)
+
+    assert result.returncode == 1, "Unbounded reply did not fail the shim"
+    assert result.stderr == "IPC error: IPC operation failed\n", (
+        "Shim did not print the bounded IPC diagnostic"
+    )
+    assert not marker.exists(), "The real command ran despite an unbounded reply"
+    assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
+
+
+def test_generated_shim_reports_unix_response_timeout() -> None:
     """A real Unix peer that withholds its reply produces a bounded IPC error."""
     with EnvironmentManager() as env:
-        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
-        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
-        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "0.2")
+        env.export_ipc_environment(timeout=0.2)
 
         result, elapsed = _run_shim_against_socket_peer(
             env,
