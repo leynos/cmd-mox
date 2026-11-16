@@ -95,6 +95,9 @@ class _ControlledWorker:
         self.released = False
         self.joins: list[float | None] = []
 
+    def start(self) -> None:
+        """Run no target; the test drives the worker's state instead."""
+
     def join(self, timeout: float | None = None) -> bool:
         """Record the budget and report whether the worker had exited."""
         self.joins.append(timeout)
@@ -141,53 +144,62 @@ def test_run_blocking_io_reraises_the_worker_exception() -> None:
     assert excinfo.value is failure, "the worker's exception identity was lost"
 
 
+def _raise_timeout(_deadline: float) -> float:
+    """Report a spent deadline the way ``_remaining_time`` does."""
+    raise TimeoutError
+
+
 @pytest.mark.parametrize(
-    "deadline_offset",
+    ("remaining_time", "expected_caller_join"),
     [
-        pytest.param(0.05, id="future-deadline"),
-        pytest.param(-1.0, id="already-spent"),
+        pytest.param(lambda _deadline: 0.05, 0.05, id="positive-budget"),
+        pytest.param(_raise_timeout, None, id="already-spent"),
     ],
 )
 def test_run_blocking_io_cancels_a_worker_that_outlives_the_deadline(
-    deadline_offset: float,
+    monkeypatch: pytest.MonkeyPatch,
+    remaining_time: cabc.Callable[[float], float],
+    expected_caller_join: float | None,
 ) -> None:
-    """A worker unfinished at its deadline is cancelled, whatever the reason.
+    """An unfinished worker is cancelled whether or not its budget is spent.
 
-    The worker blocks until ``cancel`` releases it, so both the join-budget
-    branch and the already-spent branch are reached without a sleep or a
-    scheduling assumption. The wait is bounded, so a mutant that never cancels
-    fails the assertions instead of hanging the suite.
+    A stand-in clock and a stand-in worker select the branch, so thread startup
+    on a loaded host cannot turn the positive-budget case into the expired one.
+    The positive-budget case must show the caller's timed join; the expired
+    case must cancel without one.
     """
-    release = threading.Event()
-    started = threading.Event()
+    monkeypatch.setattr(client, "_remaining_time", remaining_time)
+    monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
+    worker = _ControlledWorker(exits_on_cancel=True)
     cancels: list[str] = []
 
     def cancel() -> None:
-        """Record the cancellation and release the worker."""
+        """Record the cancellation and end the worker."""
         cancels.append("called")
-        release.set()
+        worker.released = True
 
-    def block() -> str:
-        """Stay alive until the deadline cancels the worker."""
-        started.set()
-        release.wait(_SAFETY_TIMEOUT)
-        return "too late"
-
-    try:
-        with pytest.raises(TimeoutError) as excinfo:
-            client._run_blocking_io(
-                block,
-                deadline=time.monotonic() + deadline_offset,
-                cancel=cancel,
-            )
-    finally:
-        release.set()
-
-    assert str(excinfo.value) == "IPC client operation timed out", (
-        "an exited worker must not be reported as wedged"
+    monkeypatch.setattr(
+        client, "threading", types.SimpleNamespace(Thread=lambda **_kwargs: worker)
     )
+
+    with pytest.raises(TimeoutError) as excinfo:
+        # The stand-in clock decides the budget, so this deadline is unused.
+        client._run_blocking_io(lambda: "too late", deadline=0.0, cancel=cancel)
+
+    if expected_caller_join is None:
+        assert not worker.joins, (
+            "the expired deadline joined the worker instead of cancelling it"
+        )
+    else:
+        assert worker.joins[0] == pytest.approx(expected_caller_join), (
+            "the timed join did not run with the remaining budget"
+        )
+        # The expired branch propagates the clock's own error, so the message
+        # the client composes is only observable on this branch.
+        assert str(excinfo.value) == "IPC client operation timed out", (
+            "an exited worker must not be reported as wedged"
+        )
     assert cancels == ["called"], "the deadline did not cancel the worker"
-    assert started.is_set(), "the worker never ran"
 
 
 def test_join_with_timeout_reports_the_exact_timeout_message(
