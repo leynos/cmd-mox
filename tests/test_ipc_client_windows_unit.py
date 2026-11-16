@@ -12,6 +12,8 @@ import pytest
 
 from cmd_mox.ipc import windows
 from cmd_mox.ipc.client import RetryConfig, _ConnectionContext
+from cmd_mox.ipc.constants import KIND_INVOCATION
+from cmd_mox.ipc.wire import WireFormatError
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -153,66 +155,51 @@ def test_send_pipe_request_writes_and_reads(monkeypatch: pytest.MonkeyPatch) -> 
     assert fake_handle.closed is True, "Assertion failed"
 
 
-def test_malformed_pipe_reply_raises_wire_format_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A wrong-typed named-pipe reply is rejected as a wire format error."""
-    from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
-    from cmd_mox.ipc import client, wire
-    from cmd_mox.ipc.constants import KIND_INVOCATION
-
-    fake_handle = types.SimpleNamespace()
-    monkeypatch.setattr(
-        client,
-        "_connect_pipe_with_retries",
-        lambda *_args, **_kwargs: fake_handle,
-    )
-    malformed = json.dumps({
-        "stdout": "",
-        "stderr": "",
-        "exit_code": 0,
-        "env": {},
-        "passthrough": {"invocation_id": "abc"},
-    }).encode()
-    monkeypatch.setattr(
-        client,
-        "win32file",
-        types.SimpleNamespace(
-            WriteFile=lambda *_args, **_kwargs: None,
-            FlushFileBuffers=lambda *_args, **_kwargs: None,
-            CloseHandle=lambda _handle: None,
-            ReadFile=lambda *_args, **_kwargs: (0, malformed),
-        ),
-    )
-    monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "pipe")
-
-    with pytest.raises(wire.WireFormatError, match="passthrough is missing"):
-        client._perform_request(
-            b"{}",
-            KIND_INVOCATION,
-            _ConnectionContext(timeout=0.1, retry_config=RetryConfig()),
-        )
-
-
 @pytest.mark.parametrize(
-    "reply",
+    ("reply", "error_type", "match"),
     [
+        pytest.param(
+            json.dumps({
+                "stdout": "",
+                "stderr": "",
+                "exit_code": 0,
+                "env": {},
+                "passthrough": {"invocation_id": "abc"},
+            }).encode(),
+            WireFormatError,
+            "passthrough is missing",
+            id="wrong-typed-passthrough",
+        ),
         pytest.param(
             b'{"stdout": "", "passthrough": {"invocation_id": "a"}, '
             b'"passthrough": null}',
+            RuntimeError,
+            "Invalid JSON from IPC server",
             id="duplicate-key",
         ),
-        pytest.param(b'{"exit_code": ' + b"9" * 5_000 + b"}", id="oversized-integer"),
-        pytest.param(b"[" * 100_000 + b"]" * 100_000, id="excessive-nesting"),
+        pytest.param(
+            b'{"exit_code": ' + b"9" * 5_000 + b"}",
+            RuntimeError,
+            "Invalid JSON from IPC server",
+            id="oversized-integer",
+        ),
+        pytest.param(
+            b"[" * 100_000 + b"]" * 100_000,
+            RuntimeError,
+            "Invalid JSON from IPC server",
+            id="excessive-nesting",
+        ),
     ],
 )
-def test_unbounded_pipe_reply_raises_bounded_client_error(
-    monkeypatch: pytest.MonkeyPatch, reply: bytes
+def test_unexpected_pipe_reply_raises_bounded_client_error(
+    monkeypatch: pytest.MonkeyPatch,
+    reply: bytes,
+    error_type: type[Exception],
+    match: str,
 ) -> None:
-    """An unbounded named-pipe reply surfaces as the bounded client error."""
+    """A named-pipe reply that cannot be decoded surfaces as a bounded error."""
     from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
     from cmd_mox.ipc import client
-    from cmd_mox.ipc.constants import KIND_INVOCATION
 
     fake_handle = types.SimpleNamespace()
     monkeypatch.setattr(
@@ -232,7 +219,7 @@ def test_unbounded_pipe_reply_raises_bounded_client_error(
     )
     monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, "pipe")
 
-    with pytest.raises(RuntimeError, match="Invalid JSON from IPC server"):
+    with pytest.raises(error_type, match=match):
         client._perform_request(
             b"{}",
             KIND_INVOCATION,

@@ -245,17 +245,43 @@ def test_request_pipeline_logs_invalid_request(
     _assert_single_counter_increment(emitted, counters_before)
 
 
+@pytest.mark.parametrize(
+    ("raw", "secrets"),
+    [
+        pytest.param(b"not-json", [], id="malformed-json"),
+        pytest.param(
+            b'{"kind": "invocation", "s3cr3t-key": 1, "s3cr3t-key": 2}',
+            ["s3cr3t-key"],
+            id="duplicate-key",
+        ),
+        pytest.param(
+            b'{"kind": "invocation", "stdout": "s3cr3t-value", "exit_code": '
+            + b"9" * 5_000
+            + b"}",
+            ["s3cr3t-value"],
+            id="oversized-integer",
+        ),
+        pytest.param(b"[" * 100_000 + b"]" * 100_000, [], id="excessive-nesting"),
+    ],
+)
 def test_request_pipeline_logs_rejection_frame(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    raw: bytes,
+    secrets: list[str],
 ) -> None:
     """Parse failures should return an error frame and one bounded outcome."""
     caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
-    ipc_server = IPCServer(tmp_path / "ipc.sock")
+    ipc_server = _RecordingIPCServer(tmp_path / "ipc.sock")
 
     counters_before = _observability.counter_snapshot()
     with _observability.capture_events() as emitted:
-        result = _server_core._request_pipeline(ipc_server, b"not-json")
+        result = _server_core._request_pipeline(ipc_server, raw)
 
+    assert not ipc_server.invocations, "Invocation hook ran for an unparsable request"
+    assert not ipc_server.passthrough_results, (
+        "Passthrough hook ran for an unparsable request"
+    )
     assert result.response_bytes is not None, (
         "Parse failure did not return an error frame"
     )
@@ -273,6 +299,10 @@ def test_request_pipeline_logs_rejection_frame(
     assert event["error_category"] == "RequestParseError", "Wrong error"
     _assert_bounded_duration(event)
     _assert_single_counter_increment(emitted, counters_before)
+    _assert_bounded_fields(event, secrets)
+    rendered = result.response_bytes.decode("utf-8")
+    for secret in secrets:
+        assert secret not in rendered, f"{secret!r} leaked into the rejection frame"
 
 
 def test_rejection_result_builds_frame_without_emitting_observability(
@@ -485,81 +515,6 @@ def test_request_pipeline_rejects_wrong_types_without_dispatch(
         for record in caplog.records
         if any(secret in record.getMessage() for secret in case.secrets)
     ]
-    assert not leaked, f"payload content reached the log: {leaked}"
-
-
-class _RawRequest(typ.NamedTuple):
-    """Raw request bytes and the payload text that must not leak."""
-
-    raw: bytes
-    secrets: list[str]
-
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        pytest.param(
-            _RawRequest(
-                b'{"kind": "invocation", "s3cr3t-key": 1, "s3cr3t-key": 2}',
-                ["s3cr3t-key"],
-            ),
-            id="duplicate-key",
-        ),
-        pytest.param(
-            _RawRequest(
-                b'{"kind": "invocation", "stdout": "s3cr3t-value", "exit_code": '
-                + b"9" * 5_000
-                + b"}",
-                ["s3cr3t-value"],
-            ),
-            id="oversized-integer",
-        ),
-        pytest.param(
-            _RawRequest(b"[" * 100_000 + b"]" * 100_000, []),
-            id="excessive-nesting",
-        ),
-    ],
-)
-def test_request_pipeline_rejects_unbounded_json(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-    case: _RawRequest,
-) -> None:
-    """Unsafe JSON is rejected before either hook runs."""
-    caplog.set_level("DEBUG")
-    ipc_server = _RecordingIPCServer(tmp_path / "ipc.sock")
-    counters_before = _observability.counter_snapshot()
-
-    with _observability.capture_events() as emitted:
-        result = _server_core._request_pipeline(ipc_server, case.raw)
-
-    assert not ipc_server.invocations, "Invocation hook ran for unparsable input"
-    assert not ipc_server.passthrough_results, (
-        "Passthrough hook ran for unparsable input"
-    )
-    assert result.response_bytes is not None, "Parse rejection did not return a frame"
-    assert result.correlation_id is None, "Parse rejection must carry no correlation"
-    frame = json.loads(result.response_bytes.decode("utf-8"))
-    assert frame["exit_code"] == 1, "Unparsable input must fail"
-    assert frame["stderr"] == "IPC request could not be parsed\n", (
-        "Parse rejection frame changed"
-    )
-    [event] = _dispatch_events(caplog)
-    assert event["kind"] == "unknown", "Unparsable input must not claim a kind"
-    assert event["outcome"] == "rejection_frame", "Wrong dispatch outcome"
-    assert event["error_category"] == "RequestParseError", "Wrong error category"
-    assert "request" not in event, "Unparsable payload must not be attached"
-    _assert_bounded_duration(event)
-    _assert_single_counter_increment(emitted, counters_before)
-    _assert_bounded_fields(event, case.secrets)
-    rendered = result.response_bytes.decode("utf-8")
-    leaked = [
-        record.getMessage()
-        for record in caplog.records
-        if any(secret in record.getMessage() for secret in case.secrets)
-    ]
-    for secret in case.secrets:
-        assert secret not in rendered, f"{secret!r} leaked into the rejection frame"
     assert not leaked, f"payload content reached the log: {leaked}"
 
 
