@@ -212,14 +212,10 @@ def test_shim_errors_on_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None
         assert result.returncode == 1, "Assertion failed"
 
 
-def test_generated_shim_reports_server_rejection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_generated_shim_reports_server_rejection() -> None:
     """A rejection response crosses the Unix socket into the shim diagnostic."""
     with EnvironmentManager() as env:
-        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
-        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
-        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "1.0")
+        env.export_ipc_environment(timeout=1.0)
         response_bytes = _encode_response(
             Response(stderr="IPC request payload failed validation\n", exit_code=1)
         )
@@ -259,9 +255,9 @@ def _run_marker_shim(
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
     with EnvironmentManager() as env:
-        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
-        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
-        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "1.0")
+        # Let the manager own the IPC variables: ``monkeypatch`` would capture
+        # the manager's values and restore a socket path that no longer exists.
+        env.export_ipc_environment(timeout=1.0)
         result, elapsed = _run_shim_against_socket_peer(
             env,
             command,
@@ -340,14 +336,10 @@ def test_generated_shim_rejects_unbounded_reply(
     assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
 
 
-def test_generated_shim_reports_unix_response_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_generated_shim_reports_unix_response_timeout() -> None:
     """A real Unix peer that withholds its reply produces a bounded IPC error."""
     with EnvironmentManager() as env:
-        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
-        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
-        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "0.2")
+        env.export_ipc_environment(timeout=0.2)
 
         result, elapsed = _run_shim_against_socket_peer(
             env,
