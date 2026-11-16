@@ -1,4 +1,10 @@
-"""Shared JSON parsing helpers for IPC messaging."""
+"""Bounded JSON decoding shared by the IPC client and server.
+
+`decode_json` is the single entry point for both requests and replies: it
+rejects duplicate keys at any depth and translates parser limits into
+`JSONParseError`. `parse_json_safely` wraps it for callers that want either a
+mapping or a bounded failure, and reports no payload content either way.
+"""
 
 from __future__ import annotations
 

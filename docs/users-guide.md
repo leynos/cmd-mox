@@ -173,6 +173,12 @@ The domain classes no longer provide the previous IPC conversion methods.
 Callers that used them must migrate to the wire functions listed in the
 [IPC payload migration guide](usage-guide.md#ipc-payload-migration).
 
+Strict decoding lives in `cmd_mox.ipc.wire`: `decode_response` replaces the
+removed `request_from_payload` alias and the `validate_*` helpers, and rejects
+a malformed payload instead of coercing it. See the
+[IPC payload migration note](ipc-payload-migration-note.md) for the full list
+of replacements.
+
 ## Handler environment overrides
 
 Handlers read `with_env()` overrides from `Invocation.env`. CmdMox no longer
