@@ -143,7 +143,9 @@ def test_unexpected_pipe_reply_raises_bounded_client_error(
         client._perform_request(
             b"{}",
             KIND_INVOCATION,
-            _ConnectionContext(timeout=0.1, retry_config=RetryConfig()),
+            # The worker touches only stand-ins, so a generous budget removes
+            # the chance that thread startup on a loaded host consumes it.
+            _ConnectionContext(timeout=5.0, retry_config=RetryConfig()),
         )
 
 

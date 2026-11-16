@@ -235,7 +235,9 @@ def test_send_pipe_request_writes_and_reads_through_win32_stand_ins(
     response = client._send_pipe_request(
         pathlib.Path("pipe"),
         b"{}",
-        _ConnectionContext(timeout=0.1, retry_config=RetryConfig()),
+        # The phases touch only stand-ins, so a generous budget removes the
+        # chance that thread startup on a loaded host consumes it.
+        _ConnectionContext(timeout=5.0, retry_config=RetryConfig()),
     )
 
     assert response == b"{}", "the reply was not returned verbatim"

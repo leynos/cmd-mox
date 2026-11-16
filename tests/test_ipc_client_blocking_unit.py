@@ -141,33 +141,23 @@ def test_run_blocking_io_reraises_the_worker_exception() -> None:
     assert excinfo.value is failure, "the worker's exception identity was lost"
 
 
-def test_run_blocking_io_honours_its_deadline_budget() -> None:
-    """A worker that outlives the deadline is cancelled, not waited on forever."""
-    started = threading.Event()
-    cancels: list[str] = []
+@pytest.mark.parametrize(
+    "deadline_offset",
+    [
+        pytest.param(0.05, id="future-deadline"),
+        pytest.param(-1.0, id="already-spent"),
+    ],
+)
+def test_run_blocking_io_cancels_a_worker_that_outlives_the_deadline(
+    deadline_offset: float,
+) -> None:
+    """A worker unfinished at its deadline is cancelled, whatever the reason.
 
-    def cancel() -> None:
-        """Record the cancellation."""
-        cancels.append("called")
-
-    def slow() -> str:
-        """Finish after the deadline with a result the caller must not see."""
-        started.set()
-        time.sleep(0.15)
-        return "too late"
-
-    with pytest.raises(TimeoutError) as excinfo:
-        client._run_blocking_io(slow, deadline=time.monotonic() + 0.05, cancel=cancel)
-
-    assert str(excinfo.value) == "IPC client operation timed out", (
-        "an exited worker must not be reported as wedged"
-    )
-    assert cancels == ["called"], "the deadline did not cancel the worker"
-    assert started.is_set(), "the worker never ran"
-
-
-def test_run_blocking_io_cancels_a_worker_when_the_deadline_is_already_spent() -> None:
-    """An expired deadline cancels the just-started worker before raising."""
+    The worker blocks until ``cancel`` releases it, so both the join-budget
+    branch and the already-spent branch are reached without a sleep or a
+    scheduling assumption. The wait is bounded, so a mutant that never cancels
+    fails the assertions instead of hanging the suite.
+    """
     release = threading.Event()
     started = threading.Event()
     cancels: list[str] = []
@@ -177,20 +167,27 @@ def test_run_blocking_io_cancels_a_worker_when_the_deadline_is_already_spent() -
         cancels.append("called")
         release.set()
 
-    def block() -> None:
-        """Wait for the cancellation to release the worker."""
+    def block() -> str:
+        """Stay alive until the deadline cancels the worker."""
         started.set()
         release.wait(_SAFETY_TIMEOUT)
+        return "too late"
 
     try:
-        with pytest.raises(TimeoutError):
+        with pytest.raises(TimeoutError) as excinfo:
             client._run_blocking_io(
-                block, deadline=time.monotonic() - 1.0, cancel=cancel
+                block,
+                deadline=time.monotonic() + deadline_offset,
+                cancel=cancel,
             )
-        assert cancels == ["called"], "the expired deadline did not cancel the worker"
-        assert started.is_set(), "the worker never ran"
     finally:
         release.set()
+
+    assert str(excinfo.value) == "IPC client operation timed out", (
+        "an exited worker must not be reported as wedged"
+    )
+    assert cancels == ["called"], "the deadline did not cancel the worker"
+    assert started.is_set(), "the worker never ran"
 
 
 def test_join_with_timeout_reports_the_exact_timeout_message(
@@ -228,14 +225,19 @@ def test_join_with_timeout_names_a_wedged_worker_exactly(
     monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
     worker = _ControlledWorker(exits_on_cancel=False)
 
-    started = time.monotonic()
     with pytest.raises(TimeoutError) as excinfo:
         client._join_with_timeout_and_cancel(
             typ.cast("threading.Thread", worker), 0.01, lambda: None
         )
-    elapsed = time.monotonic() - started
 
-    assert elapsed < 1.0, "the join waited for the worker instead of its budget"
+    assert worker.joins, "the caller never joined the worker"
+    assert worker.joins[0] == pytest.approx(0.01), (
+        "the caller did not join for its budget"
+    )
+    grace_joins = worker.joins[1:]
+    assert all(budget is not None and 0 < budget <= 0.05 for budget in grace_joins), (
+        "the cancellation grace joined without a bounded timeout"
+    )
     assert str(excinfo.value) == (
         "IPC client operation timed out; the I/O worker did not exit after cancellation"
     ), "the wedged-worker suffix changed"
@@ -253,6 +255,9 @@ def test_cancel_and_await_worker_waits_for_a_real_worker_to_exit() -> None:
 
     try:
         exited = client._cancel_and_await_worker(worker, cancel)
+        assert not worker.is_alive(), (
+            "the helper returned while the cancelled worker still ran"
+        )
     finally:
         release.set()
     _join_bounded(worker)
