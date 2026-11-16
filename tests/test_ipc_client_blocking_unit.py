@@ -167,8 +167,11 @@ def test_join_with_timeout_reports_the_exact_timeout_message(
 
     with pytest.raises(TimeoutError) as excinfo:
         client._join_with_timeout_and_cancel(worker, 0.01, lambda: None)
-    _join_bounded(worker)
 
+    assert not worker.is_alive(), (
+        "the timeout was reported while the cancelled worker still ran"
+    )
+    _join_bounded(worker)
     assert str(excinfo.value) == "IPC client operation timed out", (
         "the timeout message changed"
     )
