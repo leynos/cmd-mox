@@ -51,11 +51,9 @@ class _ThreadRecorder:
 def _event_blocked_worker() -> tuple[threading.Thread, threading.Event]:
     """Start a daemon worker that stays alive until its release event is set.
 
-    A sleeping worker makes the timeout tests depend on scheduling: if the test
-    thread is descheduled past the sleep, the worker finishes before the join
-    and no timeout is raised. Blocking on an event the test controls keeps the
-    worker alive for as long as the assertion needs, and still lets it exit
-    when cancellation releases it.
+    This is real-thread coverage of the cancellation lifecycle. The wait is
+    bounded so the worker terminates even when a mutant never cancels it:
+    the suite then fails on its assertions rather than hanging.
 
     Returns
     -------
@@ -80,6 +78,31 @@ def _join_bounded(worker: threading.Thread) -> None:
     """Release-safe join used by test clean-up."""
     worker.join(_SAFETY_TIMEOUT)
     assert not worker.is_alive(), "the worker outlived the test"
+
+
+class _ControlledWorker:
+    """Thread stand-in whose liveness the test releases explicitly.
+
+    The timeout branch must be observed without depending on how promptly a
+    real thread is scheduled. A release flag makes the worker's state
+    deterministic, and because ``join`` never blocks, a mutant that drops the
+    join timeout still fails the assertions instead of hanging the suite.
+    """
+
+    def __init__(self, *, exits_on_cancel: bool) -> None:
+        """Choose whether cancelling the worker ends it."""
+        self.exits_on_cancel = exits_on_cancel
+        self.released = False
+        self.joins: list[float | None] = []
+
+    def join(self, timeout: float | None = None) -> bool:
+        """Record the budget and report whether the worker had exited."""
+        self.joins.append(timeout)
+        return not self.is_alive()
+
+    def is_alive(self) -> bool:
+        """Report liveness until the worker is released, if it ever is."""
+        return not (self.exits_on_cancel and self.released)
 
 
 def test_run_blocking_io_uses_a_named_daemon_worker_and_returns_its_value(
@@ -173,28 +196,26 @@ def test_run_blocking_io_cancels_a_worker_when_the_deadline_is_already_spent() -
 def test_join_with_timeout_reports_the_exact_timeout_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A cancelling worker still leaves the caller with the base timeout text."""
+    """A cancelled worker still leaves the caller with the base timeout text."""
     monkeypatch.setattr(client, "IO_CANCEL_GRACE", 1.0)
-    worker, release = _event_blocked_worker()
+    worker = _ControlledWorker(exits_on_cancel=True)
     cancels: list[str] = []
 
     def cancel() -> None:
-        """Record the cancellation and release the worker."""
+        """Record the cancellation and end the worker."""
         cancels.append("called")
-        release.set()
+        worker.released = True
 
-    try:
-        with pytest.raises(TimeoutError) as excinfo:
-            client._join_with_timeout_and_cancel(worker, 0.01, cancel)
-
-        assert not worker.is_alive(), (
-            "the timeout was reported while the cancelled worker still ran"
+    with pytest.raises(TimeoutError) as excinfo:
+        client._join_with_timeout_and_cancel(
+            typ.cast("threading.Thread", worker), 0.01, cancel
         )
-    finally:
-        release.set()
 
+    assert worker.joins == [0.01], "the caller did not join for its budget"
     assert cancels == ["called"], "the timeout did not cancel the worker"
-    _join_bounded(worker)
+    assert not worker.is_alive(), (
+        "the timeout was reported while the cancelled worker still ran"
+    )
     assert str(excinfo.value) == "IPC client operation timed out", (
         "the timeout message changed"
     )
@@ -205,41 +226,39 @@ def test_join_with_timeout_names_a_wedged_worker_exactly(
 ) -> None:
     """A worker that ignores cancellation is named in the exact timeout text."""
     monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
-    worker, release = _event_blocked_worker()
+    worker = _ControlledWorker(exits_on_cancel=False)
 
-    try:
-        with pytest.raises(TimeoutError) as excinfo:
-            client._join_with_timeout_and_cancel(worker, 0.01, lambda: None)
-    finally:
-        release.set()
-    _join_bounded(worker)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError) as excinfo:
+        client._join_with_timeout_and_cancel(
+            typ.cast("threading.Thread", worker), 0.01, lambda: None
+        )
+    elapsed = time.monotonic() - started
 
+    assert elapsed < 1.0, "the join waited for the worker instead of its budget"
     assert str(excinfo.value) == (
         "IPC client operation timed out; the I/O worker did not exit after cancellation"
     ), "the wedged-worker suffix changed"
 
 
-def test_join_with_timeout_does_not_wait_past_its_budget() -> None:
-    """A worker finishing after the budget still times out promptly."""
-    finished = threading.Event()
+def test_cancel_and_await_worker_waits_for_a_real_worker_to_exit() -> None:
+    """Cancellation is offered to a real worker and its exit is awaited."""
+    worker, release = _event_blocked_worker()
+    cancels: list[str] = []
 
-    def slow() -> None:
-        """Finish shortly after the join budget without needing cancellation."""
-        time.sleep(0.15)
-        finished.set()
-
-    worker = threading.Thread(target=slow, daemon=True)
-    worker.start()
-    started = time.monotonic()
+    def cancel() -> None:
+        """Record the cancellation and release the worker."""
+        cancels.append("called")
+        release.set()
 
     try:
-        with pytest.raises(TimeoutError):
-            client._join_with_timeout_and_cancel(worker, 0.01, lambda: None)
-        elapsed = time.monotonic() - started
-        assert elapsed < 1.0, "the join waited for the worker instead of its budget"
+        exited = client._cancel_and_await_worker(worker, cancel)
     finally:
-        _join_bounded(worker)
-    assert finished.is_set(), "the slow worker never finished"
+        release.set()
+    _join_bounded(worker)
+
+    assert cancels == ["called"], "the worker was never cancelled"
+    assert exited is True, "the helper did not observe the cancelled worker exit"
 
 
 @pytest.mark.parametrize(
