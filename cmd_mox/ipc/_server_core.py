@@ -29,7 +29,7 @@ from cmd_mox.environment import EnvironmentManager
 
 from . import _observability
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
-from .json_utils import parse_json_safely
+from .json_utils import JSONParseError, decode_json
 from .wire import (
     WireFormatError,
     decode_invocation,
@@ -409,18 +409,18 @@ def _decode_payload(raw: bytes) -> dict[str, typ.Any] | None:
         logger.info("IPC connection closed before request was received")
         return None
 
-    payload = parse_json_safely(raw)
-    if payload is not None:
-        return payload
-
     try:
-        _ = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = decode_json(raw)
+    except JSONParseError:
+        # Parse failures include invalid UTF-8, duplicate keys, oversized
+        # integers, and excessive nesting. All are bounded rejections.
         logger.error("IPC received malformed JSON")  # ruff: ignore[error-instead-of-exception] - decode-error messages embed a snippet of the untrusted payload, so the traceback must not be logged
         return None
 
-    logger.error("IPC payload is not a mapping")
-    return None
+    if not isinstance(payload, dict):
+        logger.error("IPC payload is not a mapping")
+        return None
+    return payload
 
 
 def _extract_correlation_id(payload: dict[str, typ.Any]) -> str | None:

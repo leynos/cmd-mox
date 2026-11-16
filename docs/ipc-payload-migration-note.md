@@ -24,7 +24,10 @@ malformed. They no longer coerce or silently drop values.
 `validate_passthrough_payload` aliases are removed; use `decode_invocation`,
 `decode_passthrough_result`, or `decode_passthrough_request` instead.
 `WireFormatError` messages name a field path and an expected type only, so they
-are safe to log; unknown fields are reported by count, never by name.
+are safe to log; unknown fields are reported by count, never by name. The
+shared JSON loader also rejects duplicate object keys at every depth and
+converts parser limits such as oversized integers or excessive nesting into a
+bounded parse failure, so no parser exception bypasses the rejection path.
 
 See the [usage guide](usage-guide.md#ipc-payload-migration) for the complete
 migration guidance.

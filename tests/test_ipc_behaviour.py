@@ -237,6 +237,39 @@ def test_generated_shim_reports_server_rejection(
     assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
 
 
+def _run_marker_shim(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    response_bytes: bytes,
+) -> tuple[subprocess.CompletedProcess[str], float, Path]:
+    """Run a shim whose command would touch a marker if it executed.
+
+    Returns
+    -------
+    tuple[subprocess.CompletedProcess[str], float, Path]
+        The shim result, its elapsed duration, and the marker path.
+    """
+    marker = tmp_path / "marker"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    command = "marker-command"
+    script = bin_dir / command
+    script.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    with EnvironmentManager() as env:
+        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
+        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
+        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "1.0")
+        result, elapsed = _run_shim_against_socket_peer(
+            env,
+            command,
+            response_bytes=response_bytes,
+        )
+    return result, elapsed, marker
+
+
 @pytest.mark.parametrize(
     "passthrough",
     [
@@ -257,38 +290,53 @@ def test_generated_shim_rejects_malformed_passthrough(
     passthrough: dict[str, object],
 ) -> None:
     """A malformed directive exits non-zero before the real command runs."""
-    marker = tmp_path / "marker"
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    command = "marker-command"
-    script = bin_dir / command
-    script.write_text(f"#!/bin/sh\ntouch {marker}\n")
-    script.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    response_bytes = json.dumps({
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+        "env": {},
+        "passthrough": passthrough,
+    }).encode()
 
-    with EnvironmentManager() as env:
-        assert env.socket_path is not None, "EnvironmentManager did not set a socket"
-        monkeypatch.setenv(CMOX_IPC_SOCKET_ENV, str(env.socket_path))
-        monkeypatch.setenv(CMOX_IPC_TIMEOUT_ENV, "1.0")
-        response_bytes = json.dumps({
-            "stdout": "",
-            "stderr": "",
-            "exit_code": 0,
-            "env": {},
-            "passthrough": passthrough,
-        }).encode()
-
-        result, elapsed = _run_shim_against_socket_peer(
-            env,
-            command,
-            response_bytes=response_bytes,
-        )
+    result, elapsed, marker = _run_marker_shim(monkeypatch, tmp_path, response_bytes)
 
     assert result.returncode == 1, "Malformed directive did not fail the shim"
     assert result.stderr == "IPC error: IPC operation failed\n", (
         "Shim did not print the bounded IPC diagnostic"
     )
     assert not marker.exists(), "The real command ran despite a malformed directive"
+    assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
+
+
+@pytest.mark.parametrize(
+    "response_bytes",
+    [
+        pytest.param(
+            b'{"stdout": "", "stderr": "", "exit_code": 0, '
+            b'"passthrough": {"invocation_id": "a", "lookup_path": "/bin/echo"}, '
+            b'"passthrough": null}',
+            id="duplicate-passthrough-key",
+        ),
+        pytest.param(
+            b'{"stdout": "", "exit_code": ' + b"9" * 5_000 + b"}",
+            id="oversized-integer",
+        ),
+        pytest.param(b"[" * 100_000 + b"]" * 100_000, id="excessive-nesting"),
+    ],
+)
+def test_generated_shim_rejects_unbounded_reply(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    response_bytes: bytes,
+) -> None:
+    """An unbounded reply exits non-zero before the real command runs."""
+    result, elapsed, marker = _run_marker_shim(monkeypatch, tmp_path, response_bytes)
+
+    assert result.returncode == 1, "Unbounded reply did not fail the shim"
+    assert result.stderr == "IPC error: IPC operation failed\n", (
+        "Shim did not print the bounded IPC diagnostic"
+    )
+    assert not marker.exists(), "The real command ran despite an unbounded reply"
     assert elapsed < 1.5, "Shim exceeded the test peer's bounded response time"
 
 

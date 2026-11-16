@@ -233,10 +233,23 @@ def test_invoke_server_validates_params(
         )
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        pytest.param(b"not-json", id="malformed-json"),
+        pytest.param(
+            b'{"stdout": "", "passthrough": {"invocation_id": "a"}, '
+            b'"passthrough": null}',
+            id="duplicate-key",
+        ),
+        pytest.param(b'{"exit_code": ' + b"9" * 5_000 + b"}", id="oversized-integer"),
+        pytest.param(b"[" * 100_000 + b"]" * 100_000, id="excessive-nesting"),
+    ],
+)
 def test_invoke_server_invalid_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: bytes
 ) -> None:
-    """Client raises RuntimeError on malformed JSON from server."""
+    """Client raises RuntimeError on malformed or unbounded JSON from server."""
     socket_path = tmp_path / "ipc.sock"
     srv_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv_sock.bind(str(socket_path))
@@ -246,7 +259,7 @@ def test_invoke_server_invalid_json(
         """Accept one client, reply with malformed JSON, then close the sockets."""
         conn, _ = srv_sock.accept()
         conn.recv(1024)
-        conn.sendall(b"not-json")
+        conn.sendall(reply)
         conn.close()
         srv_sock.close()
 

@@ -896,6 +896,13 @@ treat it as an ordinary response and skip the real command. The shared pipeline
 maps `WireFormatError` to the existing `invalid_request` outcome with the
 `ValidationError` category and a fixed rejection frame.
 
+`cmd_mox.ipc.json_utils.decode_json` is the single JSON entry point for both
+requests and replies. It rejects duplicate keys in any object at any depth, so
+a later value cannot silently replace an earlier one before decoding. Parser
+failures, including oversized integer strings and excessive nesting, become a
+bounded `JSONParseError`; callers translate that into a fixed parse rejection
+rather than letting `ValueError` or `RecursionError` escape.
+
 `cmd_mox.response_policy` merges `with_env()` overrides into `Invocation.env`
 before the handler runs, and validates expectation environments.
 `cmd_mox.response_strategy.execute_handler(double, invocation)` runs the

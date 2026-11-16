@@ -559,7 +559,9 @@ skipping the real command. `request_from_payload` and the
 aliases have been removed; use `decode_invocation`,
 `decode_passthrough_result`, or `decode_passthrough_request`. Error messages
 name only a field path and an expected type, so they do not disclose payload
-values.
+values. The shared JSON loader rejects duplicate object keys at every depth and
+treats oversized integers or excessive nesting as a bounded parse failure, so a
+malformed reply cannot silently replace a validated value.
 
 ## Recording sessions (fixture capture)
 
