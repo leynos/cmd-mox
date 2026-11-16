@@ -268,6 +268,7 @@ def test_send_unix_request_forwards_the_shared_deadline_and_payload(
     """One deadline bounds connecting, sending, shutdown, and reading."""
     sock = _RecordingSocket([b"response"])
     connects: list[tuple[pathlib.Path, _ConnectionContext, float | None]] = []
+    consulted: list[float] = []
 
     def connect(
         sock_path: pathlib.Path,
@@ -279,8 +280,13 @@ def test_send_unix_request_forwards_the_shared_deadline_and_payload(
         connects.append((sock_path, context, deadline))
         return sock
 
+    def remaining(deadline: float) -> float:
+        """Record the deadline each phase consults, then report a budget."""
+        consulted.append(deadline)
+        return 2.5
+
     monkeypatch.setattr(ipc_client, "_connect_unix_with_retries", connect)
-    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 2.5)
+    monkeypatch.setattr(ipc_client, "_remaining_time", remaining)
     context = _context(deadline=42.0)
 
     result = ipc_client._send_unix_request(
@@ -290,6 +296,10 @@ def test_send_unix_request_forwards_the_shared_deadline_and_payload(
     assert result == b"response", "the reply bytes were not returned"
     assert connects == [(pathlib.Path("ipc.sock"), context, 42.0)], (
         "the shared deadline was not forwarded to the connect retries"
+    )
+    assert consulted, "no phase consulted a deadline"
+    assert set(consulted) == {42.0}, (
+        "a phase drew down a recomputed deadline instead of the shared one"
     )
     assert sock.timeouts == [2.5, 2.5, 2.5, 2.5], (
         "send, shutdown, and each read did not share the request deadline"

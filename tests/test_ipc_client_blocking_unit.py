@@ -48,20 +48,32 @@ class _ThreadRecorder:
         monkeypatch.setattr(client, "threading", types.SimpleNamespace(Thread=self))
 
 
-def _sleeper(delay: float) -> threading.Thread:
-    """Start a daemon worker that exits on its own after *delay* seconds.
+def _event_blocked_worker() -> tuple[threading.Thread, threading.Event]:
+    """Start a daemon worker that stays alive until its release event is set.
 
-    Self-terminating workers keep a mutant that joins without a timeout from
-    hanging the suite: it waits out the sleep, then visibly skips the timeout.
+    A sleeping worker makes the timeout tests depend on scheduling: if the test
+    thread is descheduled past the sleep, the worker finishes before the join
+    and no timeout is raised. Blocking on an event the test controls keeps the
+    worker alive for as long as the assertion needs, and still lets it exit
+    when cancellation releases it.
 
     Returns
     -------
-    threading.Thread
-        The started daemon thread.
+    tuple[threading.Thread, threading.Event]
+        The started daemon thread and the event that ends it.
     """
-    worker = threading.Thread(target=time.sleep, args=(delay,), daemon=True)
+    release = threading.Event()
+    started = threading.Event()
+
+    def block() -> None:
+        """Stay alive until the test releases the worker."""
+        started.set()
+        release.wait(_SAFETY_TIMEOUT)
+
+    worker = threading.Thread(target=block, daemon=True)
     worker.start()
-    return worker
+    assert started.wait(_SAFETY_TIMEOUT), "the worker never started"
+    return worker, release
 
 
 def _join_bounded(worker: threading.Thread) -> None:
@@ -163,14 +175,25 @@ def test_join_with_timeout_reports_the_exact_timeout_message(
 ) -> None:
     """A cancelling worker still leaves the caller with the base timeout text."""
     monkeypatch.setattr(client, "IO_CANCEL_GRACE", 1.0)
-    worker = _sleeper(0.15)
+    worker, release = _event_blocked_worker()
+    cancels: list[str] = []
 
-    with pytest.raises(TimeoutError) as excinfo:
-        client._join_with_timeout_and_cancel(worker, 0.01, lambda: None)
+    def cancel() -> None:
+        """Record the cancellation and release the worker."""
+        cancels.append("called")
+        release.set()
 
-    assert not worker.is_alive(), (
-        "the timeout was reported while the cancelled worker still ran"
-    )
+    try:
+        with pytest.raises(TimeoutError) as excinfo:
+            client._join_with_timeout_and_cancel(worker, 0.01, cancel)
+
+        assert not worker.is_alive(), (
+            "the timeout was reported while the cancelled worker still ran"
+        )
+    finally:
+        release.set()
+
+    assert cancels == ["called"], "the timeout did not cancel the worker"
     _join_bounded(worker)
     assert str(excinfo.value) == "IPC client operation timed out", (
         "the timeout message changed"
@@ -182,10 +205,13 @@ def test_join_with_timeout_names_a_wedged_worker_exactly(
 ) -> None:
     """A worker that ignores cancellation is named in the exact timeout text."""
     monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
-    worker = _sleeper(0.2)
+    worker, release = _event_blocked_worker()
 
-    with pytest.raises(TimeoutError) as excinfo:
-        client._join_with_timeout_and_cancel(worker, 0.01, lambda: None)
+    try:
+        with pytest.raises(TimeoutError) as excinfo:
+            client._join_with_timeout_and_cancel(worker, 0.01, lambda: None)
+    finally:
+        release.set()
     _join_bounded(worker)
 
     assert str(excinfo.value) == (
