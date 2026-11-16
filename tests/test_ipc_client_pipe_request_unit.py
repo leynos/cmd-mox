@@ -13,6 +13,8 @@ import types
 import typing as typ
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cmd_mox.ipc import client, windows
 from cmd_mox.ipc.client import RetryConfig, _ConnectionContext
@@ -341,6 +343,31 @@ def test_should_retry_pipe_error_checks_code_and_remaining_attempts(
     assert client._should_retry_pipe_error(exc, attempt, max_retries) is expected, (
         "the retry decision was wrong"
     )
+
+
+@given(
+    winerror=st.sampled_from([
+        windows.ERROR_PIPE_BUSY,
+        windows.ERROR_FILE_NOT_FOUND,
+        windows.ERROR_NO_DATA,
+        0,
+        None,
+    ]),
+    attempt=st.integers(min_value=0, max_value=10),
+    max_retries=st.integers(min_value=0, max_value=10),
+)
+def test_should_retry_pipe_error_matches_the_documented_rule(
+    winerror: int | None, attempt: int, max_retries: int
+) -> None:
+    """Retrying happens exactly for a retryable code with attempts remaining."""
+    retryable = winerror in {windows.ERROR_PIPE_BUSY, windows.ERROR_FILE_NOT_FOUND}
+    expected = retryable and attempt < max_retries - 1
+
+    decision = client._should_retry_pipe_error(
+        types.SimpleNamespace(winerror=winerror), attempt, max_retries
+    )
+
+    assert decision is expected, "the retry decision diverged from the rule"
 
 
 def test_should_retry_pipe_error_rejects_errors_without_a_winerror() -> None:

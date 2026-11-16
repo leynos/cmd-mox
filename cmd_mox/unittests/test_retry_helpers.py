@@ -78,7 +78,13 @@ def test_retry_with_backoff_respects_should_retry() -> None:
 
 
 def test_retry_with_backoff_passes_the_configured_jitter_through() -> None:
-    """The retry delay must use the configured jitter, not a substitute."""
+    """The retry delay must use the configured jitter, not a substitute.
+
+    One example is complete here: the delay is a single arithmetic expression,
+    so pinning the jitter bounds passed to ``random.uniform`` and the resulting
+    sleep covers every input. A property over jitter values would re-test that
+    expression rather than the pass-through this test exists to detect.
+    """
     sleeps: list[float] = []
 
     def attempt(_attempt: int) -> str:
@@ -102,7 +108,13 @@ def test_retry_with_backoff_passes_the_configured_jitter_through() -> None:
 
 
 def test_retry_with_backoff_reports_an_exhausted_retrying_loop() -> None:
-    """A policy that retries every failure falls through to a RuntimeError."""
+    """A policy that retries every failure falls through to a RuntimeError.
+
+    Two retries are enough to be complete: every exhausted attempt takes the
+    same path, so the only variation a larger retry count adds is a longer
+    prefix of the same linear sleep sequence. This case pins the exact
+    fall-through text and both observed backoffs.
+    """
     sleeps: list[float] = []
 
     def attempt(_attempt: int) -> str:

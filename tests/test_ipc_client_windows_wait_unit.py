@@ -5,6 +5,8 @@ from __future__ import annotations
 import types
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cmd_mox.ipc import client, windows
 from tests.helpers.ipc_windows import (
@@ -68,6 +70,41 @@ def test_wait_for_pipe_availability_bounds_the_wait_in_milliseconds(
     client._wait_for_pipe_availability("pipe", delay)
 
     assert waits == [("pipe", expected_ms)], "the wait duration was mis-converted"
+
+
+@given(
+    delay=st.floats(
+        min_value=1e-6, max_value=10.0, allow_nan=False, allow_infinity=False
+    ),
+    remaining=st.floats(
+        min_value=1e-6, max_value=10.0, allow_nan=False, allow_infinity=False
+    ),
+)
+def test_wait_for_pipe_availability_bounds_any_wait_by_the_budget(
+    delay: float, remaining: float
+) -> None:
+    """Every positive delay is floored at 1 ms and capped by the budget."""
+    waits: list[int] = []
+
+    with pytest.MonkeyPatch.context() as patch:
+        # A zero clock makes the remaining budget exactly ``remaining``, so the
+        # bounds below describe the helper's arithmetic rather than rounding.
+        _bind_pipe_wait_clock(patch, _PipeWaitClock())
+        patch.setattr(
+            client,
+            "win32pipe",
+            types.SimpleNamespace(
+                WaitNamedPipe=lambda _name, wait_ms: waits.append(wait_ms)
+            ),
+        )
+        client._wait_for_pipe_availability("pipe", delay, deadline=remaining)
+
+    [wait_ms] = waits
+    assert wait_ms >= 1, "the wait was not floored at one millisecond"
+    assert wait_ms <= max(1, remaining * 1000), (
+        "the wait overran the remaining deadline budget"
+    )
+    assert wait_ms <= max(1, delay * 1000), "the wait overran the requested delay"
 
 
 def test_wait_for_pipe_availability_caps_the_wait_to_the_remaining_deadline(
