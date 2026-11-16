@@ -70,11 +70,13 @@ class _RecordingSocket:
         self.shutdowns += [how]
 
     def recv(self, size: int) -> bytes:
-        """Return the next scripted chunk, or raise a scripted failure."""
+        """Return the next scripted chunk, then raise any scripted failure."""
         self.recv_sizes.append(size)
+        if self.chunks:
+            return self.chunks.pop(0)
         if self.recv_error is not None:
             raise self.recv_error
-        return self.chunks.pop(0) if self.chunks else b""
+        return b""
 
     def close(self) -> None:
         """Mark the socket closed."""
@@ -167,13 +169,16 @@ def test_read_all_propagates_a_receive_failure_after_a_partial_read(
 ) -> None:
     """A failure after partial data is not swallowed into a short payload."""
     failure = OSError("peer vanished")
-    sock = _RecordingSocket(recv_error=failure)
+    sock = _RecordingSocket([b"partial"], recv_error=failure)
     monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
 
     with pytest.raises(OSError, match="peer vanished") as excinfo:
         ipc_client._read_all(typ.cast("socket.socket", sock), 10.0)
 
     assert excinfo.value is failure, "the receive failure was replaced"
+    assert sock.recv_sizes == [1024, 1024], (
+        "the failure did not follow a completed read of the partial chunk"
+    )
 
 
 @pytest.mark.parametrize(

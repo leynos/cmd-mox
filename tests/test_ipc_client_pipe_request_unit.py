@@ -141,21 +141,41 @@ def test_send_pipe_request_uses_separate_phase_deadlines_and_exact_arguments(
     )
 
 
-def test_send_pipe_request_closes_once_when_the_write_fails(
+@dataclasses.dataclass(slots=True)
+class _FailingPhaseCase:
+    """One phase failing, with the observables that must still hold."""
+
+    phase: str
+    patch_target: str
+    expected_writes: int
+    expected_phases: int
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            _FailingPhaseCase("write", "write_pipe_payload", 0, 1), id="write"
+        ),
+        pytest.param(_FailingPhaseCase("read", "read_pipe_message", 1, 2), id="read"),
+    ],
+)
+def test_send_pipe_request_closes_once_when_a_phase_fails(
     send_pipe_spy: _SendPipeSpy,
     monkeypatch: pytest.MonkeyPatch,
+    case: _FailingPhaseCase,
 ) -> None:
-    """A failed write skips the read and still closes the handle once."""
+    """A failing write or read skips later phases and closes the handle once."""
     runner = _RecordingBlockingRunner()
-    error = RuntimeError("write failed")
-    monkeypatch.setattr(client, "_run_blocking_io", runner)
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    error = RuntimeError(f"{case.phase} failed")
 
-    def fail_write(_handle: object, _payload: bytes, *, win32file: object) -> None:
-        """Raise the sentinel write failure."""
+    def fail(*_args: object, **_kwargs: object) -> object:
+        """Raise the sentinel failure standing in for the broken phase."""
         raise error
 
-    monkeypatch.setattr(client, "write_pipe_payload", fail_write)
+    monkeypatch.setattr(client, "_run_blocking_io", runner)
+    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    monkeypatch.setattr(client, case.patch_target, fail)
 
     with pytest.raises(RuntimeError) as excinfo:
         client._send_pipe_request(
@@ -164,43 +184,61 @@ def test_send_pipe_request_closes_once_when_the_write_fails(
             _ConnectionContext(timeout=1.0, retry_config=RetryConfig()),
         )
 
-    assert excinfo.value is error, "the write error was replaced"
-    assert not send_pipe_spy.reads, "the read ran after a failed write"
+    assert excinfo.value is error, "the phase error was replaced"
+    assert len(send_pipe_spy.writes) == case.expected_writes, (
+        "the write phase did not run exactly when the failure allowed it"
+    )
+    assert not send_pipe_spy.reads, "the recording read ran against the failure"
+    assert len(runner.deadlines) == case.expected_phases, (
+        "the phases after the failure still ran"
+    )
     assert send_pipe_spy.closes == [send_pipe_spy.handle], (
         "the handle was not closed exactly once"
     )
 
 
-def test_send_pipe_request_closes_once_when_the_read_fails(
-    send_pipe_spy: _SendPipeSpy,
+def test_send_pipe_request_writes_and_reads_through_win32_stand_ins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed read closes the handle exactly once after the write."""
-    runner = _RecordingBlockingRunner()
-    error = RuntimeError("read failed")
-    monkeypatch.setattr(client, "_run_blocking_io", runner)
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    """The real write and read helpers exchange a message over a stand-in pipe."""
+    written: list[str] = []
 
-    def fail_read(
-        _handle: object, *, win32file: object, pywintypes: object, options: object
-    ) -> bytes:
-        """Raise the sentinel read failure."""
-        raise error
+    class _FakeHandle:
+        """Record whether the fake pipe handle has been closed."""
 
-    monkeypatch.setattr(client, "read_pipe_message", fail_read)
+        def __init__(self) -> None:
+            """Start with the handle open."""
+            self.closed = False
 
-    with pytest.raises(RuntimeError) as excinfo:
-        client._send_pipe_request(
-            pathlib.Path("socket"),
-            b"payload",
-            _ConnectionContext(timeout=1.0, retry_config=RetryConfig()),
-        )
-
-    assert excinfo.value is error, "the read error was replaced"
-    assert len(send_pipe_spy.writes) == 1, "the write did not run before the read"
-    assert send_pipe_spy.closes == [send_pipe_spy.handle], (
-        "the handle was not closed exactly once"
+    handle = _FakeHandle()
+    monkeypatch.setattr(
+        client, "_connect_pipe_with_retries", lambda *_args, **_kwargs: handle
     )
+    monkeypatch.setattr(
+        client,
+        "pywintypes",
+        types.SimpleNamespace(error=RuntimeError),
+    )
+    monkeypatch.setattr(
+        client,
+        "win32file",
+        types.SimpleNamespace(
+            WriteFile=lambda _handle, payload: written.append(payload.decode("utf-8")),
+            FlushFileBuffers=lambda *_args, **_kwargs: None,
+            CloseHandle=lambda target: setattr(target, "closed", True),
+            ReadFile=lambda *_args, **_kwargs: (0, b"{}"),
+        ),
+    )
+
+    response = client._send_pipe_request(
+        pathlib.Path("pipe"),
+        b"{}",
+        _ConnectionContext(timeout=0.1, retry_config=RetryConfig()),
+    )
+
+    assert response == b"{}", "the reply was not returned verbatim"
+    assert written == ["{}"], "the payload did not reach the pipe writer"
+    assert handle.closed is True, "the handle was not closed after the exchange"
 
 
 def test_send_pipe_request_closes_once_when_a_phase_is_cancelled(
