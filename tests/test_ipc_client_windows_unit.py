@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import types
 
 import pytest
 
@@ -144,8 +145,6 @@ def test_unexpected_pipe_reply_raises_bounded_client_error(
             KIND_INVOCATION,
             _ConnectionContext(timeout=0.1, retry_config=RetryConfig()),
         )
-
-
 
 
 class _ScriptedPipeHandleFactory:
