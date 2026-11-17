@@ -65,45 +65,50 @@ event. Windows behaviour, events, and tests stay as they are.
 
 ## Progress
 
-- [x] (2026-11-17 00:00Z) Reconnaissance and ExecPlan drafted.
-- [x] (2026-11-17 01:30Z) `EP-M1` shared limits module and bounded EOF
-  reader implemented; focused tests pass.
-- [x] (2026-11-17 03:10Z) `EP-M1` all six gates pass (`make check-fmt`,
+- [x] (2026-11-17) Reconnaissance and ExecPlan drafted.
+- [x] (2026-11-17) `EP-M1` shared limits module and bounded EOF reader
+  implemented; focused tests pass.
+- [x] (2026-11-17 01:55Z) `EP-M1` all six gates pass (`make check-fmt`,
   `make typecheck`, `make test`, `make lint`, `make markdownlint`,
   `make nixie`) and the milestone is committed.
-- [x] (2026-11-17 05:40Z) `EP-M2` Unix size rejection before dispatch with a
+- [x] (2026-11-17 02:23Z) `EP-M2` Unix size rejection before dispatch with a
   bounded event, approved counter categories, and focused tests.
-- [x] (2026-11-17 06:20Z) `EP-M3` Unix admission gate, deterministic and
+- [x] (2026-11-17 02:23Z) `EP-M3` Unix admission gate, deterministic and
   saturation tests, and the three guide updates.
 - [x] (2026-11-17) All six gates pass on the combined `EP-M2`/`EP-M3` tree
   (`make check-fmt`, `make typecheck`, `make test` with 2193 passed and 16
   skipped, `make lint` including both pylint tiers, `ambrleaks`, and spelling,
   `make markdownlint`, `make nixie`).
-- [x] (2026-11-17 04:10Z) Draft PR
+- [x] (2026-11-17 02:25Z) Draft PR
   [#479](https://github.com/leynos/cmd-mox/pull/479) opened from the combined
   tree, with the issue, the plan, and the Lody session references.
-- [x] (2026-11-17 06:50Z) CodeRabbit reviewed both commits and returned five
+- [x] (2026-11-17 02:38Z) CodeRabbit reviewed both commits and returned five
   findings: unbounded fragment storage in `read_until_eof`, a plan paragraph
   that implied a refused connection could revive, vacuous permit-return
   assertions, a socket leak in the test helper, and an unsynchronized
   readiness-probe assumption. All five are actioned, and the two CodeScene
   code-health violations the PR check reported are fixed too.
-- [x] (2026-11-17 08:20Z) Branch pushed, then replayed onto `origin/main` at
+- [x] (2026-11-17 02:45Z) Branch pushed, then replayed onto `origin/main` at
   `c426792` (see D9). The replay was conflict-free, `range-diff` shows all five
   commits unchanged, and `git diff --check` is clean.
-- [x] (2026-11-17 09:10Z) All six gates pass at `9877f98` (`make check-fmt`,
+- [x] (2026-11-17 02:59Z) All six gates pass at `9877f98` (`make check-fmt`,
   `make typecheck`, `make lint` including both pylint tiers, `make test` with
   2202 passed and 16 skipped, `make markdownlint`, `make nixie`), the branch is
   force-pushed with lease onto the rebased history, and PR #479's every check
   is green, including CodeScene Code Health with six quality gates passed.
-- [x] (2026-11-17 10:05Z) Final CodeRabbit pass at `6c8a4f3` returned two
+- [x] (2026-11-17 03:22Z) Final CodeRabbit pass at `6c8a4f3` returned two
   findings, both actioned: the reader test now injects a decreasing budget so a
   resolve-once implementation cannot pass, and the blocking probe no longer
   carries a handler deadline that the burst setup could outlive.
-- [x] (2026-11-17 11:00Z) All six gates pass at `6e00ee5`, and CodeRabbit
+- [x] (2026-11-17 03:31Z) All six gates pass at `6e00ee5`, and CodeRabbit
   reviewed that head with zero findings. PR #479's checks are green there too:
   `Linux QA`, `Windows smoke`, `build-dist`, CodeScene Code Health and Gecko
   Security all pass.
+- [x] (2026-11-17 04:32Z) CodeRabbit reviewed `86555b1`, the head carrying both
+  fixes and this record, with zero findings, and every PR check is green on it.
+  The shared review allowance needed a 50-minute backoff; `vsleep` takes its
+  unit attached (`50m`), since a spaced `50 min` is rejected and silently skips
+  the wait.
 
 ## Surprises & discoveries
 
@@ -505,3 +510,7 @@ for `check-fmt`, `typecheck`, `test`, `lint`, `markdownlint`, and `nixie`.
 - 2026-11-17: Actioned the final CodeRabbit findings on deadline
   recalculation and the per-handler timeout; recorded both in Surprises and
   Progress.
+- 2026-11-17: Corrected the Progress timestamps. Earlier entries printed a
+  local `+01:00` clock reading with a `Z` suffix; the verified times now come
+  from commit and gate-log times (UTC), and items with no surviving anchor keep
+  the date alone.
