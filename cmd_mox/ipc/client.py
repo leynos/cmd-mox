@@ -187,6 +187,14 @@ def _run_blocking_io[T](
     out during startup still reaches the cancel-and-join path: that is the
     only path which waits for the worker to release the pipe handle.
 
+    The worker re-checks the deadline before running *func*, because
+    scheduling can hold the thread until after the caller has given up. That
+    check narrows the window rather than closing it: a deadline that expires
+    between the check and the first I/O call still lets that call start, and
+    the cancel-and-join path bounds what follows. The check runs inside the
+    outcome guard, so a worker that finds the budget spent re-raises its
+    ``TimeoutError`` on the caller's thread instead of returning ``None``.
+
     Returns
     -------
     T
@@ -195,8 +203,13 @@ def _run_blocking_io[T](
     remaining(deadline)
     outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
+    def run_once_started() -> T:
+        """Run *func* only while the shared budget remains."""
+        remaining(deadline)
+        return func()
+
     thread = threading.Thread(
-        target=_bounded_thread.stash_outcome(outcome, func),
+        target=_bounded_thread.stash_outcome(outcome, run_once_started),
         name="cmd-mox-ipc-io",
         daemon=True,
     )

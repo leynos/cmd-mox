@@ -406,22 +406,56 @@ def test_request_read_and_reply_share_one_deadline(
     patch_win32: PatchWin32,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The request read is anchored to the configured connection timeout."""
+    """A slow request read leaves the reply only the rest of the budget.
+
+    The read is anchored to the configured per-connection timeout and spends
+    1.5 s of it. A reply that started a fresh budget would then wait 2000 ms,
+    while one sharing the connection deadline waits the remaining 500 ms.
+    """
+    now = [100.0]
+    event_fake = FakeWin32Event()
     patch_win32(
         FakeWin32File(
-            writes=[ScriptedWrite()],
+            writes=[ScriptedWrite(status=ERROR_IO_PENDING)],
             reads=[ScriptedRead(error=FakeWinError(ERROR_BROKEN_PIPE))],
-        )
+        ),
+        win32event=event_fake,
     )
     state = build_state(outer_timeout=2.0)
     _answer_with(monkeypatch, b"reply")
-    deadlines = _patch_request(monkeypatch, state)
+    monkeypatch.setattr(
+        named_pipe, "compute_deadline", lambda timeout: now[0] + timeout
+    )
 
-    started = time.monotonic()
+    def remaining(deadline: float) -> float:
+        """Report the budget left on the test clock."""
+        left = deadline - now[0]
+        if left <= 0:
+            raise TimeoutError
+        return left
+
+    # Delivery reads the same clock, so the wait it asks for is the remainder.
+    monkeypatch.setattr(_named_pipe_reply, "remaining", remaining)
+    monkeypatch.setattr(
+        _named_pipe_reply,
+        "remaining_ms",
+        lambda deadline: int((deadline - now[0]) * 1000),
+    )
+    deadlines: list[float] = []
+
+    def read(_handle: object, deadline: float) -> bytes:
+        """Spend most of the connection budget reading the request."""
+        deadlines.append(deadline)
+        now[0] += 1.5
+        return b"request"
+
+    monkeypatch.setattr(state, "_read_request", read)
+
     _run_worker(state, object())
-    finished = time.monotonic()
 
     [deadline] = deadlines
-    assert started + 2.0 <= deadline <= finished + 2.0, (
-        "the request read did not use the configured per-connection timeout"
+    assert deadline == pytest.approx(102.0), (
+        "the read did not use the configured timeout"
     )
+    [(_handles, _wait_all, wait_ms)] = event_fake.waits
+    assert wait_ms == 500, "the reply started a fresh budget instead of the remainder"

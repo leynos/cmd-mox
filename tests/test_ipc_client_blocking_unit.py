@@ -175,6 +175,82 @@ def test_run_blocking_io_rejects_a_spent_deadline_before_starting_a_worker(
     assert not cancels, "an unstarted worker must not be cancelled"
 
 
+def test_run_blocking_io_skips_the_operation_when_the_worker_starts_late(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker scheduled after the budget is spent runs nothing.
+
+    The caller's pre-start check can pass while the thread waits for a
+    scheduler slot, so the worker repeats the check immediately before the
+    operation. Without it, a request could reach the transport after the
+    deadline the caller has already reported as expired.
+    """
+    checks = 0
+
+    def remaining(_deadline: float) -> float:
+        """Pass the caller's check, then report the worker's as spent."""
+        nonlocal checks
+        checks += 1
+        if checks > 1:
+            raise TimeoutError
+        return _SAFETY_TIMEOUT
+
+    ran: list[str] = []
+
+    class _InlineWorker:
+        """Thread stand-in that runs its target inside ``start``."""
+
+        def __init__(
+            self, *, target: cabc.Callable[[], None], **_kwargs: object
+        ) -> None:
+            """Keep the worker target the client factory passed in."""
+            self._target = target
+            self.finished = False
+            self.joins: list[float | None] = []
+
+        def start(self) -> None:
+            """Run the worker's target as the scheduler eventually would."""
+            try:
+                self._target()
+            finally:
+                self.finished = True
+
+        def join(self, timeout: float | None = None) -> bool:
+            """Record the budget and report the worker's state."""
+            self.joins.append(timeout)
+            return self.finished
+
+        def is_alive(self) -> bool:
+            """Report that the target has finished."""
+            return not self.finished
+
+    created: list[_InlineWorker] = []
+
+    def thread(*, target: cabc.Callable[[], None], **_kwargs: object) -> _InlineWorker:
+        """Build the worker the client asked for and keep it for assertions."""
+        worker = _InlineWorker(target=target)
+        created.append(worker)
+        return worker
+
+    monkeypatch.setattr(client, "remaining", remaining)
+    monkeypatch.setattr(client, "remaining_or_none", lambda _deadline: 0.01)
+    monkeypatch.setattr(client, "threading", types.SimpleNamespace(Thread=thread))
+
+    with pytest.raises(TimeoutError):
+        client._run_blocking_io(
+            lambda: ran.append("ran"),
+            deadline=time.monotonic() + _SAFETY_TIMEOUT,
+            cancel=lambda: None,
+        )
+
+    [worker] = created
+    assert checks == 2, "the worker did not re-check the shared deadline"
+    assert not ran, "the operation started after the deadline expired"
+    assert worker.joins == [pytest.approx(0.01)], (
+        "the caller did not join the finished worker with the budget left"
+    )
+
+
 def test_run_blocking_io_cancels_a_worker_that_outlives_the_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
