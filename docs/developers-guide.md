@@ -781,7 +781,10 @@ Every deadline contract lives in `cmd_mox/ipc/_deadline.py`: `compute_deadline`,
 `remaining`, `remaining_or_none`, `remaining_ms` and `timeout_ms`. `remaining`
 raises once the budget is spent, a remainder of exactly `0.0` counts as
 expired, and callers that treat an absent deadline as unbounded test `is None`
-rather than truthiness.
+rather than truthiness. `remaining_ms` and `timeout_ms` cap their result at the
+largest wait a Win32 call accepts, because the validators only require a
+timeout to be finite: a value such as `1e308` would otherwise multiply to
+infinity and raise `OverflowError` out of the wait instead of bounding it.
 
 On the server side, one per-connection deadline is anchored when the connection
 begins and shared by the request read and the reply delivery, so a slow reader

@@ -8,6 +8,9 @@ import pytest
 
 from cmd_mox.ipc import _deadline
 
+#: Largest millisecond wait a Win32 wait call accepts.
+_MAX_WAIT_MS = 0x7FFF_FFFF
+
 
 class _FakeClock:
     """A monotonic clock whose reading the test advances explicitly."""
@@ -122,3 +125,25 @@ def test_remaining_ms_floors_at_zero(now: float, expected: int) -> None:
 def test_timeout_ms_clamps_to_at_least_one(timeout: float, expected: int) -> None:
     """A relative timeout always becomes a wait of at least one millisecond."""
     assert _deadline.timeout_ms(timeout) == expected, "the clamp or conversion changed"
+
+
+@pytest.mark.parametrize("timeout", [1e308, 1e10], ids=["finite-overflow", "huge"])
+def test_timeout_ms_caps_a_timeout_beyond_the_win32_range(timeout: float) -> None:
+    """A finite but enormous timeout becomes the largest bounded wait.
+
+    The validators accept any finite timeout, and multiplying such a value by
+    1000 can reach ``inf``. Converting that to an integer would raise
+    ``OverflowError`` out of the accept loop instead of waiting.
+    """
+    assert _deadline.timeout_ms(timeout) == _MAX_WAIT_MS, (
+        "an unbounded timeout was not capped at the Win32 wait limit"
+    )
+
+
+def test_remaining_ms_caps_a_budget_beyond_the_win32_range() -> None:
+    """A deadline far in the future yields the capped wait, not an error."""
+    clock = _FakeClock(now=0.0)
+
+    assert _deadline.remaining_ms(1e308, clock=clock) == _MAX_WAIT_MS, (
+        "an unbounded remainder was not capped at the Win32 wait limit"
+    )

@@ -18,6 +18,9 @@ This module owns every deadline contract in :mod:`cmd_mox.ipc`:
 * :func:`timeout_ms` converts a configured relative timeout to whole
   milliseconds, clamping to at least one.
 
+Both millisecond conversions cap the result at the largest wait a Win32 call
+accepts, so a finite but enormous timeout is still a bounded wait.
+
 A remainder of exactly ``0.0`` counts as expired. Callers that treat an absent
 deadline as "unbounded" must test ``is None`` rather than truthiness, because a
 computed deadline is an absolute clock reading that may legitimately be ``0``.
@@ -41,6 +44,15 @@ type _MonotonicClock = cabc.Callable[[], float]
 #: Fixed diagnostic raised by every deadline expiry. Callers that need a
 #: transport-specific message translate this at their own boundary.
 TIMEOUT_MESSAGE: typ.Final[str] = "IPC client operation timed out"
+
+#: Largest millisecond wait the Win32 wait functions accept. The timeout
+#: validators only require a configured timeout to be finite, so a value such
+#: as ``1e308`` would otherwise overflow: ``int(1e308 * 1000)`` is
+#: ``int(inf)``, which raises :class:`OverflowError` instead of waiting.
+_MAX_WAIT_MS: typ.Final[int] = 0x7FFF_FFFF
+
+#: Seconds whose conversion to milliseconds still fits :data:`_MAX_WAIT_MS`.
+_MAX_WAIT_SECONDS: typ.Final[float] = _MAX_WAIT_MS / 1000
 
 
 def _monotonic(clock: _MonotonicClock | None) -> _MonotonicClock:
@@ -118,6 +130,12 @@ def remaining_or_none(
     return left if left > 0 else None
 
 
+def _milliseconds(seconds: float) -> int:
+    """Convert *seconds* to whole milliseconds within the Win32 range."""
+    bounded = min(seconds, _MAX_WAIT_SECONDS)
+    return min(_MAX_WAIT_MS, max(0, int(bounded * 1000)))
+
+
 def remaining_ms(
     deadline: float,
     *,
@@ -127,7 +145,8 @@ def remaining_ms(
 
     A remainder below one millisecond converts to ``0`` and a spent deadline
     also yields ``0``, so a Win32 wait is asked to return at once rather than
-    receiving a negative timeout.
+    receiving a negative timeout. A remainder too large for a Win32 timeout
+    parameter is capped rather than overflowing the conversion.
 
     Returns
     -------
@@ -135,7 +154,7 @@ def remaining_ms(
         Non-negative whole milliseconds remaining.
     """
     left = remaining_or_none(deadline, clock=clock)
-    return 0 if left is None else max(0, int(left * 1000))
+    return 0 if left is None else _milliseconds(left)
 
 
 def timeout_ms(timeout: float) -> int:
@@ -143,7 +162,8 @@ def timeout_ms(timeout: float) -> int:
 
     The result is clamped to at least one millisecond: Win32 treats ``0`` as
     "return immediately", which would defeat a sub-millisecond wait rather than
-    bounding it.
+    bounding it. A timeout too large for a Win32 timeout parameter is capped so
+    the conversion cannot overflow.
 
     Parameters
     ----------
@@ -155,7 +175,7 @@ def timeout_ms(timeout: float) -> int:
     int
         The timeout in milliseconds, always at least ``1``.
     """
-    return max(1, int(timeout * 1000))
+    return max(1, _milliseconds(timeout))
 
 
 __all__ = [
