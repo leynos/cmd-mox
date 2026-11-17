@@ -61,6 +61,28 @@ def ensure_shim_spy(monkeypatch: pytest.MonkeyPatch) -> _EnsureShimSpy:
     return spy
 
 
+@pytest.fixture
+def replay_mox() -> cabc.Iterator[CmdMox]:
+    """Yield an entered, replaying controller that always restores the environment.
+
+    ``verify_on_exit=False`` keeps each test's own assertion in charge of the
+    verdict: a failing assertion must surface as that failure, not be masked by
+    a second verification during teardown.
+
+    Yields
+    ------
+    CmdMox
+        Controller entered in replay phase, exited even when a test fails.
+    """
+    mox = CmdMox(verify_on_exit=False)
+    mox.__enter__()
+    mox.replay()
+    try:
+        yield mox
+    finally:
+        mox.__exit__(None, None, None)
+
+
 def _assert_shim_created_for(spy: _EnsureShimSpy, mox: CmdMox, name: str) -> None:
     """Assert the spy recorded exactly one shim creation for *name*.
 
@@ -83,27 +105,29 @@ def test_cmdmox_nonstubbed_command_behavior(
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """Invoking a non-stubbed command returns name but fails verification."""
-    mox = CmdMox()
+    mox = CmdMox(verify_on_exit=False)
     mox.register_command("not_stubbed")
     mox.__enter__()
-    mox.replay()
+    try:
+        mox.replay()
 
-    cmd_path = shim_path(mox.environment, "not_stubbed")
-    result = run([str(cmd_path)])
+        cmd_path = shim_path(mox.environment, "not_stubbed")
+        result = run([str(cmd_path)])
 
-    assert result.stdout.strip() == "not_stubbed"
+        assert result.stdout.strip() == "not_stubbed"
 
-    with pytest.raises(UnexpectedCommandError):
-        mox.verify()
+        with pytest.raises(UnexpectedCommandError):
+            mox.verify()
+    finally:
+        mox.__exit__(None, None, None)
 
 
 def test_register_command_creates_shim_during_replay(
+    replay_mox: CmdMox,
     ensure_shim_spy: _EnsureShimSpy,
 ) -> None:
     """register_command creates missing shims immediately during replay."""
-    mox = CmdMox()
-    mox.__enter__()
-    mox.replay()
+    mox = replay_mox
     ensure_shim_spy.calls.clear()
 
     mox.register_command("late")
@@ -114,12 +138,11 @@ def test_register_command_creates_shim_during_replay(
 
 
 def test_register_command_rejects_case_variant_during_replay(
+    replay_mox: CmdMox,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A late case-variant registration leaves no command or double behind."""
-    mox = CmdMox()
-    mox.__enter__()
-    mox.replay()
+    mox = replay_mox
     monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
     mox.register_command("git")
 
@@ -133,12 +156,11 @@ def test_register_command_rejects_case_variant_during_replay(
 
 
 def test_register_command_accepts_repeated_name(
+    replay_mox: CmdMox,
     ensure_shim_spy: _EnsureShimSpy,
 ) -> None:
     """Repeating an exactly-named registration stays idempotent."""
-    mox = CmdMox()
-    mox.__enter__()
-    mox.replay()
+    mox = replay_mox
     ensure_shim_spy.calls.clear()
 
     mox.register_command("late")
@@ -150,12 +172,11 @@ def test_register_command_accepts_repeated_name(
 
 
 def test_double_is_published_before_shim_creation(
+    replay_mox: CmdMox,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A new double is visible while its late shim is being created."""
-    mox = CmdMox()
-    mox.__enter__()
-    mox.replay()
+    mox = replay_mox
 
     def assert_published(directory: Path, name: str) -> Path:
         """Fail unless the double is already available to the IPC server."""
@@ -172,12 +193,11 @@ def test_double_is_published_before_shim_creation(
 
 
 def test_ensure_shim_during_replay_propagates_symlink_failure(
+    replay_mox: CmdMox,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Shim creation failures bubble up so callers can surface them."""
-    mox = CmdMox()
-    mox.__enter__()
-    mox.replay()
+    mox = replay_mox
 
     def _boom(directory: Path, name: str) -> Path:
         """Raise a RuntimeError to simulate a failed symlink creation."""
@@ -188,57 +208,58 @@ def test_ensure_shim_during_replay_propagates_symlink_failure(
     with pytest.raises(RuntimeError, match=_SYMLINK_FAILURE_MESSAGE):
         mox._ensure_shim_during_replay("late")
 
-    mox.__exit__(None, None, None)
-
 
 @pytest.mark.parametrize(
-    ("setup", "expected_call_count", "cleanup"),
+    ("setup", "expected_call_count"),
     [
-        pytest.param("no_replay", 0, None, id="outside-replay"),
-        pytest.param("phase_only", 0, None, id="replay-without-environment"),
-        pytest.param("full_replay", 1, "exit", id="replay-with-environment"),
+        pytest.param("no_replay", 0, id="outside-replay"),
+        pytest.param("phase_only", 0, id="replay-without-environment"),
+        pytest.param("full_replay", 1, id="replay-with-environment"),
     ],
 )
 def test_ensure_shim_during_replay_behaviour(
     setup: str,
     expected_call_count: int,
-    cleanup: str | None,
     ensure_shim_spy: _EnsureShimSpy,
 ) -> None:
     """_ensure_shim_during_replay handles replay state and environment availability."""
-    mox = CmdMox()
+    mox = CmdMox(verify_on_exit=False)
+    is_entered = False
 
-    match setup:
-        case "phase_only":
-            # Directly toggle the private phase to isolate replay behaviour
-            # without invoking the full environment machinery. The test accepts
-            # the tighter coupling in exchange for targeting this edge case
-            # explicitly.
-            mox._phase = Phase.REPLAY
-        case "full_replay":
-            mox.__enter__()
-            mox.replay()
-            ensure_shim_spy.calls.clear()
-        case "no_replay":
-            # Leave the controller in its pristine record phase.
-            pass
-        case _:
-            # Guard against a future typo or an unsupported case being added to
-            # the parametrization and silently exercising the no-replay path.
-            pytest.fail(f"unsupported setup: {setup!r}")
+    try:
+        match setup:
+            case "phase_only":
+                # Directly toggle the private phase to isolate replay behaviour
+                # without invoking the full environment machinery. The test
+                # accepts the tighter coupling in exchange for targeting this
+                # edge case explicitly.
+                mox._phase = Phase.REPLAY
+            case "full_replay":
+                mox.__enter__()
+                is_entered = True
+                mox.replay()
+                ensure_shim_spy.calls.clear()
+            case "no_replay":
+                # Leave the controller in its pristine record phase.
+                pass
+            case _:
+                # Guard against a future typo or an unsupported case being added
+                # to the parametrization and silently exercising the no-replay
+                # path.
+                pytest.fail(f"unsupported setup: {setup!r}")
 
-    mox._ensure_shim_during_replay("late")
+        mox._ensure_shim_during_replay("late")
 
-    if expected_call_count:
-        _assert_shim_created_for(ensure_shim_spy, mox, "late")
-    else:
-        assert not ensure_shim_spy.called
-        assert ensure_shim_spy.calls == []
+        if expected_call_count:
+            _assert_shim_created_for(ensure_shim_spy, mox, "late")
+        else:
+            assert not ensure_shim_spy.called
+            assert ensure_shim_spy.calls == []
 
-    assert len(ensure_shim_spy.calls) == expected_call_count
-
-    if cleanup == "exit":
-        mox.__exit__(None, None, None)
+        assert len(ensure_shim_spy.calls) == expected_call_count
+    finally:
+        if is_entered:
+            mox.__exit__(None, None, None)
 
 
 def test_ensure_shim_during_replay_repairs_broken_symlink(
@@ -303,11 +324,9 @@ def test_ensure_shim_during_replay_rejects_non_symlink_collisions(
         mox._ensure_shim_during_replay("late")
 
 
-def test_register_command_fails_when_path_exists() -> None:
+def test_register_command_fails_when_path_exists(replay_mox: CmdMox) -> None:
     """register_command refuses to overwrite existing non-symlink files."""
-    mox = CmdMox(verify_on_exit=False)
-    mox.__enter__()
-    mox.replay()
+    mox = replay_mox
 
     collision = shim_path(mox.environment, "late")
     collision.write_text("collision")
@@ -315,16 +334,13 @@ def test_register_command_fails_when_path_exists() -> None:
     with pytest.raises(FileExistsError, match="already exists and is not a symlink"):
         mox.register_command("late")
 
-    mox.__exit__(None, None, None)
-
 
 def test_register_command_propagates_shim_creation_failure(
+    replay_mox: CmdMox,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """register_command surfaces errors from shim creation helpers."""
-    mox = CmdMox(verify_on_exit=False)
-    mox.__enter__()
-    mox.replay()
+    mox = replay_mox
 
     def _boom(directory: Path, name: str) -> Path:
         """Raise PermissionError to simulate an unwritable shim directory."""
@@ -335,17 +351,13 @@ def test_register_command_propagates_shim_creation_failure(
     with pytest.raises(PermissionError):
         mox.register_command("late")
 
-    mox.__exit__(None, None, None)
-
 
 def test_register_command_keeps_existing_healthy_shim(
+    replay_mox: CmdMox,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """register_command leaves an existing healthy shim untouched."""
-    mox = CmdMox()
-    mox.__enter__()
-    mox.replay()
-
+    mox = replay_mox
     link = controller.ensure_shim(require_shim_dir(mox.environment), "again")
 
     def fail_create(directory: Path, name: str) -> Path:
@@ -361,12 +373,11 @@ def test_register_command_keeps_existing_healthy_shim(
 
 
 def test_failed_registration_does_not_block_case_variant(
+    replay_mox: CmdMox,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failed registration is rolled back, so a later variant can register."""
-    mox = CmdMox(verify_on_exit=False)
-    mox.__enter__()
-    mox.replay()
+    mox = replay_mox
     monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
     shim_dir = require_shim_dir(mox.environment)
     foreign = shim_dir / "git.cmd"
@@ -381,5 +392,3 @@ def test_failed_registration_does_not_block_case_variant(
     foreign.unlink()
     mox.stub("GIT")
     assert "GIT" in mox._doubles
-
-    mox.__exit__(None, None, None)
