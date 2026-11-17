@@ -1,12 +1,14 @@
 """Bounded reply delivery for the named-pipe server.
 
-``FlushFileBuffers`` only promises the bytes left the server's write buffer; it
-says nothing about whether the client received them. The transport therefore
-writes the reply with an overlapped ``WriteFile`` and then issues a bounded
-overlapped read, treating the peer's close as the delivery acknowledgement.
-That read is what bounds a client which reads slowly or stops reading: the
-same per-connection deadline applies, and both operations are cancelled and
-drained in the serving thread before their buffer and event are released.
+On a server-side pipe handle ``FlushFileBuffers`` waits until the client has
+read the buffered data, but it takes no timeout and cannot be cancelled, so a
+client that never reads would block the handler and server shutdown
+indefinitely. The transport therefore writes the reply with an overlapped
+``WriteFile`` and then issues a bounded overlapped read, treating the peer's
+close as the delivery acknowledgement. That read is what bounds a client which
+reads slowly or stops reading: the same per-connection deadline applies, and
+both operations are cancelled and drained in the serving thread before their
+buffer and event are released.
 """
 
 from __future__ import annotations
@@ -200,10 +202,21 @@ class ReplyDelivery:
             If the deadline expires or the server stops first. The operation
             is cancelled and drained before the error propagates, so the
             kernel no longer writes into the buffer it was given.
+
+        Notes
+        -----
+        A wait that fails for another reason leaves the operation pending, and
+        the caller releases the buffer as the error unwinds, so that path
+        drains the operation too. The wait's own error is what propagates.
         """
-        if self._wait(event, remaining_ms(deadline)) == self._backend.WAIT_OBJECT_0:
+        completed: int | None = None
+        try:
+            completed = self._wait(event, remaining_ms(deadline))
+        finally:
+            if completed != self._backend.WAIT_OBJECT_0:
+                self._cancel(handle, overlapped)
+        if completed == self._backend.WAIT_OBJECT_0:
             return
-        self._cancel(handle, overlapped)
         raise TimeoutError(TIMEOUT_MESSAGE)
 
 

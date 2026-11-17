@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from cmd_mox.ipc import _observability, named_pipe
+from cmd_mox.ipc import _named_pipe_reply, _observability, named_pipe
 from cmd_mox.ipc._server_core import _RequestResult
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
@@ -23,6 +23,7 @@ from cmd_mox.ipc.windows import (
 )
 from cmd_mox.unittests._named_pipe_fakes import (  # ruff: ignore[unused-import] - re-exported pytest fixtures
     FakeEventHandle,
+    FakeNamedPipeBackend,
     FakeWin32Event,
     FakeWin32File,
     FakeWinError,
@@ -218,6 +219,39 @@ def test_reply_write_timeout_is_reported_as_a_timeout(
     assert file_fake.read_calls == 0, "an unconfirmed reply still probed the peer"
     assert closed_pipe_handles(file_fake) == [handle], "the client handle leaked"
     assert slot.released, "the permit was not released"
+
+
+def test_a_wait_failure_still_cancels_the_pending_operation(
+    fake_backend: FakeNamedPipeBackend,
+    patch_win32: PatchWin32,
+) -> None:
+    """A wait that raises still cancels and drains the pending operation.
+
+    The kernel holds the probe buffer and overlapped structure until the
+    operation settles, so an unexpected wait failure must not skip the drain
+    on its way out. The wait's own error stays the one the caller sees.
+    """
+    patch_win32(FakeWin32File(writes=[ScriptedWrite(status=ERROR_IO_PENDING)]))
+    failure = RuntimeError("wait failed")
+    cancels: list[tuple[object, object]] = []
+
+    def wait(_event: object, _timeout_ms: int) -> int:
+        """Fail the wait the way an unexpected Win32 error would."""
+        raise failure
+
+    def cancel(handle: object, overlapped: object) -> None:
+        """Record the cancellation and drain."""
+        cancels.append((handle, overlapped))
+
+    delivery = _named_pipe_reply.ReplyDelivery(fake_backend, wait=wait, cancel=cancel)
+    handle = object()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        delivery.deliver(handle, b"reply", time.monotonic() + 5.0)
+
+    assert excinfo.value is failure, "the wait error was replaced by its cleanup"
+    [cancelled] = cancels
+    assert cancelled[0] is handle, "the pending write was not cancelled"
 
 
 def test_reply_confirmation_timeout_is_reported_as_a_timeout(
