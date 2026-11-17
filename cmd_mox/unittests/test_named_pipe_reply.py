@@ -247,6 +247,39 @@ def test_reply_confirmation_timeout_is_reported_as_a_timeout(
     assert slot.released, "the permit was not released"
 
 
+def test_a_budget_spent_during_dispatch_withholds_the_reply(
+    patch_win32: PatchWin32,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A handler that outlives the budget commits, but its reply is withheld.
+
+    The deadline is anchored before the request read, so a handler that spends
+    the rest of it leaves delivery with nothing to spend. The client receives
+    no reply, the worker records a terminal timeout, and a retry repeats the
+    handler's side effects.
+    """
+    file_fake, _pipe_fake = patch_win32(FakeWin32File())
+    state = build_state()
+    handle = object()
+    _answer_with(monkeypatch, b"reply")
+    _patch_request(monkeypatch, state)
+    # The patched request read ignores the deadline, standing in for a handler
+    # that consumed the budget between the read and the reply.
+    monkeypatch.setattr(
+        named_pipe, "compute_deadline", lambda _timeout: time.monotonic() - 1.0
+    )
+
+    with _observability.capture_events() as events:
+        slot = _run_worker(state, handle)
+
+    [timed_out] = _worker_events(events, "timeout")
+    assert timed_out.error_category == "Timeout", "wrong reply timeout category"
+    assert not file_fake.overlapped_writes, "a reply was written past the budget"
+    assert not file_fake.read_calls, "the peer was probed past the budget"
+    assert closed_pipe_handles(file_fake) == [handle], "the client handle leaked"
+    assert slot.released, "the permit was not released"
+
+
 def test_reply_delivery_shutdown_is_reported_as_stopped(
     patch_win32: PatchWin32,
     monkeypatch: pytest.MonkeyPatch,

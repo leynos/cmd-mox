@@ -245,6 +245,11 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
     def _create_backend(self) -> tuple[socketserver.BaseServer, threading.Thread]:
         """Build the cached Unix socket backend and its daemon thread.
 
+        ``accept_timeout`` is passed to :meth:`socketserver.BaseServer.serve_forever`
+        as its poll interval. It bounds how long ``stop()`` waits for the
+        serving thread to notice the shutdown, not how long a client may take
+        to connect.
+
         Returns
         -------
         tuple[socketserver.BaseServer, threading.Thread]
@@ -289,8 +294,14 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
         )
         try:
             server = inner_server_cls(self.socket_path, self)
-            server.timeout = self.accept_timeout
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            # The poll interval is the only knob that makes the accept loop
+            # notice a shutdown: assigning ``server.timeout`` looked similar
+            # but never reached the loop's ``select`` call.
+            thread = threading.Thread(
+                target=server.serve_forever,
+                args=(self.accept_timeout,),
+                daemon=True,
+            )
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             outcome = (
                 "windows_rejected"

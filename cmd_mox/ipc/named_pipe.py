@@ -135,6 +135,12 @@ class _NamedPipeState:
     * a client has one ``outer.timeout`` budget, shared by the request read and
       the reply delivery, so neither end can renew it mid-exchange.
 
+    A budget that runs out while the request is being dispatched does not undo
+    the handler: its side effects are committed, the reply is withheld, and the
+    worker records a terminal ``Timeout`` event. A client that retries such a
+    request repeats those side effects, so handlers should stay idempotent or
+    finish well inside ``outer.timeout``.
+
     Cancellation design
     -------------------
     Pipe instances are created with ``FILE_FLAG_OVERLAPPED`` and every blocking
@@ -248,19 +254,30 @@ class _NamedPipeState:
     def _await_connection(
         self, handle: object, overlapped: object, event: object
     ) -> tuple[bool, bool]:
-        """Block until a client attaches to *handle* or the server stops.
+        """Wait in accept-sized slices until a client attaches or the server stops.
+
+        The pending connect is reused across slices: it stays in flight on
+        *handle*, so re-waiting costs one syscall rather than tearing down and
+        recreating the pipe instance, which would drop a client that arrived
+        during the gap.
 
         Returns
         -------
         tuple[bool, bool]
             ``(keep_serving, connected)`` for the accept loop.
         """
-        if self._wait_for_overlapped(event, self._backend.INFINITE) != (
-            self._backend.WAIT_OBJECT_0
-        ):
-            self._cancel_overlapped(handle, overlapped)
-            self._backend.close_handle(handle)
-            return False, False
+        wait_ms = timeout_ms(self.accept_timeout)
+        while True:
+            result = self._wait_for_overlapped(event, wait_ms)
+            if result == self._backend.WAIT_OBJECT_0:
+                break
+            # Any other result means either the shutdown event was signalled
+            # or the wait failed. A slice that simply expired keeps waiting,
+            # unless a stop raced the expiry and the Python flag is already up.
+            if result != self._backend.WAIT_TIMEOUT or self.stop_event.is_set():
+                self._cancel_overlapped(handle, overlapped)
+                self._backend.close_handle(handle)
+                return False, False
         try:
             self._backend.get_overlapped_result(handle, overlapped)
         except self._backend.error as exc:
@@ -504,7 +521,13 @@ class _NamedPipeState:
                     slot.release()
 
     def _serve_one_request(self, handle: object, started: float) -> None:
-        """Read, dispatch, and answer one request, emitting its outcome."""
+        """Read, dispatch, and answer one request, emitting its outcome.
+
+        Dispatch is not interrupted by the deadline: a handler that spends the
+        remaining budget still runs to completion and commits its side effects.
+        Only delivery is refused, because the client has stopped waiting, so
+        the reply is withheld and the worker reports a terminal timeout.
+        """
         try:
             deadline = compute_deadline(self.outer.timeout)
             raw = self._read_request(handle, deadline)

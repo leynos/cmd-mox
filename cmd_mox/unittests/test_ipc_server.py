@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cmd_mox import _path_utils as path_utils
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
@@ -35,6 +36,9 @@ from cmd_mox.ipc import server as _ipc_server
 
 pytestmark = pytest.mark.requires_unix_sockets
 
+#: Left on the stub server class to reveal any assignment to ``server.timeout``.
+_UNASSIGNED_TIMEOUT: typ.Final[object] = object()
+
 
 def test_ipc_server_start_stop(tmp_path: Path) -> None:
     """Server creates and removes the socket path."""
@@ -55,6 +59,59 @@ def test_ipc_server_restart(tmp_path: Path) -> None:
     server.start()
     assert socket_path.exists()
     server.stop()
+
+
+def test_ipc_server_passes_accept_timeout_as_the_serve_poll_interval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unix_server_base_cache: None,
+    stub_unix_stream_server: type[socketserver.BaseServer],
+) -> None:
+    """The accept timeout is the serving loop's poll interval."""
+    recorded: list[float] = []
+
+    def record_poll_interval(
+        _self: socketserver.BaseServer, poll_interval: float = 0.5
+    ) -> None:
+        """Record the poll interval the accept loop was started with."""
+        recorded.append(poll_interval)
+
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", False)
+    monkeypatch.setattr(
+        socketserver,
+        "ThreadingUnixStreamServer",
+        stub_unix_stream_server,
+        raising=False,
+    )
+    monkeypatch.setattr(stub_unix_stream_server, "serve_forever", record_poll_interval)
+    # ``BaseServer.timeout`` is a class attribute, so a sentinel left in place
+    # proves the backend no longer assigns it: the old code set it to the
+    # accept timeout, which never reached the loop's ``select`` call.
+    monkeypatch.setattr(stub_unix_stream_server, "timeout", _UNASSIGNED_TIMEOUT)
+
+    server = IPCServer(tmp_path / "unused.sock", timeout=5.0, accept_timeout=0.25)
+    backend, thread = server._create_backend()
+    thread.start()
+    thread.join(1.0)
+
+    assert recorded == [0.25], "the accept timeout did not reach serve_forever"
+    assert backend.timeout is _UNASSIGNED_TIMEOUT, (
+        "the backend still assigned server.timeout"
+    )
+
+
+def test_ipc_server_stop_is_bounded_by_the_accept_poll_interval(
+    tmp_path: Path,
+) -> None:
+    """An idle server notices shutdown within one accept poll."""
+    server = IPCServer(tmp_path / "ipc.sock", timeout=5.0, accept_timeout=0.05)
+    server.start()
+
+    started = time.monotonic()
+    server.stop()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 1.0, "stop() waited for more than one accept poll interval"
 
 
 def test_ipc_server_exports_environment() -> None:

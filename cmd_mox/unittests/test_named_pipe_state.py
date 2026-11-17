@@ -256,6 +256,47 @@ def test_try_connect_pipe_awaits_a_pending_connection(
     assert closed_pipe_handles(file_fake) == [], "the client handle was closed"
 
 
+def test_try_connect_pipe_reuses_the_pending_connect_after_a_poll_expiry(
+    patch_win32: PatchWin32,
+) -> None:
+    """An expired accept slice re-waits on the same pending connect."""
+    event_fake = FakeWin32Event([FakeWin32Event.WAIT_TIMEOUT])
+    file_fake, pipe_fake = patch_win32(
+        win32pipe=FakeWin32Pipe(connect_results=[ERROR_IO_PENDING]),
+        win32event=event_fake,
+    )
+    handle = object()
+
+    assert build_state(accept_timeout=0.25)._try_connect_pipe(handle) == (
+        True,
+        True,
+    ), "the accept loop stopped after one expired slice"
+
+    assert pipe_fake.connect_calls == [handle], "the pending connect was re-issued"
+    assert [wait[2] for wait in event_fake.waits] == [250, 250], (
+        "each slice did not use the accept interval"
+    )
+    assert not file_fake.cancelled, "an expired slice cancelled the connect"
+    assert closed_pipe_handles(file_fake) == [], "the handle was closed early"
+
+
+def test_try_connect_pipe_stops_after_a_poll_expiry_when_stopping(
+    patch_win32: PatchWin32,
+) -> None:
+    """A slice that expires while stopping cancels the pending connect."""
+    file_fake, _pipe_fake = patch_win32(
+        win32pipe=FakeWin32Pipe(connect_results=[ERROR_IO_PENDING]),
+        win32event=FakeWin32Event([FakeWin32Event.WAIT_TIMEOUT]),
+    )
+    state = build_state()
+    state.stop_event.set()
+    handle = object()
+
+    assert state._try_connect_pipe(handle) == (False, False), "bad decision"
+    assert file_fake.cancelled == [handle], "the pending connect was not cancelled"
+    assert closed_pipe_handles(file_fake) == [handle], "handle was not closed"
+
+
 def test_try_connect_pipe_stops_when_shutdown_wins_the_race(
     patch_win32: PatchWin32,
 ) -> None:
