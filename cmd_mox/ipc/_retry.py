@@ -31,27 +31,84 @@ MIN_RETRY_SLEEP: typ.Final[float] = 0.001
 
 @dc.dataclass(slots=True)
 class RetryConfig:
-    """Configuration for connection retry behavior."""
+    """Configuration for one bounded retry sequence.
+
+    Attributes
+    ----------
+    retries:
+        Total number of attempts permitted, not the number of retries after
+        the first failure: ``retries=3`` allows three calls of the retried
+        operation. Must be at least one.
+    backoff:
+        Base delay between attempts in seconds. Attempt *n* (zero-based)
+        waits ``backoff * (n + 1)`` before jitter is applied, and never less
+        than :data:`MIN_RETRY_SLEEP`. Must be finite and non-negative.
+    jitter:
+        Fractional randomisation of each delay, in the inclusive range from
+        ``0.0`` (no jitter) to ``1.0`` (up to twice the base delay). Must be
+        finite.
+    """
 
     retries: int = DEFAULT_CONNECT_RETRIES
     backoff: float = DEFAULT_CONNECT_BACKOFF
     jitter: float = DEFAULT_CONNECT_JITTER
 
     def __post_init__(self) -> None:
-        """Validate retry configuration values."""
+        """Validate the retry fields as soon as the value is built.
+
+        Raises
+        ------
+        TypeError
+            If a field has the wrong type.
+        ValueError
+            If a field is outside its documented range.
+        """  # ruff: ignore[docstring-extraneous-exception] - the validators raise these caller-visible failures
         validate_retry_attempts(self.retries)
         validate_retry_backoff(self.backoff)
         validate_retry_jitter(self.jitter)
 
     def validate(self, timeout: float) -> None:
-        """Re-validate retry configuration alongside the connection timeout."""
+        """Re-validate the configuration alongside a connection timeout.
+
+        Checking the pair together rejects a misconfigured timeout and retry
+        policy before the first connection attempt rather than mid-sequence.
+
+        Parameters
+        ----------
+        timeout:
+            Connection timeout in seconds; must be positive and finite.
+
+        Raises
+        ------
+        TypeError
+            If *timeout* or a retry field has the wrong type.
+        ValueError
+            If *timeout* or a retry field is outside its documented range.
+        """  # ruff: ignore[docstring-extraneous-exception] - the validators raise these caller-visible failures
         validate_positive_finite_timeout(timeout)
         self.__post_init__()
 
 
 @dc.dataclass(slots=True)
 class RetryStrategy:
-    """Hooks for logging and gating retry behaviour."""
+    """Hooks that observe and gate one retry sequence.
+
+    Attributes
+    ----------
+    on_failure:
+        Called with the zero-based index of the attempt that failed and the
+        exception it raised, before the retry decision is made. Use it for
+        bounded logging; it observes the failure rather than consuming it.
+    should_retry:
+        Called with the failure, the zero-based attempt index and the total
+        attempt count, and returns whether another attempt may run. It can
+        narrow which failures are retried but cannot extend the attempt
+        limit: the final attempt always re-raises. ``None`` retries every
+        failure until that limit.
+    sleep:
+        Waits for the delay from :func:`calculate_retry_delay`, defaulting to
+        :func:`time.sleep`. Tests inject a recorder here.
+    """
 
     on_failure: cabc.Callable[[int, Exception], None] | None = None
     should_retry: cabc.Callable[[Exception, int, int], bool] | None = None
