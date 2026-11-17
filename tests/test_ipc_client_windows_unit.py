@@ -194,7 +194,7 @@ def test_connect_pipe_with_retries_retries_busy_and_missing_pipes(
     factory = _ScriptedPipeHandleFactory([error, "HANDLE"])
     waits = _bind_pipe_waits(monkeypatch)
     monkeypatch.setattr(client, "_create_pipe_handle", factory)
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 50.0)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 50.0)
 
     handle = client._connect_pipe_with_retries(
         "pipe",
@@ -242,7 +242,7 @@ def test_connect_pipe_with_retries_honours_an_explicit_deadline(
     monkeypatch.setattr(client, "_create_pipe_handle", factory)
     monkeypatch.setattr(
         client,
-        "_compute_deadline",
+        "compute_deadline",
         lambda _timeout: pytest.fail("an explicit deadline was recomputed"),
     )
 

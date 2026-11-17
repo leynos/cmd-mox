@@ -12,7 +12,7 @@ import typing as typ
 from functools import cache
 
 from . import _observability
-from ._deadline import _compute_deadline, _remaining_time
+from ._deadline import compute_deadline, remaining
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -333,7 +333,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
     def setup(self) -> None:
         """Start the connection's receive deadline before reading begins."""
         self._clock = time.monotonic
-        self._read_deadline = _compute_deadline(
+        self._read_deadline = compute_deadline(
             self.server.outer.timeout,  # type: ignore[attr-defined, ty:unresolved-attribute]
             clock=self._clock,
         )
@@ -349,9 +349,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         """
         chunks: list[bytes] = []
         while True:
-            self.request.settimeout(
-                _remaining_time(self._read_deadline, clock=self._clock)
-            )
+            self.request.settimeout(remaining(self._read_deadline, clock=self._clock))
             chunk = self.request.recv(64 * 1024)
             if not chunk:
                 return b"".join(chunks)

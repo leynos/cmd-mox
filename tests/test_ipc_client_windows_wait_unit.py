@@ -33,7 +33,7 @@ class _PipeWaitClock:
 def _bind_pipe_wait_clock(
     monkeypatch: pytest.MonkeyPatch, clock: _PipeWaitClock
 ) -> None:
-    """Replace ``_remaining_time`` with one measured against *clock*."""
+    """Replace ``remaining`` with one measured against *clock*."""
 
     def remaining(deadline: float) -> float:
         """Measure the budget against the mutable test clock."""
@@ -42,7 +42,7 @@ def _bind_pipe_wait_clock(
             raise TimeoutError(TIMEOUT_MESSAGE)
         return left
 
-    monkeypatch.setattr(client, "_remaining_time", remaining)
+    monkeypatch.setattr(client, "remaining", remaining)
 
 
 @pytest.mark.parametrize(

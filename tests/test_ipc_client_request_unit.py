@@ -141,7 +141,7 @@ def test_read_all_requests_fixed_size_chunks_until_eof(
 ) -> None:
     """Chunks are requested at the documented size and concatenated."""
     sock = _RecordingSocket([b"first", b"second"])
-    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
+    monkeypatch.setattr(ipc_client, "remaining", lambda _deadline: 1.0)
 
     result = ipc_client._read_all(typ.cast("socket.socket", sock), 10.0)
 
@@ -157,7 +157,7 @@ def test_read_all_returns_empty_bytes_at_immediate_eof(
 ) -> None:
     """A peer that closes immediately yields an empty payload."""
     sock = _RecordingSocket()
-    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
+    monkeypatch.setattr(ipc_client, "remaining", lambda _deadline: 1.0)
 
     assert ipc_client._read_all(typ.cast("socket.socket", sock), 10.0) == b"", (
         "an immediate EOF did not yield empty bytes"
@@ -170,7 +170,7 @@ def test_read_all_propagates_a_receive_failure_after_a_partial_read(
     """A failure after partial data is not swallowed into a short payload."""
     failure = OSError("peer vanished")
     sock = _RecordingSocket([b"partial"], recv_error=failure)
-    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
+    monkeypatch.setattr(ipc_client, "remaining", lambda _deadline: 1.0)
 
     with pytest.raises(OSError, match="peer vanished") as excinfo:
         ipc_client._read_all(typ.cast("socket.socket", sock), 10.0)
@@ -204,8 +204,8 @@ def test_connect_unix_with_retries_selects_the_documented_deadline(
         observed.append(deadline)
         return 1.0
 
-    monkeypatch.setattr(ipc_client, "_remaining_time", remaining)
-    monkeypatch.setattr(ipc_client, "_compute_deadline", lambda _timeout: 77.0)
+    monkeypatch.setattr(ipc_client, "remaining", remaining)
+    monkeypatch.setattr(ipc_client, "compute_deadline", lambda _timeout: 77.0)
     monkeypatch.setattr(ipc_client.socket, "socket", lambda *_args: sock)
     context = _context(deadline=context_deadline)
 
@@ -232,7 +232,7 @@ def test_connect_unix_with_retries_opens_an_af_unix_stream_socket(
         created.append(args)
         return sock
 
-    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
+    monkeypatch.setattr(ipc_client, "remaining", lambda _deadline: 1.0)
     monkeypatch.setattr(ipc_client.socket, "socket", factory)
 
     ipc_client._connect_unix_with_retries(
@@ -250,7 +250,7 @@ def test_connect_unix_with_retries_closes_a_failed_socket(
     """A refused connect releases the socket before the error escapes."""
     failure = ConnectionRefusedError("refused")
     sock = _RecordingSocket(connect_error=failure)
-    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
+    monkeypatch.setattr(ipc_client, "remaining", lambda _deadline: 1.0)
     monkeypatch.setattr(ipc_client.socket, "socket", lambda *_args: sock)
 
     with pytest.raises(ConnectionRefusedError) as excinfo:
@@ -286,7 +286,7 @@ def test_send_unix_request_forwards_the_shared_deadline_and_payload(
         return 2.5
 
     monkeypatch.setattr(ipc_client, "_connect_unix_with_retries", connect)
-    monkeypatch.setattr(ipc_client, "_remaining_time", remaining)
+    monkeypatch.setattr(ipc_client, "remaining", remaining)
     context = _context(deadline=42.0)
 
     result = ipc_client._send_unix_request(
@@ -327,8 +327,8 @@ def test_send_unix_request_computes_a_deadline_when_none_is_supplied(
         return sock
 
     monkeypatch.setattr(ipc_client, "_connect_unix_with_retries", connect)
-    monkeypatch.setattr(ipc_client, "_compute_deadline", lambda _timeout: 88.0)
-    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
+    monkeypatch.setattr(ipc_client, "compute_deadline", lambda _timeout: 88.0)
+    monkeypatch.setattr(ipc_client, "remaining", lambda _deadline: 1.0)
 
     ipc_client._send_unix_request(
         pathlib.Path("ipc.sock"), b"payload", _context(deadline=None)

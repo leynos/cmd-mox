@@ -710,7 +710,7 @@ def test_unix_request_shares_deadline_across_generated_io_phases(
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(ipc_client, "_remaining_time", clock.remaining)
+        monkeypatch.setattr(ipc_client, "remaining", clock.remaining)
         monkeypatch.setattr(ipc_client.socket, "socket", socket_factory)
         monkeypatch.setattr(ipc_client.time, "sleep", clock.sleep)
         try:

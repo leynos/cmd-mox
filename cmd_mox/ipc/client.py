@@ -37,7 +37,7 @@ from cmd_mox.ipc.windows import (
 )
 
 from . import _client_events, _observability, wire
-from ._deadline import _compute_deadline, _remaining_time
+from ._deadline import compute_deadline, remaining, timeout_ms
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 
@@ -281,14 +281,14 @@ def _validate_initial_deadline(
         If the deadline has already passed.
     """
     try:
-        return _remaining_time(deadline)
+        return remaining(deadline)
     except TimeoutError:
         _cancel_and_await_worker(thread, cancel)
         raise
 
 
 def _join_with_timeout_and_cancel(
-    thread: threading.Thread, remaining: float, cancel: cabc.Callable[[], None]
+    thread: threading.Thread, budget: float, cancel: cabc.Callable[[], None]
 ) -> None:
     """Join the thread with timeout; cancel and raise if still alive.
 
@@ -299,9 +299,9 @@ def _join_with_timeout_and_cancel(
     Raises
     ------
     TimeoutError
-        If *thread* is still running after *remaining* seconds.
+        If *thread* is still running after *budget* seconds.
     """
-    thread.join(remaining)
+    thread.join(budget)
     if not thread.is_alive():
         return
     msg = "IPC client operation timed out"
@@ -354,8 +354,8 @@ def _run_blocking_io[T](
     )
     thread.start()
 
-    remaining = _validate_initial_deadline(deadline, cancel, thread)
-    _join_with_timeout_and_cancel(thread, remaining, cancel)
+    budget = _validate_initial_deadline(deadline, cancel, thread)
+    _join_with_timeout_and_cancel(thread, budget, cancel)
     return typ.cast("T", _extract_outcome(outcome))
 
 
@@ -389,15 +389,15 @@ def _connect_unix_with_retries(
     address = str(sock_path)
     request_deadline = deadline if deadline is not None else context.deadline
     if request_deadline is None:
-        request_deadline = _compute_deadline(context.timeout)
-    _remaining_time(request_deadline)
+        request_deadline = compute_deadline(context.timeout)
+    remaining(request_deadline)
 
     def attempt_connect(_attempt: int) -> socket.socket:
         """Open a fresh Unix socket and connect it, closing it if connect fails."""
-        _remaining_time(request_deadline)
+        remaining(request_deadline)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            sock.settimeout(_remaining_time(request_deadline))
+            sock.settimeout(remaining(request_deadline))
             sock.connect(address)
         except OSError:
             sock.close()
@@ -406,7 +406,7 @@ def _connect_unix_with_retries(
 
     def bounded_sleep(delay: float) -> None:
         """Limit retry backoff to the remaining request deadline."""
-        time.sleep(min(delay, _remaining_time(request_deadline)))
+        time.sleep(min(delay, remaining(request_deadline)))
 
     return retry_with_backoff(
         attempt_connect,
@@ -448,7 +448,7 @@ def _read_all(sock: socket.socket, deadline: float) -> bytes:
     """
     chunks = []
     while True:
-        sock.settimeout(_remaining_time(deadline))
+        sock.settimeout(remaining(deadline))
         chunk = sock.recv(1024)
         if not chunk:
             break
@@ -465,12 +465,12 @@ def _send_unix_request(
     context.validate()
     deadline = context.deadline
     if deadline is None:
-        deadline = _compute_deadline(context.timeout)
-    _remaining_time(deadline)
+        deadline = compute_deadline(context.timeout)
+    remaining(deadline)
     with _connect_unix_with_retries(sock_path, context, deadline=deadline) as client:
-        client.settimeout(_remaining_time(deadline))
+        client.settimeout(remaining(deadline))
         client.sendall(payload)
-        client.settimeout(_remaining_time(deadline))
+        client.settimeout(remaining(deadline))
         client.shutdown(socket.SHUT_WR)
         return _read_all(client, deadline)
 
@@ -506,8 +506,8 @@ def _wait_for_pipe_availability(
     """Wait for *pipe_name* to become available, falling back to sleep."""
     wait_duration = delay
     if deadline is not None:
-        wait_duration = min(delay, _remaining_time(deadline))
-    wait_ms = max(1, int(wait_duration * 1000))
+        wait_duration = min(delay, remaining(deadline))
+    wait_ms = timeout_ms(wait_duration)
     try:
         win32pipe.WaitNamedPipe(pipe_name, wait_ms)
     except pywintypes.error:
@@ -548,7 +548,7 @@ def _connect_pipe_with_retries(
 ) -> object:
     """Open a handle to the named pipe, retrying while it is busy or missing."""
     pipe_name_str = os.fspath(pipe_name)
-    connect_deadline = deadline or _compute_deadline(context.timeout)
+    connect_deadline = deadline or compute_deadline(context.timeout)
 
     def sleep(delay: float) -> None:
         """Wait for the pipe to become available, bounded by the connect deadline."""
@@ -577,7 +577,7 @@ def _send_pipe_request(
     """Send one payload over a named pipe and return the full reply."""
     pipe_name = derive_pipe_name(sock_path)
     timeout = context.timeout
-    connect_deadline = _compute_deadline(timeout)
+    connect_deadline = compute_deadline(timeout)
     handle = _connect_pipe_with_retries(
         pipe_name,
         context,
@@ -591,7 +591,7 @@ def _send_pipe_request(
                 payload,
                 win32file=win32file,
             ),
-            deadline=_compute_deadline(timeout),
+            deadline=compute_deadline(timeout),
             cancel=closer.close,
         )
         return _run_blocking_io(
@@ -601,7 +601,7 @@ def _send_pipe_request(
                 pywintypes=pywintypes,
                 options=PipeReadOptions(chunk_size=PIPE_CHUNK_SIZE),
             ),
-            deadline=_compute_deadline(timeout),
+            deadline=compute_deadline(timeout),
             cancel=closer.close,
         )
     finally:

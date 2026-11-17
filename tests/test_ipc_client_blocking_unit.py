@@ -145,7 +145,7 @@ def test_run_blocking_io_reraises_the_worker_exception() -> None:
 
 
 def _raise_timeout(_deadline: float) -> float:
-    """Report a spent deadline the way ``_remaining_time`` does."""
+    """Report a spent deadline the way ``remaining`` does."""
     raise TimeoutError
 
 
@@ -168,7 +168,7 @@ def test_run_blocking_io_cancels_a_worker_that_outlives_the_deadline(
     The positive-budget case must show the caller's timed join; the expired
     case must cancel without one.
     """
-    monkeypatch.setattr(client, "_remaining_time", remaining_time)
+    monkeypatch.setattr(client, "remaining", remaining_time)
     monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
     worker = _ControlledWorker(exits_on_cancel=True)
     cancels: list[str] = []
@@ -326,7 +326,7 @@ def test_validate_initial_deadline_returns_the_remaining_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A live deadline returns the remaining budget without cancelling."""
-    monkeypatch.setattr(client, "_remaining_time", lambda _deadline: 0.75)
+    monkeypatch.setattr(client, "remaining", lambda _deadline: 0.75)
     cancels: list[tuple[object, object]] = []
     monkeypatch.setattr(
         client, "_cancel_and_await_worker", lambda *args: cancels.append(args)
@@ -352,7 +352,7 @@ def test_validate_initial_deadline_cancels_the_exact_worker_before_raising(
         """Report an exhausted deadline."""
         raise TimeoutError
 
-    monkeypatch.setattr(client, "_remaining_time", expired)
+    monkeypatch.setattr(client, "remaining", expired)
     cancels: list[tuple[object, object]] = []
     monkeypatch.setattr(
         client, "_cancel_and_await_worker", lambda *args: cancels.append(args)

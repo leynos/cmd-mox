@@ -18,15 +18,6 @@ from cmd_mox.ipc.server import IPCServer
 pytestmark = pytest.mark.requires_unix_sockets
 
 
-def test_compute_deadline_uses_injected_clock() -> None:
-    """Deadline construction uses the supplied monotonic clock."""
-    now = 5.0
-
-    deadline = ipc_server_module._compute_deadline(2.5, clock=lambda: now)
-
-    assert deadline == pytest.approx(7.5), "Deadline did not use the injected clock"
-
-
 def test_ipc_server_reports_timeout_when_deadline_expires_before_handle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -37,7 +28,7 @@ def test_ipc_server_reports_timeout_when_deadline_expires_before_handle(
     with _observability.capture_events() as events, IPCServer(socket_path):
         monkeypatch.setattr(
             ipc_server_module,
-            "_compute_deadline",
+            "compute_deadline",
             lambda _timeout, *, clock: clock() - 1.0,
         )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as incomplete:
@@ -67,7 +58,7 @@ def test_ipc_server_reports_timeout_when_deadline_expires_before_handle(
     )
 
 
-def test_ipc_handler_uses_remaining_time_for_each_receive() -> None:
+def test_ipc_handler_uses_the_remaining_budget_for_each_receive() -> None:
     """Slow request chunks cannot renew the connection's read budget."""
     now = {"value": 5.0}
 

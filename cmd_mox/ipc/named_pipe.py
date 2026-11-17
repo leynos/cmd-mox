@@ -32,6 +32,7 @@ from cmd_mox.ipc.windows import (
 )
 
 from . import _observability
+from ._deadline import remaining_ms, timeout_ms
 from ._named_pipe_limits import (
     CLIENT_READ_TIMEOUT_SECONDS,
     MAX_ACTIVE_CLIENTS,
@@ -41,7 +42,6 @@ from ._named_pipe_limits import (
     acquire_client_slot,
     emit_worker_event,
     join_threads_before,
-    remaining_ms,
 )
 from ._server_core import (
     IPCHandlers,
@@ -458,7 +458,7 @@ class _NamedPipeState:
     def _create_pipe_instance(self) -> object:
         """Create an overlapped, message-mode pipe instance for the next client."""
         backend = self._backend
-        timeout_ms = max(1, int(self.accept_timeout * 1000))
+        accept_wait_ms = timeout_ms(self.accept_timeout)
         return backend.create_named_pipe(
             NamedPipeCreateSpec(
                 name=self.pipe_name,
@@ -473,7 +473,7 @@ class _NamedPipeState:
                 max_instances=backend.PIPE_UNLIMITED_INSTANCES,
                 out_buffer_size=PIPE_CHUNK_SIZE,
                 in_buffer_size=PIPE_CHUNK_SIZE,
-                default_timeout=timeout_ms,
+                default_timeout=accept_wait_ms,
                 security_attributes=None,
             )
         )

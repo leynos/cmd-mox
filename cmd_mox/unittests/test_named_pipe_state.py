@@ -16,11 +16,7 @@ import pytest
 
 from cmd_mox.domain import Invocation, PassthroughResult, Response
 from cmd_mox.ipc import TimeoutConfig
-from cmd_mox.ipc._named_pipe_limits import (
-    join_threads_before,
-    remaining_ms,
-    remaining_seconds,
-)
+from cmd_mox.ipc._named_pipe_limits import join_threads_before
 from cmd_mox.ipc.named_pipe import (
     CallbackNamedPipeServer,
     NamedPipeServer,
@@ -339,26 +335,6 @@ def test_get_active_threads_returns_a_snapshot() -> None:
     snapshot.clear()
 
     assert state._get_active_threads() == [thread], "snapshot aliased internal state"
-
-
-@pytest.mark.parametrize(
-    ("offset", "is_expired"),
-    [(-1.0, True), (0.0, True), (5.0, False)],
-    ids=["past", "now", "future"],
-)
-def test_remaining_seconds(
-    offset: float,
-    is_expired: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized expectation, not an API flag
-) -> None:
-    """Remaining time is ``None`` once the deadline has passed."""
-    remaining = remaining_seconds(time.monotonic() + offset)
-
-    assert (remaining is None) is is_expired, "expiry classification mismatch"
-
-
-def test_remaining_ms_floors_at_zero() -> None:
-    """An expired deadline yields a zero timeout rather than a negative one."""
-    assert remaining_ms(0.0) == 0, "negative timeout"
 
 
 @pytest.mark.parametrize(

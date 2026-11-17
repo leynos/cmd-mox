@@ -113,7 +113,7 @@ def test_send_pipe_request_uses_separate_phase_deadlines_and_exact_arguments(
         return 100.0 + len(computed)
 
     monkeypatch.setattr(client, "_run_blocking_io", runner)
-    monkeypatch.setattr(client, "_compute_deadline", compute)
+    monkeypatch.setattr(client, "compute_deadline", compute)
     context = _ConnectionContext(timeout=2.0, retry_config=RetryConfig())
 
     result = client._send_pipe_request(pathlib.Path("socket"), b"payload", context)
@@ -176,7 +176,7 @@ def test_send_pipe_request_closes_once_when_a_phase_fails(
         raise error
 
     monkeypatch.setattr(client, "_run_blocking_io", runner)
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 10.0)
     monkeypatch.setattr(client, case.patch_target, fail)
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -251,7 +251,7 @@ def test_send_pipe_request_closes_once_when_a_phase_is_cancelled(
 ) -> None:
     """Cancellation and the finally block share one idempotent close."""
     closes: list[object] = []
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 10.0)
 
     def cancel_then_raise(
         _func: cabc.Callable[[], object],
@@ -290,7 +290,7 @@ def test_send_pipe_request_offers_cancellation_to_the_read_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Both phases receive the same handle-closing cancellation callable."""
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 10.0)
     cancels: list[object] = []
 
     def run_then_time_out(

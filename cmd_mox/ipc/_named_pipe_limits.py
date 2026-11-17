@@ -1,10 +1,10 @@
 """Resource bounds and bounded worker events for the named-pipe transport.
 
 This module holds the concurrency, message-size, and lifetime limits applied by
-:mod:`cmd_mox.ipc.named_pipe`, the deadline arithmetic that enforces them, and
-the vocabulary used to report them through the observability seam. It
-deliberately imports no ``pywin32`` module, so the limits are importable and
-testable on any platform.
+:mod:`cmd_mox.ipc.named_pipe` and the vocabulary used to report them through
+the observability seam. Deadline arithmetic lives in :mod:`cmd_mox.ipc._deadline`
+so every transport shares one contract. It deliberately imports no ``pywin32``
+module, so the limits are importable and testable on any platform.
 """
 
 from __future__ import annotations
@@ -12,10 +12,10 @@ from __future__ import annotations
 import dataclasses as dc
 import logging
 import threading
-import time
 import typing as typ
 
 from . import _observability
+from ._deadline import remaining_or_none
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -143,44 +143,6 @@ class ClientSlot:
         self._semaphore.release()
 
 
-def remaining_seconds(deadline: float) -> float | None:
-    """Return the time left before *deadline*.
-
-    Parameters
-    ----------
-    deadline:
-        A :func:`time.monotonic` timestamp.
-
-    Returns
-    -------
-    float | None
-        The remaining seconds, or ``None`` once the deadline has passed.
-    """
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        return None
-    return remaining
-
-
-def remaining_ms(deadline: float) -> int:
-    """Return the milliseconds left before *deadline*.
-
-    Parameters
-    ----------
-    deadline:
-        A :func:`time.monotonic` timestamp.
-
-    Returns
-    -------
-    int
-        Zero once the deadline has passed, so a wait returns at once.
-    """
-    remaining = remaining_seconds(deadline)
-    if remaining is None:
-        return 0
-    return max(0, int(remaining * 1000))
-
-
 def join_threads_before(
     threads: cabc.Iterable[threading.Thread], deadline: float
 ) -> bool:
@@ -199,10 +161,10 @@ def join_threads_before(
         Whether every thread's join was attempted before the deadline expired.
     """
     for thread in threads:
-        remaining = remaining_seconds(deadline)
-        if remaining is None:
+        left = remaining_or_none(deadline)
+        if left is None:
             return False
-        thread.join(remaining)
+        thread.join(left)
     return True
 
 
@@ -229,6 +191,4 @@ __all__ = [
     "WorkerOutcome",
     "acquire_client_slot",
     "join_threads_before",
-    "remaining_ms",
-    "remaining_seconds",
 ]
