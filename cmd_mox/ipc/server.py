@@ -9,10 +9,11 @@ import socketserver
 import threading
 import time
 import typing as typ
-from functools import cache
+from functools import cache, partial
 
 from . import _observability
 from ._deadline import _compute_deadline, _remaining_time
+from ._limits import MAX_MESSAGE_SIZE
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -21,7 +22,12 @@ from ._server_core import (
     _request_pipeline,
 )
 from ._unix_server_base import _selection_mode, resolve_unix_server_base
-from .socket_utils import cleanup_stale_socket, wait_for_socket
+from .socket_utils import (
+    ReadOptions,
+    cleanup_stale_socket,
+    read_until_eof,
+    wait_for_socket,
+)
 
 logger = logging.getLogger(__name__)
 _CLIENT_DISCONNECT_ERRNOS = frozenset({
@@ -347,15 +353,14 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         bytes
             The request payload received before the connection reaches EOF.
         """
-        chunks: list[bytes] = []
-        while True:
-            self.request.settimeout(
-                _remaining_time(self._read_deadline, clock=self._clock)
-            )
-            chunk = self.request.recv(64 * 1024)
-            if not chunk:
-                return b"".join(chunks)
-            chunks.append(chunk)
+        return read_until_eof(
+            self.request,
+            self._read_deadline,
+            ReadOptions(
+                max_bytes=MAX_MESSAGE_SIZE,
+                remaining_time=partial(_remaining_time, clock=self._clock),
+            ),
+        )
 
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
         """Handle one Unix connection and record bounded failure events."""

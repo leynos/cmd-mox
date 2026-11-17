@@ -13,6 +13,7 @@ import pytest
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc import _client_events, _observability, wire
 from cmd_mox.ipc import client as ipc_client
+from cmd_mox.ipc._limits import MessageTooLargeError
 from cmd_mox.ipc.client import RetryConfig, _ConnectionContext
 from cmd_mox.ipc.models import Response
 
@@ -146,7 +147,7 @@ def test_read_all_requests_fixed_size_chunks_until_eof(
     result = ipc_client._read_all(typ.cast("socket.socket", sock), 10.0)
 
     assert result == b"firstsecond", "the received chunks were not joined"
-    assert sock.recv_sizes == [1024, 1024, 1024], "the read chunk size changed"
+    assert sock.recv_sizes == [65536, 65536, 65536], "the read chunk size changed"
     assert sock.timeouts == [1.0, 1.0, 1.0], (
         "each receive must draw down the shared deadline"
     )
@@ -176,9 +177,39 @@ def test_read_all_propagates_a_receive_failure_after_a_partial_read(
         ipc_client._read_all(typ.cast("socket.socket", sock), 10.0)
 
     assert excinfo.value is failure, "the receive failure was replaced"
-    assert sock.recv_sizes == [1024, 1024], (
+    assert sock.recv_sizes == [65536, 65536], (
         "the failure did not follow a completed read of the partial chunk"
     )
+
+
+def test_read_all_accepts_a_reply_exactly_at_the_size_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reply of exactly the limit followed by EOF is accepted."""
+    monkeypatch.setattr(ipc_client, "MAX_MESSAGE_SIZE", 4)
+    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
+    sock = _RecordingSocket([b"abcd"])
+
+    result = ipc_client._read_all(typ.cast("socket.socket", sock), 10.0)
+
+    assert result == b"abcd", "a reply at the limit was rejected"
+    assert sock.recv_sizes == [5, 1], "the limit did not trigger an EOF probe"
+
+
+def test_read_all_rejects_a_reply_one_byte_over_the_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One byte past the limit is refused instead of being returned."""
+    monkeypatch.setattr(ipc_client, "MAX_MESSAGE_SIZE", 4)
+    monkeypatch.setattr(ipc_client, "_remaining_time", lambda _deadline: 1.0)
+    sock = _RecordingSocket([b"abcd", b"e"])
+
+    with pytest.raises(MessageTooLargeError) as excinfo:
+        ipc_client._read_all(typ.cast("socket.socket", sock), 10.0)
+
+    assert excinfo.value.received == 5, "the overflow byte was not counted"
+    assert excinfo.value.limit == 4, "the configured limit was not reported"
+    assert sock.recv_sizes == [5, 1], "the read did not probe for EOF at the limit"
 
 
 @pytest.mark.parametrize(
