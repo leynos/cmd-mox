@@ -871,17 +871,18 @@ provide invocation and passthrough callbacks when constructing the server for
 simple composition. Subclassing remains supported when custom behaviour
 requires overriding the public handler hooks. The `CallbackIPCServer`
 compatibility wrapper forwards a `TimeoutConfig` dataclass, so callers can
-continue to customize startup and accept timeouts without exceeding the
-four-argument limit. On Windows hosts the controller constructs a
-`NamedPipeServer`, which shares the same handler plumbing but uses `win32pipe`/
-`win32file` (via `pywin32`) to host a duplex named pipe that mirrors the Unix
-socket behaviour. The named pipe name is derived from the logical socket path,
-so shims can keep filtering the shim directory out of ``PATH`` without needing
-Windows-specific logic. The server attaches the corresponding response data
-(`stdout`, `stderr`, `exit_code`) to the `Invocation` before appending it to
-the journal. On Unix systems the server cleans up the socket on shutdown to
-prevent stale sockets from interfering with subsequent tests, while the Windows
-transport simply closes the pipe handles. The timeout is configurable via :data:
+continue to customize the per-connection budget and the accept-loop poll
+interval without exceeding the four-argument limit. On Windows hosts the
+controller constructs a `NamedPipeServer`, which shares the same handler
+plumbing but uses `win32pipe`/ `win32file` (via `pywin32`) to host a duplex
+named pipe that mirrors the Unix socket behaviour. The named pipe name is
+derived from the logical socket path, so shims can keep filtering the shim
+directory out of ``PATH`` without needing Windows-specific logic. The server
+attaches the corresponding response data (`stdout`, `stderr`, `exit_code`) to
+the `Invocation` before appending it to the journal. On Unix systems the server
+cleans up the socket on shutdown to prevent stale sockets from interfering with
+subsequent tests, while the Windows transport simply closes the pipe handles.
+The timeout is configurable via :data:
 `cmd_mox.environment.CMOX_IPC_TIMEOUT_ENV` (seconds).
 
 The named-pipe server transport is split along a port and adapter boundary.
@@ -894,6 +895,9 @@ forwards each port operation to the guarded bindings it imports from
 views, which the shared `read_pipe_message` and `write_pipe_payload` helpers in
 `windows.py` use for synchronous I/O and for matching `pywintypes.error`. The
 import guard itself lives in `windows.py` and exists once for the package.
+`write_file` sits on the port as the *asynchronous* write: the server's reply
+path starts an overlapped write through it and awaits the operation's event,
+while `write_pipe_payload` remains the synchronous helper the client uses.
 Tests inject `FakeNamedPipeBackend` from
 `cmd_mox/unittests/_named_pipe_fakes.py` in its place, which lets the transport
 logic run on any platform without replacing `pywin32` module globals.
@@ -1000,12 +1004,17 @@ lifetime so a single misbehaving peer cannot exhaust the server.
 `cmd_mox.ipc._named_pipe_limits` holds the limits and the event vocabulary:
 `MAX_ACTIVE_CLIENTS` (64) caps simultaneously served clients through a
 `threading.BoundedSemaphore` acquired non-blockingly *before* a worker thread
-is spawned, and `CLIENT_READ_TIMEOUT_SECONDS` (30.0) bounds how long one client
-may take to deliver its request. `cmd_mox.ipc.windows.MAX_MESSAGE_SIZE` (8 MiB)
-caps a single message; `read_pipe_message` stops reading once the limit would
-be exceeded, discards the buffered prefix, and raises
-`PipeMessageTooLargeError`, which carries byte counts only and never message
-data.
+is spawned, and `CLIENT_READ_TIMEOUT_SECONDS` (30.0) bounded how long one
+client may take to deliver its request; that limit was later removed.
+`cmd_mox.ipc.windows.MAX_MESSAGE_SIZE` (8 MiB) caps a single message;
+`read_pipe_message` stops reading once the limit would be exceeded, discards
+the buffered prefix, and raises `PipeMessageTooLargeError`, which carries byte
+counts only and never message data.
+
+> **Superseded (2026-11-17):** `CLIENT_READ_TIMEOUT_SECONDS` is removed. One
+> `outer.timeout` budget now bounds both the request read and the reply
+> delivery; see "Unified IPC deadline semantics (2026-11-17)" above. The other
+> limits described below still apply.
 
 Each admitted client owns exactly one permit. The accept loop acquires it, the
 worker's `finally` block releases it, and the accept loop releases it itself
@@ -1013,15 +1022,15 @@ when the thread fails to start; `ClientSlot.release` latches under a lock, so
 no exit path can release twice or miss a release. Refusals never break the
 accept loop: the handle is disconnected and closed, and serving continues.
 
-Reads are cancellable rather than watchdogged. Pipe instances are created with
-`FILE_FLAG_OVERLAPPED`, and both `ConnectNamedPipe` and `ReadFile` are issued
-asynchronously and then awaited with `WaitForMultipleObjects` on the
-operation's event plus a Win32 shutdown event. A deadline or a `stop()`
-therefore wakes the waiting thread itself, which cancels with `CancelIoEx` and
-drains with `GetOverlappedResult` before releasing the buffer, so no thread is
-left blocked in the kernel. `ConnectNamedPipe` is always passed an `OVERLAPPED`
-because a null one is documented to report completion incorrectly on an
-overlapped handle.
+Reads and replies are cancellable rather than watchdogged. Pipe instances are
+created with `FILE_FLAG_OVERLAPPED`, and `ConnectNamedPipe`, `ReadFile` and the
+reply `WriteFile` are issued asynchronously and then awaited with
+`WaitForMultipleObjects` on the operation's event plus a Win32 shutdown event.
+A deadline or a `stop()` therefore wakes the waiting thread itself, which
+cancels with `CancelIoEx` and drains with `GetOverlappedResult` before
+releasing the buffer, so no thread is left blocked in the kernel.
+`ConnectNamedPipe` is always passed an `OVERLAPPED` because a null one is
+documented to report completion incorrectly on an overlapped handle.
 
 Workers emit bounded events under the operation `ipc.named_pipe.worker` with
 `transport="named_pipe"` and outcomes `admitted`, `rejected`, `completed`,
@@ -1056,6 +1065,49 @@ failures still use the shim's controlled IPC diagnostic.
 > split stdin capture out of the single POSIX deadline described here. See
 > "Implementation Notes" above for the strategy table and the script entry
 > point that terminates the process when a reader cannot be interrupted.
+>
+> **Superseded further (2026-11-17):** one absolute deadline is now anchored in
+> `main()` on both platforms, and the named-pipe client shares it, so the POSIX
+> and Windows IPC exchanges follow the same rule. The server likewise shares one
+> per-connection budget between the request read and the reply delivery. See
+> "Unified IPC deadline semantics (2026-11-17)" below.
+
+#### Unified IPC deadline semantics (2026-11-17)
+
+`CMOX_IPC_TIMEOUT` yields one absolute deadline per shim, anchored in `main()`
+before stdin capture on both platforms. The Windows special case that left the
+named-pipe client without that deadline is gone: `_send_pipe_request` computes
+one deadline when the connection context has none and passes it to the connect,
+write, and read, so a slow phase cannot renew the budget for the next one.
+Stdin capture remains bounded by the configured timeout from its own capture
+start, and running the real passthrough command is not interrupted even though
+its duration is charged to the shared budget. On Windows, cancelling a blocked
+stdin read or an overlapped pipe operation allows a bounded clean-up grace of
+about one second after expiry before the timeout is reported.
+
+The named-pipe transport previously bounded each client read with a fixed
+30-second limit independent of the configured timeout; that limit is removed,
+so the request read and the reply delivery share `outer.timeout`.
+
+Reply delivery no longer relies on `FlushFileBuffers`, which only promises that
+the bytes left the server's write buffer. The transport writes the reply with
+one overlapped `WriteFile`, then issues a bounded overlapped read and treats
+the client's close (`ERROR_BROKEN_PIPE` or `ERROR_NO_DATA`) as the
+acknowledgement. Unexpected data leaves the reply unconfirmed and is reported as
+`PipeError`; a timeout or shutdown cancels and drains the pending operation
+and is reported as a terminal `Timeout` worker event, or `ServerStopped` when a
+stop caused it. A budget spent during dispatch withholds the reply while
+leaving the handler's side effects committed. The Unix handler applies the same
+per-connection budget: the socket timeout is re-drawn before the reply write
+and again before the flush, and a spent budget takes the existing
+`response_dropped` path.
+
+`accept_timeout` is the accept loop's poll interval on both transports. Unix
+passes it to `serve_forever` instead of assigning `server.timeout`, and the
+Windows connect wait is sliced at it, re-waiting on the same pending
+`ConnectNamedPipe` so a client arriving between slices is not dropped. It
+bounds how quickly `stop()` is noticed, not how long a client may take to
+connect.
 
 The Unix server applies a read deadline to each accepted connection. A
 non-empty malformed or invalid request receives a bounded error response that

@@ -763,15 +763,51 @@ preserving that guarantee.
 
 ## IPC deadlines and stdin reads
 
-On POSIX, the shim anchors one monotonic deadline in `main()` and carries it
-through Unix socket connection retries, request sending, response reads, and
-passthrough reporting. Stdin capture is bounded by the same configured timeout
-but from its own capture start, so the two are separate bounds that can
-overlap; see the strategies below. The client stores the deadline in
-`_ConnectionContext` and applies only the remaining time before each blocking
-socket operation. The Unix server also keeps one read deadline per accepted
-connection and updates the socket timeout before each receive, so a client that
-slowly streams a request cannot renew its full wait budget with every byte.
+The shim anchors one monotonic deadline in `main()` on both platforms and
+carries it through socket connection retries, request sending, response reads,
+and passthrough reporting; there is no longer a Windows branch that leaves the
+client unbounded. Stdin capture is bounded by the same configured timeout from
+its own capture start, so the two can overlap; see the strategies below. The
+client stores the deadline in `_ConnectionContext`. On Unix it applies only the
+remaining time before each blocking socket operation. On Windows
+`_send_pipe_request` computes one deadline after encoding when the context has
+none and passes it to the connect, write, and read, so the three cannot each
+renew the full budget. `_connect_pipe_with_retries` and
+`_wait_for_pipe_availability` re-read the remainder before every attempt and
+before the fallback sleep.
+
+Every deadline contract lives in `cmd_mox/ipc/_deadline.py`: `compute_deadline`,
+`remaining`, `remaining_or_none`, `remaining_ms` and `timeout_ms`. `remaining`
+raises once the budget is spent, a remainder of exactly `0.0` counts as
+expired, and callers that treat an absent deadline as unbounded test `is None`
+rather than truthiness.
+
+On the server side, one per-connection deadline is anchored when the connection
+begins and shared by the request read and the reply delivery, so a slow reader
+cannot renew its budget mid-exchange. The Unix handler updates the socket
+timeout from that deadline before each receive and re-draws it immediately
+before the reply write and again before the flush; a spent reply budget takes
+the existing `response_dropped` path with the correlation identifier rather
+than attempting a second error reply. The named-pipe worker anchors the same
+kind of deadline from `outer.timeout` when it starts serving; the independent
+30-second client read limit is gone.
+
+Named-pipe reply delivery replaces `FlushFileBuffers`, which only promises the
+bytes left the server's write buffer. It writes the reply with one overlapped
+`WriteFile` and then issues a bounded overlapped probe read, treating the
+client's close (`ERROR_BROKEN_PIPE` or `ERROR_NO_DATA`) as the delivery
+acknowledgement. Data instead of a close leaves the reply unconfirmed and is
+reported as `PipeError`. A timeout or shutdown cancels and drains the pending
+operation before the buffer, overlapped structure and event are released, and
+is reported as a terminal `Timeout` worker event, or `ServerStopped` when a
+stop caused it. A reply is written as a single message even past
+`PIPE_CHUNK_SIZE`, because a client stops reading at the first status that is
+not `ERROR_MORE_DATA`.
+
+`accept_timeout` is the accept loop's poll interval on both transports: Unix
+passes it to `serve_forever`, and the Windows connect wait is sliced at it and
+re-waits on the same pending `ConnectNamedPipe`. It bounds how quickly `stop()`
+is noticed, not how long a client may take to connect.
 
 Stdin capture is bounded by `CMOX_IPC_TIMEOUT` on every platform and for every
 stream kind, and all of that logic lives in `cmd_mox._stdin_capture`. Limiting
