@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses as dc
 import errno
 import logging
 import socketserver
@@ -63,40 +64,36 @@ _CONNECTION_OPERATION: typ.Final[str] = "ipc.server.connection"
 _CONNECTION_EVENT_MESSAGE: typ.Final[str] = "IPC server connection outcome"
 
 
-def _emit_connection_outcome(  # ruff: ignore[too-many-arguments] - the fields are the bounded event dimensions, and grouping them would hide which outcome carries which
-    outcome: _ConnectionOutcome,
-    error_category: _ConnectionErrorCategory,
-    started: float | None = None,
-    correlation_id: str | None = None,
-    *,
-    message_size: int | None = None,
-) -> None:
-    """Emit bounded metadata for a stalled, refused, or completed connection.
+@dc.dataclass(frozen=True, slots=True)
+class _ConnectionReport:
+    """Bounded metadata describing one refused, stalled, or completed connection.
 
-    Parameters
-    ----------
-    outcome:
-        Terminal state of the connection.
-    error_category:
-        Closed-set failure label for the outcome.
-    started:
-        ``time.perf_counter`` reading taken when the connection was handled, or
-        ``None`` when the event reports no measurable duration.
-    correlation_id:
-        Request identifier shared with the dispatch record, when one exists.
-    message_size:
-        Bytes observed when a request was refused for exceeding the limit.
+    The fields are exactly the dimensions the connection event carries, so a
+    call site states which outcome carries which detail while the emitter stays
+    a single-argument function that cannot drift from the event shape.
     """
-    duration_ms = None if started is None else _observability.elapsed_ms(started)
+
+    outcome: _ConnectionOutcome
+    error_category: _ConnectionErrorCategory
+    started: float | None = None
+    correlation_id: str | None = None
+    message_size: int | None = None
+
+
+def _emit_connection_outcome(report: _ConnectionReport) -> None:
+    """Emit bounded metadata for a stalled, refused, or completed connection."""
+    duration_ms = (
+        None if report.started is None else _observability.elapsed_ms(report.started)
+    )
     _observability.emit(
         _observability.IPCEvent(
             operation=_CONNECTION_OPERATION,
             transport="unix",
-            outcome=outcome,
-            error_category=error_category,
+            outcome=report.outcome,
+            error_category=report.error_category,
             duration_ms=duration_ms,
-            message_size=message_size,
-            correlation_id=correlation_id,
+            message_size=report.message_size,
+            correlation_id=report.correlation_id,
         ),
         logger=logger,
         message=_CONNECTION_EVENT_MESSAGE,
@@ -408,30 +405,38 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             # report. Returning without a response closes the connection, and
             # the client sees EOF rather than a misleading error frame.
             _emit_connection_outcome(
-                "read_size_rejected",
-                "MessageTooLargeError",
-                started,
-                message_size=exc.received,
+                _ConnectionReport(
+                    "read_size_rejected",
+                    "MessageTooLargeError",
+                    started,
+                    message_size=exc.received,
+                )
             )
             logger.info("IPC request rejected for exceeding the size limit")
             return
         except TimeoutError:
-            _emit_connection_outcome("receive_timeout", "TimeoutError", started)
+            _emit_connection_outcome(
+                _ConnectionReport("receive_timeout", "TimeoutError", started)
+            )
             logger.info("IPC connection timed out while receiving request")
             return
         except OSError as exc:
             _emit_connection_outcome(
-                "receive_closed", _connection_error_category(exc), started
+                _ConnectionReport(
+                    "receive_closed", _connection_error_category(exc), started
+                )
             )
             logger.info("IPC connection closed while receiving request")
             return
         result = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
         if result.response_bytes is None:
             _emit_connection_outcome(
-                "receive_closed",
-                "ConnectionClosed",
-                started,
-                result.correlation_id,
+                _ConnectionReport(
+                    "receive_closed",
+                    "ConnectionClosed",
+                    started,
+                    result.correlation_id,
+                )
             )
             return
         try:
@@ -442,10 +447,12 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             self.wfile.flush()
         except OSError as exc:
             _emit_connection_outcome(
-                "response_dropped",
-                _connection_error_category(exc),
-                started,
-                result.correlation_id,
+                _ConnectionReport(
+                    "response_dropped",
+                    _connection_error_category(exc),
+                    started,
+                    result.correlation_id,
+                )
             )
             if exc.errno in _CLIENT_DISCONNECT_ERRNOS:
                 logger.debug("IPC client disconnected before reply was written")
@@ -495,7 +502,9 @@ def _inner_server_cls() -> _InnerServerClass:
             """Admit *request* within the concurrency bound, or refuse it."""
             slot = acquire_client_slot(self._admission)
             if slot is None:
-                _emit_connection_outcome("rejected", "ClientLimitReached")
+                _emit_connection_outcome(
+                    _ConnectionReport("rejected", "ClientLimitReached")
+                )
                 self.shutdown_request(request)
                 return
             with self._slots_lock:
@@ -506,7 +515,9 @@ def _inner_server_cls() -> _InnerServerClass:
                 # No worker was started, so nothing else will return this
                 # permit; the accept loop still closes the request socket.
                 self._release_request_slot(request)
-                _emit_connection_outcome("rejected", "ThreadStartFailed")
+                _emit_connection_outcome(
+                    _ConnectionReport("rejected", "ThreadStartFailed")
+                )
                 raise
 
         def shutdown_request(self, request: socket.socket) -> None:

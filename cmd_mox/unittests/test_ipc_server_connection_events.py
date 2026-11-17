@@ -17,6 +17,9 @@ from cmd_mox.ipc import _observability
 from cmd_mox.ipc import server as _ipc_server
 from cmd_mox.ipc._limits import MessageTooLargeError
 
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
 pytestmark = pytest.mark.requires_unix_sockets
 
 
@@ -348,17 +351,11 @@ def test_ipc_handler_records_receive_connection_drop() -> None:
     ), "Receive-side connection reset did not emit a bounded event"
 
 
-def test_ipc_handler_rejects_an_oversized_request(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An oversized request emits one bounded event and never dispatches."""
-    received = 4097
-    limit = 4096
-    dispatched: list[bytes] = []
+def _fail_size_read(received: int, limit: int) -> cabc.Callable[[], bytes]:
+    """Build a read that raises the payload-free size error."""
 
     def fail_read() -> bytes:
-        """Raise the payload-free size error the reader produces.
+        """Raise the size error the bounded reader produces.
 
         Raises
         ------
@@ -367,8 +364,16 @@ def test_ipc_handler_rejects_an_oversized_request(
         """
         raise MessageTooLargeError(received=received, limit=limit)
 
+    return fail_read
+
+
+def _record_dispatch(
+    dispatched: list[bytes],
+) -> cabc.Callable[[object, bytes, str], SimpleNamespace]:
+    """Build a pipeline that records any dispatch the size check misses."""
+
     def spy_pipeline(_server: object, raw: bytes, _transport: str) -> SimpleNamespace:
-        """Record any dispatch that the size check should have prevented.
+        """Record the dispatched payload and return a usable response.
 
         Returns
         -------
@@ -378,16 +383,12 @@ def test_ipc_handler_rejects_an_oversized_request(
         dispatched.append(raw)
         return SimpleNamespace(response_bytes=b"reply", correlation_id=None)
 
-    fake_handler = typ.cast(
-        "_ipc_server._IPCHandler",
-        types.SimpleNamespace(
-            _read_request_payload=fail_read,
-            server=types.SimpleNamespace(outer=types.SimpleNamespace(timeout=1.0)),
-        ),
-    )
-    monkeypatch.setattr(_ipc_server, "_request_pipeline", spy_pipeline)
-    caplog.set_level(logging.INFO, logger="cmd_mox.ipc.server")
-    counter_key = _observability.EventKey(
+    return spy_pipeline
+
+
+def _size_rejection_counter_key() -> _observability.EventKey:
+    """Return the counter key a size rejection must increment."""
+    return _observability.EventKey(
         operation="ipc.server.connection",
         transport="unix",
         selection_mode=None,
@@ -396,11 +397,12 @@ def test_ipc_handler_rejects_an_oversized_request(
         cache_outcome=None,
         error_category="MessageTooLargeError",
     )
-    count_before = _observability.counter_snapshot().get(counter_key, 0)
 
-    with _observability.capture_events() as events:
-        _ipc_server._IPCHandler.handle(fake_handler)
 
+def _assert_size_rejection_event(
+    events: list[_observability.IPCEvent], received: int
+) -> None:
+    """Check the bounded event reports only safe, expected dimensions."""
     [event] = [
         item
         for item in events
@@ -413,10 +415,12 @@ def test_ipc_handler_rejects_an_oversized_request(
     assert event.duration_ms is not None, "Event omitted its duration"
     assert event.duration_ms >= 0, "Event duration must be nonnegative"
     assert event.correlation_id is None, "Unparsed requests must not be correlated"
-    assert _observability.counter_snapshot()[counter_key] == count_before + 1, (
-        "Size rejection must increment its bounded counter once"
-    )
-    assert not dispatched, "An oversized request reached dispatch"
+
+
+def _assert_size_rejection_logged(
+    caplog: pytest.LogCaptureFixture, received: int, limit: int
+) -> None:
+    """Check the structured record, the diagnostic, and payload redaction."""
     [event_record] = [
         record
         for record in caplog.records
@@ -441,3 +445,34 @@ def test_ipc_handler_rejects_an_oversized_request(
     assert f"{limit}-byte limit" not in caplog.text, (
         "The exception message leaked into logs"
     )
+
+
+def test_ipc_handler_rejects_an_oversized_request(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An oversized request emits one bounded event and never dispatches."""
+    received = 4097
+    limit = 4096
+    dispatched: list[bytes] = []
+    fake_handler = typ.cast(
+        "_ipc_server._IPCHandler",
+        types.SimpleNamespace(
+            _read_request_payload=_fail_size_read(received, limit),
+            server=types.SimpleNamespace(outer=types.SimpleNamespace(timeout=1.0)),
+        ),
+    )
+    monkeypatch.setattr(_ipc_server, "_request_pipeline", _record_dispatch(dispatched))
+    caplog.set_level(logging.INFO, logger="cmd_mox.ipc.server")
+    counter_key = _size_rejection_counter_key()
+    count_before = _observability.counter_snapshot().get(counter_key, 0)
+
+    with _observability.capture_events() as events:
+        _ipc_server._IPCHandler.handle(fake_handler)
+
+    _assert_size_rejection_event(events, received)
+    assert _observability.counter_snapshot()[counter_key] == count_before + 1, (
+        "Size rejection must increment its bounded counter once"
+    )
+    assert not dispatched, "An oversized request reached dispatch"
+    _assert_size_rejection_logged(caplog, received, limit)
