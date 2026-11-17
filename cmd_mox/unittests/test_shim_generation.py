@@ -490,6 +490,17 @@ def test_ensure_shim_rejects_foreign_windows_launcher(
     assert launcher.read_bytes() == b"foreign"
 
 
+def test_require_matching_launcher_rejects_symlink(tmp_path: pathlib.Path) -> None:
+    """A link to otherwise valid launcher bytes is still a collision."""
+    target = tmp_path / "real.cmd"
+    target.write_bytes(shimgen._expected_windows_launcher_bytes())
+    link = tmp_path / "git.cmd"
+    link.symlink_to(target)
+
+    with pytest.raises(FileExistsError, match="not a cmd-mox launcher"):
+        shimgen._require_matching_launcher(link)
+
+
 def test_ensure_shim_chains_windows_read_error(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -351,15 +351,24 @@ def _ensure_windows_launcher(directory: Path, name: str) -> Path:
     launcher = path_utils.shim_launcher_path(directory, name)
     if not os.path.lexists(launcher):
         return _create_windows_shim(directory, name)
+    _require_matching_launcher(launcher)
+    return launcher
+
+
+def _require_matching_launcher(launcher: Path) -> None:
+    """Raise unless *launcher* is a regular file cmd-mox itself wrote."""
     if launcher.is_symlink() or not launcher.is_file():
         raise _launcher_collision_error(launcher)
+    if _read_launcher_bytes(launcher) != _expected_windows_launcher_bytes():
+        raise _launcher_collision_error(launcher)
+
+
+def _read_launcher_bytes(launcher: Path) -> bytes:
+    """Read *launcher*, reporting an unreadable entry as a collision."""
     try:
-        contents = launcher.read_bytes()
+        return launcher.read_bytes()
     except OSError as exc:
         raise _launcher_collision_error(launcher) from exc
-    if contents != _expected_windows_launcher_bytes():
-        raise _launcher_collision_error(launcher)
-    return launcher
 
 
 def _launcher_collision_error(launcher: Path) -> FileExistsError:
