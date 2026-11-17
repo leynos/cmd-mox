@@ -103,6 +103,13 @@ def _handle_retry_failure(
     if context.strategy.on_failure is not None:
         context.strategy.on_failure(context.attempt, exc)
 
+    # The attempt limit is a hard stop. A predicate that only classifies the
+    # exception (``isinstance(exc, ConnectionError)``, say) cannot know when
+    # the attempts run out, so it must not be allowed to replace the final
+    # operation failure with a synthetic loop error.
+    if context.attempt >= context.max_attempts - 1:
+        raise
+
     retry_decider = context.strategy.should_retry or (
         lambda _exc, att, maximum: att < maximum - 1
     )
@@ -138,15 +145,16 @@ def retry_with_backoff[T](
     T
         The value returned by the first successful invocation of ``func``.
 
-    Raises
-    ------
-    RuntimeError
-        If the retry loop terminates without returning or propagating a failure.
+    Notes
+    -----
+    When the attempts run out, the last exception ``func`` raised propagates
+    unchanged, so callers can still catch the specific error they expect.
     """
     max_attempts = retry_config.retries
     strat = strategy if strategy is not None else RetryStrategy()
 
-    for attempt in range(max_attempts):
+    attempt = 0
+    while True:
         try:
             return func(attempt)
         except Exception as exc:  # ruff: ignore[blind-except] - generic retry helper: *func* is caller-supplied and may raise anything
@@ -156,14 +164,10 @@ def retry_with_backoff[T](
                 retry_config=retry_config,
                 strategy=strat,
             )
-            delay = _handle_retry_failure(exc, context)
-            strat.sleep(delay)
-
-    msg = (
-        "Unreachable code reached in retry helper: all attempts exhausted "
-        "without returning a value."
-    )
-    raise RuntimeError(msg)
+            strat.sleep(_handle_retry_failure(exc, context))
+            # ``_handle_retry_failure`` raises on the final attempt, so the
+            # counter never passes ``max_attempts``.
+            attempt += 1
 
 
 __all__ = [
