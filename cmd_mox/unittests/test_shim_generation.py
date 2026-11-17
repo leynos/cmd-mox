@@ -508,3 +508,22 @@ def test_ensure_shim_chains_windows_read_error(
         shimgen.ensure_shim(tmp_path, "git")
 
     assert isinstance(excinfo.value.__cause__, OSError)
+
+
+@pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink semantics only")
+@pytest.mark.parametrize("target_kind", ["file", "directory"])
+def test_ensure_shim_repairs_foreign_posix_symlink(
+    tmp_path: pathlib.Path, target_kind: str
+) -> None:
+    """A symlink to a live foreign target is repaired, not treated as healthy."""
+    target = tmp_path / f"foreign-{target_kind}"
+    if target_kind == "directory":
+        target.mkdir()
+    else:
+        target.write_text("foreign")
+
+    link = tmp_path / "git"
+    link.symlink_to(target)
+
+    assert shimgen.ensure_shim(tmp_path, "git") == link
+    assert link.resolve() == shimgen.SHIM_PATH

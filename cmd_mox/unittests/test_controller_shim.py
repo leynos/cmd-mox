@@ -336,3 +336,28 @@ def test_register_command_keeps_existing_healthy_shim(
     assert link.resolve() == shimgen.SHIM_PATH
 
     mox.verify()
+
+
+def test_failed_registration_does_not_block_case_variant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed registration is rolled back, so a later variant can register."""
+    mox = CmdMox(verify_on_exit=False)
+    mox.__enter__()
+    mox.replay()
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    shim_dir = require_shim_dir(mox.environment)
+    foreign = shim_dir / "git.cmd"
+    foreign.write_bytes(b"foreign")
+
+    with pytest.raises(FileExistsError, match="not a cmd-mox launcher"):
+        mox.stub("git")
+
+    assert "git" not in mox._commands
+    assert "git" not in mox._doubles
+
+    foreign.unlink()
+    mox.stub("GIT")
+    assert "GIT" in mox._doubles
+
+    mox.__exit__(None, None, None)

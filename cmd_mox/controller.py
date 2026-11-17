@@ -289,6 +289,8 @@ class CmdMox:
         repaired, while any other entry at the launcher path raises
         :class:`FileExistsError`. Subsequent :meth:`_start_ipc_server` calls
         re-sync every shim so repeated registrations remain idempotent.
+        A failed late registration removes the name it added, so the same
+        command can be registered again after the underlying problem is fixed.
 
         Raises
         ------
@@ -297,8 +299,14 @@ class CmdMox:
             on a case-insensitive filesystem.
         """  # ruff: ignore[docstring-extraneous-exception] - the uniqueness validator raises this caller-visible failure
         self._validate_command_registration(name)
+        was_registered = name in self._commands
         self._commands.add(name)
-        self._ensure_shim_during_replay(name)
+        try:
+            self._ensure_shim_during_replay(name)
+        except BaseException:
+            if not was_registered:
+                self._commands.discard(name)
+            raise
 
     def _validate_command_registration(self, name: str) -> None:
         """Reject *name* when it collides by case with a registered command."""
@@ -310,19 +318,10 @@ class CmdMox:
         Errors from :func:`cmd_mox.shimgen.ensure_shim`, including a collision
         with a foreign entry, propagate unchanged.
         """
-        if self._phase is not Phase.REPLAY:
+        shim_dir = self.environment.shim_dir
+        if self._phase is not Phase.REPLAY or shim_dir is None:
             return
-        shim_dir = self._get_replay_shim_dir()
-        if shim_dir is None:
-            return
-        ensure_shim(shim_dir, name)
-
-    def _get_replay_shim_dir(self) -> Path | None:
-        """Return the replay shim directory, or ``None`` when none is prepared."""
-        env = self.environment
-        if env is None or env.shim_dir is None:
-            return None
-        return Path(env.shim_dir)
+        ensure_shim(Path(shim_dir), name)
 
     def _get_double(self, command_name: str, kind: DoubleKind) -> CommandDouble:
         """Return or create the double for *command_name*, rejecting kind changes."""

@@ -334,10 +334,15 @@ def ensure_shim(directory: Path, name: str) -> Path:
 
 
 def _ensure_posix_symlink(directory: Path, name: str) -> Path:
-    """Return a healthy symlink for *name*, creating or repairing it if needed."""
+    """Return a link to the shim template, creating or repairing it if needed."""
     link = path_utils.shim_launcher_path(directory, name)
     if link.is_symlink() and link.exists():
-        return link
+        try:
+            points_at_template = link.resolve() == SHIM_PATH
+        except OSError:
+            points_at_template = False
+        if points_at_template:
+            return link
     return _create_posix_symlink(directory, name)
 
 
