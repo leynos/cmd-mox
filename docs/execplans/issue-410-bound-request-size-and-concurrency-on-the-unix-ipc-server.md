@@ -88,7 +88,11 @@ event. Windows behaviour, events, and tests stay as they are.
   assertions, a socket leak in the test helper, and an unsynchronized
   readiness-probe assumption. All five are actioned, and the two CodeScene
   code-health violations the PR check reported are fixed too.
-- [ ] Post-fix gates, push, and a confirming CodeRabbit pass.
+- [x] (2026-11-17 08:20Z) Branch pushed, then replayed onto `origin/main` at
+  `c426792` (see D9). The replay was conflict-free, `range-diff` shows all five
+  commits unchanged, and `git diff --check` is clean.
+- [ ] Post-rebase gates, force push with lease, and a confirming CodeRabbit
+  pass.
 
 ## Surprises & discoveries
 
@@ -212,6 +216,17 @@ event. Windows behaviour, events, and tests stay as they are.
   counts without timing assumptions, and the real-socket test covers kernel
   acceptance, refusal, and re-admission together. Date/Author: 2026-11-17,
   implementing agent.
+- D9. Decision: replay the branch onto `origin/main` at `c426792` ("Measure
+  `.record()` passthrough duration") without adopting any of its changes into
+  this work. Rationale: the incoming commit measures recording durations in the
+  passthrough coordinator, which shares this branch's `duration_ms` vocabulary
+  but neither the IPC connection events nor any code path this branch touches.
+  It adds `docs/recording-duration-migration-note.md` and edits two guides this
+  branch also edits; those hunks land in unrelated sections and the replay
+  merged them without conflict. The five branch commits replay unchanged under
+  `range-diff`, and the new connection-event duration stays measured by the
+  existing `_observability.elapsed_ms`, so no shared helper moved. Date/Author:
+  2026-11-17, implementing agent.
 
 ## Outcomes & retrospective
 
@@ -445,3 +460,5 @@ for `check-fmt`, `typecheck`, `test`, `lint`, `markdownlint`, and `nixie`.
 ## Revision note
 
 - 2026-11-17: Initial draft derived from the supplied coding plan.
+- 2026-11-17: Rebased onto `origin/main` `c426792`; recorded D9 and the
+  conflict-free replay in Progress.
