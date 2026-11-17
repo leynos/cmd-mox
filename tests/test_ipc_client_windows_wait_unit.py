@@ -156,46 +156,36 @@ def test_wait_for_pipe_availability_refuses_an_exhausted_deadline(
     assert not sleeps, "an exhausted deadline still slept"
 
 
-def test_wait_for_pipe_availability_sleeps_for_the_capped_wait_on_error(
+@pytest.mark.parametrize(
+    ("consumed", "deadline", "expected"),
+    [
+        pytest.param(0.0, 10.25, 0.25, id="immediate-busy-error"),
+        pytest.param(0.2, 10.5, 0.3, id="wait-consumed-part-of-the-budget"),
+    ],
+)
+def test_wait_for_pipe_availability_sleeps_only_the_remaining_budget(
     monkeypatch: pytest.MonkeyPatch,
+    consumed: float,
+    deadline: float,
+    expected: float,
 ) -> None:
-    """A pipe error falls back to sleeping for the bounded wait."""
+    """A pipe error falls back to sleeping for the budget left after the wait."""
     clock = _PipeWaitClock(now=10.0)
     sleeps: list[float] = []
     _bind_pipe_wait_clock(monkeypatch, clock)
 
     def wait(_name: str, _wait_ms: int) -> None:
-        """Report the pipe as busy so the fallback sleep runs."""
+        """Spend *consumed* of the budget, then report the pipe as busy."""
+        clock.now += consumed
         raise DummyPipeError(windows.ERROR_PIPE_BUSY)
 
     monkeypatch.setattr(client, "win32pipe", types.SimpleNamespace(WaitNamedPipe=wait))
     monkeypatch.setattr(client.time, "sleep", sleeps.append)
 
-    client._wait_for_pipe_availability("pipe", 1.0, deadline=10.25)
+    client._wait_for_pipe_availability("pipe", 1.0, deadline=deadline)
 
-    assert sleeps == [0.25], "the fallback slept past the remaining deadline"
-
-
-def test_wait_for_pipe_availability_recomputes_the_budget_before_sleeping(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A wait that consumes the budget shortens the fallback sleep."""
-    clock = _PipeWaitClock(now=10.0)
-    sleeps: list[float] = []
-    _bind_pipe_wait_clock(monkeypatch, clock)
-
-    def wait(_name: str, _wait_ms: int) -> None:
-        """Consume part of the budget, then report the pipe as busy."""
-        clock.now = 10.2
-        raise DummyPipeError(windows.ERROR_PIPE_BUSY)
-
-    monkeypatch.setattr(client, "win32pipe", types.SimpleNamespace(WaitNamedPipe=wait))
-    monkeypatch.setattr(client.time, "sleep", sleeps.append)
-
-    client._wait_for_pipe_availability("pipe", 1.0, deadline=10.5)
-
-    assert sleeps == [pytest.approx(0.3)], (
-        "the fallback sleep reused the pre-wait budget"
+    assert sleeps == [pytest.approx(expected)], (
+        "the fallback sleep did not use the budget recomputed after the wait"
     )
 
 

@@ -235,17 +235,9 @@ def _capture_stdin(
 ) -> str:
     """Capture non-terminal stdin, reporting failures through the shim.
 
-    Parameters
-    ----------
-    timeout : float
-        Configured ``CMOX_IPC_TIMEOUT`` in seconds.
-    invocation_id : str
-        Identifier correlating this capture's telemetry with the invocation.
-    dependencies : _InvocationDependencies
-        Stdin stream, clocks and operating-system operations for the capture.
-    deadline : float or None, optional
-        Absolute start-up deadline the capture must spend, or ``None`` when
-        the caller has not anchored one.
+    *timeout* is the configured ``CMOX_IPC_TIMEOUT`` and names the value in
+    diagnostics; *deadline* is the absolute start-up budget the capture may
+    spend, or ``None`` when the caller anchored none.
 
     Returns
     -------
@@ -259,14 +251,7 @@ def _capture_stdin(
     def stdin_event(
         outcome: _StdinOutcome, *, worker_alive: bool | None = None
     ) -> _ShimEventContext:
-        """Build the bounded event describing one capture boundary.
-
-        Returns
-        -------
-        _ShimEventContext
-            Event carrying the selected strategy, worker state, and the
-            outstanding-worker count at this boundary.
-        """
+        """Build the bounded event describing one capture boundary."""
         return _ShimEventContext(
             _SHIM_STDIN_READ_OPERATION,
             outcome,

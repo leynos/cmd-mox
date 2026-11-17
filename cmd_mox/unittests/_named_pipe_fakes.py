@@ -255,12 +255,9 @@ class FakeWin32File:
             If the scripted operation reports ``ERROR_MORE_DATA`` or another
             error.
         """
-        if self._current_write is not None:
-            script, written = self._current_write
-            self._current_write = None
-            if script.error is not None:
-                raise script.error
-            return written
+        delivered = self._complete_write()
+        if delivered is not None:
+            return delivered
         current = self._current
         if current is None:
             # An overlapped ConnectNamedPipe transfers no bytes.
@@ -270,6 +267,16 @@ class FakeWin32File:
         if current.more:
             raise FakeWinError(named_pipe.ERROR_MORE_DATA)
         return len(current.data)
+
+    def _complete_write(self) -> int | None:
+        """Return the pending write's byte count, or ``None`` when none is queued."""
+        if self._current_write is None:
+            return None
+        script, written = self._current_write
+        self._current_write = None
+        if script.error is not None:
+            raise script.error
+        return written
 
     def CancelIoEx(self, handle: object, overlapped: object) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         """Record that pending I/O on *handle* was cancelled."""

@@ -258,21 +258,18 @@ class Win32NamedPipeBackend(NamedPipeBackend):
     def write_file(
         self, handle: object, payload: bytes, overlapped: object
     ) -> tuple[int, object]:
-        """Start an overlapped write and report the immediate status.
+        """Forward a whole-message write to ``win32file.WriteFile``.
 
-        Parameters
-        ----------
-        handle:
-            The connected pipe instance to write to.
-        payload:
-            The bytes to deliver to the client.
-        overlapped:
-            The overlapped structure tracking the write.
+        This method exists to keep the pywin32 dependency behind the backend
+        protocol, so the transport can be driven by a scripted fake. The
+        native call owns the immediate status and the overlapped object, and
+        the caller waits for them under the connection deadline.
 
         Returns
         -------
         tuple[int, object]
-            The immediate status and the bytes accepted so far.
+            The immediate write status and the overlapped object Win32
+            returns alongside it.
         """
         return self._win32file.WriteFile(handle, payload, overlapped)
 

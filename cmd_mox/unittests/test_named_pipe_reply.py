@@ -41,6 +41,12 @@ from cmd_mox.unittests._named_pipe_test_helpers import (
     _worker_events,
 )
 
+#: Error category each client-disconnect code is reported under.
+_DISCONNECT_CATEGORIES = {
+    ERROR_BROKEN_PIPE: "BrokenPipe",
+    ERROR_NO_DATA: "NoData",
+}
+
 
 def _answer_with(monkeypatch: pytest.MonkeyPatch, response: bytes | None) -> None:
     """Make the request pipeline answer with *response* bytes."""
@@ -195,14 +201,16 @@ def test_pending_reply_write_uses_the_connection_budget(
     assert 0 < wait_ms <= 1000, "the write wait did not use the connection budget"
 
 
-def test_reply_write_timeout_is_reported_as_a_timeout(
+def _assert_reply_phase_times_out(
     patch_win32: PatchWin32,
     monkeypatch: pytest.MonkeyPatch,
+    file_spec: FakeWin32File,
+    *,
+    expected_read_calls: int,
 ) -> None:
-    """A write that outlives the budget times the worker out."""
+    """Serve one reply whose scripted phase outlives the connection budget."""
     file_fake, _pipe_fake = patch_win32(
-        FakeWin32File(writes=[ScriptedWrite(status=ERROR_IO_PENDING)]),
-        win32event=FakeWin32Event([FakeWin32Event.WAIT_TIMEOUT]),
+        file_spec, win32event=FakeWin32Event([FakeWin32Event.WAIT_TIMEOUT])
     )
     state = build_state()
     handle = object()
@@ -215,10 +223,40 @@ def test_reply_write_timeout_is_reported_as_a_timeout(
     [timed_out] = _worker_events(events, "timeout")
     assert timed_out.error_category == "Timeout", "wrong reply timeout category"
     _assert_bounded(timed_out)
-    assert file_fake.cancelled == [handle], "the pending write was not cancelled"
-    assert file_fake.read_calls == 0, "an unconfirmed reply still probed the peer"
+    assert file_fake.cancelled == [handle], "the pending operation was not cancelled"
+    assert file_fake.read_calls == expected_read_calls, "the probe read count changed"
     assert closed_pipe_handles(file_fake) == [handle], "the client handle leaked"
     assert slot.released, "the permit was not released"
+
+
+@pytest.mark.parametrize("phase", ["write", "confirmation"])
+def test_a_reply_phase_that_outlives_the_budget_times_out(
+    patch_win32: PatchWin32,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    """A stalled write and an unanswered probe read both time the worker out.
+
+    A pending write is cancelled before the peer is probed; a pending probe
+    read is cancelled after one attempt. Either way the client handle is
+    released and no error is logged.
+    """
+    if phase == "write":
+        file_spec = FakeWin32File(writes=[ScriptedWrite(status=ERROR_IO_PENDING)])
+        expected_read_calls = 0
+    else:
+        file_spec = FakeWin32File(
+            writes=[ScriptedWrite()],
+            reads=[ScriptedRead(status=ERROR_IO_PENDING)],
+        )
+        expected_read_calls = 1
+
+    _assert_reply_phase_times_out(
+        patch_win32,
+        monkeypatch,
+        file_spec,
+        expected_read_calls=expected_read_calls,
+    )
 
 
 def test_a_wait_failure_still_cancels_the_pending_operation(
@@ -252,33 +290,6 @@ def test_a_wait_failure_still_cancels_the_pending_operation(
     assert excinfo.value is failure, "the wait error was replaced by its cleanup"
     [cancelled] = cancels
     assert cancelled[0] is handle, "the pending write was not cancelled"
-
-
-def test_reply_confirmation_timeout_is_reported_as_a_timeout(
-    patch_win32: PatchWin32,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A client that never closes leaves the reply unconfirmed."""
-    file_fake, _pipe_fake = patch_win32(
-        FakeWin32File(
-            writes=[ScriptedWrite()],
-            reads=[ScriptedRead(status=ERROR_IO_PENDING)],
-        ),
-        win32event=FakeWin32Event([FakeWin32Event.WAIT_TIMEOUT]),
-    )
-    state = build_state()
-    handle = object()
-    _answer_with(monkeypatch, b"reply")
-    _patch_request(monkeypatch, state)
-
-    with _observability.capture_events() as events:
-        slot = _run_worker(state, handle)
-
-    [timed_out] = _worker_events(events, "timeout")
-    assert timed_out.error_category == "Timeout", "wrong confirmation category"
-    assert file_fake.cancelled == [handle], "the probe read was not cancelled"
-    assert file_fake.read_calls == 1, "the probe read never ran"
-    assert slot.released, "the permit was not released"
 
 
 def test_a_budget_spent_during_dispatch_withholds_the_reply(
@@ -375,10 +386,10 @@ def test_no_reply_is_written_or_confirmed_without_a_response(
 
 
 @pytest.mark.parametrize(
-    ("winerror", "category"),
+    "winerror",
     [
-        pytest.param(ERROR_BROKEN_PIPE, "BrokenPipe", id="broken-pipe"),
-        pytest.param(ERROR_NO_DATA, "NoData", id="no-data"),
+        pytest.param(ERROR_BROKEN_PIPE, id="broken-pipe"),
+        pytest.param(ERROR_NO_DATA, id="no-data"),
     ],
 )
 def test_reply_write_disconnect_codes_stay_quiet(
@@ -386,7 +397,6 @@ def test_reply_write_disconnect_codes_stay_quiet(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     winerror: int,
-    category: str,
 ) -> None:
     """A client that left before its reply is reported without an error log."""
     caplog.set_level("DEBUG", logger="cmd_mox.ipc.named_pipe")
@@ -398,7 +408,7 @@ def test_reply_write_disconnect_codes_stay_quiet(
     with _observability.capture_events() as events:
         _run_worker(state, object())
 
-    _assert_single_completion(events, category)
+    _assert_single_completion(events, _DISCONNECT_CATEGORIES[winerror])
     _assert_no_error_log(caplog)
 
 

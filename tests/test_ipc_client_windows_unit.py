@@ -238,10 +238,23 @@ def test_connect_pipe_with_retries_converts_a_path_like_to_its_string(
     )
 
 
-def test_connect_pipe_with_retries_honours_an_explicit_deadline(
+@pytest.mark.parametrize(
+    ("explicit", "context", "expected"),
+    [
+        pytest.param(7.5, None, 7.5, id="explicit-deadline"),
+        pytest.param(None, 30.0, 30.0, id="context-deadline"),
+    ],
+)
+def test_connect_pipe_with_retries_uses_the_deadline_it_was_given(
     monkeypatch: pytest.MonkeyPatch,
+    explicit: float | None,
+    context: float | None,
+    expected: float,
 ) -> None:
-    """An explicit deadline is used without computing a new one."""
+    """An explicit deadline wins, and an omitted one falls back to the context.
+
+    Either way the deadline is forwarded unchanged and never recomputed.
+    """
     error = DummyPipeError(windows.ERROR_PIPE_BUSY)
     factory = _ScriptedPipeHandleFactory([error, "HANDLE"])
     waits = _bind_pipe_waits(monkeypatch)
@@ -250,49 +263,20 @@ def test_connect_pipe_with_retries_honours_an_explicit_deadline(
     monkeypatch.setattr(
         client,
         "compute_deadline",
-        lambda _timeout: pytest.fail("an explicit deadline was recomputed"),
+        lambda _timeout: pytest.fail("a supplied deadline was recomputed"),
     )
-
     client._connect_pipe_with_retries(
         "pipe",
         _ConnectionContext(
             timeout=1.0,
             retry_config=RetryConfig(retries=2, backoff=0.0, jitter=0.0),
+            deadline=context,
         ),
-        deadline=7.5,
+        deadline=explicit,
     )
 
-    assert waits == [("pipe", pytest.approx(0.001), 7.5)], (
-        "the explicit connect deadline was not forwarded to the wait"
-    )
-
-
-def test_connect_pipe_with_retries_uses_the_context_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An omitted deadline falls back to the context's shared deadline."""
-    error = DummyPipeError(windows.ERROR_PIPE_BUSY)
-    factory = _ScriptedPipeHandleFactory([error, "HANDLE"])
-    waits = _bind_pipe_waits(monkeypatch)
-    _bind_live_budget(monkeypatch)
-    monkeypatch.setattr(client, "_create_pipe_handle", factory)
-    monkeypatch.setattr(
-        client,
-        "compute_deadline",
-        lambda _timeout: pytest.fail("the context deadline was recomputed"),
-    )
-
-    client._connect_pipe_with_retries(
-        "pipe",
-        _ConnectionContext(
-            timeout=1.0,
-            retry_config=RetryConfig(retries=2, backoff=0.0, jitter=0.0),
-            deadline=30.0,
-        ),
-    )
-
-    assert waits == [("pipe", pytest.approx(0.001), 30.0)], (
-        "the wait did not use the context's shared deadline"
+    assert waits == [("pipe", pytest.approx(0.001), expected)], (
+        "the connect wait did not receive the supplied deadline"
     )
 
 
