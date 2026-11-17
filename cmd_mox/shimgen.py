@@ -230,8 +230,29 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
         logger=logger,
         exc_factory=_launcher_unlink_error,
     )
-    launcher.write_bytes(_expected_windows_launcher_bytes())
+    _write_windows_launcher(launcher)
     return launcher
+
+
+def _write_windows_launcher(launcher: Path) -> None:
+    """Write *launcher*, removing a partial file when the write fails."""
+    try:
+        launcher.write_bytes(_expected_windows_launcher_bytes())
+    except OSError:
+        # The failed write can leave an empty or truncated launcher behind,
+        # which a retry would then reject as a foreign entry.
+        _discard_partial_launcher(launcher)
+        raise
+
+
+def _discard_partial_launcher(launcher: Path) -> None:
+    """Remove a partially written launcher, logging a refused removal."""
+    try:
+        launcher.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Failed to remove partial launcher %s", launcher)
 
 
 def _create_posix_symlink(directory: Path, name: str) -> Path:

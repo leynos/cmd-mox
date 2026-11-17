@@ -259,6 +259,69 @@ def test_create_windows_shim_retry_failure_message(
         shimgen.create_shims(tmp_path, ["git"])
 
 
+@pytest.mark.parametrize("creates_partial", [True, False])
+def test_failed_launcher_write_leaves_no_retry_blocker(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    creates_partial: bool,
+) -> None:
+    """A failed launcher write does not leave a file that blocks a retry."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    original_write_bytes = pathlib.Path.write_bytes
+
+    def failing_write_bytes(self: pathlib.Path, data: bytes) -> int:
+        """Optionally create a truncated launcher, then fail like a full disk."""
+        if creates_partial:
+            original_write_bytes(self, b"")
+        msg = "disk full"
+        raise OSError(msg)
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", failing_write_bytes)
+
+    with pytest.raises(OSError, match="disk full"):
+        shimgen.ensure_shim(tmp_path, "git")
+
+    assert not launcher.exists()
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", original_write_bytes)
+    assert shimgen.ensure_shim(tmp_path, "git") == launcher
+
+
+def test_failed_launcher_write_reports_refused_cleanup(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A partial launcher that cannot be removed is reported, not hidden."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    original_write_bytes = pathlib.Path.write_bytes
+
+    def failing_write_bytes(self: pathlib.Path, data: bytes) -> int:
+        """Create a truncated launcher, then fail like a full disk."""
+        original_write_bytes(self, b"")
+        msg = "disk full"
+        raise OSError(msg)
+
+    def locked_unlink(self: pathlib.Path) -> None:
+        """Simulate a launcher that another process still holds open."""
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", failing_write_bytes)
+    monkeypatch.setattr(pathlib.Path, "unlink", locked_unlink)
+
+    with pytest.raises(OSError, match="disk full"):
+        shimgen.ensure_shim(tmp_path, "git")
+
+    assert any(
+        "Failed to remove partial launcher" in record.getMessage()
+        and str(launcher) in record.getMessage()
+        for record in caplog.records
+    )
+
+
 def test_create_shims_missing_target_dir() -> None:
     """Error raised when directory does not exist."""
     with tempfile.TemporaryDirectory() as tmpdir:
