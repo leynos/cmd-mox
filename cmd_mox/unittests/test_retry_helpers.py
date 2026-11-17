@@ -17,7 +17,9 @@ from cmd_mox.ipc.client import (
 def test_calculate_retry_delay() -> None:
     """Retry delay scales linearly and applies jitter bounds."""
     assert calculate_retry_delay(1, 0.1, 0.0) == pytest.approx(0.2)
-    with mock.patch("cmd_mox.ipc.random.uniform", return_value=1.25) as mock_uniform:
+    with mock.patch(
+        "cmd_mox.ipc._retry.random.uniform", return_value=1.25
+    ) as mock_uniform:
         delay = calculate_retry_delay(0, 1.0, 0.5)
         assert delay == pytest.approx(1.25)
         mock_uniform.assert_called_once_with(0.5, 1.5)
@@ -94,7 +96,7 @@ def test_retry_with_backoff_passes_the_configured_jitter_through() -> None:
     strategy = RetryStrategy(sleep=sleeps.append)
 
     with (
-        mock.patch("cmd_mox.ipc.client.random.uniform", return_value=1.5) as uniform,
+        mock.patch("cmd_mox.ipc._retry.random.uniform", return_value=1.5) as uniform,
         pytest.raises(OSError, match="temporary"),
     ):
         retry_with_backoff(

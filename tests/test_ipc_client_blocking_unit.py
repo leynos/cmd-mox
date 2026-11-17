@@ -144,31 +144,46 @@ def test_run_blocking_io_reraises_the_worker_exception() -> None:
     assert excinfo.value is failure, "the worker's exception identity was lost"
 
 
-def _raise_timeout(_deadline: float) -> float:
-    """Report a spent deadline the way ``remaining`` does."""
-    raise TimeoutError
+def test_run_blocking_io_rejects_a_spent_deadline_before_starting_a_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An expired deadline fails before any worker exists to cancel."""
+    starts: list[str] = []
+    cancels: list[str] = []
+
+    def spent(_deadline: float) -> float:
+        """Report an exhausted deadline the way ``remaining`` does."""
+        raise TimeoutError
+
+    def thread(**_kwargs: object) -> threading.Thread:
+        """Fail the test if a worker is constructed."""
+        starts.append("started")
+        msg = "a spent deadline must not start a worker"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(client, "remaining", spent)
+    monkeypatch.setattr(client, "threading", types.SimpleNamespace(Thread=thread))
+
+    with pytest.raises(TimeoutError):
+        client._run_blocking_io(
+            lambda: "too late",
+            deadline=0.0,
+            cancel=lambda: cancels.append("called"),
+        )
+
+    assert not starts, "an expired deadline still started the I/O worker"
+    assert not cancels, "an unstarted worker must not be cancelled"
 
 
-@pytest.mark.parametrize(
-    ("remaining_time", "expected_caller_join"),
-    [
-        pytest.param(lambda _deadline: 0.05, 0.05, id="positive-budget"),
-        pytest.param(_raise_timeout, None, id="already-spent"),
-    ],
-)
 def test_run_blocking_io_cancels_a_worker_that_outlives_the_deadline(
     monkeypatch: pytest.MonkeyPatch,
-    remaining_time: cabc.Callable[[float], float],
-    expected_caller_join: float | None,
 ) -> None:
-    """An unfinished worker is cancelled whether or not its budget is spent.
+    """An unfinished worker is cancelled once its budget is spent.
 
     A stand-in clock and a stand-in worker select the branch, so thread startup
-    on a loaded host cannot turn the positive-budget case into the expired one.
-    The positive-budget case must show the caller's timed join; the expired
-    case must cancel without one.
+    on a loaded host cannot turn the live deadline into an expired one.
     """
-    monkeypatch.setattr(client, "remaining", remaining_time)
+    monkeypatch.setattr(client, "remaining", lambda _deadline: 0.05)
     monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
     worker = _ControlledWorker(exits_on_cancel=True)
     cancels: list[str] = []
@@ -186,19 +201,12 @@ def test_run_blocking_io_cancels_a_worker_that_outlives_the_deadline(
         # The stand-in clock decides the budget, so this deadline is unused.
         client._run_blocking_io(lambda: "too late", deadline=0.0, cancel=cancel)
 
-    if expected_caller_join is None:
-        assert not worker.joins, (
-            "the expired deadline joined the worker instead of cancelling it"
-        )
-    else:
-        assert worker.joins[0] == pytest.approx(expected_caller_join), (
-            "the timed join did not run with the remaining budget"
-        )
-        # The expired branch propagates the clock's own error, so the message
-        # the client composes is only observable on this branch.
-        assert str(excinfo.value) == "IPC client operation timed out", (
-            "an exited worker must not be reported as wedged"
-        )
+    assert worker.joins[0] == pytest.approx(0.05), (
+        "the timed join did not run with the remaining budget"
+    )
+    assert str(excinfo.value) == "IPC client operation timed out", (
+        "an exited worker must not be reported as wedged"
+    )
     assert cancels == ["called"], "the deadline did not cancel the worker"
 
 
@@ -319,55 +327,6 @@ def test_extract_outcome_treats_a_none_error_as_absent() -> None:
     """A ``None`` error is not raised; the value is returned instead."""
     assert client._extract_outcome({"error": None, "value": "ok"}) == "ok", (
         "a None error must not be raised"
-    )
-
-
-def test_validate_initial_deadline_returns_the_remaining_time(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A live deadline returns the remaining budget without cancelling."""
-    monkeypatch.setattr(client, "remaining", lambda _deadline: 0.75)
-    cancels: list[tuple[object, object]] = []
-    monkeypatch.setattr(
-        client, "_cancel_and_await_worker", lambda *args: cancels.append(args)
-    )
-
-    def cancel() -> None:
-        """Stand in for a cancellation callback."""
-
-    thread = threading.Thread(target=cancel)
-
-    remaining = client._validate_initial_deadline(2.0, cancel, thread)
-
-    assert remaining == pytest.approx(0.75), "the remaining budget was not forwarded"
-    assert not cancels, "a live deadline cancelled the worker"
-
-
-def test_validate_initial_deadline_cancels_the_exact_worker_before_raising(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An expired deadline cancels the supplied worker and cancel callback."""
-
-    def expired(_deadline: float) -> float:
-        """Report an exhausted deadline."""
-        raise TimeoutError
-
-    monkeypatch.setattr(client, "remaining", expired)
-    cancels: list[tuple[object, object]] = []
-    monkeypatch.setattr(
-        client, "_cancel_and_await_worker", lambda *args: cancels.append(args)
-    )
-
-    def cancel() -> None:
-        """Stand in for a cancellation callback."""
-
-    thread = threading.Thread(target=cancel)
-
-    with pytest.raises(TimeoutError):
-        client._validate_initial_deadline(2.0, cancel, thread)
-
-    assert cancels == [(thread, cancel)], (
-        "the expired deadline did not cancel the worker pair"
     )
 
 

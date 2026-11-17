@@ -410,6 +410,11 @@ def _write_response(response: Response, *, correlation_id: str | None = None) ->
 def main() -> None:
     """Connect to the IPC server and execute the command behaviour.
 
+    One absolute deadline is anchored here, before stdin capture, and shared
+    with the request and any passthrough report on both transports. On Windows
+    a request that expires at the deadline may take up to a further second to
+    cancel and drain its overlapped I/O before the timeout is reported.
+
     Notes
     -----
     In-process callers receive ``SystemExit`` and keep ownership of ``sys.stdin``;
@@ -420,7 +425,7 @@ def main() -> None:
     bootstrap_shim_path()
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
-    deadline = None if path_utils.IS_WINDOWS else time.monotonic() + timeout
+    deadline = time.monotonic() + timeout
     invocation = _create_invocation(cmd_name, timeout)
     response = _execute_invocation(invocation, timeout, deadline=deadline)
     _write_response(response, correlation_id=invocation.invocation_id)

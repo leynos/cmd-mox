@@ -176,6 +176,29 @@ def test_wait_for_pipe_availability_sleeps_for_the_capped_wait_on_error(
     assert sleeps == [0.25], "the fallback slept past the remaining deadline"
 
 
+def test_wait_for_pipe_availability_recomputes_the_budget_before_sleeping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wait that consumes the budget shortens the fallback sleep."""
+    clock = _PipeWaitClock(now=10.0)
+    sleeps: list[float] = []
+    _bind_pipe_wait_clock(monkeypatch, clock)
+
+    def wait(_name: str, _wait_ms: int) -> None:
+        """Consume part of the budget, then report the pipe as busy."""
+        clock.now = 10.2
+        raise DummyPipeError(windows.ERROR_PIPE_BUSY)
+
+    monkeypatch.setattr(client, "win32pipe", types.SimpleNamespace(WaitNamedPipe=wait))
+    monkeypatch.setattr(client.time, "sleep", sleeps.append)
+
+    client._wait_for_pipe_availability("pipe", 1.0, deadline=10.5)
+
+    assert sleeps == [pytest.approx(0.3)], (
+        "the fallback sleep reused the pre-wait budget"
+    )
+
+
 def test_wait_for_pipe_availability_propagates_unexpected_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

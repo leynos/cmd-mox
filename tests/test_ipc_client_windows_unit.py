@@ -167,6 +167,11 @@ class _ScriptedPipeHandleFactory:
                 return outcome
 
 
+def _bind_live_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat the small deadlines these tests use as still in the future."""
+    monkeypatch.setattr(client, "remaining", lambda deadline: deadline)
+
+
 def _bind_pipe_waits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[tuple[str, float, float | None]]:
@@ -193,6 +198,7 @@ def test_connect_pipe_with_retries_retries_busy_and_missing_pipes(
     error = DummyPipeError(winerror)
     factory = _ScriptedPipeHandleFactory([error, "HANDLE"])
     waits = _bind_pipe_waits(monkeypatch)
+    _bind_live_budget(monkeypatch)
     monkeypatch.setattr(client, "_create_pipe_handle", factory)
     monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 50.0)
 
@@ -239,6 +245,7 @@ def test_connect_pipe_with_retries_honours_an_explicit_deadline(
     error = DummyPipeError(windows.ERROR_PIPE_BUSY)
     factory = _ScriptedPipeHandleFactory([error, "HANDLE"])
     waits = _bind_pipe_waits(monkeypatch)
+    _bind_live_budget(monkeypatch)
     monkeypatch.setattr(client, "_create_pipe_handle", factory)
     monkeypatch.setattr(
         client,
@@ -258,6 +265,93 @@ def test_connect_pipe_with_retries_honours_an_explicit_deadline(
     assert waits == [("pipe", pytest.approx(0.001), 7.5)], (
         "the explicit connect deadline was not forwarded to the wait"
     )
+
+
+def test_connect_pipe_with_retries_uses_the_context_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An omitted deadline falls back to the context's shared deadline."""
+    error = DummyPipeError(windows.ERROR_PIPE_BUSY)
+    factory = _ScriptedPipeHandleFactory([error, "HANDLE"])
+    waits = _bind_pipe_waits(monkeypatch)
+    _bind_live_budget(monkeypatch)
+    monkeypatch.setattr(client, "_create_pipe_handle", factory)
+    monkeypatch.setattr(
+        client,
+        "compute_deadline",
+        lambda _timeout: pytest.fail("the context deadline was recomputed"),
+    )
+
+    client._connect_pipe_with_retries(
+        "pipe",
+        _ConnectionContext(
+            timeout=1.0,
+            retry_config=RetryConfig(retries=2, backoff=0.0, jitter=0.0),
+            deadline=30.0,
+        ),
+    )
+
+    assert waits == [("pipe", pytest.approx(0.001), 30.0)], (
+        "the wait did not use the context's shared deadline"
+    )
+
+
+def test_connect_pipe_with_retries_rejects_an_expired_zero_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zero deadline is expired rather than treated as absent."""
+    factory = _ScriptedPipeHandleFactory(["HANDLE"])
+    monkeypatch.setattr(client, "_create_pipe_handle", factory)
+    monkeypatch.setattr(
+        client,
+        "compute_deadline",
+        lambda _timeout: pytest.fail("a zero deadline was replaced"),
+    )
+
+    with pytest.raises(TimeoutError):
+        client._connect_pipe_with_retries(
+            "pipe",
+            _ConnectionContext(
+                timeout=1.0,
+                retry_config=RetryConfig(retries=2, backoff=0.0, jitter=0.0),
+                deadline=0.0,
+            ),
+        )
+
+    assert not factory.calls, "an expired deadline still opened the pipe"
+
+
+def test_connect_pipe_with_retries_checks_the_budget_before_each_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every retry attempt re-checks the shared budget before opening."""
+    error = DummyPipeError(windows.ERROR_PIPE_BUSY)
+    factory = _ScriptedPipeHandleFactory([error, "HANDLE"])
+    _bind_pipe_waits(monkeypatch)
+    monkeypatch.setattr(client, "_create_pipe_handle", factory)
+    checked: list[float] = []
+
+    def remaining(deadline: float) -> float:
+        """Allow the first attempt, then report the budget as spent."""
+        checked.append(deadline)
+        if factory.calls:
+            raise TimeoutError("expired")
+        return 1.0
+
+    monkeypatch.setattr(client, "remaining", remaining)
+
+    with pytest.raises(TimeoutError):
+        client._connect_pipe_with_retries(
+            "pipe",
+            _ConnectionContext(
+                timeout=1.0,
+                retry_config=RetryConfig(retries=2, backoff=0.0, jitter=0.0),
+                deadline=5.0,
+            ),
+        )
+
+    assert checked == [5.0, 5.0, 5.0], "the budget was not checked per attempt"
+    assert factory.calls == ["pipe"], "the retry opened the pipe after expiry"
 
 
 @pytest.mark.parametrize(

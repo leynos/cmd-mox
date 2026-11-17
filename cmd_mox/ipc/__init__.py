@@ -2,6 +2,7 @@
 
 from cmd_mox.domain import Invocation, PassthroughRequest, PassthroughResult, Response
 
+from ._retry import random
 from ._server_core import IPCHandlers, TimeoutConfig
 from .client import (
     DEFAULT_CONNECT_BACKOFF,
@@ -12,7 +13,6 @@ from .client import (
     RetryStrategy,
     calculate_retry_delay,
     invoke_server,
-    random,
     report_passthrough_result,
     retry_with_backoff,
 )
