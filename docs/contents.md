@@ -17,6 +17,8 @@
   for three-component recording fixture versions.
 - [Go Environment Migration Note](./go-env-migration-note.md): Prepare for
   exact-name filtering of Go variables in new recordings.
+- [Recording Duration Migration Note](./recording-duration-migration-note.md):
+  Prepare for measured `duration_ms` values in new recordings.
 - [Handler Environment Migration Note](./handler-environment-migration-note.md):
   Read `with_env()` overrides from `Invocation.env` and expect touched-key
   restoration from `temporary_env()`.

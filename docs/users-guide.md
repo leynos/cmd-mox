@@ -138,6 +138,23 @@ system-key exclusions. The
 [Go environment migration note](go-env-migration-note.md) summarizes the change
 for teams upgrading shared fixtures.
 
+## Recording durations
+
+Recordings written by `.record()` store the real command's wall-clock duration
+in `duration_ms` as a non-negative integer number of milliseconds. Earlier
+releases stored a constant `0`. The interval runs from when CmdMox issues the
+passthrough directive to when the shim reports the real command's result, so it
+includes IPC and scheduling overhead as well as the command's own execution
+time. A clock that moves backwards is clamped to zero rather than rejected.
+
+This change affects new recordings only. Fixtures already on disk keep the
+`duration_ms` values they stored, and the field is descriptive: it does not
+affect replay, matching or verification. See
+[automatic recording with `.record()`](usage-guide.md#automatic-recording-with-record)
+for the full definition, and the
+[recording duration migration note](recording-duration-migration-note.md) for
+what changes in shared fixtures.
+
 ## Recording fixture schema versions
 
 The fixture `version` uses `MAJOR.MINOR.PATCH`; legacy `1.0` values load as

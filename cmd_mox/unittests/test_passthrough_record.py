@@ -4,16 +4,31 @@ from __future__ import annotations
 
 import typing as typ
 
+import hypothesis.strategies as st
 import pytest
+from hypothesis import given, settings
 
 from cmd_mox.controller import CmdMox
 from cmd_mox.ipc import Invocation, PassthroughRequest, PassthroughResult
+from cmd_mox.passthrough import PassthroughCoordinator
 from cmd_mox.record.fixture import FixtureFile
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.requires_unix_sockets
+
+
+class _FakeClock:
+    """Return scripted clock readings in call order."""
+
+    def __init__(self, readings: list[float]) -> None:
+        """Store the readings the coordinator should observe."""
+        self._readings = iter(readings)
+
+    def __call__(self) -> float:
+        """Return the next scripted reading."""
+        return next(self._readings)
 
 
 def _complete_passthrough(mox: CmdMox, directive: PassthroughRequest) -> None:
@@ -53,6 +68,106 @@ def _record_env_subset(
 
     assert spy._recording_session is not None
     return spy._recording_session._recordings[0].env_subset
+
+
+def _record_one_invocation(tmp_path: Path, readings: list[float]) -> int:
+    """Record a single invocation and return its measured duration."""
+    with CmdMox() as mox:
+        mox._passthrough_coordinator = PassthroughCoordinator(
+            duration_clock=_FakeClock(readings)
+        )
+        spy = mox.spy("echo").passthrough().record(tmp_path / "fixture.json")
+        invocation = Invocation(command="echo", args=["hello"], stdin="", env={})
+        response = mox._prepare_passthrough(spy, invocation)
+        directive = response.passthrough
+        assert directive is not None
+        mox._handle_passthrough_result(
+            PassthroughResult(
+                invocation_id=directive.invocation_id,
+                stdout="hello\n",
+                stderr="",
+                exit_code=0,
+            )
+        )
+        session = spy.recording_session
+        assert session is not None
+        return session._recordings[0].duration_ms
+
+
+def _record_invocations(
+    tmp_path: Path,
+    starts: list[float],
+    ends: list[float],
+    order: list[int],
+) -> dict[str, int]:
+    """Record one invocation per start reading, finalising in *order*."""
+    clock = _FakeClock([*starts, *ends])
+    with CmdMox() as mox:
+        mox._passthrough_coordinator = PassthroughCoordinator(duration_clock=clock)
+        spy = mox.spy("echo").passthrough().record(tmp_path / "fixture.json")
+        directives = []
+        for index in range(len(starts)):
+            response = mox._prepare_passthrough(
+                spy, Invocation(command="echo", args=[str(index)], stdin="", env={})
+            )
+            directive = response.passthrough
+            assert directive is not None
+            directives.append(directive)
+
+        for index in order:
+            mox._handle_passthrough_result(
+                PassthroughResult(
+                    invocation_id=directives[index].invocation_id,
+                    stdout="",
+                    stderr="",
+                    exit_code=0,
+                )
+            )
+
+        session = spy.recording_session
+        assert session is not None
+        return {
+            recording.args[0]: recording.duration_ms
+            for recording in session._recordings
+        }
+
+
+def _assert_duration_matches(start: float, end: float, recorded: int) -> None:
+    """Assert *recorded* is the nearest whole non-negative millisecond."""
+    assert isinstance(recorded, int), f"duration {recorded!r} is not an int"
+    elapsed_ms = (end - start) * 1000.0
+    if elapsed_ms <= 0:
+        assert recorded == 0, (
+            f"a non-positive interval of {elapsed_ms} ms recorded {recorded}"
+        )
+    else:
+        # Nearest-integer rounding: the recorded value may differ from the exact
+        # interval by at most half a millisecond.  Comparing against that bound
+        # checks the contract without restating `round()` in the oracle.
+        assert abs(recorded - elapsed_ms) <= 0.5, (
+            f"{elapsed_ms} ms did not round to {recorded}"
+        )
+
+
+#: Clock readings in seconds.  Bounded so a difference of two readings stays a
+#: finite number of milliseconds; NaN and infinities are not clock readings.
+_SECONDS = st.floats(
+    min_value=-1_000_000.0,
+    max_value=1_000_000.0,
+    allow_nan=False,
+    allow_infinity=False,
+)
+
+
+@st.composite
+def _starts_ends_and_order(
+    draw: st.DrawFn,
+) -> tuple[list[float], list[float], list[int]]:
+    """Generate start readings, completion-order end readings, and the order."""
+    starts = draw(st.lists(_SECONDS, min_size=2, max_size=8))
+    ends = draw(st.lists(_SECONDS, min_size=len(starts), max_size=len(starts)))
+    order = draw(st.permutations(range(len(starts))))
+    return starts, ends, order
 
 
 class TestPassthroughRecording:
@@ -124,6 +239,106 @@ class TestPassthroughRecording:
         assert recording.args == ["status", "--short"]
         assert recording.stdout == "M file.py\n"
         assert recording.exit_code == 0
+
+    @pytest.mark.parametrize(
+        ("readings", "expected_ms"),
+        [
+            pytest.param([10.0, 10.25], 250, id="quarter-second"),
+            pytest.param(
+                [10.0, 10.0007],
+                1,
+                id="fraction-above-half-millisecond-rounds-up",
+            ),
+            pytest.param(
+                [10.0, 10.0004],
+                0,
+                id="fraction-below-half-millisecond-rounds-down",
+            ),
+            pytest.param([10.0, 9.5], 0, id="backwards-clock-clamps"),
+        ],
+    )
+    def test_recorded_duration_follows_the_coordinator_clock(
+        self, tmp_path: Path, readings: list[float], expected_ms: int
+    ) -> None:
+        """Durations are rounded milliseconds, non-negative even if time reverses."""
+        actual_ms = _record_one_invocation(tmp_path, readings)
+        assert actual_ms == expected_ms, (
+            f"recorded {actual_ms} ms, expected {expected_ms}"
+        )
+
+    def test_out_of_order_results_keep_independent_durations(
+        self, tmp_path: Path
+    ) -> None:
+        """Concurrent requests use their own start readings, not arrival order."""
+        clock = _FakeClock([1.0, 2.0, 2.5, 4.0])
+        with CmdMox() as mox:
+            mox._passthrough_coordinator = PassthroughCoordinator(duration_clock=clock)
+            spy = mox.spy("echo").passthrough().record(tmp_path / "fixture.json")
+            first = mox._prepare_passthrough(
+                spy, Invocation(command="echo", args=["first"], stdin="", env={})
+            )
+            second = mox._prepare_passthrough(
+                spy, Invocation(command="echo", args=["second"], stdin="", env={})
+            )
+            first_directive = first.passthrough
+            second_directive = second.passthrough
+            assert first_directive is not None
+            assert second_directive is not None
+
+            # Finalise the second request before the first to prove the
+            # duration follows the invocation ID rather than insertion order.
+            for directive, stdout in (
+                (second_directive, "second\n"),
+                (first_directive, "first\n"),
+            ):
+                mox._handle_passthrough_result(
+                    PassthroughResult(
+                        invocation_id=directive.invocation_id,
+                        stdout=stdout,
+                        stderr="",
+                        exit_code=0,
+                    )
+                )
+
+            session = spy.recording_session
+            assert session is not None
+            durations = {
+                recording.args[0]: recording.duration_ms
+                for recording in session._recordings
+            }
+
+        assert durations == {"first": 3000, "second": 500}
+
+    @given(start=_SECONDS, end=_SECONDS)
+    @settings(max_examples=40, deadline=None)
+    def test_duration_is_the_nearest_non_negative_millisecond(
+        self,
+        tmp_path_factory: pytest.TempPathFactory,
+        start: float,
+        end: float,
+    ) -> None:
+        """Any clock pair records the nearest whole non-negative millisecond."""
+        tmp_path = tmp_path_factory.mktemp("duration")
+        recorded = _record_one_invocation(tmp_path, [start, end])
+        _assert_duration_matches(start, end, recorded)
+
+    @given(case=_starts_ends_and_order())
+    @settings(max_examples=40, deadline=None)
+    def test_duration_stays_with_its_invocation_across_completion_orders(
+        self,
+        tmp_path_factory: pytest.TempPathFactory,
+        case: tuple[list[float], list[float], list[int]],
+    ) -> None:
+        """Each invocation keeps its own interval whatever order results arrive."""
+        tmp_path = tmp_path_factory.mktemp("duration")
+        starts, ends, order = case
+        durations = _record_invocations(tmp_path, starts, ends, order)
+
+        assert len(durations) == len(starts)
+        for position, index in enumerate(order):
+            _assert_duration_matches(
+                starts[index], ends[position], durations[str(index)]
+            )
 
     @pytest.mark.parametrize(
         ("env_allowlist", "expected"),

@@ -156,13 +156,18 @@ def test_expired_passthrough_call_counts_after_pruning(
     """An expired call still counts after its pending entry is pruned."""
 
     class _Clock:
-        """Frozen monotonic clock for the passthrough coordinator."""
+        """Frozen clock for the passthrough coordinator."""
 
         now = 100.0
 
         @classmethod
         def monotonic(cls) -> float:
-            """Return the frozen time."""
+            """Return the frozen cleanup time."""
+            return cls.now
+
+        @classmethod
+        def perf_counter(cls) -> float:
+            """Return the frozen duration time."""
             return cls.now
 
     monkeypatch.setattr("cmd_mox.passthrough.time", _Clock)
