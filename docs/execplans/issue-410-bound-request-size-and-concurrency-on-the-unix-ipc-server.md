@@ -91,8 +91,12 @@ event. Windows behaviour, events, and tests stay as they are.
 - [x] (2026-11-17 08:20Z) Branch pushed, then replayed onto `origin/main` at
   `c426792` (see D9). The replay was conflict-free, `range-diff` shows all five
   commits unchanged, and `git diff --check` is clean.
-- [ ] Post-rebase gates, force push with lease, and a confirming CodeRabbit
-  pass.
+- [x] (2026-11-17 09:10Z) All six gates pass at `9877f98` (`make check-fmt`,
+  `make typecheck`, `make lint` including both pylint tiers, `make test` with
+  2202 passed and 16 skipped, `make markdownlint`, `make nixie`), the branch is
+  force-pushed with lease onto the rebased history, and PR #479's every check
+  is green, including CodeScene Code Health with six quality gates passed.
+- [ ] Confirming CodeRabbit pass at the final head.
 
 ## Surprises & discoveries
 
@@ -170,6 +174,20 @@ event. Windows behaviour, events, and tests stay as they are.
   Impact: the helper closes on a failed connect, tolerates a write failure only
   when the caller passes `expect_rejection=True`, and no longer leaks a socket
   on any failure path.
+- Observation: CodeScene's Large Method marker applies at 70 lines, and the
+  saturation test reached 78 once the readiness-probe waits and the refusal
+  assertions were added. Evidence: the PR check at `a8b7d7f`, which failed with
+  "has 78 lines, threshold = 70" while every other check passed. Impact: the
+  blocking handlers moved into a `_BlockingProbe` double with `release_one`,
+  `stop_blocking`, and `release_all`, and the probe wait, client burst, and
+  rejection assertion became helpers, leaving a 52-line body with unchanged
+  assertions.
+- Observation: the DF12 pylint tier rejects a test helper whose whole body is
+  `Event.set()` as `R9104 trivial-attribute-wrapper`. Evidence: `make lint` at
+  `991514c`, and the same failure in CI's `Linux QA` job. Impact:
+  `stop_blocking` now refuses a second call, which is the invariant the release
+  accounting depends on, and `test_blocking_probe_refuses_a_second_stop` covers
+  that refusal so the guard leaves no uncovered line for the 100% coverage gate.
 
 ## Decision log
 
