@@ -1067,10 +1067,11 @@ failures still use the shim's controlled IPC diagnostic.
 > point that terminates the process when a reader cannot be interrupted.
 >
 > **Superseded further (2026-11-17):** one absolute deadline is now anchored in
-> `main()` on both platforms, and the named-pipe client shares it, so the POSIX
-> and Windows IPC exchanges follow the same rule. The server likewise shares one
-> per-connection budget between the request read and the reply delivery. See
-> "Unified IPC deadline semantics (2026-11-17)" below.
+> `main()` on both platforms, stdin capture spends what start-up left of it
+> rather than starting its own, and the named-pipe client shares it, so the
+> POSIX and Windows IPC exchanges follow the same rule. The server likewise
+> shares one per-connection budget between the request read and the reply
+> delivery. See "Unified IPC deadline semantics (2026-11-17)" below.
 
 #### Unified IPC deadline semantics (2026-11-17)
 
@@ -1079,20 +1080,22 @@ before stdin capture on both platforms. The Windows special case that left the
 named-pipe client without that deadline is gone: `_send_pipe_request` computes
 one deadline when the connection context has none and passes it to the connect,
 write, and read, so a slow phase cannot renew the budget for the next one.
-Stdin capture remains bounded by the configured timeout from its own capture
-start, and running the real passthrough command is not interrupted even though
-its duration is charged to the shared budget. On Windows, cancelling a blocked
-stdin read or an overlapped pipe operation allows a bounded clean-up grace of
-about one second after expiry before the timeout is reported.
+Stdin capture spends what start-up left of that deadline rather than starting a
+fresh budget, and running the real passthrough command is not interrupted even
+though its duration is charged to the same budget. On Windows, cancelling a
+blocked stdin read or an overlapped pipe operation allows a bounded clean-up
+grace of about one second after expiry before the timeout is reported.
 
 The named-pipe transport previously bounded each client read with a fixed
 30-second limit independent of the configured timeout; that limit is removed,
 so the request read and the reply delivery share `outer.timeout`.
 
-Reply delivery no longer relies on `FlushFileBuffers`, which only promises that
-the bytes left the server's write buffer. The transport writes the reply with
-one overlapped `WriteFile`, then issues a bounded overlapped read and treats
-the client's close (`ERROR_BROKEN_PIPE` or `ERROR_NO_DATA`) as the
+Reply delivery no longer relies on `FlushFileBuffers`. On a server-side pipe
+handle that call does wait until the client has read the buffered data, but it
+takes no timeout and cannot be cancelled, so a client that never reads blocks
+the handler and server shutdown indefinitely. The transport instead writes the
+reply with one overlapped `WriteFile`, then issues a bounded overlapped read
+and treats the client's close (`ERROR_BROKEN_PIPE` or `ERROR_NO_DATA`) as the
 acknowledgement. Unexpected data leaves the reply unconfirmed and is reported as
 `PipeError`; a timeout or shutdown cancels and drains the pending operation
 and is reported as a terminal `Timeout` worker event, or `ServerStopped` when a

@@ -21,8 +21,10 @@ rule: a client has one deadline for the request and the reply, and the
 On the server side, a connection's request read and its reply delivery share
 one per-connection `timeout` budget, so a client that reads slowly cannot renew
 it for the reply. Named-pipe reply delivery writes the reply and then waits,
-within the same budget, for the client to close the pipe, because
-`FlushFileBuffers` only promises the bytes left the server's buffer.
+within the same budget, for the client to close the pipe. The previous
+`FlushFileBuffers` acknowledgement waits for the client to read the data but
+takes no timeout and cannot be cancelled, so a client that stopped reading
+could hold the server indefinitely.
 
 Reaching the deadline ends the capture: the shim discards partial input, does
 not contact the IPC server, and exits with status `1`. On Windows the cancelled
