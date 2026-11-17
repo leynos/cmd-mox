@@ -71,9 +71,15 @@ event. Windows behaviour, events, and tests stay as they are.
 - [x] (2026-11-17 03:10Z) `EP-M1` all six gates pass (`make check-fmt`,
   `make typecheck`, `make test`, `make lint`, `make markdownlint`,
   `make nixie`) and the milestone is committed.
-- [ ] `EP-M2` Unix size rejection before dispatch with bounded event.
-- [ ] `EP-M3` Unix admission gate, saturation tests, and guides.
-- [ ] Full gate run and draft PR.
+- [x] (2026-11-17 05:40Z) `EP-M2` Unix size rejection before dispatch with a
+  bounded event, approved counter categories, and focused tests.
+- [x] (2026-11-17 06:20Z) `EP-M3` Unix admission gate, deterministic and
+  saturation tests, and the three guide updates.
+- [x] (2026-11-17) All six gates pass on the combined `EP-M2`/`EP-M3` tree
+  (`make check-fmt`, `make typecheck`, `make test` with 2193 passed and 16
+  skipped, `make lint` including both pylint tiers, `ambrleaks`, and spelling,
+  `make markdownlint`, `make nixie`).
+- [ ] Draft PR.
 
 ## Surprises & discoveries
 
@@ -89,8 +95,35 @@ event. Windows behaviour, events, and tests stay as they are.
 - Observation: the DF12 pylint tier flags a test double's `settimeout` method
   as `R9104 trivial-attribute-wrapper` when its body only records the value.
   Evidence: `tests/test_ipc_read_until_eof.py:36`. Impact: the double now
-  rejects a negative timeout, as a real socket does, which is both
-  non-trivial and a more faithful stand-in.
+  rejects a negative timeout, as a real socket does, which is both non-trivial
+  and a more faithful stand-in.
+- Observation: one size rejection produces two INFO records: the bounded event
+  and the fixed diagnostic. Evidence: the first fake-handler test draft
+  unpacked both when expecting one. Impact: the assertion selects the event by
+  its structured `outcome`, and separately asserts the diagnostic message.
+- Observation: a burst of 65 Unix `connect` calls can exhaust the default
+  listen backlog (five) before the accept loop catches up, surfacing
+  `BlockingIOError` in the client. Evidence: the first saturation test run
+  failed at client six. Impact: the saturation client retries `connect` until
+  the deadline; every retry still meets the same admission gate.
+- Observation: the backend fixture does not use `IPCServer.start()`, because
+  that start performs a readiness-probe connection whose permit would race the
+  deterministic permit assertions. Evidence: `tests/test_ipc_server_limits.py`
+  constructs the cached inner class directly. Impact: only the saturation test
+  needs the real start path, and its wait for 64 entered callbacks also
+  outlasts the probe's permit.
+- Observation: `make check-fmt` runs `ruff format --check` only, so it cannot
+  see import order. Evidence: the first gate run was green on format and red on
+  `ruff check`'s `unsorted-imports` for the same file. Impact: treat
+  `make lint` as the only authority on import ordering, and run it before
+  claiming a file is clean.
+- Observation: both pylint tiers object to otherwise ordinary thread
+  primitives. Evidence: `R1732 consider-using-with` fired on
+  `Semaphore.acquire`, and the DF12 tier's `R9104 trivial-attribute-wrapper`
+  fired on the fake request's one-line `shutdown`. Impact: the saturation test
+  now releases one waiter per queued token from a `queue.Queue`, which cannot
+  be mistaken for a context manager, and the request double validates the
+  shutdown mode as a real socket does instead of only recording it.
 
 ## Decision log
 
@@ -119,10 +152,72 @@ event. Windows behaviour, events, and tests stay as they are.
   `PIPE_CHUNK_SIZE` is now an alias of `DEFAULT_READ_CHUNK_SIZE`. A bound that
   cannot describe a usable read is still rejected when options are built.
   Date/Author: 2026-11-17, implementing agent.
+- D6. Decision: acquire the Unix permit in `process_request` and return it in
+  `shutdown_request`'s `finally`, never in `stop()` or `server_close()`.
+  Rationale: `socketserver` calls `shutdown_request` on every exit path,
+  including an early worker finish and a handler failure, while a worker that
+  outlives the listener still owns its permit until its own socket closes.
+  `ClientSlot.release` latches, so the handler-failure path cannot release
+  twice. Date/Author: 2026-11-17, implementing agent.
+- D7. Decision: deliver `EP-M2` and `EP-M3` in one commit. Rationale: both
+  change the same handler and inner-server surface, and the admission tests
+  share `tests/test_ipc_server_limits.py` with the size-rejection test, so
+  splitting them would produce a misleading history rather than independent
+  reverts. Date/Author: 2026-11-17, implementing agent.
+- D8. Decision: prove the permit paths with a direct inner-backend fixture and
+  an inline `Thread` double, and prove real concurrency with one saturation
+  test over real sockets. Rationale: deterministic stand-ins give exact release
+  counts without timing assumptions, and the real-socket test covers kernel
+  acceptance, refusal, and re-admission together. Date/Author: 2026-11-17,
+  implementing agent.
 
 ## Outcomes & retrospective
 
-Pending.
+The Unix transport now enforces the same resource bounds as the named-pipe
+transport. A single message may carry at most 8 MiB, and at most 64 clients are
+served at once. Both numbers, the `ClientSlot` latch, `acquire_client_slot`, and
+`MessageTooLargeError` live in `cmd_mox.ipc._limits`, which the client, the
+server, and both named-pipe modules import, so the two transports cannot drift
+apart. `socket_utils.read_until_eof` replaced the client's `_read_all` and the
+server's read loop, so one implementation owns the budget, the EOF probe, and
+the deadline arithmetic.
+
+A request that crosses the size limit is abandoned before dispatch. The reader
+drops its buffered prefix, `_IPCHandler.handle` emits one `read_size_rejected`
+connection event carrying the observed byte count and elapsed duration, logs a
+fixed diagnostic, and returns without a response, so the client sees EOF rather
+than a misleading error frame. A connection that arrives while 64 are in flight
+is closed with no frame and recorded as `rejected` with `ClientLimitReached`;
+it is admitted normally once a permit returns. Every admitted socket returns
+exactly one permit, whichever of the accept loop, an early-finishing worker, a
+failing handler, or a failing close ends it.
+
+The behaviour is observable from outside: a caller that sends an oversized
+request receives no response and a controlled `IPC error: ...` diagnostic, and
+a 65th concurrent shim waits only until one of the 64 finishes. Evidence: the
+nine tests in `tests/test_ipc_server_limits.py`, the size-rejection regression
+in `cmd_mox/unittests/test_ipc_server_connection_events.py`, the counter-key
+tests in `tests/test_ipc_observability_seam.py`, and a full suite of 2193
+passed with 16 skipped.
+
+Lessons. First, `socketserver` already routes every exit path through
+`shutdown_request`, so permit ownership belongs there and in `process_request`,
+never in `stop()` or `server_close()`; a worker that outlives the listener
+keeps its permit until its own socket closes, and a fresh semaphore per backend
+stops one server instance inheriting another's permits. Second, a real-socket
+saturation test needs two concessions the deterministic tests do not: the
+client must retry `connect` while the listen backlog is full, and the test must
+wait for all 64 callbacks to start before expecting a refusal, because the
+server's readiness probe briefly holds a permit of its own. Third,
+`make check-fmt` runs `ruff format --check` only, so import order is caught by
+`make lint` alone; a green format gate is not evidence for it.
+
+Residual gaps. The Windows transport keeps its per-step cooperative timeouts,
+so the POSIX deadline policy described here does not apply there; the shared
+bounds only make the two transports agree on size and concurrency.
+`docs/python-native-command-mocking-design.md` appears in the markdownlint
+configuration's exclusion list, so that changed guide is validated by the
+spelling gate and `make nixie` rather than by markdownlint.
 
 ## Context and orientation
 
@@ -132,10 +227,13 @@ Pending.
 - `cmd_mox/ipc/client.py` owns the Unix client. `_read_all()` is its unbounded
   EOF loop.
 - `cmd_mox/ipc/socket_utils.py` owns Unix socket helpers.
-- `cmd_mox/ipc/windows.py` owns `MAX_MESSAGE_SIZE` and
-  `PipeMessageTooLargeError`.
-- `cmd_mox/ipc/_named_pipe_limits.py` owns `MAX_ACTIVE_CLIENTS`, `ClientSlot`,
-  and `acquire_client_slot`, plus named-pipe-only worker vocabulary.
+- `cmd_mox/ipc/_limits.py` owns `MAX_MESSAGE_SIZE`, `MAX_ACTIVE_CLIENTS`,
+  `DEFAULT_READ_CHUNK_SIZE`, `ReadBounds`, `ClientSlot`, `acquire_client_slot`,
+  and `MessageTooLargeError`.
+- `cmd_mox/ipc/windows.py` re-exports the shared size names and keeps
+  `PipeMessageTooLargeError` as a `MessageTooLargeError` subclass.
+- `cmd_mox/ipc/_named_pipe_limits.py` re-exports the shared admission names,
+  and owns the named-pipe-only worker vocabulary and client lifetime.
 - `cmd_mox/ipc/_observability.py` owns `IPCEvent` and the closed counter
   categories.
 - Relevant guides: `docs/python-native-command-mocking-design.md`,
@@ -196,9 +294,12 @@ permit is attached to one accepted socket and returned exactly once.
   Negative control: a one-byte-over run must raise.
 - `L-DEADLINE`: fake socket records `settimeout`; the existing Unix server test
   asserts `[1.0, 0.75, 0.5]`.
-- `INV-PERMIT`: deterministic `_InnerServer` tests calling `process_request`,
-  `process_request_thread`, and `shutdown_request` with fake requests, plus a
-  real-socket saturation test.
+- `INV-PERMIT`: deterministic `_InnerServer` tests calling `process_request` and
+  `shutdown_request` with fake requests. `process_request_thread` is exercised
+  through the inline `Thread` double that runs the target it is handed, so the
+  worker body, its `finally`, and the failure path all run synchronously. In
+  addition, a real-socket saturation test covers the same invariant against the
+  kernel's accept loop.
 - `INV-EVENT`: fake-handler test plus a real-socket oversize test.
 
 ### Formal verification decision
@@ -254,7 +355,29 @@ regresses. Tests create their own sockets and clean them up in `finally`.
 
 ## Artefacts and notes
 
-Pending.
+Commits on
+`issue-410-bound-request-size-and-concurrency-on-the-unix-ipc-server`:
+
+- `6794dda` — `EP-M1`: shared limits module, bounded EOF reader, and the reads
+  routed through it.
+- The `EP-M2`/`EP-M3` commit that follows covers the Unix size rejection, the
+  admission gate, the tests, and the three guide updates.
+
+Test artefacts, all runnable on their own:
+
+- `tests/test_ipc_server_limits.py` — nine tests: real-socket oversize
+  rejection, admission refusal, both thread-start-failure paths, early worker
+  completion, handler failure, failing close, repeated cleanup, and the
+  real-socket saturation test.
+- `cmd_mox/unittests/test_ipc_server_connection_events.py` —
+  `test_ipc_handler_rejects_an_oversized_request`.
+- `tests/test_ipc_observability_seam.py` —
+  `test_counter_key_preserves_fixed_unix_connection_error_categories` and
+  `test_message_size_is_logged_but_never_keyed`.
+
+Gate evidence is captured under `/tmp` as
+`<gate>-2bb17d7a-1373-4f71-a079-92dcd17ca91b-issue-410-bound-request-size-and-concurrency-on-the-unix-ipc-server.out`
+for `check-fmt`, `typecheck`, `test`, `lint`, `markdownlint`, and `nixie`.
 
 ## Interfaces and dependencies
 
@@ -264,6 +387,13 @@ Pending.
   `options` is a `ReadOptions(max_bytes, chunk_size=65536, remaining_time=...)`
   frozen dataclass that inherits its validated bounds from
   `cmd_mox.ipc._limits.ReadBounds`.
+- `_InnerServer.process_request(request, client_address)` and
+  `_InnerServer.shutdown_request(request)` in `cmd_mox/ipc/server.py`, which
+  own the admission permit around the superclass calls.
+- Unix connection events under `ipc.server.connection` with outcomes
+  `receive_timeout`, `receive_closed`, `response_dropped`,
+  `read_size_rejected`, and `rejected`, and the bounded categories
+  `MessageTooLargeError`, `ClientLimitReached`, and `ThreadStartFailed`.
 - No new dependencies.
 
 ## Revision note

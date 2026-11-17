@@ -996,15 +996,18 @@ external metrics or tracing collector.
 #### Named-pipe resource bounds (2026-08-28)
 
 The Windows named-pipe transport bounds concurrency, message size, and client
-lifetime so a single misbehaving peer cannot exhaust the server.
-`cmd_mox.ipc._named_pipe_limits` holds the limits and the event vocabulary:
-`MAX_ACTIVE_CLIENTS` (64) caps simultaneously served clients through a
-`threading.BoundedSemaphore` acquired non-blockingly *before* a worker thread
-is spawned, and `CLIENT_READ_TIMEOUT_SECONDS` (30.0) bounds how long one client
-may take to deliver its request. `cmd_mox.ipc.windows.MAX_MESSAGE_SIZE` (8 MiB)
-caps a single message; `read_pipe_message` stops reading once the limit would
-be exceeded, discards the buffered prefix, and raises
-`PipeMessageTooLargeError`, which carries byte counts only and never message
+lifetime so a single misbehaving peer cannot exhaust the server. The bounds
+themselves are transport-neutral and live in `cmd_mox.ipc._limits`, which both
+transports import: `MAX_ACTIVE_CLIENTS` (64) caps simultaneously served clients,
+`MAX_MESSAGE_SIZE` (8 MiB) caps a single message, and `ClientSlot` beside
+`acquire_client_slot` accounts for one admitted client. The named-pipe modules
+re-export those names to keep their existing import surface stable.
+`cmd_mox.ipc._named_pipe_limits` adds the pipe-only vocabulary:
+`CLIENT_READ_TIMEOUT_SECONDS` (30.0) bounds how long one client may take to
+deliver its request, and the worker event type lives there. `read_pipe_message`
+stops reading once the limit would be exceeded, discards the buffered prefix,
+and raises `PipeMessageTooLargeError`, a `MessageTooLargeError` subclass that
+keeps the named-pipe wording while carrying byte counts only and never message
 data.
 
 Each admitted client owns exactly one permit. The accept loop acquires it, the
@@ -1082,6 +1085,57 @@ are tuned in one place rather than duplicated across transports. The client
 then validates that the server's reply is valid JSON, raising a `RuntimeError`
 if decoding fails. These safeguards make the IPC bus robust on slower or
 heavily loaded systems.
+
+#### Unix socket resource bounds (2026-11-17)
+
+The POSIX transport enforces the same concurrency and message-size bounds as
+the named-pipe transport, using the shared definitions in `cmd_mox.ipc._limits`.
+`MAX_ACTIVE_CLIENTS` (64) is enforced by a `threading.BoundedSemaphore`, and
+`MAX_MESSAGE_SIZE` (8 MiB) is enforced by `socket_utils.read_until_eof`, which
+both the client and the server use in place of their former read-to-EOF loops.
+
+The reader is bounded in both directions. It requests
+`min(chunk_size, max_bytes - received + 1)` bytes per receive, so the read at
+the limit becomes a one-byte EOF probe: a payload of exactly 8 MiB followed by
+EOF succeeds, while a single further byte proves the message is oversized. An
+oversized message drops its buffered prefix before raising
+`MessageTooLargeError`, which carries byte counts only. Both transports default
+to a 64 KiB receive chunk.
+
+`_InnerServer.process_request` acquires one permit without blocking before it
+asks the thread mixin for a worker. At capacity it emits a `rejected`
+connection event with `error_category="ClientLimitReached"` and closes the
+request without starting a thread or writing a frame. If the worker thread
+cannot start, it returns the permit, emits `rejected` with
+`error_category="ThreadStartFailed"`, and re-raises so `socketserver` still
+reports the failure and closes the socket. `_InnerServer.shutdown_request`
+calls the superclass close in a `try` and returns the permit in `finally`, so
+the accept loop, an early-finishing worker, and a failing handler all release
+exactly once; repeated cleanup finds no permit and does nothing. Permits are
+not released in `stop()` or `server_close()`, because a worker that outlives
+the listener owns its permit until its own request socket closes. Each
+restarted backend constructs a fresh semaphore, so permits are never inherited
+across instances.
+
+`_IPCHandler.handle` catches `MessageTooLargeError` before the socket failures.
+It emits one `read_size_rejected` connection event carrying the observed
+`message_size` and the elapsed duration, logs a fixed message, and returns
+without dispatch or a response, so the client sees EOF rather than a misleading
+error frame. No payload byte or exception message reaches the event or the log.
+
+Unix connection events use the fixed outcomes `receive_timeout`,
+`receive_closed`, `response_dropped`, `read_size_rejected`, and `rejected`,
+with bounded categories. Counter keys approve `MessageTooLargeError`,
+`ClientLimitReached`, and `ThreadStartFailed` alongside the existing backend
+and named-pipe vocabularies; `message_size` is logged but excluded from the key
+because an exact byte count has unbounded cardinality.
+
+The deadline policy is unchanged and differs by transport. On POSIX, one
+accepted connection has a single non-renewing read deadline, and every receive
+is given only the time left before it, so trickled bytes cannot extend the
+budget. The client applies the same anchored deadline to connection attempts,
+request sending, and response reads. The Windows named-pipe transport instead
+uses per-step cooperative timeouts with cancellable overlapped reads.
 ```mermaid
 classDiagram
     class IPCServer {

@@ -15,6 +15,7 @@ import pytest
 
 from cmd_mox.ipc import _observability
 from cmd_mox.ipc import server as _ipc_server
+from cmd_mox.ipc._limits import MessageTooLargeError
 
 pytestmark = pytest.mark.requires_unix_sockets
 
@@ -345,3 +346,98 @@ def test_ipc_handler_records_receive_connection_drop() -> None:
         and event.error_category == "ConnectionError"
         for event in events
     ), "Receive-side connection reset did not emit a bounded event"
+
+
+def test_ipc_handler_rejects_an_oversized_request(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An oversized request emits one bounded event and never dispatches."""
+    received = 4097
+    limit = 4096
+    dispatched: list[bytes] = []
+
+    def fail_read() -> bytes:
+        """Raise the payload-free size error the reader produces.
+
+        Raises
+        ------
+        MessageTooLargeError
+            Always, carrying the received size and the configured limit.
+        """
+        raise MessageTooLargeError(received=received, limit=limit)
+
+    def spy_pipeline(_server: object, raw: bytes, _transport: str) -> SimpleNamespace:
+        """Record any dispatch that the size check should have prevented.
+
+        Returns
+        -------
+        SimpleNamespace
+            A response double that would be written if dispatch happened.
+        """
+        dispatched.append(raw)
+        return SimpleNamespace(response_bytes=b"reply", correlation_id=None)
+
+    fake_handler = typ.cast(
+        "_ipc_server._IPCHandler",
+        types.SimpleNamespace(
+            _read_request_payload=fail_read,
+            server=types.SimpleNamespace(outer=types.SimpleNamespace(timeout=1.0)),
+        ),
+    )
+    monkeypatch.setattr(_ipc_server, "_request_pipeline", spy_pipeline)
+    caplog.set_level(logging.INFO, logger="cmd_mox.ipc.server")
+    counter_key = _observability.EventKey(
+        operation="ipc.server.connection",
+        transport="unix",
+        selection_mode=None,
+        outcome="read_size_rejected",
+        cache_name=None,
+        cache_outcome=None,
+        error_category="MessageTooLargeError",
+    )
+    count_before = _observability.counter_snapshot().get(counter_key, 0)
+
+    with _observability.capture_events() as events:
+        _ipc_server._IPCHandler.handle(fake_handler)
+
+    [event] = [
+        item
+        for item in events
+        if item.operation == "ipc.server.connection"
+        and item.outcome == "read_size_rejected"
+    ]
+    assert event.transport == "unix", "Size rejection omitted its transport"
+    assert event.error_category == "MessageTooLargeError", "Wrong bounded category"
+    assert event.message_size == received, "Event did not report the received size"
+    assert event.duration_ms is not None, "Event omitted its duration"
+    assert event.duration_ms >= 0, "Event duration must be nonnegative"
+    assert event.correlation_id is None, "Unparsed requests must not be correlated"
+    assert _observability.counter_snapshot()[counter_key] == count_before + 1, (
+        "Size rejection must increment its bounded counter once"
+    )
+    assert not dispatched, "An oversized request reached dispatch"
+    [event_record] = [
+        record
+        for record in caplog.records
+        if getattr(record, "outcome", None) == "read_size_rejected"
+    ]
+    assert event_record.levelno == logging.INFO, "Size rejection logged above INFO"
+    assert event_record.getMessage() == "IPC server connection outcome", (
+        "Structured log lost its fixed event message"
+    )
+    assert getattr(event_record, "message_size", None) == received, (
+        "Structured log omitted the received size"
+    )
+    assert any(
+        record.name == "cmd_mox.ipc.server"
+        and record.levelno == logging.INFO
+        and record.getMessage() == "IPC request rejected for exceeding the size limit"
+        for record in caplog.records
+    ), "Size rejection lost its bounded diagnostic"
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records), (
+        "Size rejection logged an error"
+    )
+    assert f"{limit}-byte limit" not in caplog.text, (
+        "The exception message leaked into logs"
+    )

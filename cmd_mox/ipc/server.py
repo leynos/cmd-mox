@@ -13,7 +13,12 @@ from functools import cache, partial
 
 from . import _observability
 from ._deadline import _compute_deadline, _remaining_time
-from ._limits import MAX_MESSAGE_SIZE
+from ._limits import (
+    MAX_ACTIVE_CLIENTS,
+    MAX_MESSAGE_SIZE,
+    MessageTooLargeError,
+    acquire_client_slot,
+)
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -38,30 +43,59 @@ _CLIENT_DISCONNECT_ERRNOS = frozenset({
 })
 
 type _ConnectionOutcome = typ.Literal[
-    "receive_timeout", "receive_closed", "response_dropped"
+    "receive_timeout",
+    "receive_closed",
+    "response_dropped",
+    "read_size_rejected",
+    "rejected",
 ]
 type _ConnectionErrorCategory = typ.Literal[
-    "ConnectionClosed", "ConnectionError", "OSError", "TimeoutError"
+    "ConnectionClosed",
+    "ConnectionError",
+    "OSError",
+    "TimeoutError",
+    "MessageTooLargeError",
+    "ClientLimitReached",
+    "ThreadStartFailed",
 ]
 
 _CONNECTION_OPERATION: typ.Final[str] = "ipc.server.connection"
 _CONNECTION_EVENT_MESSAGE: typ.Final[str] = "IPC server connection outcome"
 
 
-def _emit_connection_outcome(
+def _emit_connection_outcome(  # ruff: ignore[too-many-arguments] - the fields are the bounded event dimensions, and grouping them would hide which outcome carries which
     outcome: _ConnectionOutcome,
     error_category: _ConnectionErrorCategory,
-    started: float,
+    started: float | None = None,
     correlation_id: str | None = None,
+    *,
+    message_size: int | None = None,
 ) -> None:
-    """Emit bounded metadata for a closed or stalled Unix connection."""
+    """Emit bounded metadata for a stalled, refused, or completed connection.
+
+    Parameters
+    ----------
+    outcome:
+        Terminal state of the connection.
+    error_category:
+        Closed-set failure label for the outcome.
+    started:
+        ``time.perf_counter`` reading taken when the connection was handled, or
+        ``None`` when the event reports no measurable duration.
+    correlation_id:
+        Request identifier shared with the dispatch record, when one exists.
+    message_size:
+        Bytes observed when a request was refused for exceeding the limit.
+    """
+    duration_ms = None if started is None else _observability.elapsed_ms(started)
     _observability.emit(
         _observability.IPCEvent(
             operation=_CONNECTION_OPERATION,
             transport="unix",
             outcome=outcome,
             error_category=error_category,
-            duration_ms=_observability.elapsed_ms(started),
+            duration_ms=duration_ms,
+            message_size=message_size,
             correlation_id=correlation_id,
         ),
         logger=logger,
@@ -89,8 +123,10 @@ def _connection_error_category(
 
 
 if typ.TYPE_CHECKING:
+    import socket
     from pathlib import Path
 
+    from ._limits import ClientSlot
     from ._observability import _BackendErrorCategory as _ErrorCategory
     from ._unix_server_base import _SelectionMode
 
@@ -367,6 +403,18 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         started = time.perf_counter()
         try:
             raw = self._read_request_payload()
+        except MessageTooLargeError as exc:
+            # The payload is already dropped, so only its size is safe to
+            # report. Returning without a response closes the connection, and
+            # the client sees EOF rather than a misleading error frame.
+            _emit_connection_outcome(
+                "read_size_rejected",
+                "MessageTooLargeError",
+                started,
+                message_size=exc.received,
+            )
+            logger.info("IPC request rejected for exceeding the size limit")
+            return
         except TimeoutError:
             _emit_connection_outcome("receive_timeout", "TimeoutError", started)
             logger.info("IPC connection timed out while receiving request")
@@ -433,8 +481,47 @@ def _inner_server_cls() -> _InnerServerClass:
         def __init__(self, socket_path: Path, outer: IPCServer) -> None:
             """Bind the server to its path and public IPC handler owner."""
             self.outer = outer
+            self._slots_lock = threading.Lock()
+            self._slots: dict[socket.socket, ClientSlot] = {}
+            # A fresh semaphore per backend keeps a restarted server's permits
+            # independent of any worker that outlived the previous instance.
+            self._admission = threading.BoundedSemaphore(MAX_ACTIVE_CLIENTS)
             super().__init__(str(socket_path), _IPCHandler)
             self.daemon_threads = True
+
+        def process_request(
+            self, request: socket.socket, client_address: object
+        ) -> None:
+            """Admit *request* within the concurrency bound, or refuse it."""
+            slot = acquire_client_slot(self._admission)
+            if slot is None:
+                _emit_connection_outcome("rejected", "ClientLimitReached")
+                self.shutdown_request(request)
+                return
+            with self._slots_lock:
+                self._slots[request] = slot
+            try:
+                super().process_request(request, client_address)
+            except BaseException:
+                # No worker was started, so nothing else will return this
+                # permit; the accept loop still closes the request socket.
+                self._release_request_slot(request)
+                _emit_connection_outcome("rejected", "ThreadStartFailed")
+                raise
+
+        def shutdown_request(self, request: socket.socket) -> None:
+            """Close *request*, always returning its admission permit."""
+            try:
+                super().shutdown_request(request)
+            finally:
+                self._release_request_slot(request)
+
+        def _release_request_slot(self, request: socket.socket) -> None:
+            """Return the permit attached to *request*, if one is still held."""
+            with self._slots_lock:
+                slot = self._slots.pop(request, None)
+            if slot is not None:
+                slot.release()
 
     return typ.cast(
         "_InnerServerClass",

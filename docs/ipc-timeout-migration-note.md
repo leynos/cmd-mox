@@ -38,3 +38,18 @@ a source that is already complete, such as `subprocess.DEVNULL`.
   diagnostic on stderr and a non-zero exit.
 - If passthrough reporting fails, the shim preserves the real command's
   non-zero exit status.
+
+## Know the request and client limits
+
+Both transports accept at most 8 MiB per message and serve at most 64 clients
+at once. On POSIX, a request that crosses the size limit is abandoned as soon
+as the limit is passed, so the server never buffers the whole payload and never
+dispatches the request. The connection then closes without a response frame, so
+the shim reports a controlled `IPC error: ...` diagnostic and a non-zero exit
+rather than a partial reply. A 65th concurrent connection is refused the same
+way while 64 are in flight, and is admitted normally once one of them finishes.
+
+The limits do not change `CMOX_IPC_TIMEOUT`. On POSIX the accepted connection
+still has one non-renewing read deadline, so a client that sends slowly cannot
+extend its budget by trickling bytes. Windows keeps its per-step cooperative
+timeouts, so the POSIX IPC deadline does not apply there.
