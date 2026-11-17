@@ -213,7 +213,8 @@ def read_stdin(
         not read at all.
     timeout:
         Deadline in seconds, measured from the start of the capture. The shim
-        passes the validated ``CMOX_IPC_TIMEOUT`` value.
+        passes what start-up left of the deadline it anchored from
+        ``CMOX_IPC_TIMEOUT``.
     options:
         Clock and strategy observer for this capture. The default uses the
         monotonic clock and reports no strategy; tests inject a fake clock or

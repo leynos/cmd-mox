@@ -202,10 +202,50 @@ def _validate_environment() -> float:
     return timeout
 
 
+def _capture_budget(timeout: float, deadline: float | None) -> float:
+    """Return the share of the shim's anchored budget left for stdin capture.
+
+    The shim anchors one absolute deadline at start-up, so capture spends what
+    start-up left rather than starting a fresh budget.
+
+    Returns
+    -------
+    float
+        Seconds left before *deadline*, or *timeout* when none was anchored.
+
+    Raises
+    ------
+    StdinTimeoutError
+        The anchored deadline expired before the capture could begin.
+    """
+    try:
+        return _timeout_remaining(timeout, deadline)
+    except TimeoutError:
+        # The shared budget reports the transport's timeout error, but the
+        # capture boundary owns a stdin-specific diagnostic.
+        raise StdinTimeoutError(timeout, worker_alive=False) from None
+
+
 def _capture_stdin(
-    timeout: float, invocation_id: str, dependencies: _InvocationDependencies
+    timeout: float,
+    invocation_id: str,
+    dependencies: _InvocationDependencies,
+    *,
+    deadline: float | None = None,
 ) -> str:
     """Capture non-terminal stdin, reporting failures through the shim.
+
+    Parameters
+    ----------
+    timeout : float
+        Configured ``CMOX_IPC_TIMEOUT`` in seconds.
+    invocation_id : str
+        Identifier correlating this capture's telemetry with the invocation.
+    dependencies : _InvocationDependencies
+        Stdin stream, clocks and operating-system operations for the capture.
+    deadline : float or None, optional
+        Absolute start-up deadline the capture must spend, or ``None`` when
+        the caller has not anchored one.
 
     Returns
     -------
@@ -258,7 +298,7 @@ def _capture_stdin(
             return ""
         text = _stdin_capture.read_stdin(
             typ.cast("_stdin_capture._StdinStream", stream),
-            timeout,
+            _capture_budget(timeout, deadline),
             options=_stdin_capture._CaptureOptions(
                 clock=dependencies.monotonic_clock,
                 on_selected=selected.append,
@@ -267,8 +307,15 @@ def _capture_stdin(
         )
     except StdinTimeoutError as exc:
         # A timed-out capture never contacts IPC: the command would otherwise
-        # run with a truncated body the caller never finished sending.
-        report_stdin_failure(exc, "deadline_expired", worker_alive=exc.worker_alive)
+        # run with a truncated body the caller never finished sending. The
+        # capture spends what start-up left of the anchored budget, but the
+        # diagnostic names the configured timeout, so callers see the value
+        # they set however much of it start-up consumed.
+        report_stdin_failure(
+            StdinTimeoutError(timeout, worker_alive=exc.worker_alive),
+            "deadline_expired",
+            worker_alive=exc.worker_alive,
+        )
     except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
         report_stdin_failure(exc, "read_failed")
     _emit_shim_event(stdin_event("success"))
@@ -279,6 +326,7 @@ def _create_invocation(
     cmd_name: str,
     timeout: float,
     *,
+    deadline: float | None = None,
     dependencies: _InvocationDependencies | None = None,
 ) -> Invocation:
     """Create an invocation from command-line arguments and stdin.
@@ -289,6 +337,9 @@ def _create_invocation(
         Command name associated with the shim process.
     timeout : float
         Deadline in seconds for capturing non-interactive standard input.
+    deadline : float or None, optional
+        Absolute start-up deadline the capture must spend, or ``None`` to give
+        capture the full *timeout*.
     dependencies : _InvocationDependencies or None, optional
         Stdin operations and clocks, or process-backed dependencies when omitted.
 
@@ -300,7 +351,7 @@ def _create_invocation(
     invocation_id = uuid.uuid4().hex
     if dependencies is None:
         dependencies = _system_invocation_dependencies()
-    stdin_data = _capture_stdin(timeout, invocation_id, dependencies)
+    stdin_data = _capture_stdin(timeout, invocation_id, dependencies, deadline=deadline)
     env: dict[str, str] = dict(os.environ)  # shallow copy is sufficient (str -> str)
     argv = sys.argv[1:]
     if path_utils.IS_WINDOWS:
@@ -426,7 +477,7 @@ def main() -> None:
     cmd_name = _resolve_command_name()
     timeout = _validate_environment()
     deadline = time.monotonic() + timeout
-    invocation = _create_invocation(cmd_name, timeout)
+    invocation = _create_invocation(cmd_name, timeout, deadline=deadline)
     response = _execute_invocation(invocation, timeout, deadline=deadline)
     _write_response(response, correlation_id=invocation.invocation_id)
 

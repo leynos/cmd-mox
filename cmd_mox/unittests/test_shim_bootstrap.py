@@ -65,8 +65,8 @@ def test_main_bootstraps_and_executes(
     monkeypatch.setattr(
         shim,
         "_create_invocation",
-        lambda name, timeout, *, dependencies=None: (
-            calls.append(("create", name, timeout)) or invocation
+        lambda name, timeout, *, deadline=None, dependencies=None: (
+            calls.append(("create", name, timeout, deadline)) or invocation
         ),
     )
 
@@ -98,6 +98,7 @@ def test_main_bootstraps_and_executes(
             "create",
             "shim",
             1.0,
+            101.0,
         ),
         (
             "execute",

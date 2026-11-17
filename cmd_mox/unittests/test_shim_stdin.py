@@ -13,6 +13,7 @@ import typing as typ
 
 import pytest
 
+from cmd_mox import shim
 from cmd_mox._stdin_system import SYSTEM_STDIN, StdinSystem
 from cmd_mox.ipc import _observability
 from cmd_mox.shim import _create_invocation
@@ -127,7 +128,87 @@ def test_string_io_stdin_is_read_directly(monkeypatch: pytest.MonkeyPatch) -> No
     assert invocation.stdin == "in-memory", "StringIO stdin was not captured"
 
 
+def test_create_invocation_spends_the_anchored_deadline_on_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Capture is bounded by what start-up left, not by a fresh timeout.
+
+    The shim anchors one absolute deadline before capture, so the stream must
+    inherit the remainder. A fresh budget would let capture and the request
+    each spend the full ``CMOX_IPC_TIMEOUT``.
+    """
+    monkeypatch.setattr(sys, "argv", ["shim"])
+    stdin = _DummyStdin("payload", is_tty=False)
+    budgets: list[float] = []
+    deadlines: list[tuple[float, float | None]] = []
+
+    def read_stdin(
+        _stream: object,
+        timeout: float,
+        *,
+        options: object,
+        system: object,
+    ) -> str:
+        """Record the capture budget instead of reading the stream."""
+        budgets.append(timeout)
+        return "captured"
+
+    def timeout_remaining(timeout: float, deadline: float | None) -> float:
+        """Record the anchored deadline and report the budget it leaves."""
+        deadlines.append((timeout, deadline))
+        return 0.25
+
+    monkeypatch.setattr(shim, "_timeout_remaining", timeout_remaining)
+    monkeypatch.setattr(shim._stdin_capture, "read_stdin", read_stdin)
+
+    invocation = _create_invocation(
+        "shim",
+        timeout=5.0,
+        deadline=42.0,
+        dependencies=_stream_dependencies(stdin),
+    )
+
+    assert deadlines == [(5.0, 42.0)], "capture ignored the shim's anchored deadline"
+    assert budgets == [0.25], "capture started a fresh budget"
+    assert invocation.stdin == "captured", "the capture result was not recorded"
+
+
 # --- Failure reporting ------------------------------------------------------
+
+
+def test_create_invocation_reports_a_spent_capture_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A deadline already spent before capture is reported as a stdin timeout.
+
+    Start-up normally leaves nearly the whole budget, but a spent deadline must
+    still produce the same bounded diagnostic instead of reading stdin or
+    contacting the IPC server with an expired request.
+    """
+    monkeypatch.setattr(sys, "argv", ["shim"])
+    stdin = _DummyStdin("payload", is_tty=False)
+
+    def spent_budget(_timeout: float, _deadline: float | None) -> float:
+        """Report the shared budget as already spent."""
+        raise TimeoutError
+
+    monkeypatch.setattr(shim, "_timeout_remaining", spent_budget)
+
+    with pytest.raises(SystemExit) as excinfo:
+        _create_invocation(
+            "shim",
+            timeout=5.0,
+            deadline=42.0,
+            dependencies=_stream_dependencies(stdin),
+        )
+
+    _assert_exit_code(excinfo, 1)
+    assert (
+        capsys.readouterr().err.strip()
+        == "IPC error: stdin read timed out after 5 seconds"
+    ), "a spent capture deadline produced a different diagnostic"
+    assert stdin.read_calls == 0, "an expired budget still read stdin"
 
 
 def test_create_invocation_observes_stdin_failure_without_error_text(
