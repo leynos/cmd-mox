@@ -1096,14 +1096,17 @@ takes no timeout and cannot be cancelled, so a client that never reads blocks
 the handler and server shutdown indefinitely. The transport instead writes the
 reply with one overlapped `WriteFile`, then issues a bounded overlapped read
 and treats the client's close (`ERROR_BROKEN_PIPE` or `ERROR_NO_DATA`) as the
-acknowledgement. Unexpected data leaves the reply unconfirmed and is reported as
-`PipeError`; a timeout or shutdown cancels and drains the pending operation
-and is reported as a terminal `Timeout` worker event, or `ServerStopped` when a
-stop caused it. A budget spent during dispatch withholds the reply while
-leaving the handler's side effects committed. The Unix handler applies the same
-per-connection budget: the socket timeout is re-drawn before the reply write
-and again before the flush, and a spent budget takes the existing
-`response_dropped` path.
+acknowledgement. The close acknowledges the exchange, not consumption: a reply
+that fits the pipe buffer is completed by `WriteFile` before the client reads
+it, so a client that closes without reading is still reported as delivered,
+matching what a successful Unix flush guarantees. Unexpected data leaves the
+reply unconfirmed and is reported as `PipeError`; a timeout or shutdown cancels
+and drains the pending operation and is reported as a terminal `Timeout` worker
+event, or `ServerStopped` when a stop caused it. A budget spent during dispatch
+withholds the reply while leaving the handler's side effects committed. The
+Unix handler applies the same per-connection budget: the socket timeout is
+re-drawn before the reply write and again before the flush, and a spent budget
+takes the existing `response_dropped` path.
 
 `accept_timeout` is the accept loop's poll interval on both transports. Unix
 passes it to `serve_forever` instead of assigning `server.timeout`, and the

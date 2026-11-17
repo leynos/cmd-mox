@@ -9,6 +9,12 @@ close as the delivery acknowledgement. That read is what bounds a client which
 reads slowly or stops reading: the same per-connection deadline applies, and
 both operations are cancelled and drained in the serving thread before their
 buffer and event are released.
+
+A close acknowledges the exchange, not consumption. A reply that fits the pipe
+buffer is completed by ``WriteFile`` before the client reads it, so a client
+that closes without reading is still reported as delivered. That is the same
+guarantee a successful Unix flush gives, and it is the strongest one the
+protocol carries.
 """
 
 from __future__ import annotations
@@ -78,9 +84,10 @@ class ReplyDelivery:
         Returns
         -------
         bool
-            ``True`` when the client closed the pipe after the write, which
-            confirms it consumed the whole reply; ``False`` when it sent more
-            data instead, leaving delivery unconfirmed.
+            ``True`` when the client closed the pipe after the reply was
+            queued, which is the only acknowledgement the protocol carries;
+            ``False`` when it sent more data instead, leaving delivery
+            unconfirmed.
 
         Notes
         -----
@@ -102,7 +109,7 @@ class ReplyDelivery:
         )
 
     def _confirm(self, handle: object, deadline: float) -> bool:
-        """Wait for the client to close the pipe after reading the reply.
+        """Wait for the client to close the pipe after the reply is queued.
 
         Returns
         -------

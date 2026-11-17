@@ -802,10 +802,14 @@ takes no timeout and cannot be cancelled, so a client that never reads blocks
 the handler and server shutdown indefinitely. Delivery instead writes the reply
 with one overlapped `WriteFile` and then issues a bounded overlapped probe
 read, treating the client's close (`ERROR_BROKEN_PIPE` or `ERROR_NO_DATA`) as
-the acknowledgement. Data instead of a close leaves the reply unconfirmed and
-is reported as `PipeError`. A timeout or shutdown cancels and drains the
-pending operation before the buffer, overlapped structure and event are
-released, and is reported as a terminal `Timeout` worker event, or
+the acknowledgement. A close acknowledges the exchange rather than consumption:
+a reply that fits the pipe buffer is completed by `WriteFile` before the client
+reads it, so a client that closes without reading is still reported as
+delivered. That is the guarantee a successful Unix flush gives too, and it is
+the strongest one the protocol carries. Data instead of a close leaves the
+reply unconfirmed and is reported as `PipeError`. A timeout or shutdown cancels
+and drains the pending operation before the buffer, overlapped structure and
+event are released, and is reported as a terminal `Timeout` worker event, or
 `ServerStopped` when a stop caused it. A failure of the wait itself drains the
 operation too, so no pending I/O outlives the buffer it was given. A reply is
 written as a single message even past `PIPE_CHUNK_SIZE`, because a client stops

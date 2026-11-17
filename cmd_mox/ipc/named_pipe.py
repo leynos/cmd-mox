@@ -576,8 +576,9 @@ class _NamedPipeState:
         Returns
         -------
         _observability._NamedPipeErrorCategory | None
-            ``None`` when no reply was owed or the client confirmed receipt,
-            otherwise the label describing why delivery is unconfirmed.
+            ``None`` when no reply was owed or the client closed the pipe
+            after delivery, otherwise the label describing why delivery is
+            unconfirmed.
         """
         if raw is None:
             return None
@@ -590,13 +591,14 @@ class _NamedPipeState:
         return "PipeError"
 
     def _deliver_reply(self, handle: object, payload: bytes, deadline: float) -> bool:
-        """Write the reply and confirm the client consumed it.
+        """Write the reply and watch for the client's close.
 
         Returns
         -------
         bool
-            ``True`` when the client acknowledged delivery by closing the
-            pipe, ``False`` when it sent more data instead.
+            ``True`` when the client closed the pipe after the reply was
+            queued, ``False`` when it sent more data instead. The close
+            acknowledges the exchange rather than proving the bytes were read.
         """
         delivery = ReplyDelivery(
             self._backend,
