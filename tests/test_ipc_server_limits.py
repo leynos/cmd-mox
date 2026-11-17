@@ -473,64 +473,109 @@ def _await_release(tokens: queue.Queue[None]) -> None:
         pytest.fail("blocked handler never ran")
 
 
+class _BlockingProbe:
+    """Handlers that hold their admission permit until the test releases them."""
+
+    def __init__(self) -> None:
+        """Start blocked, with nothing entered and no release queued."""
+        # One queued token wakes exactly one blocked handler, which a semaphore
+        # expresses less precisely because it also offers context-manager use.
+        self._tokens: queue.Queue[None] = queue.Queue()
+        self._draining = threading.Event()
+        self._entered: list[str] = []
+        self._lock = threading.Lock()
+
+    def handler(self, invocation: Invocation) -> Response:
+        """Block until released, then echo the command name."""
+        with self._lock:
+            self._entered.append(invocation.command)
+        if not self._draining.is_set():
+            _await_release(self._tokens)
+        return Response(stdout=invocation.command)
+
+    def entered_count(self) -> int:
+        """Return how many callbacks have started."""
+        with self._lock:
+            return len(self._entered)
+
+    def release_one(self) -> None:
+        """Wake exactly one blocked callback."""
+        self._tokens.put(None)
+
+    def stop_blocking(self) -> None:
+        """Let callbacks admitted from now on return without waiting."""
+        self._draining.set()
+
+    def release_all(self, count: int) -> None:
+        """Release every blocked callback, tolerating more tokens than waiters."""
+        self._draining.set()
+        for _ in range(count):
+            self._tokens.put(None)
+
+
+def _wait_for_readiness_probe(
+    backend: object, events: list[_observability.IPCEvent]
+) -> None:
+    """Wait until the start-up probe is admitted and has returned its permit.
+
+    ``start()`` returns once its probe connects, which proves neither that the
+    probe was admitted nor that it has since released its permit. Without both
+    observations a probe permit could starve the last burst client of
+    admission.
+    """
+    _wait_until(
+        lambda: any(item.operation == "ipc.server.connection" for item in events),
+        message="the server never recorded its readiness probe",
+    )
+    _wait_until(
+        lambda: _held_slot_count(backend) == 0,
+        message="the readiness probe kept its admission permit",
+    )
+
+
+def _connect_invocations(socket_path: Path, count: int) -> cabc.Iterator[socket.socket]:
+    """Connect *count* clients that each send one bare invocation."""
+    for index in range(count):
+        yield _connect_and_request(socket_path, f"cmd-{index}")
+
+
+def _assert_saturation_rejection(
+    events: list[_observability.IPCEvent],
+) -> None:
+    """Check exactly one admission refusal was recorded with its category."""
+    [rejection] = [
+        item
+        for item in events
+        if item.operation == "ipc.server.connection" and item.outcome == "rejected"
+    ]
+    assert rejection.error_category == "ClientLimitReached", "Wrong bounded category"
+    assert rejection.transport == "unix", "Admission refusal omitted its transport"
+
+
 def test_unix_server_refuses_client_65_and_admits_after_a_permit_returns(
     short_unix_socket_path: Path,
 ) -> None:
     """A 65th client is closed without a frame until a permit returns."""
-    # One queued token wakes exactly one blocked handler, which a semaphore
-    # expresses less precisely because it also offers context-manager use.
-    tokens: queue.Queue[None] = queue.Queue()
-    draining = threading.Event()
-    entered: list[str] = []
-    entered_lock = threading.Lock()
-
-    def handler(invocation: Invocation) -> Response:
-        """Block until released, then echo the command name."""
-        with entered_lock:
-            entered.append(invocation.command)
-        if not draining.is_set():
-            _await_release(tokens)
-        return Response(stdout=invocation.command)
-
-    def entered_count() -> int:
-        """Return how many callbacks have started."""
-        with entered_lock:
-            return len(entered)
-
+    probe = _BlockingProbe()
     clients: list[socket.socket] = []
     with (
         _observability.capture_events() as events,
         IPCServer(
             short_unix_socket_path,
             timeout=_WAIT_TIMEOUT,
-            handlers=IPCHandlers(handler=handler),
+            handlers=IPCHandlers(handler=probe.handler),
         ) as server,
     ):
         backend = typ.cast("typ.Any", server._server)
         try:
-            # start() returns once its readiness probe connects, which proves
-            # neither that the probe was admitted nor that it has since
-            # released its permit. Observe both before the burst, or a probe
-            # permit could starve the last burst client of admission.
-            _wait_until(
-                lambda: any(
-                    item.operation == "ipc.server.connection" for item in events
-                ),
-                message="the server never recorded its readiness probe",
-            )
-            _wait_until(
-                lambda: _held_slot_count(backend) == 0,
-                message="the readiness probe kept its admission permit",
-            )
-
+            _wait_for_readiness_probe(backend, events)
             clients.extend(
-                _connect_and_request(short_unix_socket_path, f"cmd-{index}")
-                for index in range(MAX_ACTIVE_CLIENTS)
+                _connect_invocations(short_unix_socket_path, MAX_ACTIVE_CLIENTS)
             )
             # Every permit must be held by a blocked callback before the next
             # client arrives.
             _wait_until(
-                lambda: entered_count() == MAX_ACTIVE_CLIENTS,
+                lambda: probe.entered_count() == MAX_ACTIVE_CLIENTS,
                 message="the server did not admit its full client allowance",
             )
 
@@ -540,30 +585,22 @@ def test_unix_server_refuses_client_65_and_admits_after_a_permit_returns(
             clients.append(refused)
             assert _read_frame(refused) == b"", "Client 65 received a response frame"
 
-            tokens.put(None)
+            probe.release_one()
             _wait_until(
                 lambda: _held_slot_count(backend) == MAX_ACTIVE_CLIENTS - 1,
                 message="the completed worker did not return its permit",
             )
 
-            draining.set()
+            probe.stop_blocking()
             admitted = _connect_and_request(short_unix_socket_path, "admitted")
             clients.append(admitted)
             reply = _read_frame(admitted)
         finally:
-            draining.set()
-            for _client in clients:
-                tokens.put(None)
+            probe.release_all(len(clients))
             for client in clients:
                 client.close()
 
     assert json.loads(reply)["stdout"] == "admitted", (
         "A client was not admitted after a permit returned"
     )
-    [rejection] = [
-        item
-        for item in events
-        if item.operation == "ipc.server.connection" and item.outcome == "rejected"
-    ]
-    assert rejection.error_category == "ClientLimitReached", "Wrong bounded category"
-    assert rejection.transport == "unix", "Admission refusal omitted its transport"
+    _assert_saturation_rejection(events)
