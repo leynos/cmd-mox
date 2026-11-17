@@ -8,12 +8,13 @@ and the bounded worker event can all be asserted without native pipes.
 
 from __future__ import annotations
 
+import functools
 import logging
 import time
 
 import pytest
 
-from cmd_mox.ipc import _named_pipe_reply, _observability, named_pipe
+from cmd_mox.ipc import _deadline, _named_pipe_reply, _observability, named_pipe
 from cmd_mox.ipc._server_core import _RequestResult
 from cmd_mox.ipc.windows import (
     ERROR_BROKEN_PIPE,
@@ -40,6 +41,7 @@ from cmd_mox.unittests._named_pipe_test_helpers import (
     _run_worker,
     _worker_events,
 )
+from cmd_mox.unittests.test_ipc_deadline import _FakeClock
 
 #: Error category each client-disconnect code is reported under.
 _DISCONNECT_CATEGORIES = {
@@ -299,24 +301,40 @@ def test_a_budget_spent_during_dispatch_withholds_the_reply(
     """A handler that outlives the budget commits, but its reply is withheld.
 
     The deadline is anchored before the request read, so a handler that spends
-    the rest of it leaves delivery with nothing to spend. The client receives
-    no reply, the worker records a terminal timeout, and a retry repeats the
-    handler's side effects.
+    the rest of it leaves delivery with nothing to spend. The handler still
+    runs and commits its effect; only the reply is refused.
     """
     file_fake, _pipe_fake = patch_win32(FakeWin32File())
     state = build_state()
     handle = object()
-    _answer_with(monkeypatch, b"reply")
+    clock = _FakeClock(1000.0)
+    handled: list[bytes] = []
+
+    def pipeline(_outer: object, raw: bytes, _transport: str) -> _RequestResult:
+        """Handle the request, then step the clock past the deadline."""
+        handled.append(raw)
+        clock.now += state.outer.timeout + 1.0
+        return _RequestResult(response_bytes=b"reply", correlation_id=None)
+
+    monkeypatch.setattr(named_pipe, "_request_pipeline", pipeline)
     _patch_request(monkeypatch, state)
-    # The patched request read ignores the deadline, standing in for a handler
-    # that consumed the budget between the read and the reply.
+    # The deadline is valid when dispatch begins, so the handler is really
+    # exercised; only the delivery attempt sees that the budget is spent.
     monkeypatch.setattr(
-        named_pipe, "compute_deadline", lambda _timeout: time.monotonic() - 1.0
+        named_pipe,
+        "compute_deadline",
+        lambda timeout: _deadline.compute_deadline(timeout, clock=clock),
+    )
+    monkeypatch.setattr(
+        _named_pipe_reply,
+        "remaining",
+        functools.partial(_deadline.remaining, clock=clock),
     )
 
     with _observability.capture_events() as events:
         slot = _run_worker(state, handle)
 
+    assert handled == [b"request"], "the handler was skipped"
     [timed_out] = _worker_events(events, "timeout")
     assert timed_out.error_category == "Timeout", "wrong reply timeout category"
     assert not file_fake.overlapped_writes, "a reply was written past the budget"
