@@ -39,7 +39,7 @@ from .response_strategy import (
     execute_handler,
     finalize_response_env,
 )
-from .shimgen import create_shims, ensure_shim
+from .shimgen import _validate_command_uniqueness, create_shims, ensure_shim
 from .test_doubles import CommandDouble, DoubleKind
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
@@ -289,9 +289,20 @@ class CmdMox:
         repaired, while any other entry at the launcher path raises
         :class:`FileExistsError`. Subsequent :meth:`_start_ipc_server` calls
         re-sync every shim so repeated registrations remain idempotent.
-        """
+
+        Raises
+        ------
+        ValueError
+            If *name* differs only by case from an already registered command
+            on a case-insensitive filesystem.
+        """  # ruff: ignore[docstring-extraneous-exception] - the uniqueness validator raises this caller-visible failure
+        self._validate_command_registration(name)
         self._commands.add(name)
         self._ensure_shim_during_replay(name)
+
+    def _validate_command_registration(self, name: str) -> None:
+        """Reject *name* when it collides by case with a registered command."""
+        _validate_command_uniqueness([*self._commands | {name}])
 
     def _ensure_shim_during_replay(self, name: str) -> None:
         """Create a shim when replay is active and shims are writable.
@@ -318,8 +329,8 @@ class CmdMox:
         dbl = self._doubles.get(command_name)
         if dbl is None:
             dbl = CommandDouble(command_name, self, kind)
-            self._doubles[command_name] = dbl
             self.register_command(command_name)
+            self._doubles[command_name] = dbl
         elif dbl.kind is not kind:
             msg = (
                 f"{command_name!r} already registered as {dbl.kind}; "

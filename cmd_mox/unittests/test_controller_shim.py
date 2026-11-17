@@ -113,6 +113,42 @@ def test_register_command_creates_shim_during_replay(
     mox.verify()
 
 
+def test_register_command_rejects_case_variant_during_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A late case-variant registration leaves no command or double behind."""
+    mox = CmdMox()
+    mox.__enter__()
+    mox.replay()
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    mox.register_command("git")
+
+    with pytest.raises(ValueError, match="Duplicate command names"):
+        mox.stub("GIT")
+
+    assert "GIT" not in mox._commands
+    assert "GIT" not in mox._doubles
+
+    mox.verify()
+
+
+def test_register_command_accepts_repeated_name(
+    ensure_shim_spy: _EnsureShimSpy,
+) -> None:
+    """Repeating an exactly-named registration stays idempotent."""
+    mox = CmdMox()
+    mox.__enter__()
+    mox.replay()
+    ensure_shim_spy.calls.clear()
+
+    mox.register_command("late")
+    mox.register_command("late")
+
+    assert [name for _, name in ensure_shim_spy.calls] == ["late", "late"]
+
+    mox.verify()
+
+
 def test_ensure_shim_during_replay_propagates_symlink_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
