@@ -58,8 +58,11 @@ def read_until_eof(
     remaining byte budget plus one, so the call at the limit becomes a
     one-byte EOF probe: a payload of exactly ``max_bytes`` followed by EOF
     succeeds, while a single further byte proves the message is oversized.
-    An oversized message drops its buffered prefix before raising, so the
-    caller never retains more than ``max_bytes + 1`` bytes.
+    Bytes accumulate in one resizable buffer rather than one object per
+    receive, so a peer that dribbles minimal fragments cannot inflate the
+    retained storage the way a fragment-per-``recv`` list would. An oversized
+    message drops its buffered prefix before raising, so the caller never
+    retains more than ``max_bytes + 1`` bytes.
 
     Parameters
     ----------
@@ -84,21 +87,21 @@ def read_until_eof(
     OSError
         If the socket fails while receiving.
     """  # ruff: ignore[docstring-extraneous-exception] - both propagate from the socket unchanged
-    chunks: list[bytes] = []
+    buffer = bytearray()
     received = 0
     while True:
         sock.settimeout(options.remaining_time(deadline))
         request_size = min(options.chunk_size, options.max_bytes - received + 1)
         chunk = sock.recv(request_size)
         if not chunk:
-            return b"".join(chunks)
+            return bytes(buffer)
         received += len(chunk)
         if received > options.max_bytes:
             # The message is already unusable, so retaining the prefix would
             # defeat the point of the limit.
-            chunks.clear()
+            buffer.clear()
             raise MessageTooLargeError(received=received, limit=options.max_bytes)
-        chunks.append(chunk)
+        buffer.extend(chunk)
 
 
 def cleanup_stale_socket(socket_path: pathlib.Path) -> None:

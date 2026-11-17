@@ -1330,7 +1330,9 @@ request is read only up to the limit, is not dispatched, and receives no
 response frame; the server records a `read_size_rejected` connection event
 carrying the observed byte count. A connection that arrives while 64 are
 already in flight is closed without a response frame and recorded as a
-`rejected` connection event, and is admitted normally once a permit returns.
+`rejected` connection event. That refusal ends the connection, so a shim that
+is refused fails rather than waiting; a later connection attempt is admitted
+once a permit returns.
 The Windows named-pipe transport applies the same limits with its own
 `ipc.named_pipe.worker` events and per-client read time. See the
 [design document](./python-native-command-mocking-design.md) for the event

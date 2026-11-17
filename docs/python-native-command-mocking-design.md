@@ -1097,8 +1097,10 @@ both the client and the server use in place of their former read-to-EOF loops.
 The reader is bounded in both directions. It requests
 `min(chunk_size, max_bytes - received + 1)` bytes per receive, so the read at
 the limit becomes a one-byte EOF probe: a payload of exactly 8 MiB followed by
-EOF succeeds, while a single further byte proves the message is oversized. An
-oversized message drops its buffered prefix before raising
+EOF succeeds, while a single further byte proves the message is oversized.
+Bytes accumulate in one `bytearray` rather than one object per receive, so a
+peer that dribbles minimal fragments cannot inflate retained storage beyond the
+byte budget. An oversized message drops its buffered prefix before raising
 `MessageTooLargeError`, which carries byte counts only. Both transports default
 to a 64 KiB receive chunk.
 

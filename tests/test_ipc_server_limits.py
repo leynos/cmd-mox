@@ -127,20 +127,60 @@ def _assert_permit_returned(backend: object) -> None:
     inner._admission.release()
 
 
-def _connect_and_request(socket_path: Path, command: str) -> socket.socket:
-    """Connect, send one bare invocation, half-close, and return the client."""
+def _connect_and_request(
+    socket_path: Path, command: str, *, expect_rejection: bool = False
+) -> socket.socket:
+    """Connect, send one bare invocation, half-close, and return the client.
+
+    Parameters
+    ----------
+    socket_path:
+        Socket path of the running backend.
+    command:
+        Command name carried by the invocation.
+    expect_rejection:
+        Whether admission may already have closed this connection. A refused
+        peer's reset can reach the client while it is still writing, so a
+        write failure is tolerated only for that caller.
+
+    Returns
+    -------
+    socket.socket
+        The connected client, ready to read the reply.
+
+    Raises
+    ------
+    OSError
+        If setup fails without an expected rejection; the socket is closed
+        first so a failing helper never leaks it.
+    """
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     client.settimeout(_WAIT_TIMEOUT)
-    _connect_with_retry(client, socket_path)
-    payload = json.dumps({
+    try:
+        _connect_with_retry(client, socket_path)
+    except OSError:
+        client.close()
+        raise
+    try:
+        client.sendall(_invocation_payload(command))
+        client.shutdown(socket.SHUT_WR)
+    except OSError:
+        if not expect_rejection:
+            client.close()
+            raise
+        # The refusal this caller is about to assert can arrive as a reset
+        # before its own write completes; keep the socket for the read.
+    return client
+
+
+def _invocation_payload(command: str) -> bytes:
+    """Encode the minimal bare invocation carrying *command*."""
+    return json.dumps({
         "command": command,
         "args": [],
         "stdin": "",
         "env": {},
     }).encode()
-    client.sendall(payload)
-    client.shutdown(socket.SHUT_WR)
-    return client
 
 
 def _connect_with_retry(client: socket.socket, socket_path: Path) -> None:
@@ -280,6 +320,9 @@ def test_process_request_returns_the_permit_when_the_thread_cannot_start(
 ) -> None:
     """A failed worker start releases the permit and re-raises the failure."""
     backend = typ.cast("typ.Any", running_backend)
+    # A single permit makes the leak this test hunts observable: with the
+    # default allowance, a permit that never returned would still leave 63.
+    backend._admission = threading.BoundedSemaphore(1)
     request = _FakeRequest()
     monkeypatch.setattr(threading.Thread, "start", _fail_thread_start)
 
@@ -302,6 +345,7 @@ def test_accept_loop_closes_and_releases_after_a_thread_start_failure(
 ) -> None:
     """The accept loop closes the socket and releases the permit it cannot use."""
     backend = typ.cast("typ.Any", running_backend)
+    backend._admission = threading.BoundedSemaphore(1)
     request = _FakeRequest()
     failures: list[BaseException | None] = []
 
@@ -331,6 +375,7 @@ def test_worker_completion_before_process_request_returns_releases_its_permit(
 ) -> None:
     """A worker that finishes immediately still returns its permit exactly once."""
     backend = typ.cast("typ.Any", running_backend)
+    backend._admission = threading.BoundedSemaphore(1)
     request = _FakeRequest()
     finished: list[object] = []
     monkeypatch.setattr(threading, "Thread", _InlineThread)
@@ -352,6 +397,7 @@ def test_worker_failure_still_closes_the_request_and_returns_its_permit(
 ) -> None:
     """A handler failure is reported, closed, and released exactly once."""
     backend = typ.cast("typ.Any", running_backend)
+    backend._admission = threading.BoundedSemaphore(1)
     request = _FakeRequest()
     failures: list[BaseException | None] = []
 
@@ -383,6 +429,7 @@ def test_shutdown_request_returns_the_permit_when_closing_fails(
 ) -> None:
     """A failing close still returns the permit before the failure propagates."""
     backend = typ.cast("typ.Any", running_backend)
+    backend._admission = threading.BoundedSemaphore(1)
     request = _FakeRequest()
     _register_slot(backend, request)
 
@@ -461,19 +508,35 @@ def test_unix_server_refuses_client_65_and_admits_after_a_permit_returns(
     ):
         backend = typ.cast("typ.Any", server._server)
         try:
+            # start() returns once its readiness probe connects, which proves
+            # neither that the probe was admitted nor that it has since
+            # released its permit. Observe both before the burst, or a probe
+            # permit could starve the last burst client of admission.
+            _wait_until(
+                lambda: any(
+                    item.operation == "ipc.server.connection" for item in events
+                ),
+                message="the server never recorded its readiness probe",
+            )
+            _wait_until(
+                lambda: _held_slot_count(backend) == 0,
+                message="the readiness probe kept its admission permit",
+            )
+
             clients.extend(
                 _connect_and_request(short_unix_socket_path, f"cmd-{index}")
                 for index in range(MAX_ACTIVE_CLIENTS)
             )
             # Every permit must be held by a blocked callback before the next
-            # client arrives. Waiting for the last one also outlasts the
-            # readiness probe start() makes, whose permit returns first.
+            # client arrives.
             _wait_until(
                 lambda: entered_count() == MAX_ACTIVE_CLIENTS,
                 message="the server did not admit its full client allowance",
             )
 
-            refused = _connect_and_request(short_unix_socket_path, "refused")
+            refused = _connect_and_request(
+                short_unix_socket_path, "refused", expect_rejection=True
+            )
             clients.append(refused)
             assert _read_frame(refused) == b"", "Client 65 received a response frame"
 

@@ -47,7 +47,8 @@ as the limit is passed, so the server never buffers the whole payload and never
 dispatches the request. The connection then closes without a response frame, so
 the shim reports a controlled `IPC error: ...` diagnostic and a non-zero exit
 rather than a partial reply. A 65th concurrent connection is refused the same
-way while 64 are in flight, and is admitted normally once one of them finishes.
+way while 64 are in flight, and that refusal is final for the connection: a
+later connection attempt is admitted once one of the 64 finishes.
 
 The limits do not change `CMOX_IPC_TIMEOUT`. On POSIX the accepted connection
 still has one non-renewing read deadline, so a client that sends slowly cannot

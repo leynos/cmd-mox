@@ -79,7 +79,16 @@ event. Windows behaviour, events, and tests stay as they are.
   (`make check-fmt`, `make typecheck`, `make test` with 2193 passed and 16
   skipped, `make lint` including both pylint tiers, `ambrleaks`, and spelling,
   `make markdownlint`, `make nixie`).
-- [ ] Draft PR.
+- [x] (2026-11-17 04:10Z) Draft PR
+  [#479](https://github.com/leynos/cmd-mox/pull/479) opened from the combined
+  tree, with the issue, the plan, and the Lody session references.
+- [x] (2026-11-17 06:50Z) CodeRabbit reviewed both commits and returned five
+  findings: unbounded fragment storage in `read_until_eof`, a plan paragraph
+  that implied a refused connection could revive, vacuous permit-return
+  assertions, a socket leak in the test helper, and an unsynchronised
+  readiness-probe assumption. All five are actioned, and the two CodeScene
+  code-health violations the PR check reported are fixed too.
+- [ ] Post-fix gates, push, and a confirming CodeRabbit pass.
 
 ## Surprises & discoveries
 
@@ -110,8 +119,23 @@ event. Windows behaviour, events, and tests stay as they are.
   that start performs a readiness-probe connection whose permit would race the
   deterministic permit assertions. Evidence: `tests/test_ipc_server_limits.py`
   constructs the cached inner class directly. Impact: only the saturation test
-  needs the real start path, and its wait for 64 entered callbacks also
-  outlasts the probe's permit.
+  needs the real start path, and it now waits for the probe's own connection
+  event and then for an empty slot map before bursting, rather than assuming
+  the probe's permit returns before the burst is admitted.
+- Observation: an early draft of the saturation test assumed the readiness
+  probe returns its permit before the burst completes. Evidence: `start()`
+  returns as soon as `connect()` succeeds and never observes the server's
+  admission. Impact: the probe's worker could still hold a permit when the
+  64th burst client was admitted, refusing it and stalling the wait for 64
+  entered callbacks. The test now observes the probe's `ipc.server.connection`
+  event and a zero slot count before connecting any burst client.
+- Observation: the delete-oriented permit tests were vacuous at the default
+  allowance. Evidence: replacing `slot.release()` with `pass` and running the
+  five permit tests against a 64-permit backend passed all five, because the
+  empty slot map and 63 free permits satisfied both assertions. Impact: each
+  permit test now installs `BoundedSemaphore(1)`, under which the same mutant
+  fails all six. Keeping the empty-map assertion still checks the bookkeeping
+  half.
 - Observation: `make check-fmt` runs `ruff format --check` only, so it cannot
   see import order. Evidence: the first gate run was green on format and red on
   `ruff check`'s `unsorted-imports` for the same file. Impact: treat
@@ -124,6 +148,24 @@ event. Windows behaviour, events, and tests stay as they are.
   now releases one waiter per queued token from a `queue.Queue`, which cannot
   be mistaken for a context manager, and the request double validates the
   shutdown mode as a real socket does instead of only recording it.
+- Observation: CodeScene's advisory check rejected a five-argument emitter and
+  an oversized test body. Evidence: the PR check flagged "Excess Number of
+  Function Arguments" and "Large Method". Impact: `_emit_connection_outcome`
+  now takes one frozen `_ConnectionReport`, so each call site names only the
+  dimensions its outcome carries, and the oversized-request test is now five
+  small helpers around a short body.
+- Observation: a fragment-per-`recv` list bounds payload bytes but not the
+  number of retained objects. Evidence: a peer dribbling one byte per receive
+  could retain nearly `MAX_MESSAGE_SIZE` list entries, roughly 40 bytes each,
+  per admitted connection. Impact: `read_until_eof` accumulates into one
+  `bytearray` and materialises the payload only at EOF, so retained storage
+  tracks the byte budget instead of the receive count.
+- Observation: `_connect_and_request` closed its socket only on success, and a
+  refused peer can reset before the client's own write completes. Evidence:
+  the refused client is appended to the cleanup list only after the helper
+  returns. Impact: the helper closes on a failed connect, tolerates a write
+  failure only when the caller passes `expect_rejection=True`, and no longer
+  leaks a socket on any failure path.
 
 ## Decision log
 
@@ -187,14 +229,17 @@ drops its buffered prefix, `_IPCHandler.handle` emits one `read_size_rejected`
 connection event carrying the observed byte count and elapsed duration, logs a
 fixed diagnostic, and returns without a response, so the client sees EOF rather
 than a misleading error frame. A connection that arrives while 64 are in flight
-is closed with no frame and recorded as `rejected` with `ClientLimitReached`;
-it is admitted normally once a permit returns. Every admitted socket returns
-exactly one permit, whichever of the accept loop, an early-finishing worker, a
-failing handler, or a failing close ends it.
+is closed with no frame and recorded as `rejected` with `ClientLimitReached`.
+That refusal is final for the connection: releasing a permit does not revive a
+socket the server has already closed, so recovery is a later connection
+attempt, which is admitted once a permit returns. Every admitted socket
+returns exactly one permit, whichever of the accept loop, an early-finishing
+worker, a failing handler, or a failing close ends it.
 
 The behaviour is observable from outside: a caller that sends an oversized
-request receives no response and a controlled `IPC error: ...` diagnostic, and
-a 65th concurrent shim waits only until one of the 64 finishes. Evidence: the
+request receives no response and a controlled `IPC error: ...` diagnostic; a
+65th concurrent shim is closed immediately without a response frame, and only a
+later connection attempt can be admitted after a permit returns. Evidence: the
 nine tests in `tests/test_ipc_server_limits.py`, the size-rejection regression
 in `cmd_mox/unittests/test_ipc_server_connection_events.py`, the counter-key
 tests in `tests/test_ipc_observability_seam.py`, and a full suite of 2193
@@ -345,8 +390,9 @@ Docs:   make markdownlint; make nixie
 - `make lint`, `make check-fmt`, `make typecheck`, `make markdownlint`, and
   `make nixie` pass.
 - A request over the limit is refused before the callback runs.
-- Client 65 is closed with no frame while 64 are held; a client is admitted
-  once one permit returns.
+- Client 65 is closed with no frame while 64 are held; the closed connection
+  stays refused, and the next connection attempt is admitted once one permit
+  returns.
 
 ## Idempotence and recovery
 
