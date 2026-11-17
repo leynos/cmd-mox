@@ -503,7 +503,18 @@ class _BlockingProbe:
         self._tokens.put(None)
 
     def stop_blocking(self) -> None:
-        """Let callbacks admitted from now on return without waiting."""
+        """Let callbacks admitted from now on return without waiting.
+
+        Raises
+        ------
+        RuntimeError
+            If blocking was already stopped. A second stop means the test has
+            lost track of which callbacks still hold a permit, so its release
+            accounting would no longer prove anything.
+        """
+        if self._draining.is_set():
+            msg = "blocking was already stopped"
+            raise RuntimeError(msg)
         self._draining.set()
 
     def release_all(self, count: int) -> None:
@@ -511,6 +522,15 @@ class _BlockingProbe:
         self._draining.set()
         for _ in range(count):
             self._tokens.put(None)
+
+
+def test_blocking_probe_refuses_a_second_stop() -> None:
+    """A repeated stop would invalidate the release accounting."""
+    probe = _BlockingProbe()
+    probe.stop_blocking()
+
+    with pytest.raises(RuntimeError, match="already stopped"):
+        probe.stop_blocking()
 
 
 def _wait_for_readiness_probe(
