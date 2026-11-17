@@ -29,7 +29,7 @@ from .platform import (
     skip_if_unsupported,
     unsupported_reason,
 )
-from .shimgen import SHIM_PATH, create_shim_symlinks
+from .shimgen import SHIM_PATH, create_shim_symlinks, create_shims
 from .test_doubles import CommandDouble, MockCommand, SpyCommand, StubCommand
 
 if typ.TYPE_CHECKING:
@@ -125,6 +125,7 @@ __all__ = [
     "VerificationError",
     "cmd_mox_fixture",  # ruff: ignore[undefined-export] - resolved lazily by module __getattr__ so importing cmd_mox does not require pytest
     "create_shim_symlinks",
+    "create_shims",
     "is_supported",
     "skip_if_unsupported",
     "temporary_env",

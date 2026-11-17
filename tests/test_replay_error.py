@@ -48,7 +48,7 @@ def test_replay_cleanup_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
         stack.enter_context(mox)
 
         monkeypatch.setattr(CmdMox, "__exit__", fake_exit)
-        monkeypatch.setattr(controller, "create_shim_symlinks", boom)
+        monkeypatch.setattr(controller, "create_shims", boom)
 
         with pytest.raises(RuntimeError):
             mox.replay()

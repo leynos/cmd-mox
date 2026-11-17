@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cmd_mox import EnvironmentManager, create_shim_symlinks
+from cmd_mox import CmdMox, EnvironmentManager, create_shims, shimgen
 from cmd_mox.environment import _ensure_windows_pathext
 
 pytestmark = pytest.mark.skipif(
@@ -104,7 +104,7 @@ def test_create_windows_shim_emits_batch_launcher() -> None:
     """Windows shims are emitted as CRLF-delimited batch launchers."""
     with EnvironmentManager() as env:
         assert env.shim_dir is not None, "Assertion failed"
-        create_shim_symlinks(env.shim_dir, ["cmd-mock"])
+        create_shims(env.shim_dir, ["cmd-mock"])
 
         shim_path = Path(env.shim_dir) / "cmd-mock.cmd"
         assert shim_path.exists(), "Assertion failed"
@@ -112,6 +112,47 @@ def test_create_windows_shim_emits_batch_launcher() -> None:
         assert contents.startswith(b"@echo off\r\n"), "Assertion failed"
         assert b'set "CMOX_SHIM_COMMAND=%~n0"\r\n' in contents, "Assertion failed"
         assert contents.endswith(b"%*\r\n"), "Assertion failed"
+
+
+def test_late_registration_writes_launcher_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A matching launcher is written once across repeated registrations."""
+    created: list[str] = []
+    original_create = shimgen._create_windows_shim
+
+    def counting_create(directory: Path, name: str) -> Path:
+        """Record each launcher write, then delegate to the real creator."""
+        created.append(name)
+        return original_create(directory, name)
+
+    monkeypatch.setattr(shimgen, "_create_windows_shim", counting_create)
+
+    with CmdMox(verify_on_exit=False) as mox:
+        mox.replay()
+        mox.register_command("tool")
+        assert mox.environment.shim_dir is not None, "Assertion failed"
+        launcher = Path(mox.environment.shim_dir) / "tool.cmd"
+        first_contents = launcher.read_bytes()
+
+        mox.register_command("tool")
+
+        assert created.count("tool") == 1, "Assertion failed"
+        assert launcher.read_bytes() == first_contents, "Assertion failed"
+
+
+def test_late_registration_reports_foreign_launcher_collision() -> None:
+    """A foreign .cmd entry raises and is preserved byte for byte."""
+    with CmdMox(verify_on_exit=False) as mox:
+        mox.replay()
+        assert mox.environment.shim_dir is not None, "Assertion failed"
+        foreign = Path(mox.environment.shim_dir) / "other.cmd"
+        foreign.write_bytes(b"foreign launcher")
+
+        with pytest.raises(FileExistsError, match="not a cmd-mox launcher"):
+            mox.register_command("other")
+
+        assert foreign.read_bytes() == b"foreign launcher", "Assertion failed"
 
 
 def test_environment_manager_accepts_case_tweaked_shim_dir() -> None:
