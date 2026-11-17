@@ -96,11 +96,14 @@ event. Windows behaviour, events, and tests stay as they are.
   2202 passed and 16 skipped, `make markdownlint`, `make nixie`), the branch is
   force-pushed with lease onto the rebased history, and PR #479's every check
   is green, including CodeScene Code Health with six quality gates passed.
-- [ ] (2026-11-17 10:05Z) Final CodeRabbit pass at `6c8a4f3` returned two
+- [x] (2026-11-17 10:05Z) Final CodeRabbit pass at `6c8a4f3` returned two
   findings, both actioned: the reader test now injects a decreasing budget so a
   resolve-once implementation cannot pass, and the blocking probe no longer
   carries a handler deadline that the burst setup could outlive.
-- [ ] Confirming CodeRabbit pass at the final head.
+- [x] (2026-11-17 11:00Z) All six gates pass at `6e00ee5`, and CodeRabbit
+  reviewed that head with zero findings. PR #479's checks are green there too:
+  `Linux QA`, `Windows smoke`, `build-dist`, CodeScene Code Health and Gecko
+  Security all pass.
 
 ## Surprises & discoveries
 
