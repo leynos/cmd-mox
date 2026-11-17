@@ -184,6 +184,7 @@ def test_run_blocking_io_cancels_a_worker_that_outlives_the_deadline(
     on a loaded host cannot turn the live deadline into an expired one.
     """
     monkeypatch.setattr(client, "remaining", lambda _deadline: 0.05)
+    monkeypatch.setattr(client, "remaining_or_none", lambda _deadline: 0.05)
     monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
     worker = _ControlledWorker(exits_on_cancel=True)
     cancels: list[str] = []
@@ -208,6 +209,81 @@ def test_run_blocking_io_cancels_a_worker_that_outlives_the_deadline(
         "an exited worker must not be reported as wedged"
     )
     assert cancels == ["called"], "the deadline did not cancel the worker"
+
+
+def test_run_blocking_io_joins_with_the_budget_left_after_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Thread startup is charged to the budget the join waits with.
+
+    The pre-start check sees a live deadline; only the post-start re-read
+    reports the smaller remainder, so the join budget proves the recomputation
+    happens.
+    """
+    monkeypatch.setattr(client, "remaining_or_none", lambda _deadline: 0.01)
+    monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
+    worker = _ControlledWorker(exits_on_cancel=True)
+    cancels: list[str] = []
+
+    def cancel() -> None:
+        """Record the cancellation and end the worker."""
+        cancels.append("called")
+        worker.released = True
+
+    monkeypatch.setattr(
+        client, "threading", types.SimpleNamespace(Thread=lambda **_kwargs: worker)
+    )
+
+    with pytest.raises(TimeoutError):
+        client._run_blocking_io(
+            lambda: "too late",
+            deadline=time.monotonic() + _SAFETY_TIMEOUT,
+            cancel=cancel,
+        )
+
+    assert worker.joins[0] == pytest.approx(0.01), (
+        "the join did not use the budget recomputed after startup"
+    )
+    assert cancels == ["called"], "the deadline did not cancel the worker"
+
+
+def test_run_blocking_io_cancels_a_worker_started_before_the_budget_ran_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A budget spent during startup still cancels and joins the worker."""
+    constructed: list[str] = []
+    monkeypatch.setattr(client, "remaining_or_none", lambda _deadline: None)
+    monkeypatch.setattr(client, "IO_CANCEL_GRACE", 0.01)
+    worker = _ControlledWorker(exits_on_cancel=True)
+    cancels: list[str] = []
+
+    def cancel() -> None:
+        """Record the cancellation and end the worker."""
+        cancels.append("called")
+        worker.released = True
+
+    def thread(**_kwargs: object) -> _ControlledWorker:
+        """Hand back the worker while recording that it was built."""
+        constructed.append("built")
+        return worker
+
+    monkeypatch.setattr(client, "threading", types.SimpleNamespace(Thread=thread))
+
+    with pytest.raises(TimeoutError) as excinfo:
+        client._run_blocking_io(
+            lambda: "too late",
+            deadline=time.monotonic() + _SAFETY_TIMEOUT,
+            cancel=cancel,
+        )
+
+    assert worker.joins[0] == pytest.approx(0.0), (
+        "a spent budget must join without waiting"
+    )
+    assert cancels == ["called"], "the started worker was left running"
+    assert str(excinfo.value) == "IPC client operation timed out", (
+        "an exited worker must not be reported as wedged"
+    )
+    assert constructed == ["built"], "the budget was rechecked before the worker ran"
 
 
 def test_join_with_timeout_reports_the_exact_timeout_message(

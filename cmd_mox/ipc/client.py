@@ -30,7 +30,7 @@ from cmd_mox.ipc.windows import (
 )
 
 from . import _client_events, _observability, wire
-from ._deadline import compute_deadline, remaining, timeout_ms
+from ._deadline import compute_deadline, remaining, remaining_or_none, timeout_ms
 from ._retry import (
     DEFAULT_CONNECT_BACKOFF,
     DEFAULT_CONNECT_JITTER,
@@ -182,12 +182,17 @@ def _run_blocking_io[T](
     request therefore fails without creating a thread to cancel, and the
     cancellation grace below only ever applies to a worker that exists.
 
+    The budget is re-read after the worker starts, because constructing and
+    starting the thread spends part of the same deadline. A budget that runs
+    out during startup still reaches the cancel-and-join path: that is the
+    only path which waits for the worker to release the pipe handle.
+
     Returns
     -------
     T
         The value returned by *func*.
     """
-    budget = remaining(deadline)
+    remaining(deadline)
     outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
     thread = threading.Thread(
@@ -197,7 +202,8 @@ def _run_blocking_io[T](
     )
     thread.start()
 
-    _join_with_timeout_and_cancel(thread, budget, cancel)
+    left = remaining_or_none(deadline)
+    _join_with_timeout_and_cancel(thread, 0.0 if left is None else left, cancel)
     return typ.cast("T", _extract_outcome(outcome))
 
 
