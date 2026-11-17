@@ -149,6 +149,28 @@ def test_register_command_accepts_repeated_name(
     mox.verify()
 
 
+def test_double_is_published_before_shim_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new double is visible while its late shim is being created."""
+    mox = CmdMox()
+    mox.__enter__()
+    mox.replay()
+
+    def assert_published(directory: Path, name: str) -> Path:
+        """Fail unless the double is already available to the IPC server."""
+        assert name in mox._doubles
+        return directory / name
+
+    monkeypatch.setattr(controller, "ensure_shim", assert_published)
+
+    mox.stub("late")
+
+    assert "late" in mox._doubles
+
+    mox.verify()
+
+
 def test_ensure_shim_during_replay_propagates_symlink_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

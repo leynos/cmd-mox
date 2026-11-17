@@ -495,7 +495,10 @@ def test_require_matching_launcher_rejects_symlink(tmp_path: pathlib.Path) -> No
     target = tmp_path / "real.cmd"
     target.write_bytes(shimgen._expected_windows_launcher_bytes())
     link = tmp_path / "git.cmd"
-    link.symlink_to(target)
+    try:
+        link.symlink_to(target)
+    except OSError as exc:  # pragma: no cover - Windows without symlink privilege
+        pytest.skip(f"symlinks unavailable: {exc}")
 
     with pytest.raises(FileExistsError, match="not a cmd-mox launcher"):
         shimgen._require_matching_launcher(link)

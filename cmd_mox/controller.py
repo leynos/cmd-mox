@@ -315,8 +315,7 @@ class CmdMox:
     def _ensure_shim_during_replay(self, name: str) -> None:
         """Create a shim when replay is active and shims are writable.
 
-        Errors from :func:`cmd_mox.shimgen.ensure_shim`, including a collision
-        with a foreign entry, propagate unchanged.
+        Errors from :func:`cmd_mox.shimgen.ensure_shim` propagate unchanged.
         """
         shim_dir = self.environment.shim_dir
         if self._phase is not Phase.REPLAY or shim_dir is None:
@@ -328,8 +327,13 @@ class CmdMox:
         dbl = self._doubles.get(command_name)
         if dbl is None:
             dbl = CommandDouble(command_name, self, kind)
-            self.register_command(command_name)
+            # Publish first so an invocation racing shim creation resolves.
             self._doubles[command_name] = dbl
+            try:
+                self.register_command(command_name)
+            except BaseException:
+                self._doubles.pop(command_name, None)
+                raise
         elif dbl.kind is not kind:
             msg = (
                 f"{command_name!r} already registered as {dbl.kind}; "
