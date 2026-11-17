@@ -518,26 +518,23 @@ def test_request_pipeline_rejects_wrong_types_without_dispatch(
     assert not leaked, f"payload content reached the log: {leaked}"
 
 
-def _request_payload(kind: str, **overrides: object) -> dict[str, object]:
+def _request_payload(kind: str) -> dict[str, object]:
     """Return a valid request payload for *kind*."""
     if kind == _server_core.KIND_INVOCATION:
-        body: dict[str, object] = {
+        return {
             "kind": kind,
             "command": "git",
             "args": [],
             "stdin": "",
             "env": {},
         }
-    else:
-        body = {
-            "kind": kind,
-            "invocation_id": "passthrough-123",
-            "stdout": "",
-            "stderr": "",
-            "exit_code": 0,
-        }
-    body.update(overrides)
-    return body
+    return {
+        "kind": kind,
+        "invocation_id": "passthrough-123",
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+    }
 
 
 def _server_raising(socket_path: Path, kind: str, error: BaseException) -> IPCServer:
