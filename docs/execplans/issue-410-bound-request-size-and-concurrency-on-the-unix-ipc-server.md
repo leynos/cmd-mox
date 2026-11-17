@@ -96,6 +96,10 @@ event. Windows behaviour, events, and tests stay as they are.
   2202 passed and 16 skipped, `make markdownlint`, `make nixie`), the branch is
   force-pushed with lease onto the rebased history, and PR #479's every check
   is green, including CodeScene Code Health with six quality gates passed.
+- [ ] (2026-11-17 10:05Z) Final CodeRabbit pass at `6c8a4f3` returned two
+  findings, both actioned: the reader test now injects a decreasing budget so a
+  resolve-once implementation cannot pass, and the blocking probe no longer
+  carries a handler deadline that the burst setup could outlive.
 - [ ] Confirming CodeRabbit pass at the final head.
 
 ## Surprises & discoveries
@@ -188,6 +192,21 @@ event. Windows behaviour, events, and tests stay as they are.
   `stop_blocking` now refuses a second call, which is the invariant the release
   accounting depends on, and `test_blocking_probe_refuses_a_second_stop` covers
   that refusal so the guard leaves no uncovered line for the 100% coverage gate.
+- Observation: a constant remaining-time double cannot distinguish recomputing
+  the budget before every receive from resolving it once. Evidence: hoisting
+  `options.remaining_time(deadline)` above the read loop left every existing
+  assertion green until the budget was made to shrink per call. Impact: the
+  reader test injects `2.5`, `1.5`, `0.5`, asserts each receive receives the
+  corresponding value, and asserts every call received the same deadline; the
+  resolve-once mutant now fails both that test and the timeout-propagation test.
+- Observation: a blocked handler with its own 10 s deadline is a flake source
+  even though the deadline matches the test's own wait bound. Evidence: the
+  earliest of 64 callbacks starts waiting while the remaining clients still
+  connect, so a slow burst can expire it and `pytest.fail` unwinds the worker
+  before the test releases the permit it is asserting on. Impact: the handler
+  blocks until an explicit release with no timeout of its own; the driving test
+  owns the deadline, and its `finally` releases every callback, so a failed
+  wait still unwinds cleanly.
 
 ## Decision log
 
@@ -480,3 +499,6 @@ for `check-fmt`, `typecheck`, `test`, `lint`, `markdownlint`, and `nixie`.
 - 2026-11-17: Initial draft derived from the supplied coding plan.
 - 2026-11-17: Rebased onto `origin/main` `c426792`; recorded D9 and the
   conflict-free replay in Progress.
+- 2026-11-17: Actioned the final CodeRabbit findings on deadline
+  recalculation and the per-handler timeout; recorded both in Surprises and
+  Progress.

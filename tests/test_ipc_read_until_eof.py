@@ -52,6 +52,25 @@ class _ScriptedStream:
         return chunk
 
 
+class _DecreasingBudget:
+    """Remaining-time double reporting a different budget on each call.
+
+    A constant budget cannot tell a reader that recomputes the remaining time
+    before every receive from one that resolves it once and reapplies it, so
+    the budgets shrink and every deadline handed back is recorded.
+    """
+
+    def __init__(self, budgets: cabc.Iterable[float]) -> None:
+        """Record the budgets to report, in order."""
+        self._budgets = iter(budgets)
+        self.deadlines: list[float] = []
+
+    def __call__(self, deadline: float) -> float:
+        """Record *deadline* and report the next budget."""
+        self.deadlines.append(deadline)
+        return next(self._budgets)
+
+
 def _reader(
     sock: _ScriptedStream,
     *,
@@ -72,16 +91,18 @@ def _reader(
 
 
 def test_read_until_eof_joins_the_stream_and_draws_down_the_budget() -> None:
-    """Every receive uses the remaining budget and a bounded request size."""
+    """Every receive uses the freshly computed remaining budget."""
     sock = _ScriptedStream(b"abcdef")
+    budget = _DecreasingBudget([2.5, 1.5, 0.5])
 
-    payload = _reader(sock, max_bytes=10, chunk_size=4)
+    payload = _reader(sock, max_bytes=10, chunk_size=4, remaining=budget)
 
     assert payload == b"abcdef", "the stream was not reassembled"
     # The request at each step is capped by the remaining budget plus the
     # one-byte EOF probe allowance.
     assert sock.recv_sizes == [4, 4, 4], "the receive size was not bounded"
-    assert sock.timeouts == [2.5, 2.5, 2.5], "the deadline was renewed too early"
+    assert sock.timeouts == [2.5, 1.5, 0.5], "the budget was resolved only once"
+    assert budget.deadlines == [10.0, 10.0, 10.0], "the deadline was renewed"
 
 
 def test_read_until_eof_accepts_a_payload_exactly_at_the_limit() -> None:

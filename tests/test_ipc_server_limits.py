@@ -465,14 +465,6 @@ def test_repeated_shutdown_releases_the_permit_once(running_backend: object) -> 
     _assert_permit_returned(backend)
 
 
-def _await_release(tokens: queue.Queue[None]) -> None:
-    """Block a handler until one release arrives, failing after the wait bound."""
-    try:
-        tokens.get(timeout=_WAIT_TIMEOUT)
-    except queue.Empty:
-        pytest.fail("blocked handler never ran")
-
-
 class _BlockingProbe:
     """Handlers that hold their admission permit until the test releases them."""
 
@@ -489,8 +481,13 @@ class _BlockingProbe:
         """Block until released, then echo the command name."""
         with self._lock:
             self._entered.append(invocation.command)
+        # No timeout: the earliest callback starts waiting while the rest of
+        # the burst still connects, so a handler deadline could expire during
+        # setup and unwind a worker before its permit accounting is asserted.
+        # The driving test owns the deadline and its cleanup releases every
+        # callback, including on failure.
         if not self._draining.is_set():
-            _await_release(self._tokens)
+            self._tokens.get()
         return Response(stdout=invocation.command)
 
     def entered_count(self) -> int:
