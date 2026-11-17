@@ -85,7 +85,7 @@ event. Windows behaviour, events, and tests stay as they are.
 - [x] (2026-11-17 06:50Z) CodeRabbit reviewed both commits and returned five
   findings: unbounded fragment storage in `read_until_eof`, a plan paragraph
   that implied a refused connection could revive, vacuous permit-return
-  assertions, a socket leak in the test helper, and an unsynchronised
+  assertions, a socket leak in the test helper, and an unsynchronized
   readiness-probe assumption. All five are actioned, and the two CodeScene
   code-health violations the PR check reported are fixed too.
 - [ ] Post-fix gates, push, and a confirming CodeRabbit pass.
@@ -125,10 +125,10 @@ event. Windows behaviour, events, and tests stay as they are.
 - Observation: an early draft of the saturation test assumed the readiness
   probe returns its permit before the burst completes. Evidence: `start()`
   returns as soon as `connect()` succeeds and never observes the server's
-  admission. Impact: the probe's worker could still hold a permit when the
-  64th burst client was admitted, refusing it and stalling the wait for 64
-  entered callbacks. The test now observes the probe's `ipc.server.connection`
-  event and a zero slot count before connecting any burst client.
+  admission. Impact: the probe's worker could still hold a permit when the 64th
+  burst client was admitted, refusing it and stalling the wait for 64 entered
+  callbacks. The test now observes the probe's `ipc.server.connection` event
+  and a zero slot count before connecting any burst client.
 - Observation: the delete-oriented permit tests were vacuous at the default
   allowance. Evidence: replacing `slot.release()` with `pass` and running the
   five permit tests against a 64-permit backend passed all five, because the
@@ -158,14 +158,14 @@ event. Windows behaviour, events, and tests stay as they are.
   number of retained objects. Evidence: a peer dribbling one byte per receive
   could retain nearly `MAX_MESSAGE_SIZE` list entries, roughly 40 bytes each,
   per admitted connection. Impact: `read_until_eof` accumulates into one
-  `bytearray` and materialises the payload only at EOF, so retained storage
+  `bytearray` and materializes the payload only at EOF, so retained storage
   tracks the byte budget instead of the receive count.
 - Observation: `_connect_and_request` closed its socket only on success, and a
-  refused peer can reset before the client's own write completes. Evidence:
-  the refused client is appended to the cleanup list only after the helper
-  returns. Impact: the helper closes on a failed connect, tolerates a write
-  failure only when the caller passes `expect_rejection=True`, and no longer
-  leaks a socket on any failure path.
+  refused peer can reset before the client's own write completes. Evidence: the
+  refused client is appended to the cleanup list only after the helper returns.
+  Impact: the helper closes on a failed connect, tolerates a write failure only
+  when the caller passes `expect_rejection=True`, and no longer leaks a socket
+  on any failure path.
 
 ## Decision log
 
@@ -232,9 +232,9 @@ than a misleading error frame. A connection that arrives while 64 are in flight
 is closed with no frame and recorded as `rejected` with `ClientLimitReached`.
 That refusal is final for the connection: releasing a permit does not revive a
 socket the server has already closed, so recovery is a later connection
-attempt, which is admitted once a permit returns. Every admitted socket
-returns exactly one permit, whichever of the accept loop, an early-finishing
-worker, a failing handler, or a failing close ends it.
+attempt, which is admitted once a permit returns. Every admitted socket returns
+exactly one permit, whichever of the accept loop, an early-finishing worker, a
+failing handler, or a failing close ends it.
 
 The behaviour is observable from outside: a caller that sends an oversized
 request receives no response and a controlled `IPC error: ...` diagnostic; a

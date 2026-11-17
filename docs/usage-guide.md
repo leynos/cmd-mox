@@ -1332,9 +1332,8 @@ carrying the observed byte count. A connection that arrives while 64 are
 already in flight is closed without a response frame and recorded as a
 `rejected` connection event. That refusal ends the connection, so a shim that
 is refused fails rather than waiting; a later connection attempt is admitted
-once a permit returns.
-The Windows named-pipe transport applies the same limits with its own
-`ipc.named_pipe.worker` events and per-client read time. See the
+once a permit returns. The Windows named-pipe transport applies the same limits
+with its own `ipc.named_pipe.worker` events and per-client read time. See the
 [design document](./python-native-command-mocking-design.md) for the event
 vocabulary, permit ownership, and the deadline differences between transports.
 Unix backend selection also emits bounded startup events before a request
