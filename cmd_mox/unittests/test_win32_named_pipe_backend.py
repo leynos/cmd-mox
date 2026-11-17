@@ -410,6 +410,20 @@ def test_read_file_passes_the_buffer_and_overlapped(
     assert modules.calls == [("win32file", "ReadFile", (handle, buffer, overlapped))]
 
 
+def test_write_file_forwards_the_payload_and_overlapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reply write forwards the payload and its overlapped structure."""
+    modules = _StubModules()
+    backend = modules.install(monkeypatch)
+    handle, overlapped = object(), object()
+
+    result = backend.write_file(handle, b"reply", overlapped)
+
+    assert result is _SENTINEL, "the immediate write status was not returned"
+    assert modules.calls == [("win32file", "WriteFile", (handle, b"reply", overlapped))]
+
+
 def test_allocate_read_buffer_requests_the_chunk_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -607,7 +607,7 @@ def test_handle_client_reports_unexpected_failures(
     file_fake, pipe_fake = patch_win32()
     state = build_state()
 
-    def fail_read(_handle: object) -> bytes:
+    def fail_read(_handle: object, _deadline: float) -> bytes:
         """Raise a fake Win32 read error carrying the case's error code."""
         raise FakeWinError(case.winerror)
 
@@ -626,7 +626,7 @@ def test_handle_client_returns_when_request_is_missing(
     """A missing request short-circuits before the pipeline runs."""
     file_fake, _pipe_fake = patch_win32()
     state = build_state()
-    monkeypatch.setattr(state, "_read_request", lambda _handle: None)
+    monkeypatch.setattr(state, "_read_request", lambda _handle, _deadline: None)
     handle = object()
     state._client_threads.add(threading.current_thread())
 
@@ -644,7 +644,7 @@ def test_handle_client_suppresses_disconnect_failures(
         win32pipe=FakeWin32Pipe(disconnect_error=FakeWinError(UNEXPECTED_WINERROR))
     )
     state = build_state()
-    monkeypatch.setattr(state, "_read_request", lambda _handle: None)
+    monkeypatch.setattr(state, "_read_request", lambda _handle, _deadline: None)
     handle = object()
 
     state._handle_client(handle)

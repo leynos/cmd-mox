@@ -359,7 +359,8 @@ def test_handler_logs_reply_write_oserror_at_debug(
     handler = SimpleNamespace(
         request=SimpleNamespace(settimeout=lambda _timeout: None),
         _read_request_payload=lambda: b"request",
-        _read_deadline=time.monotonic() + 1.0,
+        _connection_deadline=time.monotonic() + 1.0,
+        _clock=time.monotonic,
         wfile=writer,
         server=SimpleNamespace(outer=SimpleNamespace(timeout=1.0)),
     )
@@ -392,7 +393,8 @@ def test_handler_reports_non_disconnect_reply_write_oserror(
     handler = SimpleNamespace(
         request=SimpleNamespace(settimeout=lambda _timeout: None),
         _read_request_payload=lambda: b"request",
-        _read_deadline=time.monotonic() + 1.0,
+        _connection_deadline=time.monotonic() + 1.0,
+        _clock=time.monotonic,
         wfile=writer,
         server=SimpleNamespace(outer=SimpleNamespace(timeout=1.0)),
     )

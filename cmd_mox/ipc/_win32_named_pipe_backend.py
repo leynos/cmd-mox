@@ -255,6 +255,28 @@ class Win32NamedPipeBackend(NamedPipeBackend):
         return self._win32file.ReadFile(handle, buffer, overlapped)
 
     @typ.override
+    def write_file(
+        self, handle: object, payload: bytes, overlapped: object
+    ) -> tuple[int, object]:
+        """Start an overlapped write and report the immediate status.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to write to.
+        payload:
+            The bytes to deliver to the client.
+        overlapped:
+            The overlapped structure tracking the write.
+
+        Returns
+        -------
+        tuple[int, object]
+            The immediate status and the bytes accepted so far.
+        """
+        return self._win32file.WriteFile(handle, payload, overlapped)
+
+    @typ.override
     def allocate_read_buffer(self, size: int) -> cabc.Buffer:
         """Allocate a writable buffer of *size* bytes for an overlapped read.
 

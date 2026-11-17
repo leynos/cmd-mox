@@ -417,6 +417,27 @@ class NamedPipeBackend(typ.Protocol):
         """
         ...
 
+    def write_file(
+        self, handle: object, payload: bytes, overlapped: object
+    ) -> tuple[int, object]:
+        """Start an overlapped write and report the immediate status.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to write to.
+        payload:
+            The bytes to deliver to the client.
+        overlapped:
+            The overlapped structure tracking the write.
+
+        Returns
+        -------
+        tuple[int, object]
+            The immediate status and the bytes accepted so far.
+        """
+        ...
+
     def allocate_read_buffer(self, size: int) -> cabc.Buffer:
         """Allocate a writable buffer of *size* bytes for an overlapped read.
 

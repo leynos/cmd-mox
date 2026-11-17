@@ -14,6 +14,7 @@ for a ``pywin32`` module global.
 from __future__ import annotations
 
 import dataclasses as dc
+import types
 import typing as typ
 
 import pytest
@@ -112,6 +113,27 @@ class ScriptedRead:
     start_error: BaseException | None = None
 
 
+@dc.dataclass(slots=True)
+class ScriptedWrite:
+    """One scripted overlapped write outcome.
+
+    Parameters
+    ----------
+    status:
+        Status ``WriteFile`` reports immediately; ``ERROR_IO_PENDING`` makes the
+        transport wait on the overlapped event.
+    error:
+        Optional error raised from ``GetOverlappedResult`` instead.
+    start_error:
+        Optional error raised from ``WriteFile`` itself, once the payload has
+        been recorded.
+    """
+
+    status: int = 0
+    error: BaseException | None = None
+    start_error: BaseException | None = None
+
+
 class FakeWin32File:
     """Fake ``win32file`` module recording handle and overlapped I/O calls."""
 
@@ -124,15 +146,20 @@ class FakeWin32File:
         self,
         create_file_result: Scripted = None,
         reads: list[ScriptedRead] | None = None,
+        writes: list[ScriptedWrite] | None = None,
     ) -> None:
-        """Script the handle result and the overlapped reads for one test."""
+        """Script the handle result and the overlapped reads and writes."""
         self._create_file_result = create_file_result
         self._reads = list(reads or [])
+        self._writes = list(writes or [])
         self._current: ScriptedRead | None = None
+        self._current_write: tuple[ScriptedWrite, int] | None = None
         self.closed: list[object] = []
         self.create_file_calls: list[tuple[object, ...]] = []
         self.cancelled: list[object] = []
         self.writes: list[tuple[object, bytes]] = []
+        self.overlapped_writes: list[tuple[object, bytes, object]] = []
+        self.read_calls = 0
 
     def CloseHandle(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         """Record that *handle* was closed."""
@@ -143,9 +170,26 @@ class FakeWin32File:
         self.create_file_calls.append(args)
         return resolve_scripted(self._create_file_result)
 
-    def WriteFile(self, handle: object, payload: bytes) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
-        """Record the *payload* written to *handle*."""
-        self.writes.append((handle, payload))
+    def WriteFile(  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
+        self, handle: object, payload: bytes, overlapped: object | None = None
+    ) -> tuple[int, int] | None:
+        """Record the write and script its overlapped completion.
+
+        Returns
+        -------
+        tuple[int, int] | None
+            The immediate status and bytes accepted for an overlapped write,
+            or ``None`` for the synchronous client-side write.
+        """
+        if overlapped is None:
+            self.writes.append((handle, payload))
+            return None
+        script = self._writes.pop(0) if self._writes else ScriptedWrite()
+        self.overlapped_writes.append((handle, payload, overlapped))
+        self._current_write = (script, len(payload))
+        if script.start_error is not None:
+            raise script.start_error
+        return script.status, len(payload)
 
     def FlushFileBuffers(self, handle: object) -> None:  # ruff: ignore[invalid-function-name] - mirrors pywin32 API casing
         """Accept the flush the transport issues after a write."""
@@ -178,6 +222,7 @@ class FakeWin32File:
         BaseException
             The scripted ``start_error``, when one was supplied.
         """  # ruff: ignore[docstring-extraneous-exception] - the scripted start_error is raised verbatim and stays caller-visible
+        self.read_calls += 1
         if not self._reads:
             msg = "no scripted read remains"
             raise AssertionError(msg)
@@ -196,19 +241,26 @@ class FakeWin32File:
         overlapped: object,
         wait: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - mirrors pywin32's positional wait flag
     ) -> int:
-        """Complete the scripted overlapped read.
+        """Complete the scripted overlapped read or write.
 
         Returns
         -------
         int
-            The number of bytes the scripted read transferred, or zero when
-            completing an overlapped connect rather than a read.
+            The number of bytes the scripted operation transferred, or zero
+            when completing an overlapped connect rather than a read or write.
 
         Raises
         ------
         FakeWinError
-            If the scripted read reports ``ERROR_MORE_DATA`` or another error.
+            If the scripted operation reports ``ERROR_MORE_DATA`` or another
+            error.
         """
+        if self._current_write is not None:
+            script, written = self._current_write
+            self._current_write = None
+            if script.error is not None:
+                raise script.error
+            return written
         current = self._current
         if current is None:
             # An overlapped ConnectNamedPipe transfers no bytes.
@@ -563,6 +615,31 @@ class FakeNamedPipeBackend(NamedPipeBackend):
         )
 
     @typ.override
+    def write_file(
+        self, handle: object, payload: bytes, overlapped: object
+    ) -> tuple[int, object]:
+        """Start the next scripted overlapped write.
+
+        Parameters
+        ----------
+        handle:
+            The connected pipe instance to write to.
+        payload:
+            The bytes the transport wants to deliver.
+        overlapped:
+            The overlapped structure tracking the write.
+
+        Returns
+        -------
+        tuple[int, object]
+            The immediate status and the bytes accepted so far.
+        """
+        return typ.cast(
+            "tuple[int, object]",
+            self._file_fake.WriteFile(handle, payload, overlapped),
+        )
+
+    @typ.override
     def allocate_read_buffer(self, size: int) -> cabc.Buffer:
         """Return a writable buffer of *size* bytes.
 
@@ -704,7 +781,9 @@ def windows_platform_fixture(
     monkeypatch.setattr(named_pipe, "Win32NamedPipeBackend", lambda: fake_backend)
 
 
-def build_state(accept_timeout: float = 0.1) -> named_pipe._NamedPipeState:
+def build_state(
+    accept_timeout: float = 0.1, outer_timeout: float = 1.0
+) -> named_pipe._NamedPipeState:
     """Create a state object detached from any real IPC server.
 
     A test using ``patch_win32`` or ``windows_platform`` gets the backend the
@@ -713,18 +792,26 @@ def build_state(accept_timeout: float = 0.1) -> named_pipe._NamedPipeState:
     gets a throwaway backend, which keeps the signature unchanged for the
     state-only tests.
 
+    Parameters
+    ----------
+    accept_timeout:
+        Poll interval the state uses while waiting for a client.
+    outer_timeout:
+        The per-connection budget the worker derives its deadline from.
+
     Returns
     -------
     cmd_mox.ipc.named_pipe._NamedPipeState
-        A state instance whose outer server is an inert stand-in and whose
-        backend is this test's fake adapter.
+        A state instance whose outer server is an inert stand-in carrying
+        *outer_timeout*, and whose backend is this test's fake adapter.
     """
     backend = (
         _current_backend if _current_backend is not None else FakeNamedPipeBackend()
     )
+    outer = typ.cast("typ.Any", types.SimpleNamespace(timeout=outer_timeout))
     return named_pipe._NamedPipeState(
         pipe_name="pipe",
-        outer=typ.cast("typ.Any", object()),
+        outer=outer,
         accept_timeout=accept_timeout,
         backend=backend,
     )

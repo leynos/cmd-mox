@@ -28,13 +28,11 @@ from cmd_mox.ipc.windows import (
     PipeReadOptions,
     derive_pipe_name,
     read_pipe_message,
-    write_pipe_payload,
 )
 
 from . import _observability
-from ._deadline import remaining_ms, timeout_ms
+from ._deadline import compute_deadline, remaining, remaining_ms, timeout_ms
 from ._named_pipe_limits import (
-    CLIENT_READ_TIMEOUT_SECONDS,
     MAX_ACTIVE_CLIENTS,
     ClientSlot,
     PipeReadCancelled,
@@ -43,6 +41,7 @@ from ._named_pipe_limits import (
     emit_worker_event,
     join_threads_before,
 )
+from ._named_pipe_reply import ReplyDelivery
 from ._server_core import (
     IPCHandlers,
     _BaseIPCServer,
@@ -133,13 +132,15 @@ class _NamedPipeState:
     * at most :data:`MAX_ACTIVE_CLIENTS` workers run at once, enforced by a
       :class:`threading.BoundedSemaphore` acquired before a worker is spawned;
     * a request may not exceed :data:`~cmd_mox.ipc.windows.MAX_MESSAGE_SIZE`;
-    * a client has :data:`CLIENT_READ_TIMEOUT_SECONDS` to deliver its request.
+    * a client has one ``outer.timeout`` budget, shared by the request read and
+      the reply delivery, so neither end can renew it mid-exchange.
 
     Cancellation design
     -------------------
     Pipe instances are created with ``FILE_FLAG_OVERLAPPED`` and every blocking
-    operation (``ConnectNamedPipe`` and ``ReadFile``) is issued asynchronously,
-    then awaited with ``WaitForMultipleObjects`` on the operation's event *and*
+    operation (``ConnectNamedPipe``, ``ReadFile``, and the reply
+    ``WriteFile``) is issued asynchronously, then awaited with
+    ``WaitForMultipleObjects`` on the operation's event *and*
     a Win32 shutdown event. A deadline or a :meth:`stop` therefore wakes the
     waiting thread itself, which cancels the request with ``CancelIoEx`` and
     drains it with ``GetOverlappedResult`` before releasing the buffer. This is
@@ -505,15 +506,9 @@ class _NamedPipeState:
     def _serve_one_request(self, handle: object, started: float) -> None:
         """Read, dispatch, and answer one request, emitting its outcome."""
         try:
-            raw = self._read_request(handle)
-            if raw is not None:
-                result = _request_pipeline(self.outer, raw, "named_pipe")
-                if result.response_bytes is not None:
-                    write_pipe_payload(
-                        handle,
-                        result.response_bytes,
-                        win32file=self._backend.win32file,
-                    )
+            deadline = compute_deadline(self.outer.timeout)
+            raw = self._read_request(handle, deadline)
+            unconfirmed = self._dispatch_request(handle, raw, deadline)
         except PipeMessageTooLargeError as exc:
             # The limit trips before any envelope is parsed, so no correlation
             # id exists; only the byte count is reported, never the bytes.
@@ -526,6 +521,11 @@ class _NamedPipeState:
             )
         except PipeReadCancelled as exc:
             emit_worker_event(self._cancellation_event(exc, started))
+        except TimeoutError:
+            # Only the reply can raise this: a spent read budget is reported as
+            # ``PipeReadCancelled``. The request was handled, so the worker
+            # ends here rather than escaping with an exception.
+            emit_worker_event(self._reply_timeout_event(started))
         except self._backend.error as exc:
             if exc.winerror not in {ERROR_BROKEN_PIPE, ERROR_NO_DATA}:
                 logger.exception("Named pipe handler failed")
@@ -538,8 +538,66 @@ class _NamedPipeState:
             )
         else:
             emit_worker_event(
-                WorkerEvent("completed", duration_ms=_observability.elapsed_ms(started))
+                WorkerEvent(
+                    "completed",
+                    error_category=unconfirmed,
+                    duration_ms=_observability.elapsed_ms(started),
+                )
             )
+
+    def _dispatch_request(
+        self, handle: object, raw: bytes | None, deadline: float
+    ) -> _observability._NamedPipeErrorCategory | None:
+        """Run the pipeline and deliver its reply, if one is owed.
+
+        Returns
+        -------
+        _observability._NamedPipeErrorCategory | None
+            ``None`` when no reply was owed or the client confirmed receipt,
+            otherwise the label describing why delivery is unconfirmed.
+        """
+        if raw is None:
+            return None
+        result = _request_pipeline(self.outer, raw, "named_pipe")
+        if result.response_bytes is None:
+            # Nothing to deliver, so there is also nothing to confirm.
+            return None
+        if self._deliver_reply(handle, result.response_bytes, deadline):
+            return None
+        return "PipeError"
+
+    def _deliver_reply(self, handle: object, payload: bytes, deadline: float) -> bool:
+        """Write the reply and confirm the client consumed it.
+
+        Returns
+        -------
+        bool
+            ``True`` when the client acknowledged delivery by closing the
+            pipe, ``False`` when it sent more data instead.
+        """
+        delivery = ReplyDelivery(
+            self._backend,
+            wait=self._wait_for_overlapped,
+            cancel=self._cancel_overlapped,
+        )
+        return delivery.deliver(handle, payload, deadline)
+
+    def _reply_timeout_event(self, started: float) -> WorkerEvent:
+        """Describe a reply that could not be delivered within its budget.
+
+        Returns
+        -------
+        WorkerEvent
+            A ``timeout`` event when the budget expired, otherwise a
+            ``completed`` event attributed to server shutdown.
+        """
+        if self.stop_event.is_set():
+            return WorkerEvent(
+                "completed",
+                error_category="ServerStopped",
+                duration_ms=_observability.elapsed_ms(started),
+            )
+        return WorkerEvent("timeout", error_category="Timeout")
 
     @staticmethod
     def _cancellation_event(exc: PipeReadCancelled, started: float) -> WorkerEvent:
@@ -578,8 +636,8 @@ class _NamedPipeState:
             return "NoData"
         return "PipeError"
 
-    def _read_request(self, handle: object) -> bytes | None:
-        """Read one size-bounded request from *handle* within the deadline.
+    def _read_request(self, handle: object, deadline: float) -> bytes | None:
+        """Read one size-bounded request from *handle* within *deadline*.
 
         Propagates :class:`~cmd_mox.ipc.windows.PipeMessageTooLargeError` past
         :data:`~cmd_mox.ipc.windows.MAX_MESSAGE_SIZE` bytes, and
@@ -591,7 +649,6 @@ class _NamedPipeState:
         bytes | None
             The raw request bytes.
         """
-        deadline = time.monotonic() + CLIENT_READ_TIMEOUT_SECONDS
         return read_pipe_message(
             handle,
             win32file=self._backend.win32file,
@@ -608,15 +665,24 @@ class _NamedPipeState:
     ) -> tuple[int, bytes]:
         """Read up to *chunk_size* bytes with a cancellable overlapped read.
 
-        Propagates :class:`PipeReadCancelled` when *deadline* expires or the
-        server stops before the read completes; the pending read is cancelled
-        and drained before that signal escapes.
-
         Returns
         -------
         tuple[int, bytes]
             The ``ReadFile`` status and the bytes transferred.
+
+        Raises
+        ------
+        PipeReadCancelled
+            If *deadline* has already expired or the server stops before the
+            read completes. A pending read is cancelled and drained before the
+            signal escapes.
         """
+        try:
+            # Checked before each chunk so a fast peer cannot spend the budget
+            # one chunk at a time and leave the next read unbounded.
+            remaining(deadline)
+        except TimeoutError:
+            raise PipeReadCancelled(timed_out=True) from None
         overlapped, event = self._backend.create_overlapped()
         try:
             buffer = self._backend.allocate_read_buffer(chunk_size)

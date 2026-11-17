@@ -26,12 +26,6 @@ if typ.TYPE_CHECKING:
 # that a connection flood cannot exhaust the process's thread or handle budget.
 MAX_ACTIVE_CLIENTS: typ.Final[int] = 64
 
-# Wall-clock budget for reading one complete request from a connected client.
-# A shim writes its request immediately after connecting, so thirty seconds is
-# far more than a healthy peer needs even on a loaded CI machine, while still
-# guaranteeing that a client which connects and goes silent cannot pin a worker.
-CLIENT_READ_TIMEOUT_SECONDS: typ.Final[float] = 30.0
-
 #: Operation name for every bounded event emitted by a named-pipe worker.
 WORKER_OPERATION: typ.Final[str] = "ipc.named_pipe.worker"
 
@@ -182,7 +176,6 @@ def acquire_client_slot(semaphore: threading.BoundedSemaphore) -> ClientSlot | N
 
 
 __all__ = [
-    "CLIENT_READ_TIMEOUT_SECONDS",
     "MAX_ACTIVE_CLIENTS",
     "WORKER_OPERATION",
     "ClientSlot",
