@@ -33,10 +33,10 @@ class ReadOptions(ReadBounds):
 
     Parameters
     ----------
-    max_bytes:
-        Maximum number of payload bytes accepted.
     chunk_size:
         Upper bound on bytes requested per receive.
+    max_bytes:
+        Maximum number of payload bytes accepted.
     remaining_time:
         Callable returning the positive time left before a deadline, raising
         :class:`TimeoutError` once it has passed. Injecting it lets a caller

@@ -67,14 +67,18 @@ class ReadBounds:
 
     Parameters
     ----------
-    max_bytes:
-        Maximum number of payload bytes accepted.
     chunk_size:
         Upper bound on bytes requested per receive.
+    max_bytes:
+        Maximum number of payload bytes accepted.
     """
 
-    max_bytes: int = MAX_MESSAGE_SIZE
+    # Field order is a compatibility contract, not a preference: dataclass
+    # inheritance keeps base fields first, and ``PipeReadOptions`` took
+    # ``chunk_size`` before ``max_bytes`` long before this base existed.
+    # Reordering these would silently reinterpret every positional call.
     chunk_size: int = DEFAULT_READ_CHUNK_SIZE
+    max_bytes: int = MAX_MESSAGE_SIZE
 
     def __post_init__(self) -> None:
         """Reject bounds that cannot describe a usable read."""

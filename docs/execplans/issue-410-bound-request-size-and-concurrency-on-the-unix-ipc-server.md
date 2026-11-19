@@ -109,6 +109,11 @@ event. Windows behaviour, events, and tests stay as they are.
   The shared review allowance needed a 50-minute backoff; `vsleep` takes its
   unit attached (`50m`), since a spaced `50 min` is rejected and silently skips
   the wait.
+- [x] (2026-11-19) PR assessment found a Windows compatibility regression:
+  inheriting `ReadBounds` put `max_bytes` before `chunk_size`, so
+  `PipeReadOptions(4, 8)` silently became a 4-byte budget read 8 bytes at a
+  time. `ReadBounds` now declares `chunk_size` first, and two regression tests
+  pin the one- and two-argument forms.
 
 ## Surprises & discoveries
 
@@ -200,6 +205,13 @@ event. Windows behaviour, events, and tests stay as they are.
   `stop_blocking` now refuses a second call, which is the invariant the release
   accounting depends on, and `test_blocking_probe_refuses_a_second_stop` covers
   that refusal so the guard leaves no uncovered line for the 100% coverage gate.
+- Observation: dataclass inheritance moved a shipped Windows signature.
+  Evidence: `PipeReadOptions(4, 8)` was `(chunk_size=4, max_bytes=8)` before
+  the shared base existed and became `(max_bytes=4, chunk_size=8)` after it,
+  because base fields come first and `ReadBounds` declared the budget first.
+  Every in-repo caller passes keywords, so no test caught it. Impact: the base
+  now declares `chunk_size` first behind a comment naming it a compatibility
+  contract, and the pipe tests assert both positional arities.
 - Observation: a constant remaining-time double cannot distinguish recomputing
   the budget before every receive from resolving it once. Evidence: hoisting
   `options.remaining_time(deadline)` above the read loop left every existing
@@ -490,9 +502,11 @@ for `check-fmt`, `typecheck`, `test`, `lint`, `markdownlint`, and `nixie`.
 - `cmd_mox.ipc._limits.MessageTooLargeError`, `MAX_MESSAGE_SIZE`,
   `MAX_ACTIVE_CLIENTS`, `ClientSlot`, `acquire_client_slot`.
 - `cmd_mox.ipc.socket_utils.read_until_eof(sock, deadline, options)`, where
-  `options` is a `ReadOptions(max_bytes, chunk_size=65536, remaining_time=...)`
-  frozen dataclass that inherits its validated bounds from
-  `cmd_mox.ipc._limits.ReadBounds`.
+  `options` is a
+  `ReadOptions(chunk_size=65536, max_bytes=..., remaining_time=...)` frozen
+  dataclass that inherits its validated bounds from
+  `cmd_mox.ipc._limits.ReadBounds`; the base declares `chunk_size` first so
+  `PipeReadOptions` keeps its historical positional order.
 - `_InnerServer.process_request(request, client_address)` and
   `_InnerServer.shutdown_request(request)` in `cmd_mox/ipc/server.py`, which
   own the admission permit around the superclass calls.
@@ -514,3 +528,5 @@ for `check-fmt`, `typecheck`, `test`, `lint`, `markdownlint`, and `nixie`.
   local `+01:00` clock reading with a `Z` suffix; the verified times now come
   from commit and gate-log times (UTC), and items with no surviving anchor keep
   the date alone.
+- 2026-11-19: Restored the pre-refactor `PipeReadOptions` positional order and
+  added regression tests for both positional arities.

@@ -540,6 +540,23 @@ def test_pipe_read_options_reject_non_positive_bounds(
         PipeReadOptions(chunk_size=chunk_size, max_bytes=max_bytes)
 
 
+def test_pipe_read_options_first_positional_argument_is_the_chunk_size() -> None:
+    """One positional argument still means the receive chunk size."""
+    options = PipeReadOptions(4)
+
+    assert options.chunk_size == 4, "the first positional argument moved"
+    assert options.max_bytes == MAX_MESSAGE_SIZE, "the default budget changed"
+
+
+def test_pipe_read_options_take_chunk_size_before_max_bytes() -> None:
+    """Two positional arguments still mean ``(chunk_size, max_bytes)``."""
+    options = PipeReadOptions(4, 8)
+
+    assert (options.chunk_size, options.max_bytes) == (4, 8), (
+        "the positional bounds were reordered"
+    )
+
+
 def test_synchronous_io_cancel_is_skipped_without_pywin32() -> None:
     """The cancellation request is inert when the Windows API is absent."""
     worker = threading.Thread(target=lambda: None, daemon=True)
