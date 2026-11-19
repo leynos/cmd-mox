@@ -24,9 +24,10 @@ because they reduce boilerplate rather than protecting persisted data.
 
 This design separates implementation helpers from future public APIs:
 
-- `atomic_write_json(...)`, `file_lock(...)`, and any platform-specific lock
-  backend are internal helpers. They may move between private modules without
-  deprecation as long as documented CmdMox behaviour remains intact.
+- `atomic_write_text(...)`, `atomic_write_json(...)`, `file_lock(...)`, and any
+  platform-specific lock backend are internal helpers. They may move between
+  private modules without deprecation as long as documented CmdMox behaviour
+  remains intact.
 - `JsonStateStore`, `SubcommandRouter`, and filesystem side-effect helpers are
   candidate public APIs. They should first ship as explicitly provisional
   exports or documented examples. They become stable only after the usage guide

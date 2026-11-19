@@ -10,12 +10,12 @@ import typing as typ
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from cmd_mox import atomic_write
 from cmd_mox.atomic_write import AtomicWriteError
 from cmd_mox.errors import LifecycleError
 from cmd_mox.ipc import Invocation, Response
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata
 from cmd_mox.record.session import RecordingSession
+from cmd_mox.unittests._atomic_write_failures import install_replace_hook
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -107,7 +107,7 @@ def configure_fixture_replacement_failure(
 
     # Fail inside the real helper so the scenario exercises the helper's own
     # cleanup rather than a stubbed-out save.
-    monkeypatch.setattr(atomic_write.Path, "replace", _fail_replace)
+    install_replace_hook(monkeypatch, _fail_replace)
 
 
 @when("the session is started")

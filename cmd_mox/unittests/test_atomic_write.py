@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import typing as typ
+from pathlib import Path
 
 import pytest
 
@@ -16,9 +17,7 @@ from cmd_mox.atomic_write import (
     atomic_write_json,
     atomic_write_text,
 )
-
-if typ.TYPE_CHECKING:
-    from pathlib import Path
+from cmd_mox.unittests._atomic_write_failures import install_replace_hook
 
 _POSIX_ONLY = pytest.mark.skipif(
     os.name == "nt", reason="POSIX file mode bits are not portable to Windows"
@@ -30,7 +29,7 @@ def _temporary_files(directory: Path) -> list[Path]:
     return sorted(directory.glob(".*.tmp"))
 
 
-def _raise_os_error(*_args: object, **_kwargs: object) -> None:
+def _raise_os_error(*_args: object, **_kwargs: object) -> typ.NoReturn:
     """Model an operating-system failure raised by an injected seam."""
     message = "injected failure"
     raise OSError(errno.EIO, message)
@@ -76,7 +75,6 @@ def test_retry_after_a_failed_write_syncs_existing_ancestors(
 ) -> None:
     """A retried write flushes ancestors an earlier failed attempt created."""
     path = tmp_path / "new" / "deeper" / "note.txt"
-    real_replace = atomic_write.Path.replace
     attempts = 0
 
     def _fail_once(self: Path, target: Path) -> Path:
@@ -86,9 +84,9 @@ def test_retry_after_a_failed_write_syncs_existing_ancestors(
         if attempts == 1:
             message = "injected failure"
             raise OSError(message)
-        return real_replace(self, target)
+        return Path.replace(self, target)
 
-    monkeypatch.setattr(atomic_write.Path, "replace", _fail_once)
+    install_replace_hook(monkeypatch, _fail_once)
     with pytest.raises(AtomicWriteError):
         atomic_write_text(path, "first\n")
 
@@ -121,7 +119,7 @@ def test_permission_restriction_is_skipped_without_fchmod(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A platform without ``fchmod`` still writes the file."""
-    monkeypatch.delattr(atomic_write.os, "fchmod")
+    monkeypatch.delattr(atomic_write.os, "fchmod", raising=False)
     path = tmp_path / "note.txt"
 
     atomic_write_text(path, "content\n", mode=0o644)
@@ -231,7 +229,7 @@ def test_failed_replacement_preserves_previous_file_and_cleans_up(
     """A replacement failure leaves the old file intact and removes the temporary."""
     path = tmp_path / "note.txt"
     path.write_text("old\n", encoding="utf-8")
-    monkeypatch.setattr(atomic_write.Path, "replace", _raise_os_error)
+    install_replace_hook(monkeypatch, _raise_os_error)
 
     with pytest.raises(AtomicWriteError) as excinfo:
         atomic_write_text(path, "new\n")
