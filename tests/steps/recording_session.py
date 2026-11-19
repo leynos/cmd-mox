@@ -10,6 +10,7 @@ import typing as typ
 import pytest
 from pytest_bdd import given, parsers, then, when
 
+from cmd_mox import atomic_write
 from cmd_mox.atomic_write import AtomicWriteError
 from cmd_mox.errors import LifecycleError
 from cmd_mox.ipc import Invocation, Response
@@ -97,14 +98,16 @@ def recording_session_with_existing_fixture(tmp_path: Path) -> RecordingSession:
 def configure_fixture_replacement_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Make the next fixture save fail before it replaces the target."""
+    """Make the next fixture save fail at the atomic replacement step."""
 
-    def _fail_atomic_write(path: Path, _payload: object) -> None:
+    def _fail_replace(_self: Path, _target: Path) -> Path:
         """Model an atomic-replacement failure."""
         message = "injected replacement failure"
-        raise AtomicWriteError(message, path=path)
+        raise OSError(message)
 
-    monkeypatch.setattr("cmd_mox.record.fixture.atomic_write_json", _fail_atomic_write)
+    # Fail inside the real helper so the scenario exercises the helper's own
+    # cleanup rather than a stubbed-out save.
+    monkeypatch.setattr(atomic_write.Path, "replace", _fail_replace)
 
 
 @when("the session is started")

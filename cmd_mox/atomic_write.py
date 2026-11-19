@@ -27,6 +27,11 @@ DEFAULT_FILE_MODE: typ.Final[int] = 0o600
 # identical bytes and stable diffs.
 _NEWLINE: typ.Final[str] = "\n"
 
+# ``mkstemp`` adds eight random characters plus the suffix to the prefix.  Cap
+# the destination name copied into the prefix so a fixture whose own name is
+# near the filesystem's 255-byte limit still gets a creatable temporary name.
+_MAX_TEMP_STEM: typ.Final[int] = 64
+
 
 class AtomicWriteError(OSError):
     """Raised when a file cannot be replaced atomically.
@@ -84,6 +89,25 @@ def _sync_parent_directory(directory: Path) -> None:
         os.close(descriptor)
 
 
+def _create_missing_directories(directory: Path) -> list[Path]:
+    """Create *directory* and return the directories this call added.
+
+    Returns
+    -------
+    list[Path]
+        Newly created directories, outermost first.  The entry for each one
+        lives in its parent, so each parent must be flushed separately before
+        the new tree is durable.
+    """
+    missing: list[Path] = []
+    ancestor = directory
+    while not ancestor.exists():
+        missing.append(ancestor)
+        ancestor = ancestor.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    return missing[::-1]
+
+
 def atomic_write_text(
     path: Path,
     content: str,
@@ -116,10 +140,10 @@ def atomic_write_text(
     target = Path(path)
     temporary: Path | None = None
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
+        created_directories = _create_missing_directories(target.parent)
         descriptor, temporary_name = tempfile.mkstemp(
             dir=target.parent,
-            prefix=f".{target.name}.",
+            prefix=f".{target.name[:_MAX_TEMP_STEM]}.",
             suffix=".tmp",
         )
         temporary = Path(temporary_name)
@@ -133,6 +157,10 @@ def atomic_write_text(
                 with contextlib.suppress(OSError):
                     temporary.unlink(missing_ok=True)
         _sync_parent_directory(target.parent)
+        # Flushing a directory does not persist its own entry in its parent,
+        # so walk the newly created chain from the innermost directory out.
+        for created in reversed(created_directories):
+            _sync_parent_directory(created.parent)
     except OSError as exc:
         msg = f"Could not atomically write {target}"
         raise AtomicWriteError(msg, path=target) from exc

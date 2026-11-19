@@ -13,6 +13,7 @@ import hypothesis.strategies as st
 import pytest
 from hypothesis import given
 
+from cmd_mox import atomic_write
 from cmd_mox.atomic_write import AtomicWriteError
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.scrubber import ScrubbingRule
@@ -312,12 +313,14 @@ class TestFixtureFile:
             scrubbing_rules=[],
         )
 
-        def _fail_save(_path: Path, _payload: object) -> None:
-            """Model an atomic replacement failure."""
+        def _fail_replace(_self: Path, _target: Path) -> Path:
+            """Model a failure at the atomic replacement step."""
             message = "injected failure"
-            raise AtomicWriteError(message, path=fixture_path)
+            raise OSError(message)
 
-        monkeypatch.setattr("cmd_mox.record.fixture.atomic_write_json", _fail_save)
+        # Fail inside the real helper so the test proves the helper itself
+        # leaves the previous fixture recoverable.
+        monkeypatch.setattr(atomic_write.Path, "replace", _fail_replace)
 
         with pytest.raises(AtomicWriteError):
             replacement.save(fixture_path)

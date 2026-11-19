@@ -54,6 +54,31 @@ def test_atomic_write_text_creates_parent_directories(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "content\n"
 
 
+def test_newly_created_directories_are_synced_into_their_parents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each directory this call creates has its parent entry flushed."""
+    synced: list[Path] = []
+    monkeypatch.setattr(atomic_write, "_sync_parent_directory", synced.append)
+    path = tmp_path / "new" / "deeper" / "note.txt"
+
+    atomic_write_text(path, "content\n")
+
+    # Innermost first: the file's directory, then each new ancestor's parent.
+    assert synced == [tmp_path / "new" / "deeper", tmp_path / "new", tmp_path]
+
+
+@_POSIX_ONLY
+def test_temporary_name_fits_a_long_destination_name(tmp_path: Path) -> None:
+    """A destination near the filename limit still gets a creatable temporary."""
+    path = tmp_path / (("a" * 250) + ".json")
+
+    atomic_write_text(path, "content\n")
+
+    assert path.read_text(encoding="utf-8") == "content\n"
+
+
 def test_atomic_write_text_overwrites_existing_file(tmp_path: Path) -> None:
     """A successful write replaces the previous contents."""
     path = tmp_path / "note.txt"

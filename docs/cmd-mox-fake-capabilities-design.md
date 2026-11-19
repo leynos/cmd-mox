@@ -136,10 +136,13 @@ they may move between private modules without a deprecation period.
 
 Required behaviour:
 
-- Create `path.parent` before opening the temporary file.
+- Create `path.parent`, and any missing ancestors, before opening the
+  temporary file, remembering which directories this call created.
 - Create the temporary file in the destination directory with
   `tempfile.mkstemp(...)` and apply the requested mode with `os.fchmod(...)`
-  where available.
+  where available. The destination name copied into the temporary prefix is
+  capped so the generated name stays within a 255-byte filename limit even when
+  the destination name is close to it.
 - Serialize with `json.dumps(payload, indent=2)` plus a trailing newline for
   Git-friendly diffs. Key order follows the payload's insertion order (the
   schema field order); keys are deliberately not sorted.
@@ -150,6 +153,9 @@ Required behaviour:
   an explicit `IS_WINDOWS` check because the standard library does not expose
   directory handles for `fsync`; the rename remains as durable as the
   filesystem guarantees.
+- Flush each newly created directory's parent entry after replacement,
+  innermost first, because flushing a directory does not persist that
+  directory's own entry in its parent.
 - Remove the temporary file on failure if it still exists, without masking the
   original error.
 

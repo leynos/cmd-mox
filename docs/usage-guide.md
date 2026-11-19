@@ -689,14 +689,17 @@ pending recording is rejected with `LifecycleError`.
 ### Fixture writes are atomic
 
 `finalize()` writes through a temporary file in the fixture directory and
-installs it with an atomic replacement. An interrupted write therefore leaves
-the previous complete fixture in place instead of a truncated file that fails
-to load. New fixture files use owner read/write permissions (`0o600`) where the
-platform supports POSIX mode bits; Windows applies the mode on a best-effort
-basis. After replacement the parent directory is flushed on POSIX, while
-Windows skips that step because the standard library does not expose directory
-handles for `fsync`. If the destination is a symbolic link, the link entry is
-replaced and the file it pointed at is left untouched.
+installs it with an atomic replacement. A failure before replacement, such as
+an interrupted write, therefore leaves the previous complete fixture in place
+instead of a truncated file that fails to load. If replacement succeeds but the
+following directory flush fails, the new fixture is installed and the save
+raises `AtomicWriteError`: the contents are correct, but their durability
+across a crash is uncertain. New fixture files use owner read/write permissions
+(`0o600`) where the platform supports POSIX mode bits; Windows applies the mode
+on a best-effort basis. After replacement the parent directory is flushed on
+POSIX, while Windows skips that step because the standard library does not
+expose directory handles for `fsync`. If the destination is a symbolic link,
+the link entry is replaced and the file it pointed at is left untouched.
 
 Strict replay, the default, requires every recorded `env_subset` pair to be
 present in the live invocation. Recording only portable keys is what lets a
