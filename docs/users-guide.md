@@ -230,6 +230,15 @@ exchange still loses its input. For the precise timeout scope and error
 behaviour, see the
 [canonical `CMOX_IPC_TIMEOUT` guidance](usage-guide.md#environment-variables).
 
+One IPC message may carry at most 8 MiB, and the POSIX server serves at most 64
+clients at once. A larger request is not dispatched and receives no response
+frame, so the shim fails with a controlled `IPC error: ...` diagnostic rather
+than completing the exchange. A connection that arrives while 64 are already in
+flight is closed the same way; a later connection attempt is admitted once one
+of the 64 finishes. See the
+[canonical IPC resource-bounds guidance](usage-guide.md#using-the-ipc-server-directly)
+for the events that record each refusal.
+
 Invalid non-empty requests receive a bounded error on stderr and exit with
 status 1. An empty read, including a readiness probe that closes without a
 request, is treated as a closed connection and gets no response frame. Other

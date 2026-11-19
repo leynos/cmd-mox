@@ -5,6 +5,8 @@ from __future__ import annotations
 import typing as typ
 
 import pytest
+from hypothesis import assume, given
+from hypothesis import strategies as st
 
 from cmd_mox.ipc._limits import MessageTooLargeError
 from cmd_mox.ipc.socket_utils import (
@@ -183,3 +185,46 @@ def test_read_until_eof_rejects_non_positive_bounds(
     """A bound that cannot describe a usable read is rejected up front."""
     with pytest.raises(ValueError, match="must be positive"):
         _reader(_ScriptedStream(b""), max_bytes=max_bytes, chunk_size=chunk_size)
+
+
+@given(
+    payload=st.binary(max_size=32),
+    slack=st.integers(min_value=0, max_value=16),
+    chunk_size=st.integers(min_value=1, max_value=16),
+)
+def test_read_until_eof_returns_every_payload_within_the_budget(
+    payload: bytes, slack: int, chunk_size: int
+) -> None:
+    """A payload at or under the budget round-trips under a bounded request size."""
+    max_bytes = len(payload) + slack
+    assume(max_bytes >= 1)
+
+    sock = _ScriptedStream(payload)
+
+    assert _reader(sock, max_bytes=max_bytes, chunk_size=chunk_size) == payload, (
+        "a payload within the budget was not reassembled"
+    )
+    assert max(sock.recv_sizes) <= chunk_size, "a receive exceeded the chunk size"
+
+
+@given(
+    prefix=st.binary(min_size=1, max_size=32),
+    extra=st.integers(min_value=1, max_value=8),
+    chunk_size=st.integers(min_value=1, max_value=16),
+)
+def test_read_until_eof_refuses_every_payload_over_the_budget(
+    prefix: bytes, extra: int, chunk_size: int
+) -> None:
+    """Any byte past the budget raises, reporting counts but keeping no payload."""
+    max_bytes = len(prefix)
+    sock = _ScriptedStream(prefix + b"x" * extra)
+
+    with pytest.raises(MessageTooLargeError) as excinfo:
+        _reader(sock, max_bytes=max_bytes, chunk_size=chunk_size)
+
+    assert excinfo.value.received == max_bytes + 1, "the read ran past the first byte"
+    assert excinfo.value.limit == max_bytes, "the error reported the wrong limit"
+    assert max(sock.recv_sizes) <= chunk_size, "a receive exceeded the chunk size"
+    assert set(vars(excinfo.value)) == {"received", "limit"}, (
+        "the error retained more than its byte counts"
+    )
