@@ -16,7 +16,7 @@ import tempfile
 import typing as typ
 from pathlib import Path
 
-from ._path_utils import IS_WINDOWS
+from . import _path_utils as path_utils
 
 # Owner read/write only.  Fixtures and fake state can contain values derived
 # from the environment or command output, so other users on a shared host
@@ -79,7 +79,9 @@ def _sync_parent_directory(directory: Path) -> None:
     Windows does not expose directory handles to :func:`os.fsync` through the
     standard library, so the directory sync is skipped there explicitly.
     """
-    if IS_WINDOWS:
+    # Read through the module so tests can model a platform without
+    # directory-handle support on POSIX.
+    if path_utils.IS_WINDOWS:
         return
 
     descriptor = os.open(directory, os.O_RDONLY)

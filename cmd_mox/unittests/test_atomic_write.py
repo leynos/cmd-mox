@@ -100,6 +100,35 @@ def test_retry_after_a_failed_write_syncs_existing_ancestors(
     assert tmp_path in synced
 
 
+def test_windows_skips_the_directory_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows has no directory handles, so no directory is opened to flush."""
+
+    def _no_directory_open(*_args: object, **_kwargs: object) -> int:
+        """Fail if the Windows branch tries to open a directory handle."""
+        pytest.fail("a directory handle was opened on Windows")
+
+    monkeypatch.setattr(atomic_write.path_utils, "IS_WINDOWS", True)
+    monkeypatch.setattr(atomic_write.os, "open", _no_directory_open)
+
+    atomic_write._sync_parent_directory(tmp_path)
+
+
+def test_permission_restriction_is_skipped_without_fchmod(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A platform without ``fchmod`` still writes the file."""
+    monkeypatch.delattr(atomic_write.os, "fchmod")
+    path = tmp_path / "note.txt"
+
+    atomic_write_text(path, "content\n", mode=0o644)
+
+    assert path.read_text(encoding="utf-8") == "content\n"
+
+
 def test_unreadable_ancestor_does_not_fail_the_write(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
