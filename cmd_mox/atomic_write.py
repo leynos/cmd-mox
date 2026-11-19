@@ -28,9 +28,9 @@ DEFAULT_FILE_MODE: typ.Final[int] = 0o600
 _NEWLINE: typ.Final[str] = "\n"
 
 # ``mkstemp`` adds eight random characters plus the suffix to the prefix.  Cap
-# the destination name copied into the prefix so a fixture whose own name is
-# near the filesystem's 255-byte limit still gets a creatable temporary name.
-_MAX_TEMP_STEM: typ.Final[int] = 64
+# the UTF-8 bytes copied from the destination name so a fixture whose own name
+# is near the filesystem's 255-byte limit still gets a creatable temporary name.
+_MAX_TEMP_STEM_BYTES: typ.Final[int] = 64
 
 
 class AtomicWriteError(OSError):
@@ -89,23 +89,32 @@ def _sync_parent_directory(directory: Path) -> None:
         os.close(descriptor)
 
 
-def _create_missing_directories(directory: Path) -> list[Path]:
-    """Create *directory* and return the directories this call added.
+def _temporary_prefix(target: Path) -> str:
+    """Return a temporary-file prefix that stays within filename limits."""
+    # Truncating encoded bytes can split a multi-byte character; dropping the
+    # partial tail keeps the prefix valid UTF-8.
+    stem = target.name.encode("utf-8")[:_MAX_TEMP_STEM_BYTES].decode("utf-8", "ignore")
+    return f".{stem}."
 
-    Returns
-    -------
-    list[Path]
-        Newly created directories, outermost first.  The entry for each one
-        lives in its parent, so each parent must be flushed separately before
-        the new tree is durable.
+
+def _sync_directory_chain(directory: Path) -> None:
+    """Flush *directory* and its ancestors so new entries survive a crash.
+
+    ``directory`` is flushed strictly because a failure there leaves the
+    rename itself uncertain.  Ancestors are flushed best-effort: a retry may
+    reuse directories an earlier failed attempt created, so they still need
+    flushing, but an ancestor that cannot be opened must not fail a write
+    whose own directory is already durable.
     """
-    missing: list[Path] = []
-    ancestor = directory
-    while not ancestor.exists():
-        missing.append(ancestor)
-        ancestor = ancestor.parent
-    directory.mkdir(parents=True, exist_ok=True)
-    return missing[::-1]
+    _sync_parent_directory(directory)
+    current = directory
+    while True:
+        parent = current.parent
+        if parent == current:
+            return
+        with contextlib.suppress(OSError):
+            _sync_parent_directory(parent)
+        current = parent
 
 
 def atomic_write_text(
@@ -140,10 +149,10 @@ def atomic_write_text(
     target = Path(path)
     temporary: Path | None = None
     try:
-        created_directories = _create_missing_directories(target.parent)
+        target.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             dir=target.parent,
-            prefix=f".{target.name[:_MAX_TEMP_STEM]}.",
+            prefix=_temporary_prefix(target),
             suffix=".tmp",
         )
         temporary = Path(temporary_name)
@@ -156,11 +165,9 @@ def atomic_write_text(
             if temporary is not None:
                 with contextlib.suppress(OSError):
                     temporary.unlink(missing_ok=True)
-        _sync_parent_directory(target.parent)
         # Flushing a directory does not persist its own entry in its parent,
-        # so walk the newly created chain from the innermost directory out.
-        for created in reversed(created_directories):
-            _sync_parent_directory(created.parent)
+        # so the chain is walked from the innermost directory outwards.
+        _sync_directory_chain(target.parent)
     except OSError as exc:
         msg = f"Could not atomically write {target}"
         raise AtomicWriteError(msg, path=target) from exc

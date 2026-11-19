@@ -697,9 +697,11 @@ raises `AtomicWriteError`: the contents are correct, but their durability
 across a crash is uncertain. New fixture files use owner read/write permissions
 (`0o600`) where the platform supports POSIX mode bits; Windows applies the mode
 on a best-effort basis. After replacement the parent directory is flushed on
-POSIX, while Windows skips that step because the standard library does not
-expose directory handles for `fsync`. If the destination is a symbolic link,
-the link entry is replaced and the file it pointed at is left untouched.
+POSIX, along with each of its ancestors on a best-effort basis so a retried
+save also persists directories an earlier failed attempt created. Windows skips
+both steps because the standard library does not expose directory handles for
+`fsync`. If the destination is a symbolic link, the link entry is replaced and
+the file it pointed at is left untouched.
 
 Strict replay, the default, requires every recorded `env_subset` pair to be
 present in the live invocation. Recording only portable keys is what lets a

@@ -54,25 +54,87 @@ def test_atomic_write_text_creates_parent_directories(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "content\n"
 
 
-def test_newly_created_directories_are_synced_into_their_parents(
+def test_directory_chain_sync_covers_every_ancestor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each directory this call creates has its parent entry flushed."""
+    """The target directory and each ancestor are flushed after replacement."""
     synced: list[Path] = []
     monkeypatch.setattr(atomic_write, "_sync_parent_directory", synced.append)
     path = tmp_path / "new" / "deeper" / "note.txt"
 
     atomic_write_text(path, "content\n")
 
-    # Innermost first: the file's directory, then each new ancestor's parent.
-    assert synced == [tmp_path / "new" / "deeper", tmp_path / "new", tmp_path]
+    # Innermost first, ending at the filesystem root.
+    assert synced[:3] == [tmp_path / "new" / "deeper", tmp_path / "new", tmp_path]
+    assert synced[-1].parent == synced[-1]
+
+
+def test_retry_after_a_failed_write_syncs_existing_ancestors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retried write flushes ancestors an earlier failed attempt created."""
+    path = tmp_path / "new" / "deeper" / "note.txt"
+    real_replace = atomic_write.Path.replace
+    attempts = 0
+
+    def _fail_once(self: Path, target: Path) -> Path:
+        """Fail the first replacement only."""
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            message = "injected failure"
+            raise OSError(message)
+        return real_replace(self, target)
+
+    monkeypatch.setattr(atomic_write.Path, "replace", _fail_once)
+    with pytest.raises(AtomicWriteError):
+        atomic_write_text(path, "first\n")
+
+    synced: list[Path] = []
+    monkeypatch.setattr(atomic_write, "_sync_parent_directory", synced.append)
+    atomic_write_text(path, "second\n")
+
+    assert path.read_text(encoding="utf-8") == "second\n"
+    assert tmp_path in synced
+
+
+def test_unreadable_ancestor_does_not_fail_the_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the target's own directory blocks the write when its sync fails."""
+    path = tmp_path / "note.txt"
+    real_sync = atomic_write._sync_parent_directory
+
+    def _fail_outside_target(directory: Path) -> None:
+        """Model an ancestor the process cannot flush."""
+        if directory != tmp_path:
+            raise OSError(errno.EIO, "injected failure")
+        real_sync(directory)
+
+    monkeypatch.setattr(atomic_write, "_sync_parent_directory", _fail_outside_target)
+
+    atomic_write_text(path, "content\n")
+
+    assert path.read_text(encoding="utf-8") == "content\n"
 
 
 @_POSIX_ONLY
 def test_temporary_name_fits_a_long_destination_name(tmp_path: Path) -> None:
     """A destination near the filename limit still gets a creatable temporary."""
     path = tmp_path / (("a" * 250) + ".json")
+
+    atomic_write_text(path, "content\n")
+
+    assert path.read_text(encoding="utf-8") == "content\n"
+
+
+@_POSIX_ONLY
+def test_temporary_name_fits_a_multibyte_destination_name(tmp_path: Path) -> None:
+    """A multibyte destination near the byte limit still gets a temporary."""
+    path = tmp_path / (("🐍" * 61) + ".json")
 
     atomic_write_text(path, "content\n")
 

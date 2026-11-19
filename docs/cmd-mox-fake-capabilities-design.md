@@ -137,7 +137,7 @@ they may move between private modules without a deprecation period.
 Required behaviour:
 
 - Create `path.parent`, and any missing ancestors, before opening the
-  temporary file, remembering which directories this call created.
+  temporary file.
 - Create the temporary file in the destination directory with
   `tempfile.mkstemp(...)` and apply the requested mode with `os.fchmod(...)`
   where available. The destination name copied into the temporary prefix is
@@ -153,9 +153,12 @@ Required behaviour:
   an explicit `IS_WINDOWS` check because the standard library does not expose
   directory handles for `fsync`; the rename remains as durable as the
   filesystem guarantees.
-- Flush each newly created directory's parent entry after replacement,
+- Flush the target directory and each of its ancestors after replacement,
   innermost first, because flushing a directory does not persist that
-  directory's own entry in its parent.
+  directory's own entry in its parent. The target directory is flushed
+  strictly; ancestors are flushed best-effort so a retry that reuses a
+  directory an earlier failed attempt created still persists it, without
+  letting an ancestor that cannot be opened fail the write.
 - Remove the temporary file on failure if it still exists, without masking the
   original error.
 
