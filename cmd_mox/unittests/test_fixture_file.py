@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 import sys
 import typing as typ
 
@@ -11,6 +13,7 @@ import hypothesis.strategies as st
 import pytest
 from hypothesis import given
 
+from cmd_mox.atomic_write import AtomicWriteError
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.scrubber import ScrubbingRule
 
@@ -252,7 +255,7 @@ class TestFixtureFile:
         assert loaded.recordings[0].command == "git"
 
         # Verify it is valid JSON
-        raw = json.loads(fixture_path.read_text())
+        raw = json.loads(fixture_path.read_text(encoding="utf-8"))
         assert raw["version"] == "1.0.0"
 
     def test_save_creates_parent_directories(self, tmp_path: Path) -> None:
@@ -265,6 +268,63 @@ class TestFixtureFile:
         assert nested_path.exists()
         loaded = FixtureFile.load(nested_path)
         assert loaded.version == "1.0.0"
+
+    @pytest.mark.skipif(
+        os.name == "nt", reason="POSIX file mode bits are not portable to Windows"
+    )
+    def test_save_restricts_fixture_permissions(self, tmp_path: Path) -> None:
+        """A saved fixture is owner read/write only by default."""
+        fixture_path = tmp_path / "fixture.json"
+
+        _sample_fixture().save(fixture_path)
+
+        assert stat.S_IMODE(fixture_path.stat().st_mode) == 0o600
+
+    def test_save_round_trips_non_ascii_and_ends_with_a_newline(
+        self, tmp_path: Path
+    ) -> None:
+        """The persisted fixture keeps non-ASCII text and a trailing newline."""
+        fixture = _sample_fixture()
+        fixture.recordings[0].stdout = "café\n"
+        fixture_path = tmp_path / "fixture.json"
+
+        fixture.save(fixture_path)
+
+        # json.dumps escapes non-ASCII by default, so compare the decoded
+        # document rather than the raw bytes.
+        text = fixture_path.read_text(encoding="utf-8")
+        assert text.endswith("}\n")
+        assert json.loads(text)["recordings"][0]["stdout"] == "café\n"
+
+    def test_save_failure_preserves_the_previous_fixture(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A failed replacement leaves the previous complete fixture in place."""
+        fixture_path = tmp_path / "fixture.json"
+        original = _sample_fixture()
+        original.save(fixture_path)
+        replacement = FixtureFile(
+            version=FixtureFile.SCHEMA_VERSION,
+            metadata=_sample_metadata(),
+            recordings=[],
+            scrubbing_rules=[],
+        )
+
+        def _fail_save(_path: Path, _payload: object) -> None:
+            """Model an atomic replacement failure."""
+            message = "injected failure"
+            raise AtomicWriteError(message, path=fixture_path)
+
+        monkeypatch.setattr("cmd_mox.record.fixture.atomic_write_json", _fail_save)
+
+        with pytest.raises(AtomicWriteError):
+            replacement.save(fixture_path)
+
+        loaded = FixtureFile.load(fixture_path)
+        assert len(loaded.recordings) == 1
+        assert loaded.metadata.created_at == original.metadata.created_at
 
     @pytest.mark.parametrize("fixture_version", ["0.9", "0.9.0"])
     def test_from_dict_migrates_old_version(self, fixture_version: str) -> None:
