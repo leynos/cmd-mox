@@ -37,6 +37,30 @@ def test_fixture_metadata_generated() -> None:
 
 @scenario(
     str(FEATURES_DIR / "recording_session.feature"),
+    "finalizing an unstarted session raises a lifecycle error",
+)
+def test_finalize_unstarted_session_raises() -> None:
+    """An unstarted session refuses to finalize and writes nothing."""
+
+
+@scenario(
+    str(FEATURES_DIR / "recording_session.feature"),
+    "the command filter matches command names case-insensitively",
+)
+def test_command_filter_is_case_insensitive() -> None:
+    """Command filtering ignores case and persists only matching commands."""
+
+
+@scenario(
+    str(FEATURES_DIR / "recording_session.feature"),
+    "a failed atomic replacement preserves the previous fixture",
+)
+def test_failed_replacement_preserves_fixture() -> None:
+    """A failed save leaves the previous fixture on disk."""
+
+
+@scenario(
+    str(FEATURES_DIR / "recording_session.feature"),
     "loading a fixture with an older schema version migrates it",
 )
 def test_fixture_migration_from_old_version() -> None:
