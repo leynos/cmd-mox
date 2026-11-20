@@ -2,12 +2,45 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
+import typing as typ
 from pathlib import Path
 
 import pytest
 
 from cmd_mox import fs_retry
+
+if typ.TYPE_CHECKING:
+    import collections.abc as cabc
+
+
+def _symlink_to(link: Path, target: Path, *, target_is_directory: bool) -> Path:
+    """Create *link* pointing at *target*, skipping unsupported platforms."""
+    if not hasattr(os, "symlink"):
+        pytest.skip("Platform does not support symlinks")
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Symlinks unavailable: {exc}")
+    return link
+
+
+@pytest.fixture(params=[False, True], ids=["file-target", "directory-target"])
+def dangling_symlink(request: pytest.FixtureRequest, tmp_path: Path) -> Path:
+    """Provide a symlink whose target does not exist.
+
+    Returns
+    -------
+    pathlib.Path
+        The dangling link.
+    """
+    return _symlink_to(
+        tmp_path / "dangling-link",
+        tmp_path / "missing-target",
+        target_is_directory=request.param,
+    )
 
 
 def test_retry_unlink_success(tmp_path: Path) -> None:
@@ -89,22 +122,48 @@ def test_retry_unlink_raises_after_attempts(
 def test_retry_unlink_propagates_original_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Without exc_factory, the original exception should surface."""
+    """Without exc_factory, the final attempt's exception should surface."""
     target = tmp_path / "stuck.txt"
     target.write_text("locked")
+    produced: list[PermissionError] = []
 
     def locked_unlink(self: Path) -> None:
-        """Fail every unlink with PermissionError."""
-        raise PermissionError("locked")
+        """Fail every unlink with a fresh PermissionError."""
+        error = PermissionError("locked")
+        produced.append(error)
+        raise error
 
     monkeypatch.setattr(Path, "unlink", locked_unlink)
     monkeypatch.setattr(fs_retry.time, "sleep", lambda _duration: None)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(PermissionError) as raised:
         fs_retry.retry_unlink(
             target,
             config=fs_retry.RetryConfig(max_attempts=2, retry_delay=0),
         )
+
+    assert len(produced) == 2, "both configured attempts should run"
+    assert raised.value is produced[-1], "the final attempt's exception should surface"
+
+
+def test_retry_unlink_removes_dangling_symlink(dangling_symlink: Path) -> None:
+    """A dangling symlink is removed as a link, not treated as already gone."""
+    fs_retry.retry_unlink(
+        dangling_symlink,
+        config=fs_retry.RetryConfig(max_attempts=1, retry_delay=0),
+    )
+
+    assert not os.path.lexists(dangling_symlink), "dangling link should be removed"
+
+
+def test_handle_unlink_failure_raises_supplied_exception() -> None:
+    """The final-failure helper raises the supplied exception outside except."""
+    error = PermissionError("still locked")
+
+    with pytest.raises(PermissionError) as raised:
+        fs_retry._handle_unlink_failure(Path("ignored"), error, None)
+
+    assert raised.value is error, "the supplied exception object should be raised"
 
 
 def test_retry_unlink_missing_between_checks(
@@ -158,7 +217,9 @@ def test_robust_rmtree_treats_missing_path_as_success(
 
     real_rmtree = shutil.rmtree
 
-    def remove_then_complain(path: Path) -> None:
+    def remove_then_complain(
+        path: Path, *, onexc: cabc.Callable[..., None] | None = None
+    ) -> None:
         """Remove the tree, then raise FileNotFoundError as if it had vanished."""
         real_rmtree(path)
         raise FileNotFoundError
@@ -169,3 +230,208 @@ def test_robust_rmtree_treats_missing_path_as_success(
         target, config=fs_retry.RetryConfig(max_attempts=2, retry_delay=0)
     )
     assert not target.exists()
+
+
+def test_robust_rmtree_treats_vanished_path_as_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path gone by the time of the error is success, whatever the error type."""
+    target = tmp_path / "raced-away"
+    target.mkdir()
+    real_rmtree = shutil.rmtree
+
+    def remove_then_deny(
+        path: Path, *, onexc: cabc.Callable[..., None] | None = None
+    ) -> None:
+        """Remove the tree, then raise a non-FileNotFoundError failure."""
+        msg = "denied after removal"
+        real_rmtree(path)
+        raise PermissionError(msg)
+
+    monkeypatch.setattr(fs_retry.shutil, "rmtree", remove_then_deny)
+
+    fs_retry.robust_rmtree(
+        target, config=fs_retry.RetryConfig(max_attempts=2, retry_delay=0)
+    )
+
+    assert not os.path.lexists(target), "vanished path should not be reported"
+
+
+def test_robust_rmtree_removes_dangling_symlink(dangling_symlink: Path) -> None:
+    """A dangling root symlink is unlinked instead of being treated as absent."""
+    fs_retry.robust_rmtree(
+        dangling_symlink,
+        config=fs_retry.RetryConfig(max_attempts=1, retry_delay=0),
+    )
+
+    assert not os.path.lexists(dangling_symlink), "dangling link should be removed"
+
+
+def test_robust_rmtree_refuses_intact_directory_symlink(tmp_path: Path) -> None:
+    """An intact root symlink is refused, leaving the link and target intact."""
+    target = tmp_path / "target"
+    target.mkdir()
+    sentinel = target / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    link = _symlink_to(tmp_path / "intact-link", target, target_is_directory=True)
+
+    with pytest.raises(fs_retry.RobustRmtreeError):
+        fs_retry.robust_rmtree(
+            link, config=fs_retry.RetryConfig(max_attempts=1, retry_delay=0)
+        )
+
+    assert link.is_symlink(), "the root symlink should remain in place"
+    assert sentinel.read_text(encoding="utf-8") == "keep", "target must be untouched"
+
+
+def test_windows_permission_error_clears_read_only_then_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Windows PermissionError chmods the failing entry, then retries it."""
+    target = tmp_path / "read-only-tree"
+    target.mkdir()
+    failing = target / "locked.txt"
+    failing.write_text("locked", encoding="utf-8")
+    failing_path = os.fspath(failing)
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
+
+    events: list[tuple[object, ...]] = []
+    unlink_attempts = 0
+
+    def fake_unlink(path: str) -> None:
+        """Fail the first removal, then succeed as if chmod helped."""
+        nonlocal unlink_attempts
+        unlink_attempts += 1
+        events.append(("unlink", path))
+        if unlink_attempts == 1:
+            raise PermissionError(path)
+
+    def record_chmod(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        """Record the chmod without touching the real filesystem."""
+        events.append(("chmod", os.fspath(path), mode))
+
+    def fake_rmtree(
+        path: Path, *, onexc: cabc.Callable[..., None] | None = None
+    ) -> None:
+        """Report one failing unlink, as shutil.rmtree would."""
+        assert onexc is not None, "robust_rmtree must pass an onexc handler"
+        try:
+            fake_unlink(failing_path)
+        except PermissionError as exc:
+            onexc(fake_unlink, failing_path, exc)
+        else:  # pragma: no cover - guards the fake itself
+            pytest.fail("fake unlink was expected to fail first")
+
+    monkeypatch.setattr(fs_retry.os, "unlink", fake_unlink)
+    monkeypatch.setattr(Path, "chmod", record_chmod)
+    monkeypatch.setattr(fs_retry.shutil, "rmtree", fake_rmtree)
+
+    fs_retry.robust_rmtree(
+        target, config=fs_retry.RetryConfig(max_attempts=1, retry_delay=0)
+    )
+
+    assert events == [
+        ("unlink", failing_path),
+        ("chmod", failing_path, stat.S_IWRITE),
+        ("unlink", failing_path),
+    ], "the retried removal should follow the chmod"
+
+
+def test_permission_error_handler_reraises_other_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-PermissionError report is re-raised without chmod."""
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
+    chmod_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
+    error = OSError("not a permission failure")
+
+    with pytest.raises(OSError, match="not a permission failure") as raised:
+        fs_retry._retry_windows_permission_error(os.unlink, "some-file", error)
+
+    assert raised.value is error, "the original exception should be re-raised"
+    assert chmod_calls == [], "unrelated failures must not chmod"
+
+
+def test_permission_error_handler_reraises_scandir_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repeated directory-level scandir failure is re-raised without chmod."""
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
+    chmod_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
+    error = PermissionError("cannot list directory")
+
+    with pytest.raises(PermissionError, match="cannot list directory") as raised:
+        fs_retry._retry_windows_permission_error(os.scandir, "some-dir", error)
+
+    assert raised.value is error, "the scandir report should be re-raised unchanged"
+    assert chmod_calls == [], "a scandir failure must not chmod"
+
+
+def test_permission_error_handler_skips_symlink(
+    dangling_symlink: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A symlink path is never chmodded, since chmod would follow the link."""
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
+    chmod_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
+    error = PermissionError("locked link")
+
+    with pytest.raises(PermissionError, match="locked link") as raised:
+        fs_retry._retry_windows_permission_error(
+            os.unlink, os.fspath(dangling_symlink), error
+        )
+
+    assert raised.value is error, "the symlink report should be re-raised unchanged"
+    assert chmod_calls == [], "a symlink must not be chmodded"
+
+
+def test_permission_error_handler_is_windows_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On POSIX the handler re-raises without chmod."""
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", False)
+    chmod_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
+    error = PermissionError("locked")
+
+    with pytest.raises(PermissionError, match="locked") as raised:
+        fs_retry._retry_windows_permission_error(os.unlink, "some-file", error)
+
+    assert raised.value is error, "the original exception should be re-raised"
+    assert chmod_calls == [], "POSIX has no read-only attribute to clear"
+
+
+def test_rmtree_wraps_chmod_failure_as_last_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A chmod failure propagates and becomes the wrapped last exception."""
+    target = tmp_path / "tree"
+    target.mkdir()
+    failing = target / "locked.txt"
+    failing.write_text("locked", encoding="utf-8")
+    chmod_error = OSError("chmod denied")
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
+
+    def failing_chmod(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        """Fail the read-only repair."""
+        raise chmod_error
+
+    def fake_rmtree(
+        path: Path, *, onexc: cabc.Callable[..., None] | None = None
+    ) -> None:
+        """Report one failing unlink, as shutil.rmtree would."""
+        assert onexc is not None, "robust_rmtree must pass an onexc handler"
+        onexc(os.unlink, os.fspath(failing), PermissionError("locked"))
+
+    monkeypatch.setattr(Path, "chmod", failing_chmod)
+    monkeypatch.setattr(fs_retry.shutil, "rmtree", fake_rmtree)
+
+    with pytest.raises(fs_retry.RobustRmtreeError) as raised:
+        fs_retry.robust_rmtree(
+            target, config=fs_retry.RetryConfig(max_attempts=1, retry_delay=0)
+        )
+
+    assert raised.value.__cause__ is chmod_error, "the chmod failure is the cause"
+    assert raised.value.last_exception is chmod_error, "the chmod failure is reported"

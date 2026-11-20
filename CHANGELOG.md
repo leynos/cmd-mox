@@ -29,4 +29,11 @@ and the [v0.4.0 migration guide](docs/v-0-4-0-migration-guide.md)._
   environment keys ([#368](https://github.com/leynos/cmd-mox/issues/368);
   leynos)
 
+### Fixed
+
+- `retry_unlink()` and `robust_rmtree()` remove a dangling symlink instead of
+  treating it as already absent, and `robust_rmtree()` clears the Windows
+  read-only attribute only for entries whose removal failed
+  ([#423](https://github.com/leynos/cmd-mox/issues/423); leynos)
+
 [Unreleased]: https://github.com/leynos/cmd-mox/compare/v0.2.0...HEAD
