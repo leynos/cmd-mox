@@ -56,6 +56,11 @@ _EXPECTED_NAMED_PIPE_ERROR_CATEGORIES = frozenset({
     "ReadTimeout",
     "ServerStopped",
 })
+_EXPECTED_UNIX_CONNECTION_ERROR_CATEGORIES = frozenset({
+    "MessageTooLargeError",
+    "ClientLimitReached",
+    "ThreadStartFailed",
+})
 
 
 class _AlwaysRefusedSocket:
@@ -286,6 +291,51 @@ def test_counter_key_preserves_fixed_named_pipe_error_categories() -> None:
         )
     finally:
         _observability.reset_counters()
+
+
+def test_counter_key_preserves_fixed_unix_connection_error_categories() -> None:
+    """Keep closed Unix size and admission labels available for diagnosis."""
+    categories = _EXPECTED_UNIX_CONNECTION_ERROR_CATEGORIES
+    _observability.reset_counters()
+    try:
+        for error_category in categories:
+            _observability.emit(
+                _observability.IPCEvent(
+                    operation="ipc.server.connection",
+                    transport="unix",
+                    outcome="rejected",
+                    error_category=error_category,
+                )
+            )
+
+        counter_categories = {
+            key.error_category for key in _observability.counter_snapshot()
+        }
+
+        assert counter_categories == categories, (
+            "Fixed Unix connection categories must remain separate counters"
+        )
+    finally:
+        _observability.reset_counters()
+
+
+def test_message_size_is_logged_but_never_keyed() -> None:
+    """An exact byte count is diagnostic detail, not a counter dimension."""
+    event = _observability.IPCEvent(
+        operation="ipc.server.connection",
+        transport="unix",
+        outcome="read_size_rejected",
+        error_category="MessageTooLargeError",
+        message_size=9000,
+    )
+
+    assert event.as_extra()["message_size"] == 9000, "Message size was not logged"
+    assert dc.replace(event, message_size=1).key() == event.key(), (
+        "Message size must not change the counter key"
+    )
+    assert event.key().error_category == "MessageTooLargeError", (
+        "The approved size category must stay countable"
+    )
 
 
 def test_capture_events_collects_emissions() -> None:

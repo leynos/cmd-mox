@@ -12,6 +12,13 @@ import typing as typ
 
 from cmd_mox import _path_utils as path_utils
 
+from ._limits import (
+    DEFAULT_READ_CHUNK_SIZE,
+    MessageTooLargeError,
+    ReadBounds,
+)
+from ._limits import MAX_MESSAGE_SIZE as MAX_MESSAGE_SIZE
+
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
 
@@ -47,14 +54,7 @@ type PipeChunkReader = cabc.Callable[[int], tuple[int, bytes]]
 type PipeReadResult = tuple[int, bytes] | None
 
 WINDOWS_PIPE_PREFIX: typ.Final[str] = r"\\.\pipe\cmdmox-"
-PIPE_CHUNK_SIZE: typ.Final[int] = 64 * 1024
-# Largest IPC message the transport will buffer for a single client. A real
-# invocation payload (command name, argv, stdin, and environment) is kilobytes
-# at worst, so 8 MiB leaves several orders of magnitude of headroom while still
-# bounding the memory one misbehaving or hostile peer can pin. The limit is
-# deliberately conservative: it is cheap to raise, whereas an unbounded reader
-# lets a single client exhaust the server process.
-MAX_MESSAGE_SIZE: typ.Final[int] = 8 * 1024 * 1024
+PIPE_CHUNK_SIZE: typ.Final[int] = DEFAULT_READ_CHUNK_SIZE
 ERROR_BROKEN_PIPE: typ.Final[int] = 109
 ERROR_PIPE_BUSY: typ.Final[int] = 231
 ERROR_NO_DATA: typ.Final[int] = 232
@@ -67,13 +67,14 @@ ERROR_FILE_NOT_FOUND: typ.Final[int] = 2
 logger = logging.getLogger(__name__)
 
 
-class PipeMessageTooLargeError(RuntimeError):
+class PipeMessageTooLargeError(MessageTooLargeError):
     """Raised when a named-pipe message exceeds the configured size limit.
 
-    The exception carries byte counts only. Message content is dropped as soon
-    as the limit is breached and is never retained, logged, or embedded in the
-    exception, so this error is safe to report through the bounded
-    observability seam.
+    This is the named-pipe spelling of the shared
+    :class:`~cmd_mox.ipc._limits.MessageTooLargeError`. It carries byte counts
+    only; message content is dropped as soon as the limit is breached and is
+    never retained, logged, or embedded in the exception, so it is safe to
+    report through the bounded observability seam.
 
     Attributes
     ----------
@@ -83,12 +84,7 @@ class PipeMessageTooLargeError(RuntimeError):
         Configured maximum message size in bytes.
     """
 
-    def __init__(self, *, received: int, limit: int) -> None:
-        """Store the received byte count and the configured limit."""
-        msg = f"named pipe message exceeded the {limit}-byte limit"
-        super().__init__(msg)
-        self.received = received
-        self.limit = limit
+    _message_prefix: typ.ClassVar[str] = "named pipe message"
 
 
 class _PyWinError(Exception):
@@ -480,11 +476,19 @@ def derive_pipe_name(identifier: os.PathLike[str] | str) -> str:
 
 
 @dc.dataclass(frozen=True, slots=True)
-class PipeReadOptions:
+class PipeReadOptions(ReadBounds):
     """Tunables for :func:`read_pipe_message`.
 
-    Bundling these keeps the reader's call surface small while letting the
-    server supply a cancellable reader and the shared size limit.
+    Inherits the validated byte budget and receive chunk size from
+    :class:`~cmd_mox.ipc._limits.ReadBounds`, and adds the cancellable reader
+    the server uses to enforce a per-client deadline.
+
+    A non-positive ``chunk_size`` is the more dangerous invalid bound: a
+    zero-byte read reports ``ERROR_MORE_DATA`` with no data, so the received
+    count never grows and :func:`read_pipe_message` spins forever. A
+    non-positive ``max_bytes`` does not hang — it fails fast with
+    :class:`PipeMessageTooLargeError` on the first chunk — but it is equally a
+    misconfiguration, so both are rejected up front.
 
     Parameters
     ----------
@@ -498,31 +502,7 @@ class PipeReadOptions:
         used by the server to enforce a per-client deadline.
     """
 
-    chunk_size: int = PIPE_CHUNK_SIZE
-    max_bytes: int = MAX_MESSAGE_SIZE
     read_chunk: PipeChunkReader | None = None
-
-    def __post_init__(self) -> None:
-        """Reject read tunables that cannot describe a usable read.
-
-        A non-positive ``chunk_size`` is the more dangerous of the two: a
-        zero-byte read reports ``ERROR_MORE_DATA`` with no data, so the
-        received count never grows and :func:`read_pipe_message` spins forever.
-        A non-positive ``max_bytes`` does not hang — it fails fast with
-        :class:`PipeMessageTooLargeError` on the first chunk — but it is
-        equally a misconfiguration, so both are rejected up front.
-
-        Raises
-        ------
-        ValueError
-            If ``chunk_size`` or ``max_bytes`` is not strictly positive.
-        """
-        if self.chunk_size <= 0:
-            msg = f"chunk_size must be positive, got {self.chunk_size}"
-            raise ValueError(msg)
-        if self.max_bytes <= 0:
-            msg = f"max_bytes must be positive, got {self.max_bytes}"
-            raise ValueError(msg)
 
 
 def _continue_reading(status: int) -> bool:

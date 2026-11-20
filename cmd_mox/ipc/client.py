@@ -38,8 +38,10 @@ from cmd_mox.ipc.windows import (
 
 from . import _client_events, _observability, wire
 from ._deadline import _compute_deadline, _remaining_time
+from ._limits import MAX_MESSAGE_SIZE
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
+from .socket_utils import ReadOptions, read_until_eof
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -439,21 +441,21 @@ def _get_validated_socket_path() -> Path:
 
 
 def _read_all(sock: socket.socket, deadline: float) -> bytes:
-    """Read all data from *sock* until EOF.
+    """Read *sock* to EOF within the shared message-size bound.
 
     Returns
     -------
     bytes
         Every byte received before the peer closed the connection.
     """
-    chunks = []
-    while True:
-        sock.settimeout(_remaining_time(deadline))
-        chunk = sock.recv(1024)
-        if not chunk:
-            break
-        chunks.append(chunk)
-    return b"".join(chunks)
+    return read_until_eof(
+        sock,
+        deadline,
+        ReadOptions(
+            max_bytes=MAX_MESSAGE_SIZE,
+            remaining_time=_remaining_time,
+        ),
+    )
 
 
 def _send_unix_request(

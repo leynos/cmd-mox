@@ -24,9 +24,10 @@ metrics collector.
 
 Counters are keyed by :class:`EventKey`. Message kinds and exception class
 names remain available in structured logs but are excluded from counter keys,
-because callers may add new values. Error categories from the closed backend
-and named-pipe vocabularies retain separate counters. This keeps the registry
-bounded while preserving the failure dimensions needed to diagnose IPC.
+because callers may add new values. Error categories from the closed backend,
+Unix connection, and named-pipe vocabularies retain separate counters. This
+keeps the registry bounded while preserving the failure dimensions needed to
+diagnose IPC.
 """
 
 from __future__ import annotations
@@ -71,8 +72,18 @@ type _NamedPipeErrorCategory = typ.Literal[
     "ReadTimeout",
     "ServerStopped",
 ]
-_COUNTER_ERROR_CATEGORIES: typ.Final[frozenset[str]] = _BACKEND_ERROR_CATEGORIES | (
-    frozenset(typ.get_args(_NamedPipeErrorCategory.__value__))
+type _UnixConnectionErrorCategory = typ.Literal[
+    "MessageTooLargeError",
+    "ClientLimitReached",
+    "ThreadStartFailed",
+]
+_UNIX_CONNECTION_ERROR_CATEGORIES: typ.Final[frozenset[str]] = frozenset(
+    typ.get_args(_UnixConnectionErrorCategory.__value__)
+)
+_COUNTER_ERROR_CATEGORIES: typ.Final[frozenset[str]] = (
+    _BACKEND_ERROR_CATEGORIES
+    | frozenset(typ.get_args(_NamedPipeErrorCategory.__value__))
+    | _UNIX_CONNECTION_ERROR_CATEGORIES
 )
 
 
@@ -82,6 +93,8 @@ class EventKey(typ.NamedTuple):
     ``strategy`` is the bounded stdin capture strategy. ``worker_alive`` and
     ``outstanding_workers`` stay out of the key: the first adds no diagnostic
     dimension beyond the outcome, and the second has unbounded cardinality.
+    ``message_size`` is likewise excluded, because an exact byte count has
+    unbounded cardinality; it is logged but never keyed.
     """
 
     operation: str

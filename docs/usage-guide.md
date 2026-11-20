@@ -1324,12 +1324,20 @@ On Windows the transport can be forced explicitly by swapping `IPCServer` for
 ``os.name``.
 
 Both transports emit bounded, structured observability events with correlation
-identifiers, and the Windows named-pipe transport bounds concurrent clients,
-message size, and per-client read time. See the
+identifiers. They also enforce the same resource bounds: one message may carry
+at most 8 MiB, and at most 64 clients are served at once. On Unix an oversized
+request is read only up to the limit, is not dispatched, and receives no
+response frame; the server records a `read_size_rejected` connection event
+carrying the observed byte count. A connection that arrives while 64 are
+already in flight is closed without a response frame and recorded as a
+`rejected` connection event. That refusal ends the connection, so a shim that
+is refused fails rather than waiting; a later connection attempt is admitted
+once a permit returns. The Windows named-pipe transport applies the same limits
+with its own `ipc.named_pipe.worker` events and per-client read time. See the
 [design document](./python-native-command-mocking-design.md) for the event
-vocabulary and the specific limits. Unix backend selection also emits bounded
-startup events before a request exists, so those records do not carry a
-correlation identifier.
+vocabulary, permit ownership, and the deadline differences between transports.
+Unix backend selection also emits bounded startup events before a request
+exists, so those records do not carry a correlation identifier.
 
 Projects that rely on :class:`CallbackIPCServer` can still customize startup
 and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
