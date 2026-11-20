@@ -3859,6 +3859,7 @@ version.
 #### 9.11.2 Upgrade Path
 
 ```python
+import copy
 import re
 
 _CURRENT_VERSION = (1, 0, 0)
