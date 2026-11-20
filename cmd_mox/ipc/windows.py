@@ -417,6 +417,25 @@ class NamedPipeBackend(typ.Protocol):
         """
         ...
 
+    def write_file(
+        self, handle: object, payload: bytes, overlapped: object
+    ) -> tuple[int, object]:
+        """Queue one message for an overlapped write to the connected client.
+
+        Delivery is asynchronous: a status of ``ERROR_IO_PENDING`` means the
+        caller must wait on *overlapped*'s event before the connection
+        deadline expires. The payload is queued whole rather than in
+        chunk-sized pieces, because a client stops reading at the first status
+        that is not ``ERROR_MORE_DATA``.
+
+        Returns
+        -------
+        tuple[int, object]
+            The status reported at once and the overlapped object Win32
+            returns alongside it.
+        """
+        ...
+
     def allocate_read_buffer(self, size: int) -> cabc.Buffer:
         """Allocate a writable buffer of *size* bytes for an overlapped read.
 

@@ -1084,21 +1084,22 @@ preserve endpoint access. An absolute path alone is not sufficient when that
 environment is missing; the shim exits with `IPC socket not specified`.
 
 Shims read non-terminal standard input until EOF to populate
-`Invocation.stdin`; terminal input is skipped. That capture is bounded by
-`CMOX_IPC_TIMEOUT`, measured from the moment capture starts, on every platform
-and for every kind of stream. A stream that has not reached EOF by the deadline
-is abandoned: the shim discards any partial input, does not contact the IPC
-server, writes `IPC error: stdin read timed out after <timeout> seconds` to
-stderr, and exits with status `1`. On Windows a blocked pipe read is
-interrupted with `CancelSynchronousIo`, and the shim allows a short bounded
-grace (about one second) for that read to unwind before it writes the
-diagnostic and exits. `CMOX_IPC_TIMEOUT` therefore bounds how long the capture
-waits for input; the diagnostic and process exit follow the cleanup, so the
-deadline is not an exact process-exit time. Because the shim reads stdin before
-opening IPC, a stalled stdin read cannot itself produce a server-side
-`IPC received malformed JSON` error. If that error appears, it does not
-identify stdin as the cause. Pass `stdin=subprocess.DEVNULL`, or otherwise
-close or redirect stdin, unless the caller intends to supply input.
+`Invocation.stdin`; terminal input is skipped. That capture is bounded by the
+absolute budget a shim anchors from `CMOX_IPC_TIMEOUT` at start-up, on every
+platform and for every kind of stream. A stream that has not reached EOF by the
+deadline is abandoned: the shim discards any partial input, does not contact
+the IPC server, writes
+`IPC error: stdin read timed out after <timeout> seconds` to stderr, and exits
+with status `1`. On Windows a blocked pipe read is interrupted with
+`CancelSynchronousIo`, and the shim allows a short bounded grace (about one
+second) for that read to unwind before it writes the diagnostic and exits.
+`CMOX_IPC_TIMEOUT` therefore bounds how long the capture waits for input; the
+diagnostic and process exit follow the cleanup, so the deadline is not an exact
+process-exit time. Because the shim reads stdin before opening IPC, a stalled
+stdin read cannot itself produce a server-side `IPC received malformed JSON`
+error. If that error appears, it does not identify stdin as the cause. Pass
+`stdin=subprocess.DEVNULL`, or otherwise close or redirect stdin, unless the
+caller intends to supply input.
 
 ## Controller configuration and journals
 
@@ -1331,8 +1332,9 @@ vocabulary and the specific limits. Unix backend selection also emits bounded
 startup events before a request exists, so those records do not carry a
 correlation identifier.
 
-Projects that rely on :class:`CallbackIPCServer` can still customize startup
-and accept timeouts by passing a :class:`TimeoutConfig` dataclass:
+Projects that rely on :class:`CallbackIPCServer` can still customize the
+per-connection budget and the accept-loop poll interval by passing a
+:class:`TimeoutConfig` dataclass:
 
 ```python
 import os
@@ -1358,6 +1360,12 @@ server = Server(
 )
 ```
 
+`timeout` is the per-connection budget shared by a connection's request read
+and its reply delivery. `accept_timeout` is the accept loop's poll interval on
+both transports: it bounds how quickly `stop()` is noticed, not how long a
+client may take to connect, so a large value makes shutdown correspondingly
+slower. Leaving it `None` derives it from `timeout`.
+
 ## Environment variables
 
 CmdMox exposes two environment variables to coordinate shims with the IPC
@@ -1372,20 +1380,24 @@ server.
   if the variable is missing.
 - `CMOX_IPC_TIMEOUT` – communication timeout in seconds. When the IPC server
   starts under an active `EnvironmentManager`, the configured timeout is
-  exported automatically (default `5.0`). The value bounds stdin capture on
-  every platform: capture starts its own deadline, and reaching it ends the
-  shim with the `IPC error: stdin read timed out ...` diagnostic and status `1`
-  whatever the stream's kind. On Windows the cancelled handle read is given a
-  short bounded grace (about one second) to unwind after the deadline, so the
-  diagnostic and exit follow that cleanup rather than happening exactly on the
-  deadline. On POSIX, the IPC exchange then runs against a separate deadline
-  anchored where the shim starts, covering connection to the Unix socket,
-  sending the request, receiving the response, and reporting passthrough
-  results. Because capture can consume the full timeout, stdin and IPC are two
-  bounds rather than one shared budget; a slow capture leaves the IPC exchange
-  correspondingly less time. On Windows, stdin is bounded by its own capture
-  deadline and named-pipe communication keeps its existing cooperative timeout,
-  so the POSIX IPC deadline does not apply there.
+  exported automatically (default `5.0`). A shim anchors one absolute budget
+  from this value at start-up on both platforms, and every later step spends
+  that budget rather than starting a fresh one. Standard-input capture is
+  bounded by it: reaching the deadline ends the shim with the
+  `IPC error: stdin read timed out ...` diagnostic and status `1` whatever the
+  stream's kind. On Windows the cancelled handle read is given a short bounded
+  grace (about one second) to unwind after the deadline, so the diagnostic and
+  exit follow that cleanup rather than happening exactly on the deadline. What
+  the capture leaves then covers connection to the IPC endpoint, sending the
+  request, receiving the response, and reporting passthrough results. Running
+  the real passthrough command is not interrupted, but its duration is charged
+  to the same budget, so the report only starts if time remains. On Windows a
+  request that expires mid-exchange may likewise take up to about one second to
+  cancel and drain its overlapped I/O before the timeout is reported.
+
+  On the server side, a connection's request read and its reply delivery share
+  one per-connection `timeout` budget, so a slow reader cannot buy itself a
+  second budget for the reply.
 
   A non-empty request that cannot be parsed or fails validation receives a
   bounded error response on stderr and exit status 1. An empty read, including

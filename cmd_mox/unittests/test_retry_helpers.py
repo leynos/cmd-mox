@@ -17,7 +17,9 @@ from cmd_mox.ipc.client import (
 def test_calculate_retry_delay() -> None:
     """Retry delay scales linearly and applies jitter bounds."""
     assert calculate_retry_delay(1, 0.1, 0.0) == pytest.approx(0.2)
-    with mock.patch("cmd_mox.ipc.random.uniform", return_value=1.25) as mock_uniform:
+    with mock.patch(
+        "cmd_mox.ipc._retry.random.uniform", return_value=1.25
+    ) as mock_uniform:
         delay = calculate_retry_delay(0, 1.0, 0.5)
         assert delay == pytest.approx(1.25)
         mock_uniform.assert_called_once_with(0.5, 1.5)
@@ -94,7 +96,7 @@ def test_retry_with_backoff_passes_the_configured_jitter_through() -> None:
     strategy = RetryStrategy(sleep=sleeps.append)
 
     with (
-        mock.patch("cmd_mox.ipc.client.random.uniform", return_value=1.5) as uniform,
+        mock.patch("cmd_mox.ipc._retry.random.uniform", return_value=1.5) as uniform,
         pytest.raises(OSError, match="temporary"),
     ):
         retry_with_backoff(
@@ -107,37 +109,63 @@ def test_retry_with_backoff_passes_the_configured_jitter_through() -> None:
     assert sleeps == [pytest.approx(0.3)], "the jitter was not applied to the delay"
 
 
-def test_retry_with_backoff_reports_an_exhausted_retrying_loop() -> None:
-    """A policy that retries every failure falls through to a RuntimeError.
+def test_retry_with_backoff_reraises_the_final_failure_when_the_policy_retries() -> (
+    None
+):
+    """The attempt limit wins over a predicate that only inspects the error.
 
-    Two retries are enough to be complete: every exhausted attempt takes the
-    same path, so the only variation a larger retry count adds is a longer
-    prefix of the same linear sleep sequence. This case pins the exact
-    fall-through text and both observed backoffs.
+    A predicate such as ``isinstance(exc, ConnectionError)`` cannot know when
+    the attempts run out, so the helper must stop at the limit itself. Two
+    retries are enough to be complete: every exhausted attempt takes the same
+    path, so a larger count only lengthens the same linear sleep sequence.
     """
     sleeps: list[float] = []
+    failure = OSError("temporary")
 
     def attempt(_attempt: int) -> str:
-        """Fail every attempt so the policy, not the callable, ends the loop."""
-        raise OSError("temporary")
+        """Fail every attempt so the attempt limit, not the policy, ends the loop."""
+        raise failure
 
     strategy = RetryStrategy(
         should_retry=lambda _exc, _attempt, _max: True,
         sleep=sleeps.append,
     )
-    expected = (
-        "Unreachable code reached in retry helper: all attempts exhausted "
-        "without returning a value."
-    )
 
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(OSError, match="temporary") as excinfo:
         retry_with_backoff(
             attempt,
             retry_config=RetryConfig(retries=2, backoff=0.1, jitter=0.0),
             strategy=strategy,
         )
 
-    assert str(excinfo.value) == expected, "the fall-through message changed"
-    assert sleeps == [pytest.approx(0.1), pytest.approx(0.2)], (
-        "every exhausted attempt must still honour its backoff"
+    assert excinfo.value is failure, "the final operation failure was replaced"
+    assert sleeps == [pytest.approx(0.1)], (
+        "the helper slept after the final attempt instead of re-raising"
     )
+
+
+def test_retry_with_backoff_reraises_a_single_retryable_failure_without_sleeping() -> (
+    None
+):
+    """A one-attempt policy surfaces the error callers expect to catch."""
+    sleeps: list[float] = []
+    failure = ConnectionError("server not ready")
+
+    def attempt(_attempt: int) -> str:
+        """Fail the only attempt with a retryable error."""
+        raise failure
+
+    strategy = RetryStrategy(
+        should_retry=lambda exc, _attempt, _max: isinstance(exc, ConnectionError),
+        sleep=sleeps.append,
+    )
+
+    with pytest.raises(ConnectionError) as excinfo:
+        retry_with_backoff(
+            attempt,
+            retry_config=RetryConfig(retries=1, backoff=0.1, jitter=0.0),
+            strategy=strategy,
+        )
+
+    assert excinfo.value is failure, "the retryable failure was replaced"
+    assert not sleeps, "the helper slept with no attempts left"

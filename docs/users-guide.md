@@ -213,15 +213,16 @@ the [fluent API reference](usage-guide.md#fluent-api-reference) for the full
 ## Shim stdin and IPC timeouts
 
 `CMOX_IPC_TIMEOUT` defaults to five seconds when the IPC server starts inside
-an active `EnvironmentManager`. Capture of non-terminal stdin is bounded on
-every platform and for every kind of stream: once the deadline passes, the shim
-discards partial input, does not contact the IPC server, prints
+an active `EnvironmentManager`. A shim anchors one absolute budget from it at
+start-up on both platforms, and capture of non-terminal stdin is bounded by
+that budget for every kind of stream: once it is spent, the shim discards
+partial input, does not contact the IPC server, prints
 `IPC error: stdin read timed out after <timeout> seconds`, and exits with status
-`1`. On POSIX, the Unix IPC exchange through passthrough reporting then runs
-against a separate deadline anchored where the shim starts, so a slow capture
-leaves it correspondingly less time. On Windows, stdin has a separate capture
-deadline while named-pipe communication uses its existing cooperative timeout,
-so the POSIX IPC deadline does not apply there.
+`1`. Whatever the capture leaves then covers the IPC exchange and the
+passthrough report, and running the real passthrough command is charged to the
+same budget even though it is not interrupted. On Windows a cancelled stdin
+read, or a request cancelled mid-exchange, may take up to about one second
+longer to clean up before the timeout is reported.
 
 If a shim may inherit stdin that stays open, send EOF, close the pipe, or
 redirect stdin from a source that is already complete. The shim now stops

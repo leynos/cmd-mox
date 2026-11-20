@@ -214,7 +214,7 @@ def test_admission_racing_stop_is_refused_or_joined(
     patch_win32(FakeWin32File(FakeWinError(named_pipe.ERROR_FILE_NOT_FOUND)))
     for _ in range(_RACE_ATTEMPTS):
         state = build_state()
-        monkeypatch.setattr(state, "_read_request", lambda _handle: None)
+        monkeypatch.setattr(state, "_read_request", lambda _handle, _deadline: None)
         barrier = threading.Barrier(2)
         gate = functools.partial(barrier.wait, 5.0) if synchronised else _no_gate
 
@@ -245,7 +245,7 @@ def test_a_worker_admitted_before_stop_is_joined(
     serving = threading.Event()
     release = threading.Event()
 
-    def block_read(_handle: object) -> bytes | None:
+    def block_read(_handle: object, _deadline: float) -> bytes | None:
         """Signal that serving has begun, then block until released."""
         serving.set()
         assert release.wait(5.0), "the blocked worker was never released"
@@ -271,15 +271,13 @@ def test_completed_client_releases_capacity(
     file_fake, _pipe_fake = patch_win32()
     state = build_state()
     state._client_slots = threading.BoundedSemaphore(1)
-    monkeypatch.setattr(state, "_read_request", lambda _handle: b"{}")
+    monkeypatch.setattr(state, "_read_request", lambda _handle, _deadline: b"{}")
     monkeypatch.setattr(
         named_pipe,
         "_request_pipeline",
         lambda *_args: _RequestResult(response_bytes=b"response", correlation_id=None),
     )
-    monkeypatch.setattr(
-        named_pipe, "write_pipe_payload", lambda *_args, **_kwargs: None
-    )
+    monkeypatch.setattr(state, "_deliver_reply", lambda *_args: True)
     handle = object()
 
     with _observability.capture_events() as events:
@@ -304,7 +302,7 @@ def test_read_failure_releases_capacity(
     state = build_state()
     state._client_slots = threading.BoundedSemaphore(1)
 
-    def fail_read(_handle: object) -> bytes:
+    def fail_read(_handle: object, _deadline: float) -> bytes:
         """Raise a pipe error in place of reading the request."""
         raise FakeWinError(UNEXPECTED_WINERROR)
 
@@ -341,7 +339,7 @@ def test_failing_handle_disposal_still_releases_capacity(
         raise FakeWinError(UNEXPECTED_WINERROR)
 
     monkeypatch.setattr(file_fake, "CloseHandle", fail_close)
-    monkeypatch.setattr(state, "_read_request", lambda _handle: None)
+    monkeypatch.setattr(state, "_read_request", lambda _handle, _deadline: None)
 
     slot = _run_worker(state, object())
 

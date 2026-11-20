@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses as dc
 import json
 import os
-import random
 import socket
 import threading
 import time
@@ -15,12 +14,6 @@ from pathlib import Path
 
 from cmd_mox import _bounded_thread
 from cmd_mox import _path_utils as path_utils
-from cmd_mox._validators import (
-    validate_positive_finite_timeout,
-    validate_retry_attempts,
-    validate_retry_backoff,
-    validate_retry_jitter,
-)
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV
 from cmd_mox.ipc.windows import (
     ERROR_FILE_NOT_FOUND,
@@ -37,7 +30,17 @@ from cmd_mox.ipc.windows import (
 )
 
 from . import _client_events, _observability, wire
-from ._deadline import _compute_deadline, _remaining_time
+from ._deadline import compute_deadline, remaining, remaining_or_none, timeout_ms
+from ._retry import (
+    DEFAULT_CONNECT_BACKOFF,
+    DEFAULT_CONNECT_JITTER,
+    DEFAULT_CONNECT_RETRIES,
+    MIN_RETRY_SLEEP,
+    RetryConfig,
+    RetryStrategy,
+    calculate_retry_delay,
+    retry_with_backoff,
+)
 from .constants import KIND_INVOCATION, KIND_PASSTHROUGH_RESULT
 from .json_utils import parse_json_safely
 
@@ -46,45 +49,12 @@ if typ.TYPE_CHECKING:
 
     from cmd_mox.domain import Invocation, PassthroughResult, Response
 
-DEFAULT_CONNECT_RETRIES: typ.Final[int] = 3
-DEFAULT_CONNECT_BACKOFF: typ.Final[float] = 0.05
-DEFAULT_CONNECT_JITTER: typ.Final[float] = 0.2
-MIN_RETRY_SLEEP: typ.Final[float] = 0.001
 # Upper bound on the wait for a cancelled I/O worker to unwind: generous enough
 # for a cancellation to complete, short enough that a wedged worker cannot hang
 # the caller indefinitely.
 IO_CANCEL_GRACE: typ.Final[float] = 1.0
 
 _SENTINEL: typ.Final[object] = object()
-
-
-@dc.dataclass(slots=True)
-class RetryConfig:
-    """Configuration for connection retry behavior."""
-
-    retries: int = DEFAULT_CONNECT_RETRIES
-    backoff: float = DEFAULT_CONNECT_BACKOFF
-    jitter: float = DEFAULT_CONNECT_JITTER
-
-    def __post_init__(self) -> None:
-        """Validate retry configuration values."""
-        validate_retry_attempts(self.retries)
-        validate_retry_backoff(self.backoff)
-        validate_retry_jitter(self.jitter)
-
-    def validate(self, timeout: float) -> None:
-        """Re-validate retry configuration alongside the connection timeout."""
-        validate_positive_finite_timeout(timeout)
-        self.__post_init__()
-
-
-@dc.dataclass(slots=True)
-class RetryStrategy:
-    """Hooks for logging and gating retry behaviour."""
-
-    on_failure: cabc.Callable[[int, Exception], None] | None = None
-    should_retry: cabc.Callable[[Exception, int, int], bool] | None = None
-    sleep: cabc.Callable[[float], None] = time.sleep
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -99,114 +69,6 @@ class _ConnectionContext:
     def validate(self) -> None:
         """Re-validate the retry configuration against the timeout."""
         self.retry_config.validate(self.timeout)
-
-
-def calculate_retry_delay(attempt: int, backoff: float, jitter: float) -> float:
-    """Return the sleep delay for a 0-based *attempt*.
-
-    Never shorter than :data:`MIN_RETRY_SLEEP`.
-
-    Returns
-    -------
-    float
-        The bounded, optionally jittered retry delay in seconds.
-    """
-    delay = backoff * (attempt + 1)
-    if jitter:
-        # Randomise the linear backoff within the jitter bounds to avoid
-        # thundering herds if many clients retry simultaneously.
-        factor = random.uniform(1.0 - jitter, 1.0 + jitter)  # ruff: ignore[suspicious-non-cryptographic-random-usage] - non-cryptographic jitter for retry backoff
-        delay *= factor
-    return max(delay, MIN_RETRY_SLEEP)
-
-
-@dc.dataclass(slots=True)
-class _RetryContext:
-    """Carry the attempt state and retry policy through one retry decision."""
-
-    attempt: int
-    max_attempts: int
-    retry_config: RetryConfig
-    strategy: RetryStrategy
-
-
-def _handle_retry_failure(
-    exc: Exception,
-    context: _RetryContext,
-) -> float:
-    """Process a failure from a retry attempt and return the backoff delay.
-
-    Raises *exc* when no further retries should be attempted.
-
-    Returns
-    -------
-    float
-        The delay before the next retry attempt.
-    """
-    if context.strategy.on_failure is not None:
-        context.strategy.on_failure(context.attempt, exc)
-
-    retry_decider = context.strategy.should_retry or (
-        lambda _exc, att, maximum: att < maximum - 1
-    )
-    if not retry_decider(exc, context.attempt, context.max_attempts):
-        raise
-
-    return calculate_retry_delay(
-        context.attempt,
-        context.retry_config.backoff,
-        context.retry_config.jitter,
-    )
-
-
-def retry_with_backoff[T](
-    func: cabc.Callable[[int], T],
-    *,
-    retry_config: RetryConfig,
-    strategy: RetryStrategy | None = None,
-) -> T:
-    """Execute *func* until it succeeds or retries are exhausted.
-
-    The callable receives the 0-based attempt index. When provided, the
-    strategy's ``on_failure`` runs on every raised exception (e.g., for
-    logging). The strategy's ``should_retry`` decides whether to try again,
-    defaulting to retrying until the configured maximum attempts. The delay
-    between attempts is calculated from ``retry_config.backoff`` and
-    ``retry_config.jitter`` using :func:`calculate_retry_delay`, and the wait
-    is performed via ``strategy.sleep`` (defaulting to :func:`time.sleep` when
-    *strategy* is ``None``).
-
-    Returns
-    -------
-    T
-        The value returned by the first successful invocation of ``func``.
-
-    Raises
-    ------
-    RuntimeError
-        If the retry loop terminates without returning or propagating a failure.
-    """
-    max_attempts = retry_config.retries
-    strat = strategy if strategy is not None else RetryStrategy()
-
-    for attempt in range(max_attempts):
-        try:
-            return func(attempt)
-        except Exception as exc:  # ruff: ignore[blind-except] - generic retry helper: *func* is caller-supplied and may raise anything
-            context = _RetryContext(
-                attempt=attempt,
-                max_attempts=max_attempts,
-                retry_config=retry_config,
-                strategy=strat,
-            )
-            delay = _handle_retry_failure(exc, context)
-            strat.sleep(delay)
-
-    msg = (
-        "Unreachable code reached in retry helper: all attempts exhausted "
-        "without returning a value."
-    )
-    raise RuntimeError(msg)
 
 
 def _pipe_handle_closer(handle: object) -> _bounded_thread.HandleCloser:
@@ -263,32 +125,8 @@ def _cancel_and_await_worker(
     )
 
 
-def _validate_initial_deadline(
-    deadline: float, cancel: cabc.Callable[[], None], thread: threading.Thread
-) -> float:
-    """Validate the deadline and return remaining time.
-
-    If already expired, cancel the operation and raise TimeoutError.
-
-    Returns
-    -------
-    float
-        The positive time remaining before the operation's deadline.
-
-    Raises
-    ------
-    TimeoutError
-        If the deadline has already passed.
-    """
-    try:
-        return _remaining_time(deadline)
-    except TimeoutError:
-        _cancel_and_await_worker(thread, cancel)
-        raise
-
-
 def _join_with_timeout_and_cancel(
-    thread: threading.Thread, remaining: float, cancel: cabc.Callable[[], None]
+    thread: threading.Thread, budget: float, cancel: cabc.Callable[[], None]
 ) -> None:
     """Join the thread with timeout; cancel and raise if still alive.
 
@@ -299,9 +137,9 @@ def _join_with_timeout_and_cancel(
     Raises
     ------
     TimeoutError
-        If *thread* is still running after *remaining* seconds.
+        If *thread* is still running after *budget* seconds.
     """
-    thread.join(remaining)
+    thread.join(budget)
     if not thread.is_alive():
         return
     msg = "IPC client operation timed out"
@@ -340,22 +178,45 @@ def _run_blocking_io[T](
 ) -> T:
     """Execute *func* on a worker thread until completion or timeout.
 
+    The shared deadline is checked before the worker starts. An expired
+    request therefore fails without creating a thread to cancel, and the
+    cancellation grace below only ever applies to a worker that exists.
+
+    The budget is re-read after the worker starts, because constructing and
+    starting the thread spends part of the same deadline. A budget that runs
+    out during startup still reaches the cancel-and-join path: that is the
+    only path which waits for the worker to release the pipe handle.
+
+    The worker re-checks the deadline before running *func*, because
+    scheduling can hold the thread until after the caller has given up. That
+    check narrows the window rather than closing it: a deadline that expires
+    between the check and the first I/O call still lets that call start, and
+    the cancel-and-join path bounds what follows. The check runs inside the
+    outcome guard, so a worker that finds the budget spent re-raises its
+    ``TimeoutError`` on the caller's thread instead of returning ``None``.
+
     Returns
     -------
     T
         The value returned by *func*.
     """
+    remaining(deadline)
     outcome: dict[str, typ.Any] = {"value": _SENTINEL}
 
+    def run_once_started() -> T:
+        """Run *func* only while the shared budget remains."""
+        remaining(deadline)
+        return func()
+
     thread = threading.Thread(
-        target=_bounded_thread.stash_outcome(outcome, func),
+        target=_bounded_thread.stash_outcome(outcome, run_once_started),
         name="cmd-mox-ipc-io",
         daemon=True,
     )
     thread.start()
 
-    remaining = _validate_initial_deadline(deadline, cancel, thread)
-    _join_with_timeout_and_cancel(thread, remaining, cancel)
+    left = remaining_or_none(deadline)
+    _join_with_timeout_and_cancel(thread, 0.0 if left is None else left, cancel)
     return typ.cast("T", _extract_outcome(outcome))
 
 
@@ -389,15 +250,15 @@ def _connect_unix_with_retries(
     address = str(sock_path)
     request_deadline = deadline if deadline is not None else context.deadline
     if request_deadline is None:
-        request_deadline = _compute_deadline(context.timeout)
-    _remaining_time(request_deadline)
+        request_deadline = compute_deadline(context.timeout)
+    remaining(request_deadline)
 
     def attempt_connect(_attempt: int) -> socket.socket:
         """Open a fresh Unix socket and connect it, closing it if connect fails."""
-        _remaining_time(request_deadline)
+        remaining(request_deadline)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            sock.settimeout(_remaining_time(request_deadline))
+            sock.settimeout(remaining(request_deadline))
             sock.connect(address)
         except OSError:
             sock.close()
@@ -406,7 +267,7 @@ def _connect_unix_with_retries(
 
     def bounded_sleep(delay: float) -> None:
         """Limit retry backoff to the remaining request deadline."""
-        time.sleep(min(delay, _remaining_time(request_deadline)))
+        time.sleep(min(delay, remaining(request_deadline)))
 
     return retry_with_backoff(
         attempt_connect,
@@ -448,7 +309,7 @@ def _read_all(sock: socket.socket, deadline: float) -> bytes:
     """
     chunks = []
     while True:
-        sock.settimeout(_remaining_time(deadline))
+        sock.settimeout(remaining(deadline))
         chunk = sock.recv(1024)
         if not chunk:
             break
@@ -465,12 +326,12 @@ def _send_unix_request(
     context.validate()
     deadline = context.deadline
     if deadline is None:
-        deadline = _compute_deadline(context.timeout)
-    _remaining_time(deadline)
+        deadline = compute_deadline(context.timeout)
+    remaining(deadline)
     with _connect_unix_with_retries(sock_path, context, deadline=deadline) as client:
-        client.settimeout(_remaining_time(deadline))
+        client.settimeout(remaining(deadline))
         client.sendall(payload)
-        client.settimeout(_remaining_time(deadline))
+        client.settimeout(remaining(deadline))
         client.shutdown(socket.SHUT_WR)
         return _read_all(client, deadline)
 
@@ -503,15 +364,27 @@ def _wait_for_pipe_availability(
     *,
     deadline: float | None = None,
 ) -> None:
-    """Wait for *pipe_name* to become available, falling back to sleep."""
-    wait_duration = delay
-    if deadline is not None:
-        wait_duration = min(delay, _remaining_time(deadline))
-    wait_ms = max(1, int(wait_duration * 1000))
+    """Wait for *pipe_name* to become available, falling back to sleep.
+
+    Both the Win32 wait and the fallback sleep are limited by whatever budget
+    the shared *deadline* has left, and the remaining budget is re-read after
+    the wait so a slow ``WaitNamedPipe`` cannot overshoot it.
+
+    Raises
+    ------
+    TimeoutError
+        The shared deadline expired before the pipe became available.
+    """  # ruff: ignore[docstring-extraneous-exception] - the shared budget raises it, not this helper
+
+    def bounded_wait(seconds: float) -> float:
+        """Clamp *seconds* to the remaining shared budget."""
+        return seconds if deadline is None else min(seconds, remaining(deadline))
+
+    wait_ms = timeout_ms(bounded_wait(delay))
     try:
         win32pipe.WaitNamedPipe(pipe_name, wait_ms)
     except pywintypes.error:
-        time.sleep(wait_duration)
+        time.sleep(bounded_wait(delay))
 
 
 def _create_pipe_handle(pipe_name: str) -> object:
@@ -546,9 +419,27 @@ def _connect_pipe_with_retries(
     *,
     deadline: float | None = None,
 ) -> object:
-    """Open a handle to the named pipe, retrying while it is busy or missing."""
+    """Open a handle to the named pipe, retrying while it is busy or missing.
+
+    An omitted *deadline* falls back to the context's shared deadline and then
+    to one computed from the context timeout. The chosen deadline bounds every
+    attempt, so retries can never extend the caller's budget.
+
+    Returns
+    -------
+    object
+        The opaque pywin32 handle to the connected pipe.
+    """
     pipe_name_str = os.fspath(pipe_name)
-    connect_deadline = deadline or _compute_deadline(context.timeout)
+    connect_deadline = deadline if deadline is not None else context.deadline
+    if connect_deadline is None:
+        connect_deadline = compute_deadline(context.timeout)
+    remaining(connect_deadline)
+
+    def open_handle(_attempt: int) -> object:
+        """Open the pipe only while the shared connect budget remains."""
+        remaining(connect_deadline)
+        return _create_pipe_handle(pipe_name_str)
 
     def sleep(delay: float) -> None:
         """Wait for the pipe to become available, bounded by the connect deadline."""
@@ -559,7 +450,7 @@ def _connect_pipe_with_retries(
         )
 
     return retry_with_backoff(
-        lambda _attempt: _create_pipe_handle(pipe_name_str),
+        open_handle,
         retry_config=context.retry_config,
         strategy=RetryStrategy(
             on_failure=partial(_log_connect_retry, "named_pipe", context=context),
@@ -574,14 +465,30 @@ def _send_pipe_request(
     payload: bytes,
     context: _ConnectionContext,
 ) -> bytes:
-    """Send one payload over a named pipe and return the full reply."""
+    """Send one payload over a named pipe and return the full reply.
+
+    The pipe transport shares a single absolute deadline with the Unix
+    transport: connecting, writing the request, and reading the reply all draw
+    down the same budget. A caller that supplies no deadline grants the context
+    timeout from now, measured after the payload was encoded.
+
+    A reply that expires may report its timeout up to the cancellation grace
+    later, because the overlapped worker is cancelled and drained before the
+    handle is released.
+
+    Returns
+    -------
+    bytes
+        Every byte of the server's reply.
+    """
     pipe_name = derive_pipe_name(sock_path)
-    timeout = context.timeout
-    connect_deadline = _compute_deadline(timeout)
+    deadline = context.deadline
+    if deadline is None:
+        deadline = compute_deadline(context.timeout)
     handle = _connect_pipe_with_retries(
         pipe_name,
         context,
-        deadline=connect_deadline,
+        deadline=deadline,
     )
     closer = _pipe_handle_closer(handle)
     try:
@@ -591,7 +498,7 @@ def _send_pipe_request(
                 payload,
                 win32file=win32file,
             ),
-            deadline=_compute_deadline(timeout),
+            deadline=deadline,
             cancel=closer.close,
         )
         return _run_blocking_io(
@@ -601,7 +508,7 @@ def _send_pipe_request(
                 pywintypes=pywintypes,
                 options=PipeReadOptions(chunk_size=PIPE_CHUNK_SIZE),
             ),
-            deadline=_compute_deadline(timeout),
+            deadline=deadline,
             cancel=closer.close,
         )
     finally:
@@ -706,18 +613,23 @@ def invoke_server(
 ) -> Response:
     """Send *invocation* to the IPC server and return its response.
 
-    Unix shares one deadline across I/O; Windows uses per-step pipe timeouts.
+    Both transports share one absolute deadline across connecting, writing the
+    request, and reading the reply, so retries and connection attempts cannot
+    extend the caller's budget. On Windows an expired request may take up to a
+    further second to cancel and drain its overlapped I/O before the timeout is
+    reported.
 
     Parameters
     ----------
     invocation : Invocation
         Request to send.
     timeout : float
-        Request limit in seconds.
+        Request limit in seconds, used when *deadline* is omitted.
     retry_config : RetryConfig or None, optional
         Connection retry policy.
     deadline : float or None, optional
-        Absolute Unix deadline shared with preceding shim work.
+        Absolute monotonic deadline shared with preceding shim work, such as
+        capturing stdin. ``None`` grants *timeout* from now.
 
     Returns
     -------
@@ -740,18 +652,22 @@ def report_passthrough_result(
 ) -> Response:
     """Send passthrough execution results back to the IPC server.
 
-    Unix shares the shim deadline; Windows retains per-step pipe timeouts.
+    Both transports share one absolute deadline across connecting, writing the
+    report, and reading the acknowledgement. On Windows an expired report may
+    take up to a further second to cancel and drain its overlapped I/O before
+    the timeout is reported.
 
     Parameters
     ----------
     result : PassthroughResult
         Command result to report.
     timeout : float
-        Request limit in seconds.
+        Request limit in seconds, used when *deadline* is omitted.
     retry_config : RetryConfig or None, optional
         Connection retry policy.
     deadline : float or None, optional
-        Absolute Unix deadline shared with preceding shim work.
+        Absolute monotonic deadline shared with the passthrough command and
+        the preceding request. ``None`` grants *timeout* from now.
 
     Returns
     -------

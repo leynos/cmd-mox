@@ -47,6 +47,44 @@ class _RecordingBlockingRunner:
         return func()
 
 
+class _FakeClock:
+    """Monotonic clock whose reading the test advances explicitly."""
+
+    def __init__(self, now: float = 0.0) -> None:
+        """Start the clock at *now*."""
+        self.now = now
+
+    def remaining(self, deadline: float) -> float:
+        """Report the budget left, raising once it is spent."""
+        left = deadline - self.now
+        if left <= 0:
+            raise TimeoutError(_TIMEOUT_MESSAGE)
+        return left
+
+
+class _BudgetRecordingRunner:
+    """Run blocking closures while advancing a fake clock past each phase."""
+
+    def __init__(self, clock: _FakeClock, advance: float) -> None:
+        """Record the clock and how far each phase advances it."""
+        self.clock = clock
+        self.advance = advance
+        self.budgets: list[float] = []
+
+    def __call__(
+        self,
+        func: cabc.Callable[[], object],
+        *,
+        deadline: float,
+        cancel: cabc.Callable[[], None],
+    ) -> object:
+        """Record the budget the phase sees, advance the clock, then run it."""
+        time_left = self.clock.remaining(deadline)
+        self.budgets.append(time_left)
+        self.clock.now += self.advance
+        return func()
+
+
 @dataclasses.dataclass(slots=True)
 class _SendPipeSpy:
     """Recorded artefacts of one ``_send_pipe_request`` call."""
@@ -99,32 +137,32 @@ def send_pipe_spy(monkeypatch: pytest.MonkeyPatch) -> _SendPipeSpy:
     return _bind_send_pipe_request(monkeypatch)
 
 
-def test_send_pipe_request_uses_separate_phase_deadlines_and_exact_arguments(
+def test_send_pipe_request_shares_one_deadline_across_every_phase(
     send_pipe_spy: _SendPipeSpy,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Write and read phases each get a fresh deadline and the pipe handle."""
+    """Connect, write and read draw down a single computed deadline."""
     runner = _RecordingBlockingRunner()
     computed: list[float] = []
 
     def compute(timeout: float) -> float:
-        """Record each timeout and return a distinct increasing deadline."""
+        """Record the timeout and return one fixed deadline."""
         computed.append(timeout)
-        return 100.0 + len(computed)
+        return 101.0
 
     monkeypatch.setattr(client, "_run_blocking_io", runner)
-    monkeypatch.setattr(client, "_compute_deadline", compute)
+    monkeypatch.setattr(client, "compute_deadline", compute)
     context = _ConnectionContext(timeout=2.0, retry_config=RetryConfig())
 
     result = client._send_pipe_request(pathlib.Path("socket"), b"payload", context)
 
     assert result == b"reply", "the pipe reply was not returned"
-    assert computed == [2.0, 2.0, 2.0], "phase deadlines used the wrong timeout"
-    assert runner.deadlines == [102.0, 103.0], (
-        "the write and read phases did not receive separate deadlines"
+    assert computed == [2.0], "the deadline was not computed exactly once"
+    assert runner.deadlines == [101.0, 101.0], (
+        "the write and read phases did not share the computed deadline"
     )
     assert send_pipe_spy.connects == [("hashed-pipe", context, 101.0)], (
-        "the connection did not use the hashed pipe name and connect deadline"
+        "the connection did not use the hashed pipe name and shared deadline"
     )
     assert send_pipe_spy.writes == [
         (send_pipe_spy.handle, b"payload", client.win32file)
@@ -140,6 +178,79 @@ def test_send_pipe_request_uses_separate_phase_deadlines_and_exact_arguments(
     assert options.max_bytes == MAX_MESSAGE_SIZE, "the read size limit changed"
     assert send_pipe_spy.closes == [send_pipe_spy.handle], (
         "the pipe handle was not closed exactly once"
+    )
+
+
+def test_send_pipe_request_spends_one_budget_across_write_and_read(
+    send_pipe_spy: _SendPipeSpy,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each later phase sees less of the shared budget than the one before."""
+    clock = _FakeClock()
+    runner = _BudgetRecordingRunner(clock, advance=0.4)
+    monkeypatch.setattr(client, "_run_blocking_io", runner)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 1.0)
+    monkeypatch.setattr(client, "remaining", clock.remaining)
+
+    client._send_pipe_request(
+        pathlib.Path("socket"),
+        b"payload",
+        _ConnectionContext(timeout=1.0, retry_config=RetryConfig()),
+    )
+
+    assert runner.budgets == [pytest.approx(1.0), pytest.approx(0.6)], (
+        "the write and read phases did not draw down one shared budget"
+    )
+
+
+def test_send_pipe_request_stops_when_the_shared_budget_is_spent(
+    send_pipe_spy: _SendPipeSpy,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A budget spent by the write phase prevents the reply read entirely."""
+    clock = _FakeClock()
+    runner = _BudgetRecordingRunner(clock, advance=1.5)
+    monkeypatch.setattr(client, "_run_blocking_io", runner)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 1.0)
+    monkeypatch.setattr(client, "remaining", clock.remaining)
+
+    with pytest.raises(TimeoutError):
+        client._send_pipe_request(
+            pathlib.Path("socket"),
+            b"payload",
+            _ConnectionContext(timeout=1.0, retry_config=RetryConfig()),
+        )
+
+    assert send_pipe_spy.writes, "the write phase did not run"
+    assert not send_pipe_spy.reads, "the expired budget still read the reply"
+    assert send_pipe_spy.closes == [send_pipe_spy.handle], (
+        "the handle was not closed after the expiry"
+    )
+
+
+@pytest.mark.parametrize("deadline", [42.0, 0.0], ids=["future", "zero"])
+def test_send_pipe_request_reuses_the_context_deadline_verbatim(
+    send_pipe_spy: _SendPipeSpy,
+    monkeypatch: pytest.MonkeyPatch,
+    deadline: float,
+) -> None:
+    """A supplied deadline is never recomputed, even when it reads as zero."""
+    runner = _RecordingBlockingRunner()
+    computed: list[float] = []
+    monkeypatch.setattr(client, "_run_blocking_io", runner)
+    monkeypatch.setattr(client, "compute_deadline", computed.append)
+    context = _ConnectionContext(
+        timeout=2.0, retry_config=RetryConfig(), deadline=deadline
+    )
+
+    client._send_pipe_request(pathlib.Path("socket"), b"payload", context)
+
+    assert not computed, "a supplied deadline was replaced by a fresh one"
+    assert runner.deadlines == [deadline, deadline], (
+        "the phases did not share the supplied deadline"
+    )
+    assert send_pipe_spy.connects[0][2] == deadline, (
+        "the connection did not use the supplied deadline"
     )
 
 
@@ -176,7 +287,7 @@ def test_send_pipe_request_closes_once_when_a_phase_fails(
         raise error
 
     monkeypatch.setattr(client, "_run_blocking_io", runner)
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 10.0)
     monkeypatch.setattr(client, case.patch_target, fail)
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -251,7 +362,7 @@ def test_send_pipe_request_closes_once_when_a_phase_is_cancelled(
 ) -> None:
     """Cancellation and the finally block share one idempotent close."""
     closes: list[object] = []
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 10.0)
 
     def cancel_then_raise(
         _func: cabc.Callable[[], object],
@@ -290,7 +401,7 @@ def test_send_pipe_request_offers_cancellation_to_the_read_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Both phases receive the same handle-closing cancellation callable."""
-    monkeypatch.setattr(client, "_compute_deadline", lambda _timeout: 10.0)
+    monkeypatch.setattr(client, "compute_deadline", lambda _timeout: 10.0)
     cancels: list[object] = []
 
     def run_then_time_out(

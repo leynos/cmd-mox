@@ -1,10 +1,10 @@
 """Resource bounds and bounded worker events for the named-pipe transport.
 
 This module holds the concurrency, message-size, and lifetime limits applied by
-:mod:`cmd_mox.ipc.named_pipe`, the deadline arithmetic that enforces them, and
-the vocabulary used to report them through the observability seam. It
-deliberately imports no ``pywin32`` module, so the limits are importable and
-testable on any platform.
+:mod:`cmd_mox.ipc.named_pipe` and the vocabulary used to report them through
+the observability seam. Deadline arithmetic lives in :mod:`cmd_mox.ipc._deadline`
+so every transport shares one contract. It deliberately imports no ``pywin32``
+module, so the limits are importable and testable on any platform.
 """
 
 from __future__ import annotations
@@ -12,10 +12,10 @@ from __future__ import annotations
 import dataclasses as dc
 import logging
 import threading
-import time
 import typing as typ
 
 from . import _observability
+from ._deadline import remaining_or_none
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -25,12 +25,6 @@ if typ.TYPE_CHECKING:
 # above the handful of shims a realistic run has in flight, yet small enough
 # that a connection flood cannot exhaust the process's thread or handle budget.
 MAX_ACTIVE_CLIENTS: typ.Final[int] = 64
-
-# Wall-clock budget for reading one complete request from a connected client.
-# A shim writes its request immediately after connecting, so thirty seconds is
-# far more than a healthy peer needs even on a loaded CI machine, while still
-# guaranteeing that a client which connects and goes silent cannot pin a worker.
-CLIENT_READ_TIMEOUT_SECONDS: typ.Final[float] = 30.0
 
 #: Operation name for every bounded event emitted by a named-pipe worker.
 WORKER_OPERATION: typ.Final[str] = "ipc.named_pipe.worker"
@@ -143,44 +137,6 @@ class ClientSlot:
         self._semaphore.release()
 
 
-def remaining_seconds(deadline: float) -> float | None:
-    """Return the time left before *deadline*.
-
-    Parameters
-    ----------
-    deadline:
-        A :func:`time.monotonic` timestamp.
-
-    Returns
-    -------
-    float | None
-        The remaining seconds, or ``None`` once the deadline has passed.
-    """
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        return None
-    return remaining
-
-
-def remaining_ms(deadline: float) -> int:
-    """Return the milliseconds left before *deadline*.
-
-    Parameters
-    ----------
-    deadline:
-        A :func:`time.monotonic` timestamp.
-
-    Returns
-    -------
-    int
-        Zero once the deadline has passed, so a wait returns at once.
-    """
-    remaining = remaining_seconds(deadline)
-    if remaining is None:
-        return 0
-    return max(0, int(remaining * 1000))
-
-
 def join_threads_before(
     threads: cabc.Iterable[threading.Thread], deadline: float
 ) -> bool:
@@ -199,10 +155,10 @@ def join_threads_before(
         Whether every thread's join was attempted before the deadline expired.
     """
     for thread in threads:
-        remaining = remaining_seconds(deadline)
-        if remaining is None:
+        left = remaining_or_none(deadline)
+        if left is None:
             return False
-        thread.join(remaining)
+        thread.join(left)
     return True
 
 
@@ -220,7 +176,6 @@ def acquire_client_slot(semaphore: threading.BoundedSemaphore) -> ClientSlot | N
 
 
 __all__ = [
-    "CLIENT_READ_TIMEOUT_SECONDS",
     "MAX_ACTIVE_CLIENTS",
     "WORKER_OPERATION",
     "ClientSlot",
@@ -229,6 +184,4 @@ __all__ = [
     "WorkerOutcome",
     "acquire_client_slot",
     "join_threads_before",
-    "remaining_ms",
-    "remaining_seconds",
 ]
