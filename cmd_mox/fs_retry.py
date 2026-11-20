@@ -113,19 +113,51 @@ def _retry_windows_permission_error(
 
     ``shutil.rmtree`` reports each failing entry separately, so repairing only
     the reported entry is both sufficient and cheaper than walking the whole
-    tree before every attempt. Every other report, including the repeated
-    directory-level ``os.scandir`` failure CPython can raise for the same
-    problem, is re-raised for the retry loop to handle.
+    tree before every attempt. An entry that vanished before the repair is
+    skipped so ``rmtree`` can continue with the rest; every other report,
+    including the repeated directory-level ``os.scandir`` failure CPython can
+    raise for the same problem, is re-raised for the retry loop to handle.
     """
-    if not path_utils.IS_WINDOWS or not isinstance(exc, PermissionError):
-        raise exc
+    match exc:
+        case FileNotFoundError():
+            # The entry was already removed; letting rmtree continue is enough.
+            return
+        case PermissionError() if path_utils.IS_WINDOWS:
+            pass
+        case _:
+            raise exc
 
     entry = Path(path)
     if func not in {os.unlink, os.rmdir} or entry.is_symlink():
         raise exc
 
-    entry.chmod(stat.S_IWRITE)
-    func(path)
+    try:
+        entry.chmod(stat.S_IWRITE)
+        func(path)
+    except FileNotFoundError:
+        # The entry vanished between the report and the repair, so there is
+        # nothing left to fix and the remaining entries still need removing.
+        return
+
+
+def _link_target_is_missing(link: Path) -> bool:
+    """Report whether *link*'s target is absent rather than inaccessible.
+
+    ``Path.exists`` reports an access error as absence, which would unlink an
+    intact link to an unsearchable target. Only a target lookup that
+    establishes absence qualifies; an access error propagates to the retry
+    loop.
+
+    Returns
+    -------
+    bool
+        ``True`` when the target is absent, ``False`` when it is reachable.
+    """
+    try:
+        link.stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    return False
 
 
 def _path_exists(path: Path) -> bool:
@@ -345,8 +377,10 @@ def robust_rmtree(
     Remove a directory tree with retries and clearer errors.
 
     A dangling symlink at *path* is unlinked as a link, without touching its
-    target. An intact symlink is refused, as :func:`shutil.rmtree` refuses one.
-    On Windows, the read-only attribute is cleared only for the entries that
+    target. An intact symlink is refused, as :func:`shutil.rmtree` refuses one,
+    and a link whose target cannot be inspected is reported as a failure
+    rather than mistaken for a dangling link. On Windows, the read-only
+    attribute is cleared only for the entries that
     fail to delete, and only those calls are retried. An access error while
     checking presence counts as present rather than absent, so it cannot mask
     a failed removal. If the path does not exist or is removed during retries,
@@ -373,7 +407,7 @@ def robust_rmtree(
 
     def remove_tree() -> None:
         """Make one removal attempt for the current root type."""
-        if path.is_symlink() and not path.exists():
+        if path.is_symlink() and _link_target_is_missing(path):
             # A dangling link has no target to walk, and rmtree refuses all
             # links, so remove the link entry itself.
             path.unlink()

@@ -389,6 +389,44 @@ def test_permission_error_handler_skips_symlink(
     assert chmod_calls == [], "a symlink must not be chmodded"
 
 
+@pytest.mark.parametrize("func", [os.unlink, os.scandir], ids=["unlink", "scandir"])
+def test_permission_error_handler_skips_vanished_entry(
+    func: cabc.Callable[..., object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A FileNotFoundError report is skipped so rmtree can continue."""
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
+    chmod_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
+
+    fs_retry._retry_windows_permission_error(
+        func, "vanished", FileNotFoundError("vanished")
+    )
+
+    assert chmod_calls == [], "a vanished entry must not be chmodded"
+
+
+def test_permission_error_handler_skips_entry_vanished_before_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A FileNotFoundError from the retried removal is skipped too."""
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
+    chmod_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
+    vanished = FileNotFoundError("vanished")
+
+    def vanished_unlink(path: str) -> None:
+        """Fail as if the entry disappeared after the chmod."""
+        raise vanished
+
+    monkeypatch.setattr(fs_retry.os, "unlink", vanished_unlink)
+
+    fs_retry._retry_windows_permission_error(
+        vanished_unlink, "vanished", PermissionError("locked")
+    )
+
+    assert len(chmod_calls) == 1, "the repair should be attempted once"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX directory permissions only")
 def test_retry_unlink_reports_unsearchable_parent(tmp_path: Path) -> None:
     """An unsearchable parent is an access failure, not an absent target."""
@@ -430,6 +468,9 @@ def test_robust_rmtree_retries_when_presence_is_denied(
         attempts.append(1)
         raise PermissionError(os.fspath(path))
 
+    # Isolate the presence check: Python 3.12's is_symlink() calls lstat()
+    # itself and would otherwise fail before the removal operation runs.
+    monkeypatch.setattr(Path, "is_symlink", lambda _self: False)
     monkeypatch.setattr(Path, "lstat", deny_lstat)
     monkeypatch.setattr(fs_retry.shutil, "rmtree", failing_rmtree)
 
@@ -439,6 +480,29 @@ def test_robust_rmtree_retries_when_presence_is_denied(
         )
 
     assert len(attempts) == 2, "the failure must be retried, not treated as absence"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory permissions only")
+def test_robust_rmtree_refuses_link_to_unsearchable_target(tmp_path: Path) -> None:
+    """An inaccessible link target is a failure, not a dangling link."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    sealed = tmp_path / "sealed"
+    sealed.mkdir()
+    target = sealed / "target"
+    target.mkdir()
+    link = _symlink_to(tmp_path / "link", target, target_is_directory=True)
+    sealed.chmod(0o000)
+    try:
+        with pytest.raises(fs_retry.RobustRmtreeError):
+            fs_retry.robust_rmtree(
+                link, config=fs_retry.RetryConfig(max_attempts=1, retry_delay=0)
+            )
+    finally:
+        sealed.chmod(0o700)
+
+    assert link.is_symlink(), "the intact link must survive the failed removal"
+    assert target.is_dir(), "the link target must be untouched"
 
 
 def test_rmtree_wraps_chmod_failure_as_last_exception(
