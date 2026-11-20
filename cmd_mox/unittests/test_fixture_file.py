@@ -397,6 +397,52 @@ class TestFixtureFile:
         with pytest.raises(ValueError, match=r"Invalid schema version"):
             FixtureFile.load(path)
 
+    def test_from_dict_rejects_explicit_null_version(self) -> None:
+        """from_dict() raises ValueError when version is explicitly None."""
+        data = _sample_fixture().to_dict()
+        data["version"] = None
+        with pytest.raises(
+            ValueError,
+            match=r"^Invalid fixture schema: version: expected str, got NoneType$",
+        ):
+            FixtureFile.from_dict(data)
+
+    def test_from_dict_normalizes_missing_metadata_to_value_error(self) -> None:
+        """Missing required fields surface as a schema ValueError."""
+        data = _sample_fixture().to_dict()
+        del data["metadata"]
+        with pytest.raises(
+            ValueError,
+            match=r"^Invalid fixture schema: missing required field 'metadata'$",
+        ):
+            FixtureFile.from_dict(data)
+
+    def test_scrubbing_rules_serialization(self) -> None:
+        """Scrubbing rules survive serialization."""
+        rule = ScrubbingRule(
+            pattern=r"ghp_\w+",
+            replacement="<GITHUB_TOKEN>",
+            applied_to=["env", "stdout"],
+            description="GitHub PAT",
+        )
+        fixture = FixtureFile(
+            version="1.0.0",
+            metadata=_sample_metadata(),
+            recordings=[],
+            scrubbing_rules=[rule],
+        )
+        rebuilt = FixtureFile.from_dict(fixture.to_dict())
+
+        assert len(rebuilt.scrubbing_rules) == 1
+        assert rebuilt.scrubbing_rules[0].pattern == r"ghp_\w+"
+        assert rebuilt.scrubbing_rules[0].replacement == "<GITHUB_TOKEN>"
+        assert rebuilt.scrubbing_rules[0].applied_to == ["env", "stdout"]
+        assert rebuilt.scrubbing_rules[0].description == "GitHub PAT"
+
+
+class TestFixtureMigrationChain:
+    """Tests for the chained fixture migration registry."""
+
     def test_migration_chain_hops_through_future_majors(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -441,6 +487,38 @@ class TestFixtureFile:
 
         assert reparsed.version == "2.0.0"
         assert received == [("first", "0.9.0"), ("second", "1.0.0")]
+
+    def test_builtin_registry_migrates_through_a_future_hop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fixed 0 -> 1 target still runs a newly added 1 -> 2 hop."""
+        from cmd_mox.record import fixture as fixture_module
+
+        received: list[tuple[str, str]] = []
+
+        def migrate_one_to_two(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
+            """Record the version stamped by the built-in migration."""
+            received.append(("second", data["version"]))
+            data["metadata"]["python_version"] = "second"
+            return data
+
+        assert fixture_module._MIGRATIONS[0][0] == (1, 0, 0)
+        monkeypatch.setattr(fixture_module, "_CURRENT_VERSION", (2, 0, 0))
+        monkeypatch.setattr(FixtureFile, "SCHEMA_VERSION", "2.0.0")
+        monkeypatch.setattr(
+            fixture_module,
+            "_MIGRATIONS",
+            {**fixture_module._MIGRATIONS, 1: ((2, 0, 0), migrate_one_to_two)},
+        )
+        data = _fixture_with_rule()
+        data["version"] = "0.9.0"
+
+        result = FixtureFile.from_dict(data)
+
+        assert received == [("second", "1.0.0")]
+        assert result.version == "2.0.0"
+        assert result.metadata.python_version == "second"
+        assert result.recordings[0].command == "git"
 
     def test_migration_chain_reports_missing_path_for_empty_registry(
         self, monkeypatch: pytest.MonkeyPatch
@@ -505,48 +583,6 @@ class TestFixtureFile:
             FixtureFile.from_dict(data)
 
         assert calls == []
-
-    def test_from_dict_rejects_explicit_null_version(self) -> None:
-        """from_dict() raises ValueError when version is explicitly None."""
-        data = _sample_fixture().to_dict()
-        data["version"] = None
-        with pytest.raises(
-            ValueError,
-            match=r"^Invalid fixture schema: version: expected str, got NoneType$",
-        ):
-            FixtureFile.from_dict(data)
-
-    def test_from_dict_normalizes_missing_metadata_to_value_error(self) -> None:
-        """Missing required fields surface as a schema ValueError."""
-        data = _sample_fixture().to_dict()
-        del data["metadata"]
-        with pytest.raises(
-            ValueError,
-            match=r"^Invalid fixture schema: missing required field 'metadata'$",
-        ):
-            FixtureFile.from_dict(data)
-
-    def test_scrubbing_rules_serialization(self) -> None:
-        """Scrubbing rules survive serialization."""
-        rule = ScrubbingRule(
-            pattern=r"ghp_\w+",
-            replacement="<GITHUB_TOKEN>",
-            applied_to=["env", "stdout"],
-            description="GitHub PAT",
-        )
-        fixture = FixtureFile(
-            version="1.0.0",
-            metadata=_sample_metadata(),
-            recordings=[],
-            scrubbing_rules=[rule],
-        )
-        rebuilt = FixtureFile.from_dict(fixture.to_dict())
-
-        assert len(rebuilt.scrubbing_rules) == 1
-        assert rebuilt.scrubbing_rules[0].pattern == r"ghp_\w+"
-        assert rebuilt.scrubbing_rules[0].replacement == "<GITHUB_TOKEN>"
-        assert rebuilt.scrubbing_rules[0].applied_to == ["env", "stdout"]
-        assert rebuilt.scrubbing_rules[0].description == "GitHub PAT"
 
 
 def _fixture_with_rule() -> dict[str, typ.Any]:

@@ -3586,13 +3586,15 @@ migration registry keyed by source major version, with chainable migration
 functions (major 0 -> major 1 -> major 2, etc.). Minor and patch differences
 within the same major version are tolerated without migration.
 
-`_CURRENT_VERSION` is the single source of the current schema version. The
-public `FixtureFile.SCHEMA_VERSION` string and the registry's latest target are
-both derived from the tuple, so a version bump is one edit. The migration
-chain, not each migration callable, stamps the registered target version after
-every hop; callables only transform the fixture mapping. This keeps historical
-targets correct after a later upgrade and makes each callable indifferent to
-the version string.
+`_CURRENT_VERSION` is the single source of the current schema version, and the
+public `FixtureFile.SCHEMA_VERSION` string derives from it. Migration targets
+are historical facts: each registry entry names the version its migration
+produces and stays fixed once registered, so only a newly added hop derives its
+target from `_CURRENT_VERSION`. The migration chain, not each migration
+callable, stamps the registered target version after every hop; callables only
+transform the fixture mapping. This keeps the `0 -> 1` step intact when a later
+release adds a `1 -> 2` hop and makes each callable indifferent to the version
+string.
 
 Legacy two-component version components must be non-empty ASCII decimal digits
 before `int()` runs. Leading zeroes such as `01.0` remain accepted, while
@@ -3610,9 +3612,8 @@ check unreachable, so it is not maintained.
   versions, following the Django/Alembic pattern
 - Same-major tolerance follows the schema contract: minor and patch versions
   add fields that existing readers can ignore
-- One version tuple removes the drift risk of several independent literals,
-  and chain-applied stamps keep every registered target accurate as the current
-  version advances
+- One tuple defines the current version, while fixed historical targets keep
+  each migration's output stable as the current version advances
 - Restricting legacy components to ASCII digits rejects values that `int()`
   would otherwise silently accept, such as signs, underscores and non-ASCII
   decimal digits
@@ -3852,8 +3853,8 @@ version.
 - CmdMox maintains a migration table for old versions
 - Minor and patch differences within the same major version are tolerated
 - A higher major version with no migration path raises `ValueError`
-- `_CURRENT_VERSION` defines the current version once, and the migration chain
-  stamps each registered target rather than relying on migration callables
+- `_CURRENT_VERSION` defines the current version once, the migration chain
+  stamps each registered target, and historical targets stay fixed
 
 #### 9.11.2 Upgrade Path
 
@@ -3893,8 +3894,9 @@ def _migrate_v0_to_v1(data: dict) -> dict:
     return data
 
 
-# Migration registry: source major version -> (target version, function)
-_MIGRATIONS = {0: (_CURRENT_VERSION, _migrate_v0_to_v1)}
+# Migration registry: source major version -> (target version, function).
+# A target is historical and stays fixed once registered.
+_MIGRATIONS = {0: ((1, 0, 0), _migrate_v0_to_v1)}
 
 
 def _execute_migration_chain(data: dict, file_ver: tuple, current: tuple) -> dict:

@@ -33,8 +33,9 @@ from ._schema import (
 )
 from .scrubber import ScrubbingRule
 
-# The single source of the current schema version.  The public string and the
-# target registered for the latest migration both derive from this tuple.
+# The single source of the current schema version.  The public string derives
+# from this tuple; migration targets are historical, so they stay fixed once
+# registered (see ``_MIGRATIONS``).
 _CURRENT_VERSION: typ.Final[tuple[int, int, int]] = (1, 0, 0)
 
 
@@ -153,12 +154,13 @@ def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
 # All files with a given major version are migrated using the registered
 # function.  Migrations chain: major 0 -> major 1 -> major 2 etc.
 #
-# Future-major-hop rule: a target must advance the source major version, and
-# the chain re-reads this mapping after every hop.  Introducing major 2 needs
-# one entry, ``1: ((2, 0, 0), _migrate_v1_to_v2)``; a major 0 fixture then
-# hops 0 -> 1 -> 2 without a separate 0 -> 2 entry.
+# A target records the version its migration produces and therefore stays
+# fixed once registered.  Only a newly added hop may derive its target from
+# ``_CURRENT_VERSION``.  This keeps the historical 0 -> 1 target at 1.0.0, so a
+# major 0 fixture still runs every hop after a future major 2 adds its own
+# ``1: ((2, 0, 0), _migrate_v1_to_v2)`` entry.
 _MIGRATIONS: dict[int, tuple[tuple[int, int, int], _MigrationFn]] = {
-    0: (_CURRENT_VERSION, _migrate_v0_to_v1),
+    0: ((1, 0, 0), _migrate_v0_to_v1),
 }
 
 
