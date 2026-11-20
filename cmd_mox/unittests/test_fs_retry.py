@@ -337,36 +337,38 @@ def test_windows_permission_error_clears_read_only_then_retries(
     ], "the retried removal should follow the chmod"
 
 
-def test_permission_error_handler_reraises_other_errors(
+@pytest.mark.parametrize(
+    ("is_windows", "func", "error", "match"),
+    [
+        (True, os.unlink, OSError("not a permission failure"), "not a permission"),
+        (
+            True,
+            os.scandir,
+            PermissionError("cannot list directory"),
+            "cannot list directory",
+        ),
+        (False, os.unlink, PermissionError("locked"), "locked"),
+    ],
+    ids=["unrelated-error", "scandir-error", "posix"],
+)
+def test_permission_error_handler_reraises_without_chmod(
+    *,
+    is_windows: bool,
+    func: cabc.Callable[..., object],
+    error: OSError,
+    match: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A non-PermissionError report is re-raised without chmod."""
-    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
+    """Reports the handler cannot repair are re-raised without chmod."""
+    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", is_windows)
     chmod_calls: list[tuple[object, ...]] = []
     monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
-    error = OSError("not a permission failure")
 
-    with pytest.raises(OSError, match="not a permission failure") as raised:
-        fs_retry._retry_windows_permission_error(os.unlink, "some-file", error)
+    with pytest.raises(type(error), match=match) as raised:
+        fs_retry._retry_windows_permission_error(func, "some-path", error)
 
     assert raised.value is error, "the original exception should be re-raised"
-    assert chmod_calls == [], "unrelated failures must not chmod"
-
-
-def test_permission_error_handler_reraises_scandir_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A repeated directory-level scandir failure is re-raised without chmod."""
-    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", True)
-    chmod_calls: list[tuple[object, ...]] = []
-    monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
-    error = PermissionError("cannot list directory")
-
-    with pytest.raises(PermissionError, match="cannot list directory") as raised:
-        fs_retry._retry_windows_permission_error(os.scandir, "some-dir", error)
-
-    assert raised.value is error, "the scandir report should be re-raised unchanged"
-    assert chmod_calls == [], "a scandir failure must not chmod"
+    assert chmod_calls == [], "an unrepairable failure must not chmod"
 
 
 def test_permission_error_handler_skips_symlink(
@@ -387,20 +389,56 @@ def test_permission_error_handler_skips_symlink(
     assert chmod_calls == [], "a symlink must not be chmodded"
 
 
-def test_permission_error_handler_is_windows_only(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory permissions only")
+def test_retry_unlink_reports_unsearchable_parent(tmp_path: Path) -> None:
+    """An unsearchable parent is an access failure, not an absent target."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    parent = tmp_path / "sealed"
+    parent.mkdir()
+    target = parent / "hidden.txt"
+    target.write_text("data", encoding="utf-8")
+    parent.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError):
+            fs_retry.retry_unlink(
+                target,
+                config=fs_retry.RetryConfig(max_attempts=1, retry_delay=0),
+            )
+    finally:
+        parent.chmod(0o700)
+
+    assert target.exists(), "the target was not removed, so it must survive"
+
+
+def test_robust_rmtree_retries_when_presence_is_denied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """On POSIX the handler re-raises without chmod."""
-    monkeypatch.setattr(fs_retry.path_utils, "IS_WINDOWS", False)
-    chmod_calls: list[tuple[object, ...]] = []
-    monkeypatch.setattr(Path, "chmod", lambda *args: chmod_calls.append(args))
-    error = PermissionError("locked")
+    """An access error during cleanup triggers retries, not a false success."""
+    target = tmp_path / "partially-removed"
+    target.mkdir()
+    attempts: list[int] = []
 
-    with pytest.raises(PermissionError, match="locked") as raised:
-        fs_retry._retry_windows_permission_error(os.unlink, "some-file", error)
+    def deny_lstat(self: Path) -> os.stat_result:
+        """Simulate a parent that denies access after a partial removal."""
+        raise PermissionError(os.fspath(self))
 
-    assert raised.value is error, "the original exception should be re-raised"
-    assert chmod_calls == [], "POSIX has no read-only attribute to clear"
+    def failing_rmtree(
+        path: Path, *, onexc: cabc.Callable[..., None] | None = None
+    ) -> None:
+        """Report a permission failure without removing the root."""
+        attempts.append(1)
+        raise PermissionError(os.fspath(path))
+
+    monkeypatch.setattr(Path, "lstat", deny_lstat)
+    monkeypatch.setattr(fs_retry.shutil, "rmtree", failing_rmtree)
+
+    with pytest.raises(fs_retry.RobustRmtreeError):
+        fs_retry.robust_rmtree(
+            target, config=fs_retry.RetryConfig(max_attempts=2, retry_delay=0)
+        )
+
+    assert len(attempts) == 2, "the failure must be retried, not treated as absence"
 
 
 def test_rmtree_wraps_chmod_failure_as_last_exception(

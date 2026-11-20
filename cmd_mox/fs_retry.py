@@ -128,11 +128,37 @@ def _retry_windows_permission_error(
     func(path)
 
 
+def _path_exists(path: Path) -> bool:
+    """Report whether *path* is an entry, counting a dangling link as present.
+
+    ``os.path.lexists`` reports every ``lstat`` failure as absence, so an
+    unsearchable parent would make an existing entry look already removed.
+    Only the errors that mean the entry is absent are consumed; any other
+    access error keeps the entry present so the removal attempt surfaces it.
+
+    Returns
+    -------
+    bool
+        ``True`` when *path* is present as an entry, including a dangling
+        link; ``False`` when the entry is absent.
+    """
+    try:
+        path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        # An access error is not evidence that the entry was removed, so let
+        # the removal attempt itself report the failure.
+        return True
+    return True
+
+
 def _path_is_missing(path: Path, exc: OSError) -> bool:
     """Check if the path is missing (from the exception or filesystem).
 
     Existence is tested without following symlinks, because a dangling link is
-    still an entry that must be removed.
+    still an entry that must be removed. An access error is not evidence of
+    absence, so the removal is retried rather than reported as complete.
 
     Returns
     -------
@@ -140,7 +166,7 @@ def _path_is_missing(path: Path, exc: OSError) -> bool:
         ``True`` when *exc* is a ``FileNotFoundError`` or *path* no longer
         exists.
     """
-    return isinstance(exc, FileNotFoundError) or not os.path.lexists(path)
+    return isinstance(exc, FileNotFoundError) or not _path_exists(path)
 
 
 def _is_file_not_found(exc: OSError) -> bool:
@@ -181,10 +207,11 @@ def _removal_retry(
 
     A path that has already vanished is not a failure, so *is_missing*
     short-circuits the loop. Presence is tested without following symlinks: a
-    dangling link is present even though it has no target. The backoff shape
-    lives here rather than in each caller because unlink and rmtree differ
-    only in the operation, how a vanished target is recognised, and how the
-    final failure is reported.
+    dangling link is present even though it has no target, and an access error
+    also counts as present so it cannot mask a failed removal. The backoff
+    shape lives here rather than in each caller because unlink and rmtree
+    differ only in the operation, how a vanished target is recognised, and how
+    the final failure is reported.
 
     Parameters
     ----------
@@ -200,7 +227,7 @@ def _removal_retry(
         already absent, so the caller can skip success reporting.
     """
     path = attempt.path
-    if not os.path.lexists(path):
+    if not _path_exists(path):
         return False
 
     for try_index in range(attempt.config.max_attempts):
@@ -267,8 +294,10 @@ def retry_unlink(
     Unlink *path* with retries for transient filesystem errors.
 
     Presence is tested without following symlinks, so a dangling symlink is
-    removed as a link and its target is never touched. If the path does not
-    exist or is removed during retries (FileNotFoundError), the operation
+    removed as a link and its target is never touched. An access error while
+    checking presence counts as present rather than absent, so an unreadable
+    parent surfaces the failure instead of reporting success. If the path does
+    not exist or is removed during retries (FileNotFoundError), the operation
     succeeds silently. Transient errors (PermissionError, OSError) trigger
     retries with the configured delay.
 
@@ -318,9 +347,11 @@ def robust_rmtree(
     A dangling symlink at *path* is unlinked as a link, without touching its
     target. An intact symlink is refused, as :func:`shutil.rmtree` refuses one.
     On Windows, the read-only attribute is cleared only for the entries that
-    fail to delete, and only those calls are retried. If the path does not
-    exist or is removed during retries, the operation succeeds silently.
-    Transient errors trigger retries with the configured delay.
+    fail to delete, and only those calls are retried. An access error while
+    checking presence counts as present rather than absent, so it cannot mask
+    a failed removal. If the path does not exist or is removed during retries,
+    the operation succeeds silently. Transient errors trigger retries with the
+    configured delay.
 
     Parameters
     ----------
