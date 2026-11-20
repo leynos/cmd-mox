@@ -518,38 +518,113 @@ def test_request_pipeline_rejects_wrong_types_without_dispatch(
     assert not leaked, f"payload content reached the log: {leaked}"
 
 
-def test_request_pipeline_logs_handler_failure(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Handler failures should emit only a bounded error category."""
-    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
-
-    def failing_handler(_invocation: Invocation) -> Response:
-        """Raise a RuntimeError to simulate a handler failure."""
-        msg = "handler failure"
-        raise RuntimeError(msg)
-
-    ipc_server = IPCServer(
-        tmp_path / "ipc.sock",
-        handlers=IPCHandlers(handler=failing_handler),
-    )
-    result = _server_core._request_pipeline(
-        ipc_server,
-        json.dumps({
-            "kind": _server_core.KIND_INVOCATION,
+def _request_payload(kind: str) -> dict[str, object]:
+    """Return a valid request payload for *kind*."""
+    if kind == _server_core.KIND_INVOCATION:
+        return {
+            "kind": kind,
             "command": "git",
             "args": [],
             "stdin": "",
             "env": {},
-        }).encode(),
+        }
+    return {
+        "kind": kind,
+        "invocation_id": "passthrough-123",
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+    }
+
+
+def _server_raising(socket_path: Path, kind: str, error: BaseException) -> IPCServer:
+    """Return a server whose callback for *kind* raises *error*."""
+
+    def failing_invocation(_invocation: Invocation) -> Response:
+        """Raise *error* from the invocation callback."""
+        raise error
+
+    def failing_passthrough(_result: PassthroughResult) -> Response:
+        """Raise *error* from the passthrough callback."""
+        raise error
+
+    if kind == _server_core.KIND_INVOCATION:
+        return IPCServer(socket_path, handlers=IPCHandlers(handler=failing_invocation))
+    return IPCServer(
+        socket_path,
+        handlers=IPCHandlers(passthrough_handler=failing_passthrough),
     )
+
+
+_ERROR_KINDS = [_server_core.KIND_INVOCATION, _server_core.KIND_PASSTHROUGH_RESULT]
+
+
+@pytest.mark.parametrize("kind", _ERROR_KINDS)
+@pytest.mark.parametrize("message", ["boom", None], ids=["message", "empty-message"])
+def test_request_pipeline_logs_handler_failure(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    kind: str,
+    message: str | None,
+) -> None:
+    """Handler failures should report the original class and bounded metadata."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    counters_before = _observability.counter_snapshot()
+    expected_stderr = message or "ValueError"
+    error = ValueError() if message is None else ValueError(message)
+    ipc_server = _server_raising(tmp_path / "ipc.sock", kind, error)
+
+    with _observability.capture_events() as emitted:
+        result = _server_core._request_pipeline(
+            ipc_server, json.dumps(_request_payload(kind)).encode()
+        )
 
     assert result.response_bytes is not None, (
         "Handler failure did not return an error response"
     )
+    frame = json.loads(result.response_bytes.decode("utf-8"))
+    assert not frame["stdout"], "A failure must not emit stdout"
+    assert frame["stderr"] == expected_stderr, "Wrong failure diagnostic"
+    assert frame["exit_code"] == 1, "A failure must exit non-zero"
     [event] = _dispatch_events(caplog)
-    assert event["kind"] == _server_core.KIND_INVOCATION, "Wrong request kind"
+    assert event["kind"] == kind, "Wrong request kind"
     assert event["outcome"] == "handler_error", "Wrong outcome"
+    assert event["error_category"] == "ValueError", "Real exception class lost"
+    if kind == _server_core.KIND_PASSTHROUGH_RESULT:
+        assert event["invocation_id"] == "passthrough-123", "Wrong invocation id"
+    else:
+        assert "invocation_id" not in event, "Invocation ID must be omitted"
+    _assert_bounded_duration(event)
+    _assert_single_counter_increment(emitted, counters_before)
+
+
+@pytest.mark.parametrize("kind", _ERROR_KINDS)
+@pytest.mark.parametrize(
+    ("interrupt_type", "request_id"),
+    [
+        pytest.param(KeyboardInterrupt, "keyboard-interrupt", id="keyboard-interrupt"),
+        pytest.param(SystemExit, "system-exit", id="system-exit"),
+    ],
+)
+def test_request_pipeline_propagates_control_flow_exceptions(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    kind: str,
+    interrupt_type: type[BaseException],
+    request_id: str,
+) -> None:
+    """Control-flow exceptions must escape without a dispatch record."""
+    caplog.set_level("INFO", logger="cmd_mox.ipc._server_core")
+    interrupt = interrupt_type(request_id)
+    ipc_server = _server_raising(tmp_path / "ipc.sock", kind, interrupt)
+
+    with pytest.raises(interrupt_type) as excinfo:
+        _server_core._request_pipeline(
+            ipc_server, json.dumps(_request_payload(kind)).encode()
+        )
+
+    assert excinfo.value is interrupt, "Control-flow exception must propagate"
+    assert not _dispatch_events(caplog), "Interrupts must not emit dispatch records"
 
 
 def test_request_pipeline_records_transport_and_correlation_id(
