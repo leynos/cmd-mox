@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import re
 import sys
@@ -14,6 +13,12 @@ from hypothesis import given
 
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.scrubber import ScrubbingRule
+from cmd_mox.unittests._fixture_helpers import (
+    fixture_with_rule,
+    sample_fixture,
+    sample_invocation,
+    sample_metadata,
+)
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
@@ -46,51 +51,12 @@ _NON_STRING_JSON_VALUES = st.one_of(
 )
 
 
-def _sample_invocation(*, sequence: int = 0) -> RecordedInvocation:
-    """Build a sample ``git status`` recording with the given sequence number."""
-    return RecordedInvocation(
-        sequence=sequence,
-        command="git",
-        args=["status", "--short"],
-        stdin="",
-        env_subset={"GIT_AUTHOR_NAME": "Test User"},
-        stdout="M file.py\n",
-        stderr="",
-        exit_code=0,
-        timestamp="2025-01-15T10:30:01Z",
-        duration_ms=42,
-    )
-
-
-def _sample_metadata() -> FixtureMetadata:
-    """Return fixture metadata created with the default factory."""
-    return FixtureMetadata.create()
-
-
-def _sample_fixture(
-    recordings: list[RecordedInvocation] | None = None,
-) -> FixtureFile:
-    """Build a fixture with sample metadata and recordings.
-
-    Returns
-    -------
-    FixtureFile
-        A fixture containing the supplied or default recordings.
-    """
-    return FixtureFile(
-        version="1.0.0",
-        metadata=_sample_metadata(),
-        recordings=recordings or [_sample_invocation()],
-        scrubbing_rules=[],
-    )
-
-
 class TestRecordedInvocation:
     """Tests for RecordedInvocation serialization."""
 
     def test_to_dict_roundtrip(self) -> None:
         """RecordedInvocation survives a to_dict/from_dict cycle."""
-        original = _sample_invocation()
+        original = sample_invocation()
         rebuilt = RecordedInvocation.from_dict(original.to_dict())
 
         assert rebuilt.sequence == original.sequence
@@ -106,7 +72,7 @@ class TestRecordedInvocation:
 
     def test_to_dict_field_names(self) -> None:
         """to_dict produces the schema-specified field names."""
-        d = _sample_invocation().to_dict()
+        d = sample_invocation().to_dict()
         expected_keys = {
             "sequence",
             "command",
@@ -174,19 +140,6 @@ class TestFixtureMetadata:
         assert rebuilt.test_function == original.test_function
 
 
-def _assert_normalized_to_v1(result: FixtureFile) -> None:
-    """Assert *result* carries schema 1.0.0 with its recording intact.
-
-    Parameters
-    ----------
-    result : FixtureFile
-        The fixture returned by ``FixtureFile.from_dict``.
-    """
-    assert result.version == "1.0.0", result.version
-    assert len(result.recordings) == 1, result.recordings
-    assert result.recordings[0].command == "git", result.recordings[0]
-
-
 class TestFixtureFile:
     """Tests for FixtureFile serialization and persistence."""
 
@@ -205,7 +158,7 @@ class TestFixtureFile:
                 test_module="tests/test_example.py",
                 test_function="test_recording",
             ),
-            recordings=[_sample_invocation()],
+            recordings=[sample_invocation()],
             scrubbing_rules=[ScrubbingRule(pattern="secret", replacement="[redacted]")],
         )
         result = FixtureFile.from_dict(fixture.to_dict())
@@ -215,7 +168,7 @@ class TestFixtureFile:
 
     def test_to_dict_schema_structure(self) -> None:
         """to_dict() produces the 1.0.0 schema structure."""
-        fixture = _sample_fixture()
+        fixture = sample_fixture()
         d = fixture.to_dict()
 
         assert d["version"] == "1.0.0"
@@ -228,7 +181,7 @@ class TestFixtureFile:
 
     def test_from_dict_roundtrip(self) -> None:
         """FixtureFile survives a to_dict/from_dict cycle."""
-        original = _sample_fixture()
+        original = sample_fixture()
         rebuilt = FixtureFile.from_dict(original.to_dict())
 
         assert rebuilt.version == original.version
@@ -239,7 +192,7 @@ class TestFixtureFile:
 
     def test_save_and_load(self, tmp_path: Path) -> None:
         """Fixture saved to disk loads back identically."""
-        fixture = _sample_fixture()
+        fixture = sample_fixture()
         fixture_path = tmp_path / "test_fixture.json"
 
         fixture.save(fixture_path)
@@ -258,7 +211,7 @@ class TestFixtureFile:
 
     def test_save_creates_parent_directories(self, tmp_path: Path) -> None:
         """save() creates intermediate directories when needed."""
-        fixture = _sample_fixture()
+        fixture = sample_fixture()
         nested_path = tmp_path / "deep" / "nested" / "fixture.json"
 
         fixture.save(nested_path)
@@ -267,149 +220,9 @@ class TestFixtureFile:
         loaded = FixtureFile.load(nested_path)
         assert loaded.version == "1.0.0"
 
-    @pytest.mark.parametrize("fixture_version", ["0.9", "0.9.0", None])
-    def test_migration_preserves_legacy_fields(
-        self, fixture_version: str | None, tmp_path: Path
-    ) -> None:
-        """Legacy and unversioned fixtures migrate with their data intact."""
-        data = _sample_fixture().to_dict()
-        if fixture_version is None:
-            del data["version"]
-        else:
-            data["version"] = fixture_version
-        path = tmp_path / "legacy.json"
-        path.write_text(json.dumps(data))
-
-        results = (FixtureFile.from_dict(data), FixtureFile.load(path))
-
-        for result in results:
-            _assert_normalized_to_v1(result)
-            assert result.metadata.created_at == data["metadata"]["created_at"]
-            assert result.recordings[0].stdout == data["recordings"][0]["stdout"]
-
-    def test_from_dict_does_not_mutate_input(self) -> None:
-        """from_dict() does not modify the caller's dict."""
-        data = _sample_fixture().to_dict()
-        data["version"] = "0.9.0"
-        original_version = data["version"]
-        FixtureFile.from_dict(data)
-
-        assert data["version"] == original_version
-
-    def test_migration_receives_a_deep_copy(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A nested mutation by a migration leaves the caller's mapping intact."""
-        from cmd_mox.record import fixture as fixture_module
-
-        def stamp_platform(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-            """Mutate nested metadata to prove the input was copied."""
-            data["metadata"]["platform"] = "migrated"
-            return data
-
-        monkeypatch.setattr(
-            fixture_module, "_MIGRATIONS", {0: ((1, 0, 0), stamp_platform)}
-        )
-        data = _fixture_with_rule()
-        data["version"] = "0.9.0"
-        original_metadata = copy.deepcopy(data["metadata"])
-
-        result = FixtureFile.from_dict(data)
-
-        assert data["metadata"] == original_metadata
-        assert result.metadata.platform == "migrated"
-
-    @pytest.mark.parametrize("fixture_version", ["1.1.0", "1.0.7"])
-    def test_from_dict_tolerates_same_major_version_differences(
-        self, fixture_version: str
-    ) -> None:
-        """from_dict() accepts same-major minor and patch differences."""
-        data = _sample_fixture().to_dict()
-        data["version"] = fixture_version
-        data["new_future_field"] = "should be ignored"
-        result = FixtureFile.from_dict(data)
-
-        _assert_normalized_to_v1(result)
-        assert "new_future_field" not in result.to_dict()
-
-    def test_from_dict_rejects_incompatible_major_version(self) -> None:
-        """from_dict() raises ValueError for a higher major with no migration."""
-        data = _sample_fixture().to_dict()
-        data["version"] = "99.0.0"
-        with pytest.raises(
-            ValueError,
-            match=(
-                r"Unsupported fixture schema version '99\.0\.0'; "
-                r"no migration path to '1\.0\.0'"
-            ),
-        ):
-            FixtureFile.from_dict(data)
-
-    @pytest.mark.parametrize(
-        "legacy_version",
-        ["1.0", "01.0"],
-        ids=["two-component", "leading-zero"],
-    )
-    def test_legacy_version_loads_through_both_apis(
-        self, legacy_version: str, tmp_path: Path
-    ) -> None:
-        """Legacy two-component versions normalize through from_dict and load."""
-        data = _sample_fixture().to_dict()
-        data["version"] = legacy_version
-        path = tmp_path / "legacy.json"
-        path.write_text(json.dumps(data))
-
-        results = (FixtureFile.from_dict(data), FixtureFile.load(path))
-
-        for result in results:
-            _assert_normalized_to_v1(result)
-
-    @pytest.mark.parametrize(
-        "bad_version",
-        # The escaped value spells one and zero with Arabic-Indic digits.
-        ["0_1.0", "+1.0", "\u0661.\u0660", "1. 2", "-0.0", "1.-1"],
-        ids=[
-            "underscore-between-digits",
-            "explicit-positive-sign",
-            "non-ascii-decimal-digits",
-            "internal-whitespace",
-            "negative-major",
-            "negative-minor",
-        ],
-    )
-    def test_from_dict_rejects_non_ascii_legacy_components(
-        self, bad_version: str
-    ) -> None:
-        """Legacy components accept only ASCII digits before integer parsing."""
-        data = _sample_fixture().to_dict()
-        data["version"] = bad_version
-
-        with pytest.raises(ValueError, match=r"Invalid schema version"):
-            FixtureFile.from_dict(data)
-
-    def test_load_rejects_non_ascii_legacy_components(self, tmp_path: Path) -> None:
-        """A malformed legacy version fails through the file loader too."""
-        data = _sample_fixture().to_dict()
-        data["version"] = "0_1.0"
-        path = tmp_path / "malformed.json"
-        path.write_text(json.dumps(data))
-
-        with pytest.raises(ValueError, match=r"Invalid schema version"):
-            FixtureFile.load(path)
-
-    def test_from_dict_rejects_explicit_null_version(self) -> None:
-        """from_dict() raises ValueError when version is explicitly None."""
-        data = _sample_fixture().to_dict()
-        data["version"] = None
-        with pytest.raises(
-            ValueError,
-            match=r"^Invalid fixture schema: version: expected str, got NoneType$",
-        ):
-            FixtureFile.from_dict(data)
-
     def test_from_dict_normalizes_missing_metadata_to_value_error(self) -> None:
         """Missing required fields surface as a schema ValueError."""
-        data = _sample_fixture().to_dict()
+        data = sample_fixture().to_dict()
         del data["metadata"]
         with pytest.raises(
             ValueError,
@@ -427,7 +240,7 @@ class TestFixtureFile:
         )
         fixture = FixtureFile(
             version="1.0.0",
-            metadata=_sample_metadata(),
+            metadata=sample_metadata(),
             recordings=[],
             scrubbing_rules=[rule],
         )
@@ -438,160 +251,6 @@ class TestFixtureFile:
         assert rebuilt.scrubbing_rules[0].replacement == "<GITHUB_TOKEN>"
         assert rebuilt.scrubbing_rules[0].applied_to == ["env", "stdout"]
         assert rebuilt.scrubbing_rules[0].description == "GitHub PAT"
-
-
-class TestFixtureMigrationChain:
-    """Tests for the chained fixture migration registry."""
-
-    def test_migration_chain_hops_through_future_majors(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A fixture crosses every registered hop and each hop sees its version."""
-        from cmd_mox.record import fixture as fixture_module
-
-        received: list[tuple[str, str]] = []
-
-        def migrate_one(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-            """Record the received version and mark the first hop."""
-            received.append(("first", data["version"]))
-            data["metadata"]["platform"] = "first"
-            return data
-
-        def migrate_two(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-            """Record the received version and mark the second hop."""
-            received.append(("second", data["version"]))
-            data["metadata"]["python_version"] = "second"
-            return data
-
-        monkeypatch.setattr(fixture_module, "_CURRENT_VERSION", (2, 0, 0))
-        monkeypatch.setattr(FixtureFile, "SCHEMA_VERSION", "2.0.0")
-        monkeypatch.setattr(
-            fixture_module,
-            "_MIGRATIONS",
-            {0: ((1, 0, 0), migrate_one), 1: ((2, 0, 0), migrate_two)},
-        )
-        data = _fixture_with_rule()
-        data["version"] = "0.9.0"
-        original = copy.deepcopy(data)
-
-        result = FixtureFile.from_dict(data)
-
-        assert received == [("first", "0.9.0"), ("second", "1.0.0")]
-        assert result.version == "2.0.0"
-        assert result.metadata.platform == "first"
-        assert result.metadata.python_version == "second"
-        assert result.recordings[0].command == "git"
-        assert data == original
-
-        reparsed = FixtureFile.from_dict(result.to_dict())
-
-        assert reparsed.version == "2.0.0"
-        assert received == [("first", "0.9.0"), ("second", "1.0.0")]
-
-    def test_builtin_registry_migrates_through_a_future_hop(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The fixed 0 -> 1 target still runs a newly added 1 -> 2 hop."""
-        from cmd_mox.record import fixture as fixture_module
-
-        received: list[tuple[str, str]] = []
-
-        def migrate_one_to_two(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-            """Record the version stamped by the built-in migration."""
-            received.append(("second", data["version"]))
-            data["metadata"]["python_version"] = "second"
-            return data
-
-        assert fixture_module._MIGRATIONS[0][0] == (1, 0, 0)
-        monkeypatch.setattr(fixture_module, "_CURRENT_VERSION", (2, 0, 0))
-        monkeypatch.setattr(FixtureFile, "SCHEMA_VERSION", "2.0.0")
-        monkeypatch.setattr(
-            fixture_module,
-            "_MIGRATIONS",
-            {**fixture_module._MIGRATIONS, 1: ((2, 0, 0), migrate_one_to_two)},
-        )
-        data = _fixture_with_rule()
-        data["version"] = "0.9.0"
-
-        result = FixtureFile.from_dict(data)
-
-        assert received == [("second", "1.0.0")]
-        assert result.version == "2.0.0"
-        assert result.metadata.python_version == "second"
-        assert result.recordings[0].command == "git"
-
-    def test_migration_chain_reports_missing_path_for_empty_registry(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """An empty registry reports the missing path from the file version."""
-        from cmd_mox.record import fixture as fixture_module
-
-        monkeypatch.setattr(fixture_module, "_CURRENT_VERSION", (2, 0, 0))
-        monkeypatch.setattr(fixture_module, "_MIGRATIONS", {})
-        data = _fixture_with_rule()
-        data["version"] = "0.9.0"
-
-        with pytest.raises(
-            ValueError,
-            match=r"No migration path from schema version '0\.9\.0' to '2\.0\.0'",
-        ):
-            FixtureFile.from_dict(data)
-
-    def test_migration_chain_reports_missing_intermediate_hop(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A chain that stops at major 1 reports the version it stamped."""
-        from cmd_mox.record import fixture as fixture_module
-
-        def migrate_one(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-            """Pass the mapping through unchanged to leave major 2 unregistered."""
-            return data
-
-        monkeypatch.setattr(fixture_module, "_CURRENT_VERSION", (2, 0, 0))
-        monkeypatch.setattr(
-            fixture_module, "_MIGRATIONS", {0: ((1, 0, 0), migrate_one)}
-        )
-        data = _fixture_with_rule()
-        data["version"] = "0.9.0"
-
-        with pytest.raises(
-            ValueError,
-            match=r"No migration path from schema version '1\.0\.0' to '2\.0\.0'",
-        ):
-            FixtureFile.from_dict(data)
-
-    def test_migration_chain_rejects_non_advancing_target(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A target that keeps the source major is rejected before it runs."""
-        from cmd_mox.record import fixture as fixture_module
-
-        calls: list[str] = []
-
-        def must_not_run(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-            """Record an unexpected call so the test can assert it never ran."""
-            calls.append(data["version"])
-            return data
-
-        monkeypatch.setattr(
-            fixture_module, "_MIGRATIONS", {0: ((0, 1, 0), must_not_run)}
-        )
-        data = _fixture_with_rule()
-        data["version"] = "0.9.0"
-
-        with pytest.raises(ValueError, match=r"does not advance the major version"):
-            FixtureFile.from_dict(data)
-
-        assert calls == []
-
-
-def _fixture_with_rule() -> dict[str, typ.Any]:
-    """Return a sample fixture mapping that includes one scrubbing rule."""
-    data = _sample_fixture().to_dict()
-    data["scrubbing_rules"] = [
-        ScrubbingRule(pattern="secret", replacement="[redacted]").to_dict()
-    ]
-    return data
 
 
 _MISSING = object()
@@ -884,7 +543,7 @@ class TestFixtureSchemaValidation:
         expected_path: str,
     ) -> None:
         """A malformed field raises a path-aware schema error."""
-        data = _fixture_with_rule()
+        data = fixture_with_rule()
         mutate(data)
 
         with pytest.raises(ValueError, match=expected_path):
@@ -898,7 +557,7 @@ class TestFixtureSchemaValidation:
     @pytest.mark.parametrize("key", ["test_module", "test_function"])
     def test_optional_metadata_keys_accept_missing_and_null(self, key: str) -> None:
         """Optional metadata keys accept both an absent key and an explicit null."""
-        data = _sample_fixture().to_dict()
+        data = sample_fixture().to_dict()
         data["metadata"].pop(key, None)
         assert getattr(FixtureFile.from_dict(data).metadata, key) is None
 
@@ -907,7 +566,7 @@ class TestFixtureSchemaValidation:
 
     def test_missing_rule_description_defaults_to_empty_string(self) -> None:
         """A missing rule description becomes an empty string."""
-        data = _fixture_with_rule()
+        data = fixture_with_rule()
         del data["scrubbing_rules"][0]["description"]
 
         result = FixtureFile.from_dict(data)
@@ -917,7 +576,7 @@ class TestFixtureSchemaValidation:
 
     def test_null_rule_description_defaults_to_empty_string(self) -> None:
         """A null rule description becomes an empty string and reserializes as null."""
-        data = _fixture_with_rule()
+        data = fixture_with_rule()
         data["scrubbing_rules"][0]["description"] = None
 
         result = FixtureFile.from_dict(data)
@@ -927,7 +586,7 @@ class TestFixtureSchemaValidation:
 
     def test_unknown_nested_keys_are_ignored(self) -> None:
         """Unknown keys at every level are ignored rather than rejected."""
-        data = _fixture_with_rule()
+        data = fixture_with_rule()
         data["future_root"] = {"value": 1}
         data["metadata"]["future_metadata"] = 1
         data["recordings"][0]["future_recording"] = [1, 2]
@@ -971,7 +630,7 @@ class TestFixtureSchemaValidation:
 
     def test_direct_from_dict_reports_bare_field_name(self) -> None:
         """A direct invocation parse reports the bare field name."""
-        data = _sample_invocation().to_dict()
+        data = sample_invocation().to_dict()
         data["stdout"] = None
 
         with pytest.raises(
@@ -1002,7 +661,7 @@ def test_args_reject_non_string_value_at_generated_position(
     """A non-string value at any generated argument position names that index."""
     index = data.draw(st.integers(min_value=0, max_value=len(args)))
     mutated = [*args[:index], invalid, *args[index:]]
-    fixture = _fixture_with_rule()
+    fixture = fixture_with_rule()
     fixture["recordings"][0]["args"] = mutated
 
     with pytest.raises(ValueError, match=re.escape(f"recordings[0].args[{index}]")):
@@ -1017,7 +676,7 @@ def test_env_subset_rejects_non_string_generated_key(
     entries: dict[str, str], key: int
 ) -> None:
     """A non-string key at any generated mapping position names that key."""
-    fixture = _fixture_with_rule()
+    fixture = fixture_with_rule()
     fixture["recordings"][0]["env_subset"] = {**entries, key: "value"}
 
     with pytest.raises(
@@ -1035,131 +694,10 @@ def test_env_subset_rejects_non_string_generated_value(
     entries: dict[str, str], key: str, invalid: object
 ) -> None:
     """A non-string value at any generated mapping key names that key."""
-    fixture = _fixture_with_rule()
+    fixture = fixture_with_rule()
     fixture["recordings"][0]["env_subset"] = {**entries, key: invalid}
 
     with pytest.raises(
         ValueError, match=re.escape(f"recordings[0].env_subset[{key!r}]")
     ):
         FixtureFile.from_dict(fixture)
-
-
-class TestVersionParsing:
-    """Tests for the _parse_version helper."""
-
-    @pytest.mark.parametrize(
-        ("version_str", "parts"),
-        [(" 1.2.3 ", ["1", "2", "3"]), ("01.0", ["01", "0"])],
-    )
-    def test_split_version_preserves_components(
-        self, version_str: str, parts: list[str]
-    ) -> None:
-        """Syntax validation preserves components for numeric parsing."""
-        from cmd_mox.record.fixture import _split_version
-
-        assert _split_version(version_str) == parts
-
-    def test_split_version_rejects_noncanonical_three_part_version(self) -> None:
-        """Three-part version components cannot have leading zeroes."""
-        from cmd_mox.record.fixture import _split_version
-
-        with pytest.raises(ValueError, match="Invalid"):
-            _split_version("1.01.0")
-
-    @pytest.mark.parametrize(
-        ("version_str", "expected"),
-        [
-            ("1.0.0", (1, 0, 0)),
-            (" 1.0.0 ", (1, 0, 0)),
-            ("1.1.0", (1, 1, 0)),
-            ("0.9.0", (0, 9, 0)),
-            ("1.2.3", (1, 2, 3)),
-            ("1.0", (1, 0, 0)),
-            ("01.0", (1, 0, 0)),
-        ],
-        ids=[
-            "simple",
-            "surrounding-whitespace-stripped",
-            "non-zero-minor",
-            "zero-major",
-            "non-zero-patch",
-            "legacy-two-component",
-            "legacy-leading-zero",
-        ],
-    )
-    def test_parse_valid_versions(
-        self, version_str: str, expected: tuple[int, int, int]
-    ) -> None:
-        """Well-formed version strings parse into comparable integer tuples."""
-        from cmd_mox.record.fixture import _parse_version
-
-        assert _parse_version(version_str) == expected
-
-    def test_parse_negative_component_raises(self) -> None:
-        """Negative legacy version components are rejected."""
-        from cmd_mox.record.fixture import _parse_version
-
-        with pytest.raises(ValueError, match=r"Invalid schema version"):
-            _parse_version("1.-1")
-
-    @pytest.mark.parametrize(
-        "bad_version",
-        [
-            "1",
-            "1.a",
-            "abc",
-            "1.2.3.4",
-            "1.-0.0",
-            "1.+1.0",
-            "1.01.0",
-            "1_0.0.0",
-            "\uff11.0.0",
-        ],
-    )
-    def test_parse_rejects_invalid_formats(self, bad_version: str) -> None:
-        """Various malformed version strings are rejected."""
-        from cmd_mox.record.fixture import _parse_version
-
-        with pytest.raises(ValueError, match="Invalid"):
-            _parse_version(bad_version)
-
-
-@given(
-    major=st.integers(min_value=0, max_value=10**12),
-    minor=st.integers(min_value=0, max_value=10**12),
-    patch=st.integers(min_value=0, max_value=10**12),
-)
-def test_canonical_and_legacy_versions_round_trip(
-    major: int, minor: int, patch: int
-) -> None:
-    """Canonical and legacy numeric components retain their values."""
-    from cmd_mox.record.fixture import _parse_version
-
-    assert _parse_version(f"{major}.{minor}.{patch}") == (major, minor, patch)
-    assert _parse_version(f"{major}.{minor}") == (major, minor, 0)
-
-
-@given(component=st.integers(min_value=0, max_value=10**12))
-def test_canonical_version_rejects_leading_zero(component: int) -> None:
-    """A numeric component with a leading zero is not canonical SemVer."""
-    from cmd_mox.record.fixture import _parse_version
-
-    with pytest.raises(ValueError, match="Invalid"):
-        _parse_version(f"1.0.0{component}")
-
-
-@given(
-    minor=st.integers(min_value=0, max_value=10**12),
-    patch=st.integers(min_value=0, max_value=10**12),
-)
-def test_same_major_version_preserves_known_fields(minor: int, patch: int) -> None:
-    """Same-major versions load without migration and discard unknown fields."""
-    data = _sample_fixture().to_dict()
-    data["version"] = f"1.{minor}.{patch}"
-    data["future_field"] = {"value": "discarded"}
-
-    result = FixtureFile.from_dict(data)
-
-    assert result.version == "1.0.0"
-    assert result.recordings[0].command == "git"
-    assert "future_field" not in result.to_dict()

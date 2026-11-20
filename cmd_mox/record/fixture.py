@@ -60,6 +60,23 @@ _SEMVER_CORE_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
 type _MigrationFn = cabc.Callable[[dict[str, typ.Any]], dict[str, typ.Any]]
 
 
+def _require_semver_core(stripped_version: str, version_str: str) -> None:
+    """Reject *stripped_version* unless it matches the canonical SemVer core."""
+    if _SEMVER_CORE_PATTERN.fullmatch(stripped_version) is None:
+        msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
+        raise ValueError(msg)
+
+
+def _require_legacy_components(parts: list[str], version_str: str) -> None:
+    """Reject *parts* unless every component is an ASCII decimal."""
+    if not all(part.isascii() and part.isdecimal() for part in parts):
+        msg = (
+            f"Invalid schema version {version_str!r}; "
+            "expected numeric 'major.minor.patch'"
+        )
+        raise ValueError(msg)
+
+
 def _split_version(version_str: str) -> list[str]:
     """Split a version and validate its component syntax.
 
@@ -84,17 +101,9 @@ def _split_version(version_str: str) -> list[str]:
         msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
         raise ValueError(msg)
     if len(parts) == _MAX_VERSION_COMPONENT_COUNT:
-        if _SEMVER_CORE_PATTERN.fullmatch(stripped_version) is None:
-            msg = (
-                f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
-            )
-            raise ValueError(msg)
-    elif not all(part.isascii() and part.isdecimal() for part in parts):
-        msg = (
-            f"Invalid schema version {version_str!r}; "
-            "expected numeric 'major.minor.patch'"
-        )
-        raise ValueError(msg)
+        _require_semver_core(stripped_version, version_str)
+    else:
+        _require_legacy_components(parts, version_str)
     return parts
 
 
