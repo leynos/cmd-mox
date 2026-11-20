@@ -105,15 +105,23 @@ The design rationale, including why fail-fast remains opt-in, is recorded in
 ## Recording fixture schema versions
 
 `FixtureFile.load()` reads the JSON and delegates to `from_dict()`, which
-normalizes the version and applies registered migrations. Canonical versions
-use three dot-separated ASCII numeric components without leading zeroes; legacy
-two-component values are parsed as integers with `PATCH` set to zero. If the
-version is missing, normalization supplies `0.0.0`.
+normalizes the version and applies registered migrations. `_CURRENT_VERSION` is
+the single version source: `_SCHEMA_VERSION` and the target registered for the
+latest migration both derive from it. Canonical versions use three
+dot-separated ASCII numeric components without leading zeroes; legacy
+two-component values must use ASCII digits (leading zeroes are allowed) and are
+parsed with `PATCH` set to zero. If the version is missing, normalization
+supplies `0.0.0`.
 
 Minor and patch differences within the same major version are tolerated.
 Migrations are registered in `_MIGRATIONS` by source major version and chain
-older major versions forward; an unsupported higher major version is rejected
-with `ValueError`. See the
+older major versions forward. The chain, not each migration callable, stamps
+the registered target version after every hop, so historical targets stay
+correct after a later upgrade. An unsupported higher major version is rejected
+with `ValueError`, and a target that does not advance the major version is a
+registry misconfiguration. A future major 2 registers only the `1 -> 2` hop;
+the chain re-reads the registry, so a major 0 fixture crosses `0 -> 1 -> 2`
+automatically. See the
 [schema versioning guide](usage-guide.md#schema-versioning-and-migration) and
 the
 [detailed versioning design](python-native-command-mocking-design.md#911-versioning-and-forward-compatibility).
