@@ -42,7 +42,7 @@ def sample_fixture(
     return FixtureFile(
         version="1.0.0",
         metadata=sample_metadata(),
-        recordings=recordings or [sample_invocation()],
+        recordings=[sample_invocation()] if recordings is None else recordings,
         scrubbing_rules=[],
     )
 

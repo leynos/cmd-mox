@@ -140,6 +140,21 @@ class TestFixtureMetadata:
         assert rebuilt.test_function == original.test_function
 
 
+class TestFixtureHelpers:
+    """Tests for the shared sample fixture builders."""
+
+    def test_sample_fixture_preserves_an_explicitly_empty_recording_list(self) -> None:
+        """An explicit empty list is distinct from the default sample."""
+        assert sample_fixture(recordings=[]).recordings == []
+
+    def test_sample_fixture_supplies_a_sample_recording_by_default(self) -> None:
+        """Omitting the recording list still supplies one sample invocation."""
+        recordings = sample_fixture().recordings
+
+        assert len(recordings) == 1
+        assert recordings[0].command == "git"
+
+
 class TestFixtureFile:
     """Tests for FixtureFile serialization and persistence."""
 
