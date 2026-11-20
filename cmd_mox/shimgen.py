@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import typing as typ
+import warnings
 from pathlib import Path
 
 from cmd_mox import _path_utils as path_utils
@@ -154,6 +155,21 @@ def _format_windows_launcher(python_executable: str, shim_path: Path) -> str:
     )
 
 
+def _expected_windows_launcher_bytes() -> bytes:
+    r"""Return the exact bytes written for a Windows ``.cmd`` launcher.
+
+    ``write_text`` with ``newline="\r\n"`` expands every ``\n``, so building
+    the expectation the same way keeps the health check byte-for-byte exact.
+
+    Returns
+    -------
+    bytes
+        UTF-8 launcher contents with CRLF delimiters and no BOM.
+    """
+    contents = _format_windows_launcher(sys.executable, SHIM_PATH)
+    return contents.replace("\n", "\r\n").encode("utf-8")
+
+
 def _validate_launcher_path(launcher: Path) -> None:
     """Validate that *launcher* can be used for a new ``.cmd`` file.
 
@@ -214,12 +230,29 @@ def _create_windows_shim(directory: Path, name: str) -> Path:
         logger=logger,
         exc_factory=_launcher_unlink_error,
     )
-    launcher.write_text(
-        _format_windows_launcher(sys.executable, SHIM_PATH),
-        encoding="utf-8",
-        newline="\r\n",
-    )
+    _write_windows_launcher(launcher)
     return launcher
+
+
+def _write_windows_launcher(launcher: Path) -> None:
+    """Write *launcher*, removing a partial file when the write fails."""
+    try:
+        launcher.write_bytes(_expected_windows_launcher_bytes())
+    except OSError:
+        # The failed write can leave an empty or truncated launcher behind,
+        # which a retry would then reject as a foreign entry.
+        _discard_partial_launcher(launcher)
+        raise
+
+
+def _discard_partial_launcher(launcher: Path) -> None:
+    """Remove a partially written launcher, logging a refused removal."""
+    try:
+        launcher.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Failed to remove partial launcher %s", launcher)
 
 
 def _create_posix_symlink(directory: Path, name: str) -> Path:
@@ -280,6 +313,90 @@ def _ensure_shim_template_ready(shim_path: Path) -> None:
             raise PermissionError(msg) from exc
 
 
+def ensure_shim(directory: Path, name: str) -> Path:
+    """Ensure *directory* holds a usable shim for *name*.
+
+    The platform determines both the shim path and what counts as healthy. On
+    POSIX the shim is a symlink to :data:`SHIM_PATH`; an existing live link is
+    returned unchanged, while a broken link or missing entry is created or
+    repaired. On Windows the shim is ``name.cmd``; a regular launcher whose
+    bytes match cmd-mox's generator is returned unchanged, and every other
+    entry is reported as a collision rather than overwritten.
+
+    Parameters
+    ----------
+    directory : pathlib.Path
+        Existing directory holding generated shims.
+    name : str
+        Command name represented by the shim.
+
+    Returns
+    -------
+    pathlib.Path
+        Path of the usable shim launcher or symlink.
+
+    Raises
+    ------
+    ValueError
+        If *name* is not a safe command filename.
+    FileNotFoundError
+        If *directory* or the shim template does not exist.
+    PermissionError
+        If the shim template cannot be made executable.
+    FileExistsError
+        If a non-cmd-mox entry already occupies the shim path.
+    """  # ruff: ignore[docstring-extraneous-exception] - private validators raise these caller-visible failures
+    _validate_shim_directory(directory)
+    _ensure_shim_template_ready(SHIM_PATH)
+    _validate_command_name(name)
+    if path_utils.IS_WINDOWS:
+        return _ensure_windows_launcher(directory, name)
+    return _ensure_posix_symlink(directory, name)
+
+
+def _ensure_posix_symlink(directory: Path, name: str) -> Path:
+    """Return a link to the shim template, creating or repairing it if needed."""
+    link = path_utils.shim_launcher_path(directory, name)
+    if link.is_symlink() and link.exists():
+        try:
+            points_at_template = link.resolve() == SHIM_PATH
+        except OSError:
+            points_at_template = False
+        if points_at_template:
+            return link
+    return _create_posix_symlink(directory, name)
+
+
+def _ensure_windows_launcher(directory: Path, name: str) -> Path:
+    """Return a matching launcher for *name*, creating it when absent."""
+    launcher = path_utils.shim_launcher_path(directory, name)
+    if not os.path.lexists(launcher):
+        return _create_windows_shim(directory, name)
+    _require_matching_launcher(launcher)
+    return launcher
+
+
+def _require_matching_launcher(launcher: Path) -> None:
+    """Raise unless *launcher* is a regular file cmd-mox itself wrote."""
+    if launcher.is_symlink() or not launcher.is_file():
+        raise _launcher_collision_error(launcher)
+    if _read_launcher_bytes(launcher) != _expected_windows_launcher_bytes():
+        raise _launcher_collision_error(launcher)
+
+
+def _read_launcher_bytes(launcher: Path) -> bytes:
+    """Read *launcher*, reporting an unreadable entry as a collision."""
+    try:
+        return launcher.read_bytes()
+    except OSError as exc:
+        raise _launcher_collision_error(launcher) from exc
+
+
+def _launcher_collision_error(launcher: Path) -> FileExistsError:
+    """Return the error reporting a foreign entry at *launcher*."""
+    return FileExistsError(f"{launcher} already exists and is not a cmd-mox launcher")
+
+
 def _create_shim_for_command(directory: Path, name: str) -> Path:
     """Create a platform-appropriate shim for *name* in *directory*.
 
@@ -295,9 +412,7 @@ def _create_shim_for_command(directory: Path, name: str) -> Path:
     return _create_posix_symlink(directory, name)
 
 
-def create_shim_symlinks(
-    directory: Path, commands: cabc.Iterable[str]
-) -> dict[str, Path]:
+def create_shims(directory: Path, commands: cabc.Iterable[str]) -> dict[str, Path]:
     """Create shims for the given commands in *directory*.
 
     Parameters
@@ -322,51 +437,35 @@ def create_shim_symlinks(
     return mapping
 
 
-def is_broken_symlink(path: Path) -> bool:
-    """Return ``True`` when *path* is a symlink whose target is missing.
+def create_shim_symlinks(
+    directory: Path, commands: cabc.Iterable[str]
+) -> dict[str, Path]:
+    """Create shims for *commands* (deprecated alias for :func:`create_shims`).
+
+    .. deprecated::
+        Use :func:`create_shims` instead. The old name is inaccurate because
+        Windows shims are ``.cmd`` batch launchers rather than symlinks.
 
     Parameters
     ----------
-    path : pathlib.Path
-        Filesystem path to inspect.
+    directory : pathlib.Path
+        Directory where shims will be created. It must already exist.
+    commands : collections.abc.Iterable[str]
+        Command names for which to create shims.
 
     Returns
     -------
-    bool
-        ``True`` when *path* is a dangling symlink.
+    dict[str, Path]
+        The created shim path for each requested command.
+
+    Warns
+    -----
+    DeprecationWarning
+        Always emitted; call :func:`create_shims` directly to avoid it.
     """
-    return path.is_symlink() and not path.exists()
-
-
-def is_shim_healthy(shim_path: Path) -> bool:
-    """Return ``True`` when the shim already points to a valid target.
-
-    Parameters
-    ----------
-    shim_path : pathlib.Path
-        Path to the shim to inspect.
-
-    Returns
-    -------
-    bool
-        ``True`` when *shim_path* is an intact symlink needing no repair.
-    """
-    if not shim_path.is_symlink():
-        return False
-    return not is_broken_symlink(shim_path)
-
-
-def has_non_symlink_collision(shim_path: Path) -> bool:
-    """Return ``True`` when a non-symlink file blocks shim creation.
-
-    Parameters
-    ----------
-    shim_path : pathlib.Path
-        Path where the shim would be created.
-
-    Returns
-    -------
-    bool
-        ``True`` when *shim_path* exists but is not a symlink.
-    """
-    return shim_path.exists() and not shim_path.is_symlink()
+    warnings.warn(
+        "create_shim_symlinks is deprecated; use create_shims instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return create_shims(directory, commands)

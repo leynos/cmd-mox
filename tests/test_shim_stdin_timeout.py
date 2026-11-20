@@ -20,7 +20,7 @@ import typing as typ
 
 import pytest
 
-from cmd_mox import _stdin_capture, create_shim_symlinks
+from cmd_mox import _stdin_capture, create_shims
 from cmd_mox.environment import CMOX_IPC_SOCKET_ENV, CMOX_IPC_TIMEOUT_ENV
 from cmd_mox.ipc import IPCHandlers, IPCServer, NamedPipeServer, Response
 
@@ -58,7 +58,7 @@ def _install_shim(tmp_path: Path) -> Path:
     """
     shim_dir = tmp_path / "shims"
     shim_dir.mkdir()
-    return create_shim_symlinks(shim_dir, [_COMMAND])[_COMMAND]
+    return create_shims(shim_dir, [_COMMAND])[_COMMAND]
 
 
 def _shim_arguments(shim_path: Path) -> list[str]:

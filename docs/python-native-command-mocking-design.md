@@ -592,7 +592,7 @@ sequenceDiagram
     actor User
     participant App as Application
     participant FS as FileSystem
-    User->>App: Call create_shim_symlinks(directory, commands)
+    User->>App: Call create_shims(directory, commands)
     App->>FS: Check if directory exists
     alt Directory does not exist
         App->>User: Raise FileNotFoundError
@@ -1916,7 +1916,7 @@ sequenceDiagram
     Tester->>CmdMox: stub('hi').returns(stdout='hello')
     Tester->>CmdMox: replay()
     CmdMox->>EnvironmentManager: __enter__()
-    CmdMox->>Shim: create_shim_symlinks()
+    CmdMox->>Shim: create_shims()
     CmdMox->>IPCServer: start()
     Tester->>Shim: run 'hi' (as subprocess)
     Shim->>IPCServer: connect and send invocation

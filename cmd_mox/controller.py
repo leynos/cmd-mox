@@ -39,11 +39,7 @@ from .response_strategy import (
     execute_handler,
     finalize_response_env,
 )
-from .shimgen import (
-    create_shim_symlinks,
-    has_non_symlink_collision,
-    is_shim_healthy,
-)
+from .shimgen import _validate_command_uniqueness, create_shims, ensure_shim
 from .test_doubles import CommandDouble, DoubleKind
 from .verifiers import CountVerifier, OrderVerifier, UnexpectedCommandVerifier
 
@@ -286,49 +282,58 @@ class CmdMox:
 
         The command name is recorded for future replay transitions. When the
         controller is already in :class:`Phase.REPLAY` and the environment has
-        been entered (``env.shim_dir`` is populated), the shim symlink is
-        created immediately so late-registered doubles work without restarting
-        the IPC server. Healthy symlinks are left untouched, while broken links
-        are recreated to repair them. Subsequent :meth:`_start_ipc_server` calls
+        been entered (``env.shim_dir`` is populated), the shim is created
+        immediately so late-registered doubles work without restarting the IPC
+        server. Healthy shims are left untouched: an intact POSIX symlink, or a
+        Windows launcher matching cmd-mox's own bytes. Broken symlinks are
+        repaired, while any other entry at the launcher path raises
+        :class:`FileExistsError`. Subsequent :meth:`_start_ipc_server` calls
         re-sync every shim so repeated registrations remain idempotent.
-        """
-        self._commands.add(name)
-        self._ensure_shim_during_replay(name)
-
-    def _ensure_shim_during_replay(self, name: str) -> None:
-        """Create a shim symlink when replay is active and shims are writable.
+        A failed late registration removes the name it added, so the same
+        command can be registered again after the underlying problem is fixed.
 
         Raises
         ------
-        FileExistsError
-            If a non-symlink path already occupies the requested shim path.
-        """
-        if self._phase is not Phase.REPLAY:
-            return
-        shim_path = self._get_replay_shim_path(name)
-        if shim_path is None:
-            return
-        if is_shim_healthy(shim_path):
-            return
-        if has_non_symlink_collision(shim_path):
-            msg = f"{shim_path} already exists and is not a symlink"
-            raise FileExistsError(msg)
-        create_shim_symlinks(shim_path.parent, [name])
+        ValueError
+            If *name* differs only by case from an already registered command
+            on a case-insensitive filesystem.
+        """  # ruff: ignore[docstring-extraneous-exception] - the uniqueness validator raises this caller-visible failure
+        self._validate_command_registration(name)
+        was_registered = name in self._commands
+        self._commands.add(name)
+        try:
+            self._ensure_shim_during_replay(name)
+        except BaseException:
+            if not was_registered:
+                self._commands.discard(name)
+            raise
 
-    def _get_replay_shim_path(self, name: str) -> Path | None:
-        """Return the shim path for *name*, or ``None`` when none is prepared."""
-        env = self.environment
-        if env is None or env.shim_dir is None:
-            return None
-        return Path(env.shim_dir) / name
+    def _validate_command_registration(self, name: str) -> None:
+        """Reject *name* when it collides by case with a registered command."""
+        _validate_command_uniqueness([*self._commands | {name}])
+
+    def _ensure_shim_during_replay(self, name: str) -> None:
+        """Create a shim when replay is active and shims are writable.
+
+        Errors from :func:`cmd_mox.shimgen.ensure_shim` propagate unchanged.
+        """
+        shim_dir = self.environment.shim_dir
+        if self._phase is not Phase.REPLAY or shim_dir is None:
+            return
+        ensure_shim(Path(shim_dir), name)
 
     def _get_double(self, command_name: str, kind: DoubleKind) -> CommandDouble:
         """Return or create the double for *command_name*, rejecting kind changes."""
         dbl = self._doubles.get(command_name)
         if dbl is None:
             dbl = CommandDouble(command_name, self, kind)
+            # Publish first so an invocation racing shim creation resolves.
             self._doubles[command_name] = dbl
-            self.register_command(command_name)
+            try:
+                self.register_command(command_name)
+            except BaseException:
+                self._doubles.pop(command_name, None)
+                raise
         elif dbl.kind is not kind:
             msg = (
                 f"{command_name!r} already registered as {dbl.kind}; "
@@ -708,7 +713,7 @@ class CmdMox:
         shim_dir, socket_path = _lifecycle_checks.validate_replay_environment(
             self.environment
         )
-        create_shim_symlinks(shim_dir, self._commands)
+        create_shims(shim_dir, self._commands)
         server_factory = (
             CallbackNamedPipeServer if _path_utils.IS_WINDOWS else CallbackIPCServer
         )

@@ -1437,9 +1437,16 @@ supported surface area without navigating modules.
 - `temporary_env` – context manager that temporarily sets the `os.environ`
   entries named in its mapping and restores only those keys on exit. Unrelated
   changes made inside the context survive. It provides no thread isolation.
-- `create_shim_symlinks` – low-level helper to generate command shims.
+- `create_shims` – low-level helper to generate command shims.
+- `create_shim_symlinks` – deprecated alias for `create_shims`; it emits a
+  `DeprecationWarning`.
 - `SHIM_PATH` – filesystem path to the shared `shim.py` entrypoint used by
   shims.
+
+Registering a command during replay reuses an existing healthy shim. On Windows
+a `name.cmd` launcher written by cmd-mox is left byte-for-byte unchanged, while
+any other entry at that path raises `FileExistsError` instead of being
+overwritten.
 
 ### Platform helpers
 
