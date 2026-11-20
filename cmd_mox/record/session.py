@@ -9,6 +9,7 @@ Lifecycle: ``start()`` -> ``record()`` (one or more) -> ``finalize()``.
 
 from __future__ import annotations
 
+import dataclasses as dc
 import datetime as dt
 import threading
 import typing as typ
@@ -25,6 +26,21 @@ if typ.TYPE_CHECKING:
     from cmd_mox.ipc import Invocation, Response
 
     from .scrubber import Scrubber
+
+
+def _normalize_command_filter(command_filter: str | list[str] | None) -> list[str]:
+    """Normalize a command filter to case-folded entries.
+
+    Returns
+    -------
+    list[str]
+        A fresh list with every entry normalized.  ``None`` and an empty
+        input list both produce an empty list, which disables filtering.
+        Copying the input keeps later caller mutations from changing what
+        this session records.
+    """
+    entries = [command_filter] if isinstance(command_filter, str) else command_filter
+    return [entry.lower() for entry in entries or []]
 
 
 class RecordingSession:
@@ -54,16 +70,13 @@ class RecordingSession:
         self._fixture_path = Path(fixture_path)
         self._scrubber = scrubber
         self._env_allowlist: list[str] = list(env_allowlist or [])
-        self._command_filter: list[str] | None = (
-            [command_filter]
-            if isinstance(command_filter, str)
-            else list(command_filter)
-            if command_filter is not None
-            else None
-        )
+        self._command_filter: list[str] = _normalize_command_filter(command_filter)
 
         self._recordings: list[RecordedInvocation] = []
         self._lock = threading.Lock()
+        # Serializes the whole finalize sequence.  _lock stays reserved for
+        # short state transitions so file I/O never holds it.
+        self._finalize_lock = threading.Lock()
         self._started_at: dt.datetime | None = None
         self._finalized: bool = False
         self._fixture_file: FixtureFile | None = None
@@ -86,16 +99,19 @@ class RecordingSession:
         LifecycleError
             If the session has already been finalized.
         """
-        if self._finalized:
-            msg = "Cannot start a finalized recording session"
-            raise LifecycleError(msg)
-        self._started_at = dt.datetime.now(dt.UTC)
+        # The finalized check and the timestamp assignment share one critical
+        # section so a concurrent finalize() cannot interleave between them.
+        with self._lock:
+            if self._finalized:
+                msg = "Cannot start a finalized recording session"
+                raise LifecycleError(msg)
+            self._started_at = dt.datetime.now(dt.UTC)
 
     def _validate_record_preconditions(self, duration_ms: int) -> None:
         """Validate preconditions before recording an invocation.
 
-        Must be called while holding ``self._lock`` so that the
-        ``_finalized`` check and subsequent append are atomic.
+        Must be called while holding ``self._lock`` so the ``_finalized``
+        check and the subsequent state snapshot cannot race a finalize().
 
         Parameters
         ----------
@@ -118,6 +134,14 @@ class RecordingSession:
         if duration_ms < 0:
             msg = f"duration_ms must be non-negative, got {duration_ms}"
             raise ValueError(msg)
+
+    def _should_record_command(self, command: str) -> bool:
+        """Return whether *command* passes the configured command filter."""
+        # An absent or empty filter means "record everything"; an empty string
+        # entry is still a real filter that matches only the empty command.
+        if len(self._command_filter) == 0:
+            return True
+        return command.lower() in self._command_filter
 
     def record(
         self,
@@ -151,14 +175,12 @@ class RecordingSession:
             If ``duration_ms`` is negative.
 
         """  # ruff: ignore[docstring-extraneous-exception] - _validate_record_preconditions propagates these caller-visible failures.
-        # Lifecycle validation and append are inside the same critical
-        # section so a concurrent finalize() cannot snapshot _recordings
-        # between the _finalized check and the append.
+        # Build under _lock so a concurrent finalize() cannot snapshot
+        # _recordings between the lifecycle check and the build.
         with self._lock:
             self._validate_record_preconditions(duration_ms)
 
-            # Skip if command filter is set and this command is not in it.
-            if self._command_filter and invocation.command not in self._command_filter:
+            if not self._should_record_command(invocation.command):
                 return
 
             env_subset = filter_env_subset(
@@ -169,7 +191,9 @@ class RecordingSession:
             )
 
             recording = RecordedInvocation(
-                sequence=len(self._recordings),
+                # Provisional only: the append-order sequence is assigned once
+                # the scrubber has returned.
+                sequence=-1,
                 command=invocation.command,
                 args=list(invocation.args),
                 stdin=invocation.stdin,
@@ -181,35 +205,59 @@ class RecordingSession:
                 duration_ms=duration_ms,
             )
 
-            if self._scrubber is not None:
-                recording = self._scrubber.scrub(recording)
+        # Scrub outside _lock so a scrubber may call back into the session
+        # without deadlocking and so independent scrubs can run concurrently.
+        if self._scrubber is not None:
+            recording = self._scrubber.scrub(recording)
 
+        with self._lock:
+            # Finalization may have run while the scrubber held the recording.
+            if self._finalized:
+                msg = "Cannot record after the session has been finalized"
+                raise LifecycleError(msg)
+            recording = dc.replace(recording, sequence=len(self._recordings))
             self._recordings.append(recording)
 
     def finalize(self) -> FixtureFile:
         """Finalize the session and persist the fixture to disk.
 
-        Idempotent: calling ``finalize()`` a second time returns the same
-        ``FixtureFile`` without re-writing the file.
+        The session must have been started.  Concurrent calls are serialized:
+        exactly one fixture is built and written, and every caller receives
+        that same object.  If the write fails, the session remains finalized
+        but no fixture is cached, so a later call retries the save.
 
         Returns
         -------
         FixtureFile
             The assembled fixture file that was persisted.
-        """
-        if self._fixture_file is not None:
-            return self._fixture_file
 
-        with self._lock:
-            metadata = FixtureMetadata.create()
-            fixture = FixtureFile(
-                version=FixtureFile.SCHEMA_VERSION,
-                metadata=metadata,
-                recordings=list(self._recordings),
-                scrubbing_rules=[],
-            )
-            self._finalized = True
+        Raises
+        ------
+        LifecycleError
+            If the session has not been started.
+        cmd_mox.atomic_write.AtomicWriteError
+            If the fixture cannot be written.  A previous complete fixture at
+            the destination is left in place when replacement did not occur.
+        """  # ruff: ignore[docstring-extraneous-exception] - FixtureFile.save propagates this caller-visible failure.
+        # Hold the finalize lock across the cache check, snapshot, write, and
+        # cache assignment.  _lock is taken only while reading or updating
+        # in-memory state, so file I/O never blocks record() or start().
+        with self._finalize_lock:
+            if self._fixture_file is not None:
+                return self._fixture_file
 
-        fixture.save(self._fixture_path)
-        self._fixture_file = fixture
-        return fixture
+            with self._lock:
+                if self._started_at is None:
+                    msg = "Recording session has not been started; call start() first"
+                    raise LifecycleError(msg)
+                self._finalized = True
+                fixture = FixtureFile(
+                    version=FixtureFile.SCHEMA_VERSION,
+                    metadata=FixtureMetadata.create(),
+                    recordings=list(self._recordings),
+                    scrubbing_rules=[],
+                )
+
+            fixture.save(self._fixture_path)
+            self._fixture_file = fixture
+            return fixture

@@ -20,6 +20,8 @@ import typing as typ
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+from cmd_mox.atomic_write import atomic_write_json
+
 from ._schema import (
     SCHEMA_ERROR_PREFIX,
     _optional_str,
@@ -534,13 +536,23 @@ class FixtureFile:
     def save(self, path: Path) -> None:
         """Write this fixture to *path* as JSON, creating directories as needed.
 
+        The destination is replaced atomically: readers see either the
+        previous complete fixture or the new complete fixture, never a
+        truncated file.  The new file is written with owner read/write
+        permissions where the platform supports POSIX mode bits.
+
         Parameters
         ----------
         path : pathlib.Path
             Destination JSON path.
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
+
+        Raises
+        ------
+        cmd_mox.atomic_write.AtomicWriteError
+            If the fixture cannot be written atomically.  The previous file at
+            *path*, if any, remains complete when replacement did not occur.
+        """  # ruff: ignore[docstring-extraneous-exception] - atomic_write propagates this caller-visible failure.
+        atomic_write_json(path, self.to_dict())
 
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
@@ -563,5 +575,5 @@ class FixtureFile:
         ValueError
             If the fixture is not valid JSON or fails schema validation.
         """  # ruff: ignore[docstring-extraneous-exception] - pathlib and JSON/schema parsing propagate these caller-visible failures.
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return cls.from_dict(data)

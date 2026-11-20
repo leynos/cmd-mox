@@ -197,6 +197,9 @@ def filter_env_subset(
         The keys that are safe and relevant to persist in a fixture.
     """
     requested = set(allowlist or []) | set(explicit_keys or [])
+    # Lookup is case-insensitive because the tables above use lower-case keys.
+    # Paths and extensions are not stripped, so ``/usr/bin/git`` and
+    # ``git.exe`` gain no known command prefix.
     normalized_command = command.lower()
     cmd_prefix = COMMAND_ENV_PREFIXES.get(normalized_command, "")
     exact_keys = COMMAND_ENV_KEYS.get(normalized_command)

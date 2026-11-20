@@ -33,6 +33,31 @@ Feature: Recording session captures passthrough interactions
     And the fixture metadata contains a valid ISO8601 timestamp
     And the fixture metadata contains the Python version
 
+  Scenario: finalizing an unstarted session raises a lifecycle error
+    Given a recording session targeting a temporary fixture file
+    When the session is finalized without being started
+    Then a lifecycle error is raised
+    And the fixture file does not exist
+
+  Scenario: the command filter matches command names case-insensitively
+    Given a recording session with command filter "GIT"
+    When the session is started
+    And an invocation of "git" with args "status" is recorded
+    And an invocation of "echo" with args "hello" is recorded
+    And the session is finalized
+    Then the fixture contains 1 recording
+    And the recording command is "git"
+    And the saved fixture JSON contains 1 recording
+
+  Scenario: a failed atomic replacement preserves the previous fixture
+    Given a recording session targeting an existing fixture file
+    And the fixture replacement is configured to fail
+    When the session is started
+    And an invocation of "git" with args "status" is recorded
+    And finalizing the session is attempted
+    Then the fixture save fails with an atomic write error
+    And the saved fixture JSON contains 0 recordings
+
   Scenario: loading a fixture with an older schema version migrates it
     Given a 0.9.0 fixture file on disk
     When the fixture file is loaded

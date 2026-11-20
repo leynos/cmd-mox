@@ -1,0 +1,304 @@
+"""Unit tests for the atomic UTF-8 persistence helpers."""
+
+from __future__ import annotations
+
+import errno
+import json
+import os
+import stat
+import typing as typ
+from pathlib import Path
+
+import pytest
+
+from cmd_mox import atomic_write
+from cmd_mox.atomic_write import (
+    AtomicWriteError,
+    atomic_write_json,
+    atomic_write_text,
+)
+from cmd_mox.unittests._atomic_write_failures import install_replace_hook
+
+_POSIX_ONLY = pytest.mark.skipif(
+    os.name == "nt", reason="POSIX file mode bits are not portable to Windows"
+)
+
+
+def _temporary_files(directory: Path) -> list[Path]:
+    """Return the temporary files the helper may have left in *directory*."""
+    return sorted(directory.glob(".*.tmp"))
+
+
+def _raise_os_error(*_args: object, **_kwargs: object) -> typ.NoReturn:
+    """Model an operating-system failure raised by an injected seam."""
+    message = "injected failure"
+    raise OSError(errno.EIO, message)
+
+
+def test_atomic_write_text_writes_utf8_content(tmp_path: Path) -> None:
+    """Non-ASCII text is persisted and read back as UTF-8."""
+    path = tmp_path / "note.txt"
+
+    atomic_write_text(path, "café ☃\n")
+
+    assert path.read_text(encoding="utf-8") == "café ☃\n"
+
+
+def test_atomic_write_text_creates_parent_directories(tmp_path: Path) -> None:
+    """Missing parent directories are created before the temporary file."""
+    path = tmp_path / "nested" / "deeper" / "note.txt"
+
+    atomic_write_text(path, "content\n")
+
+    assert path.read_text(encoding="utf-8") == "content\n"
+
+
+def test_directory_chain_sync_covers_every_ancestor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The target directory and each ancestor are flushed after replacement."""
+    synced: list[Path] = []
+    monkeypatch.setattr(atomic_write, "_sync_parent_directory", synced.append)
+    path = tmp_path / "new" / "deeper" / "note.txt"
+
+    atomic_write_text(path, "content\n")
+
+    # Innermost first, ending at the filesystem root.
+    assert synced[:3] == [tmp_path / "new" / "deeper", tmp_path / "new", tmp_path]
+    assert synced[-1].parent == synced[-1]
+
+
+def test_retry_after_a_failed_write_syncs_existing_ancestors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retried write flushes ancestors an earlier failed attempt created."""
+    path = tmp_path / "new" / "deeper" / "note.txt"
+    attempts = 0
+
+    def _fail_once(self: Path, target: Path) -> Path:
+        """Fail the first replacement only."""
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            message = "injected failure"
+            raise OSError(message)
+        return Path.replace(self, target)
+
+    install_replace_hook(monkeypatch, _fail_once)
+    with pytest.raises(AtomicWriteError):
+        atomic_write_text(path, "first\n")
+
+    synced: list[Path] = []
+    monkeypatch.setattr(atomic_write, "_sync_parent_directory", synced.append)
+    atomic_write_text(path, "second\n")
+
+    assert path.read_text(encoding="utf-8") == "second\n"
+    assert tmp_path in synced
+
+
+def test_windows_skips_the_directory_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows has no directory handles, so no directory is opened to flush."""
+
+    def _no_directory_open(*_args: object, **_kwargs: object) -> int:
+        """Fail if the Windows branch tries to open a directory handle."""
+        pytest.fail("a directory handle was opened on Windows")
+
+    monkeypatch.setattr(atomic_write.path_utils, "IS_WINDOWS", True)
+    monkeypatch.setattr(atomic_write.os, "open", _no_directory_open)
+
+    atomic_write._sync_parent_directory(tmp_path)
+
+
+def test_permission_restriction_is_skipped_without_fchmod(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A platform without ``fchmod`` still writes the file."""
+    monkeypatch.delattr(atomic_write.os, "fchmod", raising=False)
+    path = tmp_path / "note.txt"
+
+    atomic_write_text(path, "content\n", mode=0o644)
+
+    assert path.read_text(encoding="utf-8") == "content\n"
+
+
+def test_unreadable_ancestor_does_not_fail_the_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the target's own directory blocks the write when its sync fails."""
+    path = tmp_path / "note.txt"
+    real_sync = atomic_write._sync_parent_directory
+
+    def _fail_outside_target(directory: Path) -> None:
+        """Model an ancestor the process cannot flush."""
+        if directory != tmp_path:
+            raise OSError(errno.EIO, "injected failure")
+        real_sync(directory)
+
+    monkeypatch.setattr(atomic_write, "_sync_parent_directory", _fail_outside_target)
+
+    atomic_write_text(path, "content\n")
+
+    assert path.read_text(encoding="utf-8") == "content\n"
+
+
+@_POSIX_ONLY
+def test_temporary_name_fits_a_long_destination_name(tmp_path: Path) -> None:
+    """A destination near the filename limit still gets a creatable temporary."""
+    path = tmp_path / (("a" * 250) + ".json")
+
+    atomic_write_text(path, "content\n")
+
+    assert path.read_text(encoding="utf-8") == "content\n"
+
+
+@_POSIX_ONLY
+def test_temporary_name_fits_a_multibyte_destination_name(tmp_path: Path) -> None:
+    """A multibyte destination near the byte limit still gets a temporary."""
+    path = tmp_path / (("🐍" * 61) + ".json")
+
+    atomic_write_text(path, "content\n")
+
+    assert path.read_text(encoding="utf-8") == "content\n"
+
+
+def test_atomic_write_text_overwrites_existing_file(tmp_path: Path) -> None:
+    """A successful write replaces the previous contents."""
+    path = tmp_path / "note.txt"
+    path.write_text("old\n", encoding="utf-8")
+
+    atomic_write_text(path, "new\n")
+
+    assert path.read_text(encoding="utf-8") == "new\n"
+
+
+def test_atomic_write_text_leaves_no_temporary_file(tmp_path: Path) -> None:
+    """A successful write removes its sibling temporary file."""
+    path = tmp_path / "note.txt"
+
+    atomic_write_text(path, "content\n")
+
+    assert _temporary_files(tmp_path) == []
+
+
+@_POSIX_ONLY
+def test_atomic_write_text_defaults_to_owner_only_mode(tmp_path: Path) -> None:
+    """The persisted file is owner read/write only by default."""
+    path = tmp_path / "note.txt"
+
+    atomic_write_text(path, "content\n")
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@_POSIX_ONLY
+def test_atomic_write_text_honours_explicit_mode(tmp_path: Path) -> None:
+    """An explicit mode replaces the restrictive default."""
+    path = tmp_path / "note.txt"
+
+    atomic_write_text(path, "content\n", mode=0o644)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@_POSIX_ONLY
+def test_atomic_write_text_replaces_symlink_not_its_target(tmp_path: Path) -> None:
+    """The symbolic link entry is replaced and its old target is untouched."""
+    real = tmp_path / "real.txt"
+    real.write_text("original\n", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real)
+
+    atomic_write_text(link, "replacement\n")
+
+    assert link.is_symlink() is False
+    assert link.read_text(encoding="utf-8") == "replacement\n"
+    assert real.read_text(encoding="utf-8") == "original\n"
+
+
+def test_failed_replacement_preserves_previous_file_and_cleans_up(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A replacement failure leaves the old file intact and removes the temporary."""
+    path = tmp_path / "note.txt"
+    path.write_text("old\n", encoding="utf-8")
+    install_replace_hook(monkeypatch, _raise_os_error)
+
+    with pytest.raises(AtomicWriteError) as excinfo:
+        atomic_write_text(path, "new\n")
+
+    assert path.read_text(encoding="utf-8") == "old\n"
+    assert _temporary_files(tmp_path) == []
+    assert excinfo.value.path == path
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+
+def test_file_sync_failure_preserves_previous_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure while syncing the temporary file leaves the old file intact."""
+    path = tmp_path / "note.txt"
+    path.write_text("old\n", encoding="utf-8")
+    monkeypatch.setattr(atomic_write.os, "fsync", _raise_os_error)
+
+    with pytest.raises(AtomicWriteError) as excinfo:
+        atomic_write_text(path, "new\n")
+
+    assert path.read_text(encoding="utf-8") == "old\n"
+    assert _temporary_files(tmp_path) == []
+    assert excinfo.value.path == path
+
+
+def test_parent_directory_sync_failure_is_reported_after_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A parent-directory sync failure reports uncertain durability."""
+    path = tmp_path / "note.txt"
+    monkeypatch.setattr(atomic_write, "_sync_parent_directory", _raise_os_error)
+
+    with pytest.raises(AtomicWriteError) as excinfo:
+        atomic_write_text(path, "new\n")
+
+    # The replacement already succeeded, so the new contents are visible even
+    # though the helper reports that durability is uncertain.
+    assert path.read_text(encoding="utf-8") == "new\n"
+    assert excinfo.value.path == path
+
+
+def test_atomic_write_json_preserves_key_order_and_indentation(
+    tmp_path: Path,
+) -> None:
+    """JSON output keeps insertion order and the standard indented layout."""
+    path = tmp_path / "data.json"
+    payload = {"second": 2, "first": 1}
+
+    atomic_write_json(path, payload)
+
+    text = path.read_text(encoding="utf-8")
+    assert text == '{\n  "second": 2,\n  "first": 1\n}\n'
+    assert json.loads(text) == payload
+
+
+def test_atomic_write_json_wraps_serialization_failure(tmp_path: Path) -> None:
+    """A non-serializable payload is reported as an atomic write error."""
+    path = tmp_path / "data.json"
+
+    with pytest.raises(AtomicWriteError) as excinfo:
+        atomic_write_json(path, {"value": object()})
+
+    assert excinfo.value.path == path
+    assert isinstance(excinfo.value.__cause__, TypeError)
+
+
+def test_atomic_write_error_is_an_os_error() -> None:
+    """Callers may handle persistence failures through the OSError family."""
+    assert issubclass(AtomicWriteError, OSError)
