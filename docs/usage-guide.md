@@ -722,8 +722,10 @@ releases that require exactly two components cannot read fixtures written with
 a three-component version.
 
 Three-component versions use ASCII digits without leading zeroes in each
-component. Legacy two-component versions retain their historical integer
-parsing for compatibility.
+component. Legacy two-component versions require ASCII digits in each
+component: leading zeroes such as `01.0` remain valid, but signs (`+1.0`,
+`-0.0`), underscores (`0_1.0`), internal whitespace (`1. 2`) and non-ASCII
+digits (`١.٠`) are rejected with `ValueError`.
 
 CmdMox automatically migrates older fixture files to the current schema when
 loading via `FixtureFile.load()` or `FixtureFile.from_dict()`. Minor and patch

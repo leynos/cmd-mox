@@ -3586,6 +3586,22 @@ migration registry keyed by source major version, with chainable migration
 functions (major 0 -> major 1 -> major 2, etc.). Minor and patch differences
 within the same major version are tolerated without migration.
 
+`_CURRENT_VERSION` is the single source of the current schema version, and the
+public `FixtureFile.SCHEMA_VERSION` string derives from it. Migration targets
+are historical facts: each registry entry names the version its migration
+produces and stays fixed once registered, so only a newly added hop derives its
+target from `_CURRENT_VERSION`. The migration chain, not each migration
+callable, stamps the registered target version after every hop; callables only
+transform the fixture mapping. This keeps the `0 -> 1` step intact when a later
+release adds a `1 -> 2` hop and makes each callable indifferent to the version
+string.
+
+Legacy two-component version components must be non-empty ASCII decimal digits
+before `int()` runs. Leading zeroes such as `01.0` remain accepted, while
+signs, underscores, internal whitespace and non-ASCII digits are rejected as
+`Invalid schema version`. The ASCII-digit rule makes a separate non-negative
+check unreachable, so it is not maintained.
+
 **Rationale:**
 
 - String comparison of version numbers is unreliable (e.g. `"9.0.0" < "10.0.0"`
@@ -3596,6 +3612,11 @@ within the same major version are tolerated without migration.
   versions, following the Django/Alembic pattern
 - Same-major tolerance follows the schema contract: minor and patch versions
   add fields that existing readers can ignore
+- One tuple defines the current version, while fixed historical targets keep
+  each migration's output stable as the current version advances
+- Restricting legacy components to ASCII digits rejects values that `int()`
+  would otherwise silently accept, such as signs, underscores and non-ASCII
+  decimal digits
 
 #### 9.10.9 Coordinator-Based Recording Integration
 
@@ -3821,42 +3842,80 @@ fixtures.
 Fixture schema versions use the numeric `MAJOR.MINOR.PATCH` semantic-version
 core, such as `1.0.0`. CmdMox parses the field into a three-integer tuple.
 Legacy two-component versions such as `1.0` are accepted with an implicit patch
-of zero and normalized to `1.0.0` when loaded. This compatibility is one-way:
-older CmdMox releases that require exactly two components cannot read fixtures
-written with a three-component version.
+of zero and normalized to `1.0.0` when loaded; their components must be ASCII
+digits, so signs, underscores, internal whitespace and non-ASCII digits are
+rejected. This compatibility is one-way: older CmdMox releases that require
+exactly two components cannot read fixtures written with a three-component
+version.
 
 - Breaking changes increment the major version
 - New optional fields increment the minor version
 - CmdMox maintains a migration table for old versions
 - Minor and patch differences within the same major version are tolerated
 - A higher major version with no migration path raises `ValueError`
+- `_CURRENT_VERSION` defines the current version once, the migration chain
+  stamps each registered target, and historical targets stay fixed
 
 #### 9.11.2 Upgrade Path
 
 ```python
+import copy
 import re
+
+_CURRENT_VERSION = (1, 0, 0)
+
+
+def _format_version(version: tuple[int, int, int]) -> str:
+    return ".".join(str(component) for component in version)
+
+
+_SCHEMA_VERSION = _format_version(_CURRENT_VERSION)
+_SEMVER_CORE_PATTERN = re.compile(
+    r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}"
+)
+
 
 def _parse_version(version_str: str) -> tuple[int, int, int]:
     parts = version_str.strip().split(".")
     if len(parts) not in (2, 3):
         raise ValueError("expected 'major.minor.patch'")
-    if len(parts) == 3 and not re.fullmatch(
-        r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}", version_str.strip()
-    ):
-        raise ValueError("expected 'major.minor.patch'")
+    if len(parts) == 3:
+        if _SEMVER_CORE_PATTERN.fullmatch(version_str.strip()) is None:
+            raise ValueError("expected 'major.minor.patch'")
+    elif not all(part.isascii() and part.isdecimal() for part in parts):
+        raise ValueError("expected numeric 'major.minor.patch'")
     components = [int(part) for part in parts]
-    if any(component < 0 for component in components):
-        raise ValueError("version components must be non-negative")
     if len(components) == 2:
         components.append(0)
     return (components[0], components[1], components[2])
 
+
 def _migrate_v0_to_v1(data: dict) -> dict:
-    data["version"] = "1.0.0"
+    # Major 0 is synthetic; the chain stamps the registered target version.
     return data
 
-# Migration registry: source major version -> (target version, function)
+
+# Migration registry: source major version -> (target version, function).
+# A target is historical and stays fixed once registered.
 _MIGRATIONS = {0: ((1, 0, 0), _migrate_v0_to_v1)}
+
+
+def _execute_migration_chain(data: dict, file_ver: tuple, current: tuple) -> dict:
+    """Reject future majors, then chain hops and stamp each target."""
+    if file_ver[0] > current[0]:
+        raise ValueError("no migration path to the current schema")
+    while file_ver[0] < current[0]:
+        entry = _MIGRATIONS.get(file_ver[0])
+        if entry is None:
+            raise ValueError("no migration path to the current schema")
+        target, migrate_fn = entry
+        if target[0] <= file_ver[0]:
+            raise ValueError("migration target does not advance the major version")
+        data = migrate_fn(data)
+        data["version"] = _format_version(target)
+        file_ver = target
+    return data
+
 
 def _apply_migrations(data: dict) -> dict:
     """Deep-copy data and chain migrations to the current schema."""
@@ -3864,20 +3923,9 @@ def _apply_migrations(data: dict) -> dict:
     if "version" not in data:
         data["version"] = "0.0.0"
     file_ver = _parse_version(data["version"])
-    data["version"] = ".".join(str(component) for component in file_ver)
-    current = _parse_version(_SCHEMA_VERSION)
-    if file_ver[0] == current[0]:
-        return data
-    if file_ver[0] > current[0]:
-        raise ValueError("no migration path to the current schema")
-    while file_ver[0] < current[0]:
-        migration = _MIGRATIONS.get(file_ver[0])
-        if migration is None:
-            raise ValueError("no migration path to the current schema")
-        target, migrate_fn = migration
-        data = migrate_fn(data)
-        file_ver = target
-    return data
+    data["version"] = _format_version(file_ver)
+    return _execute_migration_chain(data, file_ver, _CURRENT_VERSION)
+
 
 class FixtureFile:
     @classmethod
