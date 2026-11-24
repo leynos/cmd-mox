@@ -80,7 +80,7 @@ jobs:
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@3551a0bf76fe47d0cc5ff632c7796a8ddb23717e
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@29b1772534b37ea996c24a2ccb462e717073155d
         with:
           version: "0.6.1"
 
@@ -101,18 +101,18 @@ jobs:
 
       - name: Install the YAML lint tools
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/install-yaml-lint@3551a0bf76fe47d0cc5ff632c7796a8ddb23717e
+        uses: leynos/shared-actions/.github/actions/install-yaml-lint@29b1772534b37ea996c24a2ccb462e717073155d
       - name: Run lint gates
         if: matrix.run-windows-smoke == false
         run: make lint
 
       - name: Dead-code gate
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/df12-skylos@3551a0bf76fe47d0cc5ff632c7796a8ddb23717e
+        uses: leynos/shared-actions/.github/actions/df12-skylos@29b1772534b37ea996c24a2ccb462e717073155d
 
       - name: Duplication gate
         if: matrix.run-windows-smoke == false
-        uses: leynos/shared-actions/.github/actions/df12-duplication@3551a0bf76fe47d0cc5ff632c7796a8ddb23717e
+        uses: leynos/shared-actions/.github/actions/df12-duplication@29b1772534b37ea996c24a2ccb462e717073155d
 
       # Executes representative pytest-bdd scenarios before coverage, so a
       # plugin incompatibility that collection alone would not reveal is a
