@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import errno
+import importlib
 import json
+import os
 import re
+import stat
 import sys
 import typing as typ
 
 import hypothesis.strategies as st
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 
 from cmd_mox.record.fixture import FixtureFile, FixtureMetadata, RecordedInvocation
 from cmd_mox.record.scrubber import ScrubbingRule
@@ -43,6 +47,33 @@ _NON_STRING_JSON_VALUES = st.one_of(
     st.integers(),
     st.floats(allow_nan=False, allow_infinity=False),
 )
+
+_REQUIRES_ATOMIC_MODULE = pytest.mark.xfail(
+    strict=True,
+    raises=ModuleNotFoundError,
+    reason="14.1.1: cmd_mox._atomic_write is not implemented yet",
+)
+_MISSES_OWNER_ONLY_MODE = pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="14.1.2: FixtureFile.save still writes with the process umask",
+)
+
+
+def _unicode_invocation() -> RecordedInvocation:
+    """Build a recording whose fields need non-ASCII JSON escaping."""
+    return RecordedInvocation(
+        sequence=0,
+        command="café",
+        args=["héllo", "😀"],
+        stdin="",
+        env_subset={"LANG": "en_GB.UTF-8"},
+        stdout="héllo\n",
+        stderr="",
+        exit_code=0,
+        timestamp="2025-01-15T10:30:01Z",
+        duration_ms=1,
+    )
 
 
 def _sample_invocation(*, sequence: int = 0) -> RecordedInvocation:
@@ -265,6 +296,72 @@ class TestFixtureFile:
         assert nested_path.exists()
         loaded = FixtureFile.load(nested_path)
         assert loaded.version == "1.0.0"
+
+    @_MISSES_OWNER_ONLY_MODE
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX permission bits are not enforced"
+    )
+    def test_save_writes_owner_only_fixture(self, tmp_path: Path) -> None:
+        """A saved fixture is readable and writable only by its owner."""
+        fixture = _sample_fixture()
+        fixture_path = tmp_path / "owner_only.json"
+        previous_umask = os.umask(0o022)
+        try:
+            fixture.save(fixture_path)
+        finally:
+            os.umask(previous_umask)
+
+        assert stat.S_IMODE(fixture_path.stat().st_mode) == 0o600
+
+    @_REQUIRES_ATOMIC_MODULE
+    def test_save_failure_preserves_previous_fixture(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed save leaves the previous fixture loadable and byte-identical."""
+        module = importlib.import_module("cmd_mox._atomic_write")
+        fixture_path = tmp_path / "fixture.json"
+        previous = _sample_fixture()
+        previous.save(fixture_path)
+        before = fixture_path.read_bytes()
+
+        def refuse_replace(temporary: Path, target: Path) -> None:
+            """Report that the target cannot be replaced."""
+            raise PermissionError(errno.EACCES, "Permission denied")
+
+        monkeypatch.setattr(module, "_replace", refuse_replace)
+        replacement = _sample_fixture(
+            recordings=[
+                _sample_invocation(sequence=0),
+                _sample_invocation(sequence=1),
+            ]
+        )
+
+        with pytest.raises(module.AtomicWriteError) as excinfo:
+            replacement.save(fixture_path)
+
+        assert excinfo.value.stage is module.AtomicWriteStage.REPLACE
+        assert fixture_path.read_bytes() == before
+        assert len(FixtureFile.load(fixture_path).recordings) == 1
+
+    @_REQUIRES_ATOMIC_MODULE
+    @given(invocations=st.lists(_RECORDED_INVOCATIONS, max_size=3))
+    @example(invocations=[_unicode_invocation()])
+    def test_serialization_matches_legacy_fixture_bytes(
+        self, invocations: list[RecordedInvocation]
+    ) -> None:
+        """The helper writes exactly the bytes FixtureFile.save used to write."""
+        module = importlib.import_module("cmd_mox._atomic_write")
+        fixture = FixtureFile(
+            version=FixtureFile.SCHEMA_VERSION,
+            metadata=FixtureMetadata.create(),
+            recordings=invocations,
+            scrubbing_rules=[],
+        )
+        payload = fixture.to_dict()
+
+        expected = (json.dumps(payload, indent=2) + "\n").encode()
+
+        assert module._serialize_json(payload) == expected
 
     @pytest.mark.parametrize("fixture_version", ["0.9", "0.9.0"])
     def test_from_dict_migrates_old_version(self, fixture_version: str) -> None:

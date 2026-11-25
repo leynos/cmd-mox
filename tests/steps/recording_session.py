@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import datetime as dt
+import errno
+import importlib
 import json
+import stat
 import sys
 import typing as typ
 
+import pytest
 from pytest_bdd import given, parsers, then, when
 
 from cmd_mox.ipc import Invocation, Response
-from cmd_mox.record.fixture import FixtureFile
+from cmd_mox.record.fixture import (
+    FixtureFile,
+    FixtureMetadata,
+    RecordedInvocation,
+)
 from cmd_mox.record.session import RecordingSession
 
 if typ.TYPE_CHECKING:
@@ -225,3 +234,168 @@ def loaded_fixture_metadata_preserved(loaded_fixture: FixtureFile) -> None:
     """Assert key metadata fields survive migration unchanged."""
     assert loaded_fixture.metadata.cmdmox_version == "0.1.0", "Assertion failed"
     assert loaded_fixture.metadata.platform == sys.platform, "Assertion failed"
+
+
+# -- Steps for atomic fixture persistence scenarios --------------------------
+
+
+@dc.dataclass(slots=True)
+class _FixtureContext:
+    """State shared by the atomic fixture-persistence scenarios."""
+
+    path: Path
+    session: RecordingSession | None = None
+    error: OSError | None = None
+
+
+def _recorded_invocation(sequence: int) -> RecordedInvocation:
+    """Build a deterministic recording for *sequence*."""
+    return RecordedInvocation(
+        sequence=sequence,
+        command="git",
+        args=["status"],
+        stdin="",
+        env_subset={},
+        stdout="",
+        stderr="",
+        exit_code=0,
+        timestamp="2025-01-15T10:30:01Z",
+        duration_ms=1,
+    )
+
+
+@given(
+    parsers.parse('a recording session targeting "{relative}"'),
+    target_fixture="fixture_context",
+)
+def recording_session_targeting_path(tmp_path: Path, relative: str) -> _FixtureContext:
+    """Create a recording session writing to *relative* under the temp directory.
+
+    Returns
+    -------
+    _FixtureContext
+        Context holding the session and its destination path.
+    """
+    path = tmp_path / relative
+    return _FixtureContext(path=path, session=RecordingSession(path))
+
+
+@given(
+    parsers.re(
+        r'an existing fixture "(?P<relative>[^"]+)" with (?P<count>\d+) recordings?'
+    ),
+    target_fixture="fixture_context",
+)
+def existing_fixture_on_disk(
+    tmp_path: Path, relative: str, count: str
+) -> _FixtureContext:
+    """Write an existing fixture with *count* recordings to disk.
+
+    Returns
+    -------
+    _FixtureContext
+        Context holding the destination path of the existing fixture.
+    """
+    path = tmp_path / relative
+    fixture = FixtureFile(
+        version=FixtureFile.SCHEMA_VERSION,
+        metadata=FixtureMetadata.create(),
+        recordings=[_recorded_invocation(index) for index in range(int(count))],
+        scrubbing_rules=[],
+    )
+    fixture.save(path)
+    return _FixtureContext(path=path)
+
+
+@given("the final rename of fixture writes will fail")
+def final_rename_will_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the atomic-write rename step fail with a permission error."""
+    module = importlib.import_module("cmd_mox._atomic_write")
+
+    def refuse_replace(temporary: Path, target: Path) -> None:
+        """Report that the target cannot be replaced."""
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(module, "_replace", refuse_replace)
+
+
+@when(parsers.parse('the session records a "{cmd}" invocation and finalizes'))
+def record_one_invocation_and_finalize(
+    fixture_context: _FixtureContext, cmd: str
+) -> None:
+    """Record a single invocation, then finalize the session."""
+    session = fixture_context.session
+    assert session is not None, "the scenario must supply a recording session"
+    session.start()
+    invocation = Invocation(command=cmd, args=[], stdin="", env={})
+    response = Response(stdout="output\n", stderr="", exit_code=0)
+    session.record(invocation, response)
+    session.finalize()
+
+
+@when(
+    parsers.re(
+        r"a new session records (?P<count>\d+) invocations?"
+        r" to the same fixture and finalizes"
+    )
+)
+def new_session_records_and_finalizes(
+    fixture_context: _FixtureContext, count: str
+) -> None:
+    """Record invocations in a fresh session and finalize, capturing failures."""
+    session = RecordingSession(fixture_context.path)
+    session.start()
+    for index in range(int(count)):
+        invocation = Invocation(command="git", args=[f"call-{index}"], stdin="", env={})
+        response = Response(stdout="", stderr="", exit_code=0)
+        session.record(invocation, response)
+    try:
+        session.finalize()
+    except OSError as exc:
+        fixture_context.error = exc
+
+
+@then("the fixture file loads with 1 recording")
+def fixture_file_loads_with_one_recording(fixture_context: _FixtureContext) -> None:
+    """Assert the fixture on disk is loadable and holds one recording."""
+    loaded = FixtureFile.load(fixture_context.path)
+    assert len(loaded.recordings) == 1, "Assertion failed"
+
+
+@then("the fixture file still loads with 1 recording")
+def fixture_file_still_loads_with_one_recording(
+    fixture_context: _FixtureContext,
+) -> None:
+    """Assert the previous fixture survived the failed save."""
+    assert fixture_context.error is not None, "finalizing should have failed"
+    loaded = FixtureFile.load(fixture_context.path)
+    assert len(loaded.recordings) == 1, "Assertion failed"
+
+
+@then("the fixture file is readable and writable only by its owner")
+def fixture_file_is_owner_only(fixture_context: _FixtureContext) -> None:
+    """Assert the fixture's POSIX mode is exactly ``0o600``."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX permission bits are not enforced on Windows")
+    mode = stat.S_IMODE(fixture_context.path.stat().st_mode)
+    assert mode == 0o600, f"expected 0o600, got {oct(mode)}"
+
+
+@then("the fixture directory contains only the fixture file")
+def fixture_directory_contains_only_fixture(
+    fixture_context: _FixtureContext,
+) -> None:
+    """Assert no temporary or residue file remains beside the fixture."""
+    entries = {entry.name for entry in fixture_context.path.parent.iterdir()}
+    assert entries == {fixture_context.path.name}, entries
+
+
+@then(parsers.parse('finalizing fails with an atomic write error at stage "{stage}"'))
+def finalizing_fails_at_stage(fixture_context: _FixtureContext, stage: str) -> None:
+    """Assert the captured failure is an atomic write error at *stage*."""
+    error = fixture_context.error
+    assert error is not None, "finalizing should have failed"
+    module = importlib.import_module("cmd_mox._atomic_write")
+    assert isinstance(error, module.AtomicWriteError), type(error).__name__
+    atomic_error = typ.cast("typ.Any", error)
+    assert atomic_error.stage == module.AtomicWriteStage(stage), atomic_error.stage

@@ -5,7 +5,7 @@ This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Outcomes & retrospective`, `Conformance basis`, and `Verification plan` must
 be kept up to date as work proceeds.
 
-Status: DRAFT (`DEC-OPEN-1` resolved as Option C; awaiting plan approval)
+Status: APPROVED (`DEC-OPEN-1` resolved as Option C; approved 2026-11-25)
 
 ## Purpose / big picture
 
@@ -180,8 +180,9 @@ Keep these references open while executing the plan:
   `acb8217`; all three commits replayed unchanged and no conflicts occurred.
 - [x] (2026-11-25) Reconciled current repository guidance and paths below;
   the plan remains a draft pending user approval before Stage A.
-- [ ] User approval of the plan.
-- [ ] Stage A: red tests (EP-M1).
+- [x] (2026-11-25) Plan approved by the user; status changed to APPROVED.
+- [ ] Stage A: red tests (EP-M1). Tests written and observed red:
+      205 strict `xfail`, 119 passed in the focused run.
 - [ ] Stage B: green implementation and adoption (EP-M2).
 - [ ] Stage C: Windows coverage, refactor, and mutation audit (EP-M3).
 - [ ] Stage D: documentation and roadmap (EP-M4).
@@ -1291,6 +1292,23 @@ returns the branch to the previous plateau.
 
 Record red, green, and gate transcripts here during implementation, trimmed to
 the lines that prove the result.
+
+Stage A red evidence (2026-11-25), focused run:
+
+```plaintext
+cmd_mox/unittests/test_atomic_write_faults.py::test_failure_before_replacement_preserves_target[write-present] XFAIL
+cmd_mox/unittests/test_atomic_write_faults.py::test_fault_pairs_compose[replace-write] XFAIL
+cmd_mox/unittests/test_fixture_file.py::TestFixtureFile::test_save_writes_owner_only_fixture XFAIL
+tests/test_recording_session_bdd.py::test_recorded_fixture_is_owner_only XFAIL
+tests/test_atomic_write_process_boundary.py::test_killed_writer_leaves_previous_document XFAIL
+119 passed, 205 xfailed
+```
+
+The fixture mode test xfails with the underlying `AssertionError` (the file is
+`0o644` under the default umask); every helper-level test xfails with the strict
+`ModuleNotFoundError` reason. The process-boundary test imports the module in
+the parent first, so the xfail reason matches the other helper tests rather
+than a child-process import failure.
 
 ## Interfaces and dependencies
 
