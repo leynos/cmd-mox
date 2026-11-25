@@ -7,24 +7,15 @@ import typing as typ
 
 import pytest
 
-from cmd_mox.ipc import Invocation
-from cmd_mox.record.fixture import RecordedInvocation
 from cmd_mox.record.matching import InvocationMatcher
+from cmd_mox.unittests._replay_helpers import (
+    RecordedInvocationSpec,
+    make_invocation,
+    make_recorded_invocation,
+)
 
 if typ.TYPE_CHECKING:
     from cmd_mox.unittests._invocation_helpers import InvocationKwargs
-
-
-@dc.dataclass
-class RecordedInvocationSpec:
-    """Optional overrides for building a RecordedInvocation."""
-
-    stdin: str = ""
-    env_subset: dict[str, str] = dc.field(default_factory=dict)
-    stdout: str = "ok\n"
-    stderr: str = ""
-    exit_code: int = 0
-    sequence: int = 0
 
 
 @dc.dataclass(slots=True, frozen=True)
@@ -48,59 +39,11 @@ class MatchCase:
         return "strict" if self.strict else "fuzzy"
 
 
-def _make_recorded_invocation(
-    command: str = "git",
-    args: list[str] | None = None,
-    spec: RecordedInvocationSpec | None = None,
-) -> RecordedInvocation:
-    """Build a RecordedInvocation with sensible defaults.
-
-    Returns
-    -------
-    RecordedInvocation
-        A recorded invocation populated from *command*, *args*, and *spec*.
-    """
-    s = spec or RecordedInvocationSpec()
-    return RecordedInvocation(
-        sequence=s.sequence,
-        command=command,
-        args=["status"] if args is None else args,
-        stdin=s.stdin,
-        env_subset=s.env_subset,
-        stdout=s.stdout,
-        stderr=s.stderr,
-        exit_code=s.exit_code,
-        timestamp="2026-01-15T10:30:00+00:00",
-        duration_ms=0,
-    )
-
-
-def _make_invocation(
-    command: str = "git",
-    args: list[str] | None = None,
-    stdin: str = "",
-    env: dict[str, str] | None = None,
-) -> Invocation:
-    """Build an Invocation with sensible defaults.
-
-    Returns
-    -------
-    Invocation
-        An invocation populated from *command*, *args*, *stdin*, and *env*.
-    """
-    return Invocation(
-        command=command,
-        args=["status"] if args is None else args,
-        stdin=stdin,
-        env=env or {},
-    )
-
-
 def _assert_match(case: MatchCase) -> None:
     """Assert that one invocation matches its recording as expected."""
     matcher = InvocationMatcher(strict=case.strict)
-    invocation = _make_invocation(**case.inv_kwargs)
-    recording = _make_recorded_invocation(spec=case.spec)
+    invocation = make_invocation(**case.inv_kwargs)
+    recording = make_recorded_invocation(case.spec)
 
     assert matcher.matches(invocation, recording) is case.expected, (
         f"{case.mode} matches() should be {case.expected} "
@@ -258,8 +201,8 @@ class TestInvocationMatcherFindMatch:
     def test_find_match_returns_none_when_no_candidates(self) -> None:
         """find_match returns None when no recordings match."""
         matcher = InvocationMatcher(strict=True)
-        inv = _make_invocation(command="curl")
-        recordings = [_make_recorded_invocation(command="git")]
+        inv = make_invocation(command="curl")
+        recordings = [make_recorded_invocation(RecordedInvocationSpec(command="git"))]
         consumed = set[int]()
 
         result = matcher.find_match(inv, recordings, consumed)
@@ -268,10 +211,10 @@ class TestInvocationMatcherFindMatch:
     def test_find_match_skips_consumed_indices(self) -> None:
         """find_match skips indices in the consumed set."""
         matcher = InvocationMatcher(strict=True)
-        inv = _make_invocation()
+        inv = make_invocation()
         recordings = [
-            _make_recorded_invocation(spec=RecordedInvocationSpec(sequence=0)),
-            _make_recorded_invocation(spec=RecordedInvocationSpec(sequence=1)),
+            make_recorded_invocation(RecordedInvocationSpec(sequence=0)),
+            make_recorded_invocation(RecordedInvocationSpec(sequence=1)),
         ]
         consumed = {0}
 
@@ -281,8 +224,8 @@ class TestInvocationMatcherFindMatch:
     def test_find_match_returns_single_compatible_recording(self) -> None:
         """find_match returns index 0 when only one recording is compatible."""
         matcher = InvocationMatcher(strict=True)
-        inv = _make_invocation()
-        recordings = [_make_recorded_invocation()]
+        inv = make_invocation()
+        recordings = [make_recorded_invocation()]
         consumed = set[int]()
 
         result = matcher.find_match(inv, recordings, consumed)
@@ -313,14 +256,14 @@ class TestInvocationMatcherFindMatch:
     ) -> None:
         """Strict mode prefers specific env_subset; falls back on mismatch."""
         matcher = InvocationMatcher(strict=True)
-        inv = _make_invocation(env=inv_env)
+        inv = make_invocation(env=inv_env)
         recordings = [
             # Generic: empty env_subset, always matches in strict mode
-            _make_recorded_invocation(
+            make_recorded_invocation(
                 spec=RecordedInvocationSpec(sequence=0, env_subset={}, stdout="generic")
             ),
             # Specific: env_subset may or may not match
-            _make_recorded_invocation(
+            make_recorded_invocation(
                 spec=RecordedInvocationSpec(
                     sequence=1, env_subset=specific_env_subset, stdout="specific"
                 )
@@ -395,8 +338,8 @@ class TestInvocationMatcherFindMatch:
     ) -> None:
         """Test best-fit selection across different matching scenarios."""
         matcher = InvocationMatcher(**matcher_kwargs)
-        inv = _make_invocation(**inv_kwargs)
-        recordings = [_make_recorded_invocation(spec=s) for s in rec_specs]
+        inv = make_invocation(**inv_kwargs)
+        recordings = [make_recorded_invocation(s) for s in rec_specs]
         consumed = set[int]()
 
         result = matcher.find_match(inv, recordings, consumed)
@@ -405,16 +348,16 @@ class TestInvocationMatcherFindMatch:
     def test_fuzzy_best_fit_prefers_more_env_matches(self) -> None:
         """In fuzzy mode, prefer candidate with more matching env pairs."""
         matcher = InvocationMatcher(strict=False)
-        inv = _make_invocation(env={"FOO": "bar", "BAZ": "qux"})
+        inv = make_invocation(env={"FOO": "bar", "BAZ": "qux"})
         recordings = [
             # First has 1 matching env pair
-            _make_recorded_invocation(
+            make_recorded_invocation(
                 spec=RecordedInvocationSpec(
                     sequence=0, env_subset={"FOO": "bar"}, stdout="one"
                 )
             ),
             # Second has 2 matching env pairs
-            _make_recorded_invocation(
+            make_recorded_invocation(
                 spec=RecordedInvocationSpec(
                     sequence=1,
                     env_subset={"FOO": "bar", "BAZ": "qux"},
@@ -427,3 +370,76 @@ class TestInvocationMatcherFindMatch:
         result = matcher.find_match(inv, recordings, consumed)
         # Should prefer index 1 (more matching env pairs)
         assert result == 1
+
+
+class TestInvocationMatcherDiscriminatingCases:
+    """Cases that separate rules the earlier tables could not tell apart."""
+
+    def test_missing_live_env_key_never_satisfies_a_pair(self) -> None:
+        """A recorded env pair needs its key present in the live environment."""
+        matcher = InvocationMatcher(strict=True)
+        recording = make_recorded_invocation(
+            RecordedInvocationSpec(env_subset={"MISSING": "value"})
+        )
+
+        assert matcher.matches(make_invocation(env={}), recording) is False
+
+    def test_empty_env_subset_matches_any_environment(self) -> None:
+        """An empty env_subset imposes no constraint in strict mode."""
+        matcher = InvocationMatcher(strict=True)
+        recording = make_recorded_invocation(RecordedInvocationSpec(env_subset={}))
+
+        assert matcher.matches(make_invocation(env={"ANY": "thing"}), recording) is True
+
+    def test_all_candidates_consumed_returns_none(self) -> None:
+        """Consuming every compatible recording leaves no candidate."""
+        matcher = InvocationMatcher(strict=True)
+        recordings = [
+            make_recorded_invocation(RecordedInvocationSpec(sequence=0)),
+            make_recorded_invocation(RecordedInvocationSpec(sequence=1)),
+        ]
+
+        assert matcher.find_match(make_invocation(), recordings, {0, 1}) is None
+
+    def test_empty_recordings_list_returns_none(self) -> None:
+        """An empty fixture has nothing to select."""
+        matcher = InvocationMatcher(strict=False)
+
+        assert matcher.find_match(make_invocation(), [], set()) is None
+
+    def test_lower_sequence_later_in_the_list_wins(self) -> None:
+        """The tie-break reads ``sequence``, not list position."""
+        matcher = InvocationMatcher(strict=True)
+        recordings = [
+            make_recorded_invocation(RecordedInvocationSpec(sequence=5)),
+            make_recorded_invocation(RecordedInvocationSpec(sequence=1)),
+        ]
+
+        assert matcher.find_match(make_invocation(), recordings, set()) == 1
+
+    def test_equal_sequence_falls_back_to_list_order(self) -> None:
+        """Equal ``sequence`` values keep the earlier list position."""
+        matcher = InvocationMatcher(strict=True)
+        recordings = [
+            make_recorded_invocation(RecordedInvocationSpec(sequence=3)),
+            make_recorded_invocation(RecordedInvocationSpec(sequence=3)),
+        ]
+
+        assert matcher.find_match(make_invocation(), recordings, set()) == 0
+
+    def test_subset_size_decides_in_fuzzy_mode(self) -> None:
+        """A larger env_subset wins when both candidates match one pair."""
+        matcher = InvocationMatcher(strict=False)
+        invocation = make_invocation(stdin="same", env={"K": "v"})
+        recordings = [
+            make_recorded_invocation(
+                RecordedInvocationSpec(
+                    sequence=0, stdin="same", env_subset={"K": "v", "J": "miss"}
+                )
+            ),
+            make_recorded_invocation(
+                RecordedInvocationSpec(sequence=1, stdin="same", env_subset={"K": "v"})
+            ),
+        ]
+
+        assert matcher.find_match(invocation, recordings, set()) == 0
