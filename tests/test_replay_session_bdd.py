@@ -65,3 +65,27 @@ def test_strict_best_fit_env_specificity() -> None:
 )
 def test_fuzzy_best_fit_stdin() -> None:
     """Fuzzy mode selects the recording with matching stdin."""
+
+
+@scenario(
+    str(FEATURES_DIR / "replay_session.feature"),
+    "replay session rejects a fixture with a corrupt recording",
+)
+def test_replay_rejects_corrupt_recording() -> None:
+    """Loading a schema-invalid recording fails with the field path."""
+
+
+@scenario(
+    str(FEATURES_DIR / "replay_session.feature"),
+    "duplicate recordings are consumed in sequence order",
+)
+def test_duplicate_recordings_consumed_in_sequence_order() -> None:
+    """Sequence values, not list order, decide the consumption order."""
+
+
+@scenario(
+    str(FEATURES_DIR / "replay_session.feature"),
+    "an exhausted strict replay session returns none",
+)
+def test_exhausted_strict_session_returns_none() -> None:
+    """A strict session with no unconsumed recordings returns None."""

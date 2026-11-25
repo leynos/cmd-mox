@@ -111,6 +111,38 @@ Feature: CmdMox basic functionality
     And the spy "git" should record 0 invocation
     And the journal should contain 0 invocation of "git"
 
+  Scenario: replay-backed spy consumes duplicate recordings in order
+    Given a CmdMox controller
+    And a git replay fixture with recordings "first" and "second" exists
+    And the command "git" is spied with that replay fixture
+    When I replay the controller
+    And I run the command "git" with arguments "status"
+    Then the output should be "first"
+    When I run the command "git" with arguments "status"
+    Then the output should be "second"
+    When I verify the controller
+    Then the spy "git" should record 2 invocation
+
+  Scenario: exhausted strict replay fails the shim run but not verification
+    Given a CmdMox controller
+    And a git replay fixture exists
+    And the command "git" is spied with that replay fixture
+    When I replay the controller
+    And I run the command "git" with arguments "status"
+    Then the output should be "ok"
+    When I run the command "git" with arguments "status" allowing failure
+    Then the exit code should be 1
+    And the stderr should contain "No fixture recording matches: git status"
+    When I verify the controller
+    Then the spy "git" should record 1 invocation
+
+  Scenario: corrupt replay fixture is rejected when configuring the spy
+    Given a CmdMox controller
+    And a corrupt git replay fixture exists
+    When the command "git" is spied with that replay fixture expecting an error
+    Then the replay error message should contain "Invalid fixture schema"
+    And the spy "git" should not have a replay session attached
+
   Scenario: fuzzy replay mismatch falls back to spy response before verify-time failure
     Given a CmdMox controller
     And a git replay fixture exists

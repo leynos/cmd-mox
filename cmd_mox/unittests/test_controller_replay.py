@@ -18,7 +18,31 @@ from tests.helpers.fixtures import write_minimal_replay_fixture, write_replay_fi
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
+    from syrupy.assertion import SnapshotAssertion
+
     from cmd_mox.test_doubles import CommandDouble
+
+
+def _recording(command: str, args: list[str], stdout: str) -> RecordedInvocation:
+    """Build a single recorded invocation for controller tests.
+
+    Returns
+    -------
+    RecordedInvocation
+        A recording with the fixed controller-test timestamp.
+    """
+    return RecordedInvocation(
+        sequence=0,
+        command=command,
+        args=args,
+        stdin="",
+        env_subset={},
+        stdout=stdout,
+        stderr="",
+        exit_code=0,
+        timestamp="2026-01-15T10:30:00+00:00",
+        duration_ms=0,
+    )
 
 
 @dc.dataclass(slots=True, frozen=True)
@@ -350,3 +374,98 @@ class TestControllerReplayVerification:
         with mox:
             mox.replay()
             mox.verify()
+
+
+class TestControllerReplayExhaustion:
+    """Exhaustion behaviour for replay-backed controller dispatch."""
+
+    def test_strict_exhaustion_raises_with_the_invocation_text(
+        self, tmp_path: Path, snapshot: SnapshotAssertion
+    ) -> None:
+        """A strict miss after the fixture is consumed names the invocation."""
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        mox.spy("git").replay(fixture_path)
+        invocation = Invocation(command="git", args=["status"], stdin="", env={})
+
+        assert mox._make_response(invocation).stdout == "ok\n"
+        with pytest.raises(UnexpectedCommandError) as excinfo:
+            mox._make_response(invocation)
+
+        assert str(excinfo.value) == snapshot
+
+    def test_fuzzy_exhaustion_falls_back_and_records_each_invocation_once(
+        self, tmp_path: Path
+    ) -> None:
+        """A fuzzy miss after exhaustion falls back without double-recording."""
+        mox = CmdMox()
+        fixture_path = write_minimal_replay_fixture(tmp_path)
+        spy = (
+            mox.spy("git").returns(stdout="fallback").replay(fixture_path, strict=False)
+        )
+        first = Invocation(command="git", args=["status"], stdin="", env={})
+        second = Invocation(command="git", args=["status"], stdin="", env={})
+
+        assert mox._handle_invocation(first).stdout == "ok\n"
+        assert mox._handle_invocation(second).stdout == "fallback"
+
+        assert spy.invocations == [first, second]
+        assert list(mox.journal) == [first, second]
+        assert list(mox.journal).count(second) == 1
+
+
+class TestControllerReplayIndependence:
+    """Several replay-backed doubles keep separate consumption state."""
+
+    def test_two_doubles_keep_independent_consumption(self, tmp_path: Path) -> None:
+        """Consuming one double's fixture leaves the other untouched."""
+        mox = CmdMox()
+        git_fixture = write_minimal_replay_fixture(tmp_path, filename="git.json")
+        curl_fixture = write_replay_fixture(
+            tmp_path,
+            [_recording("curl", ["example.com"], "page\n")],
+            filename="curl.json",
+        )
+        git_spy = mox.spy("git").replay(git_fixture)
+        curl_spy = mox.spy("curl").replay(curl_fixture)
+
+        assert (
+            mox._handle_invocation(Invocation("git", ["status"], "", {})).stdout
+            == "ok\n"
+        )
+
+        assert git_spy.replay_session is not None
+        assert curl_spy.replay_session is not None
+        assert git_spy.replay_session.is_consumed(0)
+        assert not curl_spy.replay_session.is_consumed(0)
+
+        assert (
+            mox._handle_invocation(Invocation("curl", ["example.com"], "", {})).stdout
+            == "page\n"
+        )
+        assert curl_spy.replay_session.is_consumed(0)
+
+    def test_verify_reports_the_first_registered_double(self, tmp_path: Path) -> None:
+        """Verification stops at the first double with unused recordings."""
+        mox = CmdMox()
+        first_fixture = write_replay_fixture(
+            tmp_path,
+            [_recording("first-cmd", ["go"], "one\n")],
+            filename="first.json",
+        )
+        second_fixture = write_replay_fixture(
+            tmp_path,
+            [_recording("second-cmd", ["go"], "two\n")],
+            filename="second.json",
+        )
+        mox.spy("first-cmd").replay(first_fixture)
+        mox.spy("second-cmd").replay(second_fixture)
+
+        with mox:
+            mox.replay()
+            with pytest.raises(VerificationError) as excinfo:
+                mox.verify()
+
+        message = str(excinfo.value)
+        assert "first-cmd" in message, "the first registered double was not reported"
+        assert "second-cmd" not in message, "verification must stop at the first double"

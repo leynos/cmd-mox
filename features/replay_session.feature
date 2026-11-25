@@ -56,3 +56,25 @@ Feature: Replay session loads fixtures and matches invocations
     And a replay invocation of "git status" with stdin "hello" is matched
     Then the replay match result is the recording with matching stdin
     And the other recording remains unconsumed
+
+  Scenario: replay session rejects a fixture with a corrupt recording
+    Given a fixture file whose first recording stores args as a string
+    And a replay session targeting that fixture in strict mode
+    When the replay session is loaded expecting an error
+    Then the replay error message should contain "Invalid fixture schema: recordings[0].args"
+
+  Scenario: duplicate recordings are consumed in sequence order
+    Given a fixture file with "git" "status" recordings "one", "two", "three" in reverse sequence order
+    And a replay session targeting that fixture in strict mode
+    When the replay session is loaded
+    And a replay invocation of "git" with args "status" is matched 3 times
+    Then the replay match stdout values are "one", "two", "three"
+    And replay verify_all_consumed does not raise
+
+  Scenario: an exhausted strict replay session returns none
+    Given a fixture file with a recording of "git" with args "status"
+    And a replay session targeting that fixture in strict mode
+    When the replay session is loaded
+    And a replay invocation of "git" with args "status" is matched
+    And a replay invocation of "git" with args "status" is matched again
+    Then the replay match result is None

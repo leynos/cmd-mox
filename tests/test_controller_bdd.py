@@ -40,6 +40,30 @@ class ReplayInterruptionState(typ.TypedDict):
 from tests.steps import *  # ruff: ignore[undefined-local-with-import-star, module-import-not-at-top-of-file] - pytest-bdd registers step definitions through star imports; it sits after this module's own definitions so the star import cannot shadow them
 
 
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "replay-backed spy consumes duplicate recordings in order",
+)
+def test_replay_spy_consumes_duplicate_recordings() -> None:
+    """Duplicate recordings are served in sequence order through the shim."""
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "exhausted strict replay fails the shim run but not verification",
+)
+def test_exhausted_strict_replay_fails_the_shim_only() -> None:
+    """A strict miss exits 1 with a message while verification still passes."""
+
+
+@scenario(
+    str(FEATURES_DIR / "controller.feature"),
+    "corrupt replay fixture is rejected when configuring the spy",
+)
+def test_corrupt_replay_fixture_rejected_at_setup() -> None:
+    """A schema-invalid fixture fails when the spy is configured."""
+
+
 @scenario(str(FEATURES_DIR / "controller.feature"), "stubbed command execution")
 def test_stubbed_command_execution() -> None:
     """Stubbed command returns expected output."""

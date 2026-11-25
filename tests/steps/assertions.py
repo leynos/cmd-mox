@@ -15,7 +15,7 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing only
     import subprocess
 
     from cmd_mox.controller import CmdMox
-    from cmd_mox.errors import MissingEnvironmentError, VerificationError
+    from cmd_mox.errors import VerificationError
     from cmd_mox.test_doubles import CommandDouble
 
 
@@ -87,7 +87,7 @@ def verification_error_contains(
 
 
 @then(parsers.cfparse('the replay error message should contain "{text}"'))
-def replay_error_contains(replay_error: MissingEnvironmentError, text: str) -> None:
+def replay_error_contains(replay_error: Exception, text: str) -> None:
     """Assert the captured replay error contains *text*."""
     assert text in str(replay_error), "Assertion failed"
 
