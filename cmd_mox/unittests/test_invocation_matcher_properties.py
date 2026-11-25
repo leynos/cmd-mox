@@ -9,6 +9,7 @@ strict and fuzzy compatibility.
 from __future__ import annotations
 
 import collections.abc as cabc
+import copy
 import dataclasses as dc
 
 import hypothesis
@@ -331,7 +332,16 @@ def test_consumed_ignoring_mutant_is_rejected() -> None:
 
 def test_mutation_mutant_is_rejected() -> None:
     """The check rejects a selection that mutates the recordings it reads."""
-    scenario = _INDEX_MUTANT_WITNESS
+    # A fresh scenario: the mutant scribbles on its recordings, and module-level
+    # witnesses must stay pristine for the other mutant tests.
+    scenario = _scenario(
+        strict=True,
+        invocation=make_invocation(),
+        recordings=[
+            make_recorded_invocation(RecordedInvocationSpec(sequence=5)),
+            make_recorded_invocation(RecordedInvocationSpec(sequence=1)),
+        ],
+    )
     honest = InvocationMatcher(strict=scenario.strict)
 
     def mutating_find_match(
@@ -414,8 +424,10 @@ def test_find_match_mutates_neither_consumed_nor_recordings(
     matcher = InvocationMatcher(strict=scenario.strict)
     recordings = list(scenario.recordings)
     consumed = set(scenario.consumed)
+    untouched_recordings = copy.deepcopy(recordings)
+    untouched_consumed = set(consumed)
 
     matcher.find_match(scenario.invocation, recordings, consumed)
 
-    assert recordings == list(scenario.recordings)
-    assert consumed == set(scenario.consumed)
+    assert recordings == untouched_recordings
+    assert consumed == untouched_consumed

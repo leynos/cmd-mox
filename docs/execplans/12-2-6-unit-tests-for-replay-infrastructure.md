@@ -775,8 +775,10 @@ deterministically; syrupy compares serialized values exactly.
   property through a shared check `check_find_match(matcher, scenario)`.
   Rationale: scoring is a total order over an open input space; an independent
   oracle checks every component. Domain: commands and env keys from two- or
-  three-letter alphabets so collisions are common, zero to six recordings,
-  sequences from a small range so ties occur, `strict` drawn as a boolean.
+  three-letter alphabets so collisions are common, two to six recordings (see
+  the note below), sequences from a small range so ties occur, `strict` drawn
+  as a boolean. Zero- and one-recording scenarios are covered by the
+  `no candidate` and `single candidate` witnesses and the session tests.
   Artefact: `cmd_mox/unittests/test_invocation_matcher_properties.py`.
   Non-vacuity: `classify_scenario()` labels "no candidate", "single candidate",
   "won on stdin" (fuzzy only), "won on env pairs" (fuzzy only), "won on subset

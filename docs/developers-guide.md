@@ -630,10 +630,12 @@ should hold for every generated input.
 The replay layer carries four kinds of generated test, all built on
 `cmd_mox/unittests/_replay_helpers.py`:
 
-- **Round-trip property** (`test_fixture_round_trip.py`): every fixture the
-  writer can emit survives `to_dict()`/`from_dict()` and `save()`/`load()`
-  unchanged. A checked-in golden fixture carrying the legacy two-component
-  schema version proves the reader still accepts older output and normalizes it.
+- **Round-trip property** (`test_fixture_round_trip.py`): generated fixtures the
+  writer can emit survive `to_dict()`/`from_dict()` and `save()`/`load()`
+  unchanged. Hypothesis samples that space rather than exhausting every
+  possible output. A checked-in golden fixture carrying the legacy
+  two-component schema version proves the reader still accepts older output and
+  normalizes it.
 - **Oracle property** (`test_invocation_matcher_properties.py`): an independent
   reimplementation of best-fit selection,
   `_replay_helpers.oracle_find_match()`, must agree with
