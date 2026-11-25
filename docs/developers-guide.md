@@ -1181,8 +1181,11 @@ The lint and Markdown gates run `make spelling`, which calls the pinned
 `typos-config-builder gate` under Python 3.14. The gate regenerates
 `typos.toml` from the shared en-GB-oxendict dictionary and `typos.local.toml`,
 then checks spelling and the shared phrase corrections. The generated
-`typos.toml` is reviewed and committed so a clean network-restricted checkout
-can still enforce the last known-good policy.
+`typos.toml` is reviewed and committed. When the authority and the dictionary
+cache are both unreachable, the builder falls back to its bundled snapshot and
+regenerates `typos.toml` from that, rather than preserving the committed file,
+so the gate needs `uv` with Python 3.14 and, on a first run, access to the
+builder's Git repository or a warm `uv` tool cache.
 
 The gate reads tracked files only. Add repository-only proper names or quoted
 upstream terms to `typos.local.toml`; never edit generated entries in
