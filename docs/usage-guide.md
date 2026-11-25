@@ -712,6 +712,29 @@ assert fixture.version == "1.0.0"
 assert len(fixture.recordings) == 1
 ```
 
+#### Durability and permissions
+
+Fixture saves are atomic. CmdMox serializes the document, writes it to a hidden
+sibling temporary file, flushes it to stable storage, and renames it over the
+destination. A reader therefore sees either the previous complete fixture or
+the new one, never a partial document, and an interrupted or failing save
+leaves the previous fixture byte-for-byte intact.
+
+New fixtures are owner-only (`0o600`) on POSIX, whatever the process umask,
+because fixture contents can include environment-derived values and command
+output. Git tracks only the execute bit, so committed fixtures are unaffected.
+
+A failed save raises `AtomicWriteError`, an `OSError` subclass that names the
+target, the stage that failed, and whether the target had already been
+replaced. Catch it when a test must report that the previous fixture is still
+usable.
+
+If the process is killed hard (`SIGKILL`, the out-of-memory killer, or
+`pytest-timeout`'s thread method), one orphaned temporary file named
+`.<fixture-name>.<random>.tmp` can remain beside the fixture. Add
+`.*.json.*.tmp` to `.gitignore` so such a file is never committed. A sweep of
+orphans is planned for roadmap item `14.2`.
+
 ### Schema versioning and migration
 
 Fixture files use the numeric semantic-version core `MAJOR.MINOR.PATCH` in the

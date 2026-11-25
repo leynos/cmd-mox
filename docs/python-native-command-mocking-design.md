@@ -2784,6 +2784,16 @@ classDiagram
     FixtureFile *-- RecordedInvocation
 ```
 
+`FixtureFile.save()` writes through the internal
+`cmd_mox._atomic_write.atomic_write_json` helper with mode `0o600` on POSIX.
+The serialized bytes are unchanged from the earlier `Path.write_text(...)`
+implementation, but a save is now atomic: an interrupted or failing write
+leaves any previous fixture byte-for-byte intact, and readers see either the
+old complete document or the new one. `FixtureFile.load()` and the fixture
+schema are unchanged. See
+[the fake-capabilities design](cmd-mox-fake-capabilities-design.md#atomic-json-persistence)
+for the persistence contract.
+
 #### 9.5.4 Scrubber
 
 **Status:** The `Scrubber` protocol and the `ScrubbingRule` dataclass are
@@ -3813,6 +3823,33 @@ this version.
 **Rationale:** Three components match the semantic-version core used by the
 fixture schema while preserving compatibility with existing two-component
 fixtures.
+
+#### 9.10.18 Atomic fixture persistence (2026-11-25)
+
+**Decision:** Persist fixtures through a private, staged, atomic write helper in
+`cmd_mox/_atomic_write.py` rather than writing the destination directly.
+
+**Rationale:** A direct write can leave a truncated JSON document when the
+process is interrupted or the disk fills part-way through, and it creates the
+file with whatever permissions the process umask allows. Fixtures can contain
+environment-derived values and command output, so owner-only permissions are
+the safer default. The helper serializes before touching the filesystem,
+commits through a unique sibling temporary file and `os.replace`, applies the
+requested mode before writing any content, and reports failures through
+`AtomicWriteError` with the failing stage and whether the target was already
+replaced.
+
+**Trade-offs:** Each write now costs two `fsync` calls, and a hard kill can
+leave one orphaned `.<name>.<random>.tmp` file beside the target. The orphan
+pattern is documented, a `.gitignore` line is recommended, and a sweep is
+deferred to roadmap item `14.2` where the lock makes removal safe. Unsupported
+directory synchronization is logged and skipped rather than treated as a failed
+write, because WSL drvfs, Docker Desktop bind mounts, virtiofs, and some FUSE
+mounts reject it while still providing the required visibility guarantee.
+
+See
+[the fake-capabilities design](cmd-mox-fake-capabilities-design.md#atomic-json-persistence)
+for the full contract and the recorded deviations.
 
 ### 9.11 Versioning and Forward Compatibility
 

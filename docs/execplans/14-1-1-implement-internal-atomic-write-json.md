@@ -5,7 +5,8 @@ This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Outcomes & retrospective`, `Conformance basis`, and `Verification plan` must
 be kept up to date as work proceeds.
 
-Status: APPROVED (`DEC-OPEN-1` resolved as Option C; approved 2026-11-25)
+Status: COMPLETE (`DEC-OPEN-1` resolved as Option C; approved 2026-11-25,
+implemented and documented 2026-11-25)
 
 ## Purpose / big picture
 
@@ -191,10 +192,14 @@ Keep these references open while executing the plan:
 - [x] (2026-11-25) Stage B committed as `a013d2d` ("Add internal atomic JSON
       write helper") after all four gates passed on a frozen tree, including
       the duplication gate, both Pylint tiers, ambrleaks, and spelling.
-- [ ] Stage C: Windows coverage, refactor, and mutation audit (EP-M3).
-      `cmd_mox/unittests/test_atomic_write.py` added to `WINDOWS_SMOKE_ARGS`;
-      mutation audit run and survivors triaged (229 of 246 killed).
-- [ ] Stage D: documentation and roadmap (EP-M4).
+- [x] (2026-11-25) Stage C committed as `e7d771e` ("Harden atomic writes and
+      run the mutation audit") after all four gates passed on a frozen tree.
+      `cmd_mox/unittests/test_atomic_write.py` is in `WINDOWS_SMOKE_ARGS`; the
+      audit killed 229 of 246 mutants and every meaningful survivor is now
+      covered by a test.
+- [x] (2026-11-25) Stage D: design, usage, and developer documentation updated;
+      roadmap items `14.1.1` and `14.1.2` marked done. `make markdownlint` and
+      `make nixie` pass.
 
 ## Surprises & discoveries
 
@@ -590,7 +595,7 @@ Lessons:
   proves the adoption is real: under `write_text` the file is `0o644`, so the
   owner-only assertion is the red evidence for `RM-14.1.1-S2`.
 
-### EP-M2 (working helper, adopted) - implemented 2026-11-25
+### EP-M2 (working helper, adopted) - complete 2026-11-25
 
 `cmd_mox/_atomic_write.py` implements the nine-stage protocol, and
 `FixtureFile.save()` delegates to it. The eighteen newly-unmarked tests, the
@@ -601,6 +606,36 @@ The three snapshot cases pin the byte format: insertion order is preserved
 (`zebra`, `alpha`, `middle`), non-ASCII text and a lone surrogate are escaped as
 `\uXXXX`, indentation is two spaces, and the document ends with exactly one
 newline.
+
+### EP-M3 (Windows coverage and hardening) - complete 2026-11-25
+
+The unit module is in `WINDOWS_SMOKE_ARGS`, so the Windows branch runs on
+`windows-latest`; the local four-gate suite cannot exercise it, and that
+limitation is recorded rather than worked around. The refactor step removed a
+duplicate `os.fsync` wrapper, kept the raw `os.replace` seam that tests patch,
+and moved the fixture-byte property to module level. The mutation audit is
+recorded under `Mutation audit (Stage C)`.
+
+### EP-M4 (documentation and roadmap) - complete 2026-11-25
+
+The fake-capabilities design now names the module and both helpers, records the
+implemented contract and every deviation, and states the replacement, Windows
+retry, orphan, and `fsync`-cost consequences. The native design gains a §9.5.3
+note and a §9.10.18 decision. The usage guide documents durability, owner-only
+mode, the error contract, and the recommended `.gitignore` line; the developer
+guide gains an "Atomic file persistence" section with the test conventions; the
+roadmap marks `14.1.1` and `14.1.2` done.
+
+### Overall retrospective
+
+The nine-stage seam design paid for itself twice: the fault table made the
+failure space exhaustively testable in seconds, and the same seams let the
+mutation audit attribute survivors precisely. The main unplanned work was
+gate-driven: the duplication and DF12 gates rejected two different shapes of
+the same `os.fsync` wrapper before a single-seam design satisfied both, and
+three pre-existing mutmut incompatibilities surfaced that are independent of
+this change. Nothing in the plan's tolerances was exceeded: 15 files changed
+against an 18-file budget, and no public interface or dependency changed.
 
 ## Context and orientation
 
