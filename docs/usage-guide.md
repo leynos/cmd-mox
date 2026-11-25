@@ -908,13 +908,17 @@ The constructor accepts:
 Calling `load()` a second time raises `LifecycleError`. Calling `match()` or
 `verify_all_consumed()` before `load()` also raises `LifecycleError`.
 
+### Fixture file encoding
+
 Fixture files are JSON written and read as UTF-8, whatever the process locale,
 and a leading UTF-8 byte order mark is tolerated. Malformed JSON and
 undecodable bytes raise their usual `json.JSONDecodeError` and
 `UnicodeDecodeError`. Field types are validated as described under
 [fixture validation policy](python-native-command-mocking-design.md#934-fixture-validation-policy);
 values are never coerced, so a hand-edited `exit_code: "1"` is rejected rather
-than converted to `1`.
+than converted to `1`. A fixture containing non-ASCII text that was written
+under a non-UTF-8 locale must be re-saved as UTF-8; see the
+[fixture encoding migration note](fixture-encoding-migration-note.md).
 
 ### Matching invocations
 
@@ -956,10 +960,14 @@ fields contain non-deterministic values such as timestamps or UUIDs.
 A strict miss has one sharp edge. When the replay-backed double is reached
 through the shim, the `UnexpectedCommandError` is turned into a command result:
 the command exits with status 1 and prints
-`No fixture recording matches: <command>` on stderr. `CmdMox.verify()` does not
-report that miss, because the invocation was never journalled. A test whose
-code under test ignores the exit status therefore passes. Roadmap item 12.2.7
-covers making `verify()` report these misses alongside unconsumed recordings.
+`No fixture recording matches: <command>` on stderr. `CmdMox.verify()` reports
+nothing about that miss, because the invocation was never journalled.
+Verification can still fail for another reason — a different recording left
+unconsumed, or another verifier failing — and it passes only when every other
+check passes too. A test that compares only the exit status therefore observes
+the miss, while a test that calls `verify()` alone does not. Roadmap item
+12.2.7 covers making `verify()` report these misses alongside unconsumed
+recordings.
 
 ```python
 # Fuzzy mode: matches on command + args only

@@ -3764,13 +3764,16 @@ misses fall back to the spy's configured behaviour.
   variants
 
 **Observed deviation (2026-11-25):** over the IPC transport the strict miss
-does not fail the test. `_server_core._execute_request` converts the handler's
-`UnexpectedCommandError` into a `Response` with the message on stderr and exit
-status 1, so the shim exits 1 and `CmdMox.verify()` still passes, because the
-miss was raised before the invocation was journalled. A test whose code under
-test ignores the exit status therefore passes silently. The behaviour is pinned
-by `features/controller.feature` ("exhausted strict replay fails the shim run
-but not verification") and left for roadmap item 12.2.7 to change.
+does not fail the test by itself. `_server_core._execute_request` converts the
+handler's `UnexpectedCommandError` into a `Response` with the message on stderr
+and exit status 1, so the shim exits 1 while verification reports nothing about
+that miss, because it was raised before the invocation was journalled.
+Verification can still fail for an unrelated reason — another recording left
+unconsumed, or another verifier failing — and passes only when every other
+check passes, so a strict miss with all recordings consumed is invisible to
+`CmdMox.verify()`. The behaviour is pinned by `features/controller.feature`
+("exhausted strict replay fails the shim run but not verification") and left
+for roadmap item 12.2.7 to change.
 
 #### 9.10.16 Opt-in fail-fast handling for mismatched mock calls (2026-11-12)
 

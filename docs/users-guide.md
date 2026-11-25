@@ -184,6 +184,20 @@ document. See the
 [fixture schema validation rules](usage-guide.md#fixture-schema-validation) for
 the complete policy and the migration note for the changes to existing fixtures.
 
+## Fixture file encoding
+
+Fixture JSON is written and read as UTF-8 regardless of the process locale, and
+one leading UTF-8 byte order mark is accepted on load. A fixture that contains
+non-ASCII text and was written under a non-UTF-8 locale must be re-saved as
+UTF-8 before it is replayed; ASCII-only fixtures need no change. See the
+[fixture encoding rules](usage-guide.md#fixture-file-encoding) and the
+[fixture encoding migration note](fixture-encoding-migration-note.md).
+
+A strict replay miss over the shim exits 1 with the message on stderr, and
+verification reports nothing about that miss; it can still fail for another
+reason. The [matching modes](usage-guide.md#matching-modes) caveat has the
+detail.
+
 ## IPC payload migration
 
 The domain classes no longer provide the previous IPC conversion methods.

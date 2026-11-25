@@ -374,6 +374,19 @@ observed failing before its fix.
   metadata.test_module, test_function              str or null or absent (-> None)
   ```
 
+  **Superseded (2026-11-25):** `main` shipped this rule in #457 before this
+  branch merged, with its own helper module (`cmd_mox/record/_schema.py`),
+  message format (`Invalid fixture schema: <path>: expected str, got NoneType`,
+  and `missing required field '<path>'`), and tests. The adopted rule validates
+  every field the `1.0.0` writer emits and does not default or coerce a
+  malformed value; only `metadata.test_module`, `metadata.test_function`, and
+  `scrubbing_rules[].description` may be absent or `null`, and `recordings`,
+  `scrubbing_rules`, `applied_to`, `stdin`, `env_subset`, `stdout`, `stderr`,
+  `exit_code`, and `duration_ms` are required. The table above is kept as the
+  plan's original design, not as a description of shipped behaviour. See
+  [design 9.3.4](../python-native-command-mocking-design.md#934-fixture-validation-policy)
+  and the [fixture schema migration note](../fixture-schema-migration-note.md).
+
   Rationale: coercion is what turns `null` into `"None"`. Python `bool` is
   rejected for integer fields because it is an `int` subclass and JSON `true`
   is not a sequence number. Non-string `test_module` and `test_function` were
@@ -732,9 +745,11 @@ deterministically; syrupy compares serialized values exactly.
   text", "empty recordings", "env present", and "null description", and one
   `hypothesis.find()` call per label (with `settings(database=None)`) proves
   the strategy reaches it.
-- Obligation LOAD-2 (type rejection): for each field in the accepted-types
-  table and each wrong JSON type that applies (null, boolean, number, string,
-  list, object), loading raises `ValueError` whose message is
+- Obligation LOAD-2 (type rejection) — **superseded**, delivered on
+  `main` in #457 with its own corpus and snapshots; not implemented here: for
+  each field in the accepted-types table and each wrong JSON type that applies
+  (null, boolean, number, string, list, object), loading raises `ValueError`
+  whose message is
   `Invalid fixture schema: <path>: expected <type>, got <json type>`, and a
   missing required field gives
   `Invalid fixture schema: <path>: missing required field`. Method:
@@ -869,15 +884,18 @@ without the leading underscore (`make_recorded_invocation`,
 `oracle_find_match()`, and `classify_scenario()`. Update the existing tests to
 import them. Their assertions must not change.
 
-Stage C (EP-M2, red then green): add the LOAD-1 property and golden test (green
-before and after), the LOAD-2 corpus and snapshot, and the LOAD-3 examples.
-Also add these loading gap tests to `test_replay_session.py`: `str` path
-accepted by `ReplaySession`, retry allowed after a failed `load()`, directory
-path raising an `OSError` subclass, malformed version string through `load()`,
-integer `version` (pinning the existing `expected str` message), and empty
-recordings list. Mark the defect rows `xfail(strict=True)`, observe `XFAIL`,
-and record one real failure transcript in `Artefacts and notes`. Then, in
-`cmd_mox/record/fixture.py`, add a private
+Stage C (EP-M2, red then green) — **superseded in part**: the schema half was
+delivered on `main` in #457, so only the encoding half and the LOAD-1 property
+were implemented here; the accepted-types table and the LOAD-2 corpus are kept
+as the plan's original design. Original text: add the LOAD-1 property and
+golden test (green before and after), the LOAD-2 corpus and snapshot, and the
+LOAD-3 examples. Also add these loading gap tests to `test_replay_session.py`:
+`str` path accepted by `ReplaySession`, retry allowed after a failed `load()`,
+directory path raising an `OSError` subclass, malformed version string through
+`load()`, integer `version` (pinning the existing `expected str` message), and
+empty recordings list. Mark the defect rows `xfail(strict=True)`, observe
+`XFAIL`, and record one real failure transcript in `Artefacts and notes`. Then,
+in `cmd_mox/record/fixture.py`, add a private
 `_schema_error(path, expected, value)` that builds the message with a JSON type
 name (`null`, `boolean`, `number`, `string`, `list`, `object`), and private
 readers `_read_str`, `_read_int`, `_read_str_list`, `_read_str_mapping`,
