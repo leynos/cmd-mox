@@ -540,7 +540,9 @@ class FixtureFile:
             Destination JSON path.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
+        # RFC 8259 requires UTF-8 for JSON exchanged between systems, so the
+        # fixture format must not follow the process locale.
+        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> FixtureFile:
@@ -563,5 +565,7 @@ class FixtureFile:
         ValueError
             If the fixture is not valid JSON or fails schema validation.
         """  # ruff: ignore[docstring-extraneous-exception] - pathlib and JSON/schema parsing propagate these caller-visible failures.
-        data = json.loads(path.read_text())
+        # ``utf-8-sig`` is UTF-8 that also swallows one leading byte order
+        # mark, which some Windows editors write.
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         return cls.from_dict(data)

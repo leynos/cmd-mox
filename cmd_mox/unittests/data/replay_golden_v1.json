@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "created_at": "2026-01-15T10:30:00+00:00",
+    "cmdmox_version": "0.2.0",
+    "platform": "linux",
+    "python_version": "3.12.0"
+  },
+  "recordings": [
+    {
+      "sequence": 0,
+      "command": "git",
+      "args": [
+        "status",
+        "--short"
+      ],
+      "stdin": "input\n",
+      "env_subset": {
+        "GIT_AUTHOR_NAME": "Test User",
+        "GIT_DIR": ".git"
+      },
+      "stdout": "M file.py\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timestamp": "2026-01-15T10:30:01+00:00",
+      "duration_ms": 42
+    }
+  ],
+  "scrubbing_rules": [
+    {
+      "pattern": "ghp_\\w+",
+      "replacement": "<GITHUB_TOKEN>",
+      "applied_to": [
+        "env",
+        "stdout"
+      ],
+      "description": null
+    }
+  ]
+}
