@@ -315,19 +315,31 @@ def _cleanup_after_failure(fd: int | None, temporary: Path | None) -> list[str]:
     """Release the temporary file, noting anything that could not be undone."""
     notes: list[str] = []
     if fd is not None:
-        # Close through ``os.close`` rather than the ``_close_temporary`` seam:
-        # cleanup must still release the descriptor when that seam is the one
-        # that failed.
-        try:
-            os.close(fd)
-        except OSError as exc:
-            notes.append(f"Failed to close the temporary file: {exc}")
+        notes.extend(_close_quietly(fd))
     if temporary is not None:
-        try:
-            _discard_temporary(temporary)
-        except OSError as exc:
-            notes.append(f"Failed to remove temporary file {temporary}: {exc}")
+        notes.extend(_remove_quietly(temporary))
     return notes
+
+
+def _close_quietly(fd: int) -> list[str]:
+    """Close *fd*, returning a note when it cannot be closed."""
+    # Close through ``os.close`` rather than the ``_close_temporary`` seam:
+    # cleanup must still release the descriptor when that seam is the one that
+    # failed.
+    try:
+        os.close(fd)
+    except OSError as exc:
+        return [f"Failed to close the temporary file: {exc}"]
+    return []
+
+
+def _remove_quietly(temporary: Path) -> list[str]:
+    """Remove *temporary*, returning a note when it cannot be removed."""
+    try:
+        _discard_temporary(temporary)
+    except OSError as exc:
+        return [f"Failed to remove temporary file {temporary}: {exc}"]
+    return []
 
 
 def _os_replace(temporary: Path, path: Path) -> None:

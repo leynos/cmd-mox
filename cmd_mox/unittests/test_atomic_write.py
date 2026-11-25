@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import errno
 import importlib
 import json
@@ -260,30 +261,44 @@ def test_mode_validation_is_exact(tmp_path: Path) -> None:
     assert not untouched.parent.exists(), "mode validation must precede mutation"
 
 
+@dc.dataclass(frozen=True, slots=True)
+class _ModeCase:
+    """One umask, requested mode, and prior mode combination."""
+
+    umask_value: int
+    mode: int
+    prior_mode: int | None
+
+
+_MODE_CASES = [
+    pytest.param(
+        _ModeCase(umask_value, mode, prior_mode),
+        id=f"{umask_value:03o}-{mode:03o}-{prior_mode}",
+    )
+    for umask_value in _UMASK_VALUES
+    for mode in _REQUESTED_MODES
+    for prior_mode in _PRIOR_MODES
+]
+
+
 @pytest.mark.skipif(
     sys.platform == "win32", reason="POSIX permission bits are not enforced"
 )
-@pytest.mark.parametrize("umask_value", _UMASK_VALUES)
-@pytest.mark.parametrize("mode", _REQUESTED_MODES)
-@pytest.mark.parametrize("prior_mode", _PRIOR_MODES)
+@pytest.mark.parametrize("case", _MODE_CASES)
 def test_mode_is_exact_regardless_of_umask(
-    tmp_path: Path,
-    set_umask: cabc.Callable[[int], None],
-    umask_value: int,
-    mode: int,
-    prior_mode: int | None,
+    tmp_path: Path, set_umask: cabc.Callable[[int], None], case: _ModeCase
 ) -> None:
     """The final mode equals the requested mode whatever the umask."""
     module = _atomic_module()
     target = tmp_path / "mode.json"
-    if prior_mode is not None:
+    if case.prior_mode is not None:
         target.write_bytes(b'{"previous": true}\n')
-        target.chmod(prior_mode)
+        target.chmod(case.prior_mode)
 
-    set_umask(umask_value)
-    module.atomic_write_json(target, {"mode": mode}, mode=mode)
+    set_umask(case.umask_value)
+    module.atomic_write_json(target, {"mode": case.mode}, mode=case.mode)
 
-    assert stat.S_IMODE(target.stat().st_mode) == mode
+    assert stat.S_IMODE(target.stat().st_mode) == case.mode
     assert 0o077 in _UMASK_VALUES
     assert any(candidate != 0o600 for candidate in _REQUESTED_MODES)
 
@@ -534,105 +549,72 @@ def test_missing_fchmod_falls_back_to_chmod(
         assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
 
-def test_windows_retries_replace_permission_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@dc.dataclass(frozen=True, slots=True, kw_only=True)
+class _ReplaceCase:
+    """One replace-retry scenario."""
+
+    is_windows: bool
+    failures: int | None
+    expected_attempts: int
+    should_succeed: bool
+
+
+_REPLACE_CASES = [
+    pytest.param(
+        _ReplaceCase(
+            is_windows=True, failures=2, expected_attempts=3, should_succeed=True
+        ),
+        id="windows-transient",
+    ),
+    pytest.param(
+        _ReplaceCase(
+            is_windows=True, failures=4, expected_attempts=5, should_succeed=True
+        ),
+        id="windows-final-attempt",
+    ),
+    pytest.param(
+        _ReplaceCase(
+            is_windows=True, failures=None, expected_attempts=5, should_succeed=False
+        ),
+        id="windows-exhausted",
+    ),
+    pytest.param(
+        _ReplaceCase(
+            is_windows=False, failures=None, expected_attempts=1, should_succeed=False
+        ),
+        id="posix-no-retry",
+    ),
+]
+
+
+@pytest.mark.parametrize("case", _REPLACE_CASES)
+def test_replace_retry_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: _ReplaceCase
 ) -> None:
-    """A transient sharing violation on Windows is retried before failing."""
-    module = _atomic_module()
-    from cmd_mox import _path_utils
-
-    attempts: list[int] = []
-    real_replace = module._os_replace
-
-    def flaky_replace(source: Path, destination: Path) -> None:
-        """Fail the first two replacements, then delegate to the real one."""
-        attempts.append(1)
-        if len(attempts) < 3:
-            raise PermissionError(errno.EACCES, "sharing violation")
-        real_replace(source, destination)
-
-    monkeypatch.setattr(_path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(module, "_os_replace", flaky_replace)
-    target = tmp_path / "payload.json"
-
-    module.atomic_write_json(target, {"ok": True})
-
-    assert len(attempts) == 3
-    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
-
-
-def test_windows_replace_retry_exhausts_and_reports_replace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A persistent sharing violation stops after the retry budget."""
-    module = _atomic_module()
-    from cmd_mox import _path_utils
-
-    attempts: list[int] = []
-
-    def refuse_replace(source: Path, destination: Path) -> None:
-        """Report a sharing violation unconditionally."""
-        attempts.append(1)
-        raise PermissionError(errno.EACCES, "sharing violation")
-
-    monkeypatch.setattr(_path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(module, "_os_replace", refuse_replace)
-    target = tmp_path / "payload.json"
-
-    with pytest.raises(module.AtomicWriteError) as excinfo:
-        module.atomic_write_json(target, {"ok": True})
-
-    assert excinfo.value.stage is module.AtomicWriteStage.REPLACE
-    assert len(attempts) == 5
-
-
-def test_windows_replace_retry_succeeds_on_the_final_attempt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The last attempt after the retry budget uses the real paths."""
+    """The retry budget, and its outcome, match the platform."""
     module = _atomic_module()
     from cmd_mox import _path_utils
 
     attempts: list[tuple[Path, Path]] = []
     real_replace = module._os_replace
 
-    def fail_then_succeed(source: Path, destination: Path) -> None:
-        """Fail four attempts, then perform the real rename."""
+    def flaky_replace(source: Path, destination: Path) -> None:
+        """Fail per the case, then delegate to the real rename."""
         attempts.append((source, destination))
-        if len(attempts) < 5:
+        if case.failures is None or len(attempts) <= case.failures:
             raise PermissionError(errno.EACCES, "sharing violation")
         real_replace(source, destination)
 
-    monkeypatch.setattr(_path_utils, "IS_WINDOWS", True)
-    monkeypatch.setattr(module, "_os_replace", fail_then_succeed)
+    monkeypatch.setattr(_path_utils, "IS_WINDOWS", case.is_windows)
+    monkeypatch.setattr(module, "_os_replace", flaky_replace)
     target = tmp_path / "payload.json"
 
-    module.atomic_write_json(target, {"ok": True})
-
-    assert len(attempts) == 5
-    assert attempts[-1][1] == target
-    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
-
-
-def test_posix_does_not_retry_replace_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """POSIX does not retry, because it has no sharing violations."""
-    module = _atomic_module()
-    from cmd_mox import _path_utils
-
-    attempts: list[int] = []
-
-    def refuse_replace(source: Path, destination: Path) -> None:
-        """Report an unavailable target."""
-        attempts.append(1)
-        raise PermissionError(errno.EACCES, "denied")
-
-    monkeypatch.setattr(_path_utils, "IS_WINDOWS", False)
-    monkeypatch.setattr(module, "_os_replace", refuse_replace)
-    target = tmp_path / "payload.json"
-
-    with pytest.raises(module.AtomicWriteError):
+    if case.should_succeed:
         module.atomic_write_json(target, {"ok": True})
-
-    assert len(attempts) == 1
+        assert attempts[-1][1] == target
+        assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
+    else:
+        with pytest.raises(module.AtomicWriteError) as excinfo:
+            module.atomic_write_json(target, {"ok": True})
+        assert excinfo.value.stage is module.AtomicWriteStage.REPLACE
+    assert len(attempts) == case.expected_attempts

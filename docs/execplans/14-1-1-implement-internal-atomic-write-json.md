@@ -1557,6 +1557,30 @@ The 17 survivors are equivalent:
   attribute always exists, and the path is always a directory, so the flags are
   identical; Windows returns before the expression is evaluated.
 
+## CodeScene follow-up (2026-11-25)
+
+The hosted CodeScene check failed the first published candidate on four
+findings. All four were cleared by refactoring, with no suppressions:
+
+- `cmd_mox/unittests/test_fixture_file.py` lost cohesion (10.00 to 8.03) when
+  three atomic-save tests joined an already large module. They now live in
+  `cmd_mox/unittests/test_fixture_atomic_save.py`, which also gives the
+  fixture-byte property a smaller, purpose-built invocation generator instead
+  of the shared recording strategy.
+- `_cleanup_after_failure` was a bumpy road (9.84). It is now a two-line
+  composition over `_close_quietly` and `_remove_quietly`, each with a single
+  guarded operating-system call. The nose gate rejected the first split because
+  both helpers shared the same two-line guard, so the guards moved back into
+  the caller and the helpers now differ.
+- The four replace-retry tests shared one structure; they are one
+  `test_replace_retry_policy` over a `_ReplaceCase` table (transient,
+  final-attempt, exhausted, POSIX).
+- The umask table and the ordered-pair runner each had five parameters; both
+  now carry a small frozen dataclass (`_ModeCase`, `_PairRun`).
+
+`cs delta origin/main` reports no issues for the changed files after the
+refactor.
+
 ## Revision notes
 
 - 2026-11-25: Stage C recorded three further refinements. The `sync_file` stage

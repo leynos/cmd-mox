@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
 import errno
 import importlib
 import json
@@ -142,26 +143,28 @@ def _descriptors_under(directory: Path) -> set[str]:
     return found
 
 
-def _apply_operation(
-    module: types.ModuleType,
-    target: Path,
-    payload: object,
-    stage_name: str | None,
-    committed: object,
-) -> object:
-    """Run one success or injected fault and return the committed payload."""
-    if stage_name is None:
-        module.atomic_write_json(target, payload)
-        return payload
-    exc = OSError(errno.EIO, "injected failure")
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        _install_fault(monkeypatch, module, stage_name, exc)
-        with pytest.raises(module.AtomicWriteError) as excinfo:
-            module.atomic_write_json(target, payload)
-    assert excinfo.value.__cause__ is exc, "the injected fault must fire"
-    if stage_name == "sync_directory":
-        return payload
-    return committed
+@dc.dataclass(slots=True)
+class _PairRun:
+    """State for one ordered pair of writes against a single target."""
+
+    module: types.ModuleType
+    target: Path
+    committed: object
+
+    def apply(self, payload: object, stage_name: str | None) -> None:
+        """Run one success or injected fault, recording what committed."""
+        if stage_name is None:
+            self.module.atomic_write_json(self.target, payload)
+            self.committed = payload
+            return
+        exc = OSError(errno.EIO, "injected failure")
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            _install_fault(monkeypatch, self.module, stage_name, exc)
+            with pytest.raises(self.module.AtomicWriteError) as excinfo:
+                self.module.atomic_write_json(self.target, payload)
+        assert excinfo.value.__cause__ is exc, "the injected fault must fire"
+        if stage_name == "sync_directory":
+            self.committed = payload
 
 
 def test_fault_table_covers_every_stage() -> None:
@@ -357,15 +360,14 @@ def test_fault_pairs_compose(
     target = tmp_path / "fixture.json"
     initial = {"generation": 0}
     target.write_bytes(module._serialize_json(initial))
-    committed: object = initial
+    run = _PairRun(module=module, target=target, committed=initial)
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         _skip_durability(monkeypatch, module)
         for index, stage_name in enumerate((first, second)):
-            payload = {"generation": index + 1}
-            committed = _apply_operation(module, target, payload, stage_name, committed)
+            run.apply({"generation": index + 1}, stage_name)
 
-    assert json.loads(target.read_text(encoding="utf-8")) == committed
+    assert json.loads(target.read_text(encoding="utf-8")) == run.committed
     assert _listing(tmp_path) == {target.name}
 
 
