@@ -40,12 +40,14 @@ replayed successfully.
 
 The third case is a legacy file whose bytes are in some other single-byte
 encoding, such as a hand-edited `cp1252` fixture that an older release read
-correctly under a matching locale. The updated reader decodes UTF-8, so those
-bytes fail with `UnicodeDecodeError`. Convert the file from its known original
-encoding to UTF-8, or re-save its values through `FixtureFile.save()` so they
-become escapes. Keep a copy of the original, convert from the encoding the file
-was actually written in rather than guessing, and verify the converted values
-after replaying it.
+correctly under a matching locale. Decoding those bytes as UTF-8 can fail with
+`UnicodeDecodeError`, and it can also succeed with silently different values:
+the bytes `\xc3\xa9` are `Ã©` in `cp1252` but `é` in UTF-8. Decode the file
+with its known original encoding before converting it to UTF-8, or pass the
+decoded values through `FixtureFile.save()` so they become escapes. Keep a copy
+of the original, convert from the encoding the file was actually written in
+rather than guessing, and verify the values after replaying it — a successful
+load does not prove the text is right.
 
 ## Upgrade shared fixture workflows
 

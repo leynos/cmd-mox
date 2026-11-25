@@ -919,8 +919,8 @@ values are never coerced, so a hand-edited `exit_code: "1"` is rejected rather
 than converted to `1`. The writer escapes non-ASCII values, so its output is
 pure ASCII; a file whose bytes are raw non-ASCII UTF-8 loads here on any host,
 but an older release reads it with the locale encoding, and a legacy file in
-another single-byte encoding such as `cp1252` must be converted from that
-encoding. See the
+another single-byte encoding such as `cp1252` may fail to decode or decode to
+different text, so it must be converted from that encoding. See the
 [fixture encoding migration note](fixture-encoding-migration-note.md).
 
 ### Matching invocations

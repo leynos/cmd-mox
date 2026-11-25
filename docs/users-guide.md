@@ -191,8 +191,9 @@ one leading UTF-8 byte order mark is accepted on load. `FixtureFile.save()`
 escapes non-ASCII values, so its output is pure ASCII and needs no conversion;
 the cases to watch are a fixture whose file bytes are raw non-ASCII UTF-8,
 which an older release reads with the locale encoding, and a legacy file in
-another single-byte encoding such as `cp1252`, which the new reader rejects and
-which must be converted from its original encoding. See the
+another single-byte encoding such as `cp1252`, which decoding may reject or may
+silently render as different text and which must be converted from its original
+encoding. See the
 [fixture encoding rules](usage-guide.md#fixture-file-encoding) and the
 [fixture encoding migration note](fixture-encoding-migration-note.md).
 
