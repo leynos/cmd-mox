@@ -1319,6 +1319,8 @@ Behaviour to observe after Stage B:
   directory listing is unchanged.
 - Recording a session with `RecordingSession` and finalizing it leaves the
   fixture with mode `0o600` on POSIX and the same bytes as before the change.
+  On Windows the bytes differ from the previous text-mode write: the helper
+  emits LF where `Path.write_text` emitted CRLF, as `INV-FIXTURE-BYTES` records.
 
 Behavioural specification. Append these scenarios to
 `features/recording_session.feature`, implement their steps in

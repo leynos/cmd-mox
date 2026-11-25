@@ -538,9 +538,11 @@ class FixtureFile:
 
         The document is serialized exactly as before and committed through the
         internal atomic-write helper. A failure before the rename leaves any
-        previous fixture byte-for-byte intact; a failure after it raises
-        ``AtomicWriteError`` with ``target_replaced`` true and does not roll
-        back, because only durability is in doubt.
+        previous fixture byte-for-byte intact. An ordinary exception after the
+        rename raises ``AtomicWriteError`` with ``target_replaced`` true and
+        does not roll back, because only durability is in doubt; an interrupt
+        such as ``KeyboardInterrupt`` propagates unchanged after the same
+        clean-up.
 
         Parameters
         ----------
