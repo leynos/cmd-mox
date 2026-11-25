@@ -560,21 +560,41 @@ configuration.
 
 The development dependency group includes
 [syrupy](https://github.com/syrupy-project/syrupy), which provides the
-`snapshot` fixture used by the IPC model and server callback tests. These tests
-compare serialized payloads with the tracked `.ambr` files in
-`tests/__snapshots__`.
+`snapshot` fixture used by the IPC model and server callback tests, and by the
+replay tests. These tests compare serialized payloads and user-visible messages
+with the tracked `.ambr` files in `tests/__snapshots__` and
+`cmd_mox/unittests/__snapshots__`.
 
 Run the snapshot tests with the normal test command:
 
 ```bash
-uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py
+uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py \
+  cmd_mox/unittests/test_fixture_file.py \
+  cmd_mox/unittests/test_replay_session.py \
+  cmd_mox/unittests/test_controller_replay.py
 ```
+
+The replay snapshots are:
+
+- `cmd_mox/unittests/__snapshots__/test_fixture_file.ambr` — every schema
+  rejection message, keyed by corpus row.
+- `cmd_mox/unittests/__snapshots__/test_replay_session.ambr` — the
+  `verify_all_consumed()` message for one, three, zero-argument, and
+  multi-argument cases.
+- `cmd_mox/unittests/__snapshots__/test_controller_replay.ambr` — the
+  `UnexpectedCommandError` text for a strict miss.
+
+Messages under snapshot must name field paths and JSON type names only: no
+fixture paths, temporary directories, or `repr` of user-supplied values.
+`make lint` runs `ambrleaks` over `tests` to enforce that.
 
 When an intentional payload change requires new expected output, update the
 snapshots explicitly and review the resulting `.ambr` diff:
 
 ```bash
-uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py \
+uv run pytest cmd_mox/unittests/test_fixture_file.py \
+  cmd_mox/unittests/test_replay_session.py \
+  cmd_mox/unittests/test_controller_replay.py \
   --snapshot-update
 ```
 
@@ -603,79 +623,66 @@ Hypothesis complements the snapshot tests above rather than replacing them:
 snapshots pin exact serialized output, while properties assert relations that
 should hold for every generated input.
 
-## Shim path filtering
+### Replay properties, oracles, and mutants
 
-`cmd_mox._shim_bootstrap._should_remove_path_entry` is the boolean query behind
-`bootstrap_shim_path()`. A `True` result means remove the entry, and `False`
-means keep it.
+The replay layer carries four kinds of generated test, all built on
+`cmd_mox/unittests/_replay_helpers.py`:
 
-The query removes an entry when it starts with the `__editable__` marker
-prefix, or when the entry resolves to the package directory. It keeps an entry
-that matches neither rule. It also keeps an entry whose resolution fails, so
-bootstrap does not abort:
+- **Round-trip property** (`test_fixture_round_trip.py`): every fixture the
+  writer can emit survives `to_dict()`/`from_dict()` and `save()`/`load()`
+  unchanged. A checked-in golden fixture carrying the legacy two-component
+  schema version proves the reader still accepts older output and normalizes it.
+- **Oracle property** (`test_invocation_matcher_properties.py`): an independent
+  reimplementation of best-fit selection,
+  `_replay_helpers.oracle_find_match()`, must agree with
+  `InvocationMatcher.find_match()` for every generated scenario. The oracle is
+  deliberately written from the design document rather than from the matcher.
+- **State machine** (`test_replay_session_state_machine.py`): a
+  `RuleBasedStateMachine` drives matches and verifications and models the
+  consumed set itself, so exhaustion, partial verification, and the reported
+  indices are predicted rather than observed. The encoding examples that pin
+  `save()`/`load()` to UTF-8 live in `test_fixture_encoding.py`.
 
-- a relative entry whose working directory was deleted raises `OSError`;
-- a symlink loop raises `RuntimeError` on Python 3.12 and is tolerated from
-  Python 3.13 onwards; and
-- an entry the operating system cannot represent, such as one containing an
-  embedded null byte, raises `ValueError`.
+- **Seeded mutants**: hand-built variants of the selection loop (tie-break by
+  list index, ignoring the consumed set, swapping the first two score
+  components) run through the same `check_find_match()` on named witnesses.
+  Each must be rejected. Mutants are never run against generated inputs:
+  Hypothesis keys its example database per test function, so a mutant run would
+  pollute the real property, and failing generated runs shrink and threaten the
+  per-test timeout. A witness is deterministic and cheap.
 
-`bootstrap_shim_path()` calls the query for each `sys.path` entry, clears
-`sys.path_importer_cache`, and loads the stdlib `platform` module. If that load
-fails, it restores the removed entries. `_BOOTSTRAP_DONE` makes the function
-idempotent, so later calls return without changing `sys.path`.
+Each property has a non-vacuity control. `classify_scenario()` labels how the
+winner beat the runner-up (`won on stdin`, `won on env pairs`, and so on), one
+witness per label asserts the label and oracle agreement, and one
+`hypothesis.find()` per label proves the scenario strategy can reach it.
+`classify_fixture()` does the same for the round-trip property's coverage
+classes.
 
-Resolution failure therefore retains the entry rather than raising, so the
-unresolvable entry stays on `sys.path`. The covering tests in
-`cmd_mox/unittests/test_shim_bootstrap.py` exercise the package match, the
-deleted working directory, an injected `ELOOP`, a symlink cycle, an embedded
-null byte, and the bootstrap-level retention test.
+Two Hypothesis details matter when editing these tests. A positional
+`@given(strategy)` fills the _trailing_ positional parameters, so pass
+strategies by keyword when the test also takes a pytest fixture. And a
+`hypothesis.find()` call only uses `max_examples=2000` when no `settings`
+argument is supplied; passing one inherits the profile's default budget of 100.
 
-## Platform classification internals
+## Replay test helpers
 
-Support classification lives in `cmd_mox/platform.py`. The public helpers
-`unsupported_reason()`, `is_supported()` and `skip_if_unsupported()` all call
-`_classify_platform()`, which calls `_warn_deprecated_inputs()` and then
-`_unsupported_reason_for()`. `_unsupported_reason_for()` returns the reason of
-the first `(prefix, reason)` entry in `_UNSUPPORTED_PLATFORMS` whose prefix
-matches the effective platform name. The table is empty, so every recognized
-host is currently reported as supported. `is_supported()` is the boolean view
-of the same reason, so the two public classifiers cannot disagree.
+`cmd_mox/unittests/_replay_helpers.py` is shared scaffolding, not library code.
+It has no `test_` prefix, so pytest does not collect it, and it is excluded
+from the Skylos and mutation scans. It exports:
 
-### Deprecation warning attribution
+- `RecordedInvocationSpec` and `ReplayScenario` — frozen dataclasses describing
+  one recording's overrides and one matching scenario.
+- `make_recorded_invocation()`, `make_invocation()`, and
+  `write_fixture_file()` — builders with replay-test defaults.
+- `recorded_invocations()`, `fixture_metadata()`, `scrubbing_rules()`,
+  `fixture_files()`, and `replay_scenarios()` — Hypothesis strategies.
+- `oracle_find_match()`, `classify_scenario()`, and `check_find_match()` — the
+  independent oracle, its coverage classifier, and the shared assertion helper
+  that also checks the matcher mutates neither input.
 
-Each public entry point emits one `DeprecationWarning` per deprecated input
-supplied to a call. An explicit `platform` argument warns whenever it is not
-`None`, including an empty string. A non-empty `CMD_MOX_PLATFORM_OVERRIDE`
-warns only when the helper consults it; a truthy explicit `platform` masks the
-override for that call. The warnings use `stacklevel=4` so they attribute to
-the caller of the public helper. When the `cmd_mox` fixture is the caller, the
-warning points at `cmd_mox/pytest_plugin.py` rather than at user code.
-
-### Testing unsupported hosts
-
-Patch `cmd_mox.platform._UNSUPPORTED_PLATFORMS` with a `(prefix, reason)` entry
-to exercise the skip path without a genuinely unsupported host:
-
-```python
-from cmd_mox import platform
-
-monkeypatch.setattr(
-    platform,
-    "_UNSUPPORTED_PLATFORMS",
-    (("win", "blocked on Windows"),),
-)
-```
-
-Do not set `CMD_MOX_PLATFORM_OVERRIDE` in new tests; it is deprecated and only
-changes classification. To inspect Windows launchers on another host, patch
-`cmd_mox._path_utils.IS_WINDOWS` as described in
-[design decision 8.13](python-native-command-mocking-design.md#813-design-decisions-for-the-platform-override).
-
-The BDD step `the platform override is "{platform}"` remains only so existing
-feature files keep parsing. It deliberately changes nothing. Scenarios that
-need the Windows branch patch `cmd_mox._path_utils.IS_WINDOWS` instead. See
-[Behavioural test gate and pytest-bdd compatibility](#behavioural-test-gate-and-pytest-bdd-compatibility).
+Because the module is not a `test_*.py` file, it does not receive the test
+per-file ignores: keep functions within `max-args = 4`, avoid bare `assert`,
+and give every helper a docstring.
 
 ## IPC request dispatch
 
