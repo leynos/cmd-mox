@@ -156,7 +156,7 @@ def test_written_file_round_trips(payload: object) -> None:
     """A written file holds exactly the serialized payload."""
     module = _atomic_module()
     with tempfile.TemporaryDirectory() as directory:
-        target = Path(directory) / "nested" / "payload.json"
+        target = Path(directory) / "nested" / "deeper" / "payload.json"
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(module, "_fsync_descriptor", lambda _fd: None)
             module.atomic_write_json(target, payload)
@@ -368,6 +368,101 @@ def test_temporary_file_matches_the_documented_pattern(
     assert created[0].parent == tmp_path
     assert name.startswith(".fixture.json.")
     assert name.endswith(".tmp")
+
+
+def test_write_all_completes_short_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A short write is resumed until every byte reaches the file."""
+    module = _atomic_module()
+    target = tmp_path / "payload.bin"
+    real_write = module._write_once
+    payload = b"abcdefghij"
+    chunks: list[int] = []
+
+    def short_write(fd: int, buffer: memoryview) -> int:
+        """Accept at most four bytes per call, as a signal-interrupted write may."""
+        chunk = bytes(buffer[:4])
+        chunks.append(len(chunk))
+        return real_write(fd, memoryview(chunk))
+
+    monkeypatch.setattr(module, "_write_once", short_write)
+
+    module.atomic_write_bytes(target, payload)
+
+    assert target.read_bytes() == payload
+    assert chunks == [4, 4, 2]
+
+
+def test_temporary_file_for_a_long_name_keeps_the_tmp_suffix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A truncated prefix still leaves a dot-prefixed .tmp orphan pattern."""
+    module = _atomic_module()
+    created: list[Path] = []
+    real_create = module._create_temporary
+    name = "a" * 80 + ".json"
+
+    def recording_create(path: Path) -> tuple[int, Path]:
+        """Record each temporary path before handing it back."""
+        fd, temporary = real_create(path)
+        created.append(temporary)
+        return fd, temporary
+
+    monkeypatch.setattr(module, "_create_temporary", recording_create)
+
+    module.atomic_write_json(tmp_path / name, {"a": 1})
+
+    assert len(created) == 1
+    temporary_name = created[0].name
+    assert temporary_name.startswith("." + "a" * 64 + ".")
+    assert temporary_name.endswith(".tmp")
+    assert ".json" not in temporary_name, "the suffix is truncated away"
+
+
+def test_directory_close_error_does_not_mask_sync_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failing directory close keeps the original synchronization error."""
+    module = _atomic_module()
+    target = tmp_path / "payload.json"
+    sync_error = OSError(errno.EIO, "Input/output error")
+    close_error = OSError(errno.EIO, "close failed")
+
+    def fail_directory_sync(fd: int) -> None:
+        """Fail only for the directory descriptor."""
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise sync_error
+        os.fsync(fd)
+
+    real_close = module._close_descriptor
+
+    def fail_directory_close(fd: int) -> None:
+        """Report a close failure only for the directory descriptor."""
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise close_error
+        real_close(fd)
+
+    monkeypatch.setattr(module, "_fsync_descriptor", fail_directory_sync)
+    monkeypatch.setattr(module, "_close_descriptor", fail_directory_close)
+
+    with pytest.raises(module.AtomicWriteError) as excinfo:
+        module.atomic_write_json(target, {"ok": True})
+
+    assert excinfo.value.stage is module.AtomicWriteStage.SYNC_DIRECTORY
+    assert excinfo.value.__cause__ is sync_error
+
+
+def test_written_bytes_never_translate_newlines(tmp_path: Path) -> None:
+    """The binary write never applies platform newline translation."""
+    module = _atomic_module()
+    target = tmp_path / "payload.json"
+
+    module.atomic_write_json(target, {"a": 1})
+
+    data = target.read_bytes()
+    assert b"\r" not in data
+    assert data.endswith(b"\n")
 
 
 def test_cleanup_notes_a_failed_close() -> None:

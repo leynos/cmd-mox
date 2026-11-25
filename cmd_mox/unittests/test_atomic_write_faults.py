@@ -30,7 +30,7 @@ _FAULT_SPECS: dict[str, tuple[str, str]] = {
     "apply_mode": ("_apply_mode", "after"),
     "write": ("_write_all", "half"),
     "sync_file": ("_fsync_descriptor", "after"),
-    "close_temporary": ("_close_temporary", "before"),
+    "close_temporary": ("_close_descriptor", "after"),
     "replace": ("_replace", "before"),
     "sync_directory": ("_fsync_directory", "before"),
 }
@@ -297,6 +297,39 @@ def test_cleanup_failure_is_noted_not_raised(
     assert any(str(tmp_path) in note for note in notes), notes
 
 
+def test_failed_close_is_not_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cleanup never re-closes a descriptor whose close already failed."""
+    module = _atomic_module()
+    target = tmp_path / "fixture.json"
+    closing = OSError(errno.EIO, "close failed")
+    real_close = module._close_descriptor
+    cleanup_calls: list[int] = []
+
+    def close_then_fail(fd: int) -> None:
+        """Release the descriptor, then report an error as Linux may."""
+        real_close(fd)
+        raise closing
+
+    def record_cleanup(fd: int) -> list[str]:
+        """Record an unexpected second close attempt."""
+        cleanup_calls.append(fd)
+        return []
+
+    with monkeypatch.context() as scoped:
+        _skip_durability(scoped, module)
+        scoped.setattr(module, "_close_descriptor", close_then_fail)
+        scoped.setattr(module, "_close_quietly", record_cleanup)
+        with pytest.raises(module.AtomicWriteError) as excinfo:
+            module.atomic_write_json(target, {"new": True})
+
+    assert excinfo.value.stage is module.AtomicWriteStage.CLOSE_TEMPORARY
+    assert excinfo.value.__cause__ is closing
+    assert cleanup_calls == [], "a spent descriptor must not be closed again"
+    assert _listing(tmp_path) == set()
+
+
 def test_descriptor_check_detects_an_open_descriptor(tmp_path: Path) -> None:
     """The descriptor check notices a descriptor the helper could leak."""
     descriptor_path = tmp_path / "held-open"
@@ -378,7 +411,7 @@ def test_interleaved_writers_use_distinct_temporaries(
     module = _atomic_module()
     target = tmp_path / "shared.json"
     real_create = module._create_temporary
-    real_close = module._close_temporary
+    real_close = module._close_descriptor
     names: list[Path] = []
     failures: list[BaseException] = []
     paused = threading.Event()
@@ -405,7 +438,7 @@ def test_interleaved_writers_use_distinct_temporaries(
             failures.append(exc)
 
     monkeypatch.setattr(module, "_create_temporary", recording_create)
-    monkeypatch.setattr(module, "_close_temporary", gated_close)
+    monkeypatch.setattr(module, "_close_descriptor", gated_close)
     thread = threading.Thread(target=writer_a, name="writer-a")
     thread.start()
     try:

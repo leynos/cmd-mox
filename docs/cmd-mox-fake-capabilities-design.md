@@ -223,7 +223,10 @@ Deviations from the first draft of this section, all deliberate:
   `\udcXX` escapes instead of failing, and `allow_nan=False` rejects values
   that are not valid JSON.
 - Content is written with `os.write` in a loop rather than a buffered file
-  object, so no user-space buffer needs a separate flush.
+  object, so no user-space buffer needs a separate flush. The write is binary,
+  so the bytes are identical on every platform: on Windows this differs from
+  the former `Path.write_text(...)`, which translated `\n` to `\r\n`. Fixtures
+  now use LF newlines everywhere, as Git expects.
 - `mode` is keyword-only to prevent positional confusion with the payload.
 - Unsupported directory synchronization is an explicit skip: `PermissionError`
   when opening the parent, and `EINVAL`, `ENOTSUP`, or `EOPNOTSUPP` from its
@@ -232,6 +235,21 @@ Deviations from the first draft of this section, all deliberate:
   would break fixture saves on WSL drvfs, Docker Desktop bind mounts, virtiofs,
   and some FUSE mounts. Genuine I/O errors still raise. macOS `F_FULLFSYNC` is
   not used.
+
+The temporary descriptor's ownership leaves the protocol before the close is
+attempted. On Linux a failed `close` still releases the descriptor, so cleanup
+never retries it: a retry could close an unrelated descriptor that another
+thread reused in the meantime. Cleanup still closes a descriptor whose earlier
+stage failed, and a directory descriptor's close error never replaces the
+synchronization error that is already propagating.
+
+Durability boundary: the commit protocol synchronizes the target's own
+directory. Parent directories created by the same call are not synchronized
+individually, so a power loss immediately after a save that created a missing
+ancestor chain can lose that ancestor's entry on a filesystem that has not
+otherwise persisted it. The helper promises that readers see a complete
+document and that the target's own directory is durable; it does not promise
+crash durability for a newly created ancestor chain.
 
 Replacement semantics: `os.replace` replaces the link itself when the target is
 a symbolic link, rather than writing through it. Because replacement creates a
@@ -248,9 +266,11 @@ error, with `RetryConfig(max_attempts=5, retry_delay=0.05)` from
 `cmd_mox.fs_retry`. POSIX has no such failure, so it does not retry.
 
 A hard kill after the temporary file is closed but before the rename leaves one
-orphan named `.<name>.<random>.tmp` beside the target. The pattern is fixed so a
-`.gitignore` line can exclude it, and a sweep is deferred to roadmap item
-`14.2`, where the lock makes removal safe.
+orphan named `.<name>.<random>.tmp` beside the target. The prefix truncates a
+long name to 64 bytes, so the target name may not appear in full; the reliable
+shape is "dot-prefixed and `.tmp`-suffixed", which the recommended `.*.tmp`
+`.gitignore` line covers. A sweep is deferred to roadmap item `14.2`, where the
+lock makes removal safe.
 
 Cost: each successful write performs two `fsync` calls, about 16 ms on this
 host's ext4, against about 0.14 ms without `fsync`. That is acceptable for one

@@ -634,8 +634,10 @@ mutation audit attribute survivors precisely. The main unplanned work was
 gate-driven: the duplication and DF12 gates rejected two different shapes of
 the same `os.fsync` wrapper before a single-seam design satisfied both, and
 three pre-existing mutmut incompatibilities surfaced that are independent of
-this change. Nothing in the plan's tolerances was exceeded: 15 files changed
-against an 18-file budget, and no public interface or dependency changed.
+this change. The file budget held (16 changed files against 18), but the line
+budget did not: the diff adds 2,144 net lines excluding this plan against a
+1,300-line tolerance. No public interface or dependency changed. See
+"Assessment findings" for the recorded overage.
 
 ## Context and orientation
 
@@ -1531,7 +1533,9 @@ uncommitted `pyproject.toml` overrides were needed and both were reverted:
   `mutants/mutmut-stats.json` was deleted before each run to force the full
   stats path.
 
-Result: 246 mutants, 229 killed, 17 equivalent survivors.
+Result of the first audit: 246 mutants, 229 killed, 17 equivalent survivors.
+The final audit, after the assessment repairs and the seam merge, reports 254
+mutants, 238 killed (93.7%), and the same 16 equivalent survivors.
 
 Promoted to tests: exact error-message phrases and cause text, the mode error's
 offending type name, the exact directory-sync log record, split-character and
@@ -1549,9 +1553,10 @@ The 17 survivors are equivalent:
   are case-insensitive.
 - `_validate_mode` 7/8: mode `0` is already rejected by the owner-read/write
   rule, so narrowing the range bound cannot change the outcome.
-- `_write_all` 8: without patching `os.write` globally (which the design
-  forbids) a short write cannot be induced deterministically, so the
-  `remaining = None` mutation is unobservable through the public surface.
+- `_write_all` 8: originally recorded as unobservable because no test could
+  induce a short write. `_write_once` now provides a module-local seam, and
+  `test_write_all_completes_short_writes` forces three partial writes, so this
+  mutant is no longer equivalent; it is killed by the current audit.
 - `_fsync_directory` 2/3/5/8/9/10/11: every one concerns `os.O_DIRECTORY` and
   its `getattr` default. On the POSIX branch `os.O_RDONLY` is `0`, the
   attribute always exists, and the path is always a directory, so the flags are
@@ -1580,6 +1585,45 @@ findings. All four were cleared by refactoring, with no suppressions:
 
 `cs delta origin/main` reports no issues for the changed files after the
 refactor.
+
+## Assessment findings (2026-11-25)
+
+CodeRabbit's whole-plan completeness assessment returned seven findings. Six
+were valid and are repaired here; the seventh corrects this plan.
+
+- Descriptor cleanup retried a close. On Linux a failed `close` still releases
+  the descriptor, so ownership now leaves the protocol before the close is
+  attempted, and `test_failed_close_is_not_retried` proves cleanup never closes
+  a spent descriptor. A directory descriptor's close error no longer replaces
+  the synchronization error that is already propagating.
+- The plan's byte-compatibility claim was unqualified. The former
+  `Path.write_text(...)` translated newlines on Windows; the helper writes
+  binary and therefore LF everywhere. The claim is now qualified, and
+  `test_written_bytes_never_translate_newlines` pins the behaviour.
+- Ancestor-directory durability was implied but not provided. The contract now
+  states that only the target's own directory is synchronized.
+- The usage guide claimed that every failed save preserves the previous
+  fixture. It now separates a pre-rename failure (previous fixture intact) from
+  a post-rename directory-sync failure (`target_replaced` true, no rollback),
+  and qualifies Windows atomicity.
+- The recommended `.gitignore` pattern assumed the fixture name survives in the
+  temporary prefix. A long name is truncated to 64 bytes, so the guide now
+  recommends `.*.tmp`, which
+  `test_temporary_file_for_a_long_name_keeps_the_tmp_suffix` supports.
+- The `_write_all` survivor was recorded as uninducible. A short write is a
+  legal result, so `_write_once` is now a module-local seam and
+  `test_write_all_completes_short_writes` forces three partial writes. The
+  survivor is no longer equivalent. The same review round exposed two more
+  attribution gaps, now closed: a two-level missing parent chain proves
+  `parents=True`, and `_close_descriptor` lets a test prove that a failing
+  directory close keeps the original synchronization error.
+- The scope tolerance was misreported. The delivered diff is 16 files, inside
+  the 18-file bound, but 2,144 net added lines excluding this plan, above the
+  1,300-line bound. The overage is recorded rather than waived; the
+  implementation was already complete when it was measured, so there was no
+  earlier point at which stopping would have preserved work. The contributor
+  should treat the line budget as breached and review the test volume
+  accordingly.
 
 ## Revision notes
 

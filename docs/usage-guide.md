@@ -714,26 +714,38 @@ assert len(fixture.recordings) == 1
 
 #### Durability and permissions
 
-Fixture saves are atomic. CmdMox serializes the document, writes it to a hidden
-sibling temporary file, flushes it to stable storage, and renames it over the
-destination. A reader therefore sees either the previous complete fixture or
-the new one, never a partial document, and an interrupted or failing save
-leaves the previous fixture byte-for-byte intact.
+Fixture saves are atomic on POSIX: CmdMox serializes the document, writes it to
+a hidden sibling temporary file, flushes it to stable storage, and renames it
+over the destination. A reader therefore sees either the previous complete
+fixture or the new one, never a partial document. On Windows the replacement is
+a single metadata operation, but it is not documented as atomic.
+
+A save that fails before the rename leaves the previous fixture byte-for-byte
+intact. A save that fails after the rename, while synchronizing the directory,
+raises `AtomicWriteError` with `target_replaced` true: the new fixture is
+already in place and is not rolled back, because only durability is in doubt.
 
 New fixtures are owner-only (`0o600`) on POSIX, whatever the process umask,
 because fixture contents can include environment-derived values and command
 output. Git tracks only the execute bit, so committed fixtures are unaffected.
+Fixture bytes always use LF newlines on every platform, so a Windows checkout
+writes the same Git-friendly bytes as a POSIX one.
 
 A failed save raises `AtomicWriteError`, an `OSError` subclass that names the
 target, the stage that failed, and whether the target had already been
-replaced. Catch it when a test must report that the previous fixture is still
-usable.
+replaced. Catch it when a test must report whether the previous fixture is
+still usable.
+
+Saves also create missing parent directories. Only the target's own directory
+is synchronized, so crash durability is not promised for an ancestor directory
+chain that the same save created.
 
 If the process is killed hard (`SIGKILL`, the out-of-memory killer, or
-`pytest-timeout`'s thread method), one orphaned temporary file named
-`.<fixture-name>.<random>.tmp` can remain beside the fixture. Add
-`.*.json.*.tmp` to `.gitignore` so such a file is never committed. A sweep of
-orphans is planned for roadmap item `14.2`.
+`pytest-timeout`'s thread method), one orphaned temporary file can remain
+beside the fixture. Its name is dot-prefixed and ends in `.tmp`, but a long
+fixture name is truncated in the prefix, so the fixture name may not appear. Add
+`.*.tmp` to `.gitignore` so such a file is never committed. A sweep of orphans
+is planned for roadmap item `14.2`.
 
 ### Schema versioning and migration
 

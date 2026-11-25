@@ -12,6 +12,7 @@ globally, and a failure names the step that actually failed.
 from __future__ import annotations
 
 import collections.abc as cabc
+import contextlib
 import enum
 import errno
 import json
@@ -225,8 +226,12 @@ def _commit(path: Path, data: bytes, mode: int) -> None:
         stage = AtomicWriteStage.SYNC_FILE
         _fsync_descriptor(fd)
         stage = AtomicWriteStage.CLOSE_TEMPORARY
-        _close_temporary(fd)
+        # Ownership leaves the protocol before the close is attempted: on
+        # Linux a failed close still releases the descriptor, so a retry in
+        # cleanup could close an unrelated descriptor another thread reused.
+        closing = fd
         fd = None
+        _close_descriptor(closing)
         stage = AtomicWriteStage.REPLACE
         _replace(temporary, path)
         stage = AtomicWriteStage.SYNC_DIRECTORY
@@ -288,22 +293,22 @@ def _apply_mode(fd: int, temporary: Path, mode: int) -> None:
         _FCHMOD(fd, mode)
 
 
+def _write_once(fd: int, buffer: memoryview) -> int:
+    """Write as much of *buffer* as the operating system accepts."""
+    return os.write(fd, buffer)
+
+
 def _write_all(fd: int, data: bytes) -> None:
     """Write every byte of *data* to *fd* without a user-space buffer."""
     remaining = memoryview(data)
     while remaining:
-        written = os.write(fd, remaining)
+        written = _write_once(fd, remaining)
         remaining = remaining[written:]
 
 
 def _fsync_descriptor(fd: int) -> None:
     """Synchronize one descriptor to stable storage."""
     os.fsync(fd)
-
-
-def _close_temporary(fd: int) -> None:
-    """Close the temporary file descriptor."""
-    os.close(fd)
 
 
 def _discard_temporary(temporary: Path) -> None:
@@ -323,7 +328,7 @@ def _cleanup_after_failure(fd: int | None, temporary: Path | None) -> list[str]:
 
 def _close_quietly(fd: int) -> list[str]:
     """Close *fd*, returning a note when it cannot be closed."""
-    # Close through ``os.close`` rather than the ``_close_temporary`` seam:
+    # Close through ``os.close`` rather than the ``_close_descriptor`` seam:
     # cleanup must still release the descriptor when that seam is the one that
     # failed.
     try:
@@ -393,7 +398,15 @@ def _fsync_directory(directory: Path) -> None:
             raise
         _log_directory_sync_skipped(directory)
     finally:
-        os.close(descriptor)
+        # A close error must not replace the synchronization error that is
+        # already propagating; the descriptor is released on Linux either way.
+        with contextlib.suppress(OSError):
+            _close_descriptor(descriptor)
+
+
+def _close_descriptor(fd: int) -> None:
+    """Close a directory descriptor."""
+    os.close(fd)
 
 
 def _log_directory_sync_skipped(directory: Path) -> None:
