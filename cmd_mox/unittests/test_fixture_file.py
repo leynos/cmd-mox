@@ -48,17 +48,6 @@ _NON_STRING_JSON_VALUES = st.one_of(
     st.floats(allow_nan=False, allow_infinity=False),
 )
 
-_REQUIRES_ATOMIC_MODULE = pytest.mark.xfail(
-    strict=True,
-    raises=ModuleNotFoundError,
-    reason="14.1.1: cmd_mox._atomic_write is not implemented yet",
-)
-_MISSES_OWNER_ONLY_MODE = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="14.1.2: FixtureFile.save still writes with the process umask",
-)
-
 
 def _unicode_invocation() -> RecordedInvocation:
     """Build a recording whose fields need non-ASCII JSON escaping."""
@@ -297,7 +286,6 @@ class TestFixtureFile:
         loaded = FixtureFile.load(nested_path)
         assert loaded.version == "1.0.0"
 
-    @_MISSES_OWNER_ONLY_MODE
     @pytest.mark.skipif(
         sys.platform == "win32", reason="POSIX permission bits are not enforced"
     )
@@ -313,7 +301,6 @@ class TestFixtureFile:
 
         assert stat.S_IMODE(fixture_path.stat().st_mode) == 0o600
 
-    @_REQUIRES_ATOMIC_MODULE
     def test_save_failure_preserves_previous_fixture(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -343,7 +330,6 @@ class TestFixtureFile:
         assert fixture_path.read_bytes() == before
         assert len(FixtureFile.load(fixture_path).recordings) == 1
 
-    @_REQUIRES_ATOMIC_MODULE
     @given(invocations=st.lists(_RECORDED_INVOCATIONS, max_size=3))
     @example(invocations=[_unicode_invocation()])
     def test_serialization_matches_legacy_fixture_bytes(

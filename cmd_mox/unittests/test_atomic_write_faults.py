@@ -17,12 +17,6 @@ if typ.TYPE_CHECKING:
     import collections.abc as cabc
     import types
 
-_REQUIRES_MODULE = pytest.mark.xfail(
-    strict=True,
-    raises=ModuleNotFoundError,
-    reason="14.1.1: cmd_mox._atomic_write is not implemented yet",
-)
-
 #: One injected fault per protocol stage. The kinds are ``before`` (raise
 #: instead of doing the work), ``after`` (do the work, then raise), and ``half``
 #: (write a truncated prefix, then raise). The table is exhaustive by design:
@@ -34,7 +28,7 @@ _FAULT_SPECS: dict[str, tuple[str, str]] = {
     "create_temporary": ("_create_temporary", "before"),
     "apply_mode": ("_apply_mode", "after"),
     "write": ("_write_all", "half"),
-    "sync_file": ("_fsync_file", "after"),
+    "sync_file": ("_fsync_descriptor", "after"),
     "close_temporary": ("_close_temporary", "before"),
     "replace": ("_replace", "before"),
     "sync_directory": ("_fsync_directory", "before"),
@@ -170,7 +164,6 @@ def _apply_operation(
     return committed
 
 
-@_REQUIRES_MODULE
 def test_fault_table_covers_every_stage() -> None:
     """Every protocol stage has exactly one seam and one injected fault."""
     module = _atomic_module()
@@ -182,7 +175,6 @@ def test_fault_table_covers_every_stage() -> None:
         assert callable(getattr(module, seam_name))
 
 
-@_REQUIRES_MODULE
 @pytest.mark.parametrize("stage_name", _PRE_REPLACE_STAGE_NAMES)
 @pytest.mark.parametrize("prior_state", _PRIOR_STATES)
 def test_failure_before_replacement_preserves_target(
@@ -228,7 +220,6 @@ def test_naive_writer_violates_preservation(tmp_path: Path) -> None:
         _assert_preserved(target, _PREVIOUS_DOCUMENT, listing)
 
 
-@_REQUIRES_MODULE
 @pytest.mark.skipif(
     sys.platform == "win32", reason="directory synchronisation is skipped"
 )
@@ -258,7 +249,6 @@ def test_directory_sync_failure_reports_replaced_target(
     assert _listing(tmp_path) == {target.name}
 
 
-@_REQUIRES_MODULE
 def test_keyboard_interrupt_cleans_up_and_propagates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -277,7 +267,6 @@ def test_keyboard_interrupt_cleans_up_and_propagates(
     _assert_preserved(target, _PREVIOUS_DOCUMENT, listing)
 
 
-@_REQUIRES_MODULE
 def test_cleanup_failure_is_noted_not_raised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -314,7 +303,6 @@ def test_descriptor_check_detects_an_open_descriptor(tmp_path: Path) -> None:
         os.close(fd)
 
 
-@_REQUIRES_MODULE
 @pytest.mark.parametrize("stage_name", tuple(_FAULT_SPECS))
 def test_failures_do_not_leak_descriptors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage_name: str
@@ -334,7 +322,6 @@ def test_failures_do_not_leak_descriptors(
     assert _descriptors_under(tmp_path) == before
 
 
-@_REQUIRES_MODULE
 @pytest.mark.parametrize("first", [None, *_FAULT_SPECS])
 @pytest.mark.parametrize("second", [None, *_FAULT_SPECS])
 def test_fault_pairs_compose(
@@ -357,7 +344,6 @@ def test_fault_pairs_compose(
     assert _listing(tmp_path) == {target.name}
 
 
-@_REQUIRES_MODULE
 def test_interleaved_writers_use_distinct_temporaries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

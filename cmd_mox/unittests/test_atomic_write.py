@@ -16,19 +16,13 @@ from pathlib import Path
 import hypothesis
 import hypothesis.strategies as st
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
     import types
 
     from syrupy.assertion import SnapshotAssertion
-
-_REQUIRES_MODULE = pytest.mark.xfail(
-    strict=True,
-    raises=ModuleNotFoundError,
-    reason="14.1.1: cmd_mox._atomic_write is not implemented yet",
-)
 
 #: Lone surrogates reach fixtures when arguments are decoded with
 #: ``surrogateescape``, so the round-trip domain must include them.
@@ -122,8 +116,14 @@ def set_umask() -> cabc.Iterator[cabc.Callable[[int], None]]:
         os.umask(previous)
 
 
-@_REQUIRES_MODULE
 @given(payload=_JSON_VALUES)
+# Named examples guarantee the classification below reports every top-level
+# type: Hypothesis's recursive sampler reaches bare scalars only rarely.
+@example(payload=None)
+@example(payload=True)
+@example(payload=7)
+@example(payload=1.5)
+@example(payload="plain text")
 def test_serialization_round_trips(payload: object) -> None:
     """Serialized JSON loads back as an equal payload."""
     module = _atomic_module()
@@ -137,7 +137,18 @@ def test_serialization_round_trips(payload: object) -> None:
     hypothesis.event(f"surrogate={has_surrogate}")
 
 
-@_REQUIRES_MODULE
+@pytest.mark.parametrize(
+    "payload",
+    [None, True, 7, 1.5, "plain text", [1, 2], {"a": 1}],
+    ids=["null", "bool", "int", "float", "text", "list", "mapping"],
+)
+def test_every_top_level_type_round_trips(payload: object) -> None:
+    """Every JSON top-level type survives the serializer."""
+    module = _atomic_module()
+
+    assert json.loads(module._serialize_json(payload).decode("utf-8")) == payload
+
+
 @given(payload=_JSON_VALUES)
 @settings(max_examples=25, deadline=None)
 def test_written_file_round_trips(payload: object) -> None:
@@ -153,7 +164,6 @@ def test_written_file_round_trips(payload: object) -> None:
         assert json.loads(target.read_text(encoding="utf-8")) == payload
 
 
-@_REQUIRES_MODULE
 @pytest.mark.parametrize("payload", _SNAPSHOT_PAYLOADS)
 def test_serialized_bytes_snapshot(
     payload: object, snapshot: SnapshotAssertion
@@ -164,7 +174,6 @@ def test_serialized_bytes_snapshot(
     assert module._serialize_json(payload).decode("utf-8") == snapshot
 
 
-@_REQUIRES_MODULE
 @pytest.mark.parametrize(
     "payload",
     [
@@ -190,7 +199,6 @@ def test_unserializable_payload_touches_nothing(
     assert not target.parent.exists(), "serialization must precede mutation"
 
 
-@_REQUIRES_MODULE
 def test_error_preserves_cause_errno(tmp_path: Path) -> None:
     """The wrapper keeps the cause errno and names the target."""
     module = _atomic_module()
@@ -219,7 +227,6 @@ def test_error_preserves_cause_errno(tmp_path: Path) -> None:
     assert caller_bug.errno is None
 
 
-@_REQUIRES_MODULE
 def test_mode_validation_is_exact(tmp_path: Path) -> None:
     """The validator accepts exactly the modes that grant owner read and write."""
     module = _atomic_module()
@@ -243,7 +250,6 @@ def test_mode_validation_is_exact(tmp_path: Path) -> None:
     assert not untouched.parent.exists(), "mode validation must precede mutation"
 
 
-@_REQUIRES_MODULE
 @pytest.mark.skipif(
     sys.platform == "win32", reason="POSIX permission bits are not enforced"
 )
@@ -272,7 +278,6 @@ def test_mode_is_exact_regardless_of_umask(
     assert any(candidate != 0o600 for candidate in _REQUESTED_MODES)
 
 
-@_REQUIRES_MODULE
 def test_temporary_prefix_truncates_by_bytes() -> None:
     """The temporary prefix stays within 66 bytes without splitting a character."""
     module = _atomic_module()
@@ -283,7 +288,6 @@ def test_temporary_prefix_truncates_by_bytes() -> None:
     assert len(prefix.encode("utf-8")) == 66
 
 
-@_REQUIRES_MODULE
 def test_long_multibyte_names_are_supported(tmp_path: Path) -> None:
     """A 253-byte multibyte name still fits beside its temporary file."""
     module = _atomic_module()
@@ -296,7 +300,6 @@ def test_long_multibyte_names_are_supported(tmp_path: Path) -> None:
     assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
 
 
-@_REQUIRES_MODULE
 @pytest.mark.parametrize("raw", ["", "/", "."])
 def test_empty_names_are_rejected(raw: str) -> None:
     """A target that names no file is rejected before filesystem work."""
@@ -306,7 +309,6 @@ def test_empty_names_are_rejected(raw: str) -> None:
         module.atomic_write_json(Path(raw), {"a": 1})
 
 
-@_REQUIRES_MODULE
 def test_directory_target_fails_at_replace(tmp_path: Path) -> None:
     """Replacing a directory fails at the replace stage and leaves no residue."""
     module = _atomic_module()
@@ -323,7 +325,6 @@ def test_directory_target_fails_at_replace(tmp_path: Path) -> None:
     assert {entry.name for entry in tmp_path.iterdir()} == listing
 
 
-@_REQUIRES_MODULE
 @pytest.mark.skipif(
     sys.platform == "win32", reason="symlink creation needs extra privileges"
 )
@@ -342,7 +343,6 @@ def test_symlink_target_is_replaced_not_followed(tmp_path: Path) -> None:
     assert destination.read_bytes() == b'{"old": true}\n'
 
 
-@_REQUIRES_MODULE
 @pytest.mark.skipif(
     sys.platform == "win32", reason="directory synchronisation is skipped"
 )
@@ -370,7 +370,6 @@ def test_unsupported_directory_sync_is_skipped(
     assert str(directory) in messages[0]
 
 
-@_REQUIRES_MODULE
 @pytest.mark.skipif(
     sys.platform == "win32", reason="directory synchronisation is skipped"
 )
@@ -385,15 +384,16 @@ def test_unsupported_directory_sync_errnos_are_skipped(
 ) -> None:
     """A "not supported here" error from the directory sync is skipped."""
     module = _atomic_module()
+
     real_fsync = module._fsync_descriptor
 
-    def fail_on_directory(fd: int) -> None:
+    def fail_directory_sync(fd: int) -> None:
         """Raise *error_number* for directory descriptors, otherwise sync."""
         if stat.S_ISDIR(os.fstat(fd).st_mode):
             raise OSError(error_number, os.strerror(error_number))
         real_fsync(fd)
 
-    monkeypatch.setattr(module, "_fsync_descriptor", fail_on_directory)
+    monkeypatch.setattr(module, "_fsync_descriptor", fail_directory_sync)
     caplog.set_level(logging.DEBUG, logger="cmd_mox._atomic_write")
     target = tmp_path / "payload.json"
 
@@ -409,7 +409,6 @@ def test_unsupported_directory_sync_errnos_are_skipped(
     assert str(tmp_path) in messages[0]
 
 
-@_REQUIRES_MODULE
 def test_windows_skips_directory_sync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -432,7 +431,6 @@ def test_windows_skips_directory_sync(
     assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
 
 
-@_REQUIRES_MODULE
 def test_missing_fchmod_falls_back_to_chmod(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -448,7 +446,6 @@ def test_missing_fchmod_falls_back_to_chmod(
         assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
 
-@_REQUIRES_MODULE
 def test_windows_retries_replace_permission_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -476,7 +473,6 @@ def test_windows_retries_replace_permission_errors(
     assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
 
 
-@_REQUIRES_MODULE
 def test_windows_replace_retry_exhausts_and_reports_replace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -502,7 +498,6 @@ def test_windows_replace_retry_exhausts_and_reports_replace(
     assert len(attempts) == 5
 
 
-@_REQUIRES_MODULE
 def test_posix_does_not_retry_replace_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

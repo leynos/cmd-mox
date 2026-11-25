@@ -181,9 +181,13 @@ Keep these references open while executing the plan:
 - [x] (2026-11-25) Reconciled current repository guidance and paths below;
   the plan remains a draft pending user approval before Stage A.
 - [x] (2026-11-25) Plan approved by the user; status changed to APPROVED.
-- [ ] Stage A: red tests (EP-M1). Tests written and observed red:
-      205 strict `xfail`, 119 passed in the focused run.
-- [ ] Stage B: green implementation and adoption (EP-M2).
+- [x] (2026-11-25) Stage A complete and committed as `98ef806`
+      ("Add failing tests for atomic JSON writes"). Red evidence: 205 strict
+      `xfail`, 119 passed in the focused run. All four gates passed before the
+      commit (`make lint` reached the DF12 Pylint, ambrleaks, and spelling
+      tiers for the first time on this branch).
+- [ ] Stage B: green implementation and adoption (EP-M2). Implemented and
+      focused suite green (331 passed); awaiting the four gates.
 - [ ] Stage C: Windows coverage, refactor, and mutation audit (EP-M3).
 - [ ] Stage D: documentation and roadmap (EP-M4).
 
@@ -548,7 +552,35 @@ replace an existing file; it is noted as a possible future mitigation only.
 
 ## Outcomes & retrospective
 
-Not started. Complete this section at each milestone and at completion.
+### EP-M1 (red tests) - complete 2026-11-25
+
+Every planned obligation now has an executable artefact. The exhaustive
+single-fault enumeration (8 pre-replace stages x 3 prior states = 24 cases),
+the nine-stage fault table, the 100-case ordered-pair composition, and the
+descriptor-leak sweep all fit in one module and run in about two seconds, which
+keeps the protocol's failure space cheap to re-verify on every commit.
+
+Lessons:
+
+- A strict `xfail(raises=ModuleNotFoundError)` does not cover a test whose
+  failure happens in a child process: the process-boundary test had to import
+  the module in the parent first, so its red reason matched the other helper
+  tests instead of a child import failure.
+- The strict `xfail(raises=AssertionError)` on the fixture mode test is what
+  proves the adoption is real: under `write_text` the file is `0o644`, so the
+  owner-only assertion is the red evidence for `RM-14.1.1-S2`.
+
+### EP-M2 (working helper, adopted) - implemented 2026-11-25
+
+`cmd_mox/_atomic_write.py` implements the nine-stage protocol, and
+`FixtureFile.save()` delegates to it. The eighteen newly-unmarked tests, the
+six fixture tests added to `test_fixture_file.py`, and both recording-session
+scenarios pass; the focused suite reports 331 passed.
+
+The three snapshot cases pin the byte format: insertion order is preserved
+(`zebra`, `alpha`, `middle`), non-ASCII text and a lone surrogate are escaped as
+`\uXXXX`, indentation is two spaces, and the document ends with exactly one
+newline.
 
 ## Context and orientation
 
@@ -1310,6 +1342,29 @@ The fixture mode test xfails with the underlying `AssertionError` (the file is
 the parent first, so the xfail reason matches the other helper tests rather
 than a child-process import failure.
 
+Stage B green evidence (2026-11-25), same focused command with the markers
+removed:
+
+```plaintext
+5 snapshots passed.
+331 passed in 2.30s
+```
+
+Hypothesis classification for `test_serialization_round_trips` (100 generated
+examples plus five named examples) reports both boolean classes for `non_ascii`
+and `surrogate`, and `list`, `dict`, `NoneType`, `str`, `bool`, and `int` at
+the top level. The printed table elides low-count events, and `float` appears
+in some runs but not others, so `test_every_top_level_type_round_trips` covers
+all seven top-level types deterministically.
+
+The generating-writer process test and the interleaving test each passed ten of
+ten local repetitions (0.09-0.25 s per run).
+
+Snapshot file reviewed by hand:
+`cmd_mox/unittests/__snapshots__/test_atomic_write.ambr` shows insertion-order
+preservation, `\uXXXX` escaping for non-ASCII text and a lone surrogate,
+two-space indentation, and exactly one trailing newline.
+
 ## Interfaces and dependencies
 
 No new dependencies. Standard-library modules used: `collections.abc`, `enum`,
@@ -1406,6 +1461,17 @@ def save(self, path: Path) -> None:
 ```
 
 ## Revision notes
+
+- 2026-11-25: recorded two implementation clarifications while executing
+  Stage B. First, `JsonValue` is not defined in `cmd_mox/_atomic_write.py`:
+  nothing in production references it, and the dead-code policy forbids a
+  Skylos exception for a symbol with no verified runtime caller, so the
+  round-trip domain stays expressed by the test strategies plus a deterministic
+  top-level-type table. Second, `LEM-ERRNO` is discharged as "the wrapper
+  preserves the cause's `errno` and sets `filename` to the target": the
+  `strerror` attribute carries the constructed message (stage and outcome),
+  because the message is what a traceback reader needs. The plan text above is
+  retained as written and the deviation is recorded here.
 
 - 2026-10-23: revised after the expert-panel review. Recommended Option C for
   `DEC-OPEN-1` and restructured the stages so the helper and its caller land in

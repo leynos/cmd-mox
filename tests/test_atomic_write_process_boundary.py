@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import selectors
 import signal
@@ -13,12 +12,6 @@ from pathlib import Path
 import pytest
 
 import cmd_mox
-
-_REQUIRES_MODULE = pytest.mark.xfail(
-    strict=True,
-    raises=ModuleNotFoundError,
-    reason="14.1.1: cmd_mox._atomic_write is not implemented yet",
-)
 
 _PREVIOUS_DOCUMENT = b'{\n  "previous": true\n}\n'
 
@@ -64,13 +57,11 @@ def _terminate(process: subprocess.Popen[str]) -> None:
             stream.close()
 
 
-@_REQUIRES_MODULE
 @pytest.mark.skipif(
     sys.platform == "win32", reason="POSIX signals and pipes are required"
 )
 def test_killed_writer_leaves_previous_document(tmp_path: Path) -> None:
     """A SIGKILL before the rename leaves the previous complete document."""
-    importlib.import_module("cmd_mox._atomic_write")
     target = tmp_path / "fixture.json"
     target.write_bytes(_PREVIOUS_DOCUMENT)
     repository_root = Path(cmd_mox.__file__).parents[1]

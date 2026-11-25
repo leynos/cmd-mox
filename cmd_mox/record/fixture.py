@@ -17,6 +17,8 @@ import re
 import sys
 import typing as typ
 
+from cmd_mox._atomic_write import atomic_write_json
+
 if typ.TYPE_CHECKING:
     from pathlib import Path
 
@@ -532,15 +534,25 @@ class FixtureFile:
         )
 
     def save(self, path: Path) -> None:
-        """Write this fixture to *path* as JSON, creating directories as needed.
+        """Write this fixture to *path* atomically, owner-only by default.
+
+        The document is serialized exactly as before, then committed through
+        the internal atomic-write helper, so an interrupted or failing save
+        leaves any previous fixture byte-for-byte intact.
 
         Parameters
         ----------
         path : pathlib.Path
-            Destination JSON path.
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
+            Destination JSON path. Missing parent directories are created.
+
+        Raises
+        ------
+        AtomicWriteError
+            If the fixture cannot be serialized or committed. When
+            ``target_replaced`` is false the previous fixture is unchanged.
+
+        """  # ruff: ignore[docstring-extraneous-exception] - atomic_write_json raises this caller-visible persistence failure.
+        atomic_write_json(path, self.to_dict())
 
     @classmethod
     def load(cls, path: Path) -> FixtureFile:

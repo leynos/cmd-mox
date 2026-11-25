@@ -1,0 +1,31 @@
+# serializer version: 1
+# name: test_serialized_bytes_snapshot[top-level-scalar]
+  '''
+  "top-level scalar"
+  
+  '''
+# ---
+# name: test_serialized_bytes_snapshot[unicode-text]
+  '''
+  {
+    "text": "h\u00e9llo \ud83d\ude00",
+    "surrogate": "\udcff"
+  }
+  
+  '''
+# ---
+# name: test_serialized_bytes_snapshot[unsorted-mapping]
+  '''
+  {
+    "zebra": 1,
+    "alpha": [
+      1,
+      2
+    ],
+    "middle": {
+      "beta": null
+    }
+  }
+  
+  '''
+# ---
