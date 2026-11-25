@@ -36,12 +36,6 @@ extend-exclude = [
     # Vendored byte for byte from shared-actions; its digest is audited, so Ruff
     # must neither lint nor reformat it.
     "scripts/uv_gate.py",
-    # Estate-shared typos rollout tooling; linted upstream, mirrored here
-    # to match the Episodic configuration and avoid local drift.
-    "scripts/generate_typos_config.py",
-    "scripts/tests/test_typos_rollout.py",
-    "scripts/typos_rollout.py",
-    "scripts/typos_rollout_cache.py",
     # Ruff 0.16 formats Markdown code blocks by default; mdformat owns
     # Markdown in this repository (see the fmt target in the Makefile).
     "*.md",
@@ -346,14 +340,14 @@ enable = [
 ]
 
 [tool.ty.environment]
-# The estate typos-rollout scripts import each other as top-level modules,
-# so ty needs scripts/ on the module search path alongside the default roots.
+# The release scripts import each other as top-level modules, so ty needs
+# scripts/ on the module search path alongside the default roots.
 extra-paths = ["scripts"]
 
 [tool.pytest.ini_options]
 # Tests automatically killed after seconds elapsed
 timeout = 30
-testpaths = ["cmd_mox/unittests", "examples", "scripts/tests", "tests"]
+testpaths = ["cmd_mox/unittests", "examples", "tests"]
 
 [tool.mutmut]
 # Flat layout: the package lives at the repository root.
@@ -373,7 +367,7 @@ do_not_mutate = [
 # mutmut runs pytest from mutants/; copy the assets tests resolve
 # relative to the repository root, including shared fixtures, lint contracts,
 # tooling, workflows, BDD feature files, docs scenarios, and the spelling
-# policy the typos rollout test reads.
+# policy.
 also_copy = [
     "conftest.py",
     "Makefile",

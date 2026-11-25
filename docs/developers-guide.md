@@ -521,7 +521,6 @@ project files.
 | `RUFF`                    | `$(UV_GATE) tool --from ruff@$(RUFF_VERSION) -- ruff`                                                                                          | Runs the pinned Ruff command via the vendored helper's tool channel.              |
 | `TY_VERSION`              | `0.0.74`                                                                                                                                       | Pins the `ty` release used by the typecheck target.                               |
 | `TY`                      | `$(UV_GATE) tool --from ty@$(TY_VERSION) -- ty`                                                                                                | Runs the pinned `ty`; `--python .venv` points it at the project environment.      |
-| `TYPOS_VERSION`           | `1.48.0`                                                                                                                                       | Pins the `typos` release used by the spelling target.                             |
 | `PYLINT_PYTHON`           | `pypy@3.12`                                                                                                                                    | Selects the Python interpreter used by `uv tool run` for Pylint.                  |
 | `PYLINT_TARGETS`          | `cmd_mox conftest.py examples tests`                                                                                                           | Lists the directories and files linted by Pylint.                                 |
 | `PYLINT_VERSION`          | `4.0.9`                                                                                                                                        | Pins the Pylint release run by the second tier.                                   |
@@ -1178,18 +1177,22 @@ operation is not claimed; the Windows CI job does not run the gate.
 
 ## Spelling policy
 
-The lint and Markdown gates run a pinned `typos` release with British English
-and Oxford `-ize` conventions. Before checking maintained Markdown, the
-generator refreshes the shared estate dictionary into an untracked local cache
-only when the authority is newer and merges `typos.local.toml`. The generated
+The lint and Markdown gates run `make spelling`, which calls the pinned
+`typos-config-builder gate` under Python 3.14. The gate regenerates
+`typos.toml` from the shared en-GB-oxendict dictionary and `typos.local.toml`,
+then checks spelling and the shared phrase corrections. The generated
 `typos.toml` is reviewed and committed so a clean network-restricted checkout
 can still enforce the last known-good policy.
 
-`make spelling` checks existing `*.md` files that are tracked by Git or
-untracked and not ignored. Standard Git ignore rules exclude generated caches
-and other ignored files, while new Markdown is checked before it is staged. Add
-repository-only proper names or quoted upstream terms to `typos.local.toml`;
-never edit generated entries in `typos.toml` by hand.
+The gate reads tracked files only. Add repository-only proper names or quoted
+upstream terms to `typos.local.toml`; never edit generated entries in
+`typos.toml` by hand.
+
+The `spelling` target runs `uv tool run` directly rather than through
+`scripts/uv_gate.py`: the concordat `spelling-config-baseline` rule requires
+the builder at a release tag, which the helper's SHA-only pin check refuses, so
+that call does not get the helper's environment cleaning or offline-first
+policy.
 
 ## Episodic lint policy
 

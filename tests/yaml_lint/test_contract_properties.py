@@ -2,7 +2,7 @@
 
 ``test_contract`` enumerates each defect class by hand. These properties
 generalise the same judgements over delegation depth, installer ordering, and
-unrelated jobs, where a hand-written case for every permutation would be
+unrelated jobs, where a handwritten case for every permutation would be
 unreadable and easy to leave incomplete.
 """
 

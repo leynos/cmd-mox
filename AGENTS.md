@@ -177,12 +177,6 @@ When implementing changes, adhere to the following testing procedures:
 
 ## Python Development Guidelines
 
-The spelling configuration is generated from the shared estate dictionary. Put
-narrow repository-specific terms in `typos.local.toml`; do not edit
-`typos.toml` by hand. The generator refreshes its untracked base cache only
-when the authority is newer and retains the reviewed tracked configuration when
-a clean checkout cannot reach the authority.
-
 For Python development, refer to the detailed guidelines in the `.rules/`
 directory:
 
@@ -199,3 +193,19 @@ directory:
 - [Python Return Patterns](.rules/python-return.md) - Function return
   conventions
 - [Python Typing](.rules/python-typing.md) - Type annotation best practices
+
+<!-- typos-config-builder:agents-md:start -->
+
+## Spelling
+
+- `make spelling` runs the pinned `typos-config-builder gate`, which
+  regenerates `typos.toml` from the shared en-GB-oxendict dictionary and
+  `typos.local.toml`, then checks spelling and the shared phrase corrections.
+- `typos.toml` is generated: never edit it by hand. Put narrow
+  repository-specific exceptions in `typos.local.toml`, as exact or full-line
+  patterns rather than bare accepted words.
+- When `make spelling` changes `typos.toml`, commit the regenerated file. If
+  the change is unrelated to your work, commit it in a separate base pull
+  request and stack your branch on it, so each review diff stays focused.
+
+<!-- typos-config-builder:agents-md:end -->

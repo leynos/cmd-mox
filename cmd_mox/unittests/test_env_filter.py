@@ -112,7 +112,7 @@ _COMMAND_ENV_CASES = [
     pytest.param(case, id=case.command) for case in _COMMAND_ENV_TABLE
 ]
 
-#: Hand-written copy of the Go variables documented by ``go help environment``
+#: Handwritten copy of the Go variables documented by ``go help environment``
 #: and ``go doc runtime``.  Written independently of :data:`GO_ENV_KEYS` so a
 #: name dropped from the production set fails a test instead of silently
 #: redefining the expected list.
