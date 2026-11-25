@@ -2785,12 +2785,15 @@ classDiagram
 ```
 
 `FixtureFile.save()` writes through the internal
-`cmd_mox._atomic_write.atomic_write_json` helper with mode `0o600` on POSIX.
-The serialized bytes are unchanged from the earlier `Path.write_text(...)`
-implementation, but a save is now atomic: an interrupted or failing write
-leaves any previous fixture byte-for-byte intact, and readers see either the
-old complete document or the new one. `FixtureFile.load()` and the fixture
-schema are unchanged. See
+`cmd_mox._atomic_write.atomic_write_json` helper with mode `0o600` on POSIX. On
+POSIX the serialized bytes are unchanged from the earlier
+`Path.write_text(...)` implementation; on Windows the helper writes binary and
+therefore LF, where the old text-mode write emitted CRLF. A save is now atomic
+on POSIX: a failure before the rename leaves any previous fixture byte-for-byte
+intact, and readers see either the old complete document or the new one. A
+failure after the rename reports `target_replaced` and does not roll back, and
+Windows replacement is a single metadata operation that is not documented as
+atomic. `FixtureFile.load()` and the fixture schema are unchanged. See
 [the fake-capabilities design](cmd-mox-fake-capabilities-design.md#atomic-json-persistence)
 for the persistence contract.
 

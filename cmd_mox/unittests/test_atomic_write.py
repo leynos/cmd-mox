@@ -420,6 +420,9 @@ def test_temporary_file_for_a_long_name_keeps_the_tmp_suffix(
     assert ".json" not in temporary_name, "the suffix is truncated away"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="directory synchronisation is skipped"
+)
 def test_directory_close_error_does_not_mask_sync_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

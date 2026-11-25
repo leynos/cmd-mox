@@ -536,9 +536,11 @@ class FixtureFile:
     def save(self, path: Path) -> None:
         """Write this fixture to *path* atomically, owner-only by default.
 
-        The document is serialized exactly as before, then committed through
-        the internal atomic-write helper, so an interrupted or failing save
-        leaves any previous fixture byte-for-byte intact.
+        The document is serialized exactly as before and committed through the
+        internal atomic-write helper. A failure before the rename leaves any
+        previous fixture byte-for-byte intact; a failure after it raises
+        ``AtomicWriteError`` with ``target_replaced`` true and does not roll
+        back, because only durability is in doubt.
 
         Parameters
         ----------

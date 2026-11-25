@@ -217,11 +217,12 @@ Deviations from the first draft of this section, all deliberate:
   falls back to `os.chmod`.
 - Serialization uses
   `json.dumps(payload, indent=2, ensure_ascii=True, allow_nan=False)` plus one
-  newline, encoded as UTF-8, preserving mapping insertion order. That
+  newline, encoded as UTF-8, preserving mapping insertion order. On POSIX that
   reproduces the bytes `FixtureFile.save()` wrote before this change, so no
-  committed fixture is reformatted. `ensure_ascii` serializes lone surrogates as
-  `\udcXX` escapes instead of failing, and `allow_nan=False` rejects values
-  that are not valid JSON.
+  committed fixture is reformatted; on Windows the previous text-mode write
+  emitted CRLF and the helper now emits LF. `ensure_ascii` serializes lone
+  surrogates as `\udcXX` escapes instead of failing, and `allow_nan=False`
+  rejects values that are not valid JSON.
 - Content is written with `os.write` in a loop rather than a buffered file
   object, so no user-space buffer needs a separate flush. The write is binary,
   so the bytes are identical on every platform: on Windows this differs from
