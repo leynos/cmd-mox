@@ -38,6 +38,15 @@ non-ASCII values become escapes again. Verify the affected values after
 re-saving, and keep a copy of the original until the re-saved fixture has been
 replayed successfully.
 
+The third case is a legacy file whose bytes are in some other single-byte
+encoding, such as a hand-edited `cp1252` fixture that an older release read
+correctly under a matching locale. The updated reader decodes UTF-8, so those
+bytes fail with `UnicodeDecodeError`. Convert the file from its known original
+encoding to UTF-8, or re-save its values through `FixtureFile.save()` so they
+become escapes. Keep a copy of the original, convert from the encoding the file
+was actually written in rather than guessing, and verify the converted values
+after replaying it.
+
 ## Upgrade shared fixture workflows
 
 Upgrade every CmdMox installation that reads or writes a shared fixture before

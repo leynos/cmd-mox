@@ -204,9 +204,9 @@ observed failing before its fix.
   parameterized over (3,3) and (3,8); `TestVerifyAllConsumedMessage` with three
   snapshots; fuzzy exhaustion at session level; four controller tests including
   the strict-miss snapshot and first-failing-double ordering; three new
-  `replay_session.feature` scenarios and three end-to-end `controller.feature`
-  scenarios driven through the real shim. Full suite `1212 passed, 12 skipped`,
-  9 snapshots.
+  `replay_session.feature` scenarios and three `controller.feature` scenarios,
+  two of which drive the real shim while the corrupt-fixture one stops at spy
+  configuration. Full suite `1212 passed, 12 skipped`, 9 snapshots.
 - [x] (2026-11-25) EP-M5: documentation, roadmap update, and final gates.
   Sections 9.10.18 (UTF-8) and the amended 9.5.5, 9.8.3, and 9.10.15 are
   recorded; the field-validation write-up was dropped because `main` documents
@@ -883,16 +883,17 @@ Re-run the shim probe recorded in `Surprises & discoveries` (scratch script in
 `/tmp/12-2-6-probe/`, `stdin=subprocess.DEVNULL`) and confirm the same exit
 status and stderr. Go/no-go: gates green and probe unchanged.
 
-Stage B (EP-M1, refactor only): create the private module
-`cmd_mox/unittests/_replay_helpers.py`. Move `RecordedInvocationSpec` and the
-builders from `cmd_mox/unittests/test_replay_session.py`, fold in the duplicate
-copies from `cmd_mox/unittests/test_invocation_matcher.py`, and expose them
-without the leading underscore (`make_recorded_invocation`,
-`write_fixture_file`, `make_invocation`). Move `_RECORDED_INVOCATIONS` from
-`test_fixture_file.py` into the module as `recorded_invocations()`, and add
-`fixture_metadata()`, `fixture_files()`, `replay_scenarios()`,
-`oracle_find_match()`, and `classify_scenario()`. Update the existing tests to
-import them. Their assertions must not change.
+Stage B (EP-M1, refactor only) — **partly undelivered; accepted**: create the
+private module `cmd_mox/unittests/_replay_helpers.py`. Move
+`RecordedInvocationSpec` and the builders from
+`cmd_mox/unittests/test_replay_session.py`, fold in the duplicate copies from
+`cmd_mox/unittests/test_invocation_matcher.py`, and expose them without the
+leading underscore (`make_recorded_invocation`, `write_fixture_file`,
+`make_invocation`). Move `_RECORDED_INVOCATIONS` from `test_fixture_file.py`
+into the module as `recorded_invocations()`, and add `fixture_metadata()`,
+`fixture_files()`, `replay_scenarios()`, `oracle_find_match()`, and
+`classify_scenario()`. Update the existing tests to import them. Their
+assertions must not change.
 
 Stage C (EP-M2, red then green) — **superseded in part**: the schema half was
 delivered on `main` in #457, so only the encoding half and the LOAD-1 property
@@ -1065,8 +1066,8 @@ times", and "the replay match stdout values are {stdouts}". The existing
 `fixture_with_n_recordings` step is not changed, so its scenario keeps its
 meaning.
 
-New scenarios in `features/controller.feature` (end-to-end through the real
-shim):
+New scenarios in `features/controller.feature` (two run end to end through the
+real shim; the corrupt-fixture scenario stops at spy configuration):
 
 ```gherkin
   Scenario: replay-backed spy consumes duplicate recordings in order
@@ -1329,10 +1330,17 @@ Documentation changes in EP-M5:
   12.2.6 pull request as separate commits, and roadmap item 12.2.7 was added in
   the planning pull request. Effect on remaining work: EP-M5 no longer adds
   12.2.7; the design and usage documentation refer to it by number.
-- 2026-11-25: implementation complete. The plan was approved and executed as
-  written, with three recorded deviations: EP-M2's production change is 209 net
-  lines against a 150-line tolerance, the LOAD-2 corpus was run red as a whole
-  instead of under `xfail(strict=True)`, and the matcher's reachability
-  strategy had to favour invocation-compatible recordings before every scoring
-  class was reachable. Effect on remaining work: none; only 12.2.7 and 12.3.2
-  remain in the wider replay and scrubbing roadmap.
+- 2026-11-25: implementation complete, with recorded deviations from the
+  approved text. EP-M2's schema half was delivered on `main` in #457 before
+  this branch merged, so only its UTF-8 half and LOAD-1/LOAD-3 are implemented
+  here. Stage B's refactor was delivered only for `test_invocation_matcher.py`:
+  the `test_replay_session.py` deduplication and the `test_fixture_file.py`
+  strategy move were dropped during the rebase, so those two files stay
+  identical to `main` (see `Decision log`); the omission is accepted under the
+  plan approval because it narrows churn rather than weakening an obligation,
+  and the shared builders still serve every new test module. The LOAD-2 corpus
+  was run red as a whole instead of under `xfail(strict=True)`, and the
+  matcher's reachability strategy had to favour invocation-compatible
+  recordings before every scoring class was reachable. Effect on remaining
+  work: none; only 12.2.7 and 12.3.2 remain in the wider replay and scrubbing
+  roadmap.

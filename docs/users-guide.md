@@ -189,8 +189,10 @@ the complete policy and the migration note for the changes to existing fixtures.
 Fixture JSON is written and read as UTF-8 regardless of the process locale, and
 one leading UTF-8 byte order mark is accepted on load. `FixtureFile.save()`
 escapes non-ASCII values, so its output is pure ASCII and needs no conversion;
-the case to watch is a fixture whose file bytes are raw non-ASCII UTF-8, which
-an older release reads with the locale encoding. See the
+the cases to watch are a fixture whose file bytes are raw non-ASCII UTF-8,
+which an older release reads with the locale encoding, and a legacy file in
+another single-byte encoding such as `cp1252`, which the new reader rejects and
+which must be converted from its original encoding. See the
 [fixture encoding rules](usage-guide.md#fixture-file-encoding) and the
 [fixture encoding migration note](fixture-encoding-migration-note.md).
 
