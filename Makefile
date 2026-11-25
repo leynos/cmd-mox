@@ -33,8 +33,12 @@ RUFF = $(UV_GATE) tool --from ruff@$(RUFF_VERSION) -- ruff
 # virtualenv through --python, since an isolated tool environment would not see
 # them.
 TY = $(UV_GATE) tool --from ty@$(TY_VERSION) -- ty
-TYPOS_VERSION ?= 1.48.0
-TYPOS := $(UV_GATE) tool --from typos@$(TYPOS_VERSION) -- typos
+# The one uv call outside the helper: the spelling baseline requires the
+# builder at a release tag, which the helper's SHA-only pin check refuses.
+TYPOS_CONFIG_BUILDER_VERSION ?= v0.1.4
+TYPOS_CONFIG_BUILDER = uv tool run --python 3.14 --from \
+	"git+https://github.com/leynos/typos-config-builder.git@$(TYPOS_CONFIG_BUILDER_VERSION)" \
+	typos-config-builder
 PYLINT_PYTHON ?= pypy@3.12
 PYLINT_VERSION ?= 4.0.9
 PYLINT_TARGETS ?= cmd_mox conftest.py examples tests
@@ -231,19 +235,9 @@ markdownlint: ## Lint Markdown files
 	$(MAKE) markdownlint-run
 	+$(MAKE) spelling
 
-spelling: ## Enforce en-GB-oxendict spelling in Markdown prose
-	@$(UV_GATE) run --group dev -- python scripts/generate_typos_config.py
-	@set -eu; \
-		markdown_paths=$$(mktemp); \
-		trap 'rm -f "$$markdown_paths"' EXIT; \
-		existing_paths=$$(mktemp); \
-		trap 'rm -f "$$markdown_paths" "$$existing_paths"' EXIT; \
-		git ls-files --cached --others --exclude-standard \
-			--deduplicate -z -- '*.md' > "$$markdown_paths"; \
-		$(UV_GATE) run --group dev -- python \
-			"$(PROJECT_ROOT)/scripts/filter_existing_markdown.py" \
-			< "$$markdown_paths" > "$$existing_paths"; \
-		xargs -0 -r $(TYPOS) --config typos.toml --force-exclude < "$$existing_paths"
+# The gate reads tracked files only; stage new Markdown before expecting it checked.
+spelling: ## Enforce en-GB-oxendict spelling in prose
+	$(TYPOS_CONFIG_BUILDER) gate --repository .
 
 nixie: $(NIXIE) ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
