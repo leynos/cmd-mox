@@ -188,7 +188,12 @@ Keep these references open while executing the plan:
       tiers for the first time on this branch).
 - [ ] Stage B: green implementation and adoption (EP-M2). Implemented and
       focused suite green (331 passed); awaiting the four gates.
+- [x] (2026-11-25) Stage B committed as `a013d2d` ("Add internal atomic JSON
+      write helper") after all four gates passed on a frozen tree, including
+      the duplication gate, both Pylint tiers, ambrleaks, and spelling.
 - [ ] Stage C: Windows coverage, refactor, and mutation audit (EP-M3).
+      `cmd_mox/unittests/test_atomic_write.py` added to `WINDOWS_SMOKE_ARGS`;
+      mutation audit run and survivors triaged (229 of 246 killed).
 - [ ] Stage D: documentation and roadmap (EP-M4).
 
 ## Surprises & discoveries
@@ -255,6 +260,21 @@ Keep these references open while executing the plan:
   Impact: child processes in tests are launched with `-I` (isolated mode) and
   an explicit `sys.path` entry for the repository root.
 
+- Observation (2026-11-25 mutation audit): the repository's mutmut baseline is
+  red for reasons unrelated to this change. Three distinct incompatibilities
+  surfaced: `tests/test_atomic_write_process_boundary.py` cannot run inside the
+  sandbox because the mutmut trampoline in the instrumented module cannot be
+  imported by a child process outside the sandbox root; a Hypothesis property
+  declared as a class method trips `differing_executors`; and
+  `tests/test_platform_support.py::test_explicit_platform_warns_once` fails its
+  `stacklevel` attribution. The first is handled with a documented `pytestmark`
+  skip; the second by moving the property to module level; the third is outside
+  this change's scope and was worked around with a temporary test-selection
+  override. Evidence: `/tmp/mutmut*-cmd-mox-...out`.
+- Observation (2026-11-25 mutation audit): `syrupy` fails pytest's
+  `--collect-only` because every snapshot is unused, which breaks mutmut's
+  incremental "list all tests" path. Deleting `mutants/mutmut-stats.json`
+  between runs keeps mutmut on the full stats path.
 - Observation (2026-11-25 rebase validation): an unrelated
   `/tmp/pyproject.toml` configured pytest plugins that the nested compatibility
   test could not import. Its explicit `--rootdir` did not prevent parent
@@ -1460,7 +1480,61 @@ def save(self, path: Path) -> None:
     atomic_write_json(path, self.to_dict())
 ```
 
+## Mutation audit (Stage C)
+
+`mutmut` 3.6.0 was installed into the project virtualenv for the audit only
+(`uv pip install --python .venv 'mutmut==3.6.0'`) and pruned afterwards with
+`uv_gate prepare --group dev`; the lock file was never changed. Two temporary,
+uncommitted `pyproject.toml` overrides were needed and both were reverted:
+
+- `source_paths = ["cmd_mox/_atomic_write.py"]` for generation, then
+  `source_paths = ["cmd_mox/"]` with the 246 generated mutant names passed to
+  `mutmut run` so the sandbox held the whole package.
+- `pytest_add_cli_args_test_selection` narrowed to the five suites that cover
+  the module, because the repository's own mutmut baseline is red for reasons
+  unrelated to this change (see the discoveries below).
+  `mutants/mutmut-stats.json` was deleted before each run to force the full
+  stats path.
+
+Result: 246 mutants, 229 killed, 17 equivalent survivors.
+
+Promoted to tests: exact error-message phrases and cause text, the mode error's
+offending type name, the exact directory-sync log record, split-character and
+lone-surrogate temporary prefixes, the documented temporary-file name pattern,
+a failed-close note, `missing_ok` cleanup, the `atomic_write_bytes` default
+mode, a retry that succeeds on its final attempt, and an interrupt whose
+cleanup also fails.
+
+The 17 survivors are equivalent:
+
+- `_serialize_json` 5/8/17: `allow_nan=None` is falsy and behaves as `False`;
+  the explicit `ensure_ascii=True` equals the default; `"UTF-8"` is the same
+  codec as `"utf-8"`.
+- `_temporary_prefix` 4/7/14/17: the default encoding is UTF-8 and codec names
+  are case-insensitive.
+- `_validate_mode` 7/8: mode `0` is already rejected by the owner-read/write
+  rule, so narrowing the range bound cannot change the outcome.
+- `_write_all` 8: without patching `os.write` globally (which the design
+  forbids) a short write cannot be induced deterministically, so the
+  `remaining = None` mutation is unobservable through the public surface.
+- `_fsync_directory` 2/3/5/8/9/10/11: every one concerns `os.O_DIRECTORY` and
+  its `getattr` default. On the POSIX branch `os.O_RDONLY` is `0`, the
+  attribute always exists, and the path is always a directory, so the flags are
+  identical; Windows returns before the expression is evaluated.
+
 ## Revision notes
+
+- 2026-11-25: Stage C recorded three further refinements. The `sync_file` stage
+  now calls `_fsync_descriptor` directly: a separate `_fsync_file` wrapper was
+  a trivial alias (df12 `R9110`) and, once inlined, an exact duplicate of
+  `_fsync_descriptor` under the nose gate, so the seam list is eight functions
+  plus `_os_replace`, `_discard_temporary`, and `_fsync_descriptor` as
+  test-visible helpers outside the stage table. `_os_replace` keeps the raw
+  `os.replace` call with a reasoned Ruff `os-replace` suppression, because
+  `Path.replace` cannot be patched without touching pathlib globally. The
+  Hypothesis fixture-byte property moved from a class method to module level:
+  Hypothesis treats each bound method instance as a different executor, which
+  mutmut's repeated runs turn into a `differing_executors` health check.
 
 - 2026-11-25: recorded two implementation clarifications while executing
   Stage B. First, `JsonValue` is not defined in `cmd_mox/_atomic_write.py`:

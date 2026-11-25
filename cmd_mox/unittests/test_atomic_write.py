@@ -196,6 +196,7 @@ def test_unserializable_payload_touches_nothing(
     assert error.stage is module.AtomicWriteStage.SERIALIZE
     assert error.target_replaced is False
     assert isinstance(error.__cause__, (TypeError, ValueError))
+    assert str(error.__cause__) in str(error), "the cause belongs in the message"
     assert not target.parent.exists(), "serialization must precede mutation"
 
 
@@ -212,19 +213,24 @@ def test_error_preserves_cause_errno(tmp_path: Path) -> None:
     assert error.filename == str(target)
     assert error.path == target
     assert error.target_replaced is False
-    assert "write" in str(error)
-    assert "intact" in str(error)
+    assert error.strerror is not None
+    assert "write" in error.strerror
+    assert error.strerror.endswith("the previous file was left intact")
+    assert "No space left on device" in error.strerror
 
     replaced = module.AtomicWriteError(
         target, module.AtomicWriteStage.SYNC_DIRECTORY, cause
     )
     assert replaced.target_replaced is True
-    assert "replaced" in str(replaced)
+    assert replaced.strerror is not None
+    assert replaced.strerror.endswith("the target was replaced")
 
     caller_bug = module.AtomicWriteError(
         target, module.AtomicWriteStage.SERIALIZE, TypeError("not JSON")
     )
     assert caller_bug.errno is None
+    assert "not JSON" in str(caller_bug)
+    assert str(caller_bug).endswith("the previous file was left intact")
 
 
 def test_mode_validation_is_exact(tmp_path: Path) -> None:
@@ -243,6 +249,10 @@ def test_mode_validation_is_exact(tmp_path: Path) -> None:
     for invalid in (-1, 0o1000, True, 0.0, "600"):
         with pytest.raises(ValueError, match="mode"):
             module._validate_mode(invalid)
+    with pytest.raises(ValueError, match="got float"):
+        module._validate_mode(0.0)
+    with pytest.raises(ValueError, match="got str"):
+        module._validate_mode("600")
 
     untouched = tmp_path / "missing" / "payload.json"
     with pytest.raises(ValueError, match="mode"):
@@ -298,6 +308,83 @@ def test_long_multibyte_names_are_supported(tmp_path: Path) -> None:
     module.atomic_write_json(target, {"ok": True})
 
     assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
+
+
+def test_temporary_prefix_drops_a_split_character() -> None:
+    """Truncation never leaves a partial multibyte character in the prefix."""
+    module = _atomic_module()
+
+    prefix = module._temporary_prefix("\u2603" * 40)
+
+    assert prefix == "." + "\u2603" * 21 + "."
+    assert len(prefix.encode("utf-8")) == 65
+
+
+def test_temporary_prefix_handles_surrogate_names() -> None:
+    """A name holding a lone surrogate still yields an encodable prefix."""
+    module = _atomic_module()
+
+    prefix = module._temporary_prefix("\udcff" + "a" * 70)
+
+    assert prefix.startswith(".\udcff")
+    assert len(prefix.encode("utf-8", errors="surrogatepass")) <= 66
+
+
+def test_temporary_file_matches_the_documented_pattern(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sibling temporary file is hidden, prefixed, and .tmp suffixed."""
+    module = _atomic_module()
+    created: list[Path] = []
+    real_create = module._create_temporary
+
+    def recording_create(path: Path) -> tuple[int, Path]:
+        """Record each temporary path before handing it back."""
+        fd, temporary = real_create(path)
+        created.append(temporary)
+        return fd, temporary
+
+    monkeypatch.setattr(module, "_create_temporary", recording_create)
+
+    module.atomic_write_json(tmp_path / "fixture.json", {"a": 1})
+
+    assert len(created) == 1
+    name = created[0].name
+    assert created[0].parent == tmp_path
+    assert name.startswith(".fixture.json.")
+    assert name.endswith(".tmp")
+
+
+def test_cleanup_notes_a_failed_close() -> None:
+    """A descriptor that cannot be closed becomes a note, not an exception."""
+    module = _atomic_module()
+
+    notes = module._cleanup_after_failure(-1, None)
+
+    assert len(notes) == 1
+    assert "Failed to close the temporary file" in notes[0]
+
+
+def test_discard_temporary_tolerates_a_missing_file(tmp_path: Path) -> None:
+    """Cleanup does not fail when the temporary file already vanished."""
+    module = _atomic_module()
+
+    module._discard_temporary(tmp_path / "already-gone.tmp")
+
+    assert not (tmp_path / "already-gone.tmp").exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX permission bits are not enforced"
+)
+def test_atomic_write_bytes_defaults_to_owner_only(tmp_path: Path) -> None:
+    """The bytes helper defaults to mode 0o600 like the JSON helper."""
+    module = _atomic_module()
+    target = tmp_path / "payload.bin"
+
+    module.atomic_write_bytes(target, b"data")
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
 @pytest.mark.parametrize("raw", ["", "/", "."])
@@ -405,8 +492,9 @@ def test_unsupported_directory_sync_errnos_are_skipped(
         for record in caplog.records
         if record.name == "cmd_mox._atomic_write"
     ]
-    assert len(messages) == 1
-    assert str(tmp_path) in messages[0]
+    assert messages == [
+        f"Directory synchronization is unsupported for {tmp_path}; skipping"
+    ]
 
 
 def test_windows_skips_directory_sync(
@@ -496,6 +584,34 @@ def test_windows_replace_retry_exhausts_and_reports_replace(
 
     assert excinfo.value.stage is module.AtomicWriteStage.REPLACE
     assert len(attempts) == 5
+
+
+def test_windows_replace_retry_succeeds_on_the_final_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The last attempt after the retry budget uses the real paths."""
+    module = _atomic_module()
+    from cmd_mox import _path_utils
+
+    attempts: list[tuple[Path, Path]] = []
+    real_replace = module._os_replace
+
+    def fail_then_succeed(source: Path, destination: Path) -> None:
+        """Fail four attempts, then perform the real rename."""
+        attempts.append((source, destination))
+        if len(attempts) < 5:
+            raise PermissionError(errno.EACCES, "sharing violation")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(_path_utils, "IS_WINDOWS", True)
+    monkeypatch.setattr(module, "_os_replace", fail_then_succeed)
+    target = tmp_path / "payload.json"
+
+    module.atomic_write_json(target, {"ok": True})
+
+    assert len(attempts) == 5
+    assert attempts[-1][1] == target
+    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
 
 
 def test_posix_does_not_retry_replace_errors(

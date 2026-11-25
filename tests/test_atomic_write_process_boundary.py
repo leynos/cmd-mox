@@ -13,6 +13,14 @@ import pytest
 
 import cmd_mox
 
+pytestmark = pytest.mark.skipif(
+    "mutmut" in sys.modules,
+    reason=(
+        "mutmut instruments the module under test with a trampoline that a "
+        "child process outside the sandbox root cannot import"
+    ),
+)
+
 _PREVIOUS_DOCUMENT = b'{\n  "previous": true\n}\n'
 
 #: Runs in a child interpreter. It pauses inside the protocol, after the

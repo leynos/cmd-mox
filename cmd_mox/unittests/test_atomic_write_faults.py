@@ -206,6 +206,7 @@ def test_failure_before_replacement_preserves_target(
     assert error.path == target
     assert error.target_replaced is False
     assert error.__cause__ is exc
+    assert str(exc) in str(error), "the cause belongs in the message"
     _assert_preserved(target, previous, listing)
 
 
@@ -301,6 +302,30 @@ def test_descriptor_check_detects_an_open_descriptor(tmp_path: Path) -> None:
         assert _descriptors_under(tmp_path) == {str(descriptor_path)}
     finally:
         os.close(fd)
+
+
+def test_keyboard_interrupt_notes_a_failed_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An interrupt with a failing clean-up still propagates, with a note."""
+    module = _atomic_module()
+    target = tmp_path / "fixture.json"
+    cleanup = PermissionError(errno.EACCES, "Permission denied")
+
+    def refuse_removal(temporary: Path) -> None:
+        """Refuse to remove the temporary file."""
+        raise cleanup
+
+    with monkeypatch.context() as scoped:
+        _skip_durability(scoped, module)
+        _install_fault(scoped, module, "write", KeyboardInterrupt())
+        scoped.setattr(module, "_discard_temporary", refuse_removal)
+        with pytest.raises(KeyboardInterrupt) as excinfo:
+            module.atomic_write_json(target, {"new": True})
+
+    assert excinfo.value.__cause__ is None
+    notes = getattr(excinfo.value, "__notes__", [])
+    assert any(str(tmp_path) in note for note in notes), notes
 
 
 @pytest.mark.parametrize("stage_name", tuple(_FAULT_SPECS))

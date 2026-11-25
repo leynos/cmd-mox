@@ -141,6 +141,26 @@ class TestRecordedInvocation:
         assert set(d.keys()) == expected_keys
 
 
+@given(invocations=st.lists(_RECORDED_INVOCATIONS, max_size=3))
+@example(invocations=[_unicode_invocation()])
+def test_serialization_matches_legacy_fixture_bytes(
+    invocations: list[RecordedInvocation],
+) -> None:
+    """The helper writes exactly the bytes FixtureFile.save used to write."""
+    module = importlib.import_module("cmd_mox._atomic_write")
+    fixture = FixtureFile(
+        version=FixtureFile.SCHEMA_VERSION,
+        metadata=FixtureMetadata.create(),
+        recordings=invocations,
+        scrubbing_rules=[],
+    )
+    payload = fixture.to_dict()
+
+    expected = (json.dumps(payload, indent=2) + "\n").encode()
+
+    assert module._serialize_json(payload) == expected
+
+
 @given(_RECORDED_INVOCATIONS)
 def test_recorded_invocation_survives_a_json_round_trip(
     original: RecordedInvocation,
@@ -329,25 +349,6 @@ class TestFixtureFile:
         assert excinfo.value.stage is module.AtomicWriteStage.REPLACE
         assert fixture_path.read_bytes() == before
         assert len(FixtureFile.load(fixture_path).recordings) == 1
-
-    @given(invocations=st.lists(_RECORDED_INVOCATIONS, max_size=3))
-    @example(invocations=[_unicode_invocation()])
-    def test_serialization_matches_legacy_fixture_bytes(
-        self, invocations: list[RecordedInvocation]
-    ) -> None:
-        """The helper writes exactly the bytes FixtureFile.save used to write."""
-        module = importlib.import_module("cmd_mox._atomic_write")
-        fixture = FixtureFile(
-            version=FixtureFile.SCHEMA_VERSION,
-            metadata=FixtureMetadata.create(),
-            recordings=invocations,
-            scrubbing_rules=[],
-        )
-        payload = fixture.to_dict()
-
-        expected = (json.dumps(payload, indent=2) + "\n").encode()
-
-        assert module._serialize_json(payload) == expected
 
     @pytest.mark.parametrize("fixture_version", ["0.9", "0.9.0"])
     def test_from_dict_migrates_old_version(self, fixture_version: str) -> None:
