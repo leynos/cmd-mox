@@ -170,10 +170,14 @@ observed failing before its fix.
   `/tmp` (see `Surprises & discoveries`). Gate logs:
   `/tmp/{check-fmt,typecheck,lint,test}-cmd-mox-12-2-6-unit-tests-for-replay-infrastructure.out`.
 - [x] (2026-11-25) EP-M1: `cmd_mox/unittests/_replay_helpers.py` created with
-  the builders, strategies, oracle, classifier, and `check_find_match`; the
-  duplicate builders in `test_replay_session.py`, `test_invocation_matcher.py`,
-  and the strategy in `test_fixture_file.py` now import from it. Assertions
-  unchanged: `1033 passed, 12 skipped`, matching the Stage A baseline.
+  the builders, strategies, oracle, classifier, and `check_find_match`. Only
+  `test_invocation_matcher.py` moved onto the shared builders;
+  `test_fixture_file.py` kept its own `_RECORDED_INVOCATIONS`, and the
+  `test_replay_session.py` deduplication was dropped during the rebase (see
+  `Decision log`) so that file stays identical to `main` and keeps its cohesion
+  score. Stage B's obligation to move those builders and the fixture strategy
+  was therefore **not delivered**; the shared builders serve the new test
+  modules instead. Assertions unchanged at the time: `1033 passed, 12 skipped`.
 - [x] (2026-11-25) EP-M2, part one (superseded): the schema-validation fix
   and its 118-row LOAD-2 corpus were written and observed red first (115
   failed, 36 passed), but `main` merged equivalent validation in #457 (with its
@@ -382,8 +386,11 @@ observed failing before its fix.
   malformed value; only `metadata.test_module`, `metadata.test_function`, and
   `scrubbing_rules[].description` may be absent or `null`, and `recordings`,
   `scrubbing_rules`, `applied_to`, `stdin`, `env_subset`, `stdout`, `stderr`,
-  `exit_code`, and `duration_ms` are required. The table above is kept as the
-  plan's original design, not as a description of shipped behaviour. See
+  `exit_code`, and `duration_ms` are required. A missing `version` remains a
+  separate legacy exception: it is treated as `0.0.0` and migrated forward,
+  while an explicit non-string `version`, including `null`, is rejected. The
+  table above is kept as the plan's original design, not as a description of
+  shipped behaviour. See
   [design 9.3.4](../python-native-command-mocking-design.md#934-fixture-validation-policy)
   and the [fixture schema migration note](../fixture-schema-migration-note.md).
 
@@ -499,39 +506,42 @@ observed failing before its fix.
 
 Delivered, in six commits after the plan approval:
 
-- EP-M1 — one shared `_replay_helpers.py` replaces three drifting copies of the
-  replay builders, and adds the strategies, oracle, classifier, and
-  `check_find_match` the later milestones use.
-- EP-M2 — three real loading defects fixed behind failing tests: wrong JSON
-  types are rejected with a field path instead of coerced, `KeyError` messages
-  are no longer quoted, and fixtures are UTF-8 with byte order mark tolerance.
-  The schema work is 209 net lines in one file, over the 150-line tolerance
-  (recorded in `Decision log`).
+- EP-M1 — one shared `_replay_helpers.py` adds the strategies, oracle,
+  classifier, and `check_find_match` the later milestones use, and
+  `test_invocation_matcher.py` moved onto its builders. The other two
+  deduplication targets were dropped during the rebase, as `Progress` records.
+- EP-M2 — the encoding half only: fixtures are UTF-8 with byte order mark
+  tolerance. The schema half was delivered on `main` in #457 before this branch
+  merged, so its rejection rule and corpus are not part of this diff; the
+  dropped work is described under `Progress`.
 - EP-M3 — the matcher is pinned by seven discriminating examples, an oracle
   property, two mode-relation properties, seven labelled witnesses with
   reachability checks, and three seeded mutants that the check provably rejects.
 - EP-M4 — consumption tracking is pinned at four levels: the state machine
   (CONS-1), concurrent matches (CONS-2), message snapshots (MSG-1), controller
-  ordering and independence, and three end-to-end scenarios through the real
-  shim.
+  ordering and independence, and three controller scenarios. Two run end to end
+  through the real shim; the corrupt-fixture scenario stops at spy
+  configuration, before a shim starts.
 - EP-M5 — design decisions 9.10.16 and 9.10.17, the amended 9.5.5, 9.8.3, and
   9.10.15, the usage-guide caveats, the developer-guide replay-testing section,
   and roadmap 12.2.6 marked done.
 
 What the tests now guarantee, stated as contracts a reader can rely on:
 
-- Anything `FixtureFile.to_dict()` can emit loads back unchanged, and the two
-  pre-hardening artefacts (the golden fixture and the checked-in snapshots)
-  still load.
-- Every schema rejection names its field path and the JSON type found, and the
-  full mapping is reviewable in one snapshot.
+- Generated fixtures that `FixtureFile.to_dict()` can emit load back unchanged,
+  and the legacy golden fixture still loads and normalizes.
+- The schema rejection rules belong to `main` (#457);
+  `test_fixture_file.ambr` holds serialized fixture mappings, not rejection
+  messages, and this plan's own rejection snapshot was dropped with the
+  superseded corpus.
 - `find_match()` agrees with an independently written oracle on generated
   scenarios, and the check is known to reject three plausible defects.
 - A session's consumed set, `consumed_count`, and verification message always
   match a simple model, whatever the order of matches and verifies.
-- A strict replay miss over the shim exits 1 with the message on stderr while
-  `verify()` passes; that deviation from design 9.10.15 is pinned and
-  documented, not fixed.
+- A strict replay miss over the shim exits 1 with the message on stderr, and
+  verification reports nothing about the miss itself; it can still fail for
+  another reason. That deviation from design 9.10.15 is pinned and documented,
+  not fixed.
 
 Lessons worth carrying forward:
 

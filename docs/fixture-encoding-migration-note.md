@@ -21,19 +21,27 @@ Windows editors do, failed with `Unexpected UTF-8 BOM`.
 
 ## What existing fixtures need
 
-ASCII-only fixtures need no change; they are byte-for-byte identical under
-UTF-8 and under a single-byte locale.
+Most fixtures need no change. `FixtureFile.save()` uses `json.dumps()` with its
+default `ensure_ascii=True`, so the bytes it writes are pure ASCII even when a
+recorded value contains non-ASCII text: those characters appear as `\uXXXX`
+escapes. A file like that loads identically under UTF-8 and under any
+ASCII-compatible locale, so older releases read files written by the updated
+writer without conversion.
 
-A fixture that contains non-ASCII text and was written on a machine whose
-locale encoding is not UTF-8 may not load, or may load with mis-decoded text,
-until it is re-saved as UTF-8. Re-save it with an editor or command that writes
-UTF-8, or re-record it with the updated release, and verify the non-ASCII
-values after re-saving. Keep a copy of the original until the re-saved fixture
-has been replayed successfully.
+The case that needs attention is a file whose *bytes* are non-ASCII UTF-8: a
+fixture hand-edited and saved as UTF-8, or one written by a tool that emits raw
+UTF-8 instead of escapes. The updated reader accepts it on any machine; an
+older release reads it with the locale encoding, so on a non-UTF-8 host the
+text may fail to decode or decode incorrectly. Either keep such a fixture with
+the updated release, or re-save it through `FixtureFile.save()` so the
+non-ASCII values become escapes again. Verify the affected values after
+re-saving, and keep a copy of the original until the re-saved fixture has been
+replayed successfully.
 
 ## Upgrade shared fixture workflows
 
 Upgrade every CmdMox installation that reads or writes a shared fixture before
-distributing fixtures saved by the updated release, so every consumer reads
-them as UTF-8. Releases before this change follow the locale; on a UTF-8 host
-they read the new files correctly, and on a single-byte-locale host they do not.
+distributing fixtures that contain non-ASCII UTF-8 bytes. Files whose non-ASCII
+values are JSON escapes are portable to older releases on ASCII-compatible
+hosts; raw UTF-8 bytes are not, so a mixed-version estate should either re-save
+those fixtures through the updated writer or upgrade every consumer.

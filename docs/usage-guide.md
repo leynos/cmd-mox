@@ -916,8 +916,9 @@ undecodable bytes raise their usual `json.JSONDecodeError` and
 `UnicodeDecodeError`. Field types are validated as described under
 [fixture validation policy](python-native-command-mocking-design.md#934-fixture-validation-policy);
 values are never coerced, so a hand-edited `exit_code: "1"` is rejected rather
-than converted to `1`. A fixture containing non-ASCII text that was written
-under a non-UTF-8 locale must be re-saved as UTF-8; see the
+than converted to `1`. The writer escapes non-ASCII values, so its output is
+pure ASCII; a file whose bytes are raw non-ASCII UTF-8 loads here on any host,
+but an older release reads it with the locale encoding. See the
 [fixture encoding migration note](fixture-encoding-migration-note.md).
 
 ### Matching invocations
