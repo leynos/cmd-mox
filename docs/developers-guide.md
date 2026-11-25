@@ -570,30 +570,32 @@ Run the snapshot tests with the normal test command:
 ```bash
 uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py \
   cmd_mox/unittests/test_fixture_file.py \
-  cmd_mox/unittests/test_replay_session.py \
+  cmd_mox/unittests/test_replay_session_reporting.py \
   cmd_mox/unittests/test_controller_replay.py
 ```
 
-The replay snapshots are:
+The `cmd_mox/unittests` snapshots are:
 
-- `cmd_mox/unittests/__snapshots__/test_fixture_file.ambr` — every schema
-  rejection message, keyed by corpus row.
-- `cmd_mox/unittests/__snapshots__/test_replay_session.ambr` — the
-  `verify_all_consumed()` message for one, three, zero-argument, and
-  multi-argument cases.
+- `cmd_mox/unittests/__snapshots__/test_fixture_file.ambr` — serialized
+  fixture documents at the current and legacy schema versions, compared with the
+  `to_dict()` output.
+- `cmd_mox/unittests/__snapshots__/test_replay_session_reporting.ambr` — the
+  `verify_all_consumed()` message for the zero-argument, multi-argument, and
+  three-unconsumed cases.
 - `cmd_mox/unittests/__snapshots__/test_controller_replay.ambr` — the
   `UnexpectedCommandError` text for a strict miss.
 
 Messages under snapshot must name field paths and JSON type names only: no
 fixture paths, temporary directories, or `repr` of user-supplied values.
-`make lint` runs `ambrleaks` over `tests` to enforce that.
+`make lint` runs `ambrleaks` over `tests` and `cmd_mox/unittests` to enforce
+that.
 
 When an intentional payload change requires new expected output, update the
 snapshots explicitly and review the resulting `.ambr` diff:
 
 ```bash
 uv run pytest cmd_mox/unittests/test_fixture_file.py \
-  cmd_mox/unittests/test_replay_session.py \
+  cmd_mox/unittests/test_replay_session_reporting.py \
   cmd_mox/unittests/test_controller_replay.py \
   --snapshot-update
 ```
@@ -683,6 +685,80 @@ from the Skylos and mutation scans. It exports:
 Because the module is not a `test_*.py` file, it does not receive the test
 per-file ignores: keep functions within `max-args = 4`, avoid bare `assert`,
 and give every helper a docstring.
+
+## Shim path filtering
+
+`cmd_mox._shim_bootstrap._should_remove_path_entry` is the boolean query behind
+`bootstrap_shim_path()`. A `True` result means remove the entry, and `False`
+means keep it.
+
+The query removes an entry when it starts with the `__editable__` marker
+prefix, or when the entry resolves to the package directory. It keeps an entry
+that matches neither rule. It also keeps an entry whose resolution fails, so
+bootstrap does not abort:
+
+- a relative entry whose working directory was deleted raises `OSError`;
+- a symlink loop raises `RuntimeError` on Python 3.12 and is tolerated from
+  Python 3.13 onwards; and
+- an entry the operating system cannot represent, such as one containing an
+  embedded null byte, raises `ValueError`.
+
+`bootstrap_shim_path()` calls the query for each `sys.path` entry, clears
+`sys.path_importer_cache`, and loads the stdlib `platform` module. If that load
+fails, it restores the removed entries. `_BOOTSTRAP_DONE` makes the function
+idempotent, so later calls return without changing `sys.path`.
+
+Resolution failure therefore retains the entry rather than raising, so the
+unresolvable entry stays on `sys.path`. The covering tests in
+`cmd_mox/unittests/test_shim_bootstrap.py` exercise the package match, the
+deleted working directory, an injected `ELOOP`, a symlink cycle, an embedded
+null byte, and the bootstrap-level retention test.
+
+## Platform classification internals
+
+Support classification lives in `cmd_mox/platform.py`. The public helpers
+`unsupported_reason()`, `is_supported()` and `skip_if_unsupported()` all call
+`_classify_platform()`, which calls `_warn_deprecated_inputs()` and then
+`_unsupported_reason_for()`. `_unsupported_reason_for()` returns the reason of
+the first `(prefix, reason)` entry in `_UNSUPPORTED_PLATFORMS` whose prefix
+matches the effective platform name. The table is empty, so every recognized
+host is currently reported as supported. `is_supported()` is the boolean view
+of the same reason, so the two public classifiers cannot disagree.
+
+### Deprecation warning attribution
+
+Each public entry point emits one `DeprecationWarning` per deprecated input
+supplied to a call. An explicit `platform` argument warns whenever it is not
+`None`, including an empty string. A non-empty `CMD_MOX_PLATFORM_OVERRIDE`
+warns only when the helper consults it; a truthy explicit `platform` masks the
+override for that call. The warnings use `stacklevel=4` so they attribute to
+the caller of the public helper. When the `cmd_mox` fixture is the caller, the
+warning points at `cmd_mox/pytest_plugin.py` rather than at user code.
+
+### Testing unsupported hosts
+
+Patch `cmd_mox.platform._UNSUPPORTED_PLATFORMS` with a `(prefix, reason)` entry
+to exercise the skip path without a genuinely unsupported host:
+
+```python
+from cmd_mox import platform
+
+monkeypatch.setattr(
+    platform,
+    "_UNSUPPORTED_PLATFORMS",
+    (("win", "blocked on Windows"),),
+)
+```
+
+Do not set `CMD_MOX_PLATFORM_OVERRIDE` in new tests; it is deprecated and only
+changes classification. To inspect Windows launchers on another host, patch
+`cmd_mox._path_utils.IS_WINDOWS` as described in
+[design decision 8.13](python-native-command-mocking-design.md#813-design-decisions-for-the-platform-override).
+
+The BDD step `the platform override is "{platform}"` remains only so existing
+feature files keep parsing. It deliberately changes nothing. Scenarios that
+need the Windows branch patch `cmd_mox._path_utils.IS_WINDOWS` instead. See
+[Behavioural test gate and pytest-bdd compatibility](#behavioural-test-gate-and-pytest-bdd-compatibility).
 
 ## IPC request dispatch
 

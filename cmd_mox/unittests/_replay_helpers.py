@@ -9,6 +9,7 @@ imported by library code.
 
 from __future__ import annotations
 
+import copy
 import dataclasses as dc
 import typing as typ
 
@@ -247,7 +248,7 @@ def fixture_files() -> st.SearchStrategy[FixtureFile]:
         FixtureFile,
         version=st.just(FixtureFile.SCHEMA_VERSION),
         metadata=fixture_metadata(),
-        recordings=st.lists(recorded_invocations(), max_size=3),
+        recordings=st.lists(recorded_invocations(), max_size=5),
         scrubbing_rules=st.lists(scrubbing_rules(), max_size=2),
     )
 
@@ -342,7 +343,7 @@ def replay_scenarios(draw: st.DrawFn) -> ReplayScenario:
         _candidate_recording(invocation),
         _scenario_recordings(),
     )
-    count = draw(st.integers(min_value=2, max_value=5))
+    count = draw(st.integers(min_value=2, max_value=6))
     recordings = tuple(draw(recording) for _ in range(count))
     if recordings:
         consumed = frozenset(
@@ -489,6 +490,10 @@ def check_find_match(
     """
     recordings = list(scenario.recordings)
     consumed = set(scenario.consumed)
+    # Deep snapshots: a mutation of a recording's ``args`` or ``env_subset``
+    # would be invisible to a shallow comparison of equal references.
+    untouched_recordings = copy.deepcopy(recordings)
+    untouched_consumed = set(consumed)
     expected = oracle_find_match(scenario)
     if find_match is None:
         matcher = InvocationMatcher(strict=scenario.strict)
@@ -501,6 +506,6 @@ def check_find_match(
             f"for scenario {scenario!r}"
         )
         raise AssertionError(msg)
-    if recordings != list(scenario.recordings) or consumed != set(scenario.consumed):
+    if recordings != untouched_recordings or consumed != untouched_consumed:
         msg = f"find_match mutated its inputs for scenario {scenario!r}"
         raise AssertionError(msg)

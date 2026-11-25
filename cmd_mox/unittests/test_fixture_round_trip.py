@@ -1,9 +1,10 @@
 """Round-trip properties for fixture persistence.
 
-Every fixture the writer can emit must survive ``to_dict()``/``from_dict()`` and
-``save()``/``load()`` unchanged. The reachability checks keep the generated
-domain honest, and the legacy golden fixture pins backward compatibility with
-the two-component schema version.
+Generated fixtures that the writer can emit must survive
+``to_dict()``/``from_dict()`` and ``save()``/``load()`` unchanged. Hypothesis
+samples that space rather than exhausting it; the reachability checks prove the
+sample reaches each coverage class, and the legacy golden fixture pins backward
+compatibility with the two-component schema version.
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ def _assert_round_trips(fixture: FixtureFile) -> None:
 
 @given(candidate=fixture_files())
 def test_fixture_file_round_trips(candidate: FixtureFile) -> None:
-    """Every fixture the writer emits survives both round trips."""
+    """A generated fixture the writer can emit survives both round trips."""
     _assert_round_trips(candidate)
 
 

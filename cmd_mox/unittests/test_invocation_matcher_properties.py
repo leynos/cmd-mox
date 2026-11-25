@@ -207,9 +207,9 @@ def _oracle_key(stats: _Stats, sequence: int, index: int) -> tuple[int, ...]:
 
 
 def _index_key(stats: _Stats, sequence: int, index: int) -> tuple[int, ...]:
-    """Break stats ties by list position instead of ``sequence``."""
+    """Break stats ties by preferring the earlier list position."""
     del sequence
-    return (int(stats[0]), stats[1], stats[2], index)
+    return (int(stats[0]), stats[1], stats[2], -index)
 
 
 def _swapped_key(stats: _Stats, sequence: int, index: int) -> tuple[int, ...]:
@@ -263,13 +263,13 @@ def _make_mutant(
     return find_match
 
 
-#: Equal stats, with the lower sequence first in the list.
+#: Equal stats, with the lower sequence later in the list.
 _INDEX_MUTANT_WITNESS = _scenario(
     strict=True,
     invocation=make_invocation(),
     recordings=[
-        make_recorded_invocation(RecordedInvocationSpec(sequence=1)),
         make_recorded_invocation(RecordedInvocationSpec(sequence=5)),
+        make_recorded_invocation(RecordedInvocationSpec(sequence=1)),
     ],
 )
 
@@ -314,7 +314,7 @@ def test_oracle_key_passes_every_mutant_witness() -> None:
 
 
 def test_index_tie_break_mutant_is_rejected() -> None:
-    """The check rejects a selection that ignores ``sequence`` on a tie."""
+    """The check rejects a selection that prefers list order over sequence."""
     mutant = _make_mutant(strict=True, key=_index_key)
 
     with pytest.raises(AssertionError, match="find_match selected"):
@@ -327,6 +327,25 @@ def test_consumed_ignoring_mutant_is_rejected() -> None:
 
     with pytest.raises(AssertionError, match="find_match selected"):
         check_find_match(_CONSUMED_MUTANT_WITNESS, mutant)
+
+
+def test_mutation_mutant_is_rejected() -> None:
+    """The check rejects a selection that mutates the recordings it reads."""
+    scenario = _INDEX_MUTANT_WITNESS
+    honest = InvocationMatcher(strict=scenario.strict)
+
+    def mutating_find_match(
+        invocation: Invocation,
+        recordings: list[RecordedInvocation],
+        consumed: set[int],
+    ) -> int | None:
+        """Select correctly, then scribble on the first recording."""
+        if recordings:
+            recordings[0].args.append("mutated")
+        return honest.find_match(invocation, recordings, consumed)
+
+    with pytest.raises(AssertionError, match="mutated its inputs"):
+        check_find_match(scenario, mutating_find_match)
 
 
 def test_swapped_component_mutant_is_rejected() -> None:

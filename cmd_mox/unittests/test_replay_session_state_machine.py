@@ -45,6 +45,8 @@ if typ.TYPE_CHECKING:
 _INDEX_LINE = re.compile(r"^\s*\[(\d+)\]", re.MULTILINE)
 
 _MACHINE_COMMANDS = ("aa", "bb")
+#: Commands the recording strategy never emits, so this rule always misses.
+_UNKNOWN_COMMANDS = ("yy", "zz")
 _MACHINE_ARGS = ("x", "y", "z")
 _MACHINE_ENV_KEYS = ("K", "L")
 _MACHINE_ENV_VALUES = ("v", "w")
@@ -246,11 +248,11 @@ class ReplaySessionMachine(RuleBasedStateMachine):
         )
 
     @rule(
-        command=st.sampled_from(_MACHINE_COMMANDS),
+        command=st.sampled_from(_UNKNOWN_COMMANDS),
         args=st.lists(st.sampled_from(_MACHINE_ARGS), max_size=2),
     )
     def match_arbitrary(self, command: str, args: list[str]) -> None:
-        """Replay an invocation that may not have been recorded."""
+        """Replay an invocation whose command was never recorded."""
         self.match_and_assert(make_invocation(command, args))
 
     @rule()

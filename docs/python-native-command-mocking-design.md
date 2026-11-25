@@ -3845,7 +3845,6 @@ process locale, the previous behaviour, made the same fixture parse or fail
 depending on the machine, and a byte order mark written by some Windows editors
 made `json.loads` raise `JSONDecodeError`. `json.dumps` keeps its default
 `ensure_ascii=True`, so ASCII-only fixtures are byte-for-byte unchanged.
-||||||| /tmp/merge/python-native-command-mocking-design.md.base
 
 ### 9.11 Versioning and Forward Compatibility
 
