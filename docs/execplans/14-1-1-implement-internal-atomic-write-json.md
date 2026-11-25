@@ -64,12 +64,15 @@ Keep these references open while executing the plan:
   side-effect helpers, Security and portability, and Verification strategy.
 - `docs/python-native-command-mocking-design.md` §9.5.3 (`FixtureFile`) and
   §9.10 (design decisions), updated in Stage D.
-- `docs/usage-guide.md` §§Recording sessions and Fixture file format, updated
-  in Stage D. There is no `docs/users-guide.md`; this is the consumer guide.
+- `docs/users-guide.md` for the user-facing index and
+  `docs/usage-guide.md` §§Recording sessions and Fixture file format for the
+  detailed fixture documentation, updated in Stage D.
 - `docs/developers-guide.md` §§Snapshot testing, Property-based testing, and
   Skylos dead-code policy.
-- `docs/documentation-style-guide.md` for en-GB-oxendict spelling, 80-column
-  wrapping, and ADR format.
+- `docs/documentation-style-guide.md` for current documentation structure,
+  en-GB-oxendict spelling, 80-column wrapping, and ADR format. Its canonical
+  user-guide filename is `docs/users-guide.md`; the existing CmdMox user guide
+  points readers to the detailed `docs/usage-guide.md`.
 - `AGENTS.md` for the quality gates and the Skylos policy.
 - Skills: `execplans` (keep this document current); `python-router`, then
   `python-errors-and-logging` (exception design and chaining),
@@ -156,10 +159,10 @@ Keep these references open while executing the plan:
 - Risk: mutation testing (`.github/workflows/mutation-testing.yml`) mutates
   the new module. Severity: low. Likelihood: medium. Mitigation: Stage C runs a
   time-boxed `mutmut` audit on the module.
-- Risk: the new unit tests would not run on Windows CI, because that job runs
-  only `make windows-smoke`. Severity: medium. Likelihood: certain unless
-  addressed. Mitigation: add the new unit-test module to `WINDOWS_SMOKE_ARGS`
-  in the `Makefile`.
+- Risk: the new unit tests would not run on Windows CI unless the relevant
+  module is included in the `make windows-smoke` selection. Severity: medium.
+  Likelihood: certain unless addressed. Mitigation: add the new unit-test
+  module to `WINDOWS_SMOKE_ARGS` in the `Makefile`.
 
 ## Progress
 
@@ -173,6 +176,10 @@ Keep these references open while executing the plan:
 - [x] (2026-10-23) Expert-panel design review (verdict: proceed with
   conditions) and revision of this plan to meet those conditions.
 - [x] (2026-10-23) User accepted Option C for `DEC-OPEN-1`.
+- [x] (2026-11-25) Rebased the three plan commits onto PR target `main` at
+  `acb8217`; all three commits replayed unchanged and no conflicts occurred.
+- [x] (2026-11-25) Reconciled current repository guidance and paths below;
+  the plan remains a draft pending user approval before Stage A.
 - [ ] User approval of the plan.
 - [ ] Stage A: red tests (EP-M1).
 - [ ] Stage B: green implementation and adoption (EP-M2).
@@ -181,17 +188,41 @@ Keep these references open while executing the plan:
 
 ## Surprises & discoveries
 
-- Observation: there is no `docs/users-guide.md`; the consumer guide is
-  `docs/usage-guide.md`. Evidence: `ls docs`. Impact: user-facing notes go to
-  `docs/usage-guide.md`.
+- Observation: `docs/users-guide.md` now exists as a user-facing guide
+  that directs readers to `docs/usage-guide.md`, where recording sessions and
+  fixture format are documented in detail. Evidence: both files in the current
+  target tree. Impact: update the detailed fixture material in
+  `docs/usage-guide.md` and keep the user guide's links accurate.
+- Observation: the canonical documentation guide remains
+  `docs/documentation-style-guide.md`; its current document taxonomy names
+  `docs/users-guide.md`, `docs/developers-guide.md`, and
+  `docs/repository-layout.md`. Evidence: its "Standard document types" section.
+  Impact: follow the current naming guidance while retaining
+  `docs/usage-guide.md` as the detailed fixture reference already used by this
+  repository.
+- Observation: the fixture version and validation rules have changed since
+  this plan was drafted: writers use semantic `MAJOR.MINOR.PATCH` versions, and
+  loading rejects malformed required fields instead of coercing or defaulting
+  them. Evidence: `docs/fixture-schema-migration-note.md`,
+  `docs/usage-guide.md`, and `cmd_mox/record/_schema.py`. Impact: the plan's
+  unchanged-schema constraint means the atomic-write work must preserve the
+  current schema and strict loader behaviour; it does not mean restoring the
+  older version format or validation rules.
 - Observation: no existing test asserts file permissions, umask behaviour, or
   the exact on-disk bytes of a fixture. Evidence: repository-wide search for
   `S_IMODE`, `st_mode`, and `umask`. Impact: the conventions introduced here
   are recorded in `docs/developers-guide.md`.
-- Observation: the Windows CI job runs only `make windows-smoke`, whose
-  `WINDOWS_SMOKE_ARGS` list three test files. Evidence: `Makefile` lines 54-59
-  and `.github/workflows/ci.yml`. Impact: the plan adds the new unit-test
-  module to that list.
+- Observation: the Windows CI job runs `make windows-smoke`, whose current
+  `WINDOWS_SMOKE_ARGS` lists four test modules. Evidence: the target's
+  `Makefile` definition and `.github/workflows/ci.yml`. Impact: Stage C still
+  adds the new atomic-write unit module to that list and verifies the Windows
+  smoke job includes it.
+- Observation: the repository's `make lint` now includes five tiers, with the
+  nose code-duplication scan as tier five, and the Makefile routes development
+  `uv` calls through `scripts/uv_gate.py`. Evidence: `docs/developers-guide.md`
+  §Linting and the `UV_GATE` definition and lint targets in `Makefile`. Impact:
+  retain `make lint` as the complete gate and use the helper for focused pytest
+  and mutation commands.
 - Observation: the `fake-uv.py` raw URL cited by the design returns HTTP 404
   to anonymous fetches, but `gh api` can read the file. Evidence: Firecrawl
   scrape returned 404; `gh api repos/leynos/dev-env-rocky/contents/...`
@@ -218,6 +249,13 @@ Keep these references open while executing the plan:
   another agent's `/tmp/bisect.py` in place of the standard library module.
   Impact: child processes in tests are launched with `-I` (isolated mode) and
   an explicit `sys.path` entry for the repository root.
+
+- Observation (2026-11-25 rebase validation): an unrelated
+  `/tmp/pyproject.toml` configured pytest plugins that the nested compatibility
+  test could not import. Its explicit `--rootdir` did not prevent parent
+  configuration discovery. Impact: run validation with `TMPDIR` pointing to a
+  fresh directory under `/var/tmp` after checking its ancestors for pytest
+  configuration; do not alter another checkout's temporary files.
 
 ## Decision log
 
@@ -1093,7 +1131,7 @@ Focused test run, used for red and green checks:
 
 ```bash
 set -o pipefail
-uv run --group dev -- pytest -v \
+python3 scripts/uv_gate.py run --group dev -- pytest -v \
   cmd_mox/unittests/test_atomic_write.py \
   cmd_mox/unittests/test_fixture_file.py \
   tests/test_recording_session_bdd.py \
@@ -1115,7 +1153,7 @@ Expected in Stage B: every listed test `PASSED`, with POSIX-only tests
 Snapshot generation, Stage B only, followed by a manual review of the file:
 
 ```bash
-uv run --group dev -- pytest cmd_mox/unittests/test_atomic_write.py \
+python3 scripts/uv_gate.py run --group dev -- pytest cmd_mox/unittests/test_atomic_write.py \
   -k snapshot --snapshot-update
 git diff -- cmd_mox/unittests/__snapshots__/test_atomic_write.ambr
 ```
@@ -1123,7 +1161,7 @@ git diff -- cmd_mox/unittests/__snapshots__/test_atomic_write.ambr
 Hypothesis classification evidence:
 
 ```bash
-uv run --group dev -- pytest cmd_mox/unittests/test_atomic_write.py \
+python3 scripts/uv_gate.py run --group dev -- pytest cmd_mox/unittests/test_atomic_write.py \
   -k round_trips --hypothesis-show-statistics
 ```
 
@@ -1151,8 +1189,8 @@ in `pyproject.toml`; restrict the run to the new module with a temporary,
 uncommitted local override of `paths_to_mutate`, then:
 
 ```bash
-uv run --group dev -- mutmut run
-uv run --group dev -- mutmut results
+python3 scripts/uv_gate.py run --group dev -- mutmut run
+python3 scripts/uv_gate.py run --group dev -- mutmut results
 ```
 
 Record the `mutmut` version, the override used, and the results in
@@ -1368,3 +1406,10 @@ def save(self, path: Path) -> None:
   the standalone feature file, and the reduced documentation set), so the plan
   now describes a single delivery of `14.1.1` and `14.1.2`. The remaining work
   is plan approval, then Stages A to D.
+- 2026-11-25: rebased the three plan commits onto PR target `main` at
+  `acb8217` without conflicts. Updated the documentation references for the
+  existing user-guide index, detailed usage guide, and current documentation
+  style guide; recorded the current fixture schema and validation invariants,
+  four-module Windows smoke selection, five-tier lint pipeline, and
+  `scripts/uv_gate.py` command path. The approved Option C and the requirement
+  to obtain plan approval before Stage A remain unchanged.
