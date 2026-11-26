@@ -60,6 +60,10 @@ _UMASK_VALUES = (0o000, 0o022, 0o077)
 _REQUESTED_MODES = (0o600, 0o640, 0o644, 0o755)
 _PRIOR_MODES = (None, 0o644, 0o666)
 
+#: Root bypasses directory permission checks, so the mode-0o300 fixture cannot
+#: force a ``PermissionError`` there.
+_RUNNING_AS_ROOT = getattr(os, "geteuid", lambda: -1)() == 0
+
 
 def _atomic_module() -> types.ModuleType:
     """Return the internal atomic write module under test."""
@@ -545,6 +549,9 @@ def test_symlink_target_is_replaced_not_followed(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(
     sys.platform == "win32", reason="directory synchronisation is skipped"
+)
+@pytest.mark.skipif(
+    _RUNNING_AS_ROOT, reason="root bypasses directory permission checks"
 )
 def test_unsupported_directory_sync_is_skipped(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
