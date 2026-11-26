@@ -60,9 +60,16 @@ _UMASK_VALUES = (0o000, 0o022, 0o077)
 _REQUESTED_MODES = (0o600, 0o640, 0o644, 0o755)
 _PRIOR_MODES = (None, 0o644, 0o666)
 
-#: Root bypasses directory permission checks, so the mode-0o300 fixture cannot
-#: force a ``PermissionError`` there.
-_RUNNING_AS_ROOT = getattr(os, "geteuid", lambda: -1)() == 0
+
+def _can_open_directory(directory: Path) -> bool:
+    """Report whether this process can read *directory* without permission."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(directory, flags)
+    except PermissionError:
+        return False
+    os.close(descriptor)
+    return True
 
 
 def _atomic_module() -> types.ModuleType:
@@ -550,9 +557,6 @@ def test_symlink_target_is_replaced_not_followed(tmp_path: Path) -> None:
 @pytest.mark.skipif(
     sys.platform == "win32", reason="directory synchronisation is skipped"
 )
-@pytest.mark.skipif(
-    _RUNNING_AS_ROOT, reason="root bypasses directory permission checks"
-)
 def test_unsupported_directory_sync_is_skipped(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -561,8 +565,10 @@ def test_unsupported_directory_sync_is_skipped(
     directory = tmp_path / "locked"
     directory.mkdir()
     directory.chmod(0o300)
-    caplog.set_level(logging.DEBUG, logger="cmd_mox._atomic_write")
     try:
+        if _can_open_directory(directory):
+            pytest.skip("process bypasses directory read permissions")
+        caplog.set_level(logging.DEBUG, logger="cmd_mox._atomic_write")
         module.atomic_write_json(directory / "payload.json", {"ok": True})
     finally:
         directory.chmod(0o700)
