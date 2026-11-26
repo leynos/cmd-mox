@@ -31,6 +31,15 @@ _SURROGATE_TEXT = st.text(
     alphabet=st.characters(min_codepoint=0xDC80, max_codepoint=0xDCFF)
 )
 _JSON_TEXT = st.one_of(st.text(), _SURROGATE_TEXT)
+#: Empty names are rejected before a prefix is built, so the property domain
+#: starts at one character.
+_NON_EMPTY_TEXT = st.one_of(
+    st.text(min_size=1),
+    st.text(
+        alphabet=st.characters(min_codepoint=0xDC80, max_codepoint=0xDCFF),
+        min_size=1,
+    ),
+)
 _JSON_SCALARS = st.one_of(
     st.none(),
     st.booleans(),
@@ -354,6 +363,24 @@ def test_temporary_prefix_handles_surrogate_names() -> None:
 
     assert prefix.startswith(".\udcff")
     assert len(prefix.encode("utf-8", errors="surrogatepass")) <= 66
+
+
+@given(name=_NON_EMPTY_TEXT)
+def test_temporary_prefix_property(name: str) -> None:
+    """Every prefix is dot-delimited, bounded, and a prefix of its name."""
+    module = _atomic_module()
+
+    prefix = module._temporary_prefix(name)
+
+    encoded = prefix.encode("utf-8", errors="surrogatepass")
+    stem = prefix[1:-1]
+    assert prefix.startswith(".")
+    assert prefix.endswith(".")
+    assert stem, "the stem is never empty for a non-empty name"
+    assert len(encoded) <= 66, "dot plus 64 bytes plus dot"
+    assert name.startswith(stem), "truncation never invents characters"
+    if len(name.encode("utf-8", errors="surrogatepass")) <= 64:
+        assert stem == name
 
 
 def test_temporary_file_matches_the_documented_pattern(

@@ -188,8 +188,6 @@ Keep these references open while executing the plan:
       `xfail`, 119 passed in the focused run. All four gates passed before the
       commit (`make lint` reached the DF12 Pylint, ambrleaks, and spelling
       tiers for the first time on this branch).
-- [ ] Stage B: green implementation and adoption (EP-M2). Implemented and
-      focused suite green (331 passed); awaiting the four gates.
 - [x] (2026-11-25) Stage B committed as `a013d2d` ("Add internal atomic JSON
       write helper") after all four gates passed on a frozen tree, including
       the duplication gate, both Pylint tiers, ambrleaks, and spelling.

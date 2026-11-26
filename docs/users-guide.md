@@ -155,6 +155,19 @@ for the full definition, and the
 [recording duration migration note](recording-duration-migration-note.md) for
 what changes in shared fixtures.
 
+## Recording fixture durability
+
+Fixture saves are atomic on POSIX: CmdMox writes a hidden sibling temporary
+file, flushes it to stable storage, and renames it over the destination, so a
+reader never sees a partial fixture. A failure before the rename leaves the
+previous fixture byte-for-byte intact; a failure after it raises
+`AtomicWriteError` with `target_replaced` true and leaves the new fixture in
+place rather than rolling back. New fixtures are owner-only (`0o600`) on POSIX,
+whatever the process umask. See
+[durability and permissions](usage-guide.md#durability-and-permissions) for the
+full behaviour and the recommended `.gitignore` line for orphaned temporary
+files.
+
 ## Recording fixture schema versions
 
 The fixture `version` uses `MAJOR.MINOR.PATCH`; legacy `1.0` values load as
