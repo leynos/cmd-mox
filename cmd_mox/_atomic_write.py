@@ -142,7 +142,7 @@ class AtomicWriteError(OSError):
 
 
 def atomic_write_json(path: Path, payload: JsonInput, *, mode: int = 0o600) -> None:
-    r"""Serialize *payload* and commit it to *path* atomically.
+    r"""Serialize *payload* and commit it to *path* atomically on POSIX.
 
     Parameters
     ----------
@@ -159,8 +159,10 @@ def atomic_write_json(path: Path, payload: JsonInput, *, mode: int = 0o600) -> N
     ------
     AtomicWriteError
         If the payload cannot be serialized, or the write cannot complete.
-        A stage of ``serialize`` means the payload was invalid; the
-        filesystem was not touched.
+        On POSIX, readers see either the previous file or the complete new
+        one, never a mixture; on Windows the replacement is a single metadata
+        operation but is not documented as atomic. A stage of ``serialize``
+        means the payload was invalid; the filesystem was not touched.
     ValueError
         If *mode* is not an integer from ``0`` to ``0o777`` that grants owner
         read and write, or if *path* names no file.
@@ -179,7 +181,7 @@ def atomic_write_json(path: Path, payload: JsonInput, *, mode: int = 0o600) -> N
 
 
 def atomic_write_bytes(path: Path, data: bytes, *, mode: int = 0o600) -> None:
-    r"""Commit already-encoded *data* to *path* atomically.
+    r"""Commit already-encoded *data* to *path* atomically on POSIX.
 
     Parameters
     ----------
@@ -193,8 +195,10 @@ def atomic_write_bytes(path: Path, data: bytes, *, mode: int = 0o600) -> None:
     Raises
     ------
     AtomicWriteError
-        If the write cannot complete. Readers see either the previous file or
-        the complete new one, never a mixture.
+        If the write cannot complete. On POSIX, readers see either the
+        previous file or the complete new one, never a mixture; on Windows the
+        replacement is a single metadata operation but is not documented as
+        atomic.
     ValueError
         If *mode* is not an integer from ``0`` to ``0o777`` that grants owner
         read and write, or if *path* names no file.

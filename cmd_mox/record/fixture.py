@@ -534,15 +534,18 @@ class FixtureFile:
         )
 
     def save(self, path: Path) -> None:
-        """Write this fixture to *path* atomically, owner-only by default.
+        """Write this fixture to *path*, atomically and owner-only on POSIX.
 
         The document is serialized exactly as before and committed through the
-        internal atomic-write helper. A failure before the rename leaves any
-        previous fixture byte-for-byte intact. An ordinary exception after the
-        rename raises ``AtomicWriteError`` with ``target_replaced`` true and
-        does not roll back, because only durability is in doubt; an interrupt
-        such as ``KeyboardInterrupt`` propagates unchanged after the same
-        clean-up.
+        internal atomic-write helper. On POSIX the new fixture is created with
+        mode ``0o600`` and readers see either the previous complete fixture or
+        the new one, never a mixture; on Windows the mode is best-effort and
+        the replacement is a single metadata operation that is not documented
+        as atomic. A failure before the rename leaves any previous fixture
+        byte-for-byte intact. An ordinary exception after the rename raises
+        ``AtomicWriteError`` with ``target_replaced`` true and does not roll
+        back, because only durability is in doubt; an interrupt such as
+        ``KeyboardInterrupt`` propagates unchanged after the same clean-up.
 
         Parameters
         ----------
