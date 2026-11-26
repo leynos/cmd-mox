@@ -1622,17 +1622,18 @@ were valid and are repaired here; the seventh corrects this plan.
   `parents=True`, and `_close_descriptor` lets a test prove that a failing
   directory close keeps the original synchronization error.
 - The scope tolerance is breached on both bounds and is recorded as an open
-  governance blocker. At head `35a0e15` the diff is 20 files excluding this
-  plan (21 including it), above the 18-file bound, and 2,472 net added lines
-  excluding this plan (2,506 insertions, 34 deletions), above the 1,300-line
-  bound. The figures were 16 files and 2,144 lines at the first measurement and
-  grew as the two hosted assessments' repairs landed. The tolerance requires
-  the implementer to stop and escalate; the overage was only measurable once
-  the tests and documentation existed, so the escalation is raised here rather
-  than retroactively. Status: awaiting the user's explicit acceptance of the
-  delivered scope. No further scope growth is accepted without that approval,
-  and the test and documentation volume is the part to review, because the
-  production module is a small fraction of the total.
+  governance blocker. The diff is 20 files excluding this plan (21 including
+  it), above the 18-file bound, and 2,483 net added lines excluding this plan
+  (2,517 insertions, 34 deletions) as measured before the final docstring
+  qualification, above the 1,300-line bound. The figures were 16 files and
+  2,144 lines at the first measurement and grew as the hosted assessments'
+  repairs landed; the delivery report carries the final measurement. The
+  tolerance requires the implementer to stop and escalate; the overage was only
+  measurable once the tests and documentation existed, so the escalation is
+  raised here rather than retroactively. Status: awaiting the user's explicit
+  acceptance of the delivered scope. No further scope growth is accepted
+  without that approval, and the test and documentation volume is the part to
+  review, because the production module is a small fraction of the total.
 
 ## Revision notes
 
