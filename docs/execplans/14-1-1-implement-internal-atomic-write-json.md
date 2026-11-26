@@ -1624,10 +1624,9 @@ were valid and are repaired here; the seventh corrects this plan.
 - The scope tolerance is breached on both bounds and is recorded as an open
   governance blocker. The diff is 20 files excluding this plan (21 including
   it), above the 18-file bound, and 2,483 net added lines excluding this plan
-  (2,517 insertions, 34 deletions) as measured before the final docstring
-  qualification, above the 1,300-line bound. The figures were 16 files and
-  2,144 lines at the first measurement and grew as the hosted assessments'
-  repairs landed; the delivery report carries the final measurement. The
+  (2,517 insertions, 34 deletions), above the 1,300-line bound. The figures
+  were 16 files and 2,144 lines at the first measurement and grew as the hosted
+  assessments' repairs landed; the count above is measured at this head. The
   tolerance requires the implementer to stop and escalate; the overage was only
   measurable once the tests and documentation existed, so the escalation is
   raised here rather than retroactively. Status: awaiting the user's explicit
