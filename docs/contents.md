@@ -15,6 +15,8 @@
   Replace invalid `times()` counts and update explicitly counted spies.
 - [Fixture Schema Migration Note](./fixture-schema-migration-note.md): Prepare
   for three-component recording fixture versions.
+- [Fixture Durability Migration Note](./fixture-durability-migration-note.md):
+  Prepare for atomic saves, owner-only fixtures, and LF bytes on Windows.
 - [Go Environment Migration Note](./go-env-migration-note.md): Prepare for
   exact-name filtering of Go variables in new recordings.
 - [Recording Duration Migration Note](./recording-duration-migration-note.md):

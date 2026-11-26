@@ -721,9 +721,11 @@ fixture or the new one, never a partial document. On Windows the replacement is
 a single metadata operation, but it is not documented as atomic.
 
 A save that fails before the rename leaves the previous fixture byte-for-byte
-intact. A save that fails after the rename, while synchronizing the directory,
-raises `AtomicWriteError` with `target_replaced` true: the new fixture is
-already in place and is not rolled back, because only durability is in doubt.
+intact. An ordinary exception after the rename, while synchronizing the
+directory, raises `AtomicWriteError` with `target_replaced` true: the new
+fixture is already in place and is not rolled back, because only durability is
+in doubt. An interrupt such as `KeyboardInterrupt` propagates unchanged after
+the same clean-up.
 
 New fixtures are owner-only (`0o600`) on POSIX, whatever the process umask,
 because fixture contents can include environment-derived values and command

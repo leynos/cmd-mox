@@ -160,13 +160,16 @@ what changes in shared fixtures.
 Fixture saves are atomic on POSIX: CmdMox writes a hidden sibling temporary
 file, flushes it to stable storage, and renames it over the destination, so a
 reader never sees a partial fixture. A failure before the rename leaves the
-previous fixture byte-for-byte intact; a failure after it raises
-`AtomicWriteError` with `target_replaced` true and leaves the new fixture in
-place rather than rolling back. New fixtures are owner-only (`0o600`) on POSIX,
-whatever the process umask. See
+previous fixture byte-for-byte intact. An ordinary exception after the rename
+raises `AtomicWriteError` with `target_replaced` true and leaves the new
+fixture in place rather than rolling back; an interrupt such as
+`KeyboardInterrupt` propagates unchanged after the same clean-up. New fixtures
+are owner-only (`0o600`) on POSIX, whatever the process umask. See
 [durability and permissions](usage-guide.md#durability-and-permissions) for the
 full behaviour and the recommended `.gitignore` line for orphaned temporary
-files.
+files. See the
+[fixture durability migration note](fixture-durability-migration-note.md) for
+what changes in existing fixtures and checkouts.
 
 ## Recording fixture schema versions
 

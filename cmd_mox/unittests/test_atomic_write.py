@@ -33,6 +33,13 @@ _SURROGATE_TEXT = st.text(
 _JSON_TEXT = st.one_of(st.text(), _SURROGATE_TEXT)
 #: Empty names are rejected before a prefix is built, so the property domain
 #: starts at one character.
+#: Portable file-name text: letters, digits, and punctuation every supported
+#: filesystem accepts.
+_PORTABLE_NAMES = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_",
+    min_size=1,
+    max_size=40,
+)
 _NON_EMPTY_TEXT = st.one_of(
     st.text(min_size=1),
     st.text(
@@ -561,6 +568,19 @@ def test_directory_target_fails_at_replace(tmp_path: Path) -> None:
     assert excinfo.value.target_replaced is False
     assert target.is_dir()
     assert {entry.name for entry in tmp_path.iterdir()} == listing
+
+
+@given(name=_PORTABLE_NAMES)
+@settings(max_examples=25, deadline=None)
+def test_generated_names_round_trip_through_real_files(name: str) -> None:
+    """A generated portable name round-trips through a real file write."""
+    module = _atomic_module()
+    with tempfile.TemporaryDirectory() as directory:
+        target = Path(directory) / name
+
+        module.atomic_write_json(target, {"name": name})
+
+        assert json.loads(target.read_text(encoding="utf-8")) == {"name": name}
 
 
 @pytest.mark.skipif(
