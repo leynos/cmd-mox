@@ -914,8 +914,11 @@ Obligations:
 - Lemma `LEM-INDUCTION`: for any finite sequence of writes to one target, in
   which each write succeeds or fails at any stage, the target equals the
   serialization of the last committed payload (or the initial state if none
-  committed), and no residue accumulates. A write commits when it succeeds or
-  fails at a stage in `POST_REPLACE_STAGES`.
+  committed). No residue accumulates **except** temporary files left by
+  cleanups that themselves failed; each such file is reported as a note on the
+  error that caused it, so the residue is one file per unreported-safe cleanup
+  rather than a silent accumulation. A write commits when it succeeds or fails
+  at a stage in `POST_REPLACE_STAGES`.
   - Argument: the helper keeps no state between calls (it reads no modules
     globals that writes modify). By `INV-PRESERVE` and `INV-POST-REPLACE`,
     every handled call leaves the target equal to the last committed document
@@ -929,7 +932,12 @@ Obligations:
     in the three states the tests construct. The `noted-temporary` state is
     exercised directly by `test_cleanup_failure_is_noted_not_raised` rather
     than by the fault product, because producing it requires two simultaneous
-    failures.
+    failures. The ordered-pair enumeration uses single injected faults with a
+    working cleanup, so it composes the three ordinary states; repeated
+    cleanup failures are outside that enumeration by construction, and their
+    bound is the `noted-temporary` clause above: one noted file per failed
+    cleanup, never a silent one. `test_keyboard_interrupt_notes_a_failed_cleanup`
+    covers the same bound on the interrupt path.
   - Method: the argument above, plus `test_fault_pairs_compose`, an
     exhaustive check of every ordered pair of operations, each drawn from the
     nine faults plus success (100 cases), with the sync seams replaced by
