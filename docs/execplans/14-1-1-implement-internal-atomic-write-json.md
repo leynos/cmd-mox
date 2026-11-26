@@ -23,7 +23,8 @@ After this change, CmdMox has one internal persistence boundary in the private
 module `cmd_mox/_atomic_write.py`:
 
 - `atomic_write_json(path, payload, *, mode=0o600)` serializes a JSON payload
-  and commits it atomically.
+  and commits it atomically on POSIX, with the Windows caveat recorded in
+  `Conformance basis`.
 - `atomic_write_bytes(path, data, *, mode=0o600)` commits already-encoded
   bytes, for the text and executable helpers planned in roadmap item `14.5.1`.
 
@@ -518,7 +519,8 @@ Keep these references open while executing the plan:
     (existing record-mode round trips pass; fixture-level failure injection
     proves old contents survive) and its user-facing documentation join this
     plan, and both roadmap items are marked done. The user-visible change is
-    that fixtures become mode `0o600` on POSIX and are written atomically.
+    that fixtures become mode `0o600` on POSIX and are written atomically
+    there.
     Git tracks only the execute bit, so committed fixtures are unaffected.
   Outcome: Option C, recommended by all three expert reviewers, was accepted by
   the user on 2026-10-23. This plan is written for Option C only. Date/Author:
@@ -718,8 +720,8 @@ Upstream artefacts, at the branch point `d22bb65`:
 
 - `docs/roadmap.md` item `14.1.1` (`RM-14.1.1`), with success criteria
   `RM-14.1.1-S1` ("interrupted or failing writes preserve the previous complete
-  JSON file") and `RM-14.1.1-S2` ("successful writes leave owner-restricted
-  files on POSIX").
+  JSON file"; the roadmap now limits this to failures before the rename) and
+  `RM-14.1.1-S2` ("successful writes leave owner-restricted files on POSIX").
 - `docs/roadmap.md` item `14.1.2` (`RM-14.1.2`), with
   `RM-14.1.2-S1` ("existing record-mode fixture round-trips still pass") and
   `RM-14.1.2-S2` ("new failure-injection tests prove old fixture contents
@@ -1046,8 +1048,9 @@ Obligations:
   byte-identical. A saved fixture is mode `0o600` on POSIX.
   - Artefact: `test_save_failure_preserves_previous_fixture` and
     `test_save_writes_owner_only_fixture` in
-    `cmd_mox/unittests/test_fixture_file.py`, and the two new scenarios in
-    `features/recording_session.feature`.
+    `cmd_mox/unittests/test_fixture_atomic_save.py`, the unchanged round-trip
+    tests in `cmd_mox/unittests/test_fixture_file.py`, and the two new
+    scenarios in `features/recording_session.feature`.
   - Non-vacuity: the mode test fails against the old `write_text` code under
     umask `0o022` (the file would be `0o644`); this is the red evidence.
 
@@ -1136,8 +1139,10 @@ all four code gates pass; commit.
   - Design followed, with the deviations listed in `Conformance basis`.
   - Upstream assumptions unchanged.
   - No public export; no dependency change.
-  - Persisted format: fixture bytes unchanged (`INV-FIXTURE-BYTES`); fixture
-    mode becomes `0o600` on POSIX, an intended, documented change.
+  - Persisted format: fixture bytes unchanged on POSIX (`INV-FIXTURE-BYTES`);
+    on Windows the helper writes LF where the previous text-mode write emitted
+    CRLF. Fixture mode becomes `0o600` on POSIX, an intended, documented
+    change.
   - Trace links current.
 - Recovery: revert the milestone commit; EP-M1's strict `xfail` markers
   return.
@@ -1185,15 +1190,19 @@ all four code gates pass; commit.
     - In §Filesystem side-effect helpers, replace "set execute bits after the
       content has been written and replaced" with the `DEC-4` behaviour.
   - `docs/python-native-command-mocking-design.md`: in §9.5.3, state that
-    `save()` writes atomically through the internal helper with mode `0o600`;
+    `save()` writes atomically on POSIX through the internal helper with
+    mode `0o600`;
     add a §9.10 entry, "Atomic fixture persistence", that summarizes the
     decision and links to the fake-capabilities design.
   - `docs/usage-guide.md`: under "Fixture file format", add a short note that
-    fixtures are written atomically, so an interrupted recording never leaves
-    a truncated fixture; that new fixtures are owner-only (`0o600`) on POSIX;
-    that a failed save raises an `OSError` subclass and leaves the previous
-    fixture intact; and that an orphan matching `.<name>.*.tmp` may remain
-    after a hard kill, with a suggested `.gitignore` line (`.*.json.*.tmp`).
+    fixtures are written atomically on POSIX, so an interrupted recording
+    never leaves a truncated fixture; that new fixtures are owner-only
+    (`0o600`) on POSIX; that a save failing before the rename leaves the
+    previous fixture intact while an ordinary failure after the rename reports
+    `target_replaced` without rollback; and that an orphan whose name is
+    dot-prefixed and `.tmp`-suffixed may remain after a hard kill, with a
+    suggested `.gitignore` line (`.*.tmp`), because a long fixture name is
+    truncated out of the prefix.
   - `docs/developers-guide.md`: add a section "Atomic file persistence"
     between "Property-based testing" and "IPC request dispatch". It states
     that internal JSON and state writers must call
