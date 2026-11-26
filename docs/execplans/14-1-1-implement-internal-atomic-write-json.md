@@ -345,18 +345,20 @@ Keep these references open while executing the plan:
   `json.dumps(payload, indent=2, ensure_ascii=True, allow_nan=False) + "\n"`,
   encoded as UTF-8, and preserve mapping insertion order (no `sort_keys`).
   Rationale: `indent=2` plus a trailing newline, with `ensure_ascii` at its
-  default, reproduces the current `FixtureFile.save()` bytes, so adoption does
-  not reformat any fixture. Insertion order is deterministic for a given
-  payload and keeps fixtures' human-oriented layout (`version` and `metadata`
-  before `recordings`); `json.loads` preserves file order, so load-then-save is
-  byte-stable. `ensure_ascii=True` serializes lone surrogates (produced when
-  arguments are decoded with `surrogateescape`) as `\udcXX` escapes instead of
-  failing to encode. `allow_nan=False` rejects `NaN` and infinities, which are
-  not valid JSON; every fixture field is a string, integer, `None`, or a list
-  or mapping of those, so fixtures are unaffected. The file is written in
-  binary mode so Windows does not translate the newline to CRLF. Canonical key
-  order for mutable state is the caller's responsibility; the design document
-  records this for `14.3`. Date/Author: 2026-10-23, planning agent.
+  default, reproduces the current `FixtureFile.save()` bytes on POSIX, so
+  adoption does not reformat any POSIX fixture; on Windows the previous
+  text-mode write emitted CRLF and the helper now emits LF. Insertion order is
+  deterministic for a given payload and keeps fixtures' human-oriented layout
+  (`version` and `metadata` before `recordings`); `json.loads` preserves file
+  order, so load-then-save is byte-stable. `ensure_ascii=True` serializes lone
+  surrogates (produced when arguments are decoded with `surrogateescape`) as
+  `\udcXX` escapes instead of failing to encode. `allow_nan=False` rejects
+  `NaN` and infinities, which are not valid JSON; every fixture field is a
+  string, integer, `None`, or a list or mapping of those, so fixtures are
+  unaffected. The file is written in binary mode so Windows does not translate
+  the newline to CRLF. Canonical key order for mutable state is the caller's
+  responsibility; the design document records this for `14.3`. Date/Author:
+  2026-10-23, planning agent.
 
 - Decision `DEC-6`: define `AtomicWriteError(OSError)` and
   `AtomicWriteStage(enum.StrEnum)`. `AtomicWriteError` carries `path`, `stage`,
@@ -600,8 +602,10 @@ Lessons:
 
 `cmd_mox/_atomic_write.py` implements the nine-stage protocol, and
 `FixtureFile.save()` delegates to it. The eighteen newly-unmarked tests, the
-six fixture tests added to `test_fixture_file.py`, and both recording-session
-scenarios pass; the focused suite reports 331 passed.
+six fixture tests added at that point (three of which later moved to
+`cmd_mox/unittests/test_fixture_atomic_save.py` when the CodeScene cohesion
+finding was cleared), and both recording-session scenarios pass; the focused
+suite reported 331 passed at that milestone.
 
 The three snapshot cases pin the byte format: insertion order is preserved
 (`zebra`, `alpha`, `middle`), non-ASCII text and a lone surrogate are escaped as
@@ -845,11 +849,11 @@ Obligations:
   the previous `Path.write_text(...)` translated the trailing newline to CRLF;
   the helper writes LF there too, and
   `test_written_bytes_never_translate_newlines` pins that.
-  - Method: Hypothesis property reusing the `_RECORDED_INVOCATIONS` strategy
-    from `cmd_mox/unittests/test_fixture_file.py` to build `FixtureFile`
-    values, plus one named example with non-ASCII arguments.
+  - Method: Hypothesis property generating the command, argument list, and
+    stdout of one recording, plus one named example with non-ASCII arguments,
+    assembled into a `FixtureFile` by the test module's local helpers.
   - Artefact: `test_serialization_matches_legacy_fixture_bytes` in
-    `cmd_mox/unittests/test_fixture_file.py`.
+    `cmd_mox/unittests/test_fixture_atomic_save.py`.
   - Non-vacuity: a mutation to `ensure_ascii=False` or `indent=4` fails it.
 
 - Obligation `INV-PRESERVE`: for every stage `s` in `PRE_REPLACE_STAGES`
@@ -879,9 +883,16 @@ Obligations:
 
 - Obligation `INV-NO-RESIDUE`: after any failure handled inside the helper,
   the directory contains no file that was not there before the call, and no
-  descriptor opened by the helper remains open.
-  - Method: exact directory-listing comparison inside the `INV-PRESERVE` and
-    `INV-POST-REPLACE` tests, plus a descriptor check on Linux.
+  descriptor opened by the helper remains open. Two documented exceptions bound
+  the obligation: a **post-replace** failure can leave a new target where none
+  existed, because the target is the committed document and is never rolled
+  back; and a cleanup that itself fails can leave the temporary file, which is
+  reported as a note on the raised error rather than as a silent success.
+  `INV-PRESERVE` therefore compares the listing only for `PRE_REPLACE_STAGES`,
+  and `test_cleanup_failure_is_noted_not_raised` demonstrates the noted case.
+  - Method: exact directory-listing comparison inside the `INV-PRESERVE` tests
+    and, for `INV-POST-REPLACE`, the assertion that the target holds the new
+    document; plus a descriptor check on Linux.
   - Artefact: the same tests, and `test_failures_do_not_leak_descriptors`,
     which lists `/proc/self/fd`, resolves each entry with `os.readlink`, and
     counts only targets under the test's temporary directory (including the
@@ -905,14 +916,20 @@ Obligations:
   serialization of the last committed payload (or the initial state if none
   committed), and no residue accumulates. A write commits when it succeeds or
   fails at a stage in `POST_REPLACE_STAGES`.
-  - Argument: the helper keeps no state between calls (it reads no module
-    globals that writes modify). By `INV-PRESERVE`, `INV-POST-REPLACE`, and
-    `INV-NO-RESIDUE`, every handled call maps a state in
-    {`absent`, `present`, `orphaned`} to a state in the same set, with the
-    target equal to the last committed document. By induction on sequence
-    length, the property holds for every sequence. The exhaustive
-    enumerations discharge the induction step for every stage and prior
-    state.
+  - Argument: the helper keeps no state between calls (it reads no modules
+    globals that writes modify). By `INV-PRESERVE` and `INV-POST-REPLACE`,
+    every handled call leaves the target equal to the last committed document
+    (or unchanged, when nothing committed). `INV-NO-RESIDUE` bounds the set of
+    reachable prior states: a pre-replace failure returns the state it started
+    from, a post-replace failure adds the committed target, and a failure whose
+    own cleanup fails adds one noted temporary file, so the reachable set is
+    {`absent`, `present`, `orphaned`, `noted-temporary`} rather than the
+    original three. The induction is therefore over that closed set, and the
+    exhaustive enumerations discharge its step for every stage and prior state
+    in the three states the tests construct. The `noted-temporary` state is
+    exercised directly by `test_cleanup_failure_is_noted_not_raised` rather
+    than by the fault product, because producing it requires two simultaneous
+    failures.
   - Method: the argument above, plus `test_fault_pairs_compose`, an
     exhaustive check of every ordered pair of operations, each drawn from the
     nine faults plus success (100 cases), with the sync seams replaced by
