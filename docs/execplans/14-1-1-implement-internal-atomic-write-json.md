@@ -927,25 +927,30 @@ Obligations:
     from, a post-replace failure adds the committed target, and a failure whose
     own cleanup fails adds one noted temporary file, so the reachable set is
     {`absent`, `present`, `orphaned`, `noted-temporary`} rather than the
-    original three. The induction is therefore over that closed set, and the
-    exhaustive enumerations discharge its step for every stage and prior state
-    in the three states the tests construct. The `noted-temporary` state is
-    exercised directly by `test_cleanup_failure_is_noted_not_raised` rather
-    than by the fault product, because producing it requires two simultaneous
-    failures. The ordered-pair enumeration uses single injected faults with a
-    working cleanup, so it composes the three ordinary states; repeated
-    cleanup failures are outside that enumeration by construction, and their
-    bound is the `noted-temporary` clause above: one noted file per failed
-    cleanup, never a silent one. `test_keyboard_interrupt_notes_a_failed_cleanup`
-    covers the same bound on the interrupt path.
+    original three. The induction is therefore over that closed set. The
+    single-fault enumeration discharges its step for every pre-replace stage
+    from each of the three ordinary prior states, and the ordered-pair
+    enumeration repeats that from each of the same three states, so every
+    one-step and two-step sequence beginning in an ordinary state is covered.
+    The `noted-temporary` state is produced by two simultaneous failures, so it
+    is exercised directly by `test_cleanup_failure_is_noted_not_raised` rather
+    than by the fault product; its bound is the clause above, one noted file
+    per failed cleanup and never a silent one, and
+    `test_keyboard_interrupt_notes_a_failed_cleanup` covers the same bound on
+    the interrupt path. Repeated cleanup failures therefore accumulate only
+    noted files, which the lemma excludes from its "no silent residue" claim
+    rather than pretending they cannot occur.
   - Method: the argument above, plus `test_fault_pairs_compose`, an
     exhaustive check of every ordered pair of operations, each drawn from the
-    nine faults plus success (100 cases), with the sync seams replaced by
-    counting no-ops. It confirms the step composes, for example that a
-    failure leaves nothing that disturbs the next write.
-  - Non-vacuity: the pairwise test asserts that each case's first operation
-    actually reached its stage (the fault wrapper records that it fired), so
-    no case passes because the fault never triggered.
+    nine faults plus success (100 pairs of operations, run from each of the
+    three prior states, 300 cases), with the sync seams replaced by counting
+    no-ops. It confirms the step composes, for example that a failure leaves
+    nothing that disturbs the next write.
+  - Non-vacuity: every pair case asserts that the injected fault's exception is
+    the raised error's `__cause__`, so no case passes because the fault never
+    triggered, and each prior state asserts its own invariant: an absent target
+    stays absent until something commits, a present document is preserved, and
+    a pre-existing orphan survives untouched.
 
 - Obligation `INV-MODE`: on POSIX, after a successful write the target's
   permission bits equal the requested mode. The table covers umask values

@@ -149,7 +149,7 @@ class _PairRun:
 
     module: types.ModuleType
     target: Path
-    committed: object
+    committed: object | None
 
     def apply(self, payload: object, stage_name: str | None) -> None:
         """Run one success or injected fault, recording what committed."""
@@ -383,25 +383,38 @@ def test_failures_do_not_leak_descriptors(
     assert _descriptors_under(tmp_path) == before
 
 
+@pytest.mark.parametrize("prior_state", _PRIOR_STATES)
 @pytest.mark.parametrize("first", [None, *_FAULT_SPECS])
 @pytest.mark.parametrize("second", [None, *_FAULT_SPECS])
 def test_fault_pairs_compose(
-    tmp_path: Path, first: str | None, second: str | None
+    tmp_path: Path, prior_state: str, first: str | None, second: str | None
 ) -> None:
     """Every ordered pair of writes leaves the last committed document."""
     module = _atomic_module()
     target = tmp_path / "fixture.json"
     initial = {"generation": 0}
-    target.write_bytes(module._serialize_json(initial))
-    run = _PairRun(module=module, target=target, committed=initial)
+    committed: object | None = None
+    if prior_state != "absent":
+        target.write_bytes(module._serialize_json(initial))
+        committed = initial
+    if prior_state == "orphaned":
+        (tmp_path / _ORPHAN_NAME).write_bytes(b"stale")
+    run = _PairRun(module=module, target=target, committed=committed)
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         _skip_durability(monkeypatch, module)
         for index, stage_name in enumerate((first, second)):
             run.apply({"generation": index + 1}, stage_name)
 
-    assert json.loads(target.read_text(encoding="utf-8")) == run.committed
-    assert _listing(tmp_path) == {target.name}
+    if run.committed is None:
+        assert not target.exists(), "an absent target stays absent"
+        expected = set()
+    else:
+        assert json.loads(target.read_text(encoding="utf-8")) == run.committed
+        expected = {target.name}
+    if prior_state == "orphaned":
+        expected.add(_ORPHAN_NAME)
+    assert _listing(tmp_path) == expected
 
 
 def test_interleaved_writers_use_distinct_temporaries(
