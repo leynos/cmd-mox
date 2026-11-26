@@ -571,12 +571,15 @@ def test_directory_target_fails_at_replace(tmp_path: Path) -> None:
 
 
 @given(name=_PORTABLE_NAMES)
+@example(name="NUL")
 @settings(max_examples=25, deadline=None)
 def test_generated_names_round_trip_through_real_files(name: str) -> None:
     """A generated portable name round-trips through a real file write."""
     module = _atomic_module()
     with tempfile.TemporaryDirectory() as directory:
-        target = Path(directory) / name
+        # Windows reserves bare names such as NUL and CON, so the generated
+        # part is always a suffix; the example above proves the case.
+        target = Path(directory) / f"fixture-{name}"
 
         module.atomic_write_json(target, {"name": name})
 

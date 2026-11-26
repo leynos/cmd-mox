@@ -1621,17 +1621,18 @@ were valid and are repaired here; the seventh corrects this plan.
   attribution gaps, now closed: a two-level missing parent chain proves
   `parents=True`, and `_close_descriptor` lets a test prove that a failing
   directory close keeps the original synchronization error.
-- The scope tolerance was exceeded and is now recorded as an escalation. The
-  delivered diff is 16 files, inside the 18-file bound, but 2,326 net added
-  lines excluding this plan at the head that answers the assessment (2,356
-  insertions, 30 deletions), above the 1,300-line bound. The figure was 2,144
-  at the first measurement and grew with the assessment repairs. The tolerance
-  requires the implementer to stop and escalate; the overage was only
-  measurable once the tests existed, so the escalation is raised here rather
-  than retroactively. Escalation decision recorded: the line budget is breached
-  and the overage is reported to the user for acceptance, no further scope
-  growth is accepted without explicit approval, and the test volume is the part
-  to review because the production module is a small fraction of the total.
+- The scope tolerance is breached on both bounds and is recorded as an open
+  governance blocker. At head `35a0e15` the diff is 20 files excluding this
+  plan (21 including it), above the 18-file bound, and 2,472 net added lines
+  excluding this plan (2,506 insertions, 34 deletions), above the 1,300-line
+  bound. The figures were 16 files and 2,144 lines at the first measurement and
+  grew as the two hosted assessments' repairs landed. The tolerance requires
+  the implementer to stop and escalate; the overage was only measurable once
+  the tests and documentation existed, so the escalation is raised here rather
+  than retroactively. Status: awaiting the user's explicit acceptance of the
+  delivered scope. No further scope growth is accepted without that approval,
+  and the test and documentation volume is the part to review, because the
+  production module is a small fraction of the total.
 
 ## Revision notes
 

@@ -13,8 +13,8 @@ internal atomic-write helper. The JSON schema does not change, and
   step must read needs an explicit `chmod` after recording.
 - **Atomic replacement.** CmdMox serializes the document, writes a hidden
   sibling temporary file, flushes it to stable storage, and renames it over the
-  destination. A reader sees either the previous complete fixture or the new
-  one, never a partial document. On Windows the replacement is a single
+  destination. On POSIX a reader sees either the previous complete fixture or
+  the new one, never a partial document. On Windows the replacement is a single
   metadata operation but is not documented as atomic.
 - **Failure behaviour.** A save that fails before the rename leaves the
   previous fixture byte-for-byte intact. An ordinary exception after the
