@@ -685,12 +685,15 @@ def test_handle_passthrough_default(tmp_path: Path) -> None:
         server.handle_passthrough_result(result)
 
 
-def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
-    """Passthrough handler exceptions should be wrapped for callers."""
+def test_handle_passthrough_handler_exception_propagates_unchanged(
+    tmp_path: Path,
+) -> None:
+    """Passthrough handler exceptions should reach callers by identity."""
+    error = ValueError("boom")
 
     def failing_handler(_result: PassthroughResult) -> Response:
-        """Raise ValueError to simulate a failing passthrough handler."""
-        raise ValueError("boom")
+        """Raise the preconstructed error to prove it is not wrapped."""
+        raise error
 
     server = IPCServer(
         tmp_path / "ipc.sock",
@@ -703,13 +706,10 @@ def test_handle_passthrough_handler_exception(tmp_path: Path) -> None:
         exit_code=0,
     )
 
-    with pytest.raises(
-        RuntimeError,
-        match="Exception in passthrough handler for 123: boom",
-    ) as excinfo:
+    with pytest.raises(ValueError, match="boom") as excinfo:
         server.handle_passthrough_result(result)
 
-    assert isinstance(excinfo.value.__cause__, ValueError), "Assertion failed"
+    assert excinfo.value is error, "Passthrough failure must not be wrapped"
 
 
 @pytest.mark.parametrize(

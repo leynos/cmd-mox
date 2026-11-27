@@ -209,37 +209,21 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         argument: DispatchArg,
         *,
         default: cabc.Callable[[DispatchArg], Response],
-        error_builder: cabc.Callable[[DispatchArg, Exception], RuntimeError]
-        | None = None,
     ) -> Response:
         """Invoke *handler* when provided, otherwise fall back to *default*.
+
+        Handler failures propagate unchanged so that callers observe the
+        original exception class rather than a wrapper.
 
         Returns
         -------
         Response
             The handler's response, or *default*'s response when no handler is
             configured.
-
-        Raises
-        ------
-        KeyboardInterrupt
-            Propagated unchanged from *handler*.
-        SystemExit
-            Propagated unchanged from *handler*.
-        RuntimeError
-            The wrapped handler failure built by *error_builder*, when one is
-            supplied.
-        """  # ruff: ignore[docstring-extraneous-exception] - error_builder propagates this caller-visible failure.
+        """
         if handler is None:
             return default(argument)
-        if error_builder is None:
-            return handler(argument)
-        try:
-            return handler(argument)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except Exception as exc:
-            raise error_builder(argument, exc) from exc
+        return handler(argument)
 
     @staticmethod
     def _default_invocation_response(invocation: Invocation) -> Response:
@@ -263,20 +247,6 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         """
         msg = f"Unhandled passthrough result for {result.invocation_id}"
         raise RuntimeError(msg)
-
-    @staticmethod
-    def _build_passthrough_error(
-        result: PassthroughResult, exc: Exception
-    ) -> RuntimeError:
-        """Create the wrapped passthrough error surfaced to callers.
-
-        Returns
-        -------
-        RuntimeError
-            An error naming the invocation and the underlying failure.
-        """
-        msg = f"Exception in passthrough handler for {result.invocation_id}: {exc}"
-        return RuntimeError(msg)
 
     def _export_environment(self) -> None:
         """Export the IPC socket and timeout to the active environment, if any."""
@@ -310,7 +280,6 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
             self._passthrough_handler,
             result,
             default=self._raise_unhandled_passthrough,
-            error_builder=self._build_passthrough_error,
         )
 
 
@@ -697,8 +666,6 @@ def _execute_request(
                 return server.handle_passthrough_result(result), None
             case _:
                 return _raise_invalid_request_dispatch(processor, obj)
-    except (KeyboardInterrupt, SystemExit):
-        raise
     except Exception as exc:  # ruff: ignore[blind-except] - IPC converts arbitrary application handler failures into responses.
         message = str(exc) or exc.__class__.__name__
         return Response(stderr=message, exit_code=1), exc.__class__.__name__

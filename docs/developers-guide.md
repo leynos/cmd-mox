@@ -703,6 +703,14 @@ dispatch:
   category; validation failures keep the `invalid_request` outcome and use
   `ValidationError`. An empty read is treated as a closed connection, so
   readiness probes emit neither a dispatch record nor a response frame.
+- Handler failures are not wrapped. `_execute_request` sees the original
+  exception for both request kinds, so `handler_error` records the real
+  exception class as their `error_category` (for example `ValueError`). The
+  failure response carries the exception message as `stderr`, or the class name
+  when the message is empty, with exit code 1. A passthrough result with no
+  configured handler still raises
+  `RuntimeError("Unhandled passthrough result for {id}")`, so its category is
+  `RuntimeError`.
 - Unix connection failures emit a bounded `ipc.server.connection` event with
   one of three outcomes: `receive_timeout`, `receive_closed`, or
   `response_dropped`. Its `error_category` is one of `ConnectionClosed`,
