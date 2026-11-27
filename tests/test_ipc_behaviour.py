@@ -16,7 +16,7 @@ if typ.TYPE_CHECKING:
 
 import pytest
 
-from cmd_mox import EnvironmentManager, IPCServer, create_shim_symlinks
+from cmd_mox import EnvironmentManager, IPCServer, create_shims
 from cmd_mox.environment import (
     CMOX_IPC_SOCKET_ENV,
     CMOX_IPC_TIMEOUT_ENV,
@@ -76,7 +76,7 @@ def _run_unserved_shim(
         The completed process from running the unserved shim.
     """
     assert env.shim_dir is not None, "Assertion failed"
-    create_shim_symlinks(env.shim_dir, [command])
+    create_shims(env.shim_dir, [command])
     return _execute_shim(env, command, check=False)
 
 
@@ -99,7 +99,7 @@ def _invoke_command_via_ipc(
     server_timeout = timeout if timeout is not None else 5.0
 
     with IPCServer(socket_path, timeout=server_timeout):
-        create_shim_symlinks(env.shim_dir, [command])
+        create_shims(env.shim_dir, [command])
 
         expected_timeout = str(server_timeout)
         assert os.environ[CMOX_IPC_SOCKET_ENV] == str(socket_path), "Assertion failed"
@@ -127,7 +127,7 @@ def _run_shim_against_socket_peer(
     assert env.shim_dir is not None, "Assertion failed"
     socket_path = env.socket_path
     assert socket_path is not None, "Assertion failed"
-    create_shim_symlinks(env.shim_dir, [command])
+    create_shims(env.shim_dir, [command])
 
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(str(socket_path))

@@ -36,6 +36,10 @@ if typ.TYPE_CHECKING:  # pragma: no cover - typing helpers only
     from cmd_mox.fs_retry import RetryConfig
 
 
+_HEALTHY_SYMLINK_REWRITE_MESSAGE = "healthy symlink must not be recreated"
+_MATCHING_LAUNCHER_REWRITE_MESSAGE = "matching launcher must not be rewritten"
+
+
 def _assert_is_shim(path: pathlib.Path) -> None:
     """Assert that *path* points to a usable shim implementation."""
     if path_utils.IS_WINDOWS:
@@ -111,7 +115,7 @@ def test_validate_command_uniqueness_respects_platform(
 
 @pytest.mark.requires_unix_sockets
 @pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink execution only")
-def test_create_shim_symlinks_and_execution(
+def test_create_shims_and_execution(
     run: cabc.Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """POSIX shims execute the shared shim and expose the command name."""
@@ -120,7 +124,7 @@ def test_create_shim_symlinks_and_execution(
         assert env.shim_dir is not None
         assert env.socket_path is not None
         with IPCServer(env.socket_path):
-            mapping = shimgen.create_shim_symlinks(env.shim_dir, commands)
+            mapping = shimgen.create_shims(env.shim_dir, commands)
             assert set(mapping) == set(commands)
             assert os.environ[CMOX_IPC_SOCKET_ENV] == str(env.socket_path)
             assert os.environ[CMOX_IPC_TIMEOUT_ENV] == "5.0"
@@ -140,7 +144,7 @@ def test_create_windows_launchers(
     if not path_utils.IS_WINDOWS:
         monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
 
-    mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
+    mapping = shimgen.create_shims(tmp_path, ["git"])
     assert set(mapping) == {"git"}
     launcher = mapping["git"]
     assert launcher.suffix == ".cmd"
@@ -154,7 +158,7 @@ def test_create_windows_launchers_use_crlf(
 ) -> None:
     """Windows launchers should always use CRLF delimiters."""
     monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
-    mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
+    mapping = shimgen.create_shims(tmp_path, ["git"])
     launcher = mapping["git"]
     assert b"\r\n" in launcher.read_bytes()
 
@@ -182,7 +186,7 @@ def test_create_windows_shim_retries_locked_file(
     sleeps: list[float] = []
     monkeypatch.setattr("cmd_mox.fs_retry.time.sleep", sleeps.append)
 
-    mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
+    mapping = shimgen.create_shims(tmp_path, ["git"])
     assert mapping["git"].exists()
     assert attempts[0] == 3
     assert sleeps == [0.5, 0.5]
@@ -204,7 +208,7 @@ def test_create_windows_shim_raises_after_retries(
     monkeypatch.setattr("cmd_mox.fs_retry.time.sleep", lambda _duration: None)
 
     with pytest.raises(FileExistsError, match="Failed to remove existing launcher"):
-        shimgen.create_shim_symlinks(tmp_path, ["git"])
+        shimgen.create_shims(tmp_path, ["git"])
 
 
 def test_create_windows_shim_uses_shared_retry_config(
@@ -230,7 +234,7 @@ def test_create_windows_shim_uses_shared_retry_config(
 
     monkeypatch.setattr(shimgen, "retry_unlink", fake_retry_unlink)
 
-    shimgen.create_shim_symlinks(tmp_path, ["git"])
+    shimgen.create_shims(tmp_path, ["git"])
 
     assert calls == [(launcher, shimgen.DEFAULT_UNLINK_RETRY)]
 
@@ -252,26 +256,89 @@ def test_create_windows_shim_retry_failure_message(
 
     msg = "Failed to remove existing launcher"
     with pytest.raises(FileExistsError, match=msg):
-        shimgen.create_shim_symlinks(tmp_path, ["git"])
+        shimgen.create_shims(tmp_path, ["git"])
 
 
-def test_create_shim_symlinks_missing_target_dir() -> None:
+@pytest.mark.parametrize("creates_partial", [True, False])
+def test_failed_launcher_write_leaves_no_retry_blocker(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    creates_partial: bool,
+) -> None:
+    """A failed launcher write does not leave a file that blocks a retry."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    original_write_bytes = pathlib.Path.write_bytes
+
+    def failing_write_bytes(self: pathlib.Path, data: bytes) -> int:
+        """Optionally create a truncated launcher, then fail like a full disk."""
+        if creates_partial:
+            original_write_bytes(self, b"")
+        msg = "disk full"
+        raise OSError(msg)
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", failing_write_bytes)
+
+    with pytest.raises(OSError, match="disk full"):
+        shimgen.ensure_shim(tmp_path, "git")
+
+    assert not launcher.exists()
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", original_write_bytes)
+    assert shimgen.ensure_shim(tmp_path, "git") == launcher
+
+
+def test_failed_launcher_write_reports_refused_cleanup(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A partial launcher that cannot be removed is reported, not hidden."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    original_write_bytes = pathlib.Path.write_bytes
+
+    def failing_write_bytes(self: pathlib.Path, data: bytes) -> int:
+        """Create a truncated launcher, then fail like a full disk."""
+        original_write_bytes(self, b"")
+        msg = "disk full"
+        raise OSError(msg)
+
+    def locked_unlink(self: pathlib.Path) -> None:
+        """Simulate a launcher that another process still holds open."""
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", failing_write_bytes)
+    monkeypatch.setattr(pathlib.Path, "unlink", locked_unlink)
+
+    with pytest.raises(OSError, match="disk full"):
+        shimgen.ensure_shim(tmp_path, "git")
+
+    assert any(
+        "Failed to remove partial launcher" in record.getMessage()
+        and str(launcher) in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_create_shims_missing_target_dir() -> None:
     """Error raised when directory does not exist."""
     with tempfile.TemporaryDirectory() as tmpdir:
         missing = pathlib.Path(tmpdir) / "absent"
         with pytest.raises(FileNotFoundError):
-            shimgen.create_shim_symlinks(missing, ["ls"])
+            shimgen.create_shims(missing, ["ls"])
 
 
-def test_create_shim_symlinks_rejects_non_directory(tmp_path: pathlib.Path) -> None:
+def test_create_shims_rejects_non_directory(tmp_path: pathlib.Path) -> None:
     """Non-directory shim paths raise ``FileNotFoundError`` with context."""
     file_path = tmp_path / "not-a-dir"
     file_path.write_text("content")
     with pytest.raises(FileNotFoundError, match="not a directory"):
-        shimgen.create_shim_symlinks(file_path, ["ls"])
+        shimgen.create_shims(file_path, ["ls"])
 
 
-def test_create_shim_symlinks_existing_non_symlink_file() -> None:
+def test_create_shims_existing_non_symlink_file() -> None:
     """Error raised when an existing file collides with the shim name."""
     with tempfile.TemporaryDirectory() as tmpdir:
         path = pathlib.Path(tmpdir)
@@ -279,10 +346,10 @@ def test_create_shim_symlinks_existing_non_symlink_file() -> None:
         file_path = path / file_name
         file_path.write_text("not a shim")
         with pytest.raises(FileExistsError):
-            shimgen.create_shim_symlinks(path, ["ls"])
+            shimgen.create_shims(path, ["ls"])
 
 
-def test_create_shim_symlinks_missing_or_non_executable_shim(
+def test_create_shims_missing_or_non_executable_shim(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Handle missing or non-executable shim templates."""
@@ -291,13 +358,13 @@ def test_create_shim_symlinks_missing_or_non_executable_shim(
         missing_shim = tempdir / "missing"
         monkeypatch.setattr("cmd_mox.shimgen.SHIM_PATH", missing_shim)
         with pytest.raises(FileNotFoundError):
-            shimgen.create_shim_symlinks(tempdir, ["ls"])
+            shimgen.create_shims(tempdir, ["ls"])
 
         shim_path = tempdir / "fake_shim"
         shim_path.write_text("#!/bin/sh\necho fake")
         shim_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         monkeypatch.setattr("cmd_mox.shimgen.SHIM_PATH", shim_path)
-        mapping = shimgen.create_shim_symlinks(tempdir, ["ls"])
+        mapping = shimgen.create_shims(tempdir, ["ls"])
         _assert_is_shim(mapping["ls"])
         assert os.access(shim_path, os.X_OK)
 
@@ -309,28 +376,28 @@ def test_create_posix_symlink_replaces_existing(tmp_path: pathlib.Path) -> None:
     link.symlink_to(tmp_path / "missing")
     assert link.is_symlink()
 
-    mapping = shimgen.create_shim_symlinks(tmp_path, ["ls"])
+    mapping = shimgen.create_shims(tmp_path, ["ls"])
     assert mapping["ls"].resolve() == shimgen.SHIM_PATH
 
 
 @pytest.mark.parametrize(
     "name", ["../evil", "bad/name", "bad\\name", "..", "", "bad\x00name"]
 )
-def test_create_shim_symlinks_invalid_command_name(name: str) -> None:
+def test_create_shims_invalid_command_name(name: str) -> None:
     """Invalid command names should raise ValueError."""
     with EnvironmentManager() as env:
         assert env.shim_dir is not None
         with pytest.raises(ValueError, match="Invalid command name"):
-            shimgen.create_shim_symlinks(env.shim_dir, [name])
+            shimgen.create_shims(env.shim_dir, [name])
 
 
-def test_create_shim_symlinks_detects_case_insensitive_duplicates(
+def test_create_shims_detects_case_insensitive_duplicates(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Case-insensitive collisions should be rejected on Windows."""
     monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
     with pytest.raises(ValueError, match="Duplicate command names"):
-        shimgen.create_shim_symlinks(tmp_path, ["git", "GIT"])
+        shimgen.create_shims(tmp_path, ["git", "GIT"])
 
 
 @pytest.mark.parametrize(
@@ -361,3 +428,179 @@ def test_validators_accept_valid_name() -> None:
         _validate_no_nul_bytes,
     ]:
         validator("good", "error")
+
+
+def test_create_shims_is_exported_from_the_package() -> None:
+    """The bulk creator and its alias are exported with the same identity."""
+    import cmd_mox
+
+    assert cmd_mox.create_shims is shimgen.create_shims
+    assert cmd_mox.create_shim_symlinks is shimgen.create_shim_symlinks
+
+
+def test_create_shim_symlinks_alias_warns_and_creates(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The deprecated alias warns and delegates to :func:`create_shims`."""
+    with pytest.warns(DeprecationWarning, match="create_shims"):
+        mapping = shimgen.create_shim_symlinks(tmp_path, ["git"])
+
+    _assert_is_shim(mapping["git"])
+
+
+def test_ensure_shim_requires_existing_directory(tmp_path: pathlib.Path) -> None:
+    """A missing shim directory is rejected before launcher work."""
+    with pytest.raises(FileNotFoundError):
+        shimgen.ensure_shim(tmp_path / "missing", "git")
+
+
+def test_ensure_shim_requires_shim_template(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing shim template is rejected before destination inspection."""
+    monkeypatch.setattr(shimgen, "SHIM_PATH", tmp_path / "missing-shim")
+
+    with pytest.raises(FileNotFoundError, match="Shim template not found"):
+        shimgen.ensure_shim(tmp_path, "git")
+
+
+def test_ensure_shim_validates_command_name(tmp_path: pathlib.Path) -> None:
+    """An unsafe command name is rejected before destination inspection."""
+    with pytest.raises(ValueError, match="Invalid command name"):
+        shimgen.ensure_shim(tmp_path, "../evil")
+
+
+@pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink semantics only")
+def test_ensure_shim_creates_posix_symlink(tmp_path: pathlib.Path) -> None:
+    """ensure_shim creates a symlink when no entry exists yet."""
+    link = shimgen.ensure_shim(tmp_path, "git")
+
+    assert link == tmp_path / "git"
+    assert link.is_symlink()
+    assert link.resolve() == shimgen.SHIM_PATH
+
+
+@pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink semantics only")
+def test_ensure_shim_keeps_healthy_posix_symlink(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing symlink with a live target is reused without rewriting."""
+    link = tmp_path / "git"
+    link.symlink_to(shimgen.SHIM_PATH)
+
+    def fail_create(directory: pathlib.Path, name: str) -> pathlib.Path:
+        """Fail if ensure_shim tries to recreate a healthy link."""
+        raise AssertionError(_HEALTHY_SYMLINK_REWRITE_MESSAGE)
+
+    monkeypatch.setattr(shimgen, "_create_posix_symlink", fail_create)
+
+    assert shimgen.ensure_shim(tmp_path, "git") == link
+    assert link.resolve() == shimgen.SHIM_PATH
+
+
+@pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink semantics only")
+def test_ensure_shim_repairs_broken_posix_symlink(tmp_path: pathlib.Path) -> None:
+    """A dangling symlink is replaced with a link to the shim template."""
+    link = tmp_path / "git"
+    link.symlink_to(tmp_path / "missing")
+    assert not link.exists()
+
+    assert shimgen.ensure_shim(tmp_path, "git") == link
+    assert link.resolve() == shimgen.SHIM_PATH
+
+
+@pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink semantics only")
+def test_ensure_shim_rejects_posix_collision(tmp_path: pathlib.Path) -> None:
+    """A non-symlink entry is reported and preserved."""
+    collision = tmp_path / "git"
+    collision.write_text("foreign")
+
+    with pytest.raises(FileExistsError, match="already exists and is not a symlink"):
+        shimgen.ensure_shim(tmp_path, "git")
+
+    assert collision.read_text() == "foreign"
+
+
+def test_ensure_shim_keeps_matching_windows_launcher(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A launcher matching the generator's bytes is reused unchanged."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = shimgen.ensure_shim(tmp_path, "git")
+    original = launcher.read_bytes()
+
+    def fail_create(directory: pathlib.Path, name: str) -> pathlib.Path:
+        """Fail if ensure_shim tries to recreate a matching launcher."""
+        raise AssertionError(_MATCHING_LAUNCHER_REWRITE_MESSAGE)
+
+    monkeypatch.setattr(shimgen, "_create_windows_shim", fail_create)
+
+    assert shimgen.ensure_shim(tmp_path, "git") == launcher
+    assert launcher.read_bytes() == original
+
+
+def test_ensure_shim_rejects_foreign_windows_launcher(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A foreign .cmd entry is reported and preserved byte for byte."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    launcher.write_bytes(b"foreign")
+
+    with pytest.raises(FileExistsError, match="not a cmd-mox launcher"):
+        shimgen.ensure_shim(tmp_path, "git")
+
+    assert launcher.read_bytes() == b"foreign"
+
+
+def test_require_matching_launcher_rejects_symlink(tmp_path: pathlib.Path) -> None:
+    """A link to otherwise valid launcher bytes is still a collision."""
+    target = tmp_path / "real.cmd"
+    target.write_bytes(shimgen._expected_windows_launcher_bytes())
+    link = tmp_path / "git.cmd"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:  # pragma: no cover - Windows without symlink privilege
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+    with pytest.raises(FileExistsError, match="not a cmd-mox launcher"):
+        shimgen._require_matching_launcher(link)
+
+
+def test_ensure_shim_chains_windows_read_error(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable launcher surfaces a chained collision error."""
+    monkeypatch.setattr(path_utils, "IS_WINDOWS", True)
+    launcher = tmp_path / "git.cmd"
+    launcher.write_bytes(b"foreign")
+
+    def fail_read_bytes(self: pathlib.Path) -> bytes:
+        """Simulate a launcher the process cannot read."""
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", fail_read_bytes)
+
+    with pytest.raises(FileExistsError, match="not a cmd-mox launcher") as excinfo:
+        shimgen.ensure_shim(tmp_path, "git")
+
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+
+@pytest.mark.skipif(path_utils.IS_WINDOWS, reason="POSIX symlink semantics only")
+@pytest.mark.parametrize("target_kind", ["file", "directory"])
+def test_ensure_shim_repairs_foreign_posix_symlink(
+    tmp_path: pathlib.Path, target_kind: str
+) -> None:
+    """A symlink to a live foreign target is repaired, not treated as healthy."""
+    target = tmp_path / f"foreign-{target_kind}"
+    if target_kind == "directory":
+        target.mkdir()
+    else:
+        target.write_text("foreign")
+
+    link = tmp_path / "git"
+    link.symlink_to(target)
+
+    assert shimgen.ensure_shim(tmp_path, "git") == link
+    assert link.resolve() == shimgen.SHIM_PATH
