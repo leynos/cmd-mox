@@ -69,6 +69,7 @@ WINDOWS_SMOKE_ARGS = tests/test_windows_environment.py \
 	tests/test_windows_support_bdd.py \
 	tests/test_named_pipe_server.py \
 	tests/test_shim_stdin_timeout.py \
+	cmd_mox/unittests/test_atomic_write.py \
 	--log-file=windows-ipc.log \
 	--log-file-level=DEBUG \
 	--log-file-format="%(asctime)s %(levelname)s [%(name)s] %(message)s"

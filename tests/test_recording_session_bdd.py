@@ -41,3 +41,19 @@ def test_fixture_metadata_generated() -> None:
 )
 def test_fixture_migration_from_old_version() -> None:
     """Older schema versions are migrated on load."""
+
+
+@scenario(
+    str(FEATURES_DIR / "recording_session.feature"),
+    "recorded fixture is readable only by its owner",
+)
+def test_recorded_fixture_is_owner_only() -> None:
+    """A recorded fixture is written atomically and owner-only on POSIX."""
+
+
+@scenario(
+    str(FEATURES_DIR / "recording_session.feature"),
+    "failed fixture save keeps the previous fixture",
+)
+def test_failed_fixture_save_keeps_previous_fixture() -> None:
+    """A failed fixture save leaves the previous fixture intact."""

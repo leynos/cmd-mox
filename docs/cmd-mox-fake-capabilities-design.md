@@ -24,9 +24,10 @@ because they reduce boilerplate rather than protecting persisted data.
 
 This design separates implementation helpers from future public APIs:
 
-- `atomic_write_json(...)`, `file_lock(...)`, and any platform-specific lock
-  backend are internal helpers. They may move between private modules without
-  deprecation as long as documented CmdMox behaviour remains intact.
+- `atomic_write_json(...)`, `atomic_write_bytes(...)`, `file_lock(...)`, and
+  any platform-specific lock backend are internal helpers. They may move
+  between private modules without deprecation as long as documented CmdMox
+  behaviour remains intact.
 - `JsonStateStore`, `SubcommandRouter`, and filesystem side-effect helpers are
   candidate public APIs. They should first ship as explicitly provisional
   exports or documented examples. They become stable only after the usage guide
@@ -107,8 +108,10 @@ separate from the record/replay fixture schema.
 
 The fake-capabilities extension has five components:
 
-- `atomic_write_json(path, payload, mode=0o600)`: internal JSON persistence
-  helper used first by `FixtureFile.save()`.
+- `atomic_write_json(path, payload, *, mode=0o600)` and
+  `atomic_write_bytes(path, data, *, mode=0o600)`: internal persistence helpers
+  in `cmd_mox/_atomic_write.py`, used first by `FixtureFile.save()`. Both are
+  private to CmdMox and may move without deprecation.
 - `file_lock(path, timeout=...)`: internal context manager that acquires an
   exclusive advisory lock, retries only on lock contention, and raises a
   timeout-specific error when the deadline expires.
@@ -124,29 +127,156 @@ but the state store does not know about command routing.
 
 ## Atomic JSON persistence
 
-`atomic_write_json(path, payload, mode=0o600)` writes JSON data to a sibling
+`atomic_write_json(path, payload, *, mode=0o600)` writes JSON data to a sibling
 temporary file and replaces the target only after the temporary file has been
-fully written. The helper owns serialization so all fixture and state files use
-consistent formatting.
+fully written. `atomic_write_bytes(path, data, *, mode=0o600)` exposes the same
+commit protocol for already-encoded content, which the text and executable
+helpers in roadmap item `14.5.1` will reuse. Both live in
+`cmd_mox/_atomic_write.py`.
 
 Required behaviour:
 
 - Create `path.parent` before opening the temporary file.
-- Open the temporary file with
-  `os.open(..., O_CREAT | O_TRUNC | O_WRONLY, mode)` and call `os.fchmod(...)`
-  where available.
-- Serialize JSON with deterministic key ordering when the payload is a plain
-  mapping, plus a trailing newline for Git-friendly diffs.
-- Flush the buffered file object and call `os.fsync(...)` before replacement.
+- Open the temporary file with a unique name in the target's own directory and
+  apply the requested mode before any content is written.
+- Serialize JSON with a trailing newline for Git-friendly diffs.
+- Flush the file's contents and call `os.fsync(...)` before replacement.
 - Replace the target with `os.replace(tmp_path, path)`.
 - Open and `fsync` the parent directory after replacement where the operating
   system supports directory file descriptors.
 - Remove the temporary file on failure if it still exists.
 
-`FixtureFile.save()` should delegate to this helper by converting the fixture
-to a dictionary and passing the destination path. `FixtureFile.load()` can
-remain a plain JSON read because atomic replacement means readers either see
-the old complete file or the new complete file.
+`FixtureFile.save()` delegates to this helper by converting the fixture to a
+dictionary and passing the destination path. `FixtureFile.load()` remains a
+plain JSON read because atomic replacement means readers either see the old
+complete file or the new complete file.
+
+### Atomic JSON persistence: implementation status
+
+Roadmap items `14.1.1` and `14.1.2` are implemented. `cmd_mox._atomic_write`
+provides the private helpers; nothing from the module is exported from
+`cmd_mox/__init__.py`.
+
+The public shape is:
+
+```python
+type JsonInput = (
+    bool | int | float | str
+    | collections.abc.Sequence[JsonInput]
+    | collections.abc.Mapping[str, JsonInput]
+    | None
+)
+
+class AtomicWriteStage(enum.StrEnum): ...
+
+def atomic_write_json(
+    path: Path, payload: JsonInput, *, mode: int = 0o600
+) -> None: ...
+
+def atomic_write_bytes(path: Path, data: bytes, *, mode: int = 0o600) -> None: ...
+```
+
+`JsonInput` is covariant so ordinary `dict[str, str]` arguments type-check; an
+invariant `JsonValue` alias would reject them. The round-trip domain is
+expressed in the tests instead.
+
+The commit protocol is a fixed sequence of nine named stages in
+`AtomicWriteStage`: `serialize`, `prepare_directory`, `create_temporary`,
+`apply_mode`, `write`, `sync_file`, `close_temporary`, `replace`, and
+`sync_directory`. Each stage is a private module function wrapping one
+operating-system call, so a test can replace a single stage inside this module
+instead of patching `os` globally. `POST_REPLACE_STAGES` contains only
+`sync_directory`; a failure in it means the target already holds the new
+document.
+
+`AtomicWriteError` is an `OSError` subclass carrying `path`, `stage`, and
+`target_replaced`. It chains its cause with `raise ... from ...`, copies the
+cause's `errno`, and sets `filename` to the target so existing `ENOSPC`
+handling keeps working. Its message states whether the previous file is intact
+or the target was replaced. A `serialize` stage means the payload itself was
+invalid and the filesystem was not touched.
+
+`BaseException` subclasses such as `KeyboardInterrupt` trigger the same cleanup
+and then propagate unchanged. A cleanup that also fails is attached with
+`BaseException.add_note(...)` and never masks the primary error.
+
+Deviations from the first draft of this section, all deliberate:
+
+- The temporary file is created with `tempfile.mkstemp` in the target's
+  directory, using the prefix `.<name>.` and the suffix `.tmp`. A fixed name
+  opened with `O_CREAT | O_TRUNC` would let two writers interleave bytes in one
+  temporary file; unique names make concurrent writers last-writer-wins but
+  never torn. The name stem is truncated to 64 bytes of its UTF-8 encoding
+  without splitting a character, so multibyte names stay within `NAME_MAX`.
+- The requested mode is applied to the temporary file before any content is
+  written, including execute bits for the future `14.5.1` helpers. A mode must
+  be an integer from `0` to `0o777` that grants owner read and write; without
+  owner write the file becomes read-only on Windows and the next replacement
+  onto it fails, and without owner read the writer cannot read back what it
+  wrote. Where `os.fchmod` is unavailable (Windows on Python 3.12), the helper
+  falls back to `os.chmod`.
+- Serialization uses
+  `json.dumps(payload, indent=2, ensure_ascii=True, allow_nan=False)` plus one
+  newline, encoded as UTF-8, preserving mapping insertion order. On POSIX that
+  reproduces the bytes `FixtureFile.save()` wrote before this change, so no
+  committed fixture is reformatted; on Windows the previous text-mode write
+  emitted CRLF and the helper now emits LF. `ensure_ascii` serializes lone
+  surrogates as `\udcXX` escapes instead of failing, and `allow_nan=False`
+  rejects values that are not valid JSON.
+- Content is written with `os.write` in a loop rather than a buffered file
+  object, so no user-space buffer needs a separate flush. The write is binary,
+  so the bytes are identical on every platform: on Windows this differs from
+  the former `Path.write_text(...)`, which translated `\n` to `\r\n`. Fixtures
+  now use LF newlines everywhere, as Git expects.
+- `mode` is keyword-only to prevent positional confusion with the payload.
+- Unsupported directory synchronization is an explicit skip: `PermissionError`
+  when opening the parent, and `EINVAL`, `ENOTSUP`, or `EOPNOTSUPP` from its
+  `fsync`, are logged once at debug level and treated as success. Those errors
+  mean "not supported here", not "the write is in doubt", and raising for them
+  would break fixture saves on WSL drvfs, Docker Desktop bind mounts, virtiofs,
+  and some FUSE mounts. Genuine I/O errors still raise. macOS `F_FULLFSYNC` is
+  not used.
+
+The temporary descriptor's ownership leaves the protocol before the close is
+attempted. On Linux a failed `close` still releases the descriptor, so cleanup
+never retries it: a retry could close an unrelated descriptor that another
+thread reused in the meantime. Cleanup still closes a descriptor whose earlier
+stage failed, and a directory descriptor's close error never replaces the
+synchronization error that is already propagating.
+
+Durability boundary: the commit protocol synchronizes the target's own
+directory. Parent directories created by the same call are not synchronized
+individually, so a power loss immediately after a save that created a missing
+ancestor chain can lose that ancestor's entry on a filesystem that has not
+otherwise persisted it. The helper promises that readers see a complete
+document and that the target's own directory is durable; it does not promise
+crash durability for a newly created ancestor chain.
+
+Replacement semantics: `os.replace` replaces the link itself when the target is
+a symbolic link, rather than writing through it. Because replacement creates a
+new inode, it also breaks hard links and drops the previous file's ownership,
+group, access control lists, and extended attributes. That matches
+`python-atomicwrites` and the `fake-uv.py` prior art; writing through a link
+would put the temporary file in a different directory from the file it
+replaces. A symlinked parent directory is unaffected.
+
+On Windows, `os.replace` fails with `PermissionError` while another process
+holds the target open without delete sharing, which antivirus scanners,
+indexers, and parallel test workers commonly do. The helper retries only that
+error, with `RetryConfig(max_attempts=5, retry_delay=0.05)` from
+`cmd_mox.fs_retry`. POSIX has no such failure, so it does not retry.
+
+A hard kill after the temporary file is closed but before the rename leaves one
+orphan named `.<name>.<random>.tmp` beside the target. The prefix truncates a
+long name to 64 bytes, so the target name may not appear in full; the reliable
+shape is "dot-prefixed and `.tmp`-suffixed", which the recommended `.*.tmp`
+`.gitignore` line covers. A sweep is deferred to roadmap item `14.2`, where the
+lock makes removal safe.
+
+Cost: each successful write performs two `fsync` calls, about 16 ms on this
+host's ext4, against about 0.14 ms without `fsync`. That is acceptable for one
+fixture save per test. The state store in `14.3` may write once per command
+invocation and should measure again.
 
 ### Persistence exceptions
 
@@ -227,6 +357,10 @@ Required behaviour:
 - Write through `atomic_write_json(...)`.
 - Keep the state schema caller-owned. CmdMox should not impose a global schema
   on command-specific fake state.
+- Canonical key order is the caller's responsibility: the atomic helper
+  preserves insertion order and does not sort keys.
+- Take locks on a sibling lock file, never on the JSON target, whose inode is
+  replaced on every write.
 - Support a path namespace that can be rooted in a test temporary directory or
   in CmdMox-managed replay state.
 
@@ -280,10 +414,11 @@ CmdMox can provide small helper functions rather than a side-effect framework:
 - `create_shim(path, target, mode=0o755)` for simple script shims
 
 These helpers should use the same parent-directory creation and atomic-write
-policy where possible. Executable helpers must set execute bits after the
-content has been written and replaced. Cleanup remains the test's
-responsibility unless the helper receives an explicit CmdMox-managed cleanup
-registry in a later phase.
+policy where possible. Executable helpers apply their execute bits to the
+temporary file before it is renamed, so the file appears at its final path
+already executable and is never briefly present without the requested mode.
+Cleanup remains the test's responsibility unless the helper receives an
+explicit CmdMox-managed cleanup registry in a later phase.
 
 ## Security and portability
 

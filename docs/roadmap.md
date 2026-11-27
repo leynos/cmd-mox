@@ -422,20 +422,24 @@ changing the public record/replay API. The outcome informs every later helper
 that writes JSON state. See `cmd-mox-fake-capabilities-design.md` §§Problem,
 Goals, and Atomic JSON persistence.
 
-- [ ] 14.1.1. Implement internal
+- [x] 14.1.1. Implement internal
   `atomic_write_json(path, payload, mode=0o600)` for fixture and state files.
   - Use same-directory temporary files, explicit UTF-8 JSON serialization,
     file flush, file `fsync`, `os.replace`, parent-directory `fsync` where
     supported, and temporary-file cleanup on failure.
-  - Success: interrupted or failing writes preserve the previous complete JSON
-    file, and successful writes leave owner-restricted files on POSIX.
-- [ ] 14.1.2. Route `FixtureFile.save()` through `atomic_write_json(...)`
+  - Success: interrupted or failing writes before the rename preserve the
+    previous complete JSON file, a post-rename directory-sync failure reports
+    `target_replaced` without rollback, and successful writes leave
+    owner-restricted files on POSIX.
+- [x] 14.1.2. Route `FixtureFile.save()` through `atomic_write_json(...)`
   without changing `FixtureFile.load()` or the fixture schema.
   - Requires 14.1.1.
   - See `python-native-command-mocking-design.md` §9.5.3 and
     `cmd-mox-fake-capabilities-design.md` §Atomic JSON persistence.
   - Success: existing record-mode fixture round-trips still pass, and new
-    failure-injection tests prove old fixture contents survive failed writes.
+    failure-injection tests prove old fixture contents survive writes that
+    fail before the rename; a post-rename failure reports `target_replaced`
+    and does not roll back.
 
 ### 14.2. Add a reusable lock-with-timeout utility
 

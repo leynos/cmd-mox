@@ -603,6 +603,43 @@ Hypothesis complements the snapshot tests above rather than replacing them:
 snapshots pin exact serialized output, while properties assert relations that
 should hold for every generated input.
 
+## Atomic file persistence
+
+Internal JSON and state writers must call
+`cmd_mox._atomic_write.atomic_write_json` or `atomic_write_bytes` rather than
+`Path.write_text` or `os.replace` directly. The module is private: nothing in
+it is exported from `cmd_mox`.
+
+The helper serializes before touching the filesystem, writes a unique
+`.<name>.<random>.tmp` sibling, applies the requested mode with `fchmod` before
+any content, calls `os.fsync`, renames with `os.replace`, and syncs the parent
+directory where the platform supports it. A failure raises `AtomicWriteError`,
+an `OSError` subclass carrying `path`, `stage`, and `target_replaced`, and
+chains the original cause. Failures before the rename remove the temporary
+file; a failure after it never rolls back.
+
+Test conventions introduced with the helper:
+
+- Assert POSIX permissions with `stat.S_IMODE` and skip Windows explicitly.
+  The umask fixture sets the process umask for one test and restores it in
+  `finally`; `os.umask` is process-wide, so never leave it changed.
+- Inject faults through the module-local stage functions
+  (`cmd_mox._atomic_write._replace`, `_write_all`, and so on), never by patching
+  `os`, `tempfile`, or `pathlib` globally. The fault table in
+  `cmd_mox/unittests/test_atomic_write_faults.py` is keyed by
+  `AtomicWriteStage`; a new stage without a fault fails the suite.
+- Create a `tempfile.TemporaryDirectory()` per example inside a Hypothesis
+  test rather than using the function-scoped `tmp_path` fixture, which
+  Hypothesis rejects. Declare such properties as module-level functions: a
+  bound method is a new executor per instance, which trips Hypothesis's
+  `differing_executors` health check under repeated runs.
+- Launch child processes with `python -I` and an explicit `sys.path` entry for
+  the repository root, so a stray `json.py` in the temporary working directory
+  can never shadow a standard-library module.
+- `tests/test_atomic_write_process_boundary.py` skips when `mutmut` is
+  imported, because the mutation trampoline cannot be imported from a child
+  process outside the sandbox root.
+
 ## Shim path filtering
 
 `cmd_mox._shim_bootstrap._should_remove_path_entry` is the boolean query behind
