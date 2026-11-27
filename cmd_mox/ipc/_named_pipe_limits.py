@@ -1,30 +1,27 @@
-"""Resource bounds and bounded worker events for the named-pipe transport.
+"""Lifetime bounds and bounded worker events for the named-pipe transport.
 
-This module holds the concurrency, message-size, and lifetime limits applied by
-:mod:`cmd_mox.ipc.named_pipe`, the deadline arithmetic that enforces them, and
-the vocabulary used to report them through the observability seam. It
-deliberately imports no ``pywin32`` module, so the limits are importable and
-testable on any platform.
+This module holds the client-lifetime limit, the deadline arithmetic that
+enforces it, and the vocabulary used to report worker transitions through the
+observability seam. The concurrency and message-size bounds themselves are
+transport-neutral and live in :mod:`cmd_mox.ipc._limits`; they are re-exported
+here so existing named-pipe imports keep working. This module deliberately
+imports no ``pywin32`` module, so it is importable and testable on any
+platform.
 """
 
 from __future__ import annotations
 
 import dataclasses as dc
 import logging
-import threading
 import time
 import typing as typ
 
 from . import _observability
+from ._limits import MAX_ACTIVE_CLIENTS, ClientSlot, acquire_client_slot
 
 if typ.TYPE_CHECKING:
     import collections.abc as cabc
-
-# Upper bound on named-pipe clients served concurrently. Each admitted client
-# owns an OS thread and a pipe instance, so this caps both. Sixty-four is well
-# above the handful of shims a realistic run has in flight, yet small enough
-# that a connection flood cannot exhaust the process's thread or handle budget.
-MAX_ACTIVE_CLIENTS: typ.Final[int] = 64
+    import threading
 
 # Wall-clock budget for reading one complete request from a connected client.
 # A shim writes its request immediately after connecting, so thirty seconds is
@@ -104,45 +101,6 @@ class PipeReadCancelled(Exception):  # ruff: ignore[error-suffix-on-exception-na
         self.timed_out = timed_out
 
 
-class ClientSlot:
-    """One admitted-client permit, returned to the pool at most once.
-
-    The accept loop acquires a permit immediately before spawning a worker and
-    hands the resulting slot to that worker, whose ``finally`` block releases
-    it. When the thread never starts, the accept loop releases the slot
-    instead. Because :meth:`release` latches under a lock, no exit path can
-    release twice and none can be missed.
-    """
-
-    __slots__ = ("_lock", "_released", "_semaphore")
-
-    def __init__(self, semaphore: threading.BoundedSemaphore) -> None:
-        """Bind the slot to the shared semaphore, starting unreleased."""
-        self._semaphore = semaphore
-        self._released = False
-        self._lock = threading.Lock()
-
-    @property
-    def released(self) -> bool:
-        """Whether the permit has already been returned.
-
-        Returns
-        -------
-        bool
-            ``True`` once :meth:`release` has run.
-        """
-        with self._lock:
-            return self._released
-
-    def release(self) -> None:
-        """Return the permit, ignoring repeated calls."""
-        with self._lock:
-            if self._released:
-                return
-            self._released = True
-        self._semaphore.release()
-
-
 def remaining_seconds(deadline: float) -> float | None:
     """Return the time left before *deadline*.
 
@@ -204,19 +162,6 @@ def join_threads_before(
             return False
         thread.join(remaining)
     return True
-
-
-def acquire_client_slot(semaphore: threading.BoundedSemaphore) -> ClientSlot | None:
-    """Reserve one permit from *semaphore* without blocking.
-
-    Returns
-    -------
-    ClientSlot | None
-        The reserved permit, or ``None`` when the limit has been reached.
-    """
-    if not semaphore.acquire(blocking=False):
-        return None
-    return ClientSlot(semaphore)
 
 
 __all__ = [

@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses as dc
 import errno
 import logging
 import socketserver
 import threading
 import time
 import typing as typ
-from functools import cache
+from functools import cache, partial
 
 from . import _observability
 from ._deadline import _compute_deadline, _remaining_time
+from ._limits import (
+    MAX_ACTIVE_CLIENTS,
+    MAX_MESSAGE_SIZE,
+    MessageTooLargeError,
+    acquire_client_slot,
+)
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -21,7 +28,12 @@ from ._server_core import (
     _request_pipeline,
 )
 from ._unix_server_base import _selection_mode, resolve_unix_server_base
-from .socket_utils import cleanup_stale_socket, wait_for_socket
+from .socket_utils import (
+    ReadOptions,
+    cleanup_stale_socket,
+    read_until_eof,
+    wait_for_socket,
+)
 
 logger = logging.getLogger(__name__)
 _CLIENT_DISCONNECT_ERRNOS = frozenset({
@@ -32,31 +44,56 @@ _CLIENT_DISCONNECT_ERRNOS = frozenset({
 })
 
 type _ConnectionOutcome = typ.Literal[
-    "receive_timeout", "receive_closed", "response_dropped"
+    "receive_timeout",
+    "receive_closed",
+    "response_dropped",
+    "read_size_rejected",
+    "rejected",
 ]
 type _ConnectionErrorCategory = typ.Literal[
-    "ConnectionClosed", "ConnectionError", "OSError", "TimeoutError"
+    "ConnectionClosed",
+    "ConnectionError",
+    "OSError",
+    "TimeoutError",
+    "MessageTooLargeError",
+    "ClientLimitReached",
+    "ThreadStartFailed",
 ]
 
 _CONNECTION_OPERATION: typ.Final[str] = "ipc.server.connection"
 _CONNECTION_EVENT_MESSAGE: typ.Final[str] = "IPC server connection outcome"
 
 
-def _emit_connection_outcome(
-    outcome: _ConnectionOutcome,
-    error_category: _ConnectionErrorCategory,
-    started: float,
-    correlation_id: str | None = None,
-) -> None:
-    """Emit bounded metadata for a closed or stalled Unix connection."""
+@dc.dataclass(frozen=True, slots=True)
+class _ConnectionReport:
+    """Bounded metadata describing one refused, stalled, or completed connection.
+
+    The fields are exactly the dimensions the connection event carries, so a
+    call site states which outcome carries which detail while the emitter stays
+    a single-argument function that cannot drift from the event shape.
+    """
+
+    outcome: _ConnectionOutcome
+    error_category: _ConnectionErrorCategory
+    started: float | None = None
+    correlation_id: str | None = None
+    message_size: int | None = None
+
+
+def _emit_connection_outcome(report: _ConnectionReport) -> None:
+    """Emit bounded metadata for a stalled, refused, or completed connection."""
+    duration_ms = (
+        None if report.started is None else _observability.elapsed_ms(report.started)
+    )
     _observability.emit(
         _observability.IPCEvent(
             operation=_CONNECTION_OPERATION,
             transport="unix",
-            outcome=outcome,
-            error_category=error_category,
-            duration_ms=_observability.elapsed_ms(started),
-            correlation_id=correlation_id,
+            outcome=report.outcome,
+            error_category=report.error_category,
+            duration_ms=duration_ms,
+            message_size=report.message_size,
+            correlation_id=report.correlation_id,
         ),
         logger=logger,
         message=_CONNECTION_EVENT_MESSAGE,
@@ -83,8 +120,10 @@ def _connection_error_category(
 
 
 if typ.TYPE_CHECKING:
+    import socket
     from pathlib import Path
 
+    from ._limits import ClientSlot
     from ._observability import _BackendErrorCategory as _ErrorCategory
     from ._unix_server_base import _SelectionMode
 
@@ -347,38 +386,57 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         bytes
             The request payload received before the connection reaches EOF.
         """
-        chunks: list[bytes] = []
-        while True:
-            self.request.settimeout(
-                _remaining_time(self._read_deadline, clock=self._clock)
-            )
-            chunk = self.request.recv(64 * 1024)
-            if not chunk:
-                return b"".join(chunks)
-            chunks.append(chunk)
+        return read_until_eof(
+            self.request,
+            self._read_deadline,
+            ReadOptions(
+                max_bytes=MAX_MESSAGE_SIZE,
+                remaining_time=partial(_remaining_time, clock=self._clock),
+            ),
+        )
 
     def handle(self) -> None:  # pragma: no cover - exercised via behaviour tests
         """Handle one Unix connection and record bounded failure events."""
         started = time.perf_counter()
         try:
             raw = self._read_request_payload()
+        except MessageTooLargeError as exc:
+            # The payload is already dropped, so only its size is safe to
+            # report. Returning without a response closes the connection, and
+            # the client sees EOF rather than a misleading error frame.
+            _emit_connection_outcome(
+                _ConnectionReport(
+                    "read_size_rejected",
+                    "MessageTooLargeError",
+                    started,
+                    message_size=exc.received,
+                )
+            )
+            logger.info("IPC request rejected for exceeding the size limit")
+            return
         except TimeoutError:
-            _emit_connection_outcome("receive_timeout", "TimeoutError", started)
+            _emit_connection_outcome(
+                _ConnectionReport("receive_timeout", "TimeoutError", started)
+            )
             logger.info("IPC connection timed out while receiving request")
             return
         except OSError as exc:
             _emit_connection_outcome(
-                "receive_closed", _connection_error_category(exc), started
+                _ConnectionReport(
+                    "receive_closed", _connection_error_category(exc), started
+                )
             )
             logger.info("IPC connection closed while receiving request")
             return
         result = _request_pipeline(self.server.outer, raw, "unix")  # type: ignore[attr-defined, ty:unresolved-attribute]
         if result.response_bytes is None:
             _emit_connection_outcome(
-                "receive_closed",
-                "ConnectionClosed",
-                started,
-                result.correlation_id,
+                _ConnectionReport(
+                    "receive_closed",
+                    "ConnectionClosed",
+                    started,
+                    result.correlation_id,
+                )
             )
             return
         try:
@@ -389,10 +447,12 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             self.wfile.flush()
         except OSError as exc:
             _emit_connection_outcome(
-                "response_dropped",
-                _connection_error_category(exc),
-                started,
-                result.correlation_id,
+                _ConnectionReport(
+                    "response_dropped",
+                    _connection_error_category(exc),
+                    started,
+                    result.correlation_id,
+                )
             )
             if exc.errno in _CLIENT_DISCONNECT_ERRNOS:
                 logger.debug("IPC client disconnected before reply was written")
@@ -428,8 +488,51 @@ def _inner_server_cls() -> _InnerServerClass:
         def __init__(self, socket_path: Path, outer: IPCServer) -> None:
             """Bind the server to its path and public IPC handler owner."""
             self.outer = outer
+            self._slots_lock = threading.Lock()
+            self._slots: dict[socket.socket, ClientSlot] = {}
+            # A fresh semaphore per backend keeps a restarted server's permits
+            # independent of any worker that outlived the previous instance.
+            self._admission = threading.BoundedSemaphore(MAX_ACTIVE_CLIENTS)
             super().__init__(str(socket_path), _IPCHandler)
             self.daemon_threads = True
+
+        def process_request(
+            self, request: socket.socket, client_address: object
+        ) -> None:
+            """Admit *request* within the concurrency bound, or refuse it."""
+            slot = acquire_client_slot(self._admission)
+            if slot is None:
+                _emit_connection_outcome(
+                    _ConnectionReport("rejected", "ClientLimitReached")
+                )
+                self.shutdown_request(request)
+                return
+            with self._slots_lock:
+                self._slots[request] = slot
+            try:
+                super().process_request(request, client_address)
+            except BaseException:
+                # No worker was started, so nothing else will return this
+                # permit; the accept loop still closes the request socket.
+                self._release_request_slot(request)
+                _emit_connection_outcome(
+                    _ConnectionReport("rejected", "ThreadStartFailed")
+                )
+                raise
+
+        def shutdown_request(self, request: socket.socket) -> None:
+            """Close *request*, always returning its admission permit."""
+            try:
+                super().shutdown_request(request)
+            finally:
+                self._release_request_slot(request)
+
+        def _release_request_slot(self, request: socket.socket) -> None:
+            """Return the permit attached to *request*, if one is still held."""
+            with self._slots_lock:
+                slot = self._slots.pop(request, None)
+            if slot is not None:
+                slot.release()
 
     return typ.cast(
         "_InnerServerClass",
