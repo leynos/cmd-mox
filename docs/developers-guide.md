@@ -560,21 +560,43 @@ configuration.
 
 The development dependency group includes
 [syrupy](https://github.com/syrupy-project/syrupy), which provides the
-`snapshot` fixture used by the IPC model and server callback tests. These tests
-compare serialized payloads with the tracked `.ambr` files in
-`tests/__snapshots__`.
+`snapshot` fixture used by the IPC model and server callback tests, and by the
+replay tests. These tests compare serialized payloads and user-visible messages
+with the tracked `.ambr` files in `tests/__snapshots__` and
+`cmd_mox/unittests/__snapshots__`.
 
 Run the snapshot tests with the normal test command:
 
 ```bash
-uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py
+uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py \
+  cmd_mox/unittests/test_fixture_file.py \
+  cmd_mox/unittests/test_replay_session_reporting.py \
+  cmd_mox/unittests/test_controller_replay.py
 ```
+
+The `cmd_mox/unittests` snapshots are:
+
+- `cmd_mox/unittests/__snapshots__/test_fixture_file.ambr` — serialized
+  fixture documents at the current and legacy schema versions, compared with the
+  `to_dict()` output.
+- `cmd_mox/unittests/__snapshots__/test_replay_session_reporting.ambr` — the
+  `verify_all_consumed()` message for the zero-argument, multi-argument, and
+  three-unconsumed cases.
+- `cmd_mox/unittests/__snapshots__/test_controller_replay.ambr` — the
+  `UnexpectedCommandError` text for a strict miss.
+
+Messages under snapshot must name field paths and JSON type names only: no
+fixture paths, temporary directories, or `repr` of user-supplied values.
+`make lint` runs `ambrleaks` over `tests` and `cmd_mox/unittests` to enforce
+that.
 
 When an intentional payload change requires new expected output, update the
 snapshots explicitly and review the resulting `.ambr` diff:
 
 ```bash
-uv run pytest tests/test_ipc_models_unit.py tests/test_ipc_server_callbacks.py \
+uv run pytest cmd_mox/unittests/test_fixture_file.py \
+  cmd_mox/unittests/test_replay_session_reporting.py \
+  cmd_mox/unittests/test_controller_replay.py \
   --snapshot-update
 ```
 
@@ -602,6 +624,69 @@ uv run pytest cmd_mox/unittests/test_command_double_matches.py
 Hypothesis complements the snapshot tests above rather than replacing them:
 snapshots pin exact serialized output, while properties assert relations that
 should hold for every generated input.
+
+### Replay properties, oracles, and mutants
+
+The replay layer carries four kinds of generated test, all built on
+`cmd_mox/unittests/_replay_helpers.py`:
+
+- **Round-trip property** (`test_fixture_round_trip.py`): generated fixtures the
+  writer can emit survive `to_dict()`/`from_dict()` and `save()`/`load()`
+  unchanged. Hypothesis samples that space rather than exhausting every
+  possible output. A checked-in golden fixture carrying the legacy
+  two-component schema version proves the reader still accepts older output and
+  normalizes it.
+- **Oracle property** (`test_invocation_matcher_properties.py`): an independent
+  reimplementation of best-fit selection,
+  `_replay_helpers.oracle_find_match()`, must agree with
+  `InvocationMatcher.find_match()` for every generated scenario. The oracle is
+  deliberately written from the design document rather than from the matcher.
+- **State machine** (`test_replay_session_state_machine.py`): a
+  `RuleBasedStateMachine` drives matches and verifications and models the
+  consumed set itself, so exhaustion, partial verification, and the reported
+  indices are predicted rather than observed. The encoding examples that pin
+  `save()`/`load()` to UTF-8 live in `test_fixture_encoding.py`.
+
+- **Seeded mutants**: hand-built variants of the selection loop (tie-break by
+  list index, ignoring the consumed set, swapping the first two score
+  components) run through the same `check_find_match()` on named witnesses.
+  Each must be rejected. Mutants are never run against generated inputs:
+  Hypothesis keys its example database per test function, so a mutant run would
+  pollute the real property, and failing generated runs shrink and threaten the
+  per-test timeout. A witness is deterministic and cheap.
+
+Each property has a non-vacuity control. `classify_scenario()` labels how the
+winner beat the runner-up (`won on stdin`, `won on env pairs`, and so on), one
+witness per label asserts the label and oracle agreement, and one
+`hypothesis.find()` per label proves the scenario strategy can reach it.
+`classify_fixture()` does the same for the round-trip property's coverage
+classes.
+
+Two Hypothesis details matter when editing these tests. A positional
+`@given(strategy)` fills the _trailing_ positional parameters, so pass
+strategies by keyword when the test also takes a pytest fixture. And a
+`hypothesis.find()` call only uses `max_examples=2000` when no `settings`
+argument is supplied; passing one inherits the profile's default budget of 100.
+
+## Replay test helpers
+
+`cmd_mox/unittests/_replay_helpers.py` is shared scaffolding, not library code.
+It has no `test_` prefix, so pytest does not collect it, and it is excluded
+from the Skylos and mutation scans. It exports:
+
+- `RecordedInvocationSpec` and `ReplayScenario` — frozen dataclasses describing
+  one recording's overrides and one matching scenario.
+- `make_recorded_invocation()`, `make_invocation()`, and
+  `write_fixture_file()` — builders with replay-test defaults.
+- `recorded_invocations()`, `fixture_metadata()`, `scrubbing_rules()`,
+  `fixture_files()`, and `replay_scenarios()` — Hypothesis strategies.
+- `oracle_find_match()`, `classify_scenario()`, and `check_find_match()` — the
+  independent oracle, its coverage classifier, and the shared assertion helper
+  that also checks the matcher mutates neither input.
+
+Because the module is not a `test_*.py` file, it does not receive the test
+per-file ignores: keep functions within `max-args = 4`, avoid bare `assert`,
+and give every helper a docstring.
 
 ## Shim path filtering
 

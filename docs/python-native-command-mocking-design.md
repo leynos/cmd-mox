@@ -2839,9 +2839,12 @@ classDiagram
 
 Matching modes:
 
-- **Strict:** Command, args, stdin, and env_subset must match exactly for a
-  recording to qualify. When multiple recordings qualify, the matcher selects
-  the most specific one using a lexicographic score.
+- **Strict:** Command and args must be equal, stdin must be equal, and every
+  `env_subset` pair must be present in the live environment with the same
+  value. A missing live key never satisfies a pair, so a recording whose
+  `env_subset` names a variable the live invocation does not carry does not
+  qualify; extra live keys are allowed. When multiple recordings qualify, the
+  matcher selects the most specific one using a lexicographic score.
 - **Fuzzy:** Command and args must match; stdin and env are optional. When
   multiple recordings qualify, the matcher prefers candidates with matching
   stdin and more matching environment pairs.
@@ -2851,13 +2854,15 @@ Best-fit scoring:
 The matcher computes a stats tuple
 `(stdin_match, matching_env_pairs, env_subset_size)` for each compatible
 recording and selects the highest-scoring candidate. When two candidates have
-identical stats, the one with the lower `sequence` value wins. This ensures
-deterministic selection that prioritizes:
+identical stats, the one with the lower `sequence` value wins; when the
+`sequence` values are also equal, the earlier position in the fixture's
+`recordings` list wins. This ensures deterministic selection that prioritizes:
 
 1. Exact stdin match (True > False)
 2. Number of matching environment pairs (higher is better)
 3. Size of env_subset (higher indicates more specificity)
 4. Lower recording `sequence` value (tie-breaker)
+5. Earlier position in the recordings list (final tie-break)
 
 #### 9.5.6 Record Module Class Relationships
 
@@ -3272,6 +3277,12 @@ This ordering keeps replay completeness as part of verification rather than
 cleanup. `verify()` still enters its existing `finally` block afterwards, so
 IPC teardown and recording-session finalization run even when
 `verify_all_consumed()` raises `VerificationError`.
+
+Iteration stops at the first double whose fixture has unconsumed recordings, so
+when several doubles are incomplete `verify()` reports only the earliest
+registered one. That is pinned by
+`test_controller_replay.py::TestControllerReplayIndependence::test_verify_reports_the_first_registered_double`
+rather than changed here.
 
 One subtle consequence is that fuzzy replay remains additive at invocation time
 but not at verification time. A fuzzy mismatch can fall back to the spy's
@@ -3752,6 +3763,18 @@ misses fall back to the spy's configured behaviour.
   replay much less useful for tests that only fixture a subset of command
   variants
 
+**Observed deviation (2026-11-25):** over the IPC transport the strict miss
+does not fail the test by itself. `_server_core._execute_request` converts the
+handler's `UnexpectedCommandError` into a `Response` with the message on stderr
+and exit status 1, so the shim exits 1 while verification reports nothing about
+that miss, because it was raised before the invocation was journalled.
+Verification can still fail for an unrelated reason — another recording left
+unconsumed, or another verifier failing — and passes only when every other
+check passes, so a strict miss with all recordings consumed is invisible to
+`CmdMox.verify()`. The behaviour is pinned by `features/controller.feature`
+("exhausted strict replay fails the shim run but not verification") and left
+for roadmap item 12.2.7 to change.
+
 #### 9.10.16 Opt-in fail-fast handling for mismatched mock calls (2026-11-12)
 
 **Decision:** Add an opt-in `fail_fast` mode for mocks. When enabled, a mock
@@ -3813,6 +3836,18 @@ this version.
 **Rationale:** Three components match the semantic-version core used by the
 fixture schema while preserving compatibility with existing two-component
 fixtures.
+
+#### 9.10.18 UTF-8 fixture encoding
+
+**Decision:** `FixtureFile.save()` writes UTF-8 and `FixtureFile.load()` reads
+UTF-8 while tolerating one leading byte order mark (`utf-8-sig`).
+
+Rationale: RFC 8259 section 8.1 requires UTF-8 for JSON text exchanged between
+systems and permits parsers to ignore a byte order mark. Reading with the
+process locale, the previous behaviour, made the same fixture parse or fail
+depending on the machine, and a byte order mark written by some Windows editors
+made `json.loads` raise `JSONDecodeError`. `json.dumps` keeps its default
+`ensure_ascii=True`, so ASCII-only fixtures are byte-for-byte unchanged.
 
 ### 9.11 Versioning and Forward Compatibility
 

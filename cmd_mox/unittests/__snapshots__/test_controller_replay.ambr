@@ -1,0 +1,4 @@
+# serializer version: 1
+# name: TestControllerReplayExhaustion.test_strict_exhaustion_raises_with_the_invocation_text
+  'No fixture recording matches: git status'
+# ---

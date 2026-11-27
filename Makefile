@@ -182,7 +182,7 @@ lint: build yamllint actionlint interrogate skylos duplication ## Run linters
 	$(RUFF) check
 	$(PYLINT) $(PYLINT_TARGETS)
 	$(DF12_PYLINT) --rcfile=pylintrc-df12.toml $(PYLINT_TARGETS)
-	$(AMBRLEAKS) tests
+	$(AMBRLEAKS) tests cmd_mox/unittests
 	+$(MAKE) spelling
 
 skylos: ## Detect dead production code

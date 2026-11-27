@@ -1,0 +1,21 @@
+# serializer version: 1
+# name: TestVerifyAllConsumedMessage.test_verify_message[multi-argument]
+  '''
+  Not all fixture recordings were consumed during replay (1 unconsumed):
+    [0] git status --short
+  '''
+# ---
+# name: TestVerifyAllConsumedMessage.test_verify_message[three-unconsumed]
+  '''
+  Not all fixture recordings were consumed during replay (3 unconsumed):
+    [0] git status
+    [1] git commit -m msg
+    [2] curl example.com
+  '''
+# ---
+# name: TestVerifyAllConsumedMessage.test_verify_message[zero-argument]
+  '''
+  Not all fixture recordings were consumed during replay (1 unconsumed):
+    [0] true 
+  '''
+# ---

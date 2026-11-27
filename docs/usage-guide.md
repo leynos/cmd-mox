@@ -908,6 +908,21 @@ The constructor accepts:
 Calling `load()` a second time raises `LifecycleError`. Calling `match()` or
 `verify_all_consumed()` before `load()` also raises `LifecycleError`.
 
+### Fixture file encoding
+
+Fixture files are JSON written and read as UTF-8, whatever the process locale,
+and a leading UTF-8 byte order mark is tolerated. Malformed JSON and
+undecodable bytes raise their usual `json.JSONDecodeError` and
+`UnicodeDecodeError`. Field types are validated as described under
+[fixture validation policy](python-native-command-mocking-design.md#934-fixture-validation-policy);
+values are never coerced, so a hand-edited `exit_code: "1"` is rejected rather
+than converted to `1`. The writer escapes non-ASCII values, so its output is
+pure ASCII; a file whose bytes are raw non-ASCII UTF-8 loads here on any host,
+but an older release reads it with the locale encoding, and a legacy file in
+another single-byte encoding such as `cp1252` may fail to decode or decode to
+different text, so it must be converted from that encoding. See the
+[fixture encoding migration note](fixture-encoding-migration-note.md).
+
 ### Matching invocations
 
 ```python
@@ -945,6 +960,18 @@ consumed and will not match again.
 Stdin and environment differences are ignored, which is useful when those
 fields contain non-deterministic values such as timestamps or UUIDs.
 
+A strict miss has one sharp edge. When the replay-backed double is reached
+through the shim, the `UnexpectedCommandError` is turned into a command result:
+the command exits with status 1 and prints
+`No fixture recording matches: <command>` on stderr. `CmdMox.verify()` reports
+nothing about that miss, because the invocation was never journalled.
+Verification can still fail for another reason — a different recording left
+unconsumed, or another verifier failing — and it passes only when every other
+check passes too. A test that compares only the exit status therefore observes
+the miss, while a test that calls `verify()` alone does not. Roadmap item
+12.2.7 covers making `verify()` report these misses alongside unconsumed
+recordings.
+
 ```python
 # Fuzzy mode: matches on command + args only
 session = ReplaySession("fixtures/git.json", strict_matching=False)
@@ -963,6 +990,7 @@ env_subset). When multiple recordings qualify, the matcher prefers the one with:
 1. More matching environment pairs
 2. Larger `env_subset` (indicating greater specificity)
 3. Lower recording `sequence` value (if scores tie)
+4. Earlier position in the fixture's `recordings` list (if `sequence` ties too)
 
 **In fuzzy mode**, only command and args are required. Among qualifying
 recordings, the matcher prefers the one with:
@@ -971,6 +999,11 @@ recordings, the matcher prefers the one with:
 2. More matching environment pairs
 3. Larger `env_subset`
 4. Lower recording `sequence` value (if scores tie)
+5. Earlier position in the fixture's `recordings` list (if `sequence` ties too)
+
+The `sequence` tie-break compares recorded values, not list position, so a
+reordered list does not change which recording is served first. The list order
+only decides when the `sequence` values are equal.
 
 This ensures that when the same command is recorded with different contexts
 (for example, `git status` with and without environment variables), replay

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import json
 import typing as typ
 
 import pytest
@@ -446,3 +447,151 @@ def replay_result_matches_stdin(replay_match_result: Response | None) -> None:
 def other_recording_unconsumed(replay_session: ReplaySession) -> None:
     """Assert that index 0 (the other recording) was not consumed."""
     assert not replay_session.is_consumed(0), "Assertion failed"
+
+
+def _parse_quoted_list(text: str) -> list[str]:
+    """Split a comma-separated list of quoted Gherkin values.
+
+    Returns
+    -------
+    list[str]
+        The unquoted values, in order.
+    """
+    return [part.strip().strip('"') for part in text.split(",")]
+
+
+@given(
+    "a fixture file whose first recording stores args as a string",
+    target_fixture="replay_fixture_path",
+)
+def fixture_with_string_args(tmp_path: Path) -> Path:
+    """Write a fixture whose first recording has a string in ``args``.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
+    data = {
+        "version": "1.0",
+        "metadata": {
+            "created_at": "2026-01-15T10:30:00+00:00",
+            "cmdmox_version": "0.2.0",
+            "platform": "linux",
+            "python_version": "3.12.0",
+        },
+        "recordings": [
+            {
+                "sequence": 0,
+                "command": "git",
+                "args": "status",
+                "stdin": "",
+                "env_subset": {},
+                "stdout": "ok\n",
+                "stderr": "",
+                "exit_code": 0,
+                "timestamp": "2026-01-15T10:30:01+00:00",
+                "duration_ms": 0,
+            }
+        ],
+        "scrubbing_rules": [],
+    }
+    path = tmp_path / "corrupt_fixture.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+@given(
+    parsers.parse(
+        'a fixture file with "{cmd}" "{args}" recordings {stdouts} '
+        "in reverse sequence order"
+    ),
+    target_fixture="replay_fixture_path",
+)
+def fixture_with_reverse_sequence(
+    tmp_path: Path,
+    cmd: str,
+    args: str,
+    stdouts: str,
+) -> Path:
+    """Write recordings whose sequence values reverse their list order.
+
+    Returns
+    -------
+    Path
+        The path to the written fixture file.
+    """
+    values = _parse_quoted_list(stdouts)
+    recs = []
+    for position, stdout in enumerate(reversed(values)):
+        base = _build_recording(
+            cmd,
+            args.split(),
+            RecordingSpec(sequence=len(values) - 1 - position),
+        )
+        recs.append(dc.replace(base, stdout=f"{stdout}\n"))
+    return _save_fixture(tmp_path, recs)
+
+
+@when(
+    "the replay session is loaded expecting an error",
+    target_fixture="replay_error",
+)
+def load_replay_session_expecting_error(replay_session: ReplaySession) -> ValueError:
+    """Load the fixture and capture the schema error.
+
+    Returns
+    -------
+    ValueError
+        The exception raised while loading.
+    """
+    with pytest.raises(ValueError, match="Invalid fixture schema") as excinfo:
+        replay_session.load()
+    return excinfo.value
+
+
+@when(
+    parsers.parse(
+        'a replay invocation of "{cmd}" with args "{args}" is matched {count:d} times'
+    ),
+    target_fixture="replay_match_results",
+)
+def match_replay_invocation_times(
+    replay_session: ReplaySession,
+    cmd: str,
+    args: str,
+    count: int,
+) -> list[str | None]:
+    """Match the same invocation *count* times and collect each stdout.
+
+    Returns
+    -------
+    list of str or None
+        One entry per match, holding stdout or ``None`` for a miss.
+    """
+    results: list[str | None] = []
+    for _ in range(count):
+        response = _match_replay(
+            replay_session, _ReplayMatchRequest(command=cmd, args=args.split())
+        )
+        results.append(None if response is None else response.stdout)
+    return results
+
+
+@then(parsers.parse("the replay match stdout values are {stdouts}"))
+def replay_results_have_stdout(
+    replay_match_results: list[str | None],
+    stdouts: str,
+) -> None:
+    """Assert the collected stdout values, in order, ignoring line endings."""
+    expected = _parse_quoted_list(stdouts)
+    actual = [
+        None if value is None else value.strip() for value in replay_match_results
+    ]
+    assert actual == expected, "Assertion failed"
+
+
+@then(parsers.parse('the replay error message should contain "{text}"'))
+def replay_error_contains(replay_error: Exception, text: str) -> None:
+    """Assert the captured replay error contains *text*."""
+    assert text in str(replay_error), "Assertion failed"

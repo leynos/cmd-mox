@@ -272,6 +272,8 @@ supports deterministic replay without external dependencies. See
     matcher behaviour and best-fit selection.
   - `cmd_mox/unittests/test_fixture_file.py` covers fixture serialization,
     schema migration, and scrubbing-rule round-tripping.
+- [ ] 12.2.7. Journal strict replay misses so `CmdMox.verify()` reports them
+  alongside unconsumed recordings.
 
 ### 12.3. Scrubbing and security
 
