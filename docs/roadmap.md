@@ -270,8 +270,10 @@ supports deterministic replay without external dependencies. See
     validation, matching, consumption tracking, and `verify_all_consumed()`.
   - `cmd_mox/unittests/test_invocation_matcher.py` covers strict and fuzzy
     matcher behaviour and best-fit selection.
-  - `cmd_mox/unittests/test_fixture_file.py` covers fixture serialization,
-    schema migration, and scrubbing-rule round-tripping.
+  - `cmd_mox/unittests/test_fixture_file.py` covers fixture serialization and
+    scrubbing-rule round-tripping, and
+    `cmd_mox/unittests/test_fixture_versioning.py` covers schema version
+    parsing and migration.
 
 ### 12.3. Scrubbing and security
 

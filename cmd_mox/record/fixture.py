@@ -33,7 +33,18 @@ from ._schema import (
 )
 from .scrubber import ScrubbingRule
 
-_SCHEMA_VERSION: typ.Final[str] = "1.0.0"
+# The single source of the current schema version.  The public string derives
+# from this tuple; migration targets are historical, so they stay fixed once
+# registered (see ``_MIGRATIONS``).
+_CURRENT_VERSION: typ.Final[tuple[int, int, int]] = (1, 0, 0)
+
+
+def _format_version(version: tuple[int, int, int]) -> str:
+    """Format *version* as the canonical ``major.minor.patch`` string."""
+    return ".".join(str(component) for component in version)
+
+
+_SCHEMA_VERSION: typ.Final[str] = _format_version(_CURRENT_VERSION)
 
 # Two components remain accepted for fixtures written by the previous schema.
 _MIN_VERSION_COMPONENT_COUNT: typ.Final[int] = 2
@@ -49,8 +60,30 @@ _SEMVER_CORE_PATTERN: typ.Final[re.Pattern[str]] = re.compile(
 type _MigrationFn = cabc.Callable[[dict[str, typ.Any]], dict[str, typ.Any]]
 
 
+def _require_semver_core(stripped_version: str, version_str: str) -> None:
+    """Reject *stripped_version* unless it matches the canonical SemVer core."""
+    if _SEMVER_CORE_PATTERN.fullmatch(stripped_version) is None:
+        msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
+        raise ValueError(msg)
+
+
+def _require_legacy_components(parts: list[str], version_str: str) -> None:
+    """Reject *parts* unless every component is an ASCII decimal."""
+    if not all(part.isascii() and part.isdecimal() for part in parts):
+        msg = (
+            f"Invalid schema version {version_str!r}; "
+            "expected numeric 'major.minor.patch'"
+        )
+        raise ValueError(msg)
+
+
 def _split_version(version_str: str) -> list[str]:
     """Split a version and validate its component syntax.
+
+    Three-component versions must match the canonical SemVer core.  Legacy
+    two-component versions accept only non-empty ASCII decimal components:
+    leading zeroes remain valid, but signs, underscores, internal whitespace
+    and non-ASCII digits are rejected before ``int`` sees them.
 
     Returns
     -------
@@ -60,19 +93,17 @@ def _split_version(version_str: str) -> list[str]:
     Raises
     ------
     ValueError
-        If the component count or three-part syntax is invalid.
+        If the component count or component syntax is invalid.
     """
     stripped_version = version_str.strip()
     parts = stripped_version.split(".")
     if not _MIN_VERSION_COMPONENT_COUNT <= len(parts) <= _MAX_VERSION_COMPONENT_COUNT:
         msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
         raise ValueError(msg)
-    if (
-        len(parts) == _MAX_VERSION_COMPONENT_COUNT
-        and _SEMVER_CORE_PATTERN.fullmatch(stripped_version) is None
-    ):
-        msg = f"Invalid schema version {version_str!r}; expected 'major.minor.patch'"
-        raise ValueError(msg)
+    if len(parts) == _MAX_VERSION_COMPONENT_COUNT:
+        _require_semver_core(stripped_version, version_str)
+    else:
+        _require_legacy_components(parts, version_str)
     return parts
 
 
@@ -83,8 +114,8 @@ def _parse_version(version_str: str) -> tuple[int, int, int]:
     ----------
     version_str : str
         A version string in ``"major.minor.patch"`` format. Legacy
-        ``"major.minor"`` values retain their historical integer parsing and
-        are accepted with a zero patch component.
+        ``"major.minor"`` values must use ASCII decimal components, which may
+        carry leading zeroes, and are accepted with a zero patch component.
 
     Returns
     -------
@@ -100,6 +131,7 @@ def _parse_version(version_str: str) -> tuple[int, int, int]:
     try:
         components = [int(part) for part in parts]
     except ValueError:
+        # ``int`` still fails for a component beyond its runtime digit limit.
         msg = (
             f"Invalid schema version {version_str!r}; "
             "expected numeric 'major.minor.patch'"
@@ -108,27 +140,34 @@ def _parse_version(version_str: str) -> tuple[int, int, int]:
     # Legacy versions omit PATCH; complete the tuple before comparison.
     components.extend([0] * (_MAX_VERSION_COMPONENT_COUNT - len(components)))
     major, minor, patch = components
-    if min(major, minor, patch) < 0:
-        msg = f"Invalid schema version {version_str!r}; components must be non-negative"
-        raise ValueError(msg)
     return (major, minor, patch)
 
 
 def _migrate_v0_to_v1(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
-    """Migrate a major 0 fixture dict to schema 1.0.0.
+    """Migrate a synthetic major 0 fixture to the 1.0.0 layout.
+
+    Major 0 is a placeholder for fixtures written before schema versioning;
+    those fixtures already use the 1.0.0 field layout.  The migration therefore
+    returns *data* unchanged: ``_execute_migration_chain`` stamps the
+    registered target version after the callable returns.
 
     Returns
     -------
     dict[str, typ.Any]
-        *data* with its ``version`` field stamped as ``"1.0.0"``.
+        *data* unchanged.
     """
-    data["version"] = "1.0.0"
     return data
 
 
 # Maps source *major* version -> (target version tuple, migration function).
 # All files with a given major version are migrated using the registered
 # function.  Migrations chain: major 0 -> major 1 -> major 2 etc.
+#
+# A target records the version its migration produces and therefore stays
+# fixed once registered.  Only a newly added hop may derive its target from
+# ``_CURRENT_VERSION``.  This keeps the historical 0 -> 1 target at 1.0.0, so a
+# major 0 fixture still runs every hop after a future major 2 adds its own
+# ``1: ((2, 0, 0), _migrate_v1_to_v2)`` entry.
 _MIGRATIONS: dict[int, tuple[tuple[int, int, int], _MigrationFn]] = {
     0: ((1, 0, 0), _migrate_v0_to_v1),
 }
@@ -161,47 +200,24 @@ def _normalize_version_field(data: dict[str, typ.Any]) -> None:
         raise ValueError(msg)
 
 
-def _check_version_compatibility(
-    file_ver: tuple[int, int, int],
-    current: tuple[int, int, int],
-    file_version_str: str,
-) -> None:
-    """Reject fixture versions with a higher major version.
-
-    Parameters
-    ----------
-    file_ver : tuple[int, int, int]
-        The parsed ``(major, minor, patch)`` version from the fixture file.
-    current : tuple[int, int, int]
-        The parsed ``(major, minor, patch)`` version of the current schema.
-    file_version_str : str
-        The raw version string from the fixture, used in error messages.
-
-    Raises
-    ------
-    ValueError
-        If *file_ver* has a higher major version with no downgrade path.
-    """
-    if file_ver[0] > current[0]:
-        msg = (
-            f"Unsupported fixture schema version {file_version_str!r}; "
-            f"no migration path to {_SCHEMA_VERSION!r}"
-        )
-        raise ValueError(msg)
-
-
 def _execute_migration_chain(
     data: dict[str, typ.Any],
     file_ver: tuple[int, int, int],
     current: tuple[int, int, int],
 ) -> dict[str, typ.Any]:
-    """Chain migrations until the major versions match.
+    """Chain migrations until *data* reaches the current major version.
+
+    This function owns every major-version decision.  It rejects a fixture
+    whose major version is newer than *current*, then walks the registry one
+    hop at a time.  Each migration callable receives and returns a mapping;
+    the chain stamps the registered target version afterwards, so callables
+    never write ``version`` themselves.
 
     Parameters
     ----------
     data : dict[str, typ.Any]
-        The fixture dict to migrate.  Each migration function receives
-        and returns a dict, so successive calls are chained.
+        The fixture dict to migrate.  Its ``version`` field must already hold
+        the canonical form of *file_ver*.
     file_ver : tuple[int, int, int]
         The parsed ``(major, minor, patch)`` version of the fixture.
     current : tuple[int, int, int]
@@ -211,20 +227,28 @@ def _execute_migration_chain(
     -------
     dict[str, typ.Any]
         The fixture dict after all applicable migrations have been
-        applied.
+        applied and stamped with the latest registered target.
 
     Raises
     ------
     ValueError
-        If no migration is registered for the current major version,
-        or if a migration does not advance the major version.
+        If the fixture has a higher major version with no migration path, if
+        no migration is registered for the current major version, or if a
+        migration does not advance the major version.
     """
+    if file_ver[0] > current[0]:
+        msg = (
+            f"Unsupported fixture schema version {_format_version(file_ver)!r}; "
+            f"no migration path to {_format_version(current)!r}"
+        )
+        raise ValueError(msg)
+
     while file_ver[0] < current[0]:
         entry = _MIGRATIONS.get(file_ver[0])
         if entry is None:
             msg = (
                 f"No migration path from schema version "
-                f"{data['version']!r} to {_SCHEMA_VERSION!r}"
+                f"{data['version']!r} to {_format_version(current)!r}"
             )
             raise ValueError(msg)
         target, migrate_fn = entry
@@ -235,6 +259,7 @@ def _execute_migration_chain(
             )
             raise ValueError(msg)
         data = migrate_fn(data)
+        data["version"] = _format_version(target)
         file_ver = target
 
     return data
@@ -246,21 +271,17 @@ def _apply_migrations(data: dict[str, typ.Any]) -> dict[str, typ.Any]:
     Returns
     -------
     dict[str, typ.Any]
-        A deep copy of *data* migrated to the current schema version.
+        A deep copy of *data* migrated to the current schema version.  A
+        missing ``version`` is treated as legacy ``0.0.0``, and same-major
+        minor and patch differences pass through without a hop.
     """
     data = copy.deepcopy(data)  # deep copy to avoid mutating the caller's dict
 
     _normalize_version_field(data)
 
-    current = _parse_version(_SCHEMA_VERSION)
+    current = _CURRENT_VERSION
     file_ver = _parse_version(data["version"])
-    data["version"] = ".".join(str(component) for component in file_ver)
-
-    # Same major version: tolerate minor and patch differences.
-    if file_ver[0] == current[0]:
-        return data
-
-    _check_version_compatibility(file_ver, current, data["version"])
+    data["version"] = _format_version(file_ver)
 
     return _execute_migration_chain(data, file_ver, current)
 

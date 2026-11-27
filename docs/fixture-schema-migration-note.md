@@ -8,7 +8,9 @@ complete versioning and migration rules, see the
 
 Newly written fixtures use the numeric `MAJOR.MINOR.PATCH` form. The current
 schema version is `1.0.0`. Existing two-component versions such as `1.0` remain
-loadable and normalize to `1.0.0` when read by the updated CmdMox release.
+loadable and normalize to `1.0.0` when read by the updated CmdMox release, but
+their components must be ASCII digits, so signs, underscores, internal
+whitespace and non-ASCII digits are rejected.
 
 Compatibility is one-way across this format change: releases that require a
 two-component version cannot read fixtures written with three components.
