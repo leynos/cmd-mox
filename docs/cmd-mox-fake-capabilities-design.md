@@ -24,9 +24,10 @@ because they reduce boilerplate rather than protecting persisted data.
 
 This design separates implementation helpers from future public APIs:
 
-- `atomic_write_json(...)`, `file_lock(...)`, and any platform-specific lock
-  backend are internal helpers. They may move between private modules without
-  deprecation as long as documented CmdMox behaviour remains intact.
+- `atomic_write_text(...)`, `atomic_write_json(...)`, `file_lock(...)`, and any
+  platform-specific lock backend are internal helpers. They may move between
+  private modules without deprecation as long as documented CmdMox behaviour
+  remains intact.
 - `JsonStateStore`, `SubcommandRouter`, and filesystem side-effect helpers are
   candidate public APIs. They should first ship as explicitly provisional
   exports or documented examples. They become stable only after the usage guide
@@ -129,35 +130,58 @@ temporary file and replaces the target only after the temporary file has been
 fully written. The helper owns serialization so all fixture and state files use
 consistent formatting.
 
+The helper lives in `cmd_mox/atomic_write.py`. It exposes an internal
+`atomic_write_text(path, content, mode=0o600)` primitive and the JSON wrapper
+`atomic_write_json(...)` that record mode uses. Both are internal support code;
+they may move between private modules without a deprecation period.
+
 Required behaviour:
 
-- Create `path.parent` before opening the temporary file.
-- Open the temporary file with
-  `os.open(..., O_CREAT | O_TRUNC | O_WRONLY, mode)` and call `os.fchmod(...)`
-  where available.
-- Serialize JSON with deterministic key ordering when the payload is a plain
-  mapping, plus a trailing newline for Git-friendly diffs.
+- Create `path.parent`, and any missing ancestors, before opening the
+  temporary file.
+- Create the temporary file in the destination directory with
+  `tempfile.mkstemp(...)` and apply the requested mode with `os.fchmod(...)`
+  where available. The destination name copied into the temporary prefix is
+  capped so the generated name stays within a 255-byte filename limit even when
+  the destination name is close to it.
+- Serialize with `json.dumps(payload, indent=2)` plus a trailing newline for
+  Git-friendly diffs. Key order follows the payload's insertion order (the
+  schema field order); keys are deliberately not sorted.
 - Flush the buffered file object and call `os.fsync(...)` before replacement.
 - Replace the target with `os.replace(tmp_path, path)`.
 - Open and `fsync` the parent directory after replacement where the operating
-  system supports directory file descriptors.
-- Remove the temporary file on failure if it still exists.
+  system supports directory file descriptors. Windows skips this step through
+  an explicit `IS_WINDOWS` check because the standard library does not expose
+  directory handles for `fsync`; the rename remains as durable as the
+  filesystem guarantees.
+- Flush the target directory and each of its ancestors after replacement,
+  innermost first, because flushing a directory does not persist that
+  directory's own entry in its parent. The target directory is flushed
+  strictly; ancestors are flushed best-effort so a retry that reuses a
+  directory an earlier failed attempt created still persists it, without
+  letting an ancestor that cannot be opened fail the write.
+- Remove the temporary file on failure if it still exists, without masking the
+  original error.
 
-`FixtureFile.save()` should delegate to this helper by converting the fixture
-to a dictionary and passing the destination path. `FixtureFile.load()` can
-remain a plain JSON read because atomic replacement means readers either see
-the old complete file or the new complete file.
+`FixtureFile.save()` delegates to this helper by converting the fixture to a
+dictionary and passing the destination path. `FixtureFile.load()` remains a
+plain UTF-8 JSON read because atomic replacement means readers either see the
+old complete file or the new complete file.
+
+When the destination is a symbolic link, replacement installs a new regular
+file at the link's path and leaves the file the link pointed at untouched.
 
 ### Persistence exceptions
 
-`atomic_write_json(...)` should raise `AtomicWriteError` when the helper cannot
-complete a durable write. The exception should include the target path and
-chain the original exception with `raise ... from ...`. It should not hide
-whether the root cause was JSON serialization, temporary-file creation,
-`fsync`, replacement, or parent-directory synchronization.
+`atomic_write_json(...)` raises `AtomicWriteError`, a subclass of `OSError`,
+when the helper cannot complete a durable write. The exception includes the
+target path as its `path` attribute, and chains the original exception with
+`raise ... from ...`. It does not hide whether the root cause was JSON
+serialization, temporary-file creation, `fsync`, replacement, or
+parent-directory synchronization.
 
 Callers that only need ordinary failure handling can treat `AtomicWriteError`
-as an `OSError`-like persistence failure. Callers that need to preserve an old
+as an `OSError` persistence failure. Callers that need to preserve an old
 fixture can catch `AtomicWriteError` specifically and report that the previous
 target file should still be complete when replacement did not occur.
 

@@ -7,11 +7,15 @@ import json
 import sys
 import typing as typ
 
+import pytest
 from pytest_bdd import given, parsers, then, when
 
+from cmd_mox.atomic_write import AtomicWriteError
+from cmd_mox.errors import LifecycleError
 from cmd_mox.ipc import Invocation, Response
-from cmd_mox.record.fixture import FixtureFile
+from cmd_mox.record.fixture import FixtureFile, FixtureMetadata
 from cmd_mox.record.session import RecordingSession
+from cmd_mox.unittests._atomic_write_failures import install_replace_hook
 
 if typ.TYPE_CHECKING:
     from pathlib import Path
@@ -50,10 +54,83 @@ def recording_session_with_allowlist(tmp_path: Path, key: str) -> RecordingSessi
     )
 
 
+@given(
+    parsers.parse('a recording session with command filter "{value}"'),
+    target_fixture="session",
+)
+def recording_session_with_command_filter(
+    tmp_path: Path,
+    value: str,
+) -> RecordingSession:
+    """Create a recording session that records only *value*'s command.
+
+    Returns
+    -------
+    RecordingSession
+        A session configured with *value* as its command filter.
+    """
+    return RecordingSession(tmp_path / "fixture.json", command_filter=value)
+
+
+@given(
+    "a recording session targeting an existing fixture file",
+    target_fixture="session",
+)
+def recording_session_with_existing_fixture(tmp_path: Path) -> RecordingSession:
+    """Create a session whose destination already holds a valid fixture.
+
+    Returns
+    -------
+    RecordingSession
+        A session pointing at a pre-written empty fixture.
+    """
+    path = tmp_path / "fixture.json"
+    FixtureFile(
+        version=FixtureFile.SCHEMA_VERSION,
+        metadata=FixtureMetadata.create(),
+        recordings=[],
+        scrubbing_rules=[],
+    ).save(path)
+    return RecordingSession(path)
+
+
+@given("the fixture replacement is configured to fail")
+def configure_fixture_replacement_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Make the next fixture save fail at the atomic replacement step."""
+
+    def _fail_replace(_self: Path, _target: Path) -> Path:
+        """Model an atomic-replacement failure."""
+        message = "injected replacement failure"
+        raise OSError(message)
+
+    # Fail inside the real helper so the scenario exercises the helper's own
+    # cleanup rather than a stubbed-out save.
+    install_replace_hook(monkeypatch, _fail_replace)
+
+
 @when("the session is started")
 def start_session(session: RecordingSession) -> None:
     """Start the recording session."""
     session.start()
+
+
+@when(
+    "the session is finalized without being started",
+    target_fixture="lifecycle_error",
+)
+def finalize_unstarted_session(session: RecordingSession) -> LifecycleError:
+    """Finalize an unstarted session and return the lifecycle error.
+
+    Returns
+    -------
+    LifecycleError
+        The error the unstarted session raised.
+    """
+    with pytest.raises(LifecycleError) as excinfo:
+        session.finalize()
+    return excinfo.value
 
 
 @when(parsers.parse('an invocation of "{cmd}" with args "{args}" is recorded'))
@@ -99,10 +176,49 @@ def finalize_session(session: RecordingSession) -> FixtureFile:
     return session.finalize()
 
 
+@when("finalizing the session is attempted", target_fixture="save_error")
+def attempt_finalize(session: RecordingSession) -> AtomicWriteError:
+    """Finalize the session and return the expected save error.
+
+    Returns
+    -------
+    AtomicWriteError
+        The error the failed save raised.
+    """
+    with pytest.raises(AtomicWriteError) as excinfo:
+        session.finalize()
+    return excinfo.value
+
+
 @then("the fixture file exists on disk")
 def fixture_file_exists(session: RecordingSession) -> None:
     """Assert that the fixture file was written to disk."""
     assert session.fixture_path.exists(), "Assertion failed"
+
+
+@then("the fixture file does not exist")
+def fixture_file_does_not_exist(session: RecordingSession) -> None:
+    """Assert that no fixture file was written."""
+    assert not session.fixture_path.exists(), "Assertion failed"
+
+
+@then("a lifecycle error is raised")
+def lifecycle_error_was_raised(lifecycle_error: LifecycleError) -> None:
+    """Assert that a LifecycleError was captured."""
+    assert isinstance(lifecycle_error, LifecycleError), "Assertion failed"
+
+
+@then("the fixture save fails with an atomic write error")
+def fixture_save_failed(save_error: AtomicWriteError) -> None:
+    """Assert that the captured failure is an AtomicWriteError."""
+    assert isinstance(save_error, AtomicWriteError), "Assertion failed"
+
+
+@then(parsers.re(r"the saved fixture JSON contains (?P<count>\d+) recordings?"))
+def saved_json_has_n_recordings(session: RecordingSession, count: str) -> None:
+    """Assert that the on-disk JSON contains exactly *count* recordings."""
+    data = json.loads(session.fixture_path.read_text(encoding="utf-8"))
+    assert len(data["recordings"]) == int(count), "Assertion failed"
 
 
 @then(parsers.re(r"the fixture contains (?P<count>\d+) recordings?"))

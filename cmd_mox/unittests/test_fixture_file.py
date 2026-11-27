@@ -252,7 +252,7 @@ class TestFixtureFile:
         assert loaded.recordings[0].command == "git"
 
         # Verify it is valid JSON
-        raw = json.loads(fixture_path.read_text())
+        raw = json.loads(fixture_path.read_text(encoding="utf-8"))
         assert raw["version"] == "1.0.0"
 
     def test_save_creates_parent_directories(self, tmp_path: Path) -> None:

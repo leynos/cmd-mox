@@ -87,7 +87,44 @@ class ScrubbingRule:
 
 @typ.runtime_checkable
 class Scrubber(typ.Protocol):
-    """Protocol for scrubbing sensitive data from recorded invocations."""
+    """Protocol for scrubbing sensitive data from recorded invocations.
+
+    Notes
+    -----
+    A :class:`~cmd_mox.record.session.RecordingSession` calls :meth:`scrub`
+    outside its state lock.  An implementation may therefore call back into
+    the session without deadlocking, and independent scrubs may run
+    concurrently.  Implementations must be thread-safe when one session is
+    shared across threads, and must not assume that any session lock is held.
+
+    The returned recording is treated as a sanitized copy and appended only
+    after the call returns.  The ``sequence`` field read from the provisional
+    recording is ignored: the session assigns the append-order sequence after
+    scrubbing, so a scrubber cannot choose or reorder sequences.
+
+    Raising an exception rejects the recording.  The exception propagates to
+    the caller of ``record()``, the recording is discarded, and no sequence
+    number is consumed.  If another thread finalizes the session while a
+    scrubber is running, that pending recording is rejected with
+    :class:`~cmd_mox.errors.LifecycleError`.
+    """
 
     def scrub(self, recording: RecordedInvocation) -> RecordedInvocation:
-        """Return a sanitized copy of *recording*."""
+        """Return a sanitized copy of *recording*.
+
+        Parameters
+        ----------
+        recording : RecordedInvocation
+            The provisional recording.  Its ``sequence`` is a placeholder
+            that the session replaces after this method returns.
+
+        Returns
+        -------
+        RecordedInvocation
+            The sanitized recording to append.
+
+        Raises
+        ------
+        Exception
+            Propagated to the ``record()`` caller and discards the recording.
+        """

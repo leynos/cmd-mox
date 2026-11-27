@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import threading
 import typing as typ
 
 import pytest
@@ -70,6 +71,16 @@ class TestRecordingSessionLifecycle:
         session = RecordingSession(tmp_path / "out.json")
         with pytest.raises(LifecycleError):
             session.record(_make_invocation(), _make_response())
+
+    def test_finalize_before_start_raises_without_writing(self, tmp_path: Path) -> None:
+        """finalize() rejects an unstarted session and writes no file."""
+        path = tmp_path / "out.json"
+        session = RecordingSession(path)
+
+        with pytest.raises(LifecycleError):
+            session.finalize()
+
+        assert path.exists() is False
 
     def test_record_appends_invocation(self, tmp_path: Path) -> None:
         """After record(), the session contains one recorded invocation."""
@@ -160,6 +171,15 @@ class TestRecordingSessionFinalize:
 
         with pytest.raises(LifecycleError):
             session.record(_make_invocation(), _make_response())
+
+    def test_start_after_finalize_raises(self, tmp_path: Path) -> None:
+        """A finalized session cannot be restarted."""
+        session = RecordingSession(tmp_path / "out.json")
+        session.start()
+        session.finalize()
+
+        with pytest.raises(LifecycleError):
+            session.start()
 
 
 class TestRecordingSessionEnvFiltering:
@@ -286,6 +306,56 @@ class TestRecordingSessionCommandFilter:
         session.record(_make_invocation(command="echo"), _make_response())
         assert len(session._recordings) == 0
 
+    def test_command_filter_matches_case_insensitively(self, tmp_path: Path) -> None:
+        """Filter entries and command names are compared without case."""
+        session = RecordingSession(tmp_path / "out.json", command_filter="GIT")
+        session.start()
+        session.record(_make_invocation(command="git"), _make_response())
+
+        assert len(session._recordings) == 1
+
+    def test_command_filter_normalizes_every_list_entry(self, tmp_path: Path) -> None:
+        """Every entry in a filter list is normalized once at construction."""
+        session = RecordingSession(
+            tmp_path / "out.json", command_filter=["Git", "ECHO"]
+        )
+        session.start()
+        session.record(_make_invocation(command="echo"), _make_response())
+        session.record(_make_invocation(command="git"), _make_response())
+
+        assert [recording.command for recording in session._recordings] == [
+            "echo",
+            "git",
+        ]
+
+    def test_empty_command_filter_disables_filtering(self, tmp_path: Path) -> None:
+        """An empty list means no filter, not a filter that matches nothing."""
+        session = RecordingSession(tmp_path / "out.json", command_filter=[])
+        session.start()
+        session.record(_make_invocation(command="git"), _make_response())
+        session.record(_make_invocation(command=""), _make_response())
+
+        assert len(session._recordings) == 2
+
+    def test_none_command_filter_disables_filtering(self, tmp_path: Path) -> None:
+        """None means no filter, so every command is recorded."""
+        session = RecordingSession(tmp_path / "out.json", command_filter=None)
+        session.start()
+        session.record(_make_invocation(command="git"), _make_response())
+
+        assert len(session._recordings) == 1
+
+    def test_empty_string_filter_matches_only_an_empty_command(
+        self, tmp_path: Path
+    ) -> None:
+        """An empty filter entry is a real filter for the empty command name."""
+        session = RecordingSession(tmp_path / "out.json", command_filter="")
+        session.start()
+        session.record(_make_invocation(command="git"), _make_response())
+        session.record(_make_invocation(command=""), _make_response())
+
+        assert [recording.command for recording in session._recordings] == [""]
+
 
 class TestRecordingSessionScrubber:
     """Tests for RecordingSession scrubber integration."""
@@ -384,8 +454,6 @@ class TestRecordingSessionThreadSafety:
 
     def test_concurrent_record_produces_unique_sequences(self, tmp_path: Path) -> None:
         """Concurrent record() calls must assign unique sequence numbers."""
-        import threading
-
         session = RecordingSession(tmp_path / "out.json")
         session.start()
 

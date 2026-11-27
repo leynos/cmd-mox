@@ -587,6 +587,23 @@ recording from this session, even if they would otherwise be filtered. A key is
 kept only when it is present in the environment and is not a CmdMox internal
 key.
 
+### Limit which commands are recorded
+
+Pass `command_filter` to record only matching command names:
+
+```python
+session = RecordingSession(
+    Path("fixtures/git.json"),
+    command_filter=["git", "gh"],
+)
+```
+
+Matching is case-insensitive: a filter entry `GIT` matches an invocation of
+`git`. The command name is compared as given, so path-qualified names such as
+`/usr/bin/git` and names carrying an extension such as `git.exe` do not match
+`git`. `None` and an empty list disable filtering, while an empty string is a
+real filter that matches only an invocation whose command name is empty.
+
 ### Lifecycle: start, record, finalize
 
 A session follows a strict lifecycle:
@@ -598,8 +615,8 @@ session.record(invocation2, response2)       # Capture another
 fixture = session.finalize()                 # Persist and return FixtureFile
 ```
 
-- `start()` initializes the session timestamp. Calling `record()` before
-  `start()` raises `LifecycleError`.
+- `start()` initializes the session timestamp. Calling `record()` or
+  `finalize()` before `start()` raises `LifecycleError`.
 - `record(invocation, response, *, duration_ms=0, explicit_keys=None)` appends
   a recording with auto-incrementing sequence numbers and filtered environment
   variables. The optional `duration_ms` parameter records execution timing, and
@@ -607,9 +624,12 @@ fixture = session.finalize()                 # Persist and return FixtureFile
   override the system-key and sensitive-name exclusions but never the
   CmdMox-internal exclusion, and are recorded only when present in the
   invocation environment.
-- `finalize()` writes the fixture to disk and returns the `FixtureFile`. It
-  is idempotent: calling it again returns the same object. Calling `record()`
-  after `finalize()` raises `LifecycleError`.
+- `finalize()` requires a started session, writes the fixture atomically, and
+  returns the `FixtureFile`. Concurrent calls are serialized: exactly one
+  fixture is written, and every caller receives that same object. If the write
+  fails, the session stays finalized but no fixture is cached, so calling
+  `finalize()` again retries the save. Calling `record()` after `finalize()`
+  raises `LifecycleError`.
 
 ### Decide what a recording keeps
 
@@ -658,7 +678,30 @@ environment, and never when it is a CmdMox internal key.
 Scrubbers are a separate, value-level control: pass `scrubber=` to
 `RecordingSession(...)` for manual sessions, or to `CommandDouble.record(...)`
 for automatic recording, to rewrite `RecordedInvocation` fields before
-persistence.
+persistence. A scrubber runs outside the session's lock, so it may call back
+into the session, and independent scrubs may run concurrently. It must return
+the recording to persist; the session assigns the sequence number after the
+scrubber returns, so a scrubber cannot choose one. An exception propagates to
+the `record()` caller, discards that recording, and consumes no sequence
+number. If another thread finalizes the session while a scrub is running, the
+pending recording is rejected with `LifecycleError`.
+
+### Fixture writes are atomic
+
+`finalize()` writes through a temporary file in the fixture directory and
+installs it with an atomic replacement. A failure before replacement, such as
+an interrupted write, therefore leaves the previous complete fixture in place
+instead of a truncated file that fails to load. If replacement succeeds but the
+following directory flush fails, the new fixture is installed and the save
+raises `AtomicWriteError`: the contents are correct, but their durability
+across a crash is uncertain. New fixture files use owner read/write permissions
+(`0o600`) where the platform supports POSIX mode bits; Windows applies the mode
+on a best-effort basis. After replacement the parent directory is flushed on
+POSIX, along with each of its ancestors on a best-effort basis so a retried
+save also persists directories an earlier failed attempt created. Windows skips
+both steps because the standard library does not expose directory handles for
+`fsync`. If the destination is a symbolic link, the link entry is replaced and
+the file it pointed at is left untouched.
 
 Strict replay, the default, requires every recorded `env_subset` pair to be
 present in the live invocation. Recording only portable keys is what lets a
