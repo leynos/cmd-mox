@@ -92,7 +92,8 @@ def _response_drop_handler(writer: _FailingResponseWriter) -> SimpleNamespace:
     return SimpleNamespace(
         request=SimpleNamespace(settimeout=lambda _timeout: None),
         _read_request_payload=lambda: b"request",
-        _read_deadline=time.monotonic() + 1.0,
+        _connection_deadline=time.monotonic() + 1.0,
+        _clock=time.monotonic,
         server=SimpleNamespace(outer=SimpleNamespace(timeout=1.0)),
         wfile=writer,
     )
@@ -249,7 +250,8 @@ def test_ipc_handler_correlates_response_drop_with_validated_envelope(
         types.SimpleNamespace(
             request=types.SimpleNamespace(settimeout=lambda _timeout: None),
             _read_request_payload=lambda: raw,
-            _read_deadline=time.monotonic() + 1.0,
+            _connection_deadline=time.monotonic() + 1.0,
+            _clock=time.monotonic,
             server=types.SimpleNamespace(outer=types.SimpleNamespace(timeout=1.0)),
             wfile=writer,
         ),

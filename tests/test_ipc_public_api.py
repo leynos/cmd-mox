@@ -34,9 +34,8 @@ def test_message_kinds_align_with_constants() -> None:
     )
 
 
-def test_random_alias_points_to_client_random() -> None:
-    """The deprecated random alias should mirror cmd_mox.ipc.client.random."""
-    from cmd_mox.ipc import client as client_module
-    from cmd_mox.ipc import random
+def test_random_alias_points_to_the_retry_jitter_source() -> None:
+    """The deprecated random alias mirrors the module that draws jitter."""
+    from cmd_mox.ipc import _retry, random
 
-    assert random is client_module.random, "Assertion failed"
+    assert random is _retry.random, "Assertion failed"

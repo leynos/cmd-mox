@@ -132,8 +132,8 @@ def test_send_pipe_request_uses_shared_helpers(
 def test_named_pipe_handler_uses_shared_helpers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Server handler delegates to read/write helpers for pipe I/O."""
-    writes: list[bytes] = []
+    """The server handler reads the request and delegates reply delivery."""
+    delivered: list[tuple[object, bytes]] = []
     read_calls: list[object] = []
     handle = object()
 
@@ -142,9 +142,10 @@ def test_named_pipe_handler_uses_shared_helpers(
         read_calls.append(handle_obj)
         return b"raw-request"
 
-    def fake_write(handle_obj: object, payload: bytes, *, win32file: object) -> None:
-        """Record the payload written in place of the shared pipe write."""
-        writes.append(payload)
+    def fake_deliver(handle_obj: object, payload: bytes, _deadline: float) -> bool:
+        """Record the delivered reply and report a confirmed delivery."""
+        delivered.append((handle_obj, payload))
+        return True
 
     def fake_process(_outer: object, raw: bytes, transport: str) -> _RequestResult:
         """Return a completed response for the named-pipe handler test.
@@ -161,20 +162,20 @@ def test_named_pipe_handler_uses_shared_helpers(
     file_fake = FakeWin32File()
     state = _NamedPipeState(
         pipe_name="pipe",
-        outer=object(),  # type: ignore[arg-type, ty:invalid-argument-type]
+        outer=types.SimpleNamespace(timeout=1.0),  # type: ignore[arg-type, ty:invalid-argument-type]
         accept_timeout=0.1,
         backend=FakeNamedPipeBackend(win32file=file_fake),
     )
     state._client_threads.add(threading.current_thread())
 
     monkeypatch.setattr("cmd_mox.ipc.named_pipe.read_pipe_message", fake_read)
-    monkeypatch.setattr("cmd_mox.ipc.named_pipe.write_pipe_payload", fake_write)
+    monkeypatch.setattr(state, "_deliver_reply", fake_deliver)
     monkeypatch.setattr("cmd_mox.ipc.named_pipe._request_pipeline", fake_process)
 
     state._handle_client(handle)
 
     assert read_calls == [handle]
-    assert writes == [b"processed"]
+    assert delivered == [(handle, b"processed")]
     assert file_fake.closed == [handle], "the client handle was not closed"
 
 

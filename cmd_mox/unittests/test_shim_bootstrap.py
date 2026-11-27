@@ -38,9 +38,17 @@ def symlink_cycle(tmp_path: Path) -> Path:
     return first
 
 
-def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The shim entrypoint should bootstrap and delegate in order."""
+@pytest.mark.parametrize("is_windows", [False, True], ids=["posix", "windows"])
+def test_main_bootstraps_and_executes(
+    monkeypatch: pytest.MonkeyPatch, *, is_windows: bool
+) -> None:
+    """The shim entrypoint bootstraps, anchors one deadline, and delegates.
+
+    The deadline is anchored on every platform, so a Windows shim cannot grant
+    each IPC step its own full timeout.
+    """
     calls: list[object] = []
+    monkeypatch.setattr(shim.path_utils, "IS_WINDOWS", is_windows)
     monkeypatch.setattr(shim.time, "monotonic", lambda: 100.0)
 
     monkeypatch.setattr(shim, "bootstrap_shim_path", lambda: calls.append("bootstrap"))
@@ -57,8 +65,8 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shim,
         "_create_invocation",
-        lambda name, timeout, *, dependencies=None: (
-            calls.append(("create", name, timeout)) or invocation
+        lambda name, timeout, *, deadline=None, dependencies=None: (
+            calls.append(("create", name, timeout, deadline)) or invocation
         ),
     )
 
@@ -90,12 +98,13 @@ def test_main_bootstraps_and_executes(monkeypatch: pytest.MonkeyPatch) -> None:
             "create",
             "shim",
             1.0,
+            101.0,
         ),
         (
             "execute",
             invocation,
             1.0,
-            None if shim.path_utils.IS_WINDOWS else 101.0,
+            101.0,
         ),
         ("write", response, "bootstrap-id"),
     ], "shim startup steps did not run in the expected order"

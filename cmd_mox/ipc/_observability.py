@@ -69,6 +69,7 @@ type _NamedPipeErrorCategory = typ.Literal[
     "NoData",
     "PipeError",
     "ReadTimeout",
+    "Timeout",
     "ServerStopped",
 ]
 _COUNTER_ERROR_CATEGORIES: typ.Final[frozenset[str]] = _BACKEND_ERROR_CATEGORIES | (

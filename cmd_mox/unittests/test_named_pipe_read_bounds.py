@@ -64,7 +64,7 @@ def test_read_request_rejects_an_oversized_multi_chunk_message(
     state = build_state()
 
     with pytest.raises(PipeMessageTooLargeError) as excinfo:
-        state._read_request(object())
+        state._read_request(object(), time.monotonic() + 5.0)
 
     assert excinfo.value.received == 12, "byte count not reported"
     assert excinfo.value.limit == 8, "limit not reported"
@@ -84,7 +84,9 @@ def test_read_request_accepts_a_message_exactly_at_the_limit(
         )
     )
 
-    assert build_state()._read_request(object()) == b"abcdefgh", "boundary rejected"
+    assert (
+        build_state()._read_request(object(), time.monotonic() + 5.0) == b"abcdefgh"
+    ), "boundary rejected"
 
 
 def test_oversized_read_is_rejected_without_dispatch(
@@ -96,7 +98,7 @@ def test_oversized_read_is_rejected_without_dispatch(
     state._client_slots = threading.BoundedSemaphore(1)
     dispatched: list[bytes] = []
 
-    def reject_read(_handle: object) -> bytes:
+    def reject_read(_handle: object, _deadline: float) -> bytes:
         """Simulate a read that exceeds the message size limit."""
         raise PipeMessageTooLargeError(received=12, limit=8)
 
@@ -134,6 +136,21 @@ def test_oversized_read_is_rejected_without_dispatch(
 # ---------------------------------------------------------------------------
 # Cancellable, deadline-aware read
 # ---------------------------------------------------------------------------
+
+
+def test_read_chunk_refuses_a_chunk_once_the_budget_is_spent(
+    patch_win32: PatchWin32,
+) -> None:
+    """The connection budget bounds every chunk, not just the first."""
+    file_fake, _pipe_fake = patch_win32(FakeWin32File(reads=[ScriptedRead(data=b"hi")]))
+    state = build_state()
+
+    with pytest.raises(PipeReadCancelled) as excinfo:
+        state._read_chunk(object(), time.monotonic() - 1.0, 8)
+
+    assert excinfo.value.timed_out is True, "a spent budget was not a timeout"
+    assert file_fake.read_calls == 0, "an expired budget still issued a read"
+    assert not file_fake.cancelled, "nothing was pending to cancel"
 
 
 def test_read_chunk_waits_for_a_pending_overlapped_read(

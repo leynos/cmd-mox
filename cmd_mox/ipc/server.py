@@ -12,7 +12,7 @@ import typing as typ
 from functools import cache
 
 from . import _observability
-from ._deadline import _compute_deadline, _remaining_time
+from ._deadline import compute_deadline, remaining
 from ._server_core import (
     IPCHandlers,
     TimeoutConfig,
@@ -245,6 +245,11 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
     def _create_backend(self) -> tuple[socketserver.BaseServer, threading.Thread]:
         """Build the cached Unix socket backend and its daemon thread.
 
+        ``accept_timeout`` is passed to :meth:`socketserver.BaseServer.serve_forever`
+        as its poll interval. It bounds how long ``stop()`` waits for the
+        serving thread to notice the shutdown, not how long a client may take
+        to connect.
+
         Returns
         -------
         tuple[socketserver.BaseServer, threading.Thread]
@@ -289,8 +294,14 @@ class IPCServer(_BaseIPCServer[socketserver.BaseServer]):
         )
         try:
             server = inner_server_cls(self.socket_path, self)
-            server.timeout = self.accept_timeout
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            # The poll interval is the only knob that makes the accept loop
+            # notice a shutdown: assigning ``server.timeout`` looked similar
+            # but never reached the loop's ``select`` call.
+            thread = threading.Thread(
+                target=server.serve_forever,
+                args=(self.accept_timeout,),
+                daemon=True,
+            )
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             outcome = (
                 "windows_rejected"
@@ -331,9 +342,13 @@ class _IPCHandler(socketserver.StreamRequestHandler):
     """Handle a single shim connection."""
 
     def setup(self) -> None:
-        """Start the connection's receive deadline before reading begins."""
+        """Start the connection's one budget before reading begins.
+
+        The request read and the reply write share this deadline, so a client
+        cannot extend the connection by reading slowly at either end.
+        """
         self._clock = time.monotonic
-        self._read_deadline = _compute_deadline(
+        self._connection_deadline = compute_deadline(
             self.server.outer.timeout,  # type: ignore[attr-defined, ty:unresolved-attribute]
             clock=self._clock,
         )
@@ -350,7 +365,7 @@ class _IPCHandler(socketserver.StreamRequestHandler):
         chunks: list[bytes] = []
         while True:
             self.request.settimeout(
-                _remaining_time(self._read_deadline, clock=self._clock)
+                remaining(self._connection_deadline, clock=self._clock)
             )
             chunk = self.request.recv(64 * 1024)
             if not chunk:
@@ -382,11 +397,27 @@ class _IPCHandler(socketserver.StreamRequestHandler):
             )
             return
         try:
+            # Re-draw the connection budget around each blocking reply step so
+            # a stalled reader cannot renew it mid-reply.
             self.request.settimeout(
-                self.server.outer.timeout  # type: ignore[attr-defined, ty:unresolved-attribute]
+                remaining(self._connection_deadline, clock=self._clock)
             )
             self.wfile.write(result.response_bytes)
+            self.request.settimeout(
+                remaining(self._connection_deadline, clock=self._clock)
+            )
             self.wfile.flush()
+        except TimeoutError:
+            # The reply budget is spent. A second error reply would need the
+            # same socket the client is no longer reading, so drop it instead.
+            _emit_connection_outcome(
+                "response_dropped",
+                "TimeoutError",
+                started,
+                result.correlation_id,
+            )
+            logger.info("IPC connection timed out while replying")
+            return
         except OSError as exc:
             _emit_connection_outcome(
                 "response_dropped",

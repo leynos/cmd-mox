@@ -16,11 +16,7 @@ import pytest
 
 from cmd_mox.domain import Invocation, PassthroughResult, Response
 from cmd_mox.ipc import TimeoutConfig
-from cmd_mox.ipc._named_pipe_limits import (
-    join_threads_before,
-    remaining_ms,
-    remaining_seconds,
-)
+from cmd_mox.ipc._named_pipe_limits import join_threads_before
 from cmd_mox.ipc.named_pipe import (
     CallbackNamedPipeServer,
     NamedPipeServer,
@@ -260,6 +256,47 @@ def test_try_connect_pipe_awaits_a_pending_connection(
     assert closed_pipe_handles(file_fake) == [], "the client handle was closed"
 
 
+def test_try_connect_pipe_reuses_the_pending_connect_after_a_poll_expiry(
+    patch_win32: PatchWin32,
+) -> None:
+    """An expired accept slice re-waits on the same pending connect."""
+    event_fake = FakeWin32Event([FakeWin32Event.WAIT_TIMEOUT])
+    file_fake, pipe_fake = patch_win32(
+        win32pipe=FakeWin32Pipe(connect_results=[ERROR_IO_PENDING]),
+        win32event=event_fake,
+    )
+    handle = object()
+
+    assert build_state(accept_timeout=0.25)._try_connect_pipe(handle) == (
+        True,
+        True,
+    ), "the accept loop stopped after one expired slice"
+
+    assert pipe_fake.connect_calls == [handle], "the pending connect was re-issued"
+    assert [wait[2] for wait in event_fake.waits] == [250, 250], (
+        "each slice did not use the accept interval"
+    )
+    assert not file_fake.cancelled, "an expired slice cancelled the connect"
+    assert closed_pipe_handles(file_fake) == [], "the handle was closed early"
+
+
+def test_try_connect_pipe_stops_after_a_poll_expiry_when_stopping(
+    patch_win32: PatchWin32,
+) -> None:
+    """A slice that expires while stopping cancels the pending connect."""
+    file_fake, _pipe_fake = patch_win32(
+        win32pipe=FakeWin32Pipe(connect_results=[ERROR_IO_PENDING]),
+        win32event=FakeWin32Event([FakeWin32Event.WAIT_TIMEOUT]),
+    )
+    state = build_state()
+    state.stop_event.set()
+    handle = object()
+
+    assert state._try_connect_pipe(handle) == (False, False), "bad decision"
+    assert file_fake.cancelled == [handle], "the pending connect was not cancelled"
+    assert closed_pipe_handles(file_fake) == [handle], "handle was not closed"
+
+
 def test_try_connect_pipe_stops_when_shutdown_wins_the_race(
     patch_win32: PatchWin32,
 ) -> None:
@@ -339,26 +376,6 @@ def test_get_active_threads_returns_a_snapshot() -> None:
     snapshot.clear()
 
     assert state._get_active_threads() == [thread], "snapshot aliased internal state"
-
-
-@pytest.mark.parametrize(
-    ("offset", "is_expired"),
-    [(-1.0, True), (0.0, True), (5.0, False)],
-    ids=["past", "now", "future"],
-)
-def test_remaining_seconds(
-    offset: float,
-    is_expired: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - parametrized expectation, not an API flag
-) -> None:
-    """Remaining time is ``None`` once the deadline has passed."""
-    remaining = remaining_seconds(time.monotonic() + offset)
-
-    assert (remaining is None) is is_expired, "expiry classification mismatch"
-
-
-def test_remaining_ms_floors_at_zero() -> None:
-    """An expired deadline yields a zero timeout rather than a negative one."""
-    assert remaining_ms(0.0) == 0, "negative timeout"
 
 
 @pytest.mark.parametrize(
@@ -631,7 +648,7 @@ def test_handle_client_reports_unexpected_failures(
     file_fake, pipe_fake = patch_win32()
     state = build_state()
 
-    def fail_read(_handle: object) -> bytes:
+    def fail_read(_handle: object, _deadline: float) -> bytes:
         """Raise a fake Win32 read error carrying the case's error code."""
         raise FakeWinError(case.winerror)
 
@@ -650,7 +667,7 @@ def test_handle_client_returns_when_request_is_missing(
     """A missing request short-circuits before the pipeline runs."""
     file_fake, _pipe_fake = patch_win32()
     state = build_state()
-    monkeypatch.setattr(state, "_read_request", lambda _handle: None)
+    monkeypatch.setattr(state, "_read_request", lambda _handle, _deadline: None)
     handle = object()
     state._client_threads.add(threading.current_thread())
 
@@ -668,7 +685,7 @@ def test_handle_client_suppresses_disconnect_failures(
         win32pipe=FakeWin32Pipe(disconnect_error=FakeWinError(UNEXPECTED_WINERROR))
     )
     state = build_state()
-    monkeypatch.setattr(state, "_read_request", lambda _handle: None)
+    monkeypatch.setattr(state, "_read_request", lambda _handle, _deadline: None)
     handle = object()
 
     state._handle_client(handle)

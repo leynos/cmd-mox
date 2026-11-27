@@ -28,12 +28,11 @@ from cmd_mox.ipc.windows import (
     PipeReadOptions,
     derive_pipe_name,
     read_pipe_message,
-    write_pipe_payload,
 )
 
 from . import _observability
+from ._deadline import compute_deadline, remaining, remaining_ms, timeout_ms
 from ._named_pipe_limits import (
-    CLIENT_READ_TIMEOUT_SECONDS,
     MAX_ACTIVE_CLIENTS,
     ClientSlot,
     PipeReadCancelled,
@@ -41,8 +40,8 @@ from ._named_pipe_limits import (
     acquire_client_slot,
     emit_worker_event,
     join_threads_before,
-    remaining_ms,
 )
+from ._named_pipe_reply import ReplyDelivery
 from ._server_core import (
     IPCHandlers,
     _BaseIPCServer,
@@ -133,13 +132,21 @@ class _NamedPipeState:
     * at most :data:`MAX_ACTIVE_CLIENTS` workers run at once, enforced by a
       :class:`threading.BoundedSemaphore` acquired before a worker is spawned;
     * a request may not exceed :data:`~cmd_mox.ipc.windows.MAX_MESSAGE_SIZE`;
-    * a client has :data:`CLIENT_READ_TIMEOUT_SECONDS` to deliver its request.
+    * a client has one ``outer.timeout`` budget, shared by the request read and
+      the reply delivery, so neither end can renew it mid-exchange.
+
+    A budget that runs out while the request is being dispatched does not undo
+    the handler: its side effects are committed, the reply is withheld, and the
+    worker records a terminal ``Timeout`` event. A client that retries such a
+    request repeats those side effects, so handlers should stay idempotent or
+    finish well inside ``outer.timeout``.
 
     Cancellation design
     -------------------
     Pipe instances are created with ``FILE_FLAG_OVERLAPPED`` and every blocking
-    operation (``ConnectNamedPipe`` and ``ReadFile``) is issued asynchronously,
-    then awaited with ``WaitForMultipleObjects`` on the operation's event *and*
+    operation (``ConnectNamedPipe``, ``ReadFile``, and the reply
+    ``WriteFile``) is issued asynchronously, then awaited with
+    ``WaitForMultipleObjects`` on the operation's event *and*
     a Win32 shutdown event. A deadline or a :meth:`stop` therefore wakes the
     waiting thread itself, which cancels the request with ``CancelIoEx`` and
     drains it with ``GetOverlappedResult`` before releasing the buffer. This is
@@ -247,19 +254,30 @@ class _NamedPipeState:
     def _await_connection(
         self, handle: object, overlapped: object, event: object
     ) -> tuple[bool, bool]:
-        """Block until a client attaches to *handle* or the server stops.
+        """Wait in accept-sized slices until a client attaches or the server stops.
+
+        The pending connect is reused across slices: it stays in flight on
+        *handle*, so re-waiting costs one syscall rather than tearing down and
+        recreating the pipe instance, which would drop a client that arrived
+        during the gap.
 
         Returns
         -------
         tuple[bool, bool]
             ``(keep_serving, connected)`` for the accept loop.
         """
-        if self._wait_for_overlapped(event, self._backend.INFINITE) != (
-            self._backend.WAIT_OBJECT_0
-        ):
-            self._cancel_overlapped(handle, overlapped)
-            self._backend.close_handle(handle)
-            return False, False
+        wait_ms = timeout_ms(self.accept_timeout)
+        while True:
+            result = self._wait_for_overlapped(event, wait_ms)
+            if result == self._backend.WAIT_OBJECT_0:
+                break
+            # Any other result means either the shutdown event was signalled
+            # or the wait failed. A slice that simply expired keeps waiting,
+            # unless a stop raced the expiry and the Python flag is already up.
+            if result != self._backend.WAIT_TIMEOUT or self.stop_event.is_set():
+                self._cancel_overlapped(handle, overlapped)
+                self._backend.close_handle(handle)
+                return False, False
         try:
             self._backend.get_overlapped_result(handle, overlapped)
         except self._backend.error as exc:
@@ -458,7 +476,7 @@ class _NamedPipeState:
     def _create_pipe_instance(self) -> object:
         """Create an overlapped, message-mode pipe instance for the next client."""
         backend = self._backend
-        timeout_ms = max(1, int(self.accept_timeout * 1000))
+        accept_wait_ms = timeout_ms(self.accept_timeout)
         return backend.create_named_pipe(
             NamedPipeCreateSpec(
                 name=self.pipe_name,
@@ -473,7 +491,7 @@ class _NamedPipeState:
                 max_instances=backend.PIPE_UNLIMITED_INSTANCES,
                 out_buffer_size=PIPE_CHUNK_SIZE,
                 in_buffer_size=PIPE_CHUNK_SIZE,
-                default_timeout=timeout_ms,
+                default_timeout=accept_wait_ms,
                 security_attributes=None,
             )
         )
@@ -503,17 +521,17 @@ class _NamedPipeState:
                     slot.release()
 
     def _serve_one_request(self, handle: object, started: float) -> None:
-        """Read, dispatch, and answer one request, emitting its outcome."""
+        """Read, dispatch, and answer one request, emitting its outcome.
+
+        Dispatch is not interrupted by the deadline: a handler that spends the
+        remaining budget still runs to completion and commits its side effects.
+        Only delivery is refused, because the client has stopped waiting, so
+        the reply is withheld and the worker reports a terminal timeout.
+        """
         try:
-            raw = self._read_request(handle)
-            if raw is not None:
-                result = _request_pipeline(self.outer, raw, "named_pipe")
-                if result.response_bytes is not None:
-                    write_pipe_payload(
-                        handle,
-                        result.response_bytes,
-                        win32file=self._backend.win32file,
-                    )
+            deadline = compute_deadline(self.outer.timeout)
+            raw = self._read_request(handle, deadline)
+            unconfirmed = self._dispatch_request(handle, raw, deadline)
         except PipeMessageTooLargeError as exc:
             # The limit trips before any envelope is parsed, so no correlation
             # id exists; only the byte count is reported, never the bytes.
@@ -526,6 +544,11 @@ class _NamedPipeState:
             )
         except PipeReadCancelled as exc:
             emit_worker_event(self._cancellation_event(exc, started))
+        except TimeoutError:
+            # Only the reply can raise this: a spent read budget is reported as
+            # ``PipeReadCancelled``. The request was handled, so the worker
+            # ends here rather than escaping with an exception.
+            emit_worker_event(self._reply_timeout_event(started))
         except self._backend.error as exc:
             if exc.winerror not in {ERROR_BROKEN_PIPE, ERROR_NO_DATA}:
                 logger.exception("Named pipe handler failed")
@@ -538,8 +561,68 @@ class _NamedPipeState:
             )
         else:
             emit_worker_event(
-                WorkerEvent("completed", duration_ms=_observability.elapsed_ms(started))
+                WorkerEvent(
+                    "completed",
+                    error_category=unconfirmed,
+                    duration_ms=_observability.elapsed_ms(started),
+                )
             )
+
+    def _dispatch_request(
+        self, handle: object, raw: bytes | None, deadline: float
+    ) -> _observability._NamedPipeErrorCategory | None:
+        """Run the pipeline and deliver its reply, if one is owed.
+
+        Returns
+        -------
+        _observability._NamedPipeErrorCategory | None
+            ``None`` when no reply was owed or the client closed the pipe
+            after delivery, otherwise the label describing why delivery is
+            unconfirmed.
+        """
+        if raw is None:
+            return None
+        result = _request_pipeline(self.outer, raw, "named_pipe")
+        if result.response_bytes is None:
+            # Nothing to deliver, so there is also nothing to confirm.
+            return None
+        if self._deliver_reply(handle, result.response_bytes, deadline):
+            return None
+        return "PipeError"
+
+    def _deliver_reply(self, handle: object, payload: bytes, deadline: float) -> bool:
+        """Write the reply and watch for the client's close.
+
+        Returns
+        -------
+        bool
+            ``True`` when the client closed the pipe after the reply was
+            queued, ``False`` when it sent more data instead. The close
+            acknowledges the exchange rather than proving the bytes were read.
+        """
+        delivery = ReplyDelivery(
+            self._backend,
+            wait=self._wait_for_overlapped,
+            cancel=self._cancel_overlapped,
+        )
+        return delivery.deliver(handle, payload, deadline)
+
+    def _reply_timeout_event(self, started: float) -> WorkerEvent:
+        """Describe a reply that could not be delivered within its budget.
+
+        Returns
+        -------
+        WorkerEvent
+            A ``timeout`` event when the budget expired, otherwise a
+            ``completed`` event attributed to server shutdown.
+        """
+        if self.stop_event.is_set():
+            return WorkerEvent(
+                "completed",
+                error_category="ServerStopped",
+                duration_ms=_observability.elapsed_ms(started),
+            )
+        return WorkerEvent("timeout", error_category="Timeout")
 
     @staticmethod
     def _cancellation_event(exc: PipeReadCancelled, started: float) -> WorkerEvent:
@@ -578,8 +661,8 @@ class _NamedPipeState:
             return "NoData"
         return "PipeError"
 
-    def _read_request(self, handle: object) -> bytes | None:
-        """Read one size-bounded request from *handle* within the deadline.
+    def _read_request(self, handle: object, deadline: float) -> bytes | None:
+        """Read one size-bounded request from *handle* within *deadline*.
 
         Propagates :class:`~cmd_mox.ipc.windows.PipeMessageTooLargeError` past
         :data:`~cmd_mox.ipc.windows.MAX_MESSAGE_SIZE` bytes, and
@@ -591,7 +674,6 @@ class _NamedPipeState:
         bytes | None
             The raw request bytes.
         """
-        deadline = time.monotonic() + CLIENT_READ_TIMEOUT_SECONDS
         return read_pipe_message(
             handle,
             win32file=self._backend.win32file,
@@ -608,15 +690,24 @@ class _NamedPipeState:
     ) -> tuple[int, bytes]:
         """Read up to *chunk_size* bytes with a cancellable overlapped read.
 
-        Propagates :class:`PipeReadCancelled` when *deadline* expires or the
-        server stops before the read completes; the pending read is cancelled
-        and drained before that signal escapes.
-
         Returns
         -------
         tuple[int, bytes]
             The ``ReadFile`` status and the bytes transferred.
+
+        Raises
+        ------
+        PipeReadCancelled
+            If *deadline* has already expired or the server stops before the
+            read completes. A pending read is cancelled and drained before the
+            signal escapes.
         """
+        try:
+            # Checked before each chunk so a fast peer cannot spend the budget
+            # one chunk at a time and leave the next read unbounded.
+            remaining(deadline)
+        except TimeoutError:
+            raise PipeReadCancelled(timed_out=True) from None
         overlapped, event = self._backend.create_overlapped()
         try:
             buffer = self._backend.allocate_read_buffer(chunk_size)

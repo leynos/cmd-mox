@@ -54,7 +54,13 @@ class _ServerLifecycle[BackendT](abc.ABC):
         timeout: float,
         accept_timeout: float | None,
     ) -> None:
-        """Store the socket path and timeouts, deriving the accept timeout if unset."""
+        """Store the socket path and timeouts.
+
+        ``accept_timeout`` defaults to a tenth of ``timeout``, capped at a
+        tenth of a second. It is the accept loop's poll interval, so it bounds
+        how quickly ``stop()`` is noticed; a large value makes ``stop()``
+        correspondingly slower.
+        """
         self.socket_path = Path(socket_path)
         self.timeout = timeout
         self.accept_timeout = accept_timeout or min(0.1, timeout / 10)
@@ -148,7 +154,19 @@ class IPCHandlers:
 
 @dc.dataclass(slots=True)
 class TimeoutConfig:
-    """Timeout configuration forwarded by :class:`CallbackIPCServer`."""
+    """Timeout configuration forwarded by :class:`CallbackIPCServer`.
+
+    Attributes
+    ----------
+    timeout:
+        Per-connection budget in seconds, shared by a connection's request
+        read and its reply delivery.
+    accept_timeout:
+        How long the accept loop waits for a connection before re-checking for
+        shutdown, in seconds. It bounds ``stop()`` latency rather than how long
+        a client may take to connect: a larger value makes ``stop()`` slower.
+        ``None`` derives it from ``timeout``.
+    """
 
     timeout: float = 5.0
     accept_timeout: float | None = None
@@ -195,7 +213,12 @@ class _BaseIPCServer[BackendT](_ServerLifecycle[BackendT]):
         *,
         handlers: IPCHandlers | None = None,
     ) -> None:
-        """Validate the timeouts and store the optional request handlers."""
+        """Validate the timeouts and store the optional request handlers.
+
+        ``accept_timeout`` is the accept loop's poll interval, not a limit on
+        how long a client may take to connect, so raising it makes ``stop()``
+        slower; it is derived from ``timeout`` when left as ``None``.
+        """
         validate_positive_finite_timeout(timeout)
         validate_optional_timeout(accept_timeout, name="accept_timeout")
         super().__init__(Path(socket_path), timeout, accept_timeout)
